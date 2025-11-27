@@ -66,13 +66,31 @@ def create_application() -> FastAPI:
     )
 
     
-    # Configure CORS
+    # Configure CORS - Allow LMS Frontend origins
+    # When allow_credentials=True, cannot use ["*"] for origins
+    cors_origins = [
+        "http://localhost:4200",      # Angular dev server
+        "http://localhost:4300",      # Angular alternative port
+        "http://localhost:3000",      # React/Next.js dev server
+        "http://127.0.0.1:4200",
+        "http://127.0.0.1:4300",
+        "http://127.0.0.1:3000",
+        "https://lms-maritime.com",   # Production domain (update when known)
+        "https://*.vercel.app",       # Vercel deployments
+        "https://*.netlify.app",      # Netlify deployments
+    ]
+    
+    # Add any custom origins from settings
+    if settings.cors_origins and settings.cors_origins != ["*"]:
+        cors_origins.extend(settings.cors_origins)
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
         allow_headers=["*"],
+        expose_headers=["*"],
     )
     
     # Configure Rate Limiting
