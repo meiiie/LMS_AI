@@ -1,0 +1,243 @@
+"""
+Pydantic Schemas for API Request/Response
+Requirements: 1.1, 1.5, 1.6
+"""
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Optional
+from uuid import UUID, uuid4
+
+from pydantic import BaseModel, Field, field_validator
+
+
+def utc_now() -> datetime:
+    """Get current UTC time (timezone-aware)"""
+    return datetime.now(timezone.utc)
+
+
+class AgentType(str, Enum):
+    """Type of agent that processed the request"""
+    CHAT = "chat"
+    RAG = "rag"
+    TUTOR = "tutor"
+
+
+class IntentType(str, Enum):
+    """Classification of user intent"""
+    GENERAL = "general"
+    KNOWLEDGE = "knowledge"
+    TEACHING = "teaching"
+
+
+class ComponentStatus(str, Enum):
+    """Status of a system component"""
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNAVAILABLE = "unavailable"
+
+
+# =============================================================================
+# Chat Request/Response Schemas
+# =============================================================================
+
+class UserRole(str, Enum):
+    """User role from LMS"""
+    STUDENT = "student"
+    TEACHER = "teacher"
+    ADMIN = "admin"
+
+
+class ChatRequest(BaseModel):
+    """
+    Chat request payload from LMS Core
+    Requirements: 1.1, 1.5
+    Spec: CHỈ THỊ KỸ THUẬT SỐ 03
+    """
+    user_id: str = Field(..., description="BẮT BUỘC: ID user từ LMS (để map lịch sử chat)")
+    message: str = Field(..., min_length=1, max_length=10000, description="BẮT BUỘC: Câu hỏi người dùng")
+    role: UserRole = Field(..., description="BẮT BUỘC: student | teacher | admin")
+    session_id: Optional[str] = Field(default=None, description="Tùy chọn: ID phiên học (nếu có)")
+    context: Optional[dict[str, Any]] = Field(
+        default=None, 
+        description="Tùy chọn: Dữ liệu ngữ cảnh thêm (course_id, lesson_id, etc.)"
+    )
+    
+    @field_validator("message")
+    @classmethod
+    def validate_message_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Message cannot be empty or whitespace only")
+        return v.strip()
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "user_id": "student_12345",
+                    "session_id": "session_abc123",
+                    "message": "Giải thích quy tắc 15 COLREGs về tình huống cắt hướng",
+                    "role": "student",
+                    "context": {
+                        "course_id": "COLREGs_101"
+                    }
+                }
+            ]
+        }
+    }
+
+
+
+class Source(BaseModel):
+    """Source citation from Knowledge Graph"""
+    node_id: str = Field(..., description="Knowledge Graph node ID")
+    title: str = Field(..., description="Source title")
+    source_type: str = Field(..., description="Type: regulation, concept, etc.")
+    content_snippet: Optional[str] = Field(default=None, description="Relevant content snippet")
+
+
+class SourceInfo(BaseModel):
+    """Source citation info for LMS response"""
+    title: str = Field(..., description="Tiêu đề nguồn tài liệu")
+    content: str = Field(..., description="Nội dung trích dẫn")
+
+
+class ChatResponseData(BaseModel):
+    """Data payload in chat response"""
+    answer: str = Field(..., description="Câu trả lời của AI (Markdown format)")
+    sources: list[SourceInfo] = Field(default_factory=list, description="Danh sách nguồn tài liệu tham khảo")
+    suggested_questions: list[str] = Field(default_factory=list, description="3 câu hỏi gợi ý tiếp theo")
+
+
+class ChatResponseMetadata(BaseModel):
+    """Metadata in chat response"""
+    processing_time: float = Field(..., description="Thời gian xử lý (giây)")
+    model: str = Field(default="maritime-rag-v1", description="Model AI sử dụng")
+    agent_type: AgentType = Field(default=AgentType.RAG, description="Agent xử lý request")
+
+
+class ChatResponse(BaseModel):
+    """
+    Chat response payload to LMS Core
+    Requirements: 1.1, 1.6
+    Spec: CHỈ THỊ KỸ THUẬT SỐ 03
+    """
+    status: str = Field(default="success", description="success | error")
+    data: ChatResponseData = Field(..., description="Dữ liệu response")
+    metadata: ChatResponseMetadata = Field(..., description="Metadata response")
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "status": "success",
+                    "data": {
+                        "answer": "Theo Điều 15 COLREGs, khi hai tàu máy đi cắt hướng nhau...",
+                        "sources": [
+                            {
+                                "title": "COLREGs Rule 15 - Crossing Situation",
+                                "content": "When two power-driven vessels are crossing..."
+                            }
+                        ],
+                        "suggested_questions": [
+                            "Tàu nào phải nhường đường trong tình huống cắt hướng?",
+                            "Quy tắc 16 về hành động của tàu nhường đường là gì?",
+                            "Khi nào áp dụng quy tắc cắt hướng?"
+                        ]
+                    },
+                    "metadata": {
+                        "processing_time": 1.25,
+                        "model": "maritime-rag-v1",
+                        "agent_type": "rag"
+                    }
+                }
+            ]
+        }
+    }
+
+
+# Legacy response model (for internal use)
+class InternalChatResponse(BaseModel):
+    """Internal chat response (before formatting for LMS)"""
+    response_id: UUID = Field(default_factory=uuid4, description="Unique response identifier")
+    message: str = Field(..., description="AI-generated response message")
+    agent_type: AgentType = Field(..., description="Agent that processed the request")
+    sources: Optional[list[Source]] = Field(
+        default=None, 
+        description="Source citations for RAG responses"
+    )
+    metadata: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Additional metadata (confidence, processing time, etc.)"
+    )
+    created_at: datetime = Field(default_factory=utc_now, description="Response timestamp")
+
+
+# =============================================================================
+# Health Check Schemas
+# =============================================================================
+
+class ComponentHealth(BaseModel):
+    """Health status of a single component"""
+    name: str = Field(..., description="Component name")
+    status: ComponentStatus = Field(..., description="Component status")
+    latency_ms: Optional[float] = Field(default=None, description="Response latency in ms")
+    message: Optional[str] = Field(default=None, description="Status message or error")
+
+
+class HealthResponse(BaseModel):
+    """
+    Health check response
+    Requirements: 8.4
+    """
+    status: str = Field(..., description="Overall system status")
+    version: str = Field(..., description="Application version")
+    environment: str = Field(..., description="Current environment")
+    components: dict[str, ComponentHealth] = Field(
+        ..., 
+        description="Status of all components: API, Memory, Knowledge_Graph"
+    )
+    timestamp: datetime = Field(default_factory=utc_now, description="Check timestamp")
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "status": "healthy",
+                    "version": "0.1.0",
+                    "environment": "development",
+                    "components": {
+                        "api": {"name": "API", "status": "healthy", "latency_ms": 5.2},
+                        "memory": {"name": "Memori Engine", "status": "healthy", "latency_ms": 12.5},
+                        "knowledge_graph": {"name": "Neo4j", "status": "healthy", "latency_ms": 8.3}
+                    }
+                }
+            ]
+        }
+    }
+
+
+# =============================================================================
+# Error Response Schemas
+# =============================================================================
+
+class ErrorDetail(BaseModel):
+    """Detail of a validation or processing error"""
+    field: Optional[str] = Field(default=None, description="Field that caused the error")
+    message: str = Field(..., description="Error message")
+    code: Optional[str] = Field(default=None, description="Error code")
+
+
+class ErrorResponse(BaseModel):
+    """Standard error response format"""
+    error: str = Field(..., description="Error type")
+    message: str = Field(..., description="Human-readable error message")
+    details: Optional[list[ErrorDetail]] = Field(default=None, description="Error details")
+    request_id: Optional[str] = Field(default=None, description="Request ID for tracking")
+    timestamp: datetime = Field(default_factory=utc_now, description="Error timestamp")
+
+
+class RateLimitResponse(BaseModel):
+    """Rate limit exceeded response"""
+    error: str = Field(default="rate_limited", description="Error type")
+    message: str = Field(default="Rate limit exceeded", description="Error message")
+    retry_after: int = Field(..., description="Seconds until rate limit resets")

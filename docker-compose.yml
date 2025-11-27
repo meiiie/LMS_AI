@@ -1,0 +1,54 @@
+services:
+  # PostgreSQL - User profiles & Learning data
+  postgres:
+    image: postgres:15-alpine
+    container_name: maritime-postgres
+    environment:
+      POSTGRES_USER: maritime
+      POSTGRES_PASSWORD: maritime_secret
+      POSTGRES_DB: maritime_ai
+    ports:
+      - "5433:5432"  # Changed to 5433 to avoid conflict
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maritime -d maritime_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Neo4j - Knowledge Graph
+  neo4j:
+    image: neo4j:5-community
+    container_name: maritime-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/neo4j_secret
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "7474:7474"  # Browser UI
+      - "7687:7687"  # Bolt protocol
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7474"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ChromaDB - Vector Store
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: maritime-chroma
+    ports:
+      - "8001:8000"  # Changed to 8001 to avoid conflict with FastAPI
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=False
+
+volumes:
+  postgres_data:
+  neo4j_data:
+  neo4j_logs:
+  chroma_data:

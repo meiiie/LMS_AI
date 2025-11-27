@@ -1,0 +1,47 @@
+# Core Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+gunicorn>=21.2.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Database
+sqlalchemy>=2.0.25
+asyncpg>=0.29.0
+alembic>=1.13.0
+pgvector>=0.2.4
+
+# AI/ML - LangChain & LangGraph
+langchain>=0.1.0
+langgraph>=0.0.20
+langchain-openai>=0.0.5
+langchain-community>=0.0.13
+
+# Graph Database
+neo4j>=5.15.0
+
+# Vector Store (choose one)
+chromadb>=0.4.22
+
+# Security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# HTTP Client
+httpx>=0.26.0
+
+# Utilities
+python-multipart>=0.0.6
+slowapi>=0.1.9
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+hypothesis>=6.92.0
+
+# Code Quality
+black>=23.12.0
+ruff>=0.1.9
+mypy>=1.8.0
