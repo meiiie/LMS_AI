@@ -59,9 +59,9 @@ def create_application() -> FastAPI:
         title=settings.app_name,
         description="AI Tutor Microservice for Maritime LMS - Agentic RAG with Long-term Memory",
         version=settings.app_version,
-        docs_url="/docs" if settings.debug else None,
-        redoc_url="/redoc" if settings.debug else None,
-        openapi_url="/openapi.json" if settings.debug else None,
+        docs_url="/docs",  # Always enable for LMS team integration
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
         lifespan=lifespan,
     )
 
