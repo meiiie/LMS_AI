@@ -1,7 +1,7 @@
 """
 Chat API Endpoint for LMS Integration
 Requirements: 1.1, 1.2, 1.4
-Spec: CHỈ THỊ KỸ THUẬT SỐ 03
+Spec: CHỈ THỊ KỸ THUẬT SỐ 03, SỐ 04
 
 POST /api/v1/chat - Main chat endpoint for LMS integration
 """
@@ -10,7 +10,7 @@ import time
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from app.api.deps import RequireAuth
@@ -61,6 +61,7 @@ async def chat_completion(
     request: Request,
     chat_request: ChatRequest,
     auth: RequireAuth,
+    background_tasks: BackgroundTasks,
 ) -> ChatResponse:
     """
     Process a chat completion request from LMS.
@@ -83,10 +84,15 @@ async def chat_completion(
     
     try:
         # Process through integrated ChatService with role-based prompting
+        # Use BackgroundTasks to save chat history without blocking response
+        # Spec: CHỈ THỊ KỸ THUẬT SỐ 04
         from app.services.chat_service import get_chat_service
         
         chat_service = get_chat_service()
-        internal_response = await chat_service.process_message(chat_request)
+        internal_response = await chat_service.process_message(
+            chat_request,
+            background_save=background_tasks.add_task
+        )
         
         processing_time = time.time() - start_time
         

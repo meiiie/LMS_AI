@@ -12,12 +12,13 @@ This service wires together:
 
 **Feature: maritime-ai-tutor**
 **Validates: Requirements 1.1, 2.1, 2.2, 2.3**
+**Spec: CHỈ THỊ KỸ THUẬT SỐ 04 - Memory & Personalization**
 """
 
 import logging
 import re
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Callable, List, Optional
 from uuid import UUID, uuid4
 
 from app.engine.agents.chat_agent import ChatAgent
@@ -84,7 +85,8 @@ class ChatService:
     
     async def process_message(
         self,
-        request: ChatRequest
+        request: ChatRequest,
+        background_save: Optional[Callable] = None
     ) -> InternalChatResponse:
         """
         Process a chat message through the full pipeline.
@@ -131,8 +133,11 @@ class ChatService:
             # Get user name if stored
             user_name = self._chat_history.get_user_name(session_id)
             
-            # Save user message
-            self._chat_history.save_message(session_id, "user", message)
+            # Save user message (use background task if provided)
+            if background_save:
+                background_save(self._save_message_async, session_id, "user", message)
+            else:
+                self._chat_history.save_message(session_id, "user", message)
             
             # Try to extract user name from message
             extracted_name = self._extract_user_name(message)
@@ -162,9 +167,13 @@ class ChatService:
             user_role=user_role  # Pass role for role-based prompting
         )
         
-        # Step 7: Save AI response to history
+        # Step 7: Save AI response to history (use background task if provided)
         if self._chat_history.is_available():
-            self._chat_history.save_message(session_id, "assistant", result.message)
+            if background_save:
+                # Use BackgroundTasks to save without blocking response
+                background_save(self._save_message_async, session_id, "assistant", result.message)
+            else:
+                self._chat_history.save_message(session_id, "assistant", result.message)
         
         # Step 8: Output validation
         output_result = await self._guardrails.validate_output(result.message)
@@ -425,6 +434,18 @@ class ChatService:
             agent_type=AgentType.CHAT,
             metadata={"requires_clarification": True}
         )
+    
+    def _save_message_async(self, session_id: UUID, role: str, content: str) -> None:
+        """
+        Save message to chat history (for BackgroundTasks).
+        
+        **Spec: CHỈ THỊ KỸ THUẬT SỐ 04**
+        """
+        try:
+            self._chat_history.save_message(session_id, role, content)
+            logger.debug(f"Background saved {role} message to session {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to save message in background: {e}")
 
 
 # Singleton instance
