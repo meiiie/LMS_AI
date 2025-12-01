@@ -19,12 +19,16 @@ from app.models.schemas import (
     AgentType,
     ChatRequest,
     ChatResponse,
+    ChatResponseData,
+    ChatResponseMetadata,
     ComponentHealth,
     ComponentStatus,
     ErrorResponse,
     HealthResponse,
     RateLimitResponse,
     Source,
+    SourceInfo,
+    UserRole,
 )
 
 
@@ -39,44 +43,62 @@ valid_message_strategy = st.text(
     alphabet=st.characters(blacklist_categories=("Cs",))  # Exclude surrogates
 ).filter(lambda x: x.strip())  # Must have non-whitespace content
 
-# Strategy for optional context strings
+# Strategy for user_id (string, not UUID)
+user_id_strategy = st.text(min_size=1, max_size=50).filter(lambda x: x.strip())
+
+# Strategy for optional context
 context_strategy = st.one_of(
     st.none(),
-    st.text(min_size=1, max_size=100).filter(lambda x: x.strip())
+    st.dictionaries(
+        keys=st.text(min_size=1, max_size=20).filter(lambda x: x.strip()),
+        values=st.text(max_size=100),
+        max_size=3,
+    )
 )
 
-# Strategy for ChatRequest
+# Strategy for ChatRequest (updated for new schema)
 chat_request_strategy = st.builds(
     ChatRequest,
-    user_id=st.uuids(),
+    user_id=user_id_strategy,
     message=valid_message_strategy,
-    current_context=context_strategy,
+    role=st.sampled_from(list(UserRole)),
+    session_id=st.one_of(st.none(), st.text(min_size=1, max_size=50).filter(lambda x: x.strip())),
+    context=context_strategy,
 )
 
-# Strategy for Source
-source_strategy = st.builds(
-    Source,
-    node_id=st.text(min_size=1, max_size=50).filter(lambda x: x.strip()),
+# Strategy for SourceInfo (new schema)
+source_info_strategy = st.builds(
+    SourceInfo,
     title=st.text(min_size=1, max_size=200).filter(lambda x: x.strip()),
-    source_type=st.sampled_from(["regulation", "concept", "ship_type", "accident"]),
-    content_snippet=st.one_of(st.none(), st.text(min_size=1, max_size=500)),
+    content=st.text(min_size=1, max_size=500).filter(lambda x: x.strip()),
 )
 
+# Strategy for ChatResponseData
+chat_response_data_strategy = st.builds(
+    ChatResponseData,
+    answer=valid_message_strategy,
+    sources=st.lists(source_info_strategy, min_size=0, max_size=3),
+    suggested_questions=st.lists(
+        st.text(min_size=1, max_size=100).filter(lambda x: x.strip()),
+        min_size=0,
+        max_size=3,
+    ),
+)
 
-# Strategy for ChatResponse
+# Strategy for ChatResponseMetadata
+chat_response_metadata_strategy = st.builds(
+    ChatResponseMetadata,
+    processing_time=st.floats(min_value=0.01, max_value=100.0, allow_nan=False),
+    model=st.just("maritime-rag-v1"),
+    agent_type=st.sampled_from(list(AgentType)),
+)
+
+# Strategy for ChatResponse (updated for new schema)
 chat_response_strategy = st.builds(
     ChatResponse,
-    message=valid_message_strategy,
-    agent_type=st.sampled_from(list(AgentType)),
-    sources=st.one_of(st.none(), st.lists(source_strategy, min_size=0, max_size=5)),
-    metadata=st.one_of(
-        st.none(),
-        st.dictionaries(
-            keys=st.text(min_size=1, max_size=20).filter(lambda x: x.strip()),
-            values=st.one_of(st.integers(), st.floats(allow_nan=False), st.text(max_size=100)),
-            max_size=5,
-        ),
-    ),
+    status=st.just("success"),
+    data=chat_response_data_strategy,
+    metadata=chat_response_metadata_strategy,
 )
 
 # Strategy for ComponentHealth
@@ -117,7 +139,9 @@ class TestChatRequestRoundTrip:
         # Assert equivalence
         assert restored.user_id == request.user_id
         assert restored.message == request.message
-        assert restored.current_context == request.current_context
+        assert restored.role == request.role
+        assert restored.session_id == request.session_id
+        assert restored.context == request.context
     
     @given(chat_request_strategy)
     @settings(max_examples=100, deadline=None)
@@ -157,16 +181,15 @@ class TestChatResponseRoundTrip:
         restored = ChatResponse.model_validate_json(json_str)
         
         # Assert key fields are preserved
-        assert restored.message == response.message
-        assert restored.agent_type == response.agent_type
+        assert restored.status == response.status
+        assert restored.data.answer == response.data.answer
+        assert restored.metadata.agent_type == response.metadata.agent_type
         
-        # Check sources if present
-        if response.sources is not None:
-            assert restored.sources is not None
-            assert len(restored.sources) == len(response.sources)
-            for orig, rest in zip(response.sources, restored.sources):
-                assert orig.node_id == rest.node_id
-                assert orig.title == rest.title
+        # Check sources
+        assert len(restored.data.sources) == len(response.data.sources)
+        for orig, rest in zip(response.data.sources, restored.data.sources):
+            assert orig.title == rest.title
+            assert orig.content == rest.content
     
     @given(chat_response_strategy)
     @settings(max_examples=100, deadline=None)
@@ -174,15 +197,16 @@ class TestChatResponseRoundTrip:
         """
         Property: from_dict(to_dict(ChatResponse)) == ChatResponse
         """
-        # Convert to dict (excluding generated fields)
+        # Convert to dict
         data = response.model_dump()
         
         # Restore from dict
         restored = ChatResponse.model_validate(data)
         
         # Assert key fields match
-        assert restored.message == response.message
-        assert restored.agent_type == response.agent_type
+        assert restored.status == response.status
+        assert restored.data.answer == response.data.answer
+        assert restored.metadata.agent_type == response.metadata.agent_type
 
 
 class TestHealthResponseRoundTrip:
@@ -238,22 +262,25 @@ class TestEdgeCases:
         """Empty messages should be rejected"""
         with pytest.raises(ValueError):
             ChatRequest(
-                user_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+                user_id="test_user",
                 message="",
+                role=UserRole.STUDENT,
             )
     
     def test_chat_request_rejects_whitespace_only_message(self):
         """Whitespace-only messages should be rejected"""
         with pytest.raises(ValueError):
             ChatRequest(
-                user_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+                user_id="test_user",
                 message="   \n\t  ",
+                role=UserRole.STUDENT,
             )
     
     def test_chat_request_trims_message(self):
         """Messages should be trimmed"""
         request = ChatRequest(
-            user_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+            user_id="test_user",
             message="  Hello World  ",
+            role=UserRole.STUDENT,
         )
         assert request.message == "Hello World"
