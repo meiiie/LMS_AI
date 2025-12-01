@@ -97,11 +97,16 @@ class Settings(BaseSettings):
         """Get Neo4j username (supports both neo4j_user and neo4j_username)"""
         return self.neo4j_username or self.neo4j_user
     
-    # LLM Settings
+    # LLM Settings - OpenAI/OpenRouter (legacy)
     openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
     openai_base_url: Optional[str] = Field(default=None, description="OpenAI-compatible API base URL (e.g., OpenRouter)")
     openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model for general tasks")
     openai_model_advanced: str = Field(default="gpt-4o", description="OpenAI model for complex tasks")
+    
+    # LLM Settings - Google Gemini (primary)
+    google_api_key: Optional[str] = Field(default=None, description="Google Gemini API key")
+    google_model: str = Field(default="gemini-1.5-flash", description="Google Gemini model")
+    llm_provider: str = Field(default="google", description="LLM provider: google, openai, openrouter")
     
     # Memori Settings
     memori_enabled: bool = Field(default=True, description="Enable Memori long-term memory")

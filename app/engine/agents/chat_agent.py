@@ -10,10 +10,18 @@ conversation with users, integrating with Memory Engine.
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+
+# Google Gemini support
+try:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    ChatGoogleGenerativeAI = None
 
 from app.core.config import settings
 from app.engine.memory import MemoriEngine
@@ -66,10 +74,36 @@ class ChatAgent:
         self._system_prompt = MARITIME_EXPERT_PROMPT
         self._llm = self._init_llm()
     
-    def _init_llm(self) -> Optional[ChatOpenAI]:
-        """Initialize LLM client."""
+    def _init_llm(self) -> Optional[Union[ChatOpenAI, "ChatGoogleGenerativeAI"]]:
+        """
+        Initialize LLM client.
+        
+        Supports multiple providers:
+        - google: Google Gemini (primary, recommended)
+        - openai: OpenAI GPT
+        - openrouter: OpenRouter (OpenAI-compatible)
+        """
+        provider = getattr(settings, 'llm_provider', 'google')
+        
+        # Try Google Gemini first (primary)
+        if provider == "google" or (not settings.openai_api_key and settings.google_api_key):
+            if settings.google_api_key and GEMINI_AVAILABLE:
+                try:
+                    logger.info(f"Initializing Google Gemini: {settings.google_model}")
+                    return ChatGoogleGenerativeAI(
+                        google_api_key=settings.google_api_key,
+                        model=settings.google_model,
+                        temperature=0.7,
+                        convert_system_message_to_human=True,  # Gemini doesn't support system messages directly
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to initialize Google Gemini: {e}")
+            elif not GEMINI_AVAILABLE:
+                logger.warning("langchain-google-genai not installed, falling back to OpenAI")
+        
+        # Fallback to OpenAI/OpenRouter
         if not settings.openai_api_key:
-            logger.warning("No OpenAI API key configured, using placeholder responses")
+            logger.warning("No LLM API key configured, using placeholder responses")
             return None
         
         try:
@@ -80,6 +114,9 @@ class ChatAgent:
             }
             if settings.openai_base_url:
                 llm_kwargs["base_url"] = settings.openai_base_url
+                logger.info(f"Initializing OpenRouter: {settings.openai_model}")
+            else:
+                logger.info(f"Initializing OpenAI: {settings.openai_model}")
             
             return ChatOpenAI(**llm_kwargs)
         except Exception as e:

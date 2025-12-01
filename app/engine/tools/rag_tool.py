@@ -106,10 +106,34 @@ class RAGAgent:
         self._kg = knowledge_graph or get_knowledge_repository()
         self._llm = self._init_llm()
     
-    def _init_llm(self) -> Optional[ChatOpenAI]:
-        """Initialize LLM for response synthesis."""
+    def _init_llm(self):
+        """
+        Initialize LLM for response synthesis.
+        
+        Supports Google Gemini (primary) and OpenAI/OpenRouter (fallback).
+        """
+        provider = getattr(settings, 'llm_provider', 'google')
+        
+        # Try Google Gemini first
+        if provider == "google" or (not settings.openai_api_key and settings.google_api_key):
+            if settings.google_api_key:
+                try:
+                    from langchain_google_genai import ChatGoogleGenerativeAI
+                    logger.info(f"RAG using Google Gemini: {settings.google_model}")
+                    return ChatGoogleGenerativeAI(
+                        google_api_key=settings.google_api_key,
+                        model=settings.google_model,
+                        temperature=0.3,  # Lower for factual responses
+                        convert_system_message_to_human=True,
+                    )
+                except ImportError:
+                    logger.warning("langchain-google-genai not installed")
+                except Exception as e:
+                    logger.error(f"Failed to initialize Gemini for RAG: {e}")
+        
+        # Fallback to OpenAI/OpenRouter
         if not settings.openai_api_key:
-            logger.warning("No OpenAI API key, RAG will return raw content")
+            logger.warning("No LLM API key, RAG will return raw content")
             return None
         
         try:
@@ -120,6 +144,9 @@ class RAGAgent:
             }
             if settings.openai_base_url:
                 llm_kwargs["base_url"] = settings.openai_base_url
+                logger.info(f"RAG using OpenRouter: {settings.openai_model}")
+            else:
+                logger.info(f"RAG using OpenAI: {settings.openai_model}")
             
             return ChatOpenAI(**llm_kwargs)
         except Exception as e:
