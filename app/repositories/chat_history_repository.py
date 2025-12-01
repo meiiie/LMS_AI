@@ -47,8 +47,10 @@ class ChatHistoryRepository:
     Repository for chat history operations.
     
     Implements Memory Lite with Sliding Window strategy.
+    Supports both SQLAlchemy models and raw SQL for CHỈ THỊ SỐ 04 tables.
     
     **Feature: maritime-ai-tutor, Week 2: Memory Lite**
+    **Spec: CHỈ THỊ KỸ THUẬT SỐ 04**
     """
     
     # Sliding window size - number of recent messages to retrieve
@@ -61,6 +63,7 @@ class ChatHistoryRepository:
         self._engine = None
         self._session_factory = None
         self._available = False
+        self._use_new_schema = False  # Flag for CHỈ THỊ SỐ 04 schema
         self._init_connection()
     
     def _init_connection(self):
@@ -76,6 +79,16 @@ class ChatHistoryRepository:
             # Test connection
             with self._session_factory() as session:
                 session.execute(select(1))
+                
+                # Check if new schema exists (CHỈ THỊ SỐ 04)
+                try:
+                    from sqlalchemy import text
+                    result = session.execute(text("SELECT 1 FROM chat_history LIMIT 1"))
+                    self._use_new_schema = True
+                    logger.info("Using CHỈ THỊ SỐ 04 schema (chat_history table)")
+                except Exception:
+                    self._use_new_schema = False
+                    logger.info("Using legacy schema (chat_sessions + chat_messages)")
             
             self._available = True
             logger.info("Chat history repository connected to PostgreSQL")
@@ -155,7 +168,8 @@ class ChatHistoryRepository:
         self, 
         session_id: UUID, 
         role: str, 
-        content: str
+        content: str,
+        user_id: Optional[str] = None
     ) -> Optional[ChatMessage]:
         """
         Save a message to the chat history.
@@ -164,31 +178,61 @@ class ChatHistoryRepository:
             session_id: Session UUID
             role: 'user' or 'assistant'
             content: Message content
+            user_id: User ID (required for new schema)
             
         Returns:
             ChatMessage or None if failed
+            
+        **Spec: CHỈ THỊ KỸ THUẬT SỐ 04**
         """
         if not self._available:
             return None
         
         try:
             with self._session_factory() as session:
-                message = ChatMessageModel(
-                    id=uuid4(),
-                    session_id=session_id,
-                    role=role,
-                    content=content
-                )
-                session.add(message)
-                session.commit()
-                
-                return ChatMessage(
-                    id=message.id,
-                    session_id=message.session_id,
-                    role=message.role,
-                    content=message.content,
-                    created_at=message.created_at
-                )
+                if self._use_new_schema:
+                    # Use CHỈ THỊ SỐ 04 schema (chat_history table)
+                    from sqlalchemy import text
+                    msg_id = uuid4()
+                    session.execute(
+                        text("""
+                            INSERT INTO chat_history (id, user_id, session_id, role, content)
+                            VALUES (:id, :user_id, :session_id, :role, :content)
+                        """),
+                        {
+                            "id": str(msg_id),
+                            "user_id": user_id or str(session_id),
+                            "session_id": str(session_id),
+                            "role": role,
+                            "content": content
+                        }
+                    )
+                    session.commit()
+                    return ChatMessage(
+                        id=msg_id,
+                        session_id=session_id,
+                        role=role,
+                        content=content,
+                        created_at=datetime.now(timezone.utc)
+                    )
+                else:
+                    # Use legacy schema (chat_messages table)
+                    message = ChatMessageModel(
+                        id=uuid4(),
+                        session_id=session_id,
+                        role=role,
+                        content=content
+                    )
+                    session.add(message)
+                    session.commit()
+                    
+                    return ChatMessage(
+                        id=message.id,
+                        session_id=message.session_id,
+                        role=message.role,
+                        content=message.content,
+                        created_at=message.created_at
+                    )
         except Exception as e:
             logger.error(f"Failed to save message: {e}")
             return None
@@ -196,7 +240,8 @@ class ChatHistoryRepository:
     def get_recent_messages(
         self, 
         session_id: UUID, 
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        user_id: Optional[str] = None
     ) -> List[ChatMessage]:
         """
         Get recent messages using Sliding Window strategy.
@@ -204,9 +249,12 @@ class ChatHistoryRepository:
         Args:
             session_id: Session UUID
             limit: Number of messages (default: WINDOW_SIZE)
+            user_id: User ID (for new schema query by user)
             
         Returns:
             List of recent messages, oldest first
+            
+        **Spec: CHỈ THỊ KỸ THUẬT SỐ 04**
         """
         if not self._available:
             return []
@@ -215,26 +263,57 @@ class ChatHistoryRepository:
 
         try:
             with self._session_factory() as session:
-                # Get recent messages, ordered by created_at DESC, then reverse
-                stmt = select(ChatMessageModel).where(
-                    ChatMessageModel.session_id == session_id
-                ).order_by(desc(ChatMessageModel.created_at)).limit(limit)
-                
-                results = session.execute(stmt).scalars().all()
-                
-                # Reverse to get chronological order (oldest first)
-                messages = [
-                    ChatMessage(
-                        id=msg.id,
-                        session_id=msg.session_id,
-                        role=msg.role,
-                        content=msg.content,
-                        created_at=msg.created_at
+                if self._use_new_schema:
+                    # Use CHỈ THỊ SỐ 04 schema (chat_history table)
+                    from sqlalchemy import text
+                    query_field = "user_id" if user_id else "session_id"
+                    query_value = user_id if user_id else str(session_id)
+                    
+                    result = session.execute(
+                        text(f"""
+                            SELECT id, user_id, session_id, role, content, created_at
+                            FROM chat_history
+                            WHERE {query_field} = :query_value
+                            ORDER BY created_at DESC
+                            LIMIT :limit
+                        """),
+                        {"query_value": query_value, "limit": limit}
                     )
-                    for msg in reversed(results)
-                ]
-                
-                return messages
+                    rows = result.fetchall()
+                    
+                    # Reverse to get chronological order (oldest first)
+                    messages = [
+                        ChatMessage(
+                            id=UUID(row[0]) if isinstance(row[0], str) else row[0],
+                            session_id=UUID(row[2]) if isinstance(row[2], str) else session_id,
+                            role=row[3],
+                            content=row[4],
+                            created_at=row[5]
+                        )
+                        for row in reversed(rows)
+                    ]
+                    return messages
+                else:
+                    # Use legacy schema (chat_messages table)
+                    stmt = select(ChatMessageModel).where(
+                        ChatMessageModel.session_id == session_id
+                    ).order_by(desc(ChatMessageModel.created_at)).limit(limit)
+                    
+                    results = session.execute(stmt).scalars().all()
+                    
+                    # Reverse to get chronological order (oldest first)
+                    messages = [
+                        ChatMessage(
+                            id=msg.id,
+                            session_id=msg.session_id,
+                            role=msg.role,
+                            content=msg.content,
+                            created_at=msg.created_at
+                        )
+                        for msg in reversed(results)
+                    ]
+                    
+                    return messages
         except Exception as e:
             logger.error(f"Failed to get messages: {e}")
             return []
