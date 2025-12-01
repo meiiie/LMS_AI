@@ -29,7 +29,10 @@ from app.engine.tools.rag_tool import RAGAgent, get_knowledge_repository
 from app.engine.tools.tutor_agent import TutorAgent
 from app.models.learning_profile import LearningProfile
 from app.models.schemas import ChatRequest, InternalChatResponse, Source, UserRole
-from app.repositories.learning_profile_repository import InMemoryLearningProfileRepository
+from app.repositories.learning_profile_repository import (
+    InMemoryLearningProfileRepository,
+    get_learning_profile_repository
+)
 from app.repositories.chat_history_repository import (
     ChatHistoryRepository, 
     get_chat_history_repository
@@ -60,7 +63,8 @@ class ChatService:
         # Core components
         self._memory = MemoriEngine()
         self._knowledge_graph = get_knowledge_repository()  # Use Neo4j if available
-        self._profile_repo = InMemoryLearningProfileRepository()
+        self._profile_repo = InMemoryLearningProfileRepository()  # Legacy
+        self._supabase_profile_repo = get_learning_profile_repository()  # CHỈ THỊ SỐ 04
         self._guardrails = Guardrails()
         
         # Memory Lite - Chat History (Week 2)
@@ -77,6 +81,7 @@ class ChatService:
         
         logger.info(f"Knowledge graph available: {self._knowledge_graph.is_available()}")
         logger.info(f"Chat history available: {self._chat_history.is_available()}")
+        logger.info(f"Learning profile (Supabase) available: {self._supabase_profile_repo.is_available()}")
         
         # Session tracking (in-memory fallback)
         self._sessions: dict[str, UUID] = {}  # user_id -> session_id
@@ -122,7 +127,14 @@ class ChatService:
         # Step 2: Get or create session (Memory Lite)
         session_id = self._get_or_create_session(user_id)
         
-        # Step 3: Retrieve conversation history (Sliding Window)
+        # Step 3: Fetch learning profile (CHỈ THỊ SỐ 04)
+        learning_profile = None
+        if self._supabase_profile_repo.is_available():
+            learning_profile = await self._supabase_profile_repo.get_or_create(user_id)
+            if learning_profile:
+                logger.debug(f"Loaded learning profile for user {user_id}: {learning_profile.get('attributes', {})}")
+        
+        # Step 4: Retrieve conversation history (Sliding Window)
         conversation_history = ""
         user_name = None
         if self._chat_history.is_available():
@@ -145,18 +157,18 @@ class ChatService:
                 self._chat_history.update_user_name(session_id, extracted_name)
                 user_name = extracted_name
         
-        # Step 4: Process through orchestrator
+        # Step 5: Process through orchestrator
         orchestrator_response = self._orchestrator.process_message(
             message=message,
             session_id=str(session_id),
             user_id=user_id
         )
         
-        # Step 5: Handle clarification request
+        # Step 6: Handle clarification request
         if orchestrator_response.requires_clarification:
             return self._create_clarification_response(orchestrator_response.content)
         
-        # Step 6: Route to appropriate agent (with history context + role-based prompting)
+        # Step 7: Route to appropriate agent (with history context + role-based prompting + learning profile)
         result = await self._route_to_agent(
             agent_type=orchestrator_response.agent_type,
             message=message,
@@ -164,10 +176,11 @@ class ChatService:
             session_id=str(session_id),
             conversation_history=conversation_history,
             user_name=user_name,
-            user_role=user_role  # Pass role for role-based prompting
+            user_role=user_role,  # Pass role for role-based prompting
+            learning_profile=learning_profile  # CHỈ THỊ SỐ 04
         )
         
-        # Step 7: Save AI response to history (use background task if provided)
+        # Step 8: Save AI response to history (use background task if provided)
         if self._chat_history.is_available():
             if background_save:
                 # Use BackgroundTasks to save without blocking response
@@ -175,12 +188,16 @@ class ChatService:
             else:
                 self._chat_history.save_message(session_id, "assistant", result.message)
         
-        # Step 8: Output validation
+        # Step 9: Update learning profile stats (background)
+        if self._supabase_profile_repo.is_available() and background_save:
+            background_save(self._update_profile_stats_async, user_id)
+        
+        # Step 10: Output validation
         output_result = await self._guardrails.validate_output(result.message)
         if output_result.status == ValidationStatus.FLAGGED:
             result.message += "\n\n_Note: Please verify safety-critical information with official sources._"
         
-        # Step 9: Create response (InternalChatResponse for API layer to convert)
+        # Step 11: Create response (InternalChatResponse for API layer to convert)
         return InternalChatResponse(
             response_id=uuid4(),
             message=result.message,
@@ -206,7 +223,8 @@ class ChatService:
         session_id: str,
         conversation_history: str = "",
         user_name: Optional[str] = None,
-        user_role: UserRole = UserRole.STUDENT
+        user_role: UserRole = UserRole.STUDENT,
+        learning_profile: Optional[dict] = None
     ) -> ProcessingResult:
         """
         Route message to appropriate agent with conversation context.
@@ -446,6 +464,24 @@ class ChatService:
             logger.debug(f"Background saved {role} message to session {session_id}")
         except Exception as e:
             logger.error(f"Failed to save message in background: {e}")
+    
+    def _update_profile_stats_async(self, user_id: str) -> None:
+        """
+        Update learning profile stats (for BackgroundTasks).
+        
+        **Spec: CHỈ THỊ KỸ THUẬT SỐ 04**
+        """
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(
+                self._supabase_profile_repo.increment_stats(user_id, messages=2)  # user + assistant
+            )
+            loop.close()
+            logger.debug(f"Background updated profile stats for user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to update profile stats in background: {e}")
 
 
 # Singleton instance

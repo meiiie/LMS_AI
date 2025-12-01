@@ -6,12 +6,19 @@ Learning Profile persistence operations.
 
 **Feature: maritime-ai-tutor**
 **Validates: Requirements 6.1, 6.3, 6.4**
+**Spec: CHỈ THỊ KỸ THUẬT SỐ 04 - Memory & Personalization**
 """
 
+import json
 import logging
-from typing import Dict, Optional, Protocol
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Protocol
 from uuid import UUID
 
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+
+from app.core.config import settings
 from app.models.learning_profile import (
     Assessment,
     LearnerLevel,
@@ -222,3 +229,250 @@ class InMemoryLearningProfileRepository:
     def clear(self) -> None:
         """Clear all profiles (for testing)."""
         self._profiles.clear()
+
+
+class SupabaseLearningProfileRepository:
+    """
+    Supabase PostgreSQL implementation of Learning Profile repository.
+    
+    Uses the learning_profile table created by CHỈ THỊ SỐ 04 SQL script.
+    
+    **Spec: CHỈ THỊ KỸ THUẬT SỐ 04**
+    **Validates: Requirements 6.1, 6.3, 6.4**
+    """
+    
+    def __init__(self, database_url: Optional[str] = None):
+        """Initialize with database connection."""
+        self._database_url = database_url or settings.postgres_url_sync
+        self._engine = None
+        self._session_factory = None
+        self._available = False
+        self._init_connection()
+    
+    def _init_connection(self):
+        """Initialize database connection."""
+        try:
+            self._engine = create_engine(
+                self._database_url,
+                echo=False,
+                pool_pre_ping=True
+            )
+            self._session_factory = sessionmaker(bind=self._engine)
+            
+            # Test connection
+            with self._session_factory() as session:
+                session.execute(text("SELECT 1"))
+            
+            self._available = True
+            logger.info("Learning profile repository connected to Supabase")
+        except Exception as e:
+            logger.warning(f"Learning profile repository connection failed: {e}")
+            self._available = False
+    
+    def is_available(self) -> bool:
+        """Check if repository is available."""
+        return self._available
+    
+    async def get(self, user_id: str) -> Optional[dict]:
+        """
+        Get a learning profile by user ID.
+        
+        Args:
+            user_id: The user's unique identifier (string from LMS)
+            
+        Returns:
+            Profile dict if found, None otherwise
+        """
+        if not self._available:
+            return None
+        
+        try:
+            with self._session_factory() as session:
+                result = session.execute(
+                    text("""
+                        SELECT user_id, attributes, weak_areas, strong_areas, 
+                               total_sessions, total_messages, updated_at
+                        FROM learning_profile
+                        WHERE user_id = :user_id
+                    """),
+                    {"user_id": user_id}
+                )
+                row = result.fetchone()
+                
+                if row:
+                    return {
+                        "user_id": row[0],
+                        "attributes": row[1] or {},
+                        "weak_areas": row[2] or [],
+                        "strong_areas": row[3] or [],
+                        "total_sessions": row[4] or 0,
+                        "total_messages": row[5] or 0,
+                        "updated_at": row[6]
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Failed to get learning profile: {e}")
+            return None
+    
+    async def create(self, user_id: str, attributes: dict = None) -> Optional[dict]:
+        """
+        Create a new learning profile.
+        
+        Args:
+            user_id: The user's unique identifier
+            attributes: Initial attributes (level, style, language)
+            
+        Returns:
+            The created profile dict
+        """
+        if not self._available:
+            return None
+        
+        try:
+            with self._session_factory() as session:
+                session.execute(
+                    text("""
+                        INSERT INTO learning_profile (user_id, attributes)
+                        VALUES (:user_id, :attributes)
+                        ON CONFLICT (user_id) DO NOTHING
+                    """),
+                    {
+                        "user_id": user_id,
+                        "attributes": json.dumps(attributes or {"level": "beginner"})
+                    }
+                )
+                session.commit()
+                logger.info(f"Created learning profile for user {user_id}")
+                return await self.get(user_id)
+        except Exception as e:
+            logger.error(f"Failed to create learning profile: {e}")
+            return None
+    
+    async def get_or_create(self, user_id: str) -> Optional[dict]:
+        """
+        Get existing profile or create default one.
+        
+        Args:
+            user_id: The user's unique identifier
+            
+        Returns:
+            Existing or newly created profile dict
+        """
+        profile = await self.get(user_id)
+        if profile is None:
+            profile = await self.create(user_id)
+        return profile
+    
+    async def update_weak_areas(self, user_id: str, weak_areas: List[str]) -> bool:
+        """
+        Update user's weak areas.
+        
+        Args:
+            user_id: The user's unique identifier
+            weak_areas: List of weak topic names
+            
+        Returns:
+            True if successful
+        """
+        if not self._available:
+            return False
+        
+        try:
+            with self._session_factory() as session:
+                session.execute(
+                    text("""
+                        UPDATE learning_profile
+                        SET weak_areas = :weak_areas, updated_at = NOW()
+                        WHERE user_id = :user_id
+                    """),
+                    {
+                        "user_id": user_id,
+                        "weak_areas": json.dumps(weak_areas)
+                    }
+                )
+                session.commit()
+                logger.info(f"Updated weak areas for user {user_id}")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to update weak areas: {e}")
+            return False
+    
+    async def update_strong_areas(self, user_id: str, strong_areas: List[str]) -> bool:
+        """
+        Update user's strong areas.
+        
+        Args:
+            user_id: The user's unique identifier
+            strong_areas: List of strong topic names
+            
+        Returns:
+            True if successful
+        """
+        if not self._available:
+            return False
+        
+        try:
+            with self._session_factory() as session:
+                session.execute(
+                    text("""
+                        UPDATE learning_profile
+                        SET strong_areas = :strong_areas, updated_at = NOW()
+                        WHERE user_id = :user_id
+                    """),
+                    {
+                        "user_id": user_id,
+                        "strong_areas": json.dumps(strong_areas)
+                    }
+                )
+                session.commit()
+                logger.info(f"Updated strong areas for user {user_id}")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to update strong areas: {e}")
+            return False
+    
+    async def increment_stats(self, user_id: str, messages: int = 1) -> bool:
+        """
+        Increment user's message count.
+        
+        Args:
+            user_id: The user's unique identifier
+            messages: Number of messages to add
+            
+        Returns:
+            True if successful
+        """
+        if not self._available:
+            return False
+        
+        try:
+            # Ensure profile exists
+            await self.get_or_create(user_id)
+            
+            with self._session_factory() as session:
+                session.execute(
+                    text("""
+                        UPDATE learning_profile
+                        SET total_messages = total_messages + :messages,
+                            updated_at = NOW()
+                        WHERE user_id = :user_id
+                    """),
+                    {"user_id": user_id, "messages": messages}
+                )
+                session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to increment stats: {e}")
+            return False
+
+
+# Singleton instance
+_supabase_profile_repo: Optional[SupabaseLearningProfileRepository] = None
+
+
+def get_learning_profile_repository() -> SupabaseLearningProfileRepository:
+    """Get or create SupabaseLearningProfileRepository singleton."""
+    global _supabase_profile_repo
+    if _supabase_profile_repo is None:
+        _supabase_profile_repo = SupabaseLearningProfileRepository()
+    return _supabase_profile_repo
