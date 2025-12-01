@@ -18,7 +18,7 @@ langchain-community==0.0.24
 langchain-core==0.1.26
 langchain-openai==0.0.7
 langchain-google-genai==0.0.9
-google-generativeai==0.4.0
+google-generativeai==0.3.2
 langgraph==0.0.24
 
 # Graph DB
