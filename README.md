@@ -1,67 +1,72 @@
-# 🚢 Maritime AI Tutor Service
+# Maritime AI Tutor Service
 
 <div align="center">
 
-![Maritime AI Tutor](https://img.shields.io/badge/Maritime-AI%20Tutor-0066cc?style=for-the-badge&logo=ship&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3.11+-3776ab?style=for-the-badge&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688?style=for-the-badge&logo=fastapi&logoColor=white)
-![LangChain](https://img.shields.io/badge/LangChain-0.1.9-1c3c3c?style=for-the-badge&logo=chainlink&logoColor=white)
-![Neo4j](https://img.shields.io/badge/Neo4j-5.17-008cc1?style=for-the-badge&logo=neo4j&logoColor=white)
+![Maritime AI Tutor Banner](assets/banner_AI_LMS.jpeg)
+
+[![Python](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![LangChain](https://img.shields.io/badge/LangChain-0.1.9-1c3c3c?style=flat-square&logo=chainlink&logoColor=white)](https://langchain.com)
+[![Neo4j](https://img.shields.io/badge/Neo4j-5.17-008cc1?style=flat-square&logo=neo4j&logoColor=white)](https://neo4j.com)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791?style=flat-square&logo=postgresql&logoColor=white)](https://postgresql.org)
+[![License](https://img.shields.io/badge/License-Proprietary-red?style=flat-square)](LICENSE)
 
 **AI-Powered Maritime Education Platform with Agentic RAG & Long-term Memory**
 
 *Intelligent tutoring system for maritime professionals, featuring GraphRAG knowledge retrieval, role-based personalization, and adaptive learning.*
 
-[Features](#-features) • [Architecture](#-architecture) • [Quick Start](#-quick-start) • [API Reference](#-api-reference) • [Deployment](#-deployment)
+[Features](#features) • [Architecture](#architecture) • [Quick Start](#quick-start) • [API Reference](#api-reference) • [Deployment](#deployment)
 
 </div>
 
 ---
 
-## 📋 Overview
+## Overview
 
 Maritime AI Tutor Service là một microservice AI thông minh được thiết kế để tích hợp với hệ thống LMS (Learning Management System) hàng hải. Hệ thống cung cấp khả năng:
 
-- **🎓 Intelligent Tutoring**: AI Tutor với role-based prompting (Student/Teacher/Admin)
-- **📚 GraphRAG Knowledge Retrieval**: Truy vấn kiến thức từ SOLAS, COLREGs, MARPOL
-- **🧠 Long-term Memory**: Ghi nhớ ngữ cảnh hội thoại và cá nhân hóa học tập
-- **🛡️ Content Guardrails**: Bảo vệ nội dung với PII masking và prompt injection detection
+- **Intelligent Tutoring**: AI Tutor với role-based prompting (Student/Teacher/Admin)
+- **GraphRAG Knowledge Retrieval**: Truy vấn kiến thức từ SOLAS, COLREGs, MARPOL
+- **Long-term Memory**: Ghi nhớ ngữ cảnh hội thoại và cá nhân hóa học tập
+- **Content Guardrails**: Bảo vệ nội dung với PII masking và prompt injection detection
 
 ---
 
-## ✨ Features
+## Features
 
-### 🤖 Multi-Agent Architecture
-| Agent | Chức năng | Trigger Keywords |
-|-------|-----------|------------------|
-| **Chat Agent** | Hội thoại chung về hàng hải | General conversation |
-| **RAG Agent** | Truy vấn Knowledge Graph | `solas`, `colregs`, `marpol`, `rule`, `regulation` |
-| **Tutor Agent** | Dạy học có cấu trúc với assessment | `teach`, `learn`, `quiz`, `explain` |
+### Multi-Agent Architecture
 
-### 🎯 Role-Based Prompting
+| Agent | Function | Trigger Keywords |
+|-------|----------|------------------|
+| **Chat Agent** | General maritime conversation | General conversation |
+| **RAG Agent** | Knowledge Graph queries | `solas`, `colregs`, `marpol`, `rule`, `regulation` |
+| **Tutor Agent** | Structured teaching with assessment | `teach`, `learn`, `quiz`, `explain` |
+
+### Role-Based Prompting
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Student Role → AI đóng vai GIA SƯ (Tutor)                  │
-│  • Giọng văn: Khuyến khích, động viên, kiên nhẫn            │
-│  • Giải thích CẶN KẼ thuật ngữ chuyên môn                   │
-│  • Kết thúc bằng câu hỏi gợi mở                             │
+│  Student Role → AI acts as TUTOR                            │
+│  • Tone: Encouraging, supportive, patient                   │
+│  • Explains technical terms in detail                       │
+│  • Ends with follow-up questions                            │
 ├─────────────────────────────────────────────────────────────┤
-│  Teacher/Admin Role → AI đóng vai TRỢ LÝ (Assistant)        │
-│  • Giọng văn: Chuyên nghiệp, ngắn gọn, chính xác            │
-│  • Trích dẫn CHÍNH XÁC điều luật, số hiệu quy định          │
-│  • Không giải thích thuật ngữ cơ bản                        │
+│  Teacher/Admin Role → AI acts as ASSISTANT                  │
+│  • Tone: Professional, concise, accurate                    │
+│  • Cites exact regulations and codes                        │
+│  • No basic term explanations                               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 📊 Memory & Personalization
-- **Sliding Window Context**: 10 tin nhắn gần nhất cho ngữ cảnh
-- **Learning Profile**: Theo dõi weak_areas, strong_areas, learning_style
-- **Session Management**: Persistent chat history với Supabase/PostgreSQL
+### Memory & Personalization
+
+- **Sliding Window Context**: Last 10 messages for context
+- **Learning Profile**: Tracks weak_areas, strong_areas, learning_style
+- **Session Management**: Persistent chat history with Supabase/PostgreSQL
 
 ---
 
-## 🏗️ Architecture
-
+## Architecture
 
 ### System Architecture Diagram
 
@@ -148,7 +153,7 @@ Maritime AI Tutor Service là một microservice AI thông minh được thiết
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 maritime-ai-service/
@@ -194,6 +199,7 @@ maritime-ai-service/
 │   └── main.py                      # FastAPI application factory
 │
 ├── alembic/                         # Database migrations
+├── assets/                          # Static assets (images, etc.)
 ├── scripts/
 │   └── create_memory_tables.sql     # Supabase schema script
 ├── tests/
@@ -209,7 +215,7 @@ maritime-ai-service/
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -217,7 +223,7 @@ maritime-ai-service/
 - Docker & Docker Compose
 - Neo4j (local or Aura)
 - PostgreSQL (local or Supabase)
-- Google Gemini API Key (hoặc OpenAI)
+- Google Gemini API Key (or OpenAI)
 
 ### 1. Clone & Setup Environment
 
@@ -321,7 +327,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ---
 
-## 📡 API Reference
+## API Reference
 
 ### Main Endpoint: POST /api/v1/chat
 
@@ -394,7 +400,7 @@ curl http://localhost:8000/api/v1/health
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ### Run All Tests
 
@@ -414,7 +420,7 @@ pytest tests/property/test_guardrails_properties.py -v
 
 ### Property-Based Tests (Hypothesis)
 
-Dự án sử dụng **Hypothesis** cho property-based testing:
+The project uses **Hypothesis** for property-based testing:
 
 ```python
 # Example: Guardrails validation
@@ -427,7 +433,7 @@ def test_validate_input_always_returns_result(message):
 
 ---
 
-## 🚀 Deployment
+## Deployment
 
 ### Render.com (Recommended)
 
@@ -468,7 +474,7 @@ docker run -d \
 
 ---
 
-## 🔧 Configuration Reference
+## Configuration Reference
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -487,7 +493,7 @@ docker run -d \
 
 ---
 
-## 📊 Tech Stack
+## Tech Stack
 
 | Category | Technology | Version |
 |----------|------------|---------|
@@ -504,13 +510,13 @@ docker run -d \
 
 ---
 
-## 📝 License
+## License
 
 This project is proprietary software developed for Maritime LMS integration.
 
 ---
 
-## 👥 Team
+## Team
 
 - **AI Backend Team** - Core development
 - **LMS Team** - Integration & Frontend
@@ -519,8 +525,11 @@ This project is proprietary software developed for Maritime LMS integration.
 
 <div align="center">
 
-**Built with ❤️ for Maritime Education**
+**Built for Maritime Education**
 
 *Empowering maritime professionals with AI-driven learning*
+
+[![Made with FastAPI](https://img.shields.io/badge/Made%20with-FastAPI-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
+[![Powered by LangChain](https://img.shields.io/badge/Powered%20by-LangChain-1c3c3c?style=flat-square)](https://langchain.com)
 
 </div>
