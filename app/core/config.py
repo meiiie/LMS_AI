@@ -108,11 +108,17 @@ class Settings(BaseSettings):
     google_model: str = Field(default="gemini-2.5-flash", description="Google Gemini model")
     llm_provider: str = Field(default="google", description="LLM provider: google, openai, openrouter")
     
-    # Memori Settings
+    # Memori Settings (Legacy v0.2)
     memori_enabled: bool = Field(default=True, description="Enable Memori long-term memory")
     memori_namespace_prefix: str = Field(default="user_", description="Memori namespace prefix")
     memori_namespace_suffix: str = Field(default="_maritime", description="Memori namespace suffix")
     memori_summarize_threshold: int = Field(default=10, description="Turns before summarization")
+    
+    # Semantic Memory Settings (v0.3 - Vector Embeddings)
+    embedding_model: str = Field(default="models/gemini-embedding-001", description="Gemini embedding model")
+    embedding_dimensions: int = Field(default=768, description="Embedding vector dimensions (MRL)")
+    semantic_memory_enabled: bool = Field(default=True, description="Enable semantic memory v0.3")
+    summarization_token_threshold: int = Field(default=2000, description="Token threshold for summarization")
     
     # Vector Store
     chroma_host: str = Field(default="localhost", description="ChromaDB host")
