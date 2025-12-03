@@ -24,12 +24,6 @@ NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", os.getenv("NEO4J_USER", "neo4j"))
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4j_secret")
 
-print(f"Connecting to Neo4j: {NEO4J_URI}")
-driver = GraphDatabase.driver(
-    NEO4J_URI, 
-    auth=(NEO4J_USERNAME, NEO4J_PASSWORD)
-)
-
 # COLREGs Rules 5-19 - Steering and Sailing Rules
 COLREGS_DATA = [
     {
@@ -276,39 +270,48 @@ Vietnamese: Trong tầm nhìn hạn chế, các quy tắc 11-18 không áp dụn
 ]
 
 def import_data():
-    """Import COLREGs data to Neo4j."""
-    with driver.session() as session:
-        # First, clear existing COLREGs data to avoid duplicates
-        session.run("MATCH (k:Knowledge {category: 'COLREGs'}) DETACH DELETE k")
-        print("Cleared existing COLREGs data")
+    """Import COLREGs data to Neo4j using best practices from Neo4j documentation."""
+    print(f"Connecting to Neo4j: {NEO4J_URI}")
+    
+    # Use 'with' statement as recommended by Neo4j docs (auto-closes driver)
+    with GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD)) as driver:
+        # Verify connectivity first
+        driver.verify_connectivity()
+        print("✅ Neo4j connection verified")
         
-        # Ensure Category exists
-        session.run("""
-            MERGE (c:Category {name: 'COLREGs'})
-            SET c.description = 'International Regulations for Preventing Collisions at Sea'
-        """)
-        
-        # Import each rule
-        for rule in COLREGS_DATA:
+        with driver.session() as session:
+            # First, clear existing COLREGs data to avoid duplicates
+            session.run("MATCH (k:Knowledge {category: 'COLREGs'}) DETACH DELETE k")
+            print("Cleared existing COLREGs data")
+            
+            # Ensure Category exists
             session.run("""
-                CREATE (k:Knowledge {
-                    id: $id,
-                    title: $title,
-                    category: $category,
-                    subcategory: $subcategory,
-                    source: $source,
-                    content: $content
-                })
-                WITH k
-                MATCH (c:Category {name: $category})
-                MERGE (k)-[:BELONGS_TO]->(c)
-            """, **rule)
-            print(f"Imported: {rule['title']}")
-        
-        # Count total
-        result = session.run("MATCH (k:Knowledge) RETURN count(k) as count")
-        print(f"\nTotal Knowledge nodes: {result.single()['count']}")
+                MERGE (c:Category {name: 'COLREGs'})
+                SET c.description = 'International Regulations for Preventing Collisions at Sea'
+            """)
+            
+            # Import each rule
+            for rule in COLREGS_DATA:
+                session.run("""
+                    CREATE (k:Knowledge {
+                        id: $id,
+                        title: $title,
+                        category: $category,
+                        subcategory: $subcategory,
+                        source: $source,
+                        content: $content
+                    })
+                    WITH k
+                    MATCH (c:Category {name: $category})
+                    MERGE (k)-[:BELONGS_TO]->(c)
+                """, **rule)
+                print(f"Imported: {rule['title']}")
+            
+            # Count total
+            result = session.run("MATCH (k:Knowledge) RETURN count(k) as count")
+            print(f"\nTotal Knowledge nodes: {result.single()['count']}")
+    
+    print("✅ Neo4j driver closed automatically")
 
 if __name__ == "__main__":
     import_data()
-    driver.close()
