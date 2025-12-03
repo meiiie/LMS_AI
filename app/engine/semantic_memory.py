@@ -376,6 +376,274 @@ Return ONLY valid JSON, no explanation:"""
         # Rough estimate: 1 token ≈ 4 characters for Vietnamese/English mix
         return total_chars // 4
     
+    def count_tokens(self, text: str) -> int:
+        """
+        Count tokens in text using tiktoken.
+        
+        Args:
+            text: Text to count tokens for
+            
+        Returns:
+            Estimated token count
+            
+        Requirements: 3.1
+        """
+        try:
+            import tiktoken
+            # Use cl100k_base encoding (GPT-4/Gemini compatible)
+            encoding = tiktoken.get_encoding("cl100k_base")
+            return len(encoding.encode(text))
+        except ImportError:
+            # Fallback: estimate 1 token ≈ 4 characters
+            return len(text) // 4
+        except Exception as e:
+            logger.warning(f"Token counting failed: {e}")
+            return len(text) // 4
+    
+    def count_session_tokens(
+        self,
+        user_id: str,
+        session_id: str
+    ) -> int:
+        """
+        Count total tokens for a session's messages.
+        
+        Args:
+            user_id: User ID
+            session_id: Session ID
+            
+        Returns:
+            Total token count for session
+            
+        Requirements: 3.1
+        """
+        try:
+            # Get all messages for session
+            messages = self._repository.search_similar(
+                user_id=user_id,
+                query_embedding=[0.0] * 768,  # Dummy embedding
+                limit=1000,
+                threshold=0.0,  # Get all
+                memory_types=[MemoryType.MESSAGE]
+            )
+            
+            # Filter by session and count tokens
+            total_tokens = 0
+            for msg in messages:
+                if msg.metadata.get("session_id") == session_id:
+                    total_tokens += self.count_tokens(msg.content)
+            
+            return total_tokens
+            
+        except Exception as e:
+            logger.error(f"Failed to count session tokens: {e}")
+            return 0
+    
+    async def check_and_summarize(
+        self,
+        user_id: str,
+        session_id: str,
+        token_threshold: Optional[int] = None
+    ) -> Optional[ConversationSummary]:
+        """
+        Check if session exceeds token threshold and summarize if needed.
+        
+        Args:
+            user_id: User ID
+            session_id: Session ID
+            token_threshold: Token threshold (defaults to settings)
+            
+        Returns:
+            ConversationSummary if summarization was performed, None otherwise
+            
+        Requirements: 3.1, 3.2, 3.3, 3.4
+        """
+        threshold = token_threshold or settings.summarization_token_threshold
+        
+        try:
+            # Count current session tokens
+            current_tokens = self.count_session_tokens(user_id, session_id)
+            
+            if current_tokens < threshold:
+                logger.debug(
+                    f"Session {session_id} has {current_tokens} tokens, "
+                    f"below threshold {threshold}"
+                )
+                return None
+            
+            logger.info(
+                f"Session {session_id} has {current_tokens} tokens, "
+                f"triggering summarization"
+            )
+            
+            # Perform summarization
+            summary = await self._summarize_session(
+                user_id=user_id,
+                session_id=session_id,
+                token_count=current_tokens
+            )
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Summarization check failed: {e}")
+            return None
+    
+    async def _summarize_session(
+        self,
+        user_id: str,
+        session_id: str,
+        token_count: int
+    ) -> Optional[ConversationSummary]:
+        """
+        Summarize a session's conversation.
+        
+        Args:
+            user_id: User ID
+            session_id: Session ID
+            token_count: Current token count
+            
+        Returns:
+            ConversationSummary object
+            
+        Requirements: 3.2, 3.3, 3.4
+        """
+        self._ensure_llm()
+        
+        if not self._llm:
+            logger.warning("LLM not available for summarization")
+            return None
+        
+        try:
+            # Get all messages for session
+            messages = self._get_session_messages(user_id, session_id)
+            
+            if not messages:
+                return None
+            
+            # Build conversation text
+            conversation_text = "\n".join([m.content for m in messages])
+            
+            # Generate summary using LLM
+            summary_text, key_topics = await self._generate_summary(conversation_text)
+            
+            # Create summary object
+            summary = ConversationSummary(
+                user_id=user_id,
+                session_id=session_id,
+                summary_text=summary_text,
+                original_message_count=len(messages),
+                original_token_count=token_count,
+                key_topics=key_topics
+            )
+            
+            # Store summary as semantic memory
+            summary_embedding = self._embeddings.embed_documents([summary_text])[0]
+            summary_memory = summary.to_semantic_memory_create(summary_embedding)
+            self._repository.save_memory(summary_memory)
+            
+            # Archive original messages (delete from semantic_memories)
+            self._repository.delete_by_session(user_id, session_id)
+            
+            logger.info(
+                f"Summarized session {session_id}: "
+                f"{len(messages)} messages -> 1 summary"
+            )
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Session summarization failed: {e}")
+            return None
+    
+    def _get_session_messages(
+        self,
+        user_id: str,
+        session_id: str
+    ) -> List[SemanticMemorySearchResult]:
+        """Get all messages for a session."""
+        try:
+            # Use a broad search to get all messages
+            all_memories = self._repository.search_similar(
+                user_id=user_id,
+                query_embedding=[0.0] * 768,
+                limit=1000,
+                threshold=0.0,
+                memory_types=[MemoryType.MESSAGE]
+            )
+            
+            # Filter by session_id from metadata
+            session_messages = [
+                m for m in all_memories
+                if m.metadata.get("session_id") == session_id
+            ]
+            
+            # Sort by created_at
+            session_messages.sort(key=lambda x: x.created_at)
+            
+            return session_messages
+            
+        except Exception as e:
+            logger.error(f"Failed to get session messages: {e}")
+            return []
+    
+    async def _generate_summary(
+        self,
+        conversation_text: str
+    ) -> tuple[str, List[str]]:
+        """
+        Generate summary using LLM.
+        
+        Args:
+            conversation_text: Full conversation text
+            
+        Returns:
+            Tuple of (summary_text, key_topics)
+            
+        Requirements: 3.2
+        """
+        prompt = f"""Summarize the following conversation between a user and an AI tutor about maritime topics.
+
+Conversation:
+{conversation_text}
+
+Provide:
+1. A concise summary (2-3 paragraphs) capturing the main points discussed
+2. A list of key topics covered
+
+Format your response as JSON:
+{{
+    "summary": "Your summary here...",
+    "key_topics": ["topic1", "topic2", "topic3"]
+}}
+
+Return ONLY valid JSON:"""
+        
+        try:
+            response = await self._llm.ainvoke(prompt)
+            content = response.content.strip()
+            
+            # Clean JSON
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            data = json.loads(content)
+            
+            summary_text = data.get("summary", "")
+            key_topics = data.get("key_topics", [])
+            
+            return summary_text, key_topics
+            
+        except Exception as e:
+            logger.error(f"Summary generation failed: {e}")
+            # Fallback: truncate conversation
+            return conversation_text[:500] + "...", []
+    
     def is_available(self) -> bool:
         """Check if semantic memory is available."""
         return self._repository.is_available()
