@@ -110,28 +110,42 @@ async def check_knowledge_graph_health() -> ComponentHealth:
     """
     Check Neo4j Knowledge Graph health using real connection.
     
-    Uses Neo4jKnowledgeRepository.is_available() for actual check.
+    CRITICAL: This function runs a real query (RETURN 1) to Neo4j.
+    This is essential for Neo4j Aura Free Tier which pauses after 72 hours
+    of inactivity. Each health check ping resets the inactivity timer.
     
     Requirements: 1.2, 1.8
+    Expert Feedback: Must run actual query, not just check variable
     """
     start = time.time()
     
     try:
         # Import repository (lazy to avoid circular imports)
-        from app.repositories.neo4j_knowledge_repository import Neo4jKnowledgeRepository
+        from app.engine.tools.rag_tool import get_knowledge_repository
         
-        # Check actual Neo4j connection
-        neo4j_repo = Neo4jKnowledgeRepository()
-        neo4j_available = neo4j_repo.is_available()
+        # Get cached repository instance (singleton)
+        neo4j_repo = get_knowledge_repository()
+        
+        # CRITICAL: Use ping() which runs actual query "RETURN 1"
+        # This keeps Neo4j Aura Free Tier alive (resets 72h inactivity timer)
+        ping_success = neo4j_repo.ping()
         
         latency = (time.time() - start) * 1000
         
-        if neo4j_available:
+        if ping_success:
             return ComponentHealth(
                 name="Neo4j Knowledge Graph",
                 status=ComponentStatus.HEALTHY,
                 latency_ms=round(latency, 2),
-                message="Neo4j connected",
+                message="Neo4j connected (ping OK)",
+            )
+        elif neo4j_repo.is_available():
+            # Connection exists but ping failed
+            return ComponentHealth(
+                name="Neo4j Knowledge Graph",
+                status=ComponentStatus.DEGRADED,
+                latency_ms=round(latency, 2),
+                message="Neo4j connected but ping failed",
             )
         else:
             return ComponentHealth(
