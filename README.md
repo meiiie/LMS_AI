@@ -261,6 +261,115 @@ curl -X POST http://localhost:8000/api/v1/chat \
 
 ---
 
+## Knowledge Ingestion API (Admin Only)
+
+API cho phép Admin upload tài liệu PDF vào Neo4j Knowledge Graph để hỗ trợ RAG queries.
+
+### POST /api/v1/knowledge/ingest
+
+Upload PDF document để xử lý và lưu vào Knowledge Graph.
+
+**Request (multipart/form-data):**
+```bash
+curl -X POST http://localhost:8000/api/v1/knowledge/ingest \
+  -F "file=@colregs.pdf" \
+  -F "category=COLREGs" \
+  -F "role=admin"
+```
+
+**Response:**
+```json
+{
+  "status": "accepted",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "message": "Document 'colregs.pdf' accepted for processing."
+}
+```
+
+### GET /api/v1/knowledge/jobs/{job_id}
+
+Kiểm tra trạng thái xử lý document.
+
+**Response:**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "completed",
+  "progress": 100,
+  "nodes_created": 45,
+  "error_message": null,
+  "filename": "colregs.pdf",
+  "category": "COLREGs"
+}
+```
+
+### GET /api/v1/knowledge/list
+
+Lấy danh sách documents đã upload.
+
+**Response:**
+```json
+{
+  "documents": [
+    {
+      "id": "doc_123",
+      "filename": "colregs.pdf",
+      "category": "COLREGs",
+      "nodes_count": 45,
+      "uploaded_by": "admin"
+    }
+  ],
+  "page": 1,
+  "limit": 20
+}
+```
+
+### GET /api/v1/knowledge/stats
+
+Lấy thống kê Knowledge Base.
+
+**Response:**
+```json
+{
+  "total_documents": 5,
+  "total_nodes": 230,
+  "categories": {
+    "COLREGs": 120,
+    "SOLAS": 80,
+    "MARPOL": 30
+  },
+  "recent_uploads": [...]
+}
+```
+
+### DELETE /api/v1/knowledge/{document_id}
+
+Xóa document và tất cả Knowledge nodes liên quan (Admin only).
+
+**Request:**
+```bash
+curl -X DELETE http://localhost:8000/api/v1/knowledge/doc_123 \
+  -F "role=admin"
+```
+
+**Response:**
+```json
+{
+  "status": "deleted",
+  "document_id": "doc_123",
+  "nodes_deleted": 45
+}
+```
+
+### Constraints
+
+- **File Type**: Chỉ chấp nhận PDF (.pdf)
+- **Max Size**: 50MB
+- **Role**: Chỉ Admin mới có quyền ingest/delete
+- **Duplicate Detection**: Tự động phát hiện file trùng lặp qua content hash
+
+---
+
 ## Testing
 
 ```bash
@@ -312,6 +421,7 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.4.0 | 2024-12-04 | Knowledge Ingestion API - Admin PDF upload to Neo4j |
 | v0.3.0 | 2024-12-03 | Semantic Memory v0.3, Cross-session persistence, Code cleanup |
 | v0.2.1 | 2024-12-02 | Memory Lite, Chat History, Learning Profile |
 | v0.2.0 | 2024-12-01 | Role-based prompting, Multi-agent architecture |
