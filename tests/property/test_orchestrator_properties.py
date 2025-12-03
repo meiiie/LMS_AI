@@ -21,7 +21,6 @@ from app.engine.graph import (
     TEACHING_KEYWORDS,
 )
 from app.engine.agents.chat_agent import ChatAgent
-from app.engine.memory import MemoriEngine
 
 
 class TestAgentRoutingCorrectness:
@@ -186,14 +185,17 @@ class TestGracefulDegradationMemory:
     
     @pytest.mark.asyncio
     @given(message=st.text(min_size=1, max_size=100).filter(lambda x: x.strip()))
-    @settings(max_examples=30)
+    @settings(max_examples=30, deadline=None)  # LLM calls can be slow
     async def test_chat_works_without_memory(self, message):
         """
         **Feature: maritime-ai-tutor, Property 19: Graceful Degradation - Memory Unavailable**
         **Validates: Requirements 8.2**
+        
+        Note: Legacy memory removed. ChatAgent now works without memory_engine parameter.
+        Personalization is handled by Semantic Memory v0.3 at ChatService level.
         """
-        # Create chat agent without memory
-        agent = ChatAgent(memory_engine=None)
+        # Create chat agent (no legacy memory parameter)
+        agent = ChatAgent()
         
         # Should still process message
         response = await agent.process(
@@ -204,13 +206,11 @@ class TestGracefulDegradationMemory:
         # Should return valid response
         assert response.content is not None
         assert len(response.content) > 0
-        assert response.personalization_reduced is True
     
     @pytest.mark.asyncio
-    async def test_chat_with_memory_uses_personalization(self):
-        """Chat with memory should use personalization."""
-        memory = MemoriEngine()
-        agent = ChatAgent(memory_engine=memory)
+    async def test_chat_without_legacy_memory_works(self):
+        """Chat without legacy memory should work (uses Semantic Memory v0.3)."""
+        agent = ChatAgent()  # No legacy memory
         
         user_id = str(uuid4())
         
@@ -220,8 +220,9 @@ class TestGracefulDegradationMemory:
             user_id=user_id
         )
         
-        assert response1.memory_used is True
-        assert response1.personalization_reduced is False
+        # Should work without legacy memory (personalization via Semantic Memory v0.3)
+        assert response1.content is not None
+        assert len(response1.content) > 0
 
 
 class TestConversationStateManagement:

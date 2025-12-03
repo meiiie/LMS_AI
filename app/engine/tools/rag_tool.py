@@ -22,7 +22,6 @@ from app.models.knowledge_graph import (
     KnowledgeNode,
     RelationType,
 )
-from app.repositories.knowledge_graph_repository import InMemoryKnowledgeGraphRepository
 from app.repositories.neo4j_knowledge_repository import Neo4jKnowledgeRepository
 
 logger = logging.getLogger(__name__)
@@ -33,22 +32,18 @@ _knowledge_repo = None
 
 
 def get_knowledge_repository():
-    """Get the best available knowledge repository (cached)."""
+    """Get the Neo4j knowledge repository (cached)."""
     global _knowledge_repo
     
     if _knowledge_repo is not None:
         return _knowledge_repo
     
-    # Try Neo4j first
-    neo4j_repo = Neo4jKnowledgeRepository()
-    if neo4j_repo.is_available():
+    _knowledge_repo = Neo4jKnowledgeRepository()
+    if _knowledge_repo.is_available():
         logger.info("Using Neo4j knowledge repository")
-        _knowledge_repo = neo4j_repo
-        return _knowledge_repo
+    else:
+        logger.warning("Neo4j unavailable - RAG queries will return empty results")
     
-    # Fallback to in-memory
-    logger.warning("Neo4j unavailable, using in-memory repository")
-    _knowledge_repo = InMemoryKnowledgeGraphRepository()
     return _knowledge_repo
 
 

@@ -7,6 +7,7 @@ Property-based tests for Knowledge Graph and RAG Agent.
 
 import pytest
 from uuid import uuid4
+from typing import List, Optional
 
 from hypothesis import given, settings, strategies as st, assume
 
@@ -17,8 +18,79 @@ from app.models.knowledge_graph import (
     Relation,
     RelationType,
 )
-from app.repositories.knowledge_graph_repository import InMemoryKnowledgeGraphRepository
 from app.engine.tools.rag_tool import RAGAgent, MaritimeDocumentParser
+
+
+class MockKnowledgeRepository:
+    """
+    Mock Knowledge Graph Repository for testing.
+    
+    Replaces InMemoryKnowledgeGraphRepository which was removed during cleanup.
+    """
+    
+    def __init__(self):
+        self._nodes: dict[str, KnowledgeNode] = {}
+        self._available = True
+    
+    def is_available(self) -> bool:
+        return self._available
+    
+    def set_available(self, available: bool) -> None:
+        self._available = available
+    
+    async def add_node(self, node: KnowledgeNode) -> None:
+        self._nodes[node.id] = node
+    
+    async def get_node(self, node_id: str) -> Optional[KnowledgeNode]:
+        return self._nodes.get(node_id)
+    
+    async def hybrid_search(self, query: str, limit: int = 5) -> List[KnowledgeNode]:
+        """Simple keyword search for testing."""
+        if not self._available:
+            return []
+        
+        query_lower = query.lower()
+        results = []
+        
+        for node in self._nodes.values():
+            if (query_lower in node.title.lower() or 
+                query_lower in node.content.lower()):
+                results.append(node)
+                if len(results) >= limit:
+                    break
+        
+        return results
+    
+    async def traverse_relations(
+        self, 
+        node_id: str, 
+        relation_types: List[RelationType],
+        depth: int = 1
+    ) -> List[KnowledgeNode]:
+        """Traverse relations from a node."""
+        node = self._nodes.get(node_id)
+        if not node:
+            return []
+        
+        related = []
+        for relation in node.relations:
+            if relation.type in relation_types:
+                target = self._nodes.get(relation.target_id)
+                if target:
+                    related.append(target)
+        
+        return related
+    
+    async def get_citations(self, nodes: List[KnowledgeNode]) -> List[Citation]:
+        """Generate citations from nodes."""
+        return [
+            Citation(
+                node_id=node.id,
+                title=node.title,
+                source=node.source or ""
+            )
+            for node in nodes
+        ]
 
 
 # Custom strategies
@@ -48,9 +120,6 @@ def knowledge_node_strategy(draw):
 class TestGraphTraversalIncludesRelations:
     """
     **Feature: maritime-ai-tutor, Property 10: Graph Traversal Includes Relations**
-    
-    For any Knowledge_Graph query result, the returned KnowledgeNodes SHALL
-    include traversed relationships when such relationships exist.
     """
     
     @pytest.mark.asyncio
@@ -59,7 +128,7 @@ class TestGraphTraversalIncludesRelations:
         **Feature: maritime-ai-tutor, Property 10: Graph Traversal Includes Relations**
         **Validates: Requirements 4.4**
         """
-        repo = InMemoryKnowledgeGraphRepository()
+        repo = MockKnowledgeRepository()
         
         # Create nodes with relationships
         node1 = KnowledgeNode(
@@ -97,7 +166,7 @@ class TestGraphTraversalIncludesRelations:
     @settings(max_examples=50)
     async def test_node_with_no_matching_relations_returns_empty(self, node):
         """Traversal with non-matching relation types returns empty."""
-        repo = InMemoryKnowledgeGraphRepository()
+        repo = MockKnowledgeRepository()
         await repo.add_node(node)
         
         # Use a relation type that doesn't exist
@@ -114,9 +183,6 @@ class TestGraphTraversalIncludesRelations:
 class TestRAGResponseContainsCitations:
     """
     **Feature: maritime-ai-tutor, Property 9: RAG Response Contains Citations**
-    
-    For any maritime regulation query that returns results, the RAG_Agent
-    response SHALL include at least one source citation.
     """
     
     @pytest.mark.asyncio
@@ -125,7 +191,7 @@ class TestRAGResponseContainsCitations:
         **Feature: maritime-ai-tutor, Property 9: RAG Response Contains Citations**
         **Validates: Requirements 4.1**
         """
-        repo = InMemoryKnowledgeGraphRepository()
+        repo = MockKnowledgeRepository()
         
         # Add a node that will match the query
         node = KnowledgeNode(
@@ -151,7 +217,7 @@ class TestRAGResponseContainsCitations:
     @pytest.mark.asyncio
     async def test_rag_response_no_citations_when_no_results(self):
         """No citations when no results found."""
-        repo = InMemoryKnowledgeGraphRepository()
+        repo = MockKnowledgeRepository()
         agent = RAGAgent(knowledge_graph=repo)
         
         # Query with no matching nodes
@@ -164,9 +230,6 @@ class TestRAGResponseContainsCitations:
 class TestMaritimeDocumentParsingRoundTrip:
     """
     **Feature: maritime-ai-tutor, Property 11: Maritime Document Parsing Round-Trip**
-    
-    For any structured maritime regulation document, parsing into KnowledgeNode
-    format and serializing back SHALL preserve essential content.
     """
     
     @given(
@@ -202,9 +265,6 @@ class TestMaritimeDocumentParsingRoundTrip:
 class TestGracefulDegradationKnowledgeGraph:
     """
     **Feature: maritime-ai-tutor, Property 20: Graceful Degradation - Knowledge Graph Unavailable**
-    
-    For any knowledge query when Knowledge_Graph is unavailable, the RAG_Agent
-    SHALL fall back to general response with appropriate disclaimer.
     """
     
     @pytest.mark.asyncio
@@ -215,7 +275,7 @@ class TestGracefulDegradationKnowledgeGraph:
         **Feature: maritime-ai-tutor, Property 20: Graceful Degradation - Knowledge Graph Unavailable**
         **Validates: Requirements 8.3**
         """
-        repo = InMemoryKnowledgeGraphRepository()
+        repo = MockKnowledgeRepository()
         repo.set_available(False)  # Simulate unavailability
         
         agent = RAGAgent(knowledge_graph=repo)
@@ -229,7 +289,7 @@ class TestGracefulDegradationKnowledgeGraph:
     @pytest.mark.asyncio
     async def test_fallback_has_no_citations(self):
         """Fallback response should have no citations."""
-        repo = InMemoryKnowledgeGraphRepository()
+        repo = MockKnowledgeRepository()
         repo.set_available(False)
         
         agent = RAGAgent(knowledge_graph=repo)
@@ -264,7 +324,7 @@ class TestCitationGeneration:
     @settings(max_examples=50)
     async def test_citations_match_nodes(self, nodes):
         """Generated citations should match source nodes."""
-        repo = InMemoryKnowledgeGraphRepository()
+        repo = MockKnowledgeRepository()
         
         # Add nodes
         for node in nodes:

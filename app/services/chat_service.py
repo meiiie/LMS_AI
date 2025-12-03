@@ -4,15 +4,15 @@ Chat Service - Integration layer for all components.
 This service wires together:
 - Agent Orchestrator (LangGraph)
 - Chat Agent, RAG Agent, Tutor Agent
-- Memory Engine (Memori)
-- Knowledge Graph (GraphRAG)
+- Semantic Memory Engine v0.3 (pgvector + Gemini embeddings)
+- Knowledge Graph (Neo4j GraphRAG)
 - Guardrails
 - Learning Profile
-- Chat History (Memory Lite - Week 2)
+- Chat History
 
 **Feature: maritime-ai-tutor**
 **Validates: Requirements 1.1, 2.1, 2.2, 2.3**
-**Spec: CHỈ THỊ KỸ THUẬT SỐ 04 - Memory & Personalization**
+**Spec: CHỈ THỊ KỸ THUẬT SỐ 06 - Semantic Memory v0.3**
 """
 
 import logging
@@ -21,10 +21,10 @@ from dataclasses import dataclass
 from typing import Callable, List, Optional
 from uuid import UUID, uuid4
 
+from app.core.config import settings
 from app.engine.agents.chat_agent import ChatAgent
 from app.engine.graph import AgentOrchestrator, AgentType, IntentType
 from app.engine.guardrails import Guardrails, ValidationStatus
-from app.engine.memory import MemoriEngine
 from app.engine.tools.rag_tool import RAGAgent, get_knowledge_repository
 from app.engine.tools.tutor_agent import TutorAgent
 from app.models.learning_profile import LearningProfile
@@ -37,6 +37,13 @@ from app.repositories.chat_history_repository import (
     ChatHistoryRepository, 
     get_chat_history_repository
 )
+
+# Semantic Memory v0.3 (CHỈ THỊ KỸ THUẬT SỐ 06)
+try:
+    from app.engine.semantic_memory import SemanticMemoryEngine, get_semantic_memory_engine
+    SEMANTIC_MEMORY_AVAILABLE = True
+except ImportError:
+    SEMANTIC_MEMORY_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +67,7 @@ class ChatService:
     
     def __init__(self):
         """Initialize all components."""
-        # Core components
-        self._memory = MemoriEngine()
+        # Core components (Semantic Memory v0.3 is primary - no legacy fallback)
         self._knowledge_graph = get_knowledge_repository()  # Use Neo4j if available
         self._profile_repo = InMemoryLearningProfileRepository()  # Legacy
         self._supabase_profile_repo = get_learning_profile_repository()  # CHỈ THỊ SỐ 04
@@ -73,15 +79,30 @@ class ChatService:
             self._chat_history.ensure_tables()
             logger.info("Memory Lite (Chat History) initialized")
         
+        # Semantic Memory v0.3 (CHỈ THỊ KỸ THUẬT SỐ 06)
+        self._semantic_memory: Optional[SemanticMemoryEngine] = None
+        if SEMANTIC_MEMORY_AVAILABLE and settings.semantic_memory_enabled:
+            try:
+                self._semantic_memory = get_semantic_memory_engine()
+                if self._semantic_memory.is_available():
+                    logger.info("Semantic Memory v0.3 initialized (pgvector + Gemini embeddings)")
+                else:
+                    logger.warning("Semantic Memory v0.3 not available, falling back to sliding window")
+                    self._semantic_memory = None
+            except Exception as e:
+                logger.warning(f"Failed to initialize Semantic Memory: {e}")
+                self._semantic_memory = None
+        
         # Agents
         self._orchestrator = AgentOrchestrator()
-        self._chat_agent = ChatAgent(memory_engine=self._memory)
+        self._chat_agent = ChatAgent()  # No legacy memory, uses Semantic Memory v0.3
         self._rag_agent = RAGAgent(knowledge_graph=self._knowledge_graph)
         self._tutor_agent = TutorAgent()
         
         logger.info(f"Knowledge graph available: {self._knowledge_graph.is_available()}")
         logger.info(f"Chat history available: {self._chat_history.is_available()}")
         logger.info(f"Learning profile (Supabase) available: {self._supabase_profile_repo.is_available()}")
+        logger.info(f"Semantic memory v0.3 available: {self._semantic_memory is not None}")
         
         # Session tracking (in-memory fallback)
         self._sessions: dict[str, UUID] = {}  # user_id -> session_id
@@ -134,9 +155,27 @@ class ChatService:
             if learning_profile:
                 logger.debug(f"Loaded learning profile for user {user_id}: {learning_profile.get('attributes', {})}")
         
-        # Step 4: Retrieve conversation history (Sliding Window)
+        # Step 4: Retrieve conversation history (Hybrid: Semantic + Sliding Window)
         conversation_history = ""
+        semantic_context = ""
         user_name = None
+        
+        # Try Semantic Memory v0.3 first (CHỈ THỊ KỸ THUẬT SỐ 06)
+        if self._semantic_memory is not None:
+            try:
+                context = await self._semantic_memory.retrieve_context(
+                    user_id=user_id,
+                    query=message,
+                    search_limit=5,
+                    similarity_threshold=0.7,
+                    include_user_facts=True
+                )
+                semantic_context = context.to_prompt_context()
+                logger.debug(f"Semantic context retrieved: {len(context.relevant_memories)} memories, {len(context.user_facts)} facts")
+            except Exception as e:
+                logger.warning(f"Semantic memory retrieval failed: {e}")
+        
+        # Fallback/Hybrid: Also get sliding window history
         if self._chat_history.is_available():
             # Get recent messages
             recent_messages = self._chat_history.get_recent_messages(session_id)
@@ -156,6 +195,10 @@ class ChatService:
             if extracted_name and not user_name:
                 self._chat_history.update_user_name(session_id, extracted_name)
                 user_name = extracted_name
+        
+        # Combine semantic context with conversation history
+        if semantic_context:
+            conversation_history = f"{semantic_context}\n\n{conversation_history}".strip()
         
         # Step 5: Process through orchestrator
         orchestrator_response = self._orchestrator.process_message(
@@ -187,6 +230,13 @@ class ChatService:
                 background_save(self._save_message_async, session_id, "assistant", result.message)
             else:
                 self._chat_history.save_message(session_id, "assistant", result.message)
+        
+        # Step 8.5: Store interaction in Semantic Memory v0.3 (background)
+        if self._semantic_memory is not None and background_save:
+            background_save(
+                self._store_semantic_interaction_async,
+                user_id, message, result.message, str(session_id)
+            )
         
         # Step 9: Update learning profile stats (background)
         if self._supabase_profile_repo.is_available() and background_save:
@@ -482,6 +532,50 @@ class ChatService:
             logger.debug(f"Background updated profile stats for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to update profile stats in background: {e}")
+    
+    def _store_semantic_interaction_async(
+        self,
+        user_id: str,
+        message: str,
+        response: str,
+        session_id: str
+    ) -> None:
+        """
+        Store interaction in Semantic Memory v0.3 (for BackgroundTasks).
+        
+        **Spec: CHỈ THỊ KỸ THUẬT SỐ 06**
+        """
+        if self._semantic_memory is None:
+            return
+        
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Store interaction with fact extraction
+            loop.run_until_complete(
+                self._semantic_memory.store_interaction(
+                    user_id=user_id,
+                    message=message,
+                    response=response,
+                    session_id=session_id,
+                    extract_facts=True
+                )
+            )
+            
+            # Check and summarize if needed
+            loop.run_until_complete(
+                self._semantic_memory.check_and_summarize(
+                    user_id=user_id,
+                    session_id=session_id
+                )
+            )
+            
+            loop.close()
+            logger.debug(f"Background stored semantic interaction for user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to store semantic interaction: {e}")
 
 
 # Singleton instance
