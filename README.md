@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![LangChain](https://img.shields.io/badge/LangChain-0.1.9-1c3c3c?style=flat-square&logo=chainlink&logoColor=white)](https://langchain.com)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.0.24-purple?style=flat-square)](https://langchain.com)
-[![Neo4j](https://img.shields.io/badge/Neo4j-5.17-008cc1?style=flat-square&logo=neo4j&logoColor=white)](https://neo4j.com)
+[![Neo4j](https://img.shields.io/badge/Neo4j-5.28-008cc1?style=flat-square&logo=neo4j&logoColor=white)](https://neo4j.com)
 [![Supabase](https://img.shields.io/badge/Supabase-pgvector-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com)
 [![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev)
 [![License](https://img.shields.io/badge/License-Proprietary-red?style=flat-square)](LICENSE)
@@ -301,7 +301,7 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 | **Framework** | FastAPI 0.109 |
 | **AI/LLM** | LangChain + LangGraph |
 | **LLM Provider** | Google Gemini 2.5 Flash |
-| **Graph Database** | Neo4j 5.17 |
+| **Graph Database** | Neo4j 5.28 |
 | **SQL Database** | PostgreSQL + pgvector |
 | **Memory** | Semantic Memory v0.3 |
 | **Testing** | Pytest + Hypothesis |
