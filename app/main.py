@@ -32,22 +32,65 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Application lifespan manager.
     Handles startup and shutdown events.
+    
+    Production Readiness Spec:
+    - Startup: Validate connections, log warnings if unavailable (don't crash)
+    - Shutdown: Close Neo4j driver explicitly
+    
+    Requirements: 2.1, 2.2, 3.1, 3.2, 3.3
     """
     # Startup
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"Debug mode: {settings.debug}")
     
-    # TODO: Initialize database connections
-    # TODO: Initialize Neo4j connection
-    # TODO: Initialize Memori engine
+    # Validate database connections (warn only, don't crash)
+    neo4j_repo = None
+    try:
+        from app.repositories.chat_history_repository import get_chat_history_repository
+        chat_repo = get_chat_history_repository()
+        if chat_repo.is_available():
+            logger.info("✅ PostgreSQL connection: Available")
+        else:
+            logger.warning("⚠️ PostgreSQL connection: Unavailable (service will continue)")
+    except Exception as e:
+        logger.warning(f"⚠️ PostgreSQL validation failed: {e} (service will continue)")
+    
+    try:
+        from app.repositories.neo4j_knowledge_repository import Neo4jKnowledgeRepository
+        neo4j_repo = Neo4jKnowledgeRepository()
+        if neo4j_repo.is_available():
+            logger.info("✅ Neo4j connection: Available")
+        else:
+            logger.warning("⚠️ Neo4j connection: Unavailable (service will continue)")
+    except Exception as e:
+        logger.warning(f"⚠️ Neo4j validation failed: {e} (service will continue)")
+    
+    try:
+        from app.repositories.semantic_memory_repository import get_semantic_memory_repository
+        semantic_repo = get_semantic_memory_repository()
+        if semantic_repo.is_available():
+            logger.info("✅ pgvector connection: Available")
+        else:
+            logger.warning("⚠️ pgvector connection: Unavailable (service will continue)")
+    except Exception as e:
+        logger.warning(f"⚠️ pgvector validation failed: {e} (service will continue)")
+    
+    logger.info(f"🚀 {settings.app_name} started successfully")
     
     yield
     
-    # Shutdown
+    # Shutdown - Close Neo4j driver explicitly (Requirements: 2.1, 2.2)
     logger.info("Shutting down Maritime AI Service...")
-    # TODO: Close database connections
-    # TODO: Close Neo4j connection
+    
+    if neo4j_repo is not None:
+        try:
+            neo4j_repo.close()
+            logger.info("✅ Neo4j driver closed successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to close Neo4j driver: {e}")
+    
+    logger.info("👋 Maritime AI Service shutdown complete")
 
 
 def create_application() -> FastAPI:

@@ -24,8 +24,6 @@ except ImportError:
     ChatGoogleGenerativeAI = None
 
 from app.core.config import settings
-from app.engine.memory import MemoriEngine
-from app.models.memory import Memory, MemoryContext, MemoryType
 
 logger = logging.getLogger(__name__)
 
@@ -55,22 +53,18 @@ class ChatAgent:
     """
     Chat Agent for general maritime conversation.
     
-    Integrates with Memory Engine for personalized responses.
+    Personalization is handled by Semantic Memory v0.3 at ChatService level.
     
     **Validates: Requirements 2.1, 3.3, 8.2**
     """
     
-    def __init__(
-        self,
-        memory_engine: Optional[MemoriEngine] = None
-    ):
+    def __init__(self):
         """
         Initialize Chat Agent.
         
-        Args:
-            memory_engine: Memory engine for personalization
+        Note: Personalization is handled by Semantic Memory v0.3 at ChatService level,
+        not by legacy MemoriEngine.
         """
-        self._memory = memory_engine
         self._system_prompt = MARITIME_EXPERT_PROMPT
         self._llm = self._init_llm()
     
@@ -135,8 +129,8 @@ class ChatAgent:
         
         Args:
             message: User's message
-            user_id: User's ID for memory retrieval
-            conversation_history: Previous messages in conversation
+            user_id: User's ID (for logging)
+            conversation_history: Previous messages in conversation (from Semantic Memory v0.3)
             user_role: User role for role-based prompting (student/teacher/admin)
             
         Returns:
@@ -144,50 +138,30 @@ class ChatAgent:
             
         **Validates: Requirements 2.1, 3.3, 8.2**
         **Spec: CHỈ THỊ KỸ THUẬT SỐ 03 - Role-Based Prompting**
+        
+        Note: Personalization is handled by Semantic Memory v0.3 at ChatService level.
+        conversation_history already contains semantic context.
         """
-        memory_context = None
-        memory_used = False
-        personalization_reduced = False
-        
-        # Try to get memory context
-        if self._memory and self._memory.is_available():
-            try:
-                namespace = await self._memory.create_namespace(user_id)
-                memory_context = await self._memory.get_memory_context(
-                    namespace, 
-                    message
-                )
-                memory_used = True
-            except Exception as e:
-                logger.warning(f"Memory retrieval failed: {e}")
-                personalization_reduced = True
-        else:
-            personalization_reduced = True
-            logger.info("Memory unavailable, proceeding without personalization")
-        
         # Generate response with role-based prompting
+        # Memory context is already included in conversation_history from ChatService
         content = self._generate_response(
             message, 
-            memory_context, 
+            None,  # No legacy memory context
             conversation_history,
             user_role
         )
         
-        # Store interaction in memory
-        if self._memory and memory_used:
-            await self._store_interaction(user_id, message, content)
-        
         return ChatResponse(
             content=content,
-            memory_used=memory_used,
-            personalization_reduced=personalization_reduced
+            memory_used=False,  # Legacy memory not used
+            personalization_reduced=False  # Semantic Memory v0.3 handles personalization
         )
 
     
     def _generate_response(
         self,
         message: str,
-        memory_context: Optional[MemoryContext],
+        memory_context,  # Deprecated, kept for compatibility
         conversation_history: Optional[List[dict]],
         user_role: str = "student"
     ) -> str:
@@ -199,25 +173,13 @@ class ChatAgent:
         Role-Based Prompting (CHỈ THỊ KỸ THUẬT SỐ 03):
         - student: AI đóng vai Gia sư (Tutor) - giọng văn khuyến khích, giải thích cặn kẽ
         - teacher/admin: AI đóng vai Trợ lý (Assistant) - chuyên nghiệp, ngắn gọn
+        
+        Note: memory_context is deprecated. Personalization is handled by Semantic Memory v0.3
+        at ChatService level and passed via conversation_history.
         """
-        # Build context from memory
-        context_parts = []
-        
-        if memory_context and memory_context.summary:
-            context_parts.append(f"Previous context: {memory_context.summary}")
-        
-        if memory_context and memory_context.memories:
-            relevant = memory_context.memories[:3]
-            for mem in relevant:
-                context_parts.append(f"- {mem.content[:100]}")
-        
         # If no LLM, return placeholder
         if not self._llm:
-            response = f"As a maritime expert, I can help you with: {message}"
-            if context_parts:
-                response += "\n\nBased on our previous conversations, I remember:\n"
-                response += "\n".join(context_parts)
-            return response
+            return f"As a maritime expert, I can help you with: {message}"
         
         # Role-Based System Prompt (CHỈ THỊ KỸ THUẬT SỐ 03)
         if user_role == "student":
@@ -260,11 +222,6 @@ QUY TẮC:
         # Build messages for LLM
         messages = [SystemMessage(content=system_prompt)]
         
-        # Add memory context to system message
-        if context_parts:
-            memory_info = "\n\nRelevant context from previous conversations:\n" + "\n".join(context_parts)
-            messages[0] = SystemMessage(content=system_prompt + memory_info)
-        
         # Add conversation history
         if conversation_history:
             for msg in conversation_history[-10:]:  # Last 10 messages
@@ -283,34 +240,6 @@ QUY TẮC:
             logger.error(f"LLM call failed: {e}")
             return f"I apologize, but I'm having trouble processing your request. Error: {str(e)}"
     
-    async def _store_interaction(
-        self,
-        user_id: str,
-        user_message: str,
-        assistant_response: str
-    ) -> None:
-        """Store the interaction in memory."""
-        if not self._memory:
-            return
-        
-        try:
-            namespace = await self._memory.create_namespace(user_id)
-            
-            # Store as episodic memory
-            memory = Memory(
-                namespace=namespace,
-                memory_type=MemoryType.EPISODIC,
-                content=f"User asked: {user_message[:200]}. Assistant responded about maritime topics.",
-                entities=[]
-            )
-            await self._memory.store_memory(namespace, memory)
-        except Exception as e:
-            logger.warning(f"Failed to store interaction: {e}")
-    
     def is_available(self) -> bool:
         """Check if Chat Agent is available."""
-        return True  # Always available, memory is optional
-    
-    def has_memory(self) -> bool:
-        """Check if memory is available."""
-        return self._memory is not None and self._memory.is_available()
+        return True  # Always available

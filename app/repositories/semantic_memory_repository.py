@@ -100,7 +100,7 @@ class SemanticMemoryRepository:
                     INSERT INTO {self.TABLE_NAME} 
                     (user_id, content, embedding, memory_type, importance, metadata, session_id)
                     VALUES 
-                    (:user_id, :content, :embedding::vector, :memory_type, :importance, :metadata::jsonb, :session_id)
+                    (:user_id, :content, CAST(:embedding AS vector), :memory_type, :importance, CAST(:metadata AS jsonb), :session_id)
                     RETURNING id, user_id, content, memory_type, importance, metadata, session_id, created_at, updated_at
                 """)
                 
@@ -143,13 +143,16 @@ class SemanticMemoryRepository:
         query_embedding: List[float],
         limit: int = DEFAULT_SEARCH_LIMIT,
         threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
-        memory_types: Optional[List[MemoryType]] = None
+        memory_types: Optional[List[MemoryType]] = None,
+        include_all_sessions: bool = True
     ) -> List[SemanticMemorySearchResult]:
         """
         Search for similar memories using cosine similarity.
         
-        Uses pgvector's <=> operator for cosine distance.
-        Results are ordered by similarity (descending).
+        Cross-session Memory Persistence (v0.2.1):
+        - By default, searches across ALL sessions for the user_id
+        - Uses pgvector's <=> operator for cosine distance
+        - Results are ordered by similarity (descending)
         
         Args:
             user_id: User ID to filter memories
@@ -157,11 +160,13 @@ class SemanticMemoryRepository:
             limit: Maximum number of results
             threshold: Minimum similarity threshold (0.0 - 1.0)
             memory_types: Optional filter by memory types
+            include_all_sessions: If True (default), search across all sessions
             
         Returns:
             List of SemanticMemorySearchResult ordered by similarity
             
-        Requirements: 2.2, 2.3, 2.4
+        Requirements: 2.2, 2.3, 2.4, 4.2
+        **Feature: cross-session-memory, Property 6: Search Across All Sessions**
         """
         self._ensure_initialized()
         
@@ -193,12 +198,12 @@ class SemanticMemoryRepository:
                         importance,
                         metadata,
                         created_at,
-                        1 - (embedding <=> :embedding::vector) AS similarity
+                        1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
                     FROM {self.TABLE_NAME}
                     WHERE user_id = :user_id
-                      AND 1 - (embedding <=> :embedding::vector) >= :threshold
+                      AND 1 - (embedding <=> CAST(:embedding AS vector)) >= :threshold
                       {type_filter}
-                    ORDER BY embedding <=> :embedding::vector
+                    ORDER BY embedding <=> CAST(:embedding AS vector)
                     LIMIT :limit
                 """)
                 
@@ -227,22 +232,34 @@ class SemanticMemoryRepository:
     def get_user_facts(
         self,
         user_id: str,
-        limit: int = 20
+        limit: int = 20,
+        deduplicate: bool = True
     ) -> List[SemanticMemorySearchResult]:
         """
-        Get all user facts for personalization.
+        Get all user facts for personalization across ALL sessions.
+        
+        Cross-session Memory Persistence (v0.2.1):
+        - Queries by user_id ONLY (no session_id filter)
+        - Deduplicates facts by fact_type (keeps most recent)
+        - Orders by importance DESC, created_at DESC
         
         Args:
             user_id: User ID
             limit: Maximum number of facts to return
+            deduplicate: If True, keep only most recent fact per fact_type
             
         Returns:
             List of user facts ordered by importance and recency
+            
+        Requirements: 1.1, 1.2, 2.3
+        **Feature: cross-session-memory**
         """
         self._ensure_initialized()
         
         try:
             with self._session_factory() as session:
+                # Query ALL user facts for this user_id (no session_id filter)
+                # This ensures cross-session persistence
                 query = text(f"""
                     SELECT 
                         id,
@@ -262,7 +279,7 @@ class SemanticMemoryRepository:
                 result = session.execute(query, {
                     "user_id": user_id,
                     "memory_type": MemoryType.USER_FACT.value,
-                    "limit": limit
+                    "limit": limit * 3 if deduplicate else limit  # Fetch more for deduplication
                 })
                 
                 rows = result.fetchall()
@@ -279,12 +296,64 @@ class SemanticMemoryRepository:
                         created_at=row.created_at
                     ))
                 
-                logger.debug(f"Found {len(facts)} user facts for user {user_id}")
+                # Deduplicate by fact_type if requested
+                if deduplicate and facts:
+                    facts = self._deduplicate_facts(facts)
+                
+                # Apply final limit after deduplication
+                facts = facts[:limit]
+                
+                logger.debug(f"Found {len(facts)} user facts for user {user_id} (deduplicate={deduplicate})")
                 return facts
                 
         except Exception as e:
             logger.error(f"Failed to get user facts: {e}")
             return []
+    
+    def _deduplicate_facts(
+        self,
+        facts: List[SemanticMemorySearchResult]
+    ) -> List[SemanticMemorySearchResult]:
+        """
+        Deduplicate facts by fact_type, keeping the most recent one.
+        
+        For each fact_type (name, job, preference, etc.), keeps only the
+        fact with the highest created_at timestamp.
+        
+        Args:
+            facts: List of facts (already ordered by importance, created_at DESC)
+            
+        Returns:
+            Deduplicated list of facts
+            
+        Requirements: 2.3
+        **Feature: cross-session-memory, Property 4: Fact Deduplication by Type**
+        """
+        if not facts:
+            return []
+        
+        # Group by fact_type from metadata
+        seen_types: dict[str, SemanticMemorySearchResult] = {}
+        
+        for fact in facts:
+            # Extract fact_type from metadata
+            fact_type = fact.metadata.get("fact_type", "unknown")
+            
+            if fact_type not in seen_types:
+                # First occurrence of this type - keep it (already sorted by recency)
+                seen_types[fact_type] = fact
+            else:
+                # Compare created_at timestamps
+                existing = seen_types[fact_type]
+                if fact.created_at > existing.created_at:
+                    seen_types[fact_type] = fact
+        
+        # Return deduplicated facts, maintaining importance order
+        deduplicated = list(seen_types.values())
+        deduplicated.sort(key=lambda f: (f.importance, f.created_at), reverse=True)
+        
+        logger.debug(f"Deduplicated {len(facts)} facts to {len(deduplicated)} unique types")
+        return deduplicated
     
     def get_by_id(
         self,

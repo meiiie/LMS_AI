@@ -181,30 +181,86 @@ class SemanticContext(BaseModel):
         """
         Format context for injection into LLM prompt.
         
+        Cross-session Memory Persistence (v0.2.1):
+        - User facts appear at TOP of context (highest priority)
+        - Facts are grouped by type for better readability
+        - Includes relevant memories from all sessions
+        
         Returns:
             Formatted context string
+            
+        Requirements: 2.2, 4.3
+        **Feature: cross-session-memory, Property 5: Context Includes User Facts**
         """
         parts = []
         
-        # Add user facts section
+        # Add user facts section (FIRST - highest priority for personalization)
         if self.user_facts:
-            facts_text = "\n".join([f"- {m.content}" for m in self.user_facts])
-            parts.append(f"**Thông tin về người dùng:**\n{facts_text}")
+            # Group facts by type for better formatting
+            facts_by_type = self._group_facts_by_type()
+            
+            facts_lines = []
+            # Priority order for fact types
+            type_order = ["name", "background", "goal", "weak_area", "strong_area", 
+                         "interest", "preference", "learning_style"]
+            
+            for fact_type in type_order:
+                if fact_type in facts_by_type:
+                    fact = facts_by_type[fact_type]
+                    # Format based on type
+                    type_labels = {
+                        "name": "Tên",
+                        "background": "Nghề nghiệp",
+                        "goal": "Mục tiêu học tập",
+                        "weak_area": "Điểm yếu",
+                        "strong_area": "Điểm mạnh",
+                        "interest": "Quan tâm",
+                        "preference": "Sở thích",
+                        "learning_style": "Phong cách học"
+                    }
+                    label = type_labels.get(fact_type, fact_type.replace("_", " ").title())
+                    # Extract value from content (format: "fact_type: value")
+                    value = fact.content.split(": ", 1)[-1] if ": " in fact.content else fact.content
+                    facts_lines.append(f"- {label}: {value}")
+            
+            # Add any remaining facts not in priority order
+            for fact_type, fact in facts_by_type.items():
+                if fact_type not in type_order:
+                    value = fact.content.split(": ", 1)[-1] if ": " in fact.content else fact.content
+                    facts_lines.append(f"- {fact_type}: {value}")
+            
+            if facts_lines:
+                parts.append(f"=== Hồ sơ người dùng ===\n" + "\n".join(facts_lines))
         
         # Add relevant memories section
         if self.relevant_memories:
             memories_text = "\n".join([
-                f"- {m.content} (relevance: {m.similarity:.2f})"
-                for m in self.relevant_memories
+                f"- {m.content}"
+                for m in self.relevant_memories[:5]  # Limit to top 5
             ])
-            parts.append(f"**Ngữ cảnh liên quan:**\n{memories_text}")
+            parts.append(f"=== Ngữ cảnh liên quan ===\n{memories_text}")
         
         # Add recent messages section
         if self.recent_messages:
-            recent_text = "\n".join(self.recent_messages)
-            parts.append(f"**Hội thoại gần đây:**\n{recent_text}")
+            recent_text = "\n".join(self.recent_messages[-5:])  # Last 5 messages
+            parts.append(f"=== Hội thoại gần đây ===\n{recent_text}")
         
         return "\n\n".join(parts) if parts else ""
+    
+    def _group_facts_by_type(self) -> Dict[str, "SemanticMemorySearchResult"]:
+        """
+        Group user facts by fact_type from metadata.
+        
+        Returns:
+            Dict mapping fact_type to the most recent fact of that type
+        """
+        facts_by_type = {}
+        for fact in self.user_facts:
+            fact_type = fact.metadata.get("fact_type", "unknown")
+            # Keep first occurrence (already sorted by recency from repository)
+            if fact_type not in facts_by_type:
+                facts_by_type[fact_type] = fact
+        return facts_by_type
     
     @property
     def is_empty(self) -> bool:

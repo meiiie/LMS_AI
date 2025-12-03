@@ -4,16 +4,14 @@ Chat Service - Integration layer for all components.
 This service wires together:
 - Agent Orchestrator (LangGraph)
 - Chat Agent, RAG Agent, Tutor Agent
-- Memory Engine (Memori) - Legacy v0.2
-- Semantic Memory Engine - v0.3 (CHỈ THỊ KỸ THUẬT SỐ 06)
-- Knowledge Graph (GraphRAG)
+- Semantic Memory Engine v0.3 (pgvector + Gemini embeddings)
+- Knowledge Graph (Neo4j GraphRAG)
 - Guardrails
 - Learning Profile
-- Chat History (Memory Lite - Week 2)
+- Chat History
 
 **Feature: maritime-ai-tutor**
 **Validates: Requirements 1.1, 2.1, 2.2, 2.3**
-**Spec: CHỈ THỊ KỸ THUẬT SỐ 04 - Memory & Personalization**
 **Spec: CHỈ THỊ KỸ THUẬT SỐ 06 - Semantic Memory v0.3**
 """
 
@@ -27,7 +25,6 @@ from app.core.config import settings
 from app.engine.agents.chat_agent import ChatAgent
 from app.engine.graph import AgentOrchestrator, AgentType, IntentType
 from app.engine.guardrails import Guardrails, ValidationStatus
-from app.engine.memory import MemoriEngine
 from app.engine.tools.rag_tool import RAGAgent, get_knowledge_repository
 from app.engine.tools.tutor_agent import TutorAgent
 from app.models.learning_profile import LearningProfile
@@ -70,8 +67,7 @@ class ChatService:
     
     def __init__(self):
         """Initialize all components."""
-        # Core components
-        self._memory = MemoriEngine()
+        # Core components (Semantic Memory v0.3 is primary - no legacy fallback)
         self._knowledge_graph = get_knowledge_repository()  # Use Neo4j if available
         self._profile_repo = InMemoryLearningProfileRepository()  # Legacy
         self._supabase_profile_repo = get_learning_profile_repository()  # CHỈ THỊ SỐ 04
@@ -99,7 +95,7 @@ class ChatService:
         
         # Agents
         self._orchestrator = AgentOrchestrator()
-        self._chat_agent = ChatAgent(memory_engine=self._memory)
+        self._chat_agent = ChatAgent()  # No legacy memory, uses Semantic Memory v0.3
         self._rag_agent = RAGAgent(knowledge_graph=self._knowledge_graph)
         self._tutor_agent = TutorAgent()
         

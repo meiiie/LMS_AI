@@ -89,12 +89,16 @@ class SemanticMemoryEngine:
         query: str,
         search_limit: int = DEFAULT_SEARCH_LIMIT,
         similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
-        include_user_facts: bool = True
+        include_user_facts: bool = True,
+        deduplicate_facts: bool = True
     ) -> SemanticContext:
         """
         Retrieve relevant context for a query.
         
-        Performs vector similarity search and retrieves user facts.
+        Cross-session Memory Persistence (v0.2.1):
+        - Retrieves user facts from ALL sessions (deduplicated by fact_type)
+        - Searches relevant memories across ALL sessions
+        - Combines into SemanticContext for LLM prompt
         
         Args:
             user_id: User ID
@@ -102,31 +106,35 @@ class SemanticMemoryEngine:
             search_limit: Maximum similar memories to return
             similarity_threshold: Minimum similarity score
             include_user_facts: Whether to include user facts
+            deduplicate_facts: If True, deduplicate facts by fact_type
             
         Returns:
             SemanticContext with relevant memories and user facts
             
-        Requirements: 2.2, 2.4
+        Requirements: 1.1, 2.2, 2.4, 4.3
+        **Feature: cross-session-memory, Property 5: Context Includes User Facts**
         """
         try:
             # Generate query embedding
             query_embedding = self._embeddings.embed_query(query)
             
-            # Search for similar memories (excluding user_facts)
+            # Search for similar memories across ALL sessions (excluding user_facts)
             relevant_memories = self._repository.search_similar(
                 user_id=user_id,
                 query_embedding=query_embedding,
                 limit=search_limit,
                 threshold=similarity_threshold,
-                memory_types=[MemoryType.MESSAGE, MemoryType.SUMMARY]
+                memory_types=[MemoryType.MESSAGE, MemoryType.SUMMARY],
+                include_all_sessions=True  # Cross-session search
             )
             
-            # Get user facts if requested
+            # Get user facts from ALL sessions (deduplicated)
             user_facts = []
             if include_user_facts:
                 user_facts = self._repository.get_user_facts(
                     user_id=user_id,
-                    limit=self.DEFAULT_USER_FACTS_LIMIT
+                    limit=self.DEFAULT_USER_FACTS_LIMIT,
+                    deduplicate=deduplicate_facts  # Deduplicate by fact_type
                 )
             
             context = SemanticContext(
