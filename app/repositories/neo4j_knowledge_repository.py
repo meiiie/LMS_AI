@@ -381,6 +381,265 @@ class Neo4jKnowledgeRepository:
             logger.error(f"Neo4j stats query failed: {e}")
             return {"total": 0, "categories": 0}
     
+    # ==================== Document Management Methods ====================
+    # Feature: knowledge-ingestion
+    # Requirements: 4.1, 4.3, 4.4, 6.1, 6.3
+    
+    async def create_document(
+        self,
+        document_id: str,
+        filename: str,
+        category: str,
+        content_hash: str,
+        uploaded_by: str
+    ) -> str:
+        """
+        Create a Document node to track uploaded files.
+        
+        **Validates: Requirements 4.1**
+        """
+        if not self._available:
+            raise RuntimeError("Neo4j not available")
+        
+        try:
+            with self._driver.session() as session:
+                cypher = """
+                MERGE (c:Category {name: $category})
+                CREATE (d:Document {
+                    id: $document_id,
+                    filename: $filename,
+                    category: $category,
+                    content_hash: $content_hash,
+                    uploaded_by: $uploaded_by,
+                    uploaded_at: datetime(),
+                    nodes_count: 0
+                })
+                MERGE (d)-[:IN_CATEGORY]->(c)
+                RETURN d.id as id
+                """
+                result = session.run(
+                    cypher,
+                    document_id=document_id,
+                    filename=filename,
+                    category=category,
+                    content_hash=content_hash,
+                    uploaded_by=uploaded_by
+                )
+                record = result.single()
+                logger.info(f"Created document node: {document_id}")
+                return record["id"]
+        except Exception as e:
+            logger.error(f"Failed to create document: {e}")
+            raise
+    
+    async def create_knowledge_node(
+        self,
+        node_id: str,
+        title: str,
+        content: str,
+        category: str,
+        source: str,
+        document_id: str,
+        chunk_index: int
+    ) -> bool:
+        """
+        Create a Knowledge node from a document chunk.
+        
+        **Validates: Requirements 4.1, 4.2, 4.3**
+        """
+        if not self._available:
+            raise RuntimeError("Neo4j not available")
+        
+        try:
+            with self._driver.session() as session:
+                cypher = """
+                MATCH (d:Document {id: $document_id})
+                MERGE (c:Category {name: $category})
+                CREATE (k:Knowledge {
+                    id: $node_id,
+                    title: $title,
+                    content: $content,
+                    category: $category,
+                    source: $source,
+                    document_id: $document_id,
+                    chunk_index: $chunk_index
+                })
+                MERGE (k)-[:BELONGS_TO]->(c)
+                MERGE (k)-[:FROM_DOCUMENT]->(d)
+                WITH d
+                SET d.nodes_count = d.nodes_count + 1
+                RETURN true as success
+                """
+                result = session.run(
+                    cypher,
+                    node_id=node_id,
+                    title=title,
+                    content=content,
+                    category=category,
+                    source=source,
+                    document_id=document_id,
+                    chunk_index=chunk_index
+                )
+                result.single()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to create knowledge node: {e}")
+            return False
+    
+    async def delete_document_nodes(self, document_id: str) -> int:
+        """
+        Delete a document and all its associated Knowledge nodes.
+        
+        **Validates: Requirements 6.3**
+        """
+        if not self._available:
+            raise RuntimeError("Neo4j not available")
+        
+        try:
+            with self._driver.session() as session:
+                # First count nodes to delete
+                count_cypher = """
+                MATCH (k:Knowledge {document_id: $document_id})
+                RETURN count(k) as count
+                """
+                result = session.run(count_cypher, document_id=document_id)
+                count = result.single()["count"]
+                
+                # Delete knowledge nodes
+                delete_knowledge = """
+                MATCH (k:Knowledge {document_id: $document_id})
+                DETACH DELETE k
+                """
+                session.run(delete_knowledge, document_id=document_id)
+                
+                # Delete document node
+                delete_doc = """
+                MATCH (d:Document {id: $document_id})
+                DETACH DELETE d
+                """
+                session.run(delete_doc, document_id=document_id)
+                
+                logger.info(f"Deleted document {document_id} with {count} knowledge nodes")
+                return count
+        except Exception as e:
+            logger.error(f"Failed to delete document nodes: {e}")
+            raise
+    
+    async def get_document_list(
+        self,
+        page: int = 1,
+        limit: int = 20
+    ) -> List[dict]:
+        """
+        Get paginated list of uploaded documents.
+        
+        **Validates: Requirements 6.1**
+        """
+        if not self._available:
+            return []
+        
+        try:
+            skip = (page - 1) * limit
+            with self._driver.session() as session:
+                cypher = """
+                MATCH (d:Document)
+                RETURN d.id as id, d.filename as filename, d.category as category,
+                       d.nodes_count as nodes_count, d.uploaded_by as uploaded_by,
+                       d.uploaded_at as uploaded_at
+                ORDER BY d.uploaded_at DESC
+                SKIP $skip LIMIT $limit
+                """
+                result = session.run(cypher, skip=skip, limit=limit)
+                
+                documents = []
+                for record in result:
+                    documents.append({
+                        "id": record["id"],
+                        "filename": record["filename"],
+                        "category": record["category"],
+                        "nodes_count": record["nodes_count"],
+                        "uploaded_by": record["uploaded_by"],
+                        "uploaded_at": record["uploaded_at"]
+                    })
+                return documents
+        except Exception as e:
+            logger.error(f"Failed to get document list: {e}")
+            return []
+    
+    async def check_duplicate(self, content_hash: str) -> Optional[str]:
+        """
+        Check if a document with the same content hash already exists.
+        
+        **Validates: Requirements 4.4**
+        """
+        if not self._available:
+            return None
+        
+        try:
+            with self._driver.session() as session:
+                cypher = """
+                MATCH (d:Document {content_hash: $content_hash})
+                RETURN d.id as id
+                LIMIT 1
+                """
+                result = session.run(cypher, content_hash=content_hash)
+                record = result.single()
+                if record:
+                    return record["id"]
+                return None
+        except Exception as e:
+            logger.error(f"Failed to check duplicate: {e}")
+            return None
+    
+    async def get_extended_stats(self) -> dict:
+        """
+        Get extended knowledge base statistics including documents.
+        
+        **Validates: Requirements 6.2**
+        """
+        if not self._available:
+            return {"total_documents": 0, "total_nodes": 0, "categories": {}}
+        
+        try:
+            with self._driver.session() as session:
+                # Count documents
+                doc_result = session.run("MATCH (d:Document) RETURN count(d) as count")
+                total_documents = doc_result.single()["count"]
+                
+                # Count nodes
+                node_result = session.run("MATCH (k:Knowledge) RETURN count(k) as count")
+                total_nodes = node_result.single()["count"]
+                
+                # Category breakdown
+                cat_cypher = """
+                MATCH (k:Knowledge)
+                RETURN k.category as category, count(k) as count
+                ORDER BY count DESC
+                """
+                cat_result = session.run(cat_cypher)
+                categories = {r["category"]: r["count"] for r in cat_result}
+                
+                # Recent uploads
+                recent_cypher = """
+                MATCH (d:Document)
+                RETURN d.id as id, d.filename as filename, d.category as category,
+                       d.nodes_count as nodes_count, d.uploaded_at as uploaded_at
+                ORDER BY d.uploaded_at DESC
+                LIMIT 5
+                """
+                recent_result = session.run(recent_cypher)
+                recent_uploads = [dict(r) for r in recent_result]
+                
+                return {
+                    "total_documents": total_documents,
+                    "total_nodes": total_nodes,
+                    "categories": categories,
+                    "recent_uploads": recent_uploads
+                }
+        except Exception as e:
+            logger.error(f"Failed to get extended stats: {e}")
+            return {"total_documents": 0, "total_nodes": 0, "categories": {}}
+    
     def close(self):
         """Close Neo4j connection."""
         if self._driver:
