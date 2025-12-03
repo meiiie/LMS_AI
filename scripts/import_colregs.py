@@ -1,13 +1,33 @@
 """
 Import COLREGs data to Neo4j.
 Focus on Rules 5-19 (Steering and Sailing Rules).
+
+Usage:
+    python scripts/import_colregs.py
 """
+import os
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from neo4j import GraphDatabase
+from dotenv import load_dotenv
 import uuid
 
+# Load environment variables
+load_dotenv()
+
+# Get Neo4j credentials from environment
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", os.getenv("NEO4J_USER", "neo4j"))
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4j_secret")
+
+print(f"Connecting to Neo4j: {NEO4J_URI}")
 driver = GraphDatabase.driver(
-    "bolt://localhost:7687", 
-    auth=("neo4j", "neo4j_secret")
+    NEO4J_URI, 
+    auth=(NEO4J_USERNAME, NEO4J_PASSWORD)
 )
 
 # COLREGs Rules 5-19 - Steering and Sailing Rules

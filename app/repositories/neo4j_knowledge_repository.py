@@ -54,6 +54,33 @@ class Neo4jKnowledgeRepository:
         """Check if Neo4j is available."""
         return self._available
     
+    def ping(self) -> bool:
+        """
+        Ping Neo4j with a lightweight query to keep connection alive.
+        
+        This is critical for Neo4j Aura Free Tier which pauses after 72 hours
+        of inactivity. Running this query resets the inactivity timer.
+        
+        Returns:
+            True if ping successful, False otherwise
+        """
+        if not self._driver:
+            return False
+        
+        try:
+            with self._driver.session() as session:
+                result = session.run("RETURN 1 as ping")
+                record = result.single()
+                if record and record["ping"] == 1:
+                    logger.debug("Neo4j ping successful")
+                    return True
+            return False
+        except Exception as e:
+            logger.warning(f"Neo4j ping failed: {e}")
+            # Try to reconnect
+            self._init_driver()
+            return self._available
+    
     # Synonym mapping for better search
     SYNONYMS = {
         # Vietnamese synonyms
