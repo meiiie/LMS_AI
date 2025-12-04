@@ -687,44 +687,49 @@ TOTAL CONNECTIONS: 4 (down from 11)
 
 ---
 
-## Known Issues & Future Work
+## Van de da biet va Cong viec tuong lai
 
-### ✅ Resolved (v0.5.3)
-- **Agent Routing**: Vietnamese questions now correctly route to RAG Agent
-- **Citation Accuracy**: Top-1 accuracy improved from 20% to 100%
+### Da giai quyet (v0.5.3)
+- **Agent Routing**: Cau hoi tieng Viet da duoc dinh tuyen dung den RAG Agent
+- **Do chinh xac trich dan**: Do chinh xac Top-1 tang tu 20% len 100%
 
-### ✅ Resolved (v0.6.3)
-- **MaxClientsInSessionMode**: Fixed Supabase Free Tier connection limit issue
-- **Shared Database Engine**: All repositories now use singleton engine pattern
-- **Connection Pool Optimization**: Reduced from 11 connections to 4 total
+### Da giai quyet (v0.6.3)
+- **MaxClientsInSessionMode**: Da khac phuc van de gioi han ket noi Supabase Free Tier
+- **Shared Database Engine**: Tat ca repositories su dung singleton engine pattern
+- **Toi uu Connection Pool**: Giam tu 11 ket noi xuong 4 ket noi
 
-### ✅ Resolved (v0.6.0)
-- **PDF Library Migration**: Migrated from deprecated PyPDF2 to pypdf for better Vietnamese support
-- **Knowledge API Endpoints**: `/stats` and `/list` now return empty results instead of 500 errors
-- **Pydantic v2 Compliance**: Config uses `model_config = SettingsConfigDict()` pattern
-- **Circular Import Fix**: Fixed circular import between rag_tool.py and chat_service.py
+### Da giai quyet (v0.6.0)
+- **Migration thu vien PDF**: Chuyen tu PyPDF2 sang pypdf de ho tro tieng Viet tot hon
+- **Knowledge API Endpoints**: `/stats` va `/list` tra ve ket qua rong thay vi loi 500
+- **Tuan thu Pydantic v2**: Config su dung pattern `model_config = SettingsConfigDict()`
+- **Sua loi Circular Import**: Khac phuc circular import giua rag_tool.py va chat_service.py
 
-### 🔄 In Progress
-- **Vietnamese Text Chunking**: Sentence boundary detection for Vietnamese PDFs
+### Dang thuc hien
+- **Vietnamese Text Chunking**: Phat hien ranh gioi cau cho PDF tieng Viet
 
-### 📋 Planned
-- Cross-session memory testing
-- Learning profile analytics
-- Multi-language support (EN/VN)
-
----
-
-## License
-
-Proprietary software for Maritime LMS integration.
+### Du kien
+- Kiem tra bo nho cross-session
+- Phan tich learning profile
+- Ho tro da ngon ngu (EN/VN)
 
 ---
 
-<div align="center">
+## Giay phep
 
-**Built for Maritime Education**
+Phan mem doc quyen duoc phat trien cho Maritime Education LMS.
 
-[![Made with FastAPI](https://img.shields.io/badge/Made%20with-FastAPI-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
-[![Powered by LangChain](https://img.shields.io/badge/Powered%20by-LangChain-1c3c3c?style=flat-square)](https://langchain.com)
+---
 
-</div>
+## Dong gop
+
+Du an nay duoc phat trien boi HoLiLiHu AI LMS tu Nhom Lab VMU. De dong gop:
+
+1. Fork repository
+2. Tao feature branch
+3. Thuc hien thay doi
+4. Them tests
+5. Gui pull request
+
+---
+
+*Duoc xay dung boi HoLiLiHu AI LMS - Nhom Lab VMU*
