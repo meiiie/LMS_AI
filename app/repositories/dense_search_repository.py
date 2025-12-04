@@ -65,7 +65,7 @@ class DenseSearchRepository:
                 self._pool = await asyncpg.create_pool(
                     settings.database_url,
                     min_size=1,
-                    max_size=5
+                    max_size=2  # Limit for Supabase Free Tier
                 )
                 logger.info("Created asyncpg connection pool")
             except Exception as e:

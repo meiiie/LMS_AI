@@ -255,7 +255,11 @@ class SupabaseLearningProfileRepository:
             self._engine = create_engine(
                 self._database_url,
                 echo=False,
-                pool_pre_ping=True
+                pool_pre_ping=True,
+                pool_size=3,        # Limit connections for Supabase Free Tier
+                max_overflow=0,     # No extra connections
+                pool_timeout=30,    # Wait 30s for connection
+                pool_recycle=1800   # Recycle connections after 30 minutes
             )
             self._session_factory = sessionmaker(bind=self._engine)
             
