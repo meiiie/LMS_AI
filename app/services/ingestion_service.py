@@ -57,11 +57,15 @@ class IngestionService:
             self._dense_repo = DenseSearchRepository()
         return self._dense_repo
     
-    def _get_repo(self) -> Neo4jKnowledgeRepository:
-        """Get or create knowledge repository."""
+    def _get_repo(self) -> Optional[Neo4jKnowledgeRepository]:
+        """Get or create knowledge repository (may return None if unavailable)."""
         if self._knowledge_repo is None:
-            from app.engine.tools.rag_tool import get_knowledge_repository
-            self._knowledge_repo = get_knowledge_repository()
+            try:
+                from app.engine.tools.rag_tool import get_knowledge_repository
+                self._knowledge_repo = get_knowledge_repository()
+            except Exception as e:
+                logger.warning(f"Failed to get knowledge repository: {e}")
+                return None
         return self._knowledge_repo
     
     async def create_ingestion_job(
@@ -272,6 +276,9 @@ class IngestionService:
         """
         try:
             repo = self._get_repo()
+            if repo is None:
+                logger.warning("Knowledge repository unavailable for list_documents")
+                return []
             return await repo.get_document_list(page, limit)
         except Exception as e:
             logger.error(f"Failed to list documents: {e}")
@@ -321,6 +328,14 @@ class IngestionService:
         """
         try:
             repo = self._get_repo()
+            if repo is None:
+                logger.warning("Knowledge repository unavailable for stats")
+                return {
+                    "total_documents": 0,
+                    "total_nodes": 0,
+                    "categories": {},
+                    "recent_uploads": []
+                }
             return await repo.get_extended_stats()
         except Exception as e:
             logger.error(f"Failed to get stats: {e}")
