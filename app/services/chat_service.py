@@ -515,25 +515,19 @@ class ChatService:
         except Exception as e:
             logger.error(f"Failed to save message in background: {e}")
     
-    def _update_profile_stats_async(self, user_id: str) -> None:
+    async def _update_profile_stats_async(self, user_id: str) -> None:
         """
         Update learning profile stats (for BackgroundTasks).
         
         **Spec: CHỈ THỊ KỸ THUẬT SỐ 04**
         """
         try:
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(
-                self._supabase_profile_repo.increment_stats(user_id, messages=2)  # user + assistant
-            )
-            loop.close()
+            await self._supabase_profile_repo.increment_stats(user_id, messages=2)  # user + assistant
             logger.debug(f"Background updated profile stats for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to update profile stats in background: {e}")
     
-    def _store_semantic_interaction_async(
+    async def _store_semantic_interaction_async(
         self,
         user_id: str,
         message: str,
@@ -549,30 +543,21 @@ class ChatService:
             return
         
         try:
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
             # Store interaction with fact extraction
-            loop.run_until_complete(
-                self._semantic_memory.store_interaction(
-                    user_id=user_id,
-                    message=message,
-                    response=response,
-                    session_id=session_id,
-                    extract_facts=True
-                )
+            await self._semantic_memory.store_interaction(
+                user_id=user_id,
+                message=message,
+                response=response,
+                session_id=session_id,
+                extract_facts=True
             )
             
             # Check and summarize if needed
-            loop.run_until_complete(
-                self._semantic_memory.check_and_summarize(
-                    user_id=user_id,
-                    session_id=session_id
-                )
+            await self._semantic_memory.check_and_summarize(
+                user_id=user_id,
+                session_id=session_id
             )
             
-            loop.close()
             logger.debug(f"Background stored semantic interaction for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to store semantic interaction: {e}")

@@ -5,7 +5,7 @@ services:
     region: singapore  # Gần Việt Nam nhất
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app.main:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 60
+    startCommand: gunicorn app.main:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 180 --graceful-timeout 90 --keep-alive 5
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
