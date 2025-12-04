@@ -59,7 +59,7 @@ def test_delete_history():
         
         try:
             response = requests.delete(
-                f"{BASE_URL}/api/v1/chat/history/{test_case['user_id']}",
+                f"{BASE_URL}/api/v1/history/{test_case['user_id']}",
                 json=test_case["payload"],
                 headers=headers,
                 timeout=30
