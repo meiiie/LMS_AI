@@ -64,10 +64,10 @@ async def test_citation_accuracy():
     print("TEST: CITATION ACCURACY ANALYSIS")
     print("=" * 70)
     
-    from app.services.hybrid_search_service import HybridSearchService
+    from app.services.hybrid_search_service import get_hybrid_search_service
     
-    # Initialize hybrid search directly
-    hybrid_search = HybridSearchService()
+    # Use singleton to avoid connection pool issues
+    hybrid_search = get_hybrid_search_service()
     
     # Test cases với expected citations
     test_cases = [

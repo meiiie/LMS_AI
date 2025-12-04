@@ -138,9 +138,9 @@ class IntentClassifier:
         """
         Classify the intent of a user message.
         
-        HOTFIX: Aggressive Routing - "Thà giết nhầm còn hơn bỏ sót"
-        - Mở rộng từ khóa tiếng Việt
-        - Kiểm tra cả từ đơn lẻ và cụm từ
+        HOTFIX v2: Smart Routing with Greeting Detection
+        - Detect greetings and introductions FIRST
+        - Then apply aggressive knowledge routing
         - Ưu tiên KNOWLEDGE nếu có bất kỳ dấu hiệu nào về luật/quy định
         
         Args:
@@ -153,6 +153,33 @@ class IntentClassifier:
         """
         message_lower = message.lower()
         words = set(message_lower.split())
+        
+        # HOTFIX v2: Detect greetings and introductions FIRST
+        # These should go to Chat Agent, not RAG
+        greeting_patterns = [
+            "xin chào", "chào bạn", "hello", "hi ", "hey",
+            "tôi là", "tên tôi là", "mình là", "tên mình là",
+            "i am", "my name is", "i'm",
+            "sinh viên", "giáo viên", "thuyền trưởng", "sĩ quan",
+            "đại học", "trường", "năm 1", "năm 2", "năm 3", "năm 4",
+            "rất vui", "nice to meet", "pleased to meet"
+        ]
+        
+        is_greeting = any(pattern in message_lower for pattern in greeting_patterns)
+        
+        # Check if message is ONLY a greeting/introduction (no actual question)
+        question_indicators = ["?", "là gì", "như thế nào", "tại sao", "khi nào", 
+                              "what", "how", "why", "when", "explain", "giải thích"]
+        has_question = any(q in message_lower for q in question_indicators)
+        
+        # If it's a greeting without a question, route to Chat Agent
+        if is_greeting and not has_question:
+            logger.debug(f"Detected greeting/introduction, routing to CHAT")
+            return Intent(
+                type=IntentType.GENERAL,
+                confidence=0.9,
+                entities=[]
+            )
         
         # Calculate keyword matches (word-level)
         knowledge_score = len(words & KNOWLEDGE_KEYWORDS)
