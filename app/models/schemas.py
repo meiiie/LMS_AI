@@ -259,3 +259,27 @@ class DeleteHistoryResponse(BaseModel):
     user_id: str = Field(..., description="ID of user whose history was deleted")
     messages_deleted: int = Field(..., description="Number of messages deleted")
     deleted_by: str = Field(..., description="ID of user who performed the deletion")
+
+
+# =============================================================================
+# Get History Schemas (Phase 2 - CHỈ THỊ KỸ THUẬT SỐ 11)
+# =============================================================================
+
+class HistoryMessage(BaseModel):
+    """Single message in chat history"""
+    role: str = Field(..., description="user | assistant")
+    content: str = Field(..., description="Nội dung tin nhắn")
+    timestamp: datetime = Field(..., description="Thời gian gửi tin nhắn (ISO 8601)")
+
+
+class HistoryPagination(BaseModel):
+    """Pagination info for history response"""
+    total: int = Field(..., description="Tổng số tin nhắn")
+    limit: int = Field(..., description="Số tin nhắn trả về")
+    offset: int = Field(..., description="Vị trí bắt đầu")
+
+
+class GetHistoryResponse(BaseModel):
+    """Response for GET /api/v1/history/{user_id}"""
+    data: list[HistoryMessage] = Field(default_factory=list, description="Danh sách tin nhắn")
+    pagination: HistoryPagination = Field(..., description="Thông tin phân trang")

@@ -28,6 +28,9 @@ from app.models.schemas import (
     UserRole,
     DeleteHistoryRequest,
     DeleteHistoryResponse,
+    GetHistoryResponse,
+    HistoryMessage,
+    HistoryPagination,
 )
 
 logger = logging.getLogger(__name__)
@@ -217,6 +220,92 @@ async def chat_status():
         "status": "available",
         "agents": ["chat", "rag", "tutor"],
     }
+
+
+@router.get(
+    "/history/{user_id}",
+    response_model=GetHistoryResponse,
+    responses={
+        200: {"description": "Chat history retrieved successfully"},
+        401: {"description": "Authentication required", "model": ErrorResponse},
+        500: {"description": "Internal server error", "model": ErrorResponse}
+    },
+    summary="Get user chat history (Phase 2)",
+    description="""
+    **Lấy lịch sử chat của một user với phân trang.**
+    
+    Hỗ trợ đồng bộ hóa đa thiết bị trong Phase 2.
+    
+    **Query Parameters:**
+    - `limit`: Số tin nhắn trả về (default: 20, max: 100)
+    - `offset`: Vị trí bắt đầu (default: 0)
+    
+    **Spec: CHỈ THỊ KỸ THUẬT SỐ 11**
+    """
+)
+async def get_chat_history(
+    user_id: str,
+    auth: RequireAuth,
+    limit: int = 20,
+    offset: int = 0,
+) -> GetHistoryResponse:
+    """
+    Get paginated chat history for a user.
+    
+    Args:
+        user_id: ID of user whose history to retrieve
+        auth: Authenticated via X-API-Key header
+        limit: Number of messages to return (default 20, max 100)
+        offset: Offset for pagination (default 0)
+    
+    Returns:
+        GetHistoryResponse with messages and pagination info
+    """
+    try:
+        # Validate limit
+        if limit > 100:
+            limit = 100
+        if limit < 1:
+            limit = 20
+        if offset < 0:
+            offset = 0
+        
+        # Get history from repository
+        from app.repositories.chat_history_repository import get_chat_history_repository
+        
+        chat_history_repo = get_chat_history_repository()
+        messages, total = chat_history_repo.get_user_history(user_id, limit, offset)
+        
+        # Convert to response format
+        history_messages = [
+            HistoryMessage(
+                role=msg.role,
+                content=msg.content,
+                timestamp=msg.created_at
+            )
+            for msg in messages
+        ]
+        
+        logger.info(f"Retrieved {len(history_messages)} messages for user {user_id} (total: {total})")
+        
+        return GetHistoryResponse(
+            data=history_messages,
+            pagination=HistoryPagination(
+                total=total,
+                limit=limit,
+                offset=offset
+            )
+        )
+        
+    except Exception as e:
+        logger.exception(f"Error retrieving chat history: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "internal_error",
+                "message": f"Failed to retrieve chat history: {str(e)}"
+            }
+        )
 
 
 @router.delete(

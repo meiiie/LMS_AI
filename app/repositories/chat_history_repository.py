@@ -445,6 +445,107 @@ class ChatHistoryRepository:
         except Exception as e:
             logger.error(f"Failed to delete user history: {e}")
             return 0
+    
+    def get_user_history(
+        self, 
+        user_id: str, 
+        limit: int = 20, 
+        offset: int = 0
+    ) -> tuple[List[ChatMessage], int]:
+        """
+        Get paginated chat history for a user.
+        
+        Args:
+            user_id: User identifier
+            limit: Number of messages to return (default 20)
+            offset: Offset for pagination (default 0)
+            
+        Returns:
+            Tuple of (list of messages, total count)
+            
+        **Spec: CHỈ THỊ KỸ THUẬT SỐ 11**
+        """
+        if not self._available:
+            return [], 0
+        
+        try:
+            with self._session_factory() as session:
+                if self._use_new_schema:
+                    # Use CHỈ THỊ SỐ 04 schema (chat_history table)
+                    from sqlalchemy import text
+                    
+                    # Get total count
+                    count_result = session.execute(
+                        text("SELECT COUNT(*) FROM chat_history WHERE user_id = :user_id"),
+                        {"user_id": user_id}
+                    )
+                    total = count_result.scalar() or 0
+                    
+                    # Get paginated messages (newest first, then reverse for chronological order)
+                    result = session.execute(
+                        text("""
+                            SELECT id, user_id, session_id, role, content, created_at
+                            FROM chat_history
+                            WHERE user_id = :user_id
+                            ORDER BY created_at DESC
+                            LIMIT :limit OFFSET :offset
+                        """),
+                        {"user_id": user_id, "limit": limit, "offset": offset}
+                    )
+                    rows = result.fetchall()
+                    
+                    messages = [
+                        ChatMessage(
+                            id=UUID(row[0]) if isinstance(row[0], str) else row[0],
+                            session_id=UUID(row[2]) if isinstance(row[2], str) else UUID(row[2]),
+                            role=row[3],
+                            content=row[4],
+                            created_at=row[5]
+                        )
+                        for row in reversed(rows)  # Reverse for chronological order
+                    ]
+                    
+                    return messages, total
+                else:
+                    # Legacy schema - get all sessions for user
+                    from sqlalchemy import func
+                    
+                    # Get total count across all sessions
+                    stmt = select(ChatSessionModel).where(
+                        ChatSessionModel.user_id == user_id
+                    )
+                    sessions = session.execute(stmt).scalars().all()
+                    session_ids = [s.session_id for s in sessions]
+                    
+                    if not session_ids:
+                        return [], 0
+                    
+                    # Count total messages
+                    total = session.query(func.count(ChatMessageModel.id)).filter(
+                        ChatMessageModel.session_id.in_(session_ids)
+                    ).scalar() or 0
+                    
+                    # Get paginated messages
+                    results = session.query(ChatMessageModel).filter(
+                        ChatMessageModel.session_id.in_(session_ids)
+                    ).order_by(desc(ChatMessageModel.created_at)).offset(offset).limit(limit).all()
+                    
+                    messages = [
+                        ChatMessage(
+                            id=msg.id,
+                            session_id=msg.session_id,
+                            role=msg.role,
+                            content=msg.content,
+                            created_at=msg.created_at
+                        )
+                        for msg in reversed(results)
+                    ]
+                    
+                    return messages, total
+                    
+        except Exception as e:
+            logger.error(f"Failed to get user history: {e}")
+            return [], 0
 
 
 # Singleton instance
