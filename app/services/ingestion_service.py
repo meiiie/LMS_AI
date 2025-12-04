@@ -2,8 +2,9 @@
 Ingestion Service for Knowledge Ingestion feature.
 
 Handles PDF upload, processing, and Neo4j storage.
+Integrates with Hybrid Search for embedding storage.
 
-Feature: knowledge-ingestion
+Feature: knowledge-ingestion, hybrid-search
 Requirements: 1.1, 4.1, 5.1, 5.2, 6.1, 6.2, 6.3
 """
 
@@ -15,8 +16,10 @@ from typing import Dict, List, Optional
 from uuid import uuid4
 
 from app.engine.pdf_processor import PDFProcessor
+from app.engine.gemini_embedding import GeminiOptimizedEmbeddings
 from app.models.ingestion_job import JobStatus
 from app.repositories.neo4j_knowledge_repository import Neo4jKnowledgeRepository
+from app.repositories.dense_search_repository import DenseSearchRepository
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +42,8 @@ class IngestionService:
         """Initialize ingestion service."""
         self._pdf_processor = PDFProcessor()
         self._knowledge_repo = knowledge_repo
+        self._embeddings = GeminiOptimizedEmbeddings()
+        self._dense_repo = DenseSearchRepository()
     
     def _get_repo(self) -> Neo4jKnowledgeRepository:
         """Get or create knowledge repository."""
@@ -195,6 +200,16 @@ class IngestionService:
                     
                     if success:
                         nodes_created += 1
+                        
+                        # Store embedding for hybrid search (Feature: hybrid-search)
+                        try:
+                            embedding_text = f"{title}\n{chunk.content}"
+                            embedding = self._embeddings.embed_documents([embedding_text])[0]
+                            await self._dense_repo.store_embedding(node_id, embedding)
+                            logger.debug(f"Stored embedding for node: {node_id}")
+                        except Exception as emb_error:
+                            # Log but don't fail - embedding is optional enhancement
+                            logger.warning(f"Failed to store embedding for {node_id}: {emb_error}")
                     
                     # Update progress (50% to 90%)
                     progress = 50 + int((i + 1) / total_chunks * 40)
@@ -246,10 +261,34 @@ class IngestionService:
     async def delete_document(self, document_id: str) -> int:
         """
         Delete a document and all its knowledge nodes.
+        Also deletes associated embeddings from pgvector.
         
         **Validates: Requirements 6.3**
+        **Feature: hybrid-search**
         """
         repo = self._get_repo()
+        
+        # Get list of node IDs before deletion for embedding cleanup
+        try:
+            # Query nodes that will be deleted
+            with repo._driver.session() as session:
+                result = session.run(
+                    "MATCH (k:Knowledge {document_id: $doc_id}) RETURN k.id as node_id",
+                    doc_id=document_id
+                )
+                node_ids = [record["node_id"] for record in result]
+            
+            # Delete embeddings from pgvector
+            for node_id in node_ids:
+                try:
+                    await self._dense_repo.delete_embedding(node_id)
+                except Exception as e:
+                    logger.warning(f"Failed to delete embedding for {node_id}: {e}")
+                    
+        except Exception as e:
+            logger.warning(f"Failed to cleanup embeddings for document {document_id}: {e}")
+        
+        # Delete from Neo4j
         return await repo.delete_document_nodes(document_id)
     
     async def get_stats(self) -> dict:

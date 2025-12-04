@@ -87,16 +87,41 @@ class AgentState(TypedDict, total=False):
 
 
 # Intent classification keywords
+# HOTFIX: Mở rộng từ khóa tiếng Việt theo CHỈ THỊ CỐ VẤN KIẾN TRÚC
 KNOWLEDGE_KEYWORDS = {
+    # English keywords
     "solas", "colregs", "marpol", "regulation", "rule", "chapter",
     "convention", "imo", "safety", "navigation", "collision",
-    "fire", "lifesaving", "pollution", "certificate", "inspection"
+    "fire", "lifesaving", "pollution", "certificate", "inspection",
+    "vessel", "ship", "maritime", "sea", "port", "harbor",
+    
+    # Vietnamese keywords - Luật/Quy định
+    "luật", "bộ luật", "nghị định", "quy định", "điều khoản", "điều",
+    "quy tắc", "công ước", "quy chế", "thông tư", "pháp luật",
+    
+    # Vietnamese keywords - Hàng hải
+    "tàu", "thuyền", "biển", "cảng", "hàng hải", "hải phận",
+    "nhường đường", "tránh va", "va chạm", "cắt hướng",
+    "đăng ký", "đăng kiểm", "thuyền viên", "thuyền trưởng",
+    "hoa tiêu", "neo đậu", "cập cảng", "rời cảng",
+    "tầm nhìn", "hạn chế", "đèn hiệu", "tín hiệu",
+    "cứu sinh", "cứu hỏa", "an toàn", "sự cố",
+    
+    # Vietnamese keywords - Specific terms
+    "mạn phải", "mạn trái", "starboard", "port",
+    "give-way", "stand-on", "nhường", "giữ nguyên",
+    "vượt", "overtaking", "head-on", "đối đầu"
 }
 
 TEACHING_KEYWORDS = {
+    # English keywords
     "teach", "learn", "explain", "understand", "quiz", "test",
     "assessment", "practice", "exercise", "study", "lesson",
-    "course", "training", "help me understand", "what is"
+    "course", "training", "help me understand", "what is",
+    
+    # Vietnamese keywords
+    "dạy", "học", "giải thích", "hiểu", "kiểm tra", "bài tập",
+    "luyện tập", "ôn tập", "bài học", "khóa học", "đào tạo"
 }
 
 
@@ -113,6 +138,11 @@ class IntentClassifier:
         """
         Classify the intent of a user message.
         
+        HOTFIX: Aggressive Routing - "Thà giết nhầm còn hơn bỏ sót"
+        - Mở rộng từ khóa tiếng Việt
+        - Kiểm tra cả từ đơn lẻ và cụm từ
+        - Ưu tiên KNOWLEDGE nếu có bất kỳ dấu hiệu nào về luật/quy định
+        
         Args:
             message: User's message text
             
@@ -124,19 +154,47 @@ class IntentClassifier:
         message_lower = message.lower()
         words = set(message_lower.split())
         
-        # Calculate keyword matches
+        # Calculate keyword matches (word-level)
         knowledge_score = len(words & KNOWLEDGE_KEYWORDS)
         teaching_score = len(words & TEACHING_KEYWORDS)
         
+        # HOTFIX: Check for phrase-level matches (multi-word keywords)
+        knowledge_phrases = [
+            "nhường đường", "tránh va", "cắt hướng", "va chạm",
+            "bộ luật", "quy tắc", "quy định", "điều khoản",
+            "tầm nhìn hạn chế", "đăng ký tàu", "đăng kiểm",
+            "mạn phải", "mạn trái", "give-way", "stand-on",
+            "cứu sinh", "cứu hỏa", "an toàn hàng hải"
+        ]
+        for phrase in knowledge_phrases:
+            if phrase in message_lower:
+                knowledge_score += 2  # Boost for phrase match
+        
         # Check for teaching phrases
-        teaching_phrases = ["teach me", "help me learn", "explain to me", "what is"]
+        teaching_phrases = [
+            "teach me", "help me learn", "explain to me", "what is",
+            "dạy tôi", "giúp tôi hiểu", "giải thích cho tôi"
+        ]
         for phrase in teaching_phrases:
             if phrase in message_lower:
                 teaching_score += 2
         
-        # Determine intent - ensure confidence >= 0.7 when keywords match
+        # HOTFIX: Aggressive Knowledge Detection
+        # Nếu câu hỏi có dấu hiệu về luật/quy định, ưu tiên KNOWLEDGE
+        aggressive_knowledge_patterns = [
+            "tàu nào", "ai phải", "khi nào", "làm sao", "như thế nào",
+            "quy định", "luật", "điều", "rule", "regulation"
+        ]
+        for pattern in aggressive_knowledge_patterns:
+            if pattern in message_lower:
+                knowledge_score += 1
+        
+        # Log for debugging
+        logger.debug(f"Intent classification: knowledge_score={knowledge_score}, teaching_score={teaching_score}")
+        
+        # Determine intent - AGGRESSIVE ROUTING
+        # Ưu tiên KNOWLEDGE nếu có bất kỳ dấu hiệu nào
         if teaching_score > knowledge_score and teaching_score > 0:
-            # Base confidence 0.7, increase with more matches
             confidence = min(0.7 + (teaching_score * 0.1), 1.0)
             return Intent(
                 type=IntentType.TEACHING,
@@ -144,7 +202,7 @@ class IntentClassifier:
                 entities=self._extract_entities(message)
             )
         elif knowledge_score > 0:
-            # Base confidence 0.7, increase with more matches
+            # HOTFIX: Luôn route sang RAG nếu có bất kỳ keyword nào
             confidence = min(0.7 + (knowledge_score * 0.1), 1.0)
             return Intent(
                 type=IntentType.KNOWLEDGE,

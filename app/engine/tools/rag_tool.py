@@ -3,8 +3,9 @@ RAG Agent for maritime knowledge retrieval.
 
 This module implements the RAG (Retrieval-Augmented Generation) agent
 that queries the Knowledge Graph and generates responses with citations.
+Now uses Hybrid Search (Dense + Sparse) for improved retrieval.
 
-**Feature: maritime-ai-tutor**
+**Feature: maritime-ai-tutor, hybrid-search**
 **Validates: Requirements 4.1, 4.2, 4.4, 8.3**
 """
 
@@ -23,6 +24,8 @@ from app.models.knowledge_graph import (
     RelationType,
 )
 from app.repositories.neo4j_knowledge_repository import Neo4jKnowledgeRepository
+from app.services.hybrid_search_service import HybridSearchService, get_hybrid_search_service
+from app.engine.rrf_reranker import HybridSearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -90,15 +93,18 @@ class RAGAgent:
     
     def __init__(
         self,
-        knowledge_graph=None
+        knowledge_graph=None,
+        hybrid_search_service=None
     ):
         """
         Initialize RAG Agent.
         
         Args:
             knowledge_graph: Knowledge graph repository instance
+            hybrid_search_service: Hybrid search service for Dense+Sparse search
         """
         self._kg = knowledge_graph or get_knowledge_repository()
+        self._hybrid_search = hybrid_search_service or get_hybrid_search_service()
         self._llm = self._init_llm()
     
     def _init_llm(self):
@@ -158,6 +164,8 @@ class RAGAgent:
         """
         Query the knowledge graph and generate response.
         
+        Uses Hybrid Search (Dense + Sparse) for improved retrieval.
+        
         Args:
             question: User's question
             limit: Maximum number of sources to retrieve
@@ -169,31 +177,90 @@ class RAGAgent:
             
         **Validates: Requirements 4.1, 8.3**
         **Spec: CHỈ THỊ KỸ THUẬT SỐ 03 - Role-Based Prompting**
+        **Feature: hybrid-search**
         """
-        # Check if KG is available
-        if not self._kg.is_available():
+        # Check if search is available
+        if not self._hybrid_search.is_available() and not self._kg.is_available():
             return self._create_fallback_response(question)
         
-        # Perform hybrid search
-        nodes = await self._kg.hybrid_search(question, limit=limit)
+        # Perform hybrid search (Dense + Sparse with RRF)
+        hybrid_results = await self._hybrid_search.search(question, limit=limit)
         
-        if not nodes:
-            return self._create_no_results_response(question)
+        if not hybrid_results:
+            # Fallback to legacy Neo4j search
+            logger.info("Hybrid search returned no results, falling back to legacy search")
+            nodes = await self._kg.hybrid_search(question, limit=limit)
+            if not nodes:
+                return self._create_no_results_response(question)
+            expanded_nodes = await self._expand_context(nodes)
+            citations = await self._kg.get_citations(nodes)
+            content = self._generate_response(question, expanded_nodes, conversation_history, user_role)
+            return RAGResponse(content=content, citations=citations, is_fallback=False)
+        
+        # Convert hybrid results to KnowledgeNodes for compatibility
+        nodes = self._hybrid_results_to_nodes(hybrid_results)
         
         # Expand context with related nodes
         expanded_nodes = await self._expand_context(nodes)
         
-        # Generate citations
-        citations = await self._kg.get_citations(nodes)
+        # Generate citations with relevance scores
+        citations = self._generate_hybrid_citations(hybrid_results)
         
         # Generate response content with conversation history and role-based prompting
         content = self._generate_response(question, expanded_nodes, conversation_history, user_role)
+        
+        # Add search method info to response
+        search_method = hybrid_results[0].search_method if hybrid_results else "hybrid"
+        if search_method != "hybrid":
+            content += f"\n\n*[Tìm kiếm: {search_method}]*"
         
         return RAGResponse(
             content=content,
             citations=citations,
             is_fallback=False
         )
+    
+    def _hybrid_results_to_nodes(self, results: List[HybridSearchResult]) -> List[KnowledgeNode]:
+        """Convert HybridSearchResult to KnowledgeNode for compatibility."""
+        from app.models.knowledge_graph import NodeType
+        
+        nodes = []
+        for r in results:
+            # Skip results with empty title or content
+            title = r.title or ""
+            content = r.content or ""
+            
+            if not title.strip() or not content.strip():
+                logger.warning(f"Skipping result with empty title/content: {r.node_id}")
+                continue
+            
+            nodes.append(KnowledgeNode(
+                id=r.node_id,
+                node_type=NodeType.CONCEPT,
+                title=title,
+                content=content,
+                source=r.source or "Maritime Knowledge Base",
+                metadata={
+                    "category": r.category,
+                    "rrf_score": r.rrf_score,
+                    "dense_score": r.dense_score,
+                    "sparse_score": r.sparse_score,
+                    "search_method": r.search_method
+                }
+            ))
+        return nodes
+    
+    def _generate_hybrid_citations(self, results: List[HybridSearchResult]) -> List[Citation]:
+        """Generate citations from hybrid search results with relevance scores."""
+        citations = []
+        for r in results:
+            citations.append(Citation(
+                node_id=r.node_id,
+                source=r.source or "Maritime Knowledge Base",
+                title=r.title,
+                relevance_score=r.rrf_score
+            ))
+        return citations
 
     
     async def _expand_context(

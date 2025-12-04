@@ -240,6 +240,93 @@ async def get_statistics() -> KnowledgeStatsResponse:
     )
 
 
+class ReingestEmbeddingsResponse(BaseModel):
+    """Response for re-ingest embeddings."""
+    status: str
+    nodes_processed: int
+    embeddings_created: int
+    message: str
+
+
+@router.post("/reingest-embeddings", response_model=ReingestEmbeddingsResponse)
+async def reingest_embeddings(
+    background_tasks: BackgroundTasks,
+    role: str = Form(default="admin")
+) -> ReingestEmbeddingsResponse:
+    """
+    Re-ingest all Knowledge nodes and create embeddings for Dense Search.
+    
+    This endpoint:
+    1. Fetches all Knowledge nodes from Neo4j
+    2. Generates Gemini embeddings (768 dims)
+    3. Stores embeddings in pgvector (Supabase)
+    
+    - **role**: User role (must be "admin")
+    
+    **Feature: hybrid-search**
+    **Validates: Requirements 2.1, 6.1**
+    """
+    # Validate admin role
+    validate_admin_role(role)
+    
+    try:
+        from app.repositories.dense_search_repository import DenseSearchRepository
+        from app.repositories.neo4j_knowledge_repository import Neo4jKnowledgeRepository
+        from app.engine.gemini_embedding import GeminiOptimizedEmbeddings
+        
+        # Initialize components
+        neo4j_repo = Neo4jKnowledgeRepository()
+        dense_repo = DenseSearchRepository()
+        embeddings = GeminiOptimizedEmbeddings()
+        
+        # Fetch all Knowledge nodes from Neo4j
+        nodes = neo4j_repo.get_all_knowledge_nodes()
+        logger.info(f"Found {len(nodes)} Knowledge nodes to process")
+        
+        if not nodes:
+            return ReingestEmbeddingsResponse(
+                status="completed",
+                nodes_processed=0,
+                embeddings_created=0,
+                message="No Knowledge nodes found in Neo4j"
+            )
+        
+        # Process each node
+        success_count = 0
+        for node in nodes:
+            try:
+                # Generate embedding
+                text = f"{node.get('title', '')}\n{node.get('content', '')}"
+                embedding = embeddings.embed_documents([text])[0]
+                
+                # Store in pgvector
+                await dense_repo.upsert_embedding(
+                    node_id=node['id'],
+                    content=text[:500],
+                    embedding=embedding
+                )
+                success_count += 1
+                
+            except Exception as e:
+                logger.error(f"Failed to process node {node.get('id')}: {e}")
+        
+        logger.info(f"Re-ingest completed: {success_count}/{len(nodes)} embeddings created")
+        
+        return ReingestEmbeddingsResponse(
+            status="completed",
+            nodes_processed=len(nodes),
+            embeddings_created=success_count,
+            message=f"Successfully created {success_count}/{len(nodes)} embeddings"
+        )
+        
+    except Exception as e:
+        logger.error(f"Re-ingest failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Re-ingest failed: {str(e)}"
+        )
+
+
 @router.delete("/{document_id}", response_model=DeleteResponse)
 async def delete_document(
     document_id: str,

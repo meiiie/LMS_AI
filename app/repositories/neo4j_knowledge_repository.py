@@ -640,6 +640,42 @@ class Neo4jKnowledgeRepository:
             logger.error(f"Failed to get extended stats: {e}")
             return {"total_documents": 0, "total_nodes": 0, "categories": {}}
     
+    def get_all_knowledge_nodes(self) -> List[dict]:
+        """
+        Get all Knowledge nodes for embedding generation.
+        
+        Returns list of dicts with id, title, content.
+        
+        **Feature: hybrid-search**
+        **Validates: Requirements 2.1, 6.1**
+        """
+        if not self._available:
+            logger.warning("Neo4j not available")
+            return []
+        
+        try:
+            with self._driver.session() as session:
+                cypher = """
+                MATCH (k:Knowledge)
+                RETURN k.id as id, k.title as title, k.content as content
+                """
+                result = session.run(cypher)
+                
+                nodes = []
+                for record in result:
+                    nodes.append({
+                        "id": record["id"],
+                        "title": record["title"] or "",
+                        "content": record["content"] or ""
+                    })
+                
+                logger.info(f"Retrieved {len(nodes)} Knowledge nodes")
+                return nodes
+                
+        except Exception as e:
+            logger.error(f"Failed to get all knowledge nodes: {e}")
+            return []
+    
     def close(self):
         """Close Neo4j connection."""
         if self._driver:

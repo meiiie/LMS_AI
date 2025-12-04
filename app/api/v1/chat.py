@@ -149,36 +149,58 @@ async def chat_completion(
 def _generate_suggested_questions(user_message: str, ai_response: str) -> list[str]:
     """
     Generate 3 suggested follow-up questions based on context.
-    TODO: Use LLM to generate more relevant questions.
+    
+    Logic:
+    1. Detect maritime topic from user message
+    2. Return topic-specific suggestions
+    3. If no maritime topic detected, return general maritime suggestions
+       (not generic "quy tắc" suggestions for non-maritime queries)
     """
-    # Default suggestions based on common maritime topics
-    default_suggestions = [
-        "Bạn có thể giải thích thêm về quy tắc này không?",
-        "Có ví dụ thực tế nào về tình huống này không?",
-        "Quy tắc nào liên quan đến vấn đề này?"
+    user_lower = user_message.lower()
+    response_lower = ai_response.lower()
+    
+    # Check if this is a maritime-related query
+    maritime_keywords = [
+        'colreg', 'solas', 'marpol', 'stcw', 'quy tắc', 'rule',
+        'tàu', 'thuyền', 'hàng hải', 'biển', 'maritime', 'vessel',
+        'navigation', 'safety', 'an toàn', 'thuyền viên', 'seafarer'
     ]
     
-    # Topic-based suggestions
-    if "colreg" in user_message.lower() or "quy tắc" in user_message.lower():
+    is_maritime_query = any(kw in user_lower for kw in maritime_keywords)
+    
+    # Topic-based suggestions for maritime queries
+    if "colreg" in user_lower or "quy tắc" in user_lower or "rule" in user_lower:
         return [
             "Tàu nào phải nhường đường trong tình huống này?",
             "Khi nào áp dụng quy tắc này?",
             "Có ngoại lệ nào cho quy tắc này không?"
         ]
-    elif "solas" in user_message.lower() or "an toàn" in user_message.lower():
+    elif "solas" in user_lower or ("an toàn" in user_lower and is_maritime_query):
         return [
             "Yêu cầu về thiết bị cứu sinh là gì?",
             "Quy định về huấn luyện thủy thủ đoàn?",
             "Kiểm tra an toàn định kỳ như thế nào?"
         ]
-    elif "marpol" in user_message.lower() or "ô nhiễm" in user_message.lower():
+    elif "marpol" in user_lower or "ô nhiễm" in user_lower:
         return [
             "Quy định về xả thải dầu là gì?",
             "Vùng biển đặc biệt có quy định gì?",
             "Xử phạt vi phạm MARPOL như thế nào?"
         ]
-    
-    return default_suggestions
+    elif is_maritime_query:
+        # General maritime suggestions
+        return [
+            "Bạn muốn tìm hiểu thêm về quy định nào?",
+            "Có câu hỏi nào khác về hàng hải không?",
+            "Bạn cần giải thích chi tiết hơn không?"
+        ]
+    else:
+        # Non-maritime query - return empty or generic helpful suggestions
+        return [
+            "Bạn có câu hỏi nào về hàng hải không?",
+            "Tôi có thể giúp gì về COLREGs, SOLAS, hoặc MARPOL?",
+            "Bạn muốn tìm hiểu về quy định hàng hải nào?"
+        ]
 
 
 @router.get(
