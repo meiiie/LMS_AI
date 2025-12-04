@@ -26,6 +26,8 @@ from app.models.schemas import (
     ErrorResponse,
     Source,
     UserRole,
+    DeleteHistoryRequest,
+    DeleteHistoryResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -215,3 +217,89 @@ async def chat_status():
         "status": "available",
         "agents": ["chat", "rag", "tutor"],
     }
+
+
+@router.delete(
+    "/history/{user_id}",
+    response_model=DeleteHistoryResponse,
+    responses={
+        200: {"description": "Chat history deleted successfully"},
+        403: {"description": "Permission denied", "model": ErrorResponse},
+        500: {"description": "Internal server error", "model": ErrorResponse}
+    },
+    summary="Delete user chat history",
+    description="""
+    **Xóa toàn bộ lịch sử chat của một user.**
+    
+    **Access Control:**
+    - `admin`: Có thể xóa lịch sử của bất kỳ user nào
+    - `student`/`teacher`: Chỉ có thể xóa lịch sử của chính mình
+    """
+)
+async def delete_chat_history(
+    user_id: str,
+    request: DeleteHistoryRequest,
+    auth: RequireAuth,
+) -> DeleteHistoryResponse:
+    """
+    Delete chat history for a user.
+    
+    Args:
+        user_id: ID of user whose history to delete
+        request: Contains role and requesting_user_id
+        auth: Authenticated via X-API-Key header
+    
+    Returns:
+        DeleteHistoryResponse with status and count of deleted messages
+    """
+    try:
+        # Check permissions
+        if request.role == "admin":
+            # Admin can delete any user's history
+            pass
+        elif request.role in ["student", "teacher"]:
+            # Users can only delete their own history
+            if request.requesting_user_id != user_id:
+                return JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content={
+                        "error": "permission_denied",
+                        "message": "Permission denied. Users can only delete their own chat history."
+                    }
+                )
+        else:
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={
+                    "error": "invalid_role",
+                    "message": "Permission denied. Invalid role."
+                }
+            )
+        
+        # Delete from chat history repository
+        from app.repositories.chat_history_repository import get_chat_history_repository
+        
+        chat_history_repo = get_chat_history_repository()
+        deleted_count = chat_history_repo.delete_user_history(user_id)
+        
+        logger.info(
+            f"Deleted {deleted_count} chat messages for user {user_id} "
+            f"by {request.requesting_user_id} ({request.role})"
+        )
+        
+        return DeleteHistoryResponse(
+            status="deleted",
+            user_id=user_id,
+            messages_deleted=deleted_count,
+            deleted_by=request.requesting_user_id
+        )
+        
+    except Exception as e:
+        logger.exception(f"Error deleting chat history: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "internal_error",
+                "message": f"Failed to delete chat history: {str(e)}"
+            }
+        )

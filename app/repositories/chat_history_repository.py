@@ -392,6 +392,59 @@ class ChatHistoryRepository:
             lines.append(f"{role_label}: {content}")
         
         return "\n".join(lines)
+    
+    def delete_user_history(self, user_id: str) -> int:
+        """
+        Delete all chat history for a user.
+        
+        Args:
+            user_id: User identifier
+            
+        Returns:
+            Number of messages deleted
+        """
+        if not self._available:
+            return 0
+        
+        try:
+            with self._session_factory() as session:
+                deleted_count = 0
+                
+                if self._use_new_schema:
+                    # Delete from chat_history table (CHỈ THỊ SỐ 04)
+                    from sqlalchemy import text
+                    result = session.execute(
+                        text("DELETE FROM chat_history WHERE user_id = :user_id"),
+                        {"user_id": user_id}
+                    )
+                    deleted_count = result.rowcount
+                    session.commit()
+                else:
+                    # Delete from legacy schema
+                    # First get all sessions for user
+                    stmt = select(ChatSessionModel).where(
+                        ChatSessionModel.user_id == user_id
+                    )
+                    sessions = session.execute(stmt).scalars().all()
+                    
+                    for chat_session in sessions:
+                        # Delete messages
+                        msg_result = session.query(ChatMessageModel).filter(
+                            ChatMessageModel.session_id == chat_session.session_id
+                        ).delete()
+                        deleted_count += msg_result
+                        
+                        # Delete session
+                        session.delete(chat_session)
+                    
+                    session.commit()
+                
+                logger.info(f"Deleted {deleted_count} messages for user {user_id}")
+                return deleted_count
+                
+        except Exception as e:
+            logger.error(f"Failed to delete user history: {e}")
+            return 0
 
 
 # Singleton instance

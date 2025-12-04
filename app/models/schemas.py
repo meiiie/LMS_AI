@@ -241,3 +241,21 @@ class RateLimitResponse(BaseModel):
     error: str = Field(default="rate_limited", description="Error type")
     message: str = Field(default="Rate limit exceeded", description="Error message")
     retry_after: int = Field(..., description="Seconds until rate limit resets")
+
+
+# =============================================================================
+# Delete History Schemas
+# =============================================================================
+
+class DeleteHistoryRequest(BaseModel):
+    """Request to delete chat history"""
+    role: str = Field(..., description="Role of requesting user (admin, student, teacher)")
+    requesting_user_id: str = Field(..., description="ID of user making the request")
+
+
+class DeleteHistoryResponse(BaseModel):
+    """Response after deleting chat history"""
+    status: str = Field(default="deleted", description="Operation status")
+    user_id: str = Field(..., description="ID of user whose history was deleted")
+    messages_deleted: int = Field(..., description="Number of messages deleted")
+    deleted_by: str = Field(..., description="ID of user who performed the deletion")
