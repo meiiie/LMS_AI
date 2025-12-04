@@ -39,11 +39,23 @@ class IngestionService:
     """
     
     def __init__(self, knowledge_repo: Optional[Neo4jKnowledgeRepository] = None):
-        """Initialize ingestion service."""
+        """Initialize ingestion service with lazy loading."""
         self._pdf_processor = PDFProcessor()
         self._knowledge_repo = knowledge_repo
-        self._embeddings = GeminiOptimizedEmbeddings()
-        self._dense_repo = DenseSearchRepository()
+        self._embeddings = None  # Lazy init
+        self._dense_repo = None  # Lazy init
+    
+    def _get_embeddings(self) -> GeminiOptimizedEmbeddings:
+        """Get or create embeddings instance (lazy)."""
+        if self._embeddings is None:
+            self._embeddings = GeminiOptimizedEmbeddings()
+        return self._embeddings
+    
+    def _get_dense_repo(self) -> DenseSearchRepository:
+        """Get or create dense search repository (lazy)."""
+        if self._dense_repo is None:
+            self._dense_repo = DenseSearchRepository()
+        return self._dense_repo
     
     def _get_repo(self) -> Neo4jKnowledgeRepository:
         """Get or create knowledge repository."""
@@ -204,8 +216,8 @@ class IngestionService:
                         # Store embedding for hybrid search (Feature: hybrid-search)
                         try:
                             embedding_text = f"{title}\n{chunk.content}"
-                            embedding = self._embeddings.embed_documents([embedding_text])[0]
-                            await self._dense_repo.store_embedding(node_id, embedding)
+                            embedding = self._get_embeddings().embed_documents([embedding_text])[0]
+                            await self._get_dense_repo().store_embedding(node_id, embedding)
                             logger.debug(f"Stored embedding for node: {node_id}")
                         except Exception as emb_error:
                             # Log but don't fail - embedding is optional enhancement
@@ -288,7 +300,7 @@ class IngestionService:
             # Delete embeddings from pgvector
             for node_id in node_ids:
                 try:
-                    await self._dense_repo.delete_embedding(node_id)
+                    await self._get_dense_repo().delete_embedding(node_id)
                 except Exception as e:
                     logger.warning(f"Failed to delete embedding for {node_id}: {e}")
                     
