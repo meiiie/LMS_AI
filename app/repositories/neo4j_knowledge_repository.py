@@ -5,7 +5,8 @@ Connects to Neo4j database for knowledge retrieval.
 """
 
 import logging
-from typing import List, Optional
+from datetime import datetime
+from typing import Any, List, Optional
 
 from app.core.config import settings
 from app.models.knowledge_graph import (
@@ -30,6 +31,31 @@ class Neo4jKnowledgeRepository:
         self._driver = None
         self._available = False
         self._init_driver()
+    
+    @staticmethod
+    def _convert_neo4j_datetime(value: Any) -> Any:
+        """
+        Convert neo4j.time.DateTime to Python datetime or ISO string.
+        
+        Neo4j returns its own DateTime type which Pydantic cannot serialize.
+        This helper converts it to a standard Python datetime.
+        """
+        if value is None:
+            return None
+        
+        # Check if it's a neo4j DateTime type
+        type_name = type(value).__name__
+        if type_name in ('DateTime', 'Date', 'Time', 'Duration'):
+            try:
+                # neo4j.time.DateTime has to_native() method
+                if hasattr(value, 'to_native'):
+                    return value.to_native()
+                # Fallback: convert to ISO string
+                return str(value)
+            except Exception:
+                return str(value)
+        
+        return value
     
     def _init_driver(self):
         """Initialize Neo4j driver (supports both local Docker and Neo4j Aura)."""
@@ -553,13 +579,15 @@ class Neo4jKnowledgeRepository:
                 
                 documents = []
                 for record in result:
+                    # Convert neo4j.time.DateTime to Python datetime
+                    uploaded_at = self._convert_neo4j_datetime(record["uploaded_at"])
                     documents.append({
                         "id": record["id"],
                         "filename": record["filename"],
                         "category": record["category"],
                         "nodes_count": record["nodes_count"],
                         "uploaded_by": record["uploaded_by"],
-                        "uploaded_at": record["uploaded_at"]
+                        "uploaded_at": uploaded_at
                     })
                 return documents
         except Exception as e:
@@ -628,7 +656,13 @@ class Neo4jKnowledgeRepository:
                 LIMIT 5
                 """
                 recent_result = session.run(recent_cypher)
-                recent_uploads = [dict(r) for r in recent_result]
+                
+                # Convert neo4j.time.DateTime to Python datetime for each record
+                recent_uploads = []
+                for r in recent_result:
+                    doc = dict(r)
+                    doc["uploaded_at"] = self._convert_neo4j_datetime(doc.get("uploaded_at"))
+                    recent_uploads.append(doc)
                 
                 return {
                     "total_documents": total_documents,
