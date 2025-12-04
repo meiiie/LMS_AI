@@ -90,6 +90,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.error(f"❌ Failed to close Neo4j driver: {e}")
     
+    # Close shared database engine
+    try:
+        from app.core.database import close_shared_engine
+        close_shared_engine()
+        logger.info("✅ Shared database engine closed successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to close shared database engine: {e}")
+    
     logger.info("👋 Maritime AI Service shutdown complete")
 
 

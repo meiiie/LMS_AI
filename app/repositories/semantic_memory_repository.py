@@ -42,32 +42,26 @@ class SemanticMemoryRepository:
     
     def __init__(self, database_url: Optional[str] = None):
         """
-        Initialize repository with database connection.
+        Initialize repository with SHARED database connection.
         
         Args:
-            database_url: PostgreSQL connection URL (defaults to settings)
+            database_url: Ignored - uses shared engine for connection pooling
         """
-        self._database_url = database_url or settings.postgres_url_sync
         self._engine = None
         self._session_factory = None
         self._initialized = False
     
     def _ensure_initialized(self) -> None:
-        """Lazy initialization of database connection."""
+        """Lazy initialization using SHARED database engine."""
         if not self._initialized:
             try:
-                self._engine = create_engine(
-                    self._database_url,
-                    echo=settings.debug,
-                    pool_pre_ping=True,
-                    pool_size=3,        # Limit connections for Supabase Free Tier
-                    max_overflow=0,     # No extra connections
-                    pool_timeout=30,    # Wait 30s for connection
-                    pool_recycle=1800   # Recycle connections after 30 minutes
-                )
-                self._session_factory = sessionmaker(bind=self._engine)
+                # Use SHARED engine to minimize connections (Supabase Free Tier)
+                from app.core.database import get_shared_engine, get_shared_session_factory
+                
+                self._engine = get_shared_engine()
+                self._session_factory = get_shared_session_factory()
                 self._initialized = True
-                logger.info("SemanticMemoryRepository initialized successfully")
+                logger.info("SemanticMemoryRepository using SHARED database engine")
             except Exception as e:
                 logger.error(f"Failed to initialize SemanticMemoryRepository: {e}")
                 raise

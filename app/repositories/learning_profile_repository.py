@@ -242,33 +242,27 @@ class SupabaseLearningProfileRepository:
     """
     
     def __init__(self, database_url: Optional[str] = None):
-        """Initialize with database connection."""
-        self._database_url = database_url or settings.postgres_url_sync
+        """Initialize with SHARED database connection."""
         self._engine = None
         self._session_factory = None
         self._available = False
         self._init_connection()
     
     def _init_connection(self):
-        """Initialize database connection."""
+        """Initialize database connection using SHARED engine."""
         try:
-            self._engine = create_engine(
-                self._database_url,
-                echo=False,
-                pool_pre_ping=True,
-                pool_size=3,        # Limit connections for Supabase Free Tier
-                max_overflow=0,     # No extra connections
-                pool_timeout=30,    # Wait 30s for connection
-                pool_recycle=1800   # Recycle connections after 30 minutes
-            )
-            self._session_factory = sessionmaker(bind=self._engine)
+            # Use SHARED engine to minimize connections (Supabase Free Tier)
+            from app.core.database import get_shared_engine, get_shared_session_factory
+            
+            self._engine = get_shared_engine()
+            self._session_factory = get_shared_session_factory()
             
             # Test connection
             with self._session_factory() as session:
                 session.execute(text("SELECT 1"))
             
             self._available = True
-            logger.info("Learning profile repository connected to Supabase")
+            logger.info("Learning profile repository using SHARED database engine")
         except Exception as e:
             logger.warning(f"Learning profile repository connection failed: {e}")
             self._available = False

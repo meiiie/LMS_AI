@@ -58,16 +58,16 @@ class DenseSearchRepository:
             self._available = False
     
     async def _get_pool(self):
-        """Get or create connection pool."""
+        """Get or create connection pool (MINIMAL for Supabase Free Tier)."""
         if self._pool is None:
             try:
                 import asyncpg
                 self._pool = await asyncpg.create_pool(
                     settings.database_url,
                     min_size=1,
-                    max_size=2  # Limit for Supabase Free Tier
+                    max_size=1  # MINIMAL: Only 1 connection for async operations
                 )
-                logger.info("Created asyncpg connection pool")
+                logger.info("Created asyncpg connection pool (min=1, max=1)")
             except Exception as e:
                 logger.error(f"Failed to create connection pool: {e}")
                 self._available = False
