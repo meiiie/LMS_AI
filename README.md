@@ -626,10 +626,52 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 
 ---
 
+## Database Connection Pooling (v0.6.3)
+
+Optimized for Supabase Free Tier (~10-15 max connections).
+
+### Shared Engine Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    SHARED DATABASE ENGINE                    │
+│                    (app/core/database.py)                   │
+│                                                              │
+│   pool_size=2, max_overflow=1, pool_timeout=10s             │
+│   Total Max Connections: 3                                   │
+└─────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+┌───────────────┐    ┌───────────────┐    ┌───────────────┐
+│ ChatHistory   │    │ SemanticMemory│    │ LearningProfile│
+│ Repository    │    │ Repository    │    │ Repository    │
+└───────────────┘    └───────────────┘    └───────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│              DENSE SEARCH (asyncpg)                          │
+│              min_size=1, max_size=1                          │
+│              Total: 1 connection                             │
+└─────────────────────────────────────────────────────────────┘
+
+TOTAL CONNECTIONS: 4 (down from 11)
+```
+
+### Connection Settings
+
+| Component | pool_size | max_overflow | Total |
+|-----------|-----------|--------------|-------|
+| Shared SQLAlchemy Engine | 2 | 1 | 3 |
+| DenseSearchRepository (asyncpg) | 1 | 0 | 1 |
+| **TOTAL** | | | **4** |
+
+---
+
 ## Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.6.3 | 2025-12-05 | **CRITICAL FIX**: Shared Database Engine - Fix MaxClientsInSessionMode error on Supabase Free Tier |
 | v0.6.2 | 2025-12-05 | GET /api/v1/history/{user_id} - Paginated history retrieval for multi-device sync (Phase 2) |
 | v0.6.1 | 2025-12-04 | Chat History Management API - DELETE /api/v1/history/{user_id} with role-based access control |
 | v0.6.0 | 2025-12-04 | Tech Debt Cleanup - pypdf migration (from PyPDF2), Knowledge API error handling, Pydantic v2 compliance, circular import fix |
@@ -650,6 +692,11 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 ### ✅ Resolved (v0.5.3)
 - **Agent Routing**: Vietnamese questions now correctly route to RAG Agent
 - **Citation Accuracy**: Top-1 accuracy improved from 20% to 100%
+
+### ✅ Resolved (v0.6.3)
+- **MaxClientsInSessionMode**: Fixed Supabase Free Tier connection limit issue
+- **Shared Database Engine**: All repositories now use singleton engine pattern
+- **Connection Pool Optimization**: Reduced from 11 connections to 4 total
 
 ### ✅ Resolved (v0.6.0)
 - **PDF Library Migration**: Migrated from deprecated PyPDF2 to pypdf for better Vietnamese support
