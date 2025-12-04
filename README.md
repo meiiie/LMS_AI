@@ -440,6 +440,48 @@ curl -X DELETE http://localhost:8000/api/v1/knowledge/doc_123 \
 }
 ```
 
+---
+
+## Chat History Management API
+
+API cho phép quản lý lịch sử chat của người dùng.
+
+### DELETE /api/v1/history/{user_id}
+
+Xóa toàn bộ lịch sử chat của một user.
+
+**Access Control:**
+- `admin`: Có thể xóa lịch sử của bất kỳ user nào
+- `student`/`teacher`: Chỉ có thể xóa lịch sử của chính mình
+
+**Request:**
+```bash
+curl -X DELETE http://localhost:8000/api/v1/history/student_123 \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin", "requesting_user_id": "admin_user"}'
+```
+
+**Response (Success):**
+```json
+{
+  "status": "deleted",
+  "user_id": "student_123",
+  "messages_deleted": 15,
+  "deleted_by": "admin_user"
+}
+```
+
+**Response (Permission Denied - 403):**
+```json
+{
+  "error": "permission_denied",
+  "message": "Permission denied. Users can only delete their own chat history."
+}
+```
+
+---
+
 ### Constraints
 
 - **File Type**: Chỉ chấp nhận PDF (.pdf)
@@ -545,6 +587,7 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.6.1 | 2025-12-04 | Chat History Management API - DELETE /api/v1/history/{user_id} with role-based access control |
 | v0.6.0 | 2025-12-04 | Tech Debt Cleanup - pypdf migration (from PyPDF2), Knowledge API error handling, Pydantic v2 compliance, circular import fix |
 | v0.5.3 | 2025-12-04 | Intent Classifier HOTFIX - 70 Vietnamese keywords, Aggressive Routing, 100% classification accuracy |
 | v0.5.2 | 2025-12-04 | Title Match Boosting v2 - Strong Boost x3.0 cho số hiệu, Top-1 Citation Accuracy 100% |
