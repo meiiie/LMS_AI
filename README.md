@@ -545,6 +545,7 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.6.0 | 2025-12-04 | Tech Debt Cleanup - pypdf migration (from PyPDF2), Knowledge API error handling, Pydantic v2 compliance, circular import fix |
 | v0.5.3 | 2025-12-04 | Intent Classifier HOTFIX - 70 Vietnamese keywords, Aggressive Routing, 100% classification accuracy |
 | v0.5.2 | 2025-12-04 | Title Match Boosting v2 - Strong Boost x3.0 cho số hiệu, Top-1 Citation Accuracy 100% |
 | v0.5.1 | 2025-12-04 | Project cleanup, removed redundant test scripts, security fix (.env.production.example) |
@@ -563,9 +564,14 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 - **Agent Routing**: Vietnamese questions now correctly route to RAG Agent
 - **Citation Accuracy**: Top-1 accuracy improved from 20% to 100%
 
+### ✅ Resolved (v0.6.0)
+- **PDF Library Migration**: Migrated from deprecated PyPDF2 to pypdf for better Vietnamese support
+- **Knowledge API Endpoints**: `/stats` and `/list` now return empty results instead of 500 errors
+- **Pydantic v2 Compliance**: Config uses `model_config = SettingsConfigDict()` pattern
+- **Circular Import Fix**: Fixed circular import between rag_tool.py and chat_service.py
+
 ### 🔄 In Progress
 - **Vietnamese Text Chunking**: Sentence boundary detection for Vietnamese PDFs
-- **Knowledge API Endpoints**: `/stats` and `/list` need verification
 
 ### 📋 Planned
 - Cross-session memory testing

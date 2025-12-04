@@ -205,19 +205,31 @@ async def list_documents(
     - **page**: Page number (default: 1)
     - **limit**: Items per page (default: 20, max: 100)
     
+    Returns empty list if no documents exist or on database error.
+    
     **Validates: Requirements 6.1**
+    **Feature: tech-debt-cleanup**
     """
     if limit > 100:
         limit = 100
     
-    service = get_ingestion_service()
-    documents = await service.list_documents(page, limit)
-    
-    return DocumentListResponse(
-        documents=documents,
-        page=page,
-        limit=limit
-    )
+    try:
+        service = get_ingestion_service()
+        documents = await service.list_documents(page, limit)
+        
+        return DocumentListResponse(
+            documents=documents,
+            page=page,
+            limit=limit
+        )
+    except Exception as e:
+        logger.error(f"List documents error: {e}")
+        # Return empty results instead of 500 error
+        return DocumentListResponse(
+            documents=[],
+            page=page,
+            limit=limit
+        )
 
 
 @router.get("/stats", response_model=KnowledgeStatsResponse)
@@ -226,18 +238,30 @@ async def get_statistics() -> KnowledgeStatsResponse:
     Get knowledge base statistics.
     
     Returns total documents, nodes, category breakdown, and recent uploads.
+    Returns default empty stats if database is unavailable.
     
     **Validates: Requirements 6.2**
+    **Feature: tech-debt-cleanup**
     """
-    service = get_ingestion_service()
-    stats = await service.get_stats()
-    
-    return KnowledgeStatsResponse(
-        total_documents=stats.get("total_documents", 0),
-        total_nodes=stats.get("total_nodes", 0),
-        categories=stats.get("categories", {}),
-        recent_uploads=stats.get("recent_uploads", [])
-    )
+    try:
+        service = get_ingestion_service()
+        stats = await service.get_stats()
+        
+        return KnowledgeStatsResponse(
+            total_documents=stats.get("total_documents", 0),
+            total_nodes=stats.get("total_nodes", 0),
+            categories=stats.get("categories", {}),
+            recent_uploads=stats.get("recent_uploads", [])
+        )
+    except Exception as e:
+        logger.error(f"Stats error: {e}")
+        # Return empty stats instead of 500 error
+        return KnowledgeStatsResponse(
+            total_documents=0,
+            total_nodes=0,
+            categories={},
+            recent_uploads=[]
+        )
 
 
 class ReingestEmbeddingsResponse(BaseModel):

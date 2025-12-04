@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-from PyPDF2 import PdfReader
+# Migrated from PyPDF2 (deprecated) to pypdf for better Vietnamese support
+from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
 

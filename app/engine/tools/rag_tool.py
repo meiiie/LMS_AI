@@ -24,8 +24,10 @@ from app.models.knowledge_graph import (
     RelationType,
 )
 from app.repositories.neo4j_knowledge_repository import Neo4jKnowledgeRepository
-from app.services.hybrid_search_service import HybridSearchService, get_hybrid_search_service
 from app.engine.rrf_reranker import HybridSearchResult
+
+# Lazy import to avoid circular dependency with app.services
+# HybridSearchService is imported in __init__ method
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +106,14 @@ class RAGAgent:
             hybrid_search_service: Hybrid search service for Dense+Sparse search
         """
         self._kg = knowledge_graph or get_knowledge_repository()
-        self._hybrid_search = hybrid_search_service or get_hybrid_search_service()
+        
+        # Lazy import to avoid circular dependency
+        if hybrid_search_service is None:
+            from app.services.hybrid_search_service import get_hybrid_search_service
+            self._hybrid_search = get_hybrid_search_service()
+        else:
+            self._hybrid_search = hybrid_search_service
+            
         self._llm = self._init_llm()
     
     def _init_llm(self):

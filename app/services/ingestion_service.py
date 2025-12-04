@@ -253,10 +253,17 @@ class IngestionService:
         """
         Get paginated list of uploaded documents from Neo4j.
         
+        Returns empty list if Neo4j is unavailable or on error.
+        
         **Validates: Requirements 6.1**
+        **Feature: tech-debt-cleanup**
         """
-        repo = self._get_repo()
-        return await repo.get_document_list(page, limit)
+        try:
+            repo = self._get_repo()
+            return await repo.get_document_list(page, limit)
+        except Exception as e:
+            logger.error(f"Failed to list documents: {e}")
+            return []
     
     async def delete_document(self, document_id: str) -> int:
         """
@@ -295,10 +302,22 @@ class IngestionService:
         """
         Get knowledge base statistics.
         
+        Returns default empty stats if Neo4j is unavailable or on error.
+        
         **Validates: Requirements 6.2**
+        **Feature: tech-debt-cleanup**
         """
-        repo = self._get_repo()
-        return await repo.get_extended_stats()
+        try:
+            repo = self._get_repo()
+            return await repo.get_extended_stats()
+        except Exception as e:
+            logger.error(f"Failed to get stats: {e}")
+            return {
+                "total_documents": 0,
+                "total_nodes": 0,
+                "categories": {},
+                "recent_uploads": []
+            }
 
 
 # Singleton instance

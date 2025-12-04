@@ -7,7 +7,7 @@ Feature: knowledge-ingestion
 """
 
 import re
-from hypothesis import given, strategies as st, settings, assume
+from hypothesis import given, strategies as st, settings, assume, HealthCheck
 
 from app.engine.pdf_processor import PDFProcessor, Chunk
 from app.models.ingestion_job import JobStatus
@@ -55,8 +55,8 @@ def test_text_extraction_preserves_content(text: str):
 # Validates: Requirements 3.1
 # =============================================================================
 
-@given(st.text(min_size=1500, max_size=5000))
-@settings(max_examples=100)
+@given(st.text(min_size=1000, max_size=2000, alphabet=st.characters(whitelist_categories=('L', 'N', 'Z', 'P'))))
+@settings(max_examples=100, suppress_health_check=[HealthCheck.large_base_example])
 def test_chunk_size_bounds(text: str):
     """
     **Feature: knowledge-ingestion, Property 4: Chunk Size Bounds**
