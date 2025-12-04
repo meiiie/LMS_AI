@@ -212,12 +212,20 @@ class SemanticMemoryRepository:
                 
                 memories = []
                 for row in rows:
+                    # Handle NaN similarity (can happen with zero vectors)
+                    similarity = float(row.similarity) if row.similarity is not None else 0.0
+                    import math
+                    if math.isnan(similarity) or math.isinf(similarity):
+                        similarity = 0.0
+                    # Clamp to valid range [0, 1]
+                    similarity = max(0.0, min(1.0, similarity))
+                    
                     memories.append(SemanticMemorySearchResult(
                         id=row.id,
                         content=row.content,
                         memory_type=MemoryType(row.memory_type),
                         importance=row.importance,
-                        similarity=float(row.similarity),
+                        similarity=similarity,
                         metadata=row.metadata or {},
                         created_at=row.created_at
                     ))

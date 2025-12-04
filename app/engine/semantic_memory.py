@@ -263,6 +263,13 @@ class SemanticMemoryEngine:
             logger.info(f"Extracted {len(extraction.facts)} facts for user {user_id}")
             return extraction.facts
             
+        except RuntimeError as e:
+            # Handle "Event loop is closed" gracefully
+            if "Event loop is closed" in str(e):
+                logger.warning(f"Fact extraction skipped (event loop closed): {e}")
+            else:
+                logger.error(f"Fact extraction runtime error: {e}")
+            return []
         except Exception as e:
             logger.error(f"Failed to extract facts: {e}")
             return []
