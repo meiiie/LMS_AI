@@ -138,10 +138,10 @@ class IntentClassifier:
         """
         Classify the intent of a user message.
         
-        HOTFIX v2: Smart Routing with Greeting Detection
-        - Detect greetings and introductions FIRST
-        - Then apply aggressive knowledge routing
-        - Ưu tiên KNOWLEDGE nếu có bất kỳ dấu hiệu nào về luật/quy định
+        CHỈ THỊ KỸ THUẬT SỐ 12: Priority-based Routing
+        1. ƯU TIÊN TUYỆT ĐỐI: Greeting Check (câu ngắn < 20 từ + có từ chào)
+        2. KIỂM TRA CÂU HỎI NỐI TIẾP (Follow-up Context)
+        3. KIỂM TRA TỪ KHÓA RAG (Logic cũ)
         
         Args:
             message: User's message text
@@ -153,34 +153,45 @@ class IntentClassifier:
         """
         message_lower = message.lower()
         words = set(message_lower.split())
+        word_count = len(message.split())
         
-        # HOTFIX v2: Detect greetings and introductions FIRST
-        # These should go to Chat Agent, not RAG
-        greeting_patterns = [
-            "xin chào", "chào bạn", "hello", "hi ", "hey",
-            "tôi là", "tên tôi là", "mình là", "tên mình là",
-            "i am", "my name is", "i'm",
-            "sinh viên", "giáo viên", "thuyền trưởng", "sĩ quan",
-            "đại học", "trường", "năm 1", "năm 2", "năm 3", "năm 4",
-            "rất vui", "nice to meet", "pleased to meet"
-        ]
+        # =================================================================
+        # 1. ƯU TIÊN TUYỆT ĐỐI: Greeting Check (Chào hỏi)
+        # Nếu câu ngắn (< 20 từ) VÀ có từ chào -> Là CHAT AGENT
+        # (Bất kể có từ khóa chuyên ngành hay không)
+        # =================================================================
+        greetings = ["xin chào", "chào", "hello", "hi ", "tôi là", "tên tôi"]
+        is_greeting = any(g in message_lower for g in greetings)
         
-        is_greeting = any(pattern in message_lower for pattern in greeting_patterns)
-        
-        # Check if message is ONLY a greeting/introduction (no actual question)
-        question_indicators = ["?", "là gì", "như thế nào", "tại sao", "khi nào", 
-                              "what", "how", "why", "when", "explain", "giải thích"]
-        has_question = any(q in message_lower for q in question_indicators)
-        
-        # If it's a greeting without a question, route to Chat Agent
-        if is_greeting and not has_question:
-            logger.debug(f"Detected greeting/introduction, routing to CHAT")
+        if is_greeting and word_count < 20:
+            logger.info(f"[ROUTING] Greeting detected (< 20 words), routing to CHAT")
             return Intent(
                 type=IntentType.GENERAL,
-                confidence=0.9,
+                confidence=1.0,
                 entities=[]
             )
         
+        # =================================================================
+        # 2. KIỂM TRA CÂU HỎI NỐI TIẾP (Follow-up Context)
+        # Nếu câu hỏi quá ngắn (< 5 từ) và có từ tham chiếu -> Giữ agent cũ
+        # =================================================================
+        follow_ups = ["tại sao", "vậy thì", "còn", "thế nào", "là gì", 
+                      "vậy sao", "còn gì", "tiếp theo", "nữa không"]
+        is_follow_up = word_count < 8 and any(f in message_lower for f in follow_ups)
+        
+        if is_follow_up:
+            logger.info(f"[ROUTING] Follow-up question detected (< 8 words)")
+            # Return KNOWLEDGE by default for follow-ups (most common case)
+            # ChatService will use last_agent_type from history if available
+            return Intent(
+                type=IntentType.KNOWLEDGE,
+                confidence=0.85,
+                entities=[]
+            )
+        
+        # =================================================================
+        # 3. KIỂM TRA TỪ KHÓA RAG (Logic cũ)
+        # =================================================================
         # Calculate keyword matches (word-level)
         knowledge_score = len(words & KNOWLEDGE_KEYWORDS)
         teaching_score = len(words & TEACHING_KEYWORDS)

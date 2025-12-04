@@ -196,6 +196,13 @@ class ChatService:
                 self._chat_history.update_user_name(session_id, extracted_name)
                 user_name = extracted_name
         
+        # CHỈ THỊ KỸ THUẬT SỐ 12: Debug Logging để truy vết Memory
+        logger.info(f"--- PREPARING PROMPT FOR USER {user_id} ---")
+        logger.info(f"Detected Name: {user_name or 'UNKNOWN'}")
+        logger.info(f"Retrieved History Length: {len(conversation_history)} chars")
+        logger.info(f"Semantic Context Length: {len(semantic_context)} chars")
+        logger.info("-------------------------------------------")
+        
         # Combine semantic context with conversation history
         if semantic_context:
             conversation_history = f"{semantic_context}\n\n{conversation_history}".strip()
