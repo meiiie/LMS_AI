@@ -57,6 +57,7 @@ class DocumentListResponse(BaseModel):
     documents: list
     page: int
     limit: int
+    warning: Optional[str] = None  # Warning message if data retrieval had issues
 
 
 class KnowledgeStatsResponse(BaseModel):
@@ -65,6 +66,7 @@ class KnowledgeStatsResponse(BaseModel):
     total_nodes: int
     categories: dict
     recent_uploads: list
+    warning: Optional[str] = None  # Warning message if data retrieval had issues
 
 
 class DeleteResponse(BaseModel):
@@ -205,7 +207,7 @@ async def list_documents(
     - **page**: Page number (default: 1)
     - **limit**: Items per page (default: 20, max: 100)
     
-    Returns empty list if no documents exist or on database error.
+    Returns empty list with warning if database error occurs.
     
     **Validates: Requirements 6.1**
     **Feature: tech-debt-cleanup**
@@ -220,15 +222,18 @@ async def list_documents(
         return DocumentListResponse(
             documents=documents,
             page=page,
-            limit=limit
+            limit=limit,
+            warning=None
         )
     except Exception as e:
-        logger.error(f"List documents error: {e}")
-        # Return empty results instead of 500 error
+        error_msg = str(e)
+        logger.error(f"List documents error: {error_msg}", exc_info=True)
+        # Return empty results with warning instead of 500 error
         return DocumentListResponse(
             documents=[],
             page=page,
-            limit=limit
+            limit=limit,
+            warning=f"Database connection failed: {error_msg[:100]}"
         )
 
 
@@ -238,7 +243,7 @@ async def get_statistics() -> KnowledgeStatsResponse:
     Get knowledge base statistics.
     
     Returns total documents, nodes, category breakdown, and recent uploads.
-    Returns default empty stats if database is unavailable.
+    Returns default empty stats with warning if database is unavailable.
     
     **Validates: Requirements 6.2**
     **Feature: tech-debt-cleanup**
@@ -251,16 +256,19 @@ async def get_statistics() -> KnowledgeStatsResponse:
             total_documents=stats.get("total_documents", 0),
             total_nodes=stats.get("total_nodes", 0),
             categories=stats.get("categories", {}),
-            recent_uploads=stats.get("recent_uploads", [])
+            recent_uploads=stats.get("recent_uploads", []),
+            warning=None
         )
     except Exception as e:
-        logger.error(f"Stats error: {e}")
-        # Return empty stats instead of 500 error
+        error_msg = str(e)
+        logger.error(f"Stats error: {error_msg}", exc_info=True)
+        # Return empty stats with warning instead of 500 error
         return KnowledgeStatsResponse(
             total_documents=0,
             total_nodes=0,
             categories={},
-            recent_uploads=[]
+            recent_uploads=[],
+            warning=f"Database connection failed: {error_msg[:100]}"
         )
 
 
