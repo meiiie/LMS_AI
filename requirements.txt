@@ -9,6 +9,7 @@ pydantic-settings==2.1.0
 # Database
 sqlalchemy==2.0.27
 asyncpg==0.30.0
+psycopg2-binary==2.9.9  # Sync PostgreSQL driver for SQLAlchemy (required for chat_history_repository)
 alembic==1.13.1
 pgvector==0.2.5
 
