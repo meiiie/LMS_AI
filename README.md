@@ -482,6 +482,49 @@ curl -X DELETE http://localhost:8000/api/v1/history/student_123 \
 
 ---
 
+## Chat History Retrieval API (Phase 2)
+
+API cho phép lấy lịch sử chat với phân trang, hỗ trợ đồng bộ đa thiết bị.
+
+### GET /api/v1/history/{user_id}
+
+Lấy lịch sử chat của một user với phân trang.
+
+**Query Parameters:**
+- `limit`: Số tin nhắn trả về (default: 20, max: 100)
+- `offset`: Vị trí bắt đầu (default: 0)
+
+**Request:**
+```bash
+curl -X GET "https://maritime-ai-chatbot.onrender.com/api/v1/history/student_123?limit=20&offset=0" \
+  -H "X-API-Key: your_api_key"
+```
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "role": "user",
+      "content": "Quy tắc 5 là gì?",
+      "timestamp": "2025-12-05T10:00:00Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Quy tắc 5 COLREGs quy định về...",
+      "timestamp": "2025-12-05T10:00:05Z"
+    }
+  ],
+  "pagination": {
+    "total": 150,
+    "limit": 20,
+    "offset": 0
+  }
+}
+```
+
+---
+
 ### Constraints
 
 - **File Type**: Chỉ chấp nhận PDF (.pdf)
@@ -587,6 +630,7 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.6.2 | 2025-12-05 | GET /api/v1/history/{user_id} - Paginated history retrieval for multi-device sync (Phase 2) |
 | v0.6.1 | 2025-12-04 | Chat History Management API - DELETE /api/v1/history/{user_id} with role-based access control |
 | v0.6.0 | 2025-12-04 | Tech Debt Cleanup - pypdf migration (from PyPDF2), Knowledge API error handling, Pydantic v2 compliance, circular import fix |
 | v0.5.3 | 2025-12-04 | Intent Classifier HOTFIX - 70 Vietnamese keywords, Aggressive Routing, 100% classification accuracy |
