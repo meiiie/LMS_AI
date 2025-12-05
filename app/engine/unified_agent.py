@@ -4,10 +4,11 @@ Unified Agent - LLM-driven Orchestration (ReAct Pattern)
 CHỈ THỊ KỸ THUẬT SỐ 13: KIẾN TRÚC UNIFIED AGENT (TOOL-USE ARCHITECTURE)
 CHỈ THỊ KỸ THUẬT SỐ 15: NÂNG CẤP DEPENDENCIES (SOTA STACK)
 
-Sử dụng LangGraph 0.2.x với create_react_agent để:
-- Gemini 2.5 Flash tự quyết định khi nào cần gọi Tool
-- Không cần IntentClassifier cứng nhắc
-- ReAct pattern: Reason -> Act -> Observe -> Repeat
+Cập nhật theo LangChain 1.x Documentation (Tháng 12/2025):
+- Sử dụng Manual ReAct với model.bind_tools() (API ổn định nhất)
+- @tool decorator từ langchain_core.tools
+- Async tools được hỗ trợ đầy đủ
+- SystemMessage cho system prompt
 
 Architecture:
     User Message -> Gemini (Super Agent) -> Tự suy nghĩ (ReAct)
@@ -25,10 +26,15 @@ Tools:
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Annotated
+from typing import Any, Dict, List, Optional
 
-from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, SystemMessage
+# LangChain 1.x imports
+try:
+    from langchain.tools import tool
+except ImportError:
+    from langchain_core.tools import tool
+
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 
 from app.core.config import settings
 
@@ -63,28 +69,21 @@ VÍ DỤ CÁCH XỬ LÝ:
 
 
 # ============================================================================
-# TOOL DEFINITIONS (LangChain @tool decorator)
+# GLOBAL REFERENCES (set during initialization)
 # ============================================================================
-
-# Global references to be set during initialization
 _rag_agent = None
 _semantic_memory = None
 _chat_history = None
 _user_cache: Dict[str, Dict[str, Any]] = {}
 
 
-@tool
+# ============================================================================
+# TOOL DEFINITIONS (LangChain @tool decorator)
+# ============================================================================
+
+@tool(description="Tra cứu các quy tắc, luật lệ hàng hải (COLREGs, SOLAS, MARPOL) hoặc thông tin kỹ thuật về tàu biển. CHỈ gọi khi user hỏi về kiến thức chuyên môn hàng hải.")
 async def tool_maritime_search(query: str) -> str:
-    """
-    Tra cứu các quy tắc, luật lệ hàng hải (COLREGs, SOLAS, MARPOL) hoặc thông tin kỹ thuật về tàu biển.
-    CHỈ gọi khi user hỏi về kiến thức chuyên môn hàng hải.
-    
-    Args:
-        query: Câu hỏi cần tra cứu, nên viết đầy đủ ngữ cảnh. VD: 'Quy tắc 15 COLREGs về tình huống cắt hướng'
-    
-    Returns:
-        Kết quả tra cứu từ Knowledge Base
-    """
+    """Search maritime regulations and knowledge base."""
     global _rag_agent
     
     if not _rag_agent:
@@ -94,7 +93,6 @@ async def tool_maritime_search(query: str) -> str:
         logger.info(f"[TOOL] Maritime Search: {query}")
         response = await _rag_agent.query(query, user_role="student")
         
-        # Format result
         result = response.content
         if response.citations:
             sources = [f"- {c.title}" for c in response.citations[:3]]
@@ -107,31 +105,19 @@ async def tool_maritime_search(query: str) -> str:
         return f"Lỗi khi tra cứu: {str(e)}"
 
 
-@tool
+@tool(description="Lưu thông tin cá nhân của người dùng khi họ giới thiệu bản thân. Gọi khi user nói tên, nghề nghiệp, trường học.")
 async def tool_save_user_info(key: str, value: str) -> str:
-    """
-    Lưu thông tin cá nhân của người dùng khi họ giới thiệu bản thân.
-    Gọi khi user nói tên, nghề nghiệp, trường học, v.v.
-    
-    Args:
-        key: Loại thông tin (name, role, school, year, interest)
-        value: Giá trị của thông tin
-    
-    Returns:
-        Xác nhận đã lưu
-    """
-    global _user_cache, _semantic_memory, _chat_history
+    """Save user personal information."""
+    global _user_cache, _semantic_memory
     
     try:
         logger.info(f"[TOOL] Save User Info: {key}={value}")
         
-        # Save to in-memory cache (use a default user_id for now)
         user_id = "current_user"
         if user_id not in _user_cache:
             _user_cache[user_id] = {}
         _user_cache[user_id][key] = value
         
-        # Save to Semantic Memory if available
         if _semantic_memory:
             try:
                 fact = f"User's {key} is {value}"
@@ -146,19 +132,10 @@ async def tool_save_user_info(key: str, value: str) -> str:
         return f"Lỗi khi lưu thông tin: {str(e)}"
 
 
-@tool
+@tool(description="Lấy thông tin đã lưu về người dùng. Gọi khi cần biết tên hoặc thông tin user để cá nhân hóa câu trả lời.")
 async def tool_get_user_info(key: str = "all") -> str:
-    """
-    Lấy thông tin đã lưu về người dùng.
-    Gọi khi cần biết tên hoặc thông tin user để cá nhân hóa câu trả lời.
-    
-    Args:
-        key: Loại thông tin cần lấy (name, role, school, year, interest, all)
-    
-    Returns:
-        Thông tin user đã lưu
-    """
-    global _user_cache, _semantic_memory, _chat_history
+    """Get saved user information."""
+    global _user_cache, _semantic_memory
     
     try:
         logger.info(f"[TOOL] Get User Info: {key}")
@@ -166,7 +143,6 @@ async def tool_get_user_info(key: str = "all") -> str:
         user_id = "current_user"
         user_data = _user_cache.get(user_id, {})
         
-        # Try Semantic Memory if not in cache
         if not user_data and _semantic_memory:
             try:
                 context = await _semantic_memory.retrieve_context(
@@ -184,21 +160,16 @@ async def tool_get_user_info(key: str = "all") -> str:
                 logger.warning(f"Semantic memory retrieval failed: {e}")
         
         if key == "all":
-            if user_data:
-                return f"Thông tin user: {user_data}"
-            return "Chưa có thông tin user nào được lưu."
+            return f"Thông tin user: {user_data}" if user_data else "Chưa có thông tin user."
         else:
             value = user_data.get(key)
-            if value:
-                return f"{key}: {value}"
-            return f"Chưa có thông tin về {key}."
+            return f"{key}: {value}" if value else f"Chưa có thông tin về {key}."
             
     except Exception as e:
         logger.error(f"Get user info error: {e}")
         return f"Lỗi khi lấy thông tin: {str(e)}"
 
 
-# List of tools for the agent
 TOOLS = [tool_maritime_search, tool_save_user_info, tool_get_user_info]
 
 
@@ -208,43 +179,25 @@ TOOLS = [tool_maritime_search, tool_save_user_info, tool_get_user_info]
 
 class UnifiedAgent:
     """
-    Unified Agent using LangGraph's create_react_agent.
+    Unified Agent using Manual ReAct Pattern with LangChain 1.x.
     
     CHỈ THỊ SỐ 13: LLM-driven orchestration (ReAct pattern)
-    CHỈ THỊ SỐ 15: Sử dụng LangGraph 0.2.x với create_react_agent
+    CHỈ THỊ SỐ 15: Sử dụng LangChain 1.x API (bind_tools + manual loop)
     
-    Instead of rule-based intent classification, Gemini decides:
-    - When to call tools (RAG, Memory)
-    - When to respond directly
-    - How to formulate queries for tools
+    Approach: Manual ReAct với model.bind_tools() - API ổn định nhất
     """
     
-    def __init__(
-        self,
-        rag_agent=None,
-        semantic_memory=None,
-        chat_history=None
-    ):
-        """
-        Initialize Unified Agent with dependencies.
-        
-        Args:
-            rag_agent: RAG Agent for maritime knowledge
-            semantic_memory: Semantic Memory Engine
-            chat_history: Chat History Repository
-        """
+    def __init__(self, rag_agent=None, semantic_memory=None, chat_history=None):
         global _rag_agent, _semantic_memory, _chat_history
         
-        # Set global references for tools
         _rag_agent = rag_agent
         _semantic_memory = semantic_memory
         _chat_history = chat_history
         
-        # Initialize LLM and Agent
         self._llm = self._init_llm()
-        self._agent = self._init_agent()
+        self._llm_with_tools = self._init_llm_with_tools()
         
-        logger.info("UnifiedAgent initialized with LangGraph ReAct pattern")
+        logger.info("UnifiedAgent initialized (Manual ReAct)")
     
     def _init_llm(self):
         """Initialize Gemini LLM."""
@@ -252,7 +205,7 @@ class UnifiedAgent:
             from langchain_google_genai import ChatGoogleGenerativeAI
             
             if not settings.google_api_key:
-                logger.warning("No Google API key, UnifiedAgent will not work")
+                logger.warning("No Google API key")
                 return None
             
             llm = ChatGoogleGenerativeAI(
@@ -260,7 +213,6 @@ class UnifiedAgent:
                 model=settings.google_model,
                 temperature=0.7,
             )
-            
             logger.info(f"UnifiedAgent using Gemini: {settings.google_model}")
             return llm
             
@@ -268,34 +220,17 @@ class UnifiedAgent:
             logger.error(f"Failed to initialize LLM: {e}")
             return None
     
-    def _init_agent(self):
-        """
-        Initialize ReAct Agent using LangGraph's create_react_agent.
-        
-        CHỈ THỊ SỐ 15: Sử dụng hàm có sẵn thay vì tự viết
-        """
+    def _init_llm_with_tools(self):
+        """Initialize LLM with tools bound (LangChain 1.x API)."""
         if not self._llm:
             return None
         
         try:
-            # Try to use LangGraph's create_react_agent (0.2.x)
-            from langgraph.prebuilt import create_react_agent
-            
-            agent = create_react_agent(
-                self._llm,
-                TOOLS,
-                state_modifier=SYSTEM_PROMPT
-            )
-            
-            logger.info("✅ Using LangGraph create_react_agent (0.2.x)")
-            return agent
-            
-        except ImportError as e:
-            logger.warning(f"LangGraph 0.2.x not available: {e}")
-            logger.info("Falling back to manual ReAct implementation")
-            return None
+            llm_with_tools = self._llm.bind_tools(TOOLS)
+            logger.info(f"✅ LLM bound with {len(TOOLS)} tools")
+            return llm_with_tools
         except Exception as e:
-            logger.error(f"Failed to create ReAct agent: {e}")
+            logger.error(f"Failed to bind tools: {e}")
             return None
     
     async def process(
@@ -306,25 +241,13 @@ class UnifiedAgent:
         conversation_history: List[Dict] = None,
         user_role: str = "student"
     ) -> Dict[str, Any]:
-        """
-        Process a message using ReAct pattern.
-        
-        Args:
-            message: User's message
-            user_id: User ID
-            session_id: Session ID
-            conversation_history: Previous messages
-            user_role: User role (student/teacher/admin)
-            
-        Returns:
-            Dict with response content and metadata
-        """
+        """Process a message using Manual ReAct pattern."""
         global _user_cache
         
-        # Set current user for tools
+        # Set current user context for tools
         _user_cache["current_user"] = _user_cache.get(user_id, {})
         
-        if not self._llm:
+        if not self._llm_with_tools:
             return {
                 "content": "Xin lỗi, hệ thống AI đang không khả dụng.",
                 "agent_type": "unified",
@@ -333,26 +256,8 @@ class UnifiedAgent:
             }
         
         try:
-            # Build input messages
             messages = self._build_messages(message, conversation_history)
-            
-            if self._agent:
-                # Use LangGraph's create_react_agent
-                result = await self._agent.ainvoke({"messages": messages})
-                
-                # Extract final response
-                final_message = result.get("messages", [])[-1]
-                content = final_message.content if hasattr(final_message, 'content') else str(final_message)
-                
-                return {
-                    "content": content,
-                    "agent_type": "unified",
-                    "tools_used": [],  # TODO: Extract from result
-                    "method": "langgraph_react"
-                }
-            else:
-                # Fallback: Manual ReAct implementation
-                return await self._manual_react(messages, user_id)
+            return await self._manual_react(messages, user_id)
                 
         except Exception as e:
             logger.error(f"UnifiedAgent error: {e}")
@@ -363,129 +268,104 @@ class UnifiedAgent:
                 "error": str(e)
             }
     
-    def _build_messages(
-        self, 
-        message: str, 
-        conversation_history: List[Dict] = None
-    ) -> List:
-        """Build message list for LLM."""
-        from langchain_core.messages import HumanMessage, AIMessage
+    def _build_messages(self, message: str, conversation_history: List[Dict] = None) -> List:
+        """Build message list with SystemMessage for ReAct."""
+        messages = [SystemMessage(content=SYSTEM_PROMPT)]
         
-        messages = []
-        
-        # Add conversation history
         if conversation_history:
             for msg in conversation_history[-10:]:
-                role = msg.get("role", "")
-                content = msg.get("content", "")
-                
+                role, content = msg.get("role", ""), msg.get("content", "")
                 if role == "user":
                     messages.append(HumanMessage(content=content))
                 elif role == "assistant":
                     messages.append(AIMessage(content=content))
         
-        # Add current message
         messages.append(HumanMessage(content=message))
-        
         return messages
     
-    async def _manual_react(
-        self, 
-        messages: List, 
-        user_id: str
-    ) -> Dict[str, Any]:
+    async def _manual_react(self, messages: List, user_id: str, max_iterations: int = 5) -> Dict[str, Any]:
         """
-        Manual ReAct implementation for older LangGraph versions.
+        Manual ReAct implementation (LangChain 1.x API).
         
-        This is a fallback when create_react_agent is not available.
+        Loop: LLM -> Check tool_calls -> Execute tools -> Repeat until no tool_calls
         """
-        from langchain_core.messages import AIMessage, ToolMessage
-        import json
-        
         tools_used = []
-        max_iterations = 5
-        
-        # Bind tools to LLM
-        llm_with_tools = self._llm.bind_tools(TOOLS)
+        tools_map = {t.name: t for t in TOOLS}
         
         for iteration in range(max_iterations):
-            logger.info(f"[Manual ReAct] Iteration {iteration + 1}")
+            logger.info(f"[ReAct] Iteration {iteration + 1}")
             
-            # Call LLM
-            response = await llm_with_tools.ainvoke(messages)
-            
-            # Check for tool calls
+            # Call LLM with tools
+            response = await self._llm_with_tools.ainvoke(messages)
             tool_calls = getattr(response, 'tool_calls', [])
             
+            logger.debug(f"[ReAct] Tool calls: {len(tool_calls)}")
+            
+            # No tool calls = final answer
             if not tool_calls:
-                # No tool calls - return response
+                content = self._extract_content(response)
                 return {
-                    "content": response.content,
+                    "content": content,
                     "agent_type": "unified",
                     "tools_used": tools_used,
                     "method": "manual_react",
                     "iterations": iteration + 1
                 }
             
-            # Execute tool calls
+            # Execute tools
             messages.append(response)
-            
             for tc in tool_calls:
                 tool_name = tc.get("name", "")
                 tool_args = tc.get("args", {})
+                tool_id = tc.get("id", "")
                 
-                logger.info(f"[Manual ReAct] Calling: {tool_name}({tool_args})")
+                logger.info(f"[ReAct] Calling: {tool_name}({tool_args})")
                 
-                # Find and execute tool
-                result = "Tool not found"
-                for t in TOOLS:
-                    if t.name == tool_name:
-                        try:
-                            result = await t.ainvoke(tool_args)
-                        except Exception as e:
-                            result = f"Error: {e}"
-                        break
+                # Execute tool
+                if tool_name in tools_map:
+                    try:
+                        result = await tools_map[tool_name].ainvoke(tool_args)
+                    except Exception as e:
+                        logger.error(f"Tool {tool_name} error: {e}")
+                        result = f"Error executing tool: {e}"
+                else:
+                    result = f"Tool '{tool_name}' not found"
                 
-                tools_used.append({"name": tool_name, "args": tool_args})
-                
-                messages.append(ToolMessage(
-                    content=str(result),
-                    tool_call_id=tc.get("id", "")
-                ))
+                tools_used.append({"name": tool_name, "args": tool_args, "result": str(result)[:100]})
+                messages.append(ToolMessage(content=str(result), tool_call_id=tool_id))
         
+        # Max iterations reached
+        logger.warning(f"[ReAct] Max iterations ({max_iterations}) reached")
         return {
-            "content": "Xin lỗi, tôi gặp khó khăn khi xử lý yêu cầu này.",
+            "content": "Xin lỗi, tôi gặp khó khăn khi xử lý yêu cầu này. Vui lòng thử lại.",
             "agent_type": "unified",
             "tools_used": tools_used,
             "method": "manual_react",
             "error": "Max iterations reached"
         }
     
+    def _extract_content(self, response) -> str:
+        """Extract text content from AIMessage (handles list format)."""
+        content = response.content
+        
+        # Gemini sometimes returns content as list
+        if isinstance(content, list):
+            if content and isinstance(content[0], dict):
+                return content[0].get('text', str(content))
+            return str(content)
+        
+        return content if content else ""
+    
     def is_available(self) -> bool:
-        """Check if UnifiedAgent is available."""
-        return self._llm is not None
+        """Check if agent is ready to process messages."""
+        return self._llm_with_tools is not None
 
 
-# ============================================================================
-# SINGLETON INSTANCE
-# ============================================================================
-
+# Singleton
 _unified_agent: Optional[UnifiedAgent] = None
 
-
-def get_unified_agent(
-    rag_agent=None,
-    semantic_memory=None,
-    chat_history=None
-) -> UnifiedAgent:
-    """Get or create UnifiedAgent singleton."""
+def get_unified_agent(rag_agent=None, semantic_memory=None, chat_history=None) -> UnifiedAgent:
     global _unified_agent
-    
     if _unified_agent is None:
-        _unified_agent = UnifiedAgent(
-            rag_agent=rag_agent,
-            semantic_memory=semantic_memory,
-            chat_history=chat_history
-        )
-    
+        _unified_agent = UnifiedAgent(rag_agent=rag_agent, semantic_memory=semantic_memory, chat_history=chat_history)
     return _unified_agent

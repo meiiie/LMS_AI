@@ -14,20 +14,23 @@ alembic==1.13.1
 pgvector==0.2.5
 
 # --- AI CORE STACK (2025 STABLE - CHỈ THỊ SỐ 15) ---
+# Cập nhật: 5/12/2025 - LangChain 1.x + Manual ReAct pattern
 
 # LangChain Ecosystem (Stable 1.x)
-langchain>=1.1.0           # Core Framework ổn định
-langchain-core>=0.3.10     # Base abstractions
-langchain-community>=0.3.5 # Community tools
-langchain-openai>=0.2.0    # OpenAI integration
+langchain>=1.1.0           # Core Framework GA
+langchain-core>=1.1.0      # Base abstractions
+langchain-community>=0.4.0 # Community tools
+langchain-openai>=1.1.0    # OpenAI integration
+langchain-text-splitters>=1.0.0  # Text splitting utilities
 
-# LangGraph (Agent Orchestration - BẮT BUỘC cho create_react_agent)
-langgraph>=0.2.20          # Unified Agent với ReAct pattern
+# LangGraph (Agent Orchestration)
+langgraph>=1.0.0           # Agent framework
+langgraph-checkpoint>=3.0.0  # Checkpointing
+langgraph-prebuilt>=1.0.0  # Prebuilt components
 
 # LLM Providers
-langchain-google-genai>=2.0.0  # Hỗ trợ Gemini 2.5 Flash & Tool Calling
+langchain-google-genai>=3.2.0  # Hỗ trợ Gemini 2.5 Flash & Tool Calling
 google-generativeai>=0.8.0     # Google AI SDK
-google-genai>=0.4.0            # Google GenAI SDK mới
 
 # Semantic Memory (v0.3)
 numpy>=1.24.0
