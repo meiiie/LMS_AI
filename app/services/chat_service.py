@@ -48,10 +48,20 @@ except ImportError:
 
 # Unified Agent (CHỈ THỊ KỸ THUẬT SỐ 13)
 try:
-    from app.engine.unified_agent import UnifiedAgent, get_unified_agent
+    from app.engine.unified_agent import (
+        UnifiedAgent, 
+        get_unified_agent,
+        get_last_retrieved_sources,
+        clear_retrieved_sources
+    )
     UNIFIED_AGENT_AVAILABLE = True
 except ImportError:
     UNIFIED_AGENT_AVAILABLE = False
+    # Fallback functions
+    def get_last_retrieved_sources():
+        return []
+    def clear_retrieved_sources():
+        pass
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +254,9 @@ class ChatService:
         if self._unified_agent is not None:
             logger.info("[UNIFIED AGENT] Processing with LLM-driven orchestration (ReAct)")
             
+            # CHỈ THỊ KỸ THUẬT SỐ 16: Clear sources trước mỗi request
+            clear_retrieved_sources()
+            
             # Build conversation history as list for UnifiedAgent
             history_list = []
             if self._chat_history.is_available():
@@ -263,11 +276,26 @@ class ChatService:
                 user_role=user_role.value
             )
             
+            # CHỈ THỊ KỸ THUẬT SỐ 16: Lấy sources từ tool_maritime_search
+            retrieved_sources = get_last_retrieved_sources()
+            sources_list = None
+            if retrieved_sources:
+                sources_list = [
+                    Source(
+                        node_id=s.get("node_id", ""),
+                        title=s.get("title", ""),
+                        source_type="knowledge_graph",
+                        content_snippet=s.get("content", "")[:200]  # Truncate for API
+                    )
+                    for s in retrieved_sources
+                ]
+                logger.info(f"[UNIFIED AGENT] Retrieved {len(sources_list)} sources for API response")
+            
             # Convert to ProcessingResult
             result = ProcessingResult(
                 message=unified_result.get("content", ""),
-                agent_type=AgentType.CHAT,  # UnifiedAgent handles all
-                sources=None,  # TODO: Extract sources from tool results
+                agent_type=AgentType.RAG if sources_list else AgentType.CHAT,
+                sources=sources_list,
                 metadata={
                     "unified_agent": True,
                     "tools_used": unified_result.get("tools_used", []),

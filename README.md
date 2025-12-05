@@ -700,6 +700,7 @@ TOTAL CONNECTIONS: 4 (down from 11)
 - **google-genai SDK Missing**: Them `google-genai>=0.3.0` vao requirements.txt
 - **Semantic Memory Embedding**: Fix loi "No module named 'google.genai'" khien bot khong nho ten user
 - **httpx Version**: Cap nhat httpx>=0.28.1 (yeu cau boi google-genai)
+- **Sources Missing in API Response**: Fix loi mat nguon trich dan khi dung Unified Agent (CHI THI SO 16)
 
 ### Da giai quyet (v0.7.0)
 - **LangChain/LangGraph Upgrade**: Nang cap tu 0.1.x len 1.1.x (LangChain) va 1.0.x (LangGraph)

@@ -76,6 +76,10 @@ _semantic_memory = None
 _chat_history = None
 _user_cache: Dict[str, Dict[str, Any]] = {}
 
+# CHỈ THỊ KỸ THUẬT SỐ 16: Lưu sources từ tool_maritime_search
+# Để API có thể trả về sources trong response
+_last_retrieved_sources: List[Dict[str, str]] = []
+
 
 # ============================================================================
 # TOOL DEFINITIONS (LangChain @tool decorator)
@@ -84,7 +88,7 @@ _user_cache: Dict[str, Dict[str, Any]] = {}
 @tool(description="Tra cứu các quy tắc, luật lệ hàng hải (COLREGs, SOLAS, MARPOL) hoặc thông tin kỹ thuật về tàu biển. CHỈ gọi khi user hỏi về kiến thức chuyên môn hàng hải.")
 async def tool_maritime_search(query: str) -> str:
     """Search maritime regulations and knowledge base."""
-    global _rag_agent
+    global _rag_agent, _last_retrieved_sources
     
     if not _rag_agent:
         return "Lỗi: RAG Agent không khả dụng. Không thể tra cứu kiến thức."
@@ -94,14 +98,30 @@ async def tool_maritime_search(query: str) -> str:
         response = await _rag_agent.query(query, user_role="student")
         
         result = response.content
+        
+        # CHỈ THỊ KỸ THUẬT SỐ 16: Lưu sources để API trả về
         if response.citations:
-            sources = [f"- {c.title}" for c in response.citations[:3]]
-            result += "\n\n**Nguồn tham khảo:**\n" + "\n".join(sources)
+            _last_retrieved_sources = [
+                {
+                    "node_id": c.node_id,
+                    "title": c.title,
+                    "content": c.source[:500] if c.source else ""  # Truncate for API
+                }
+                for c in response.citations[:5]  # Top 5 sources
+            ]
+            logger.info(f"[TOOL] Saved {len(_last_retrieved_sources)} sources for API response")
+            
+            # Also append to text for LLM context
+            sources_text = [f"- {c.title}" for c in response.citations[:3]]
+            result += "\n\n**Nguồn tham khảo:**\n" + "\n".join(sources_text)
+        else:
+            _last_retrieved_sources = []
         
         return result
         
     except Exception as e:
         logger.error(f"Maritime search error: {e}")
+        _last_retrieved_sources = []
         return f"Lỗi khi tra cứu: {str(e)}"
 
 
@@ -369,3 +389,26 @@ def get_unified_agent(rag_agent=None, semantic_memory=None, chat_history=None) -
     if _unified_agent is None:
         _unified_agent = UnifiedAgent(rag_agent=rag_agent, semantic_memory=semantic_memory, chat_history=chat_history)
     return _unified_agent
+
+
+def get_last_retrieved_sources() -> List[Dict[str, str]]:
+    """
+    Get sources from the last tool_maritime_search call.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 16: Trả về sources cho API response.
+    
+    Returns:
+        List of source dicts with node_id, title, content
+    """
+    global _last_retrieved_sources
+    return _last_retrieved_sources.copy()
+
+
+def clear_retrieved_sources() -> None:
+    """
+    Clear the last retrieved sources.
+    
+    Should be called at the start of each request to avoid stale data.
+    """
+    global _last_retrieved_sources
+    _last_retrieved_sources = []
