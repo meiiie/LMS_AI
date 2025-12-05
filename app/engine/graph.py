@@ -156,15 +156,22 @@ class IntentClassifier:
         word_count = len(message.split())
         
         # =================================================================
-        # 1. ƯU TIÊN TUYỆT ĐỐI: Greeting Check (Chào hỏi)
-        # Nếu câu ngắn (< 20 từ) VÀ có từ chào -> Là CHAT AGENT
-        # (Bất kể có từ khóa chuyên ngành hay không)
+        # 1. ƯU TIÊN TUYỆT ĐỐI: Greeting/Introduction Check
+        # Nếu có từ chào HOẶC giới thiệu bản thân -> LUÔN route đến CHAT AGENT
+        # (Bất kể có từ khóa chuyên ngành hay không, bất kể độ dài)
         # =================================================================
-        greetings = ["xin chào", "chào", "hello", "hi ", "tôi là", "tên tôi"]
-        is_greeting = any(g in message_lower for g in greetings)
+        greetings = ["xin chào", "chào bạn", "hello", "hi "]
+        introductions = ["tôi là", "tên tôi", "mình là", "i am", "my name is", 
+                         "tôi tên", "em là", "em tên"]
         
-        if is_greeting and word_count < 20:
-            logger.info(f"[ROUTING] Greeting detected (< 20 words), routing to CHAT")
+        is_greeting = any(g in message_lower for g in greetings)
+        is_introduction = any(intro in message_lower for intro in introductions)
+        
+        # CRITICAL: Greeting/Introduction LUÔN route đến Chat Agent
+        # Không quan tâm có keyword "hàng hải" hay không
+        if is_greeting or is_introduction:
+            logger.info(f"[ROUTING] Greeting/Introduction detected: greeting={is_greeting}, intro={is_introduction}")
+            logger.info(f"[ROUTING] Message: '{message[:50]}...' -> CHAT AGENT")
             return Intent(
                 type=IntentType.GENERAL,
                 confidence=1.0,
