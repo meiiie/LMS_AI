@@ -53,19 +53,34 @@ class PromptLoader:
             "admin": "assistant.yaml"
         }
         
+        # Log prompts directory for debugging deployment issues
+        logger.info(f"PromptLoader: Looking for YAML files in {self._prompts_dir}")
+        logger.info(f"PromptLoader: Directory exists: {self._prompts_dir.exists()}")
+        
+        if self._prompts_dir.exists():
+            try:
+                files_in_dir = list(self._prompts_dir.glob("*.yaml"))
+                logger.info(f"PromptLoader: Found YAML files: {[f.name for f in files_in_dir]}")
+            except Exception as e:
+                logger.warning(f"PromptLoader: Could not list directory: {e}")
+        
+        loaded_count = 0
         for role, filename in yaml_files.items():
             filepath = self._prompts_dir / filename
             if filepath.exists():
                 try:
                     with open(filepath, "r", encoding="utf-8") as f:
                         self._personas[role] = yaml.safe_load(f)
-                    logger.info(f"Loaded persona for role '{role}' from {filename}")
+                    logger.info(f"✅ Loaded persona for role '{role}' from {filename}")
+                    loaded_count += 1
                 except Exception as e:
-                    logger.error(f"Failed to load {filename}: {e}")
+                    logger.error(f"❌ Failed to load {filename}: {e}")
                     self._personas[role] = self._get_default_persona()
             else:
-                logger.warning(f"Persona file not found: {filepath}")
+                logger.warning(f"⚠️ Persona file not found: {filepath} - using default")
                 self._personas[role] = self._get_default_persona()
+        
+        logger.info(f"PromptLoader: Loaded {loaded_count}/{len(yaml_files)} persona files")
     
     def _get_default_persona(self) -> Dict[str, Any]:
         """Get default persona if YAML not found."""
@@ -88,6 +103,41 @@ class PromptLoader:
         """
         return self._personas.get(role, self._personas.get("student", {}))
     
+    def _replace_template_variables(
+        self,
+        text: str,
+        user_name: Optional[str] = None,
+        **kwargs
+    ) -> str:
+        """
+        Replace template variables in text with actual values.
+        
+        Supported variables:
+        - {{user_name}} -> User's name from Memory
+        
+        Args:
+            text: Text containing template variables
+            user_name: User's name to substitute
+            **kwargs: Additional variables for future expansion
+            
+        Returns:
+            Text with variables replaced
+        """
+        if not text:
+            return text
+        
+        # Replace {{user_name}} with actual name or fallback
+        if user_name:
+            text = text.replace("{{user_name}}", user_name)
+        else:
+            # Fallback: remove the variable or use generic term
+            text = text.replace("{{user_name}}", "bạn")
+        
+        # Future: Add more template variables here
+        # text = text.replace("{{variable}}", value)
+        
+        return text
+    
     def build_system_prompt(
         self,
         role: str,
@@ -98,31 +148,95 @@ class PromptLoader:
         """
         Build system prompt from persona configuration.
         
+        Supports both tutor.yaml and assistant.yaml formats with full YAML structure.
+        
         Args:
             role: User role (student, teacher, admin)
-            user_name: User's name if known
+            user_name: User's name if known (from Memory)
             conversation_summary: Summary of previous conversation
             user_facts: List of known facts about user
             
         Returns:
-            Complete system prompt string
+            Complete system prompt string with template variables replaced
         """
         persona = self.get_persona(role)
         
         # Build prompt sections
         sections = []
         
-        # Role and description
-        sections.append(f"Bạn là {persona.get('role', 'Maritime AI Assistant')}.")
-        if persona.get('description'):
-            sections.append(persona['description'])
+        # ============================================================
+        # PROFILE SECTION (from YAML profile.*)
+        # ============================================================
+        profile = persona.get('profile', {})
+        if profile:
+            profile_name = profile.get('name', 'Maritime AI')
+            profile_role = profile.get('role', 'Assistant')
+            sections.append(f"Bạn là **{profile_name}** - {profile_role}.")
+            
+            if profile.get('backstory'):
+                sections.append(f"\n{profile['backstory'].strip()}")
+        else:
+            # Fallback for old format
+            role_name = persona.get('role', 'Maritime AI Assistant')
+            sections.append(f"Bạn là {role_name}.")
+            if persona.get('description'):
+                sections.append(persona['description'])
+        
+        # ============================================================
+        # STYLE SECTION (from YAML style.*)
+        # ============================================================
+        style = persona.get('style', {})
         
         # Tone
-        if persona.get('tone'):
-            tone_text = "\n".join(f"- {t}" for t in persona['tone'])
-            sections.append(f"\nGIỌNG VĂN:\n{tone_text}")
+        tone = style.get('tone') or persona.get('tone', [])
+        if tone:
+            sections.append("\nGIỌNG VĂN:")
+            for t in tone:
+                sections.append(f"- {t}")
         
-        # Instructions
+        # Formatting rules
+        formatting = style.get('formatting', [])
+        if formatting:
+            sections.append("\nĐỊNH DẠNG:")
+            for f in formatting:
+                sections.append(f"- {f}")
+        
+        # Addressing rules (for assistant.yaml)
+        addressing = style.get('addressing_rules', [])
+        if addressing:
+            sections.append("\nCÁCH XƯNG HÔ:")
+            for a in addressing:
+                sections.append(f"- {a}")
+        
+        # ============================================================
+        # THOUGHT PROCESS (from YAML thought_process.*)
+        # ============================================================
+        thought_process = persona.get('thought_process', {})
+        if thought_process:
+            sections.append("\nQUY TRÌNH SUY NGHĨ (Trước khi trả lời):")
+            for step, instruction in thought_process.items():
+                # Format: "1_analyze" -> "1. analyze"
+                step_num = step.split('_')[0] if '_' in step else step
+                sections.append(f"{step_num}. {instruction}")
+        
+        # ============================================================
+        # DIRECTIVES SECTION (from YAML directives.*)
+        # ============================================================
+        directives = persona.get('directives', {})
+        if directives:
+            if directives.get('dos'):
+                sections.append("\nNÊN LÀM:")
+                for rule in directives['dos']:
+                    # Replace template variables like {{user_name}}
+                    rule = self._replace_template_variables(rule, user_name)
+                    sections.append(f"- {rule}")
+            
+            if directives.get('donts'):
+                sections.append("\nKHÔNG NÊN:")
+                for rule in directives['donts']:
+                    sections.append(f"- {rule}")
+        
+        # Instructions (legacy format)
         instructions = persona.get('instructions', {})
         if instructions:
             sections.append("\nQUY TẮC ỨNG XỬ:")
@@ -131,32 +245,46 @@ class PromptLoader:
                     for rule in rules:
                         sections.append(f"- {rule}")
         
-        # User context
+        # ============================================================
+        # USER CONTEXT (from Memory - CRITICAL for personalization)
+        # ============================================================
         if user_name or user_facts:
-            sections.append("\nTHÔNG TIN NGƯỜI DÙNG:")
+            sections.append("\n--- THÔNG TIN NGƯỜI DÙNG (từ Memory) ---")
             if user_name:
-                sections.append(f"- Tên: {user_name}")
+                sections.append(f"- Tên: **{user_name}**")
             if user_facts:
                 for fact in user_facts[:5]:  # Limit to 5 facts
                     sections.append(f"- {fact}")
         
-        # Conversation summary
+        # ============================================================
+        # CONVERSATION SUMMARY (from MemorySummarizer)
+        # ============================================================
         if conversation_summary:
-            sections.append(f"\nTÓM TẮT HỘI THOẠI TRƯỚC:\n{conversation_summary}")
+            sections.append(f"\n--- TÓM TẮT HỘI THOẠI TRƯỚC ---\n{conversation_summary}")
         
-        # Few-shot examples
+        # ============================================================
+        # TOOLS INSTRUCTION (Required for ReAct Agent)
+        # ============================================================
+        sections.append("\n--- SỬ DỤNG CÔNG CỤ (TOOLS) ---")
+        sections.append("- Hỏi về luật hàng hải, quy tắc, tàu biển -> BẮT BUỘC gọi `tool_maritime_search`. ĐỪNG bịa.")
+        sections.append("- User giới thiệu tên/tuổi/trường/nghề -> Gọi `tool_save_user_info` để ghi nhớ.")
+        sections.append("- Cần biết tên user -> Gọi `tool_get_user_info`.")
+        sections.append("- Chào hỏi xã giao, than vãn -> Trả lời trực tiếp, KHÔNG cần tool.")
+        
+        # ============================================================
+        # FEW-SHOT EXAMPLES (from YAML few_shot_examples)
+        # ============================================================
         examples = persona.get('few_shot_examples', [])
         if examples:
-            sections.append("\nVÍ DỤ CÁCH TRẢ LỜI:")
-            for ex in examples[:3]:  # Limit to 3 examples
+            sections.append("\n--- VÍ DỤ CÁCH TRẢ LỜI ---")
+            for ex in examples[:4]:  # Limit to 4 examples
                 context = ex.get('context', '')
                 user_msg = ex.get('user', '')
                 ai_msg = ex.get('ai', '')
                 if user_msg and ai_msg:
-                    sections.append(f"[{context}]")
+                    sections.append(f"\n[{context}]")
                     sections.append(f"User: {user_msg}")
                     sections.append(f"AI: {ai_msg}")
-                    sections.append("")
         
         return "\n".join(sections)
     

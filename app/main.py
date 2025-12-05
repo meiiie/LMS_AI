@@ -76,6 +76,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"⚠️ pgvector validation failed: {e} (service will continue)")
     
+    # Validate YAML persona files (CHỈ THỊ 16 - Humanization)
+    try:
+        from app.prompts.prompt_loader import get_prompt_loader
+        prompt_loader = get_prompt_loader()
+        # This will log which files were found/loaded
+        logger.info("✅ PromptLoader initialized (persona YAML files checked)")
+    except Exception as e:
+        logger.warning(f"⚠️ PromptLoader initialization failed: {e} (using defaults)")
+    
     logger.info(f"🚀 {settings.app_name} started successfully")
     
     yield

@@ -308,13 +308,37 @@ class ChatService:
                         "content": msg.content
                     })
             
-            # Process with UnifiedAgent
+            # CHỈ THỊ SỐ 16: Get user facts from semantic memory for personalization
+            user_facts = []
+            if self._semantic_memory is not None:
+                try:
+                    context = await self._semantic_memory.retrieve_context(
+                        user_id=user_id,
+                        query=message,
+                        include_user_facts=True
+                    )
+                    user_facts = context.user_facts if context.user_facts else []
+                except Exception as e:
+                    logger.warning(f"Failed to get user facts: {e}")
+            
+            # CHỈ THỊ SỐ 17: Get conversation summary from MemorySummarizer
+            conversation_summary = None
+            if self._memory_summarizer is not None:
+                try:
+                    conversation_summary = await self._memory_summarizer.get_summary_async(str(session_id))
+                except Exception as e:
+                    logger.warning(f"Failed to get conversation summary: {e}")
+            
+            # Process with UnifiedAgent (CHỈ THỊ SỐ 16: Pass user_name for {{user_name}} replacement)
             unified_result = await self._unified_agent.process(
                 message=message,
                 user_id=user_id,
                 session_id=str(session_id),
                 conversation_history=history_list,
-                user_role=user_role.value
+                user_role=user_role.value,
+                user_name=user_name,  # CHỈ THỊ SỐ 16: Thay thế {{user_name}} trong YAML
+                user_facts=user_facts,  # CHỈ THỊ SỐ 16: Facts từ Semantic Memory
+                conversation_summary=conversation_summary  # CHỈ THỊ SỐ 17: Summary từ MemorySummarizer
             )
             
             # CHỈ THỊ KỸ THUẬT SỐ 16: Lấy sources từ tool_maritime_search

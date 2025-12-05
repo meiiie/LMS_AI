@@ -96,6 +96,7 @@ _rag_agent = None
 _semantic_memory = None
 _chat_history = None
 _user_cache: Dict[str, Dict[str, Any]] = {}
+_prompt_loader = None  # CHỈ THỊ SỐ 16: PromptLoader for dynamic persona
 
 # CHỈ THỊ KỸ THUẬT SỐ 16: Lưu sources từ tool_maritime_search
 # Để API có thể trả về sources trong response
@@ -224,19 +225,30 @@ class UnifiedAgent:
     
     CHỈ THỊ SỐ 13: LLM-driven orchestration (ReAct pattern)
     CHỈ THỊ SỐ 15: Sử dụng LangChain 1.x API (bind_tools + manual loop)
+    CHỈ THỊ SỐ 16: Dynamic persona via PromptLoader (YAML config)
     
     Approach: Manual ReAct với model.bind_tools() - API ổn định nhất
     """
     
-    def __init__(self, rag_agent=None, semantic_memory=None, chat_history=None):
-        global _rag_agent, _semantic_memory, _chat_history
+    def __init__(self, rag_agent=None, semantic_memory=None, chat_history=None, prompt_loader=None):
+        global _rag_agent, _semantic_memory, _chat_history, _prompt_loader
         
         _rag_agent = rag_agent
         _semantic_memory = semantic_memory
         _chat_history = chat_history
+        _prompt_loader = prompt_loader
         
         self._llm = self._init_llm()
         self._llm_with_tools = self._init_llm_with_tools()
+        
+        # CHỈ THỊ SỐ 16: Initialize PromptLoader if not provided
+        if _prompt_loader is None:
+            try:
+                from app.prompts.prompt_loader import get_prompt_loader
+                _prompt_loader = get_prompt_loader()
+                logger.info("✅ PromptLoader initialized for dynamic persona")
+            except Exception as e:
+                logger.warning(f"PromptLoader not available: {e}")
         
         logger.info("UnifiedAgent initialized (Manual ReAct)")
     
@@ -280,13 +292,25 @@ class UnifiedAgent:
         user_id: str,
         session_id: str,
         conversation_history: List[Dict] = None,
-        user_role: str = "student"
+        user_role: str = "student",
+        user_name: Optional[str] = None,
+        user_facts: Optional[List[str]] = None,
+        conversation_summary: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Process a message using Manual ReAct pattern."""
+        """
+        Process a message using Manual ReAct pattern.
+        
+        CHỈ THỊ SỐ 16: Dynamic persona via PromptLoader
+        - user_name: Tên user từ Memory (thay thế {{user_name}} trong YAML)
+        - user_facts: Facts về user từ Semantic Memory
+        - conversation_summary: Tóm tắt hội thoại từ MemorySummarizer
+        """
         global _user_cache
         
         # Set current user context for tools
         _user_cache["current_user"] = _user_cache.get(user_id, {})
+        if user_name:
+            _user_cache["current_user"]["name"] = user_name
         
         if not self._llm_with_tools:
             return {
@@ -297,7 +321,14 @@ class UnifiedAgent:
             }
         
         try:
-            messages = self._build_messages(message, conversation_history)
+            messages = self._build_messages(
+                message=message,
+                conversation_history=conversation_history,
+                user_role=user_role,
+                user_name=user_name,
+                user_facts=user_facts,
+                conversation_summary=conversation_summary
+            )
             return await self._manual_react(messages, user_id)
                 
         except Exception as e:
@@ -309,9 +340,40 @@ class UnifiedAgent:
                 "error": str(e)
             }
     
-    def _build_messages(self, message: str, conversation_history: List[Dict] = None) -> List:
-        """Build message list with SystemMessage for ReAct."""
-        messages = [SystemMessage(content=SYSTEM_PROMPT)]
+    def _build_messages(
+        self,
+        message: str,
+        conversation_history: List[Dict] = None,
+        user_role: str = "student",
+        user_name: Optional[str] = None,
+        user_facts: Optional[List[str]] = None,
+        conversation_summary: Optional[str] = None
+    ) -> List:
+        """
+        Build message list with SystemMessage for ReAct.
+        
+        CHỈ THỊ SỐ 16: Dynamic persona via PromptLoader
+        - Sử dụng YAML config thay vì hardcoded SYSTEM_PROMPT
+        - Thay thế {{user_name}} bằng tên thật từ Memory
+        """
+        global _prompt_loader
+        
+        # Build dynamic system prompt from YAML config
+        system_prompt = SYSTEM_PROMPT  # Fallback to hardcoded
+        
+        if _prompt_loader is not None:
+            try:
+                system_prompt = _prompt_loader.build_system_prompt(
+                    role=user_role,
+                    user_name=user_name,  # Thay thế {{user_name}}
+                    conversation_summary=conversation_summary,
+                    user_facts=user_facts
+                )
+                logger.debug(f"[PromptLoader] Built dynamic prompt for role={user_role}, user={user_name}")
+            except Exception as e:
+                logger.warning(f"PromptLoader failed, using fallback: {e}")
+        
+        messages = [SystemMessage(content=system_prompt)]
         
         if conversation_history:
             for msg in conversation_history[-10:]:

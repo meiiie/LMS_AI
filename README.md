@@ -45,19 +45,63 @@ Maritime AI Tutor Service là một **Backend AI microservice** được thiết
 | **RAG Agent** | Knowledge Graph queries | `solas`, `colregs`, `marpol`, `rule`, `luật`, `quy định`, `tàu`, `nhường đường`, `cắt hướng`... (70 keywords) |
 | **Tutor Agent** | Structured teaching | `teach`, `learn`, `quiz`, `dạy`, `học`, `giải thích`... |
 
+### Dynamic Persona System (v0.7.4)
+
+Hệ thống persona được cấu hình qua file YAML, hỗ trợ cá nhân hóa theo role và user.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         PERSONA CONFIGURATION                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   app/prompts/                                                               │
+│   ├── tutor.yaml      → Student Role (Captain AI - Mentor)                  │
+│   └── assistant.yaml  → Teacher/Admin Role (Maritime Pro Assistant)         │
+│                                                                              │
+│   YAML Structure:                                                            │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │ profile:                                                             │   │
+│   │   name: "Captain AI"                                                 │   │
+│   │   role: "Senior Maritime Mentor"                                     │   │
+│   │   backstory: "Bạn là Thuyền phó 1 đã về hưu..."                     │   │
+│   │                                                                      │   │
+│   │ style:                                                               │   │
+│   │   tone: ["Ấm áp", "Hài hước nghề biển"]                             │   │
+│   │   addressing_rules: ["Thầy/Cô", "Anh/Chị"]  # For assistant.yaml    │   │
+│   │                                                                      │   │
+│   │ thought_process:                                                     │   │
+│   │   1_analyze: "User đang hỏi kiến thức hay chia sẻ cảm xúc?"         │   │
+│   │   2_empathy: "Nếu user mệt -> Đồng cảm trước"                       │   │
+│   │                                                                      │   │
+│   │ directives:                                                          │   │
+│   │   dos: ["Gọi tên user ({{user_name}}) khi nhấn mạnh"]               │   │
+│   │   donts: ["KHÔNG bắt đầu bằng 'Chào bạn'"]                          │   │
+│   │                                                                      │   │
+│   │ few_shot_examples:                                                   │   │
+│   │   - context: "User than mệt"                                         │   │
+│   │     user: "Học COLREGs chán quá"                                     │   │
+│   │     ai: "Ha ha, bệnh chung của dân đi biển rồi! 🌊"                  │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│   Template Variables:                                                        │
+│   • {{user_name}} → Replaced with actual name from Memory                   │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 ### Role-Based Prompting
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Student Role → AI acts as TUTOR                            │
-│  • Tone: Encouraging, supportive, patient                   │
-│  • Explains technical terms in detail                       │
-│  • Ends with follow-up questions                            │
+│  Student Role → tutor.yaml (Captain AI)                     │
+│  • Persona: Thuyền phó 1 về hưu, truyền lửa nghề           │
+│  • Tone: Ấm áp, hài hước, như người anh đi trước           │
+│  • Style: Socratic method, ví dụ thực tế trên boong tàu    │
 ├─────────────────────────────────────────────────────────────┤
-│  Teacher/Admin Role → AI acts as ASSISTANT                  │
-│  • Tone: Professional, concise, accurate                    │
-│  • Cites exact regulations and codes                        │
-│  • No basic term explanations                               │
+│  Teacher/Admin Role → assistant.yaml (Maritime Pro)         │
+│  • Persona: Cán bộ hỗ trợ học thuật                        │
+│  • Tone: Lịch sự, tôn trọng, kính ngữ phù hợp              │
+│  • Style: Xưng hô đúng mực (Thầy/Cô, Anh/Chị)              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -672,6 +716,7 @@ TOTAL CONNECTIONS: 4 (down from 11)
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.7.4 | 2025-12-05 | **PERSONA SYSTEM**: Dynamic YAML Persona - Full support for tutor.yaml/assistant.yaml structure, Template variable `{{user_name}}` replacement from Memory |
 | v0.7.3 | 2025-12-05 | **WIRING**: CHỈ THỊ SỐ 17 - Tích hợp PromptLoader & MemorySummarizer vào ChatService |
 | v0.7.2 | 2025-12-05 | **HUMANIZATION**: CHỈ THỊ SỐ 16 - YAML Persona Config, Memory Summarizer, Natural conversation style |
 | v0.7.1 | 2025-12-05 | **CRITICAL FIX**: google-genai SDK - Fix Semantic Memory embedding failure (No module named 'google.genai') |
@@ -697,6 +742,13 @@ TOTAL CONNECTIONS: 4 (down from 11)
 ### Da giai quyet (v0.5.3)
 - **Agent Routing**: Cau hoi tieng Viet da duoc dinh tuyen dung den RAG Agent
 - **Do chinh xac trich dan**: Do chinh xac Top-1 tang tu 20% len 100%
+
+### Da giai quyet (v0.7.4)
+- **Dynamic YAML Persona**: PromptLoader ho tro day du cau truc YAML moi (profile, style, thought_process, directives)
+- **Template Variable**: `{{user_name}}` duoc thay the bang ten that tu Memory
+- **Role-Based Persona**: Student dung tutor.yaml (Captain AI), Teacher/Admin dung assistant.yaml (Maritime Pro Assistant)
+- **Tools Instruction**: Tu dong them huong dan su dung tools vao system prompt
+- **Addressing Rules**: Ho tro quy tac xung ho cho Teacher/Admin (Thay/Co, Anh/Chi)
 
 ### Da giai quyet (v0.7.3)
 - **Wiring & Activation**: Tich hop PromptLoader va MemorySummarizer vao ChatService
