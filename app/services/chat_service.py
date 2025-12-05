@@ -2,8 +2,8 @@
 Chat Service - Integration layer for all components.
 
 This service wires together:
-- Agent Orchestrator (LangGraph)
-- Chat Agent, RAG Agent, Tutor Agent
+- Unified Agent (CHỈ THỊ SỐ 13) - LLM-driven orchestration (ReAct pattern)
+- OR Legacy: Agent Orchestrator (LangGraph) with IntentClassifier
 - Semantic Memory Engine v0.3 (pgvector + Gemini embeddings)
 - Knowledge Graph (Neo4j GraphRAG)
 - Guardrails
@@ -13,6 +13,7 @@ This service wires together:
 **Feature: maritime-ai-tutor**
 **Validates: Requirements 1.1, 2.1, 2.2, 2.3**
 **Spec: CHỈ THỊ KỸ THUẬT SỐ 06 - Semantic Memory v0.3**
+**Spec: CHỈ THỊ KỸ THUẬT SỐ 13 - Unified Agent (Tool-Use Architecture)**
 """
 
 import logging
@@ -44,6 +45,13 @@ try:
     SEMANTIC_MEMORY_AVAILABLE = True
 except ImportError:
     SEMANTIC_MEMORY_AVAILABLE = False
+
+# Unified Agent (CHỈ THỊ KỸ THUẬT SỐ 13)
+try:
+    from app.engine.unified_agent import UnifiedAgent, get_unified_agent
+    UNIFIED_AGENT_AVAILABLE = True
+except ImportError:
+    UNIFIED_AGENT_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -93,16 +101,38 @@ class ChatService:
                 logger.warning(f"Failed to initialize Semantic Memory: {e}")
                 self._semantic_memory = None
         
-        # Agents
+        # Agents (Legacy - kept for backward compatibility)
         self._orchestrator = AgentOrchestrator()
         self._chat_agent = ChatAgent()  # No legacy memory, uses Semantic Memory v0.3
         self._rag_agent = RAGAgent(knowledge_graph=self._knowledge_graph)
         self._tutor_agent = TutorAgent()
         
+        # Unified Agent (CHỈ THỊ KỸ THUẬT SỐ 13)
+        # This replaces IntentClassifier with LLM-driven orchestration
+        self._unified_agent: Optional[UnifiedAgent] = None
+        self._use_unified_agent = getattr(settings, 'use_unified_agent', True)  # Default: ON
+        
+        if UNIFIED_AGENT_AVAILABLE and self._use_unified_agent:
+            try:
+                self._unified_agent = UnifiedAgent(
+                    rag_agent=self._rag_agent,
+                    semantic_memory=self._semantic_memory,
+                    chat_history=self._chat_history
+                )
+                if self._unified_agent.is_available():
+                    logger.info("✅ Unified Agent (CHỈ THỊ SỐ 13) initialized - LLM-driven orchestration ENABLED")
+                else:
+                    logger.warning("Unified Agent not available, falling back to legacy IntentClassifier")
+                    self._unified_agent = None
+            except Exception as e:
+                logger.warning(f"Failed to initialize Unified Agent: {e}")
+                self._unified_agent = None
+        
         logger.info(f"Knowledge graph available: {self._knowledge_graph.is_available()}")
         logger.info(f"Chat history available: {self._chat_history.is_available()}")
         logger.info(f"Learning profile (Supabase) available: {self._supabase_profile_repo.is_available()}")
         logger.info(f"Semantic memory v0.3 available: {self._semantic_memory is not None}")
+        logger.info(f"Unified Agent (ReAct) available: {self._unified_agent is not None}")
         
         # Session tracking (in-memory fallback)
         self._sessions: dict[str, UUID] = {}  # user_id -> session_id
@@ -207,28 +237,74 @@ class ChatService:
         if semantic_context:
             conversation_history = f"{semantic_context}\n\n{conversation_history}".strip()
         
-        # Step 5: Process through orchestrator
-        orchestrator_response = self._orchestrator.process_message(
-            message=message,
-            session_id=str(session_id),
-            user_id=user_id
-        )
+        # ================================================================
+        # CHỈ THỊ KỸ THUẬT SỐ 13: UNIFIED AGENT (LLM-driven Orchestration)
+        # Thay vì dùng IntentClassifier cứng nhắc, để Gemini tự quyết định
+        # ================================================================
+        if self._unified_agent is not None:
+            logger.info("[UNIFIED AGENT] Processing with LLM-driven orchestration (ReAct)")
+            
+            # Build conversation history as list for UnifiedAgent
+            history_list = []
+            if self._chat_history.is_available():
+                recent_messages = self._chat_history.get_recent_messages(session_id)
+                for msg in recent_messages:
+                    history_list.append({
+                        "role": msg.role,
+                        "content": msg.content
+                    })
+            
+            # Process with UnifiedAgent
+            unified_result = await self._unified_agent.process(
+                message=message,
+                user_id=user_id,
+                session_id=str(session_id),
+                conversation_history=history_list,
+                user_role=user_role.value
+            )
+            
+            # Convert to ProcessingResult
+            result = ProcessingResult(
+                message=unified_result.get("content", ""),
+                agent_type=AgentType.CHAT,  # UnifiedAgent handles all
+                sources=None,  # TODO: Extract sources from tool results
+                metadata={
+                    "unified_agent": True,
+                    "tools_used": unified_result.get("tools_used", []),
+                    "iterations": unified_result.get("iterations", 1)
+                }
+            )
+            
+            logger.info(f"[UNIFIED AGENT] Tools used: {unified_result.get('tools_used', [])}")
         
-        # Step 6: Handle clarification request
-        if orchestrator_response.requires_clarification:
-            return self._create_clarification_response(orchestrator_response.content)
-        
-        # Step 7: Route to appropriate agent (with history context + role-based prompting + learning profile)
-        result = await self._route_to_agent(
-            agent_type=orchestrator_response.agent_type,
-            message=message,
-            user_id=user_id,
-            session_id=str(session_id),
-            conversation_history=conversation_history,
-            user_name=user_name,
-            user_role=user_role,  # Pass role for role-based prompting
-            learning_profile=learning_profile  # CHỈ THỊ SỐ 04
-        )
+        else:
+            # ================================================================
+            # LEGACY: Rule-based IntentClassifier (fallback)
+            # ================================================================
+            logger.info("[LEGACY] Processing with IntentClassifier (rule-based)")
+            
+            # Step 5: Process through orchestrator
+            orchestrator_response = self._orchestrator.process_message(
+                message=message,
+                session_id=str(session_id),
+                user_id=user_id
+            )
+            
+            # Step 6: Handle clarification request
+            if orchestrator_response.requires_clarification:
+                return self._create_clarification_response(orchestrator_response.content)
+            
+            # Step 7: Route to appropriate agent (with history context + role-based prompting + learning profile)
+            result = await self._route_to_agent(
+                agent_type=orchestrator_response.agent_type,
+                message=message,
+                user_id=user_id,
+                session_id=str(session_id),
+                conversation_history=conversation_history,
+                user_name=user_name,
+                user_role=user_role,  # Pass role for role-based prompting
+                learning_profile=learning_profile  # CHỈ THỊ SỐ 04
+            )
         
         # Step 8: Save AI response to history (use background task if provided)
         if self._chat_history.is_available():

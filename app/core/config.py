@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     semantic_memory_enabled: bool = Field(default=True, description="Enable semantic memory v0.3")
     summarization_token_threshold: int = Field(default=2000, description="Token threshold for summarization")
     
+    # Unified Agent Settings (CHỈ THỊ KỸ THUẬT SỐ 13)
+    use_unified_agent: bool = Field(default=True, description="Use Unified Agent (LLM-driven orchestration) instead of IntentClassifier")
+    
     # Vector Store
     chroma_host: str = Field(default="localhost", description="ChromaDB host")
     chroma_port: int = Field(default=8000, description="ChromaDB port")
