@@ -3,8 +3,8 @@ fastapi==0.109.2
 uvicorn[standard]==0.27.1
 gunicorn==21.2.0
 python-multipart==0.0.9
-pydantic==2.6.1
-pydantic-settings==2.1.0
+pydantic>=2.9.0            # Data validation v2 (CHỈ THỊ SỐ 15)
+pydantic-settings>=2.1.0
 
 # Database
 sqlalchemy==2.0.27
@@ -13,15 +13,21 @@ psycopg2-binary==2.9.9  # Sync PostgreSQL driver for SQLAlchemy (required for ch
 alembic==1.13.1
 pgvector==0.2.5
 
-# AI & LangChain (THE CRITICAL PART - PINNED VERSIONS)
-langchain==0.1.9
-langchain-community==0.0.24
-langchain-core==0.1.26
-langchain-openai==0.0.7
-langchain-google-genai==0.0.9
-google-generativeai==0.3.2
-google-genai==0.1.0
-langgraph==0.0.24
+# --- AI CORE STACK (2025 STABLE - CHỈ THỊ SỐ 15) ---
+
+# LangChain Ecosystem (Stable 1.x)
+langchain>=1.1.0           # Core Framework ổn định
+langchain-core>=0.3.10     # Base abstractions
+langchain-community>=0.3.5 # Community tools
+langchain-openai>=0.2.0    # OpenAI integration
+
+# LangGraph (Agent Orchestration - BẮT BUỘC cho create_react_agent)
+langgraph>=0.2.20          # Unified Agent với ReAct pattern
+
+# LLM Providers
+langchain-google-genai>=2.0.0  # Hỗ trợ Gemini 2.5 Flash & Tool Calling
+google-generativeai>=0.8.0     # Google AI SDK
+google-genai>=0.4.0            # Google GenAI SDK mới
 
 # Semantic Memory (v0.3)
 numpy>=1.24.0
