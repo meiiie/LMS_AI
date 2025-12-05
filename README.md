@@ -6,8 +6,8 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![LangChain](https://img.shields.io/badge/LangChain-0.1.9-1c3c3c?style=flat-square&logo=chainlink&logoColor=white)](https://langchain.com)
-[![LangGraph](https://img.shields.io/badge/LangGraph-0.0.24-purple?style=flat-square)](https://langchain.com)
+[![LangChain](https://img.shields.io/badge/LangChain-1.1.2-1c3c3c?style=flat-square&logo=chainlink&logoColor=white)](https://langchain.com)
+[![LangGraph](https://img.shields.io/badge/LangGraph-1.0.4-purple?style=flat-square)](https://langchain.com)
 [![Neo4j](https://img.shields.io/badge/Neo4j-5.28-008cc1?style=flat-square&logo=neo4j&logoColor=white)](https://neo4j.com)
 [![Supabase](https://img.shields.io/badge/Supabase-pgvector-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com)
 [![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev)
@@ -615,7 +615,8 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 | Category | Technology |
 |----------|------------|
 | **Framework** | FastAPI 0.109 |
-| **AI/LLM** | LangChain + LangGraph |
+| **AI/LLM** | LangChain 1.1.x + LangGraph 1.0.x |
+| **Agent Pattern** | Manual ReAct (bind_tools + loop) |
 | **LLM Provider** | Google Gemini 2.5 Flash |
 | **Embeddings** | Gemini text-embedding-004 (768 dims) |
 | **Graph Database** | Neo4j 5.28 + Full-text Search |
@@ -671,6 +672,7 @@ TOTAL CONNECTIONS: 4 (down from 11)
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.7.0 | 2025-12-05 | **MAJOR UPGRADE**: LangChain 1.1.x + LangGraph 1.0.x - Manual ReAct pattern với bind_tools(), loại bỏ deprecated create_react_agent |
 | v0.6.3 | 2025-12-05 | **CRITICAL FIX**: Shared Database Engine - Fix MaxClientsInSessionMode error on Supabase Free Tier |
 | v0.6.2 | 2025-12-05 | GET /api/v1/history/{user_id} - Paginated history retrieval for multi-device sync (Phase 2) |
 | v0.6.1 | 2025-12-04 | Chat History Management API - DELETE /api/v1/history/{user_id} with role-based access control |
@@ -692,6 +694,12 @@ TOTAL CONNECTIONS: 4 (down from 11)
 ### Da giai quyet (v0.5.3)
 - **Agent Routing**: Cau hoi tieng Viet da duoc dinh tuyen dung den RAG Agent
 - **Do chinh xac trich dan**: Do chinh xac Top-1 tang tu 20% len 100%
+
+### Da giai quyet (v0.7.0)
+- **LangChain/LangGraph Upgrade**: Nang cap tu 0.1.x len 1.1.x (LangChain) va 1.0.x (LangGraph)
+- **Manual ReAct Pattern**: Su dung `model.bind_tools()` + manual loop thay vi deprecated `create_react_agent`
+- **SystemMessage Support**: Them SystemMessage cho system prompt trong ReAct loop
+- **Gemini Response Handling**: Cai thien xu ly response format cua Gemini (list vs string)
 
 ### Da giai quyet (v0.6.3)
 - **MaxClientsInSessionMode**: Da khac phuc van de gioi han ket noi Supabase Free Tier
