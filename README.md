@@ -672,6 +672,7 @@ TOTAL CONNECTIONS: 4 (down from 11)
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.7.2 | 2025-12-05 | **HUMANIZATION**: CHỈ THỊ SỐ 16 - YAML Persona Config, Memory Summarizer, Natural conversation style |
 | v0.7.1 | 2025-12-05 | **CRITICAL FIX**: google-genai SDK - Fix Semantic Memory embedding failure (No module named 'google.genai') |
 | v0.7.0 | 2025-12-05 | **MAJOR UPGRADE**: LangChain 1.1.x + LangGraph 1.0.x - Manual ReAct pattern với bind_tools(), loại bỏ deprecated create_react_agent |
 | v0.6.3 | 2025-12-05 | **CRITICAL FIX**: Shared Database Engine - Fix MaxClientsInSessionMode error on Supabase Free Tier |
@@ -696,11 +697,17 @@ TOTAL CONNECTIONS: 4 (down from 11)
 - **Agent Routing**: Cau hoi tieng Viet da duoc dinh tuyen dung den RAG Agent
 - **Do chinh xac trich dan**: Do chinh xac Top-1 tang tu 20% len 100%
 
+### Da giai quyet (v0.7.2)
+- **YAML Persona Config**: Tach biet persona ra file YAML (tutor.yaml, assistant.yaml)
+- **Memory Summarizer**: Nen ky uc theo dot (Tiered Memory Architecture)
+- **Natural Conversation**: Cai thien System Prompt - AI tu nhien hon, it may moc
+- **Empathy First**: AI chia se cam xuc truoc khi tra loi (user than met/doi)
+
 ### Da giai quyet (v0.7.1)
 - **google-genai SDK Missing**: Them `google-genai>=0.3.0` vao requirements.txt
 - **Semantic Memory Embedding**: Fix loi "No module named 'google.genai'" khien bot khong nho ten user
 - **httpx Version**: Cap nhat httpx>=0.28.1 (yeu cau boi google-genai)
-- **Sources Missing in API Response**: Fix loi mat nguon trich dan khi dung Unified Agent (CHI THI SO 16)
+- **Sources Missing in API Response**: Fix loi mat nguon trich dan khi dung Unified Agent
 
 ### Da giai quyet (v0.7.0)
 - **LangChain/LangGraph Upgrade**: Nang cap tu 0.1.x len 1.1.x (LangChain) va 1.0.x (LangGraph)
