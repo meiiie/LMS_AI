@@ -672,6 +672,7 @@ TOTAL CONNECTIONS: 4 (down from 11)
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.7.3 | 2025-12-05 | **WIRING**: CHỈ THỊ SỐ 17 - Tích hợp PromptLoader & MemorySummarizer vào ChatService |
 | v0.7.2 | 2025-12-05 | **HUMANIZATION**: CHỈ THỊ SỐ 16 - YAML Persona Config, Memory Summarizer, Natural conversation style |
 | v0.7.1 | 2025-12-05 | **CRITICAL FIX**: google-genai SDK - Fix Semantic Memory embedding failure (No module named 'google.genai') |
 | v0.7.0 | 2025-12-05 | **MAJOR UPGRADE**: LangChain 1.1.x + LangGraph 1.0.x - Manual ReAct pattern với bind_tools(), loại bỏ deprecated create_react_agent |
@@ -696,6 +697,11 @@ TOTAL CONNECTIONS: 4 (down from 11)
 ### Da giai quyet (v0.5.3)
 - **Agent Routing**: Cau hoi tieng Viet da duoc dinh tuyen dung den RAG Agent
 - **Do chinh xac trich dan**: Do chinh xac Top-1 tang tu 20% len 100%
+
+### Da giai quyet (v0.7.3)
+- **Wiring & Activation**: Tich hop PromptLoader va MemorySummarizer vao ChatService
+- **Background Memory Summarization**: Nen ky uc chay ngam sau khi tra loi user
+- **Production Ready**: Tat ca module Humanization da duoc kich hoat
 
 ### Da giai quyet (v0.7.2)
 - **YAML Persona Config**: Tach biet persona ra file YAML (tutor.yaml, assistant.yaml)

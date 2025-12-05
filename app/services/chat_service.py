@@ -63,6 +63,23 @@ except ImportError:
     def clear_retrieved_sources():
         pass
 
+# CHỈ THỊ KỸ THUẬT SỐ 16 & 17: Humanization - PromptLoader & MemorySummarizer
+try:
+    from app.prompts import get_prompt_loader
+    PROMPT_LOADER_AVAILABLE = True
+except ImportError:
+    PROMPT_LOADER_AVAILABLE = False
+    def get_prompt_loader():
+        return None
+
+try:
+    from app.engine.memory_summarizer import get_memory_summarizer
+    MEMORY_SUMMARIZER_AVAILABLE = True
+except ImportError:
+    MEMORY_SUMMARIZER_AVAILABLE = False
+    def get_memory_summarizer():
+        return None
+
 logger = logging.getLogger(__name__)
 
 
@@ -138,9 +155,33 @@ class ChatService:
                 logger.warning(f"Failed to initialize Unified Agent: {e}")
                 self._unified_agent = None
         
+        # CHỈ THỊ KỸ THUẬT SỐ 16 & 17: Humanization Components
+        self._prompt_loader = None
+        self._memory_summarizer = None
+        
+        if PROMPT_LOADER_AVAILABLE:
+            try:
+                self._prompt_loader = get_prompt_loader()
+                logger.info("✅ PromptLoader (CHỈ THỊ SỐ 16) initialized - YAML Persona Config ENABLED")
+            except Exception as e:
+                logger.warning(f"Failed to initialize PromptLoader: {e}")
+        
+        if MEMORY_SUMMARIZER_AVAILABLE:
+            try:
+                self._memory_summarizer = get_memory_summarizer()
+                if self._memory_summarizer.is_available():
+                    logger.info("✅ MemorySummarizer (CHỈ THỊ SỐ 16) initialized - Tiered Memory ENABLED")
+                else:
+                    logger.warning("MemorySummarizer not available (no LLM)")
+                    self._memory_summarizer = None
+            except Exception as e:
+                logger.warning(f"Failed to initialize MemorySummarizer: {e}")
+        
         logger.info(f"Knowledge graph available: {self._knowledge_graph.is_available()}")
         logger.info(f"Chat history available: {self._chat_history.is_available()}")
         logger.info(f"Learning profile (Supabase) available: {self._supabase_profile_repo.is_available()}")
+        logger.info(f"PromptLoader available: {self._prompt_loader is not None}")
+        logger.info(f"MemorySummarizer available: {self._memory_summarizer is not None}")
         logger.info(f"Semantic memory v0.3 available: {self._semantic_memory is not None}")
         logger.info(f"Unified Agent (ReAct) available: {self._unified_agent is not None}")
         
@@ -347,6 +388,13 @@ class ChatService:
             background_save(
                 self._store_semantic_interaction_async,
                 user_id, message, result.message, str(session_id)
+            )
+        
+        # Step 8.6: CHỈ THỊ SỐ 17 - Summarize memory if needed (background)
+        if self._memory_summarizer is not None and background_save:
+            background_save(
+                self._summarize_memory_async,
+                str(session_id), message, result.message
             )
         
         # Step 9: Update learning profile stats (background)
@@ -678,6 +726,31 @@ class ChatService:
             logger.debug(f"Background stored semantic interaction for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to store semantic interaction: {e}")
+    
+    async def _summarize_memory_async(
+        self,
+        session_id: str,
+        message: str,
+        response: str
+    ) -> None:
+        """
+        Summarize conversation memory if needed (for BackgroundTasks).
+        
+        CHỈ THỊ KỸ THUẬT SỐ 17: Memory Summarizer Integration
+        
+        This runs in background after response is sent to user.
+        """
+        if self._memory_summarizer is None:
+            return
+        
+        try:
+            # Add messages to tiered memory
+            await self._memory_summarizer.add_message_async(session_id, "user", message)
+            await self._memory_summarizer.add_message_async(session_id, "assistant", response)
+            
+            logger.debug(f"Background added messages to MemorySummarizer for session {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to summarize memory: {e}")
 
 
 # Singleton instance
