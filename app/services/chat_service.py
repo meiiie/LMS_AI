@@ -331,20 +331,26 @@ class ChatService:
             result.message += "\n\n_Note: Please verify safety-critical information with official sources._"
         
         # Step 11: Create response (InternalChatResponse for API layer to convert)
+        # Build metadata based on whether UnifiedAgent or Legacy was used
+        response_metadata = {
+            "session_id": str(session_id),
+            "user_name": user_name,
+            "user_role": user_role.value,
+            "history_available": self._chat_history.is_available(),
+            **(result.metadata or {})
+        }
+        
+        # Add intent info only if using legacy orchestrator
+        if self._unified_agent is None:
+            response_metadata["intent"] = orchestrator_response.intent.type.value
+            response_metadata["confidence"] = orchestrator_response.intent.confidence
+        
         return InternalChatResponse(
             response_id=uuid4(),
             message=result.message,
             agent_type=result.agent_type,
             sources=result.sources,
-            metadata={
-                "session_id": str(session_id),
-                "intent": orchestrator_response.intent.type.value,
-                "confidence": orchestrator_response.intent.confidence,
-                "user_name": user_name,
-                "user_role": user_role.value,
-                "history_available": self._chat_history.is_available(),
-                **(result.metadata or {})
-            }
+            metadata=response_metadata
         )
 
     
