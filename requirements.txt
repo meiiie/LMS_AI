@@ -13,31 +13,29 @@ psycopg2-binary==2.9.9
 alembic==1.13.1
 pgvector==0.2.5
 
-# --- AI CORE STACK (2025 STABLE - CHỈ THỊ SỐ 15) ---
-# LangChain Ecosystem (Stable 1.x)
+# --- AI CORE STACK (FIXED) ---
 langchain>=1.1.0
 langchain-core>=1.1.0
 langchain-community>=0.4.0
 langchain-openai>=1.1.0
 langchain-text-splitters>=1.0.0
 
-# LangGraph (Agent Orchestration)
 langgraph>=1.0.0
 langgraph-checkpoint>=3.0.0
 langgraph-prebuilt>=1.0.0
 
-# LLM Providers
+# LLM Providers (FIXED CONFLICT)
+# Chỉ cần dòng này, nó sẽ tự cài google-generativeai tương thích
 langchain-google-genai>=3.2.0
-google-generativeai>=0.8.0
 
-# Semantic Memory (v0.3)
+# Semantic Memory
 numpy>=1.24.0
 scikit-learn>=1.3.0
 
 # Graph DB
 neo4j~=5.28.0
 
-# PDF Processing (Knowledge Ingestion)
+# PDF Processing
 pypdf>=4.0.0
 
 # Utils
@@ -46,9 +44,8 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-dotenv==1.0.1
 slowapi==0.1.9
-# ĐÃ XÓA tiktoken==0.6.0 để tránh xung đột dependencies
 
-# Testing (Nới lỏng version để tránh conflict)
+# Testing
 pytest>=7.4.4
 pytest-asyncio>=0.23.4
 pytest-cov>=4.1.0
