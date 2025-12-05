@@ -78,9 +78,14 @@ class GeminiOptimizedEmbeddings:
                 from google import genai
                 self._client = genai.Client(api_key=self._api_key)
                 logger.info(f"Initialized Gemini client with model: {self._model_name}")
-            except ImportError:
-                logger.error("google-genai package not installed. Run: pip install google-genai")
-                raise
+            except ImportError as e:
+                error_msg = (
+                    "google-genai package not installed. "
+                    "Run: pip install google-genai>=0.3.0 "
+                    "This is required for Semantic Memory embeddings."
+                )
+                logger.error(error_msg)
+                raise ImportError(error_msg) from e
             except Exception as e:
                 logger.error(f"Failed to initialize Gemini client: {e}")
                 raise

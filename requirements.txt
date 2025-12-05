@@ -28,6 +28,10 @@ langgraph-prebuilt>=1.0.0
 # Chỉ cần dòng này, nó sẽ tự cài google-generativeai tương thích
 langchain-google-genai>=3.2.0
 
+# Google GenAI SDK (NEW - Required for gemini_embedding.py)
+# SDK mới của Google cho Gemini API - cần cho Semantic Memory
+google-genai>=0.3.0
+
 # Semantic Memory
 numpy>=1.24.0
 scikit-learn>=1.3.0
@@ -39,7 +43,7 @@ neo4j~=5.28.0
 pypdf>=4.0.0
 
 # Utils
-httpx==0.26.0
+httpx>=0.28.1
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-dotenv==1.0.1
