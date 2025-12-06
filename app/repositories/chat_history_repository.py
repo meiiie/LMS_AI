@@ -56,11 +56,13 @@ class ChatHistoryRepository:
     Supports both SQLAlchemy models and raw SQL for CHỈ THỊ SỐ 04 tables.
     
     **Feature: maritime-ai-tutor, Week 2: Memory Lite**
-    **Spec: CHỈ THỊ KỸ THUẬT SỐ 04**
+    **Spec: CHỈ THỊ KỸ THUẬT SỐ 04, CHỈ THỊ SỐ 21 (Large Context Window)**
     """
     
-    # Sliding window size - number of recent messages to retrieve
-    WINDOW_SIZE = 10
+    # CHỈ THỊ SỐ 21: Large Context Window - Tăng từ 10 lên 50 messages
+    # Gemini 2.5 Flash xử lý 50-100 tin nhắn cực nhanh và rẻ
+    # Giúp AI hiểu các đại từ thay thế ("nó", "tàu đó", "ông ấy") hoàn hảo
+    WINDOW_SIZE = 50
     
     def __init__(self, database_url: Optional[str] = None):
         """Initialize repository with SHARED database connection."""

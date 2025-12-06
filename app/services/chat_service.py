@@ -93,6 +93,19 @@ except ImportError:
     def get_guardian_agent(fallback_guardrails=None):
         return None
 
+# CHỈ THỊ KỸ THUẬT SỐ 21: Deep Reasoning - Conversation Analyzer
+try:
+    from app.engine.conversation_analyzer import (
+        ConversationAnalyzer, 
+        ConversationContext,
+        get_conversation_analyzer
+    )
+    CONVERSATION_ANALYZER_AVAILABLE = True
+except ImportError:
+    CONVERSATION_ANALYZER_AVAILABLE = False
+    def get_conversation_analyzer():
+        return None
+
 logger = logging.getLogger(__name__)
 
 
@@ -255,6 +268,16 @@ class ChatService:
             except Exception as e:
                 logger.warning(f"Failed to initialize Guardian Agent: {e}")
         
+        # CHỈ THỊ KỸ THUẬT SỐ 21: Conversation Analyzer (Deep Reasoning Support)
+        # Analyzes conversation for incomplete explanations and proactive behavior
+        self._conversation_analyzer = None
+        if CONVERSATION_ANALYZER_AVAILABLE:
+            try:
+                self._conversation_analyzer = get_conversation_analyzer()
+                logger.info("✅ Conversation Analyzer (CHỈ THỊ SỐ 21) initialized - Deep Reasoning ENABLED")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Conversation Analyzer: {e}")
+        
         logger.info(f"Knowledge graph available: {self._knowledge_graph.is_available()}")
         logger.info(f"Chat history available: {self._chat_history.is_available()}")
         logger.info(f"Learning profile (PostgreSQL/Neon) available: {self._pg_profile_repo.is_available()}")
@@ -263,6 +286,7 @@ class ChatService:
         logger.info(f"Semantic memory v0.3 available: {self._semantic_memory is not None}")
         logger.info(f"Unified Agent (ReAct) available: {self._unified_agent is not None}")
         logger.info(f"Guardian Agent (LLM) available: {self._guardian_agent is not None}")
+        logger.info(f"Conversation Analyzer available: {self._conversation_analyzer is not None}")
         
         # Session tracking (in-memory fallback)
         self._sessions: dict[str, UUID] = {}  # user_id -> session_id
@@ -478,6 +502,16 @@ class ChatService:
                     session_state.update_pronoun_style(custom_style)
                     logger.info(f"[GUARDIAN] Custom pronoun approved: {custom_style}")
             
+            # CHỈ THỊ SỐ 21: Analyze conversation for Deep Reasoning (proactive behavior)
+            conversation_context = None
+            if self._conversation_analyzer is not None and recent_messages:
+                try:
+                    conversation_context = self._conversation_analyzer.analyze(recent_messages)
+                    if conversation_context.should_offer_continuation:
+                        logger.info(f"[DEEP REASONING] Detected incomplete topic: {conversation_context.last_explanation_topic}")
+                except Exception as e:
+                    logger.warning(f"Failed to analyze conversation: {e}")
+            
             # Process with UnifiedAgent (CHỈ THỊ SỐ 16: Pass user_name for {{user_name}} replacement)
             unified_result = await self._unified_agent.process(
                 message=message,
@@ -492,7 +526,8 @@ class ChatService:
                 is_follow_up=not session_state.is_first_message,  # Follow-up detection
                 name_usage_count=session_state.name_usage_count,
                 total_responses=session_state.total_responses,
-                pronoun_style=session_state.pronoun_style  # CHỈ THỊ SỐ 20: Pronoun Adaptation
+                pronoun_style=session_state.pronoun_style,  # CHỈ THỊ SỐ 20: Pronoun Adaptation
+                conversation_context=conversation_context  # CHỈ THỊ SỐ 21: Deep Reasoning Context
             )
             
             # CHỈ THỊ KỸ THUẬT SỐ 16: Lấy sources từ tool_maritime_search

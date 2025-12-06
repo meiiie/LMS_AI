@@ -335,7 +335,8 @@ class UnifiedAgent:
         is_follow_up: bool = False,
         name_usage_count: int = 0,
         total_responses: int = 0,
-        pronoun_style: Optional[Dict[str, str]] = None
+        pronoun_style: Optional[Dict[str, str]] = None,
+        conversation_context: Optional[Any] = None  # CHỈ THỊ SỐ 21: Deep Reasoning
     ) -> Dict[str, Any]:
         """
         Process a message using Manual ReAct pattern.
@@ -347,6 +348,9 @@ class UnifiedAgent:
         
         CHỈ THỊ SỐ 20: Pronoun Adaptation
         - pronoun_style: Dict với cách xưng hô đã detect từ user
+        
+        CHỈ THỊ SỐ 21: Deep Reasoning
+        - conversation_context: ConversationContext với incomplete topics và proactive hints
         """
         global _user_cache, _current_user_id
         
@@ -376,7 +380,8 @@ class UnifiedAgent:
                 is_follow_up=is_follow_up,
                 name_usage_count=name_usage_count,
                 total_responses=total_responses,
-                pronoun_style=pronoun_style  # CHỈ THỊ SỐ 20
+                pronoun_style=pronoun_style,  # CHỈ THỊ SỐ 20
+                conversation_context=conversation_context  # CHỈ THỊ SỐ 21
             )
             return await self._manual_react(messages, user_id)
                 
@@ -401,7 +406,8 @@ class UnifiedAgent:
         is_follow_up: bool = False,
         name_usage_count: int = 0,
         total_responses: int = 0,
-        pronoun_style: Optional[Dict[str, str]] = None
+        pronoun_style: Optional[Dict[str, str]] = None,
+        conversation_context: Optional[Any] = None  # CHỈ THỊ SỐ 21
     ) -> List:
         """
         Build message list with SystemMessage for ReAct.
@@ -413,6 +419,9 @@ class UnifiedAgent:
         
         CHỈ THỊ SỐ 20: Pronoun Adaptation
         - pronoun_style: Dict với cách xưng hô đã detect từ user
+        
+        CHỈ THỊ SỐ 21: Deep Reasoning
+        - conversation_context: ConversationContext với incomplete topics
         """
         global _prompt_loader
         
@@ -435,6 +444,22 @@ class UnifiedAgent:
                 logger.debug(f"[PromptLoader] Built dynamic prompt for role={user_role}, user={user_name}, follow_up={is_follow_up}, pronoun={pronoun_style}")
             except Exception as e:
                 logger.warning(f"PromptLoader failed, using fallback: {e}")
+        
+        # CHỈ THỊ SỐ 21: Add Deep Reasoning context for proactive behavior
+        if conversation_context is not None:
+            try:
+                if hasattr(conversation_context, 'should_offer_continuation') and conversation_context.should_offer_continuation:
+                    topic = getattr(conversation_context, 'last_explanation_topic', 'chủ đề trước')
+                    proactive_hint = (
+                        f"\n\n[DEEP REASONING HINT]\n"
+                        f"Bạn đang giải thích dở về '{topic}' và user đã hỏi câu mới. "
+                        f"Sau khi trả lời câu hỏi hiện tại, hãy hỏi user có muốn nghe tiếp về '{topic}' không.\n"
+                        f"Ví dụ: 'Nãy mình đang nói dở về {topic}, bạn có muốn nghe tiếp không?'"
+                    )
+                    system_prompt += proactive_hint
+                    logger.info(f"[DEEP REASONING] Added proactive hint for topic: {topic}")
+            except Exception as e:
+                logger.warning(f"Failed to add Deep Reasoning context: {e}")
         
         messages = [SystemMessage(content=system_prompt)]
         
