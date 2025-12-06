@@ -6,18 +6,140 @@ CHỈ THỊ KỸ THUẬT SỐ 16: HUMANIZATION
 - Few-shot prompting để dạy AI nói chuyện tự nhiên
 - Hỗ trợ role-based prompting (student vs teacher/admin)
 
+CHỈ THỊ KỸ THUẬT SỐ 20: PRONOUN ADAPTATION
+- Phát hiện cách xưng hô từ user (mình/cậu, tớ/cậu, anh/em, chị/em)
+- AI thích ứng xưng hô theo user
+- Lọc bỏ xưng hô tục tĩu/nhạy cảm
+
 **Feature: maritime-ai-tutor**
-**Spec: CHỈ THỊ KỸ THUẬT SỐ 16**
+**Spec: CHỈ THỊ KỸ THUẬT SỐ 16, 20**
 """
 
 import logging
 import os
+import re
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 import yaml
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# PRONOUN ADAPTATION - CHỈ THỊ KỸ THUẬT SỐ 20
+# =============================================================================
+
+# Các cặp xưng hô hợp lệ (user_pronoun -> ai_pronoun)
+VALID_PRONOUN_PAIRS = {
+    # User xưng "mình" -> AI xưng "mình" và gọi user là "cậu"
+    "mình": {"user_called": "cậu", "ai_self": "mình"},
+    # User xưng "tớ" -> AI xưng "tớ" và gọi user là "cậu"
+    "tớ": {"user_called": "cậu", "ai_self": "tớ"},
+    # User xưng "em" -> AI xưng "anh/chị" và gọi user là "em"
+    "em": {"user_called": "em", "ai_self": "anh"},  # Default to "anh", can be "chị"
+    # User xưng "anh" -> AI xưng "em" và gọi user là "anh"
+    "anh": {"user_called": "anh", "ai_self": "em"},
+    # User xưng "chị" -> AI xưng "em" và gọi user là "chị"
+    "chị": {"user_called": "chị", "ai_self": "em"},
+    # User xưng "tôi" -> AI xưng "tôi" và gọi user là "bạn" (default)
+    "tôi": {"user_called": "bạn", "ai_self": "tôi"},
+    # User xưng "bạn" (gọi AI) -> AI xưng "tôi" và gọi user là "bạn"
+    "bạn": {"user_called": "bạn", "ai_self": "tôi"},
+}
+
+# Từ xưng hô tục tĩu/nhạy cảm cần lọc bỏ
+INAPPROPRIATE_PRONOUNS = [
+    "mày", "tao", "đ.m", "dm", "vcl", "vl", "đéo", "địt",
+    "con", "thằng", "đồ", "lũ", "bọn",  # Khi dùng một mình có thể xúc phạm
+]
+
+
+def detect_pronoun_style(message: str) -> Optional[Dict[str, str]]:
+    """
+    Detect user's pronoun style from their message.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 20: Pronoun Adaptation
+    
+    Args:
+        message: User's message text
+        
+    Returns:
+        Dict with pronoun style info or None if not detected
+        Example: {"user_self": "mình", "user_called": "cậu", "ai_self": "mình"}
+        
+    **Validates: Requirements 6.1, 6.4**
+    """
+    message_lower = message.lower()
+    
+    # Check for inappropriate pronouns first
+    for bad_word in INAPPROPRIATE_PRONOUNS:
+        if bad_word in message_lower:
+            logger.warning(f"Inappropriate pronoun detected: {bad_word}")
+            return None  # Reject and use default
+    
+    # Patterns to detect user's self-reference
+    # Order matters: check more specific patterns first
+    pronoun_patterns = [
+        # "mình" patterns
+        (r'\bmình\s+(?:là|tên|muốn|cần|hỏi|không|có|đang|sẽ|đã)', "mình"),
+        (r'\bmình\b', "mình"),
+        # "tớ" patterns
+        (r'\btớ\s+(?:là|tên|muốn|cần|hỏi|không|có|đang|sẽ|đã)', "tớ"),
+        (r'\btớ\b', "tớ"),
+        # "em" patterns (user xưng em với AI)
+        (r'\bem\s+(?:là|tên|muốn|cần|hỏi|không|có|đang|sẽ|đã|chào)', "em"),
+        (r'^em\s+', "em"),  # Message starts with "em"
+        # "anh" patterns (user gọi AI là anh)
+        (r'(?:chào|cảm ơn|hỏi|nhờ)\s+anh\b', "anh"),
+        (r'\banh\s+(?:ơi|à|nhé|giúp|chỉ)', "anh"),
+        # "chị" patterns (user gọi AI là chị)
+        (r'(?:chào|cảm ơn|hỏi|nhờ)\s+chị\b', "chị"),
+        (r'\bchị\s+(?:ơi|à|nhé|giúp|chỉ)', "chị"),
+        # "cậu" patterns (user gọi AI là cậu)
+        (r'(?:chào|cảm ơn|hỏi|nhờ)\s+cậu\b', "mình"),  # If user calls AI "cậu", they use "mình"
+        (r'\bcậu\s+(?:ơi|à|nhé|giúp|chỉ)', "mình"),
+    ]
+    
+    for pattern, pronoun in pronoun_patterns:
+        if re.search(pattern, message_lower):
+            if pronoun in VALID_PRONOUN_PAIRS:
+                style = VALID_PRONOUN_PAIRS[pronoun].copy()
+                style["user_self"] = pronoun
+                logger.info(f"Detected pronoun style: {style}")
+                return style
+    
+    return None  # No specific style detected, use default
+
+
+def get_pronoun_instruction(pronoun_style: Optional[Dict[str, str]]) -> str:
+    """
+    Generate instruction for AI to use adapted pronouns.
+    
+    Args:
+        pronoun_style: Dict with pronoun style info
+        
+    Returns:
+        Instruction string for system prompt
+        
+    **Validates: Requirements 6.2**
+    """
+    if not pronoun_style:
+        return ""
+    
+    user_called = pronoun_style.get("user_called", "bạn")
+    ai_self = pronoun_style.get("ai_self", "tôi")
+    user_self = pronoun_style.get("user_self", "")
+    
+    instruction = f"""
+--- CÁCH XƯNG HÔ ĐÃ THÍCH ỨNG ---
+⚠️ QUAN TRỌNG: User đang xưng "{user_self}", hãy thích ứng theo:
+- Gọi user là: "{user_called}"
+- Tự xưng là: "{ai_self}"
+- KHÔNG dùng "tôi/bạn" mặc định nữa
+- Giữ nhất quán trong suốt cuộc hội thoại
+"""
+    return instruction
 
 
 class PromptLoader:
@@ -147,7 +269,8 @@ class PromptLoader:
         recent_phrases: Optional[List[str]] = None,
         is_follow_up: bool = False,
         name_usage_count: int = 0,
-        total_responses: int = 0
+        total_responses: int = 0,
+        pronoun_style: Optional[Dict[str, str]] = None
     ) -> str:
         """
         Build system prompt from persona configuration.
@@ -163,11 +286,12 @@ class PromptLoader:
             is_follow_up: True if this is a follow-up message (not first in session)
             name_usage_count: Number of times user's name has been used
             total_responses: Total number of responses in session
+            pronoun_style: Dict with adapted pronoun style (CHỈ THỊ SỐ 20)
             
         Returns:
             Complete system prompt string with template variables replaced
             
-        **Validates: Requirements 1.2, 7.1, 7.3**
+        **Validates: Requirements 1.2, 7.1, 7.3, 6.2**
         """
         persona = self.get_persona(role)
         
@@ -315,14 +439,19 @@ class PromptLoader:
                 sections.append("→ Hãy dùng cách mở đầu KHÁC BIỆT hoàn toàn.")
         
         # ============================================================
-        # CRITICAL: ADDRESSING RULES (Cách xưng hô mặc định)
+        # CRITICAL: ADDRESSING RULES (Cách xưng hô - CHỈ THỊ SỐ 20)
         # ============================================================
-        if role == "student":
+        if pronoun_style:
+            # User đã có pronoun style được detect -> thích ứng theo
+            pronoun_instruction = get_pronoun_instruction(pronoun_style)
+            sections.append(pronoun_instruction)
+        elif role == "student":
+            # Mặc định cho student role
             sections.append("\n--- CÁCH XƯNG HÔ MẶC ĐỊNH ---")
             sections.append("- Gọi người dùng là 'bạn' (lịch sự, thân thiện)")
             sections.append("- Tự xưng là 'tôi'")
-            sections.append("- Nếu người dùng yêu cầu cách xưng hô khác thì mới thay đổi")
-            sections.append("- KHÔNG dùng 'cậu/mình' - nghe xa cách")
+            sections.append("- Nếu người dùng dùng cách xưng hô khác (mình/cậu, em/anh...) thì THÍCH ỨNG THEO")
+            sections.append("- KHÔNG cứng nhắc giữ 'tôi/bạn' nếu user đã đổi cách xưng hô")
         
         # ============================================================
         # CRITICAL: ANTI-REPETITION RULES (QUAN TRỌNG NHẤT)

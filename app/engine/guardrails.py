@@ -113,8 +113,8 @@ class Guardrails:
     """
     
     REFUSAL_MESSAGE = (
-        "I'm sorry, but I can't help with that request. "
-        "Please ask about maritime topics in a professional manner."
+        "Xin lỗi, tôi không thể hỗ trợ yêu cầu này. "
+        "Vui lòng đặt câu hỏi về chủ đề hàng hải một cách lịch sự."
     )
     
     def __init__(self):

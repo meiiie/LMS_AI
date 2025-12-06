@@ -334,7 +334,8 @@ class UnifiedAgent:
         recent_phrases: Optional[List[str]] = None,
         is_follow_up: bool = False,
         name_usage_count: int = 0,
-        total_responses: int = 0
+        total_responses: int = 0,
+        pronoun_style: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """
         Process a message using Manual ReAct pattern.
@@ -343,6 +344,9 @@ class UnifiedAgent:
         - user_name: Tên user từ Memory (thay thế {{user_name}} trong YAML)
         - user_facts: Facts về user từ Semantic Memory
         - conversation_summary: Tóm tắt hội thoại từ MemorySummarizer
+        
+        CHỈ THỊ SỐ 20: Pronoun Adaptation
+        - pronoun_style: Dict với cách xưng hô đã detect từ user
         """
         global _user_cache, _current_user_id
         
@@ -371,7 +375,8 @@ class UnifiedAgent:
                 recent_phrases=recent_phrases,
                 is_follow_up=is_follow_up,
                 name_usage_count=name_usage_count,
-                total_responses=total_responses
+                total_responses=total_responses,
+                pronoun_style=pronoun_style  # CHỈ THỊ SỐ 20
             )
             return await self._manual_react(messages, user_id)
                 
@@ -395,7 +400,8 @@ class UnifiedAgent:
         recent_phrases: Optional[List[str]] = None,
         is_follow_up: bool = False,
         name_usage_count: int = 0,
-        total_responses: int = 0
+        total_responses: int = 0,
+        pronoun_style: Optional[Dict[str, str]] = None
     ) -> List:
         """
         Build message list with SystemMessage for ReAct.
@@ -404,6 +410,9 @@ class UnifiedAgent:
         - Sử dụng YAML config thay vì hardcoded SYSTEM_PROMPT
         - Thay thế {{user_name}} bằng tên thật từ Memory
         - Anti-repetition via recent_phrases, is_follow_up, name_usage_count
+        
+        CHỈ THỊ SỐ 20: Pronoun Adaptation
+        - pronoun_style: Dict với cách xưng hô đã detect từ user
         """
         global _prompt_loader
         
@@ -420,9 +429,10 @@ class UnifiedAgent:
                     recent_phrases=recent_phrases,
                     is_follow_up=is_follow_up,
                     name_usage_count=name_usage_count,
-                    total_responses=total_responses
+                    total_responses=total_responses,
+                    pronoun_style=pronoun_style  # CHỈ THỊ SỐ 20
                 )
-                logger.debug(f"[PromptLoader] Built dynamic prompt for role={user_role}, user={user_name}, follow_up={is_follow_up}")
+                logger.debug(f"[PromptLoader] Built dynamic prompt for role={user_role}, user={user_name}, follow_up={is_follow_up}, pronoun={pronoun_style}")
             except Exception as e:
                 logger.warning(f"PromptLoader failed, using fallback: {e}")
         
