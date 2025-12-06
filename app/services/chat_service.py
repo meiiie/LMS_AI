@@ -64,12 +64,16 @@ except ImportError:
         pass
 
 # CHỈ THỊ KỸ THUẬT SỐ 16 & 17: Humanization - PromptLoader & MemorySummarizer
+# CHỈ THỊ KỸ THUẬT SỐ 20: Pronoun Adaptation
 try:
     from app.prompts import get_prompt_loader
+    from app.prompts.prompt_loader import detect_pronoun_style
     PROMPT_LOADER_AVAILABLE = True
 except ImportError:
     PROMPT_LOADER_AVAILABLE = False
     def get_prompt_loader():
+        return None
+    def detect_pronoun_style(message: str):
         return None
 
 try:
@@ -78,6 +82,15 @@ try:
 except ImportError:
     MEMORY_SUMMARIZER_AVAILABLE = False
     def get_memory_summarizer():
+        return None
+
+# CHỈ THỊ KỸ THUẬT SỐ 21: Guardian Agent (LLM-based Content Moderation)
+try:
+    from app.engine.guardian_agent import GuardianAgent, get_guardian_agent, GuardianConfig
+    GUARDIAN_AGENT_AVAILABLE = True
+except ImportError:
+    GUARDIAN_AGENT_AVAILABLE = False
+    def get_guardian_agent(fallback_guardrails=None):
         return None
 
 logger = logging.getLogger(__name__)
@@ -98,13 +111,14 @@ class SessionState:
     """
     Track session state for anti-repetition and personalization.
     
-    **Validates: Requirements 3.1, 3.2, 2.3**
+    **Validates: Requirements 3.1, 3.2, 2.3, 6.1, 6.2, 6.3**
     """
     session_id: UUID
     recent_phrases: List[str] = None  # Recent opening phrases used
     name_usage_count: int = 0  # Times user's name was used
     total_responses: int = 0  # Total responses in session
     is_first_message: bool = True  # First message in session
+    pronoun_style: Optional[dict] = None  # CHỈ THỊ SỐ 20: Detected pronoun style
     
     def __post_init__(self):
         if self.recent_phrases is None:
@@ -129,6 +143,17 @@ class SessionState:
             return True  # First response can use name
         ratio = self.name_usage_count / self.total_responses
         return ratio < 0.25  # Target 25%
+    
+    def update_pronoun_style(self, style: Optional[dict]):
+        """
+        Update pronoun style if detected.
+        
+        CHỈ THỊ SỐ 20: Pronoun Adaptation
+        **Validates: Requirements 6.3**
+        """
+        if style:
+            self.pronoun_style = style
+            logger.debug(f"Updated pronoun style: {style}")
 
 
 class ChatService:
@@ -215,6 +240,21 @@ class ChatService:
             except Exception as e:
                 logger.warning(f"Failed to initialize MemorySummarizer: {e}")
         
+        # CHỈ THỊ KỸ THUẬT SỐ 21: Guardian Agent (LLM-based Content Moderation)
+        # Replaces hardcoded content filtering with contextual LLM validation
+        self._guardian_agent = None
+        if GUARDIAN_AGENT_AVAILABLE:
+            try:
+                # Pass Guardrails as fallback for when LLM is unavailable
+                self._guardian_agent = get_guardian_agent(fallback_guardrails=self._guardrails)
+                if self._guardian_agent.is_available():
+                    logger.info("✅ Guardian Agent (CHỈ THỊ SỐ 21) initialized - LLM Content Moderation ENABLED")
+                else:
+                    logger.warning("Guardian Agent not available, using rule-based Guardrails")
+                    self._guardian_agent = None
+            except Exception as e:
+                logger.warning(f"Failed to initialize Guardian Agent: {e}")
+        
         logger.info(f"Knowledge graph available: {self._knowledge_graph.is_available()}")
         logger.info(f"Chat history available: {self._chat_history.is_available()}")
         logger.info(f"Learning profile (PostgreSQL/Neon) available: {self._pg_profile_repo.is_available()}")
@@ -222,6 +262,7 @@ class ChatService:
         logger.info(f"MemorySummarizer available: {self._memory_summarizer is not None}")
         logger.info(f"Semantic memory v0.3 available: {self._semantic_memory is not None}")
         logger.info(f"Unified Agent (ReAct) available: {self._unified_agent is not None}")
+        logger.info(f"Guardian Agent (LLM) available: {self._guardian_agent is not None}")
         
         # Session tracking (in-memory fallback)
         self._sessions: dict[str, UUID] = {}  # user_id -> session_id
@@ -258,11 +299,26 @@ class ChatService:
         message = request.message
         user_role = request.role  # student | teacher | admin
         
-        # Step 1: Input validation
-        input_result = await self._guardrails.validate_input(message)
-        if not input_result.is_valid:
-            logger.warning(f"Input blocked for user {user_id}: {input_result.issues}")
-            return self._create_blocked_response(input_result.issues)
+        # Step 1: Input validation (CHỈ THỊ SỐ 21: Guardian Agent)
+        # Use LLM-based Guardian Agent for contextual content filtering
+        # Falls back to rule-based Guardrails if Guardian unavailable
+        if self._guardian_agent is not None:
+            guardian_decision = await self._guardian_agent.validate_message(
+                message=message,
+                context="maritime education"
+            )
+            if guardian_decision.action == "BLOCK":
+                logger.warning(f"[GUARDIAN] Input blocked for user {user_id}: {guardian_decision.reason}")
+                return self._create_blocked_response([guardian_decision.reason or "Nội dung không phù hợp"])
+            elif guardian_decision.action == "FLAG":
+                logger.info(f"[GUARDIAN] Input flagged for user {user_id}: {guardian_decision.reason}")
+                # Continue processing but log for review
+        else:
+            # Fallback to rule-based Guardrails
+            input_result = await self._guardrails.validate_input(message)
+            if not input_result.is_valid:
+                logger.warning(f"Input blocked for user {user_id}: {input_result.issues}")
+                return self._create_blocked_response(input_result.issues)
         
         # Log role for debugging
         logger.info(f"Processing request for user {user_id} with role: {user_role.value}")
@@ -373,6 +429,25 @@ class ChatService:
             # CHỈ THỊ SỐ 16: Get session state for anti-repetition
             session_state = self._get_session_state(session_id)
             
+            # CHỈ THỊ SỐ 20 & 21: Detect and update pronoun style
+            # Use GuardianAgent for custom pronoun validation (e.g., "gọi tôi là công chúa")
+            detected_pronoun = detect_pronoun_style(message)
+            if detected_pronoun:
+                session_state.update_pronoun_style(detected_pronoun)
+                logger.info(f"[PRONOUN] Detected style: {detected_pronoun}")
+            
+            # CHỈ THỊ SỐ 21: Validate custom pronoun requests with GuardianAgent
+            if self._guardian_agent is not None:
+                pronoun_result = await self._guardian_agent.validate_pronoun_request(message)
+                if pronoun_result.approved:
+                    # Store custom pronouns in session state
+                    custom_style = {
+                        "user_called": pronoun_result.user_called,
+                        "ai_self": pronoun_result.ai_self
+                    }
+                    session_state.update_pronoun_style(custom_style)
+                    logger.info(f"[GUARDIAN] Custom pronoun approved: {custom_style}")
+            
             # Process with UnifiedAgent (CHỈ THỊ SỐ 16: Pass user_name for {{user_name}} replacement)
             unified_result = await self._unified_agent.process(
                 message=message,
@@ -386,7 +461,8 @@ class ChatService:
                 recent_phrases=session_state.recent_phrases,  # Anti-repetition
                 is_follow_up=not session_state.is_first_message,  # Follow-up detection
                 name_usage_count=session_state.name_usage_count,
-                total_responses=session_state.total_responses
+                total_responses=session_state.total_responses,
+                pronoun_style=session_state.pronoun_style  # CHỈ THỊ SỐ 20: Pronoun Adaptation
             )
             
             # CHỈ THỊ KỸ THUẬT SỐ 16: Lấy sources từ tool_maritime_search

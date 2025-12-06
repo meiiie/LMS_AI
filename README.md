@@ -31,6 +31,7 @@ Maritime AI Tutor Service là một **Backend AI microservice** được thiết
 - **Hybrid Search v0.5**: Kết hợp Dense Search (pgvector) + Sparse Search (Neo4j Full-text) với RRF Reranking
 - **GraphRAG Knowledge Retrieval**: Truy vấn kiến thức từ SOLAS, COLREGs, MARPOL
 - **Semantic Memory v0.3**: Ghi nhớ ngữ cảnh cross-session với pgvector + Gemini embeddings
+- **Guardian Agent v0.8.1**: LLM-based Content Moderation với Gemini 2.5 Flash - Custom Pronoun Validation, Contextual Filtering
 - **Content Guardrails**: Bảo vệ nội dung với PII masking và prompt injection detection
 
 ---
@@ -173,6 +174,43 @@ Hệ thống persona được cấu hình qua file YAML, hỗ trợ cá nhân h�
 - **Cross-Session Persistence**: Ghi nhớ ngữ cảnh qua nhiều phiên chat
 - **Deduplication**: Tự động loại bỏ facts trùng lặp, giữ bản mới nhất
 
+### Guardian Agent v0.8.1 (LLM Content Moderation)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         GUARDIAN AGENT FLOW                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   User Message                                                               │
+│        │                                                                     │
+│        ▼                                                                     │
+│   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐                   │
+│   │ Quick Check │ ──▶ │ LLM Validate│ ──▶ │  Decision   │                   │
+│   │ (Skip LLM?) │     │ (Gemini)    │     │             │                   │
+│   └─────────────┘     └─────────────┘     └─────────────┘                   │
+│         │                    │                   │                           │
+│         │ Simple greeting    │ Contextual        │ ALLOW → Continue         │
+│         │ → Skip LLM         │ analysis          │ BLOCK → Reject           │
+│         │ → ALLOW            │                   │ FLAG  → Log & Continue   │
+│         │                    │                   │                           │
+│         └────────────────────┴───────────────────┘                           │
+│                                                                              │
+│   Features:                                                                  │
+│   • Custom Pronoun Validation: "Gọi tôi là công chúa" → ALLOW               │
+│   • Contextual Filtering: "cướp biển" in maritime → ALLOW                   │
+│   • Inappropriate Detection: "mày/tao" → BLOCK                              │
+│   • Caching: 1h TTL for repeated messages                                   │
+│   • Fallback: Rule-based Guardrails when LLM unavailable                    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **LLM-based Validation**: Sử dụng Gemini 2.5 Flash thay vì hardcoded patterns
+- **Custom Pronoun Support**: Validate và lưu custom pronouns ("công chúa", "thuyền trưởng")
+- **Contextual Understanding**: Hiểu ngữ cảnh hàng hải (piracy, cướp biển)
+- **Performance Optimized**: Skip LLM cho greetings, cache decisions
+- **Graceful Fallback**: Tự động dùng rule-based khi LLM không khả dụng
+
 ---
 
 ## Architecture
@@ -194,7 +232,7 @@ Hệ thống persona được cấu hình qua file YAML, hỗ trợ cá nhân h�
 │                                    │                                         │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
 │  │                        Service Layer                                   │  │
-│  │  ChatService: Guardrails → Intent → Agent Routing → Response          │  │
+│  │  ChatService: Guardian → Guardrails → Intent → Agent Routing → Response│  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 │                                    │                                         │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
@@ -235,7 +273,8 @@ maritime-ai-service/
 │   │   ├── tools/rag_tool.py        # RAG Agent with Neo4j
 │   │   ├── tools/tutor_agent.py     # Tutor Agent
 │   │   ├── graph.py                 # LangGraph Orchestrator
-│   │   ├── guardrails.py            # Input/Output validation
+│   │   ├── guardrails.py            # Input/Output validation (rule-based)
+│   │   ├── guardian_agent.py        # LLM Content Moderation (Gemini 2.5 Flash)
 │   │   ├── semantic_memory.py       # Semantic Memory v0.3
 │   │   ├── gemini_embedding.py      # Gemini Embeddings (768 dims, L2 norm)
 │   │   ├── rrf_reranker.py          # RRF Reranker (k=60)
@@ -731,6 +770,7 @@ TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.8.1 | 2025-12-07 | **GUARDIAN AGENT**: CHỈ THỊ SỐ 21 - LLM-based Content Moderation (Gemini 2.5 Flash), Custom Pronoun Validation ("gọi tôi là công chúa"), Contextual Content Filtering, Caching & Fallback |
 | v0.8.0 | 2025-12-07 | **NEON MIGRATION**: CHỈ THỊ SỐ 19 - Migrate from Supabase to Neon Serverless Postgres, Optimized Health Check (shallow/deep), Code cleanup |
 | v0.7.5 | 2025-12-07 | **AI QUALITY**: Fix "À," repetition pattern, SessionState tracking, Explicit anti-repetition instructions |
 | v0.7.4 | 2025-12-05 | **PERSONA SYSTEM**: Dynamic YAML Persona - Full support for tutor.yaml/assistant.yaml structure, Template variable `{{user_name}}` replacement from Memory |
@@ -755,6 +795,13 @@ TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 ---
 
 ## Van de da biet va Cong viec tuong lai
+
+### Da giai quyet (v0.8.1 - Guardian Agent)
+- **LLM Content Moderation**: Thay the hardcoded patterns bang Gemini 2.5 Flash
+- **Custom Pronoun Validation**: Ho tro "goi toi la cong chua", "goi toi la thuyen truong"
+- **Contextual Filtering**: "cuop bien" trong ngu canh hang hai duoc ALLOW, "may/tao" bi BLOCK
+- **Performance Optimization**: Skip LLM cho greetings, Cache decisions (1h TTL)
+- **Fallback Mechanism**: Tu dong dung rule-based Guardrails khi LLM khong kha dung
 
 ### Da giai quyet (v0.5.2a)
 - **Agent Routing**: Cau hoi tieng Viet da duoc dinh tuyen dung den RAG Agent
