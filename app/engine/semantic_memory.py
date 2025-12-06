@@ -659,6 +659,59 @@ Return ONLY valid JSON:"""
             # Fallback: truncate conversation
             return conversation_text[:500] + "...", []
     
+    async def store_user_fact(
+        self,
+        user_id: str,
+        fact_content: str,
+        fact_type: str = "name",
+        confidence: float = 0.9,
+        session_id: Optional[str] = None
+    ) -> bool:
+        """
+        Store a user fact directly (without LLM extraction).
+        
+        Used by tools like tool_save_user_info to store user information
+        when the user explicitly provides it.
+        
+        Args:
+            user_id: User ID
+            fact_content: The fact content (e.g., "User's name is Minh")
+            fact_type: Type of fact (name, preference, goal, etc.)
+            confidence: Confidence score (0.0 - 1.0)
+            session_id: Optional session ID
+            
+        Returns:
+            True if storage successful
+            
+        **Validates: Requirements 2.2, 2.4**
+        """
+        try:
+            # Generate embedding for the fact
+            fact_embedding = self._embeddings.embed_documents([fact_content])[0]
+            
+            # Create semantic memory for the fact
+            fact_memory = SemanticMemoryCreate(
+                user_id=user_id,
+                content=fact_content,
+                embedding=fact_embedding,
+                memory_type=MemoryType.USER_FACT,
+                importance=confidence,
+                metadata={
+                    "fact_type": fact_type,
+                    "confidence": confidence,
+                    "source": "explicit_save"
+                },
+                session_id=session_id
+            )
+            
+            self._repository.save_memory(fact_memory)
+            logger.info(f"Stored user fact for {user_id}: {fact_type}={fact_content[:50]}...")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to store user fact: {e}")
+            return False
+    
     def is_available(self) -> bool:
         """Check if semantic memory is available."""
         return self._repository.is_available()

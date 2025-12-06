@@ -44,10 +44,10 @@ class Settings(BaseSettings):
     postgres_password: str = Field(default="maritime_secret", description="PostgreSQL password")
     postgres_db: str = Field(default="maritime_ai", description="PostgreSQL database name")
     
-    # Database - Supabase/Cloud (Production)
-    database_url: Optional[str] = Field(default=None, description="Full database URL (Supabase/Cloud)")
-    supabase_url: Optional[str] = Field(default=None, description="Supabase project URL")
-    supabase_key: Optional[str] = Field(default=None, description="Supabase anon key")
+    # Database - Cloud (Production) - CHỈ THỊ 19: Now using Neon
+    database_url: Optional[str] = Field(default=None, description="Full database URL (Neon/Cloud)")
+    supabase_url: Optional[str] = Field(default=None, description="Legacy Supabase URL (deprecated)")
+    supabase_key: Optional[str] = Field(default=None, description="Legacy Supabase key (deprecated)")
     
     # LMS API Key (for authentication from LMS)
     lms_api_key: Optional[str] = Field(default=None, description="API Key for LMS integration")
@@ -59,7 +59,7 @@ class Settings(BaseSettings):
         Construct PostgreSQL connection URL.
         Prioritizes DATABASE_URL (cloud) over individual settings (local).
         """
-        # Use DATABASE_URL if provided (Supabase/Cloud)
+        # Use DATABASE_URL if provided (Neon/Cloud)
         if self.database_url:
             # Convert to asyncpg format if needed
             url = self.database_url
@@ -76,13 +76,19 @@ class Settings(BaseSettings):
     def postgres_url_sync(self) -> str:
         """
         Construct synchronous PostgreSQL connection URL (for Alembic migrations).
+        
+        CHỈ THỊ KỸ THUẬT SỐ 19: Xử lý ssl=require cho psycopg2
         """
         if self.database_url:
             url = self.database_url
             # Ensure it's standard postgresql:// format
             if url.startswith("postgres://"):
                 url = url.replace("postgres://", "postgresql://", 1)
-            return url.replace("postgresql+asyncpg://", "postgresql://")
+            url = url.replace("postgresql+asyncpg://", "postgresql://")
+            # Convert ssl=require to sslmode=require for psycopg2
+            if "ssl=require" in url:
+                url = url.replace("ssl=require", "sslmode=require")
+            return url
         
         return f"postgresql://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
     

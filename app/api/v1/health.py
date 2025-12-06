@@ -218,10 +218,41 @@ async def check_with_timeout(
 
 @router.get(
     "",
-    response_model=HealthResponse,
-    summary="Health Check",
+    summary="Shallow Health Check (Cronjob/Render Ping)",
     description="""
-    Returns the health status of all system components.
+    CHỈ THỊ KỸ THUẬT SỐ 19: Shallow Health Check
+    
+    KHÔNG kết nối Database - Chỉ trả về static JSON.
+    Mục đích: Giữ Server Python (Render) không ngủ, nhưng cho phép Database (Neon) ngủ khi không có user.
+    
+    Dùng cho: UptimeRobot, Cron-job ping
+    """,
+)
+async def health_check_shallow():
+    """
+    Shallow health check - NO DATABASE ACCESS.
+    
+    CHỈ THỊ 19: Bảo vệ Neon Free Tier (100 giờ compute)
+    - Cronjob ping vào đây sẽ KHÔNG đánh thức Neon
+    - Chỉ kiểm tra Python server còn sống
+    """
+    return {
+        "status": "ok",
+        "service": "maritime-ai-tutor",
+        "version": settings.app_version,
+        "environment": settings.environment,
+    }
+
+
+@router.get(
+    "/db",
+    response_model=HealthResponse,
+    summary="Deep Health Check (Debug/Admin)",
+    description="""
+    CHỈ THỊ KỸ THUẬT SỐ 19: Deep Health Check
+    
+    Thực hiện query vào Database - SẼ ĐÁNH THỨC Neon.
+    Chỉ dùng khi Dev cần kiểm tra kết nối bằng tay.
     
     Components checked:
     - **API**: FastAPI application status
@@ -229,16 +260,15 @@ async def check_with_timeout(
     - **Knowledge Graph**: Neo4j status
     
     Timeout: 5 seconds per component.
-    
-    **Requirements: 8.4**
     """,
 )
-async def health_check() -> HealthResponse:
+async def health_check_deep() -> HealthResponse:
     """
-    Perform health check on all components with timeout handling.
+    Deep health check - WAKES UP Neon DB.
     
-    Returns:
-        HealthResponse with status of all components
+    CHỈ THỊ 19: Chỉ dùng cho Debug/Admin
+    - KHÔNG để Cronjob ping vào endpoint này
+    - Sẽ tiêu tốn compute hours của Neon
     """
     # Check all components with timeout
     api_health = await check_with_timeout(check_api_health, "API")
@@ -260,7 +290,7 @@ async def health_check() -> HealthResponse:
         components=components,
     )
     
-    logger.info(f"Health check: {overall_status}")
+    logger.info(f"Deep health check: {overall_status}")
     
     return response
 

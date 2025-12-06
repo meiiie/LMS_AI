@@ -93,6 +93,44 @@ class ProcessingResult:
     metadata: dict = None
 
 
+@dataclass
+class SessionState:
+    """
+    Track session state for anti-repetition and personalization.
+    
+    **Validates: Requirements 3.1, 3.2, 2.3**
+    """
+    session_id: UUID
+    recent_phrases: List[str] = None  # Recent opening phrases used
+    name_usage_count: int = 0  # Times user's name was used
+    total_responses: int = 0  # Total responses in session
+    is_first_message: bool = True  # First message in session
+    
+    def __post_init__(self):
+        if self.recent_phrases is None:
+            self.recent_phrases = []
+    
+    def add_phrase(self, phrase: str):
+        """Track a phrase that was used."""
+        self.recent_phrases.append(phrase)
+        if len(self.recent_phrases) > 5:  # Keep last 5
+            self.recent_phrases.pop(0)
+    
+    def increment_response(self, used_name: bool = False):
+        """Increment response counter."""
+        self.total_responses += 1
+        if used_name:
+            self.name_usage_count += 1
+        self.is_first_message = False
+    
+    def should_use_name(self) -> bool:
+        """Check if name should be used (20-30% frequency)."""
+        if self.total_responses == 0:
+            return True  # First response can use name
+        ratio = self.name_usage_count / self.total_responses
+        return ratio < 0.25  # Target 25%
+
+
 class ChatService:
     """
     Main service that integrates all components.
@@ -105,7 +143,7 @@ class ChatService:
         # Core components (Semantic Memory v0.3 is primary - no legacy fallback)
         self._knowledge_graph = get_knowledge_repository()  # Use Neo4j if available
         self._profile_repo = InMemoryLearningProfileRepository()  # Legacy
-        self._supabase_profile_repo = get_learning_profile_repository()  # CHỈ THỊ SỐ 04
+        self._pg_profile_repo = get_learning_profile_repository()  # CHỈ THỊ SỐ 04 (PostgreSQL/Neon)
         self._guardrails = Guardrails()
         
         # Memory Lite - Chat History (Week 2)
@@ -179,7 +217,7 @@ class ChatService:
         
         logger.info(f"Knowledge graph available: {self._knowledge_graph.is_available()}")
         logger.info(f"Chat history available: {self._chat_history.is_available()}")
-        logger.info(f"Learning profile (Supabase) available: {self._supabase_profile_repo.is_available()}")
+        logger.info(f"Learning profile (PostgreSQL/Neon) available: {self._pg_profile_repo.is_available()}")
         logger.info(f"PromptLoader available: {self._prompt_loader is not None}")
         logger.info(f"MemorySummarizer available: {self._memory_summarizer is not None}")
         logger.info(f"Semantic memory v0.3 available: {self._semantic_memory is not None}")
@@ -187,6 +225,9 @@ class ChatService:
         
         # Session tracking (in-memory fallback)
         self._sessions: dict[str, UUID] = {}  # user_id -> session_id
+        
+        # Anti-repetition tracking (CHỈ THỊ SỐ 16)
+        self._session_states: dict[str, SessionState] = {}  # session_id -> SessionState
         
         logger.info("ChatService initialized with all components")
     
@@ -231,8 +272,8 @@ class ChatService:
         
         # Step 3: Fetch learning profile (CHỈ THỊ SỐ 04)
         learning_profile = None
-        if self._supabase_profile_repo.is_available():
-            learning_profile = await self._supabase_profile_repo.get_or_create(user_id)
+        if self._pg_profile_repo.is_available():
+            learning_profile = await self._pg_profile_repo.get_or_create(user_id)
             if learning_profile:
                 logger.debug(f"Loaded learning profile for user {user_id}: {learning_profile.get('attributes', {})}")
         
@@ -329,6 +370,9 @@ class ChatService:
                 except Exception as e:
                     logger.warning(f"Failed to get conversation summary: {e}")
             
+            # CHỈ THỊ SỐ 16: Get session state for anti-repetition
+            session_state = self._get_session_state(session_id)
+            
             # Process with UnifiedAgent (CHỈ THỊ SỐ 16: Pass user_name for {{user_name}} replacement)
             unified_result = await self._unified_agent.process(
                 message=message,
@@ -338,7 +382,11 @@ class ChatService:
                 user_role=user_role.value,
                 user_name=user_name,  # CHỈ THỊ SỐ 16: Thay thế {{user_name}} trong YAML
                 user_facts=user_facts,  # CHỈ THỊ SỐ 16: Facts từ Semantic Memory
-                conversation_summary=conversation_summary  # CHỈ THỊ SỐ 17: Summary từ MemorySummarizer
+                conversation_summary=conversation_summary,  # CHỈ THỊ SỐ 17: Summary từ MemorySummarizer
+                recent_phrases=session_state.recent_phrases,  # Anti-repetition
+                is_follow_up=not session_state.is_first_message,  # Follow-up detection
+                name_usage_count=session_state.name_usage_count,
+                total_responses=session_state.total_responses
             )
             
             # CHỈ THỊ KỸ THUẬT SỐ 16: Lấy sources từ tool_maritime_search
@@ -407,6 +455,18 @@ class ChatService:
             else:
                 self._chat_history.save_message(session_id, "assistant", result.message)
         
+        # Step 8.1: Update session state for anti-repetition (CHỈ THỊ SỐ 16)
+        session_state = self._get_session_state(session_id)
+        used_name = user_name and user_name.lower() in result.message.lower() if user_name else False
+        session_state.increment_response(used_name=used_name)
+        
+        # Step 8.2: Track opening phrase for anti-repetition
+        # Extract first 50 chars as "opening" to avoid repetition
+        if result.message:
+            opening = result.message[:50].strip()
+            session_state.add_phrase(opening)
+            logger.debug(f"[Anti-Repetition] Tracked opening: {opening}...")
+        
         # Step 8.5: Store interaction in Semantic Memory v0.3 (background)
         if self._semantic_memory is not None and background_save:
             background_save(
@@ -422,7 +482,7 @@ class ChatService:
             )
         
         # Step 9: Update learning profile stats (background)
-        if self._supabase_profile_repo.is_available() and background_save:
+        if self._pg_profile_repo.is_available() and background_save:
             background_save(self._update_profile_stats_async, user_id)
         
         # Step 10: Output validation
@@ -649,19 +709,47 @@ class ChatService:
             self._sessions[user_id] = uuid4()
         return self._sessions[user_id]
     
+    def _get_session_state(self, session_id: UUID) -> SessionState:
+        """
+        Get or create session state for anti-repetition tracking.
+        
+        **Validates: Requirements 3.1, 3.2, 2.3**
+        """
+        session_key = str(session_id)
+        if session_key not in self._session_states:
+            self._session_states[session_key] = SessionState(session_id=session_id)
+        return self._session_states[session_key]
+    
     def _extract_user_name(self, message: str) -> Optional[str]:
         """
         Extract user name from message.
         
-        Patterns:
+        Enhanced patterns for Vietnamese and English:
         - "tên là X", "tên tôi là X", "mình tên là X"
+        - "tôi là X", "em là X", "mình là X"
+        - "tôi tên X", "em tên X"
+        - "gọi tôi là X"
         - "I'm X", "my name is X", "call me X"
+        
+        **Validates: Requirements 2.1**
         """
         patterns = [
-            r"tên (?:là|tôi là|mình là)\s+(\w+)",
+            # Vietnamese patterns (more comprehensive)
+            r"tên (?:là|tôi là|mình là|em là)\s+(\w+)",
             r"mình tên là\s+(\w+)",
-            r"(?:i'm|i am|my name is|call me)\s+(\w+)",
+            r"(?:tôi|mình|em) là\s+(\w+)",  # "Tôi là Minh"
+            r"(?:tôi|mình|em) tên\s+(\w+)",  # "Tôi tên Minh"
+            r"gọi (?:tôi|mình|em) là\s+(\w+)",  # "Gọi tôi là Minh"
             r"tên\s+(\w+)",
+            # English patterns
+            r"(?:i'm|i am|my name is|call me)\s+(\w+)",
+        ]
+        
+        # Common Vietnamese words that aren't names
+        not_names = [
+            "là", "tôi", "mình", "em", "anh", "chị", "bạn",
+            "the", "a", "an", "gì", "đây", "này", "kia",
+            "học", "sinh", "viên", "giáo", "sư"
         ]
         
         message_lower = message.lower()
@@ -670,7 +758,7 @@ class ChatService:
             if match:
                 name = match.group(1).capitalize()
                 # Filter out common words that aren't names
-                if name.lower() not in ["là", "tôi", "mình", "the", "a", "an"]:
+                if name.lower() not in not_names:
                     return name
         return None
     
@@ -711,7 +799,7 @@ class ChatService:
         **Spec: CHỈ THỊ KỸ THUẬT SỐ 04**
         """
         try:
-            await self._supabase_profile_repo.increment_stats(user_id, messages=2)  # user + assistant
+            await self._pg_profile_repo.increment_stats(user_id, messages=2)  # user + assistant
             logger.debug(f"Background updated profile stats for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to update profile stats in background: {e}")

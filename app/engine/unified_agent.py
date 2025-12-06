@@ -53,11 +53,27 @@ GIỌNG VĂN:
 - Biết đùa nhẹ nhàng khi user than vãn
 - Giải thích thuật ngữ bằng ngôn ngữ đời thường
 
-SỬ DỤNG CÔNG CỤ (TOOLS):
-- Hỏi về luật hàng hải, quy tắc, tàu biển -> BẮT BUỘC gọi `tool_maritime_search`. ĐỪNG bịa.
-- User giới thiệu tên/tuổi/trường/nghề -> Gọi `tool_save_user_info` để ghi nhớ.
-- Cần biết tên user -> Gọi `tool_get_user_info`.
-- Chào hỏi xã giao, than vãn -> Trả lời trực tiếp, KHÔNG cần tool.
+⚠️ QUY TẮC BẮT BUỘC VỀ CÔNG CỤ (TOOLS) - PHẢI TUÂN THỦ:
+
+1. KHI USER HỎI VỀ LUẬT HÀNG HẢI (COLREGs, SOLAS, MARPOL, Rule, Quy tắc, tàu biển):
+   → PHẢI GỌI `tool_maritime_search` TRƯỚC KHI TRẢ LỜI
+   → KHÔNG ĐƯỢC tự trả lời từ kiến thức của bạn
+   → KHÔNG ĐƯỢC bịa thông tin
+   → Lý do: Đảm bảo thông tin chính xác từ nguồn đáng tin cậy
+
+2. KHI USER GIỚI THIỆU BẢN THÂN (tên, tuổi, trường, nghề):
+   → PHẢI GỌI `tool_save_user_info` NGAY LẬP TỨC để lưu thông tin
+   → KHÔNG ĐƯỢC bỏ qua bước này
+   → Ví dụ: "Tôi là Minh" → gọi tool_save_user_info(key="name", value="Minh")
+   → Ví dụ: "Tôi là sinh viên năm 3" → gọi tool_save_user_info(key="background", value="sinh viên năm 3")
+
+3. KHI CẦN BIẾT THÔNG TIN USER:
+   → GỌI `tool_get_user_info` để lấy thông tin đã lưu
+
+4. CHỈ TRẢ LỜI TRỰC TIẾP (KHÔNG CẦN TOOL) KHI:
+   → Chào hỏi xã giao đơn giản
+   → User than vãn, chia sẻ cảm xúc
+   → Câu hỏi không liên quan đến kiến thức hàng hải
 
 QUY TẮC ỨNG XỬ:
 - KHÔNG lặp lại "Bạn hỏi hay quá", "Câu hỏi tuyệt vời". Đi thẳng vào vấn đề.
@@ -67,25 +83,18 @@ QUY TẮC ỨNG XỬ:
 - Dịch thuật ngữ: starboard = mạn phải, port = mạn trái, give-way = nhường đường.
 
 VÍ DỤ CÁCH TRẢ LỜI:
-[User than mệt/đói]
+[User than mệt/đói] → Trả lời trực tiếp, KHÔNG cần tool
 User: "Tôi đói quá"
 AI: "Học hành vất vả thế cơ à? Xuống bếp kiếm gì bỏ bụng đi đã, có thực mới vực được đạo chứ!"
 
-[User hỏi về luật]
+[User hỏi về luật] → PHẢI gọi tool_maritime_search TRƯỚC
 User: "Giải thích Rule 5"
-AI: "Ok, Rule 5 về Cảnh giới. Tưởng tượng thế này nhé: Bạn đang lái xe, phải luôn quan sát xung quanh đúng không? Trên tàu cũng vậy..."
+→ Gọi tool_maritime_search("Rule 5 COLREGs") → Dùng kết quả để trả lời
 
-[User chào hỏi]
+[User chào hỏi] → Trả lời trực tiếp
 User: "Xin chào, tôi là Minh"
+→ Gọi tool_save_user_info(key="name", value="Minh")
 AI: "Chào Minh! Rất vui được làm quen. Hôm nay bạn muốn tìm hiểu về chủ đề gì?"
-
-[User cảm ơn]
-User: "Cảm ơn bạn"
-AI: "Không có gì! Học vui nhé, có gì thắc mắc cứ hỏi."
-
-[User hỏi tiếp]
-User: "Vậy tàu nào phải tránh?"
-AI: "Trong tình huống cắt hướng, tàu nhìn thấy tàu kia ở mạn phải phải nhường đường. Dễ nhớ: 'Thấy đèn đỏ - Dừng lại'."
 """
 
 
@@ -97,6 +106,7 @@ _semantic_memory = None
 _chat_history = None
 _user_cache: Dict[str, Dict[str, Any]] = {}
 _prompt_loader = None  # CHỈ THỊ SỐ 16: PromptLoader for dynamic persona
+_current_user_id: Optional[str] = None  # Track current user for tools
 
 # CHỈ THỊ KỸ THUẬT SỐ 16: Lưu sources từ tool_maritime_search
 # Để API có thể trả về sources trong response
@@ -150,20 +160,45 @@ async def tool_maritime_search(query: str) -> str:
 @tool(description="Lưu thông tin cá nhân của người dùng khi họ giới thiệu bản thân. Gọi khi user nói tên, nghề nghiệp, trường học.")
 async def tool_save_user_info(key: str, value: str) -> str:
     """Save user personal information."""
-    global _user_cache, _semantic_memory
+    global _user_cache, _semantic_memory, _current_user_id
     
     try:
-        logger.info(f"[TOOL] Save User Info: {key}={value}")
+        # Use actual user_id if available, fallback to "current_user"
+        user_id = _current_user_id or "current_user"
+        logger.info(f"[TOOL] Save User Info: {key}={value} for user {user_id}")
         
-        user_id = "current_user"
         if user_id not in _user_cache:
             _user_cache[user_id] = {}
         _user_cache[user_id][key] = value
+        # Also update "current_user" cache for backward compatibility
+        if "current_user" not in _user_cache:
+            _user_cache["current_user"] = {}
+        _user_cache["current_user"][key] = value
+        
+        # Map key to fact_type for SemanticMemory
+        fact_type_map = {
+            "name": "name",
+            "tên": "name",
+            "job": "background",
+            "nghề": "background",
+            "school": "background",
+            "trường": "background",
+            "goal": "goal",
+            "mục tiêu": "goal",
+            "interest": "interest",
+            "quan tâm": "interest",
+        }
+        fact_type = fact_type_map.get(key.lower(), "preference")
         
         if _semantic_memory:
             try:
-                fact = f"User's {key} is {value}"
-                await _semantic_memory.store_user_fact(user_id, fact)
+                fact_content = f"{key}: {value}"
+                await _semantic_memory.store_user_fact(
+                    user_id=user_id,
+                    fact_content=fact_content,
+                    fact_type=fact_type,
+                    confidence=0.95  # High confidence for explicit user input
+                )
             except Exception as e:
                 logger.warning(f"Failed to save to semantic memory: {e}")
         
@@ -295,7 +330,11 @@ class UnifiedAgent:
         user_role: str = "student",
         user_name: Optional[str] = None,
         user_facts: Optional[List[str]] = None,
-        conversation_summary: Optional[str] = None
+        conversation_summary: Optional[str] = None,
+        recent_phrases: Optional[List[str]] = None,
+        is_follow_up: bool = False,
+        name_usage_count: int = 0,
+        total_responses: int = 0
     ) -> Dict[str, Any]:
         """
         Process a message using Manual ReAct pattern.
@@ -305,9 +344,10 @@ class UnifiedAgent:
         - user_facts: Facts về user từ Semantic Memory
         - conversation_summary: Tóm tắt hội thoại từ MemorySummarizer
         """
-        global _user_cache
+        global _user_cache, _current_user_id
         
         # Set current user context for tools
+        _current_user_id = user_id  # Track actual user_id for tools
         _user_cache["current_user"] = _user_cache.get(user_id, {})
         if user_name:
             _user_cache["current_user"]["name"] = user_name
@@ -327,7 +367,11 @@ class UnifiedAgent:
                 user_role=user_role,
                 user_name=user_name,
                 user_facts=user_facts,
-                conversation_summary=conversation_summary
+                conversation_summary=conversation_summary,
+                recent_phrases=recent_phrases,
+                is_follow_up=is_follow_up,
+                name_usage_count=name_usage_count,
+                total_responses=total_responses
             )
             return await self._manual_react(messages, user_id)
                 
@@ -347,7 +391,11 @@ class UnifiedAgent:
         user_role: str = "student",
         user_name: Optional[str] = None,
         user_facts: Optional[List[str]] = None,
-        conversation_summary: Optional[str] = None
+        conversation_summary: Optional[str] = None,
+        recent_phrases: Optional[List[str]] = None,
+        is_follow_up: bool = False,
+        name_usage_count: int = 0,
+        total_responses: int = 0
     ) -> List:
         """
         Build message list with SystemMessage for ReAct.
@@ -355,6 +403,7 @@ class UnifiedAgent:
         CHỈ THỊ SỐ 16: Dynamic persona via PromptLoader
         - Sử dụng YAML config thay vì hardcoded SYSTEM_PROMPT
         - Thay thế {{user_name}} bằng tên thật từ Memory
+        - Anti-repetition via recent_phrases, is_follow_up, name_usage_count
         """
         global _prompt_loader
         
@@ -367,9 +416,13 @@ class UnifiedAgent:
                     role=user_role,
                     user_name=user_name,  # Thay thế {{user_name}}
                     conversation_summary=conversation_summary,
-                    user_facts=user_facts
+                    user_facts=user_facts,
+                    recent_phrases=recent_phrases,
+                    is_follow_up=is_follow_up,
+                    name_usage_count=name_usage_count,
+                    total_responses=total_responses
                 )
-                logger.debug(f"[PromptLoader] Built dynamic prompt for role={user_role}, user={user_name}")
+                logger.debug(f"[PromptLoader] Built dynamic prompt for role={user_role}, user={user_name}, follow_up={is_follow_up}")
             except Exception as e:
                 logger.warning(f"PromptLoader failed, using fallback: {e}")
         

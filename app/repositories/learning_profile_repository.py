@@ -465,12 +465,14 @@ class SupabaseLearningProfileRepository:
 
 
 # Singleton instance
-_supabase_profile_repo: Optional[SupabaseLearningProfileRepository] = None
+# Note: Class name kept as SupabaseLearningProfileRepository for backward compatibility
+# but it actually uses PostgreSQL (Neon) via SQLAlchemy
+_pg_profile_repo: Optional[SupabaseLearningProfileRepository] = None
 
 
 def get_learning_profile_repository() -> SupabaseLearningProfileRepository:
-    """Get or create SupabaseLearningProfileRepository singleton."""
-    global _supabase_profile_repo
-    if _supabase_profile_repo is None:
-        _supabase_profile_repo = SupabaseLearningProfileRepository()
-    return _supabase_profile_repo
+    """Get or create PostgreSQL LearningProfileRepository singleton."""
+    global _pg_profile_repo
+    if _pg_profile_repo is None:
+        _pg_profile_repo = SupabaseLearningProfileRepository()
+    return _pg_profile_repo

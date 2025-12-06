@@ -6,7 +6,30 @@ Implements rate limiting using slowapi to prevent API abuse.
 Returns HTTP 429 with retry-after header when limit exceeded.
 """
 import logging
+import os
 from typing import Callable
+
+# Monkey patch starlette.config to avoid .env encoding issues on Windows
+# Must be done BEFORE importing slowapi
+import starlette.config
+_original_read_file = starlette.config.Config._read_file
+
+def _patched_read_file(self, file_name):
+    """Patched version that handles encoding properly."""
+    try:
+        with open(file_name, encoding='utf-8') as input_file:
+            return {
+                key: value
+                for key, value in [
+                    line.strip().split("=", 1)
+                    for line in input_file.readlines()
+                    if "=" in line and not line.strip().startswith("#")
+                ]
+            }
+    except Exception:
+        return {}
+
+starlette.config.Config._read_file = _patched_read_file
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -37,10 +60,11 @@ def get_client_identifier(request: Request) -> str:
     return get_remote_address(request)
 
 
-# Create limiter instance
+# Create limiter instance with in-memory storage
 limiter = Limiter(
     key_func=get_client_identifier,
     default_limits=[f"{settings.rate_limit_requests}/{settings.rate_limit_window_seconds}seconds"],
+    storage_uri="memory://",
 )
 
 

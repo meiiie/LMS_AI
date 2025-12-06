@@ -1,13 +1,12 @@
 """
 Shared Database Engine - Singleton Pattern.
 
-This module provides a SINGLE shared database engine for all repositories
-to avoid exceeding Supabase Free Tier connection limits.
+This module provides a SINGLE shared database engine for all repositories.
 
-**CHỈ THỊ KỸ THUẬT: Connection Pool Optimization**
-- Supabase Free Tier: ~10-15 max connections
-- Solution: Share ONE engine across all repositories
-- pool_size=2, max_overflow=1 → Max 3 connections total
+**CHỈ THỊ KỸ THUẬT SỐ 19: Migration to Neon**
+- Neon Serverless Postgres với Pooled Connection
+- Khắc phục vĩnh viễn lỗi MaxClients từ Supabase
+- pool_size=5, max_overflow=5 → Max 10 connections (Neon cho phép nhiều hơn)
 """
 
 import logging
@@ -33,8 +32,8 @@ def get_shared_engine():
     """
     Get the shared SQLAlchemy engine (Singleton).
     
-    Creates ONE engine that all repositories share to minimize
-    database connections on Supabase Free Tier.
+    Creates ONE engine that all repositories share.
+    CHỈ THỊ 19: Now using Neon Serverless Postgres.
     
     Connection Pool Settings:
     - pool_size=2: Only 2 persistent connections
@@ -54,15 +53,15 @@ def get_shared_engine():
                 settings.postgres_url_sync,
                 echo=False,
                 pool_pre_ping=True,
-                pool_size=2,        # MINIMAL: Only 2 persistent connections
-                max_overflow=1,     # Allow 1 extra under load (total max: 3)
-                pool_timeout=10,    # Fail fast (10s) instead of waiting forever
+                pool_size=5,        # CHỈ THỊ 19: Neon Pooled Connection
+                max_overflow=5,     # Allow 5 extra under load (total max: 10)
+                pool_timeout=30,    # Neon có thể cần thời gian wake up
                 pool_recycle=1800   # Recycle connections every 30 minutes
             )
             _engine_initialized = True
             logger.info(
-                "Shared database engine created: "
-                "pool_size=2, max_overflow=1, pool_timeout=10s"
+                "Shared database engine created (Neon): "
+                "pool_size=5, max_overflow=5, pool_timeout=30s"
             )
         except Exception as e:
             logger.error(f"Failed to create shared database engine: {e}")

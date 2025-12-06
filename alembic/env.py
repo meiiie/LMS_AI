@@ -34,8 +34,26 @@ target_metadata = Base.metadata
 
 # Get database URL from environment or config
 def get_url():
-    """Get database URL from environment variables or alembic.ini."""
-    # Try to build URL from individual env vars first
+    """
+    Get database URL from environment variables.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 19: Ưu tiên DATABASE_URL (Neon/Cloud)
+    """
+    # Ưu tiên DATABASE_URL (Neon/Cloud)
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        # Convert to sync driver (psycopg2) for Alembic
+        url = database_url
+        if "+asyncpg" in url:
+            url = url.replace("+asyncpg", "")
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+        # Convert ssl=require to sslmode=require for psycopg2
+        if "ssl=require" in url:
+            url = url.replace("ssl=require", "sslmode=require")
+        return url
+    
+    # Fallback to individual env vars (local Docker)
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5433")
     user = os.getenv("POSTGRES_USER", "maritime")

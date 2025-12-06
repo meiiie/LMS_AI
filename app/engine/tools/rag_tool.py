@@ -13,10 +13,12 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
+
+# Lazy import for optional LLM providers
+ChatOpenAI = None  # Will be imported if needed
 from app.models.knowledge_graph import (
     Citation,
     GraphContext,
@@ -141,12 +143,22 @@ class RAGAgent:
                 except Exception as e:
                     logger.error(f"Failed to initialize Gemini for RAG: {e}")
         
-        # Fallback to OpenAI/OpenRouter
+        # Fallback to OpenAI/OpenRouter (optional)
         if not settings.openai_api_key:
             logger.warning("No LLM API key, RAG will return raw content")
             return None
         
         try:
+            # Lazy import ChatOpenAI only when needed
+            global ChatOpenAI
+            if ChatOpenAI is None:
+                try:
+                    from langchain_openai import ChatOpenAI as _ChatOpenAI
+                    ChatOpenAI = _ChatOpenAI
+                except ImportError:
+                    logger.warning("langchain-openai not installed, skipping OpenAI fallback")
+                    return None
+            
             llm_kwargs = {
                 "api_key": settings.openai_api_key,
                 "model": settings.openai_model,

@@ -2,8 +2,8 @@
 -- SEMANTIC MEMORY SCHEMA v0.3
 -- Maritime AI Tutor - CHỈ THỊ KỸ THUẬT SỐ 06
 -- =============================================================================
--- Run this script in Supabase SQL Editor
--- Prerequisites: pgvector extension must be available in your Supabase project
+-- Run this script in Neon SQL Editor (or any PostgreSQL with pgvector)
+-- Prerequisites: pgvector extension must be available
 -- =============================================================================
 
 -- Enable pgvector extension (required for vector operations)

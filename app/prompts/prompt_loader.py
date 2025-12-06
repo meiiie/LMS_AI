@@ -143,7 +143,11 @@ class PromptLoader:
         role: str,
         user_name: Optional[str] = None,
         conversation_summary: Optional[str] = None,
-        user_facts: Optional[List[str]] = None
+        user_facts: Optional[List[str]] = None,
+        recent_phrases: Optional[List[str]] = None,
+        is_follow_up: bool = False,
+        name_usage_count: int = 0,
+        total_responses: int = 0
     ) -> str:
         """
         Build system prompt from persona configuration.
@@ -155,14 +159,35 @@ class PromptLoader:
             user_name: User's name if known (from Memory)
             conversation_summary: Summary of previous conversation
             user_facts: List of known facts about user
+            recent_phrases: List of recently used opening phrases (for variation)
+            is_follow_up: True if this is a follow-up message (not first in session)
+            name_usage_count: Number of times user's name has been used
+            total_responses: Total number of responses in session
             
         Returns:
             Complete system prompt string with template variables replaced
+            
+        **Validates: Requirements 1.2, 7.1, 7.3**
         """
         persona = self.get_persona(role)
         
         # Build prompt sections
         sections = []
+        
+        # ============================================================
+        # CRITICAL RULE AT THE TOP (Most important - LLM sees this first)
+        # ============================================================
+        sections.append("=" * 60)
+        sections.append("⛔ QUY TẮC TUYỆT ĐỐI - ĐỌC TRƯỚC KHI TRẢ LỜI ⛔")
+        sections.append("=" * 60)
+        sections.append("KHÔNG BAO GIỜ bắt đầu câu trả lời bằng 'À,' hoặc 'À, ' hoặc 'À '")
+        sections.append("Thay vào đó, bắt đầu trực tiếp bằng:")
+        sections.append("  - '**Quy tắc X** - ...'")
+        sections.append("  - 'Tiếp tục với **Quy tắc X**...'")
+        sections.append("  - 'Nói về **Quy tắc X**...'")
+        sections.append("  - 'Chuyển sang **Quy tắc X**...'")
+        sections.append("=" * 60)
+        sections.append("")
         
         # ============================================================
         # PROFILE SECTION (from YAML profile.*)
@@ -263,6 +288,59 @@ class PromptLoader:
             sections.append(f"\n--- TÓM TẮT HỘI THOẠI TRƯỚC ---\n{conversation_summary}")
         
         # ============================================================
+        # VARIATION INSTRUCTIONS (Anti-repetition)
+        # Spec: ai-response-quality, Requirements 7.1, 7.3
+        # ============================================================
+        if recent_phrases or is_follow_up or total_responses > 0:
+            sections.append("\n--- HƯỚNG DẪN ĐA DẠNG HÓA (VARIATION) ---")
+            
+            # Follow-up instruction
+            if is_follow_up:
+                sections.append("- Đây là tin nhắn FOLLOW-UP, KHÔNG chào hỏi lại.")
+            
+            # Name usage instruction (20-30% frequency)
+            if user_name and total_responses > 0:
+                name_ratio = name_usage_count / total_responses if total_responses > 0 else 0
+                if name_ratio >= 0.3:
+                    sections.append(f"- KHÔNG dùng tên '{user_name}' trong response này (đã dùng đủ rồi).")
+                elif name_ratio < 0.2:
+                    sections.append(f"- Có thể dùng tên '{user_name}' một cách tự nhiên.")
+            
+            # Phrases to avoid - CRITICAL for anti-repetition
+            if recent_phrases:
+                sections.append("\n⚠️ CÁC CÁCH MỞ ĐẦU BẠN ĐÃ DÙNG GẦN ĐÂY:")
+                for i, phrase in enumerate(recent_phrases[-3:], 1):
+                    sections.append(f"  {i}. \"{phrase[:40]}...\"")
+                sections.append("→ KHÔNG được bắt đầu response bằng các pattern tương tự!")
+                sections.append("→ Hãy dùng cách mở đầu KHÁC BIỆT hoàn toàn.")
+        
+        # ============================================================
+        # CRITICAL: ADDRESSING RULES (Cách xưng hô mặc định)
+        # ============================================================
+        if role == "student":
+            sections.append("\n--- CÁCH XƯNG HÔ MẶC ĐỊNH ---")
+            sections.append("- Gọi người dùng là 'bạn' (lịch sự, thân thiện)")
+            sections.append("- Tự xưng là 'tôi'")
+            sections.append("- Nếu người dùng yêu cầu cách xưng hô khác thì mới thay đổi")
+            sections.append("- KHÔNG dùng 'cậu/mình' - nghe xa cách")
+        
+        # ============================================================
+        # CRITICAL: ANTI-REPETITION RULES (QUAN TRỌNG NHẤT)
+        # ============================================================
+        sections.append("\n" + "="*60)
+        sections.append("⚠️ QUY TẮC BẮT BUỘC - KHÔNG ĐƯỢC VI PHẠM ⚠️")
+        sections.append("="*60)
+        sections.append("1. TUYỆT ĐỐI KHÔNG bắt đầu câu trả lời bằng 'À,' hoặc 'À, ' hoặc 'À '")
+        sections.append("   - Đây là thói quen XẤU, nghe không chuyên nghiệp")
+        sections.append("   - Thay vào đó, bắt đầu trực tiếp bằng tên quy tắc hoặc nội dung")
+        sections.append("2. Khi trả lời nhiều câu hỏi liên tiếp về quy tắc:")
+        sections.append("   - Câu 1: Bắt đầu bằng '**Quy tắc X** - ...' hoặc 'Về vấn đề này...'")
+        sections.append("   - Câu 2: Bắt đầu bằng 'Quy tắc này cũng quan trọng...' hoặc 'Tiếp theo...'")
+        sections.append("   - Câu 3: Bắt đầu bằng 'Nói về **Quy tắc X**...' hoặc 'Chuyển sang...'")
+        sections.append("3. KHÔNG lặp lại cùng một cách mở đầu trong 3 câu liên tiếp")
+        sections.append("="*60)
+        
+        # ============================================================
         # TOOLS INSTRUCTION (Required for ReAct Agent)
         # ============================================================
         sections.append("\n--- SỬ DỤNG CÔNG CỤ (TOOLS) ---")
@@ -305,6 +383,143 @@ class PromptLoader:
             "extract": memory_hints.get('extract_facts', []),
             "ignore": memory_hints.get('ignore_facts', [])
         }
+    
+    # =========================================================================
+    # ENHANCED METHODS - AI Response Quality Improvement
+    # Spec: ai-response-quality, Requirements 1.2, 7.1
+    # =========================================================================
+    
+    def detect_empathy_needed(self, message: str, role: str = "student") -> bool:
+        """
+        Detect if user message requires empathy-first response.
+        
+        Checks message against empathy_patterns defined in YAML.
+        
+        Args:
+            message: User's message text
+            role: User role to get correct persona
+            
+        Returns:
+            True if empathy response is needed
+            
+        **Validates: Requirements 1.2**
+        """
+        persona = self.get_persona(role)
+        empathy_patterns = persona.get('empathy_patterns', {})
+        
+        if not empathy_patterns:
+            return False
+        
+        message_lower = message.lower()
+        
+        # Check frustration keywords
+        frustration_keywords = empathy_patterns.get('frustration_keywords', [])
+        for keyword in frustration_keywords:
+            if keyword.lower() in message_lower:
+                logger.debug(f"Empathy needed: frustration keyword '{keyword}' detected")
+                return True
+        
+        # Check basic needs keywords
+        basic_needs = empathy_patterns.get('basic_needs_keywords', [])
+        for keyword in basic_needs:
+            if keyword.lower() in message_lower:
+                logger.debug(f"Empathy needed: basic need '{keyword}' detected")
+                return True
+        
+        # Check work pressure keywords (for teacher/admin)
+        work_pressure = empathy_patterns.get('work_pressure_keywords', [])
+        for keyword in work_pressure:
+            if keyword.lower() in message_lower:
+                logger.debug(f"Empathy needed: work pressure '{keyword}' detected")
+                return True
+        
+        return False
+    
+    def get_variation_phrases(
+        self,
+        role: str,
+        category: str,
+        subcategory: Optional[str] = None
+    ) -> List[str]:
+        """
+        Get alternative phrases for a category to avoid repetition.
+        
+        Args:
+            role: User role (student, teacher, admin)
+            category: Phrase category (openings, transitions, closings)
+            subcategory: Optional subcategory (knowledge, follow_up, empathy)
+            
+        Returns:
+            List of alternative phrases
+            
+        **Validates: Requirements 7.1**
+        """
+        persona = self.get_persona(role)
+        variation_phrases = persona.get('variation_phrases', {})
+        
+        if not variation_phrases:
+            return []
+        
+        phrases = variation_phrases.get(category, {})
+        
+        if subcategory and isinstance(phrases, dict):
+            return phrases.get(subcategory, [])
+        elif isinstance(phrases, list):
+            return phrases
+        
+        return []
+    
+    def get_random_opening(
+        self,
+        role: str,
+        context_type: str = "knowledge",
+        exclude_phrases: Optional[List[str]] = None
+    ) -> Optional[str]:
+        """
+        Get a random opening phrase, excluding recently used ones.
+        
+        Args:
+            role: User role
+            context_type: Type of response (knowledge, follow_up, empathy)
+            exclude_phrases: List of recently used phrases to avoid
+            
+        Returns:
+            A phrase not in exclude_phrases, or None if all exhausted
+        """
+        import random
+        
+        phrases = self.get_variation_phrases(role, "openings", context_type)
+        
+        if not phrases:
+            return None
+        
+        if exclude_phrases:
+            available = [p for p in phrases if p not in exclude_phrases]
+            if available:
+                return random.choice(available)
+        
+        return random.choice(phrases)
+    
+    def get_empathy_response_template(
+        self,
+        role: str,
+        empathy_type: str = "frustration"
+    ) -> Optional[str]:
+        """
+        Get empathy response template from YAML.
+        
+        Args:
+            role: User role
+            empathy_type: Type of empathy (frustration, basic_needs, encouragement, urgent, busy)
+            
+        Returns:
+            Response template string with placeholders
+        """
+        persona = self.get_persona(role)
+        empathy_patterns = persona.get('empathy_patterns', {})
+        empathy_responses = empathy_patterns.get('empathy_responses', {})
+        
+        return empathy_responses.get(empathy_type)
     
     def reload(self) -> None:
         """Reload all persona files."""

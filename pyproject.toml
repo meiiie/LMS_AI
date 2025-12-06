@@ -50,3 +50,25 @@ dev = [
     "mypy>=1.8.0",
     "pre-commit>=3.6.0",
 ]
+
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+markers = [
+    "integration: marks tests as integration tests (require real services like Neo4j, Google API)",
+]
+# Hypothesis settings for property-based testing
+[tool.hypothesis]
+profile = "dev"
+
+[tool.hypothesis.profiles.dev]
+max_examples = 50
+deadline = 5000

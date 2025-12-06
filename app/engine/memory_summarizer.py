@@ -308,6 +308,80 @@ TOPICS: [chủ đề 1, chủ đề 2]"""
         state = self.get_state(session_id)
         return state.get_context_for_prompt()
     
+    async def get_summary_async(self, session_id: str) -> Optional[str]:
+        """
+        Get conversation summary for a session (async).
+        
+        This method is called by ChatService to get a summary of the conversation
+        to pass to UnifiedAgent for context.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Formatted summary string, or None if no summaries exist
+        """
+        state = self.get_state(session_id)
+        
+        # If no summaries yet, return None
+        if not state.summaries:
+            return None
+        
+        # Build summary from tiered memory
+        parts = []
+        
+        # Add summaries (episodic memory - Tầng 2)
+        if state.summaries:
+            summary_texts = [s.summary_text for s in state.summaries[-3:]]  # Last 3 summaries
+            parts.append("TÓM TẮT HỘI THOẠI:")
+            parts.extend(summary_texts)
+        
+        # Add user state if detected
+        recent_state = state._get_recent_user_state()
+        if recent_state:
+            parts.append(f"\nTRẠNG THÁI USER: {recent_state}")
+        
+        # Add topics discussed
+        all_topics = []
+        for summary in state.summaries:
+            all_topics.extend(summary.topics)
+        if all_topics:
+            unique_topics = list(dict.fromkeys(all_topics))  # Preserve order, remove duplicates
+            parts.append(f"\nCHỦ ĐỀ ĐÃ THẢO LUẬN: {', '.join(unique_topics[:5])}")
+        
+        return "\n".join(parts) if parts else None
+    
+    def get_summary(self, session_id: str) -> Optional[str]:
+        """
+        Sync version of get_summary_async.
+        
+        For use in non-async contexts.
+        """
+        state = self.get_state(session_id)
+        
+        if not state.summaries:
+            return None
+        
+        parts = []
+        
+        if state.summaries:
+            summary_texts = [s.summary_text for s in state.summaries[-3:]]
+            parts.append("TÓM TẮT HỘI THOẠI:")
+            parts.extend(summary_texts)
+        
+        recent_state = state._get_recent_user_state()
+        if recent_state:
+            parts.append(f"\nTRẠNG THÁI USER: {recent_state}")
+        
+        all_topics = []
+        for summary in state.summaries:
+            all_topics.extend(summary.topics)
+        if all_topics:
+            unique_topics = list(dict.fromkeys(all_topics))
+            parts.append(f"\nCHỦ ĐỀ ĐÃ THẢO LUẬN: {', '.join(unique_topics[:5])}")
+        
+        return "\n".join(parts) if parts else None
+    
     def clear_session(self, session_id: str) -> None:
         """Clear memory state for a session."""
         if session_id in self._states:

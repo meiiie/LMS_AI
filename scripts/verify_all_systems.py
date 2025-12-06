@@ -32,11 +32,11 @@ async def test_1_env_files():
         with open(env_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
         
-        # Check for correct Session Pooler URL
-        if "aws-1-ap-southeast-1.pooler.supabase.com:5432" in content:
-            log_result(".env DATABASE_URL", True, "Session Pooler 5432 ✓")
+        # Check for correct Neon Pooler URL (CHỈ THỊ 19)
+        if "neon.tech" in content or "ep-quiet-bush" in content:
+            log_result(".env DATABASE_URL", True, "Neon Pooler ✓")
         else:
-            log_result(".env DATABASE_URL", False, "Wrong URL format")
+            log_result(".env DATABASE_URL", False, "Wrong URL format (expected Neon)")
     else:
         log_result(".env", False, "File not found")
     
@@ -46,18 +46,18 @@ async def test_1_env_files():
         with open(render_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
         
-        if "aws-1-ap-southeast-1.pooler.supabase.com:5432" in content:
-            log_result(".env.render DATABASE_URL", True, "Session Pooler 5432 ✓")
+        if "neon.tech" in content or "ep-quiet-bush" in content:
+            log_result(".env.render DATABASE_URL", True, "Neon Pooler ✓")
         else:
-            log_result(".env.render DATABASE_URL", False, "Wrong URL format")
+            log_result(".env.render DATABASE_URL", False, "Wrong URL format (expected Neon)")
     else:
         log_result(".env.render", False, "File not found")
 
 
-async def test_2_supabase_connection():
-    """Test 2: Kiểm tra kết nối Supabase PostgreSQL."""
+async def test_2_neon_connection():
+    """Test 2: Kiểm tra kết nối Neon PostgreSQL (CHỈ THỊ 19)."""
     print("\n" + "="*60)
-    print("TEST 2: Supabase PostgreSQL Connection")
+    print("TEST 2: Neon PostgreSQL Connection")
     print("="*60)
     
     try:
@@ -292,7 +292,7 @@ async def main():
     print("="*60)
     
     await test_1_env_files()
-    await test_2_supabase_connection()
+    await test_2_neon_connection()
     await test_3_neo4j_connection()
     await test_4_dense_search()
     await test_5_sparse_search()
