@@ -9,7 +9,7 @@
 [![LangChain](https://img.shields.io/badge/LangChain-1.1.2-1c3c3c?style=flat-square&logo=chainlink&logoColor=white)](https://langchain.com)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.0.4-purple?style=flat-square)](https://langchain.com)
 [![Neo4j](https://img.shields.io/badge/Neo4j-5.28-008cc1?style=flat-square&logo=neo4j&logoColor=white)](https://neo4j.com)
-[![Supabase](https://img.shields.io/badge/Supabase-pgvector-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com)
+[![Neon](https://img.shields.io/badge/Neon-pgvector-00E599?style=flat-square&logo=postgresql&logoColor=white)](https://neon.tech)
 [![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev)
 [![License](https://img.shields.io/badge/License-Proprietary-red?style=flat-square)](LICENSE)
 
@@ -216,7 +216,7 @@ Hệ thống persona được cấu hình qua file YAML, hỗ trợ cá nhân h�
           ▼                         ▼                         ▼
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │   PostgreSQL    │     │     Neo4j       │     │  Google Gemini  │
-│   (Supabase)    │     │  Knowledge      │     │  2.5 Flash      │
+│   (Neon)        │     │  Knowledge      │     │  2.5 Flash      │
 │   + pgvector    │     │  Graph + FTS    │     │  + Embeddings   │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
 ```
@@ -278,7 +278,7 @@ maritime-ai-service/
 - Python 3.11+
 - Docker & Docker Compose
 - Neo4j (local or Aura)
-- PostgreSQL with pgvector (local or Supabase)
+- PostgreSQL with pgvector (local or Neon)
 - Google Gemini API Key
 
 ### 1. Clone & Setup
@@ -306,8 +306,8 @@ LLM_PROVIDER=google
 GOOGLE_API_KEY=your_gemini_api_key
 GOOGLE_MODEL=gemini-2.5-flash
 
-# Database (Supabase)
-DATABASE_URL=postgresql://user:pass@host:5432/db
+# Database (Neon Serverless Postgres)
+DATABASE_URL=postgresql+asyncpg://user:pass@host/db?ssl=require
 
 # Neo4j
 NEO4J_URI=bolt://localhost:7687
@@ -664,16 +664,22 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 | **LLM Provider** | Google Gemini 2.5 Flash |
 | **Embeddings** | Gemini text-embedding-004 (768 dims) |
 | **Graph Database** | Neo4j 5.28 + Full-text Search |
-| **Vector Database** | PostgreSQL + pgvector (Supabase) |
+| **Vector Database** | PostgreSQL + pgvector (Neon) |
 | **Search** | Hybrid Search (Dense + Sparse + RRF) |
 | **Memory** | Semantic Memory v0.3 |
 | **Testing** | Pytest + Hypothesis |
 
 ---
 
-## Database Connection Pooling (v0.6.3)
+## Database Connection Pooling (v0.8.0 - Neon Migration)
 
-Optimized for Supabase Free Tier (~10-15 max connections).
+Migrated from Supabase to Neon Serverless Postgres (CHỈ THỊ KỸ THUẬT SỐ 19).
+
+### Why Neon?
+
+- **No MaxClients Error**: Neon Pooled Connection handles connections better
+- **Serverless**: Auto-scales, sleeps when idle (saves compute hours)
+- **Free Tier**: 100 compute hours/month (vs Supabase connection limits)
 
 ### Shared Engine Architecture
 
@@ -682,8 +688,8 @@ Optimized for Supabase Free Tier (~10-15 max connections).
 │                    SHARED DATABASE ENGINE                    │
 │                    (app/core/database.py)                   │
 │                                                              │
-│   pool_size=2, max_overflow=1, pool_timeout=10s             │
-│   Total Max Connections: 3                                   │
+│   pool_size=5, max_overflow=5, pool_timeout=30s             │
+│   Total Max Connections: 10 (Neon allows more)              │
 └─────────────────────────────────────────────────────────────┘
                               │
         ┌─────────────────────┼─────────────────────┐
@@ -695,20 +701,29 @@ Optimized for Supabase Free Tier (~10-15 max connections).
 
 ┌─────────────────────────────────────────────────────────────┐
 │              DENSE SEARCH (asyncpg)                          │
-│              min_size=1, max_size=1                          │
-│              Total: 1 connection                             │
+│              min_size=1, max_size=2                          │
+│              Total: 2 connections                            │
 └─────────────────────────────────────────────────────────────┘
 
-TOTAL CONNECTIONS: 4 (down from 11)
+TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 ```
 
 ### Connection Settings
 
 | Component | pool_size | max_overflow | Total |
 |-----------|-----------|--------------|-------|
-| Shared SQLAlchemy Engine | 2 | 1 | 3 |
-| DenseSearchRepository (asyncpg) | 1 | 0 | 1 |
-| **TOTAL** | | | **4** |
+| Shared SQLAlchemy Engine | 5 | 5 | 10 |
+| DenseSearchRepository (asyncpg) | 1 | 1 | 2 |
+| **TOTAL** | | | **12** |
+
+### Health Check Strategy (Protect Neon Free Tier)
+
+| Endpoint | Purpose | DB Access |
+|----------|---------|-----------|
+| `GET /api/v1/health` | Cronjob/Render ping | ❌ No (shallow) |
+| `GET /api/v1/health/db` | Admin debug | ✅ Yes (deep) |
+
+**Important**: Configure UptimeRobot/Cron-job to ping `/api/v1/health` (NOT `/api/v1/health/db`) to avoid waking up Neon unnecessarily.
 
 ---
 
@@ -716,12 +731,14 @@ TOTAL CONNECTIONS: 4 (down from 11)
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.8.0 | 2025-12-07 | **NEON MIGRATION**: CHỈ THỊ SỐ 19 - Migrate from Supabase to Neon Serverless Postgres, Optimized Health Check (shallow/deep), Code cleanup |
+| v0.7.5 | 2025-12-07 | **AI QUALITY**: Fix "À," repetition pattern, SessionState tracking, Explicit anti-repetition instructions |
 | v0.7.4 | 2025-12-05 | **PERSONA SYSTEM**: Dynamic YAML Persona - Full support for tutor.yaml/assistant.yaml structure, Template variable `{{user_name}}` replacement from Memory |
 | v0.7.3 | 2025-12-05 | **WIRING**: CHỈ THỊ SỐ 17 - Tích hợp PromptLoader & MemorySummarizer vào ChatService |
 | v0.7.2 | 2025-12-05 | **HUMANIZATION**: CHỈ THỊ SỐ 16 - YAML Persona Config, Memory Summarizer, Natural conversation style |
 | v0.7.1 | 2025-12-05 | **CRITICAL FIX**: google-genai SDK - Fix Semantic Memory embedding failure (No module named 'google.genai') |
 | v0.7.0 | 2025-12-05 | **MAJOR UPGRADE**: LangChain 1.1.x + LangGraph 1.0.x - Manual ReAct pattern với bind_tools(), loại bỏ deprecated create_react_agent |
-| v0.6.3 | 2025-12-05 | **CRITICAL FIX**: Shared Database Engine - Fix MaxClientsInSessionMode error on Supabase Free Tier |
+| v0.6.3 | 2025-12-05 | **CRITICAL FIX**: Shared Database Engine - Fix MaxClientsInSessionMode error (now resolved with Neon) |
 | v0.6.2 | 2025-12-05 | GET /api/v1/history/{user_id} - Paginated history retrieval for multi-device sync (Phase 2) |
 | v0.6.1 | 2025-12-04 | Chat History Management API - DELETE /api/v1/history/{user_id} with role-based access control |
 | v0.6.0 | 2025-12-04 | Tech Debt Cleanup - pypdf migration (from PyPDF2), Knowledge API error handling, Pydantic v2 compliance, circular import fix |
@@ -739,7 +756,7 @@ TOTAL CONNECTIONS: 4 (down from 11)
 
 ## Van de da biet va Cong viec tuong lai
 
-### Da giai quyet (v0.5.3)
+### Da giai quyet (v0.5.2a)
 - **Agent Routing**: Cau hoi tieng Viet da duoc dinh tuyen dung den RAG Agent
 - **Do chinh xac trich dan**: Do chinh xac Top-1 tang tu 20% len 100%
 
@@ -773,8 +790,19 @@ TOTAL CONNECTIONS: 4 (down from 11)
 - **SystemMessage Support**: Them SystemMessage cho system prompt trong ReAct loop
 - **Gemini Response Handling**: Cai thien xu ly response format cua Gemini (list vs string)
 
+### Da giai quyet (v0.8.0 - Neon Migration)
+- **MaxClientsInSessionMode**: KHAC PHUC VINH VIEN - Chuyen tu Supabase sang Neon Serverless Postgres
+- **Health Check Optimization**: Shallow check (no DB) cho Cronjob, Deep check cho Admin
+- **Code Cleanup**: Xoa tat ca references den Supabase trong Python code
+- **Connection Pool**: Tang pool_size tu 2 len 5 (Neon cho phep nhieu hon)
+
+### Da giai quyet (v0.7.5 - AI Quality)
+- **"À," Repetition Pattern**: AI khong con lap lai "À," o dau cau
+- **SessionState Tracking**: Cache tren RAM de theo doi patterns da dung
+- **Explicit Anti-Repetition**: Them chi dan cu the vao system prompt
+
 ### Da giai quyet (v0.6.3)
-- **MaxClientsInSessionMode**: Da khac phuc van de gioi han ket noi Supabase Free Tier
+- **MaxClientsInSessionMode**: Da khac phuc tam thoi (nay da chuyen sang Neon v0.8.0)
 - **Shared Database Engine**: Tat ca repositories su dung singleton engine pattern
 - **Toi uu Connection Pool**: Giam tu 11 ket noi xuong 4 ket noi
 
