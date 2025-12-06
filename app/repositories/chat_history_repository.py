@@ -59,10 +59,11 @@ class ChatHistoryRepository:
     **Spec: CHỈ THỊ KỸ THUẬT SỐ 04, CHỈ THỊ SỐ 21 (Large Context Window)**
     """
     
-    # CHỈ THỊ SỐ 21: Large Context Window - Tăng từ 10 lên 50 messages
+    # CHỈ THỊ SỐ 21: Large Context Window - Configurable via settings
     # Gemini 2.5 Flash xử lý 50-100 tin nhắn cực nhanh và rẻ
     # Giúp AI hiểu các đại từ thay thế ("nó", "tàu đó", "ông ấy") hoàn hảo
-    WINDOW_SIZE = 50
+    # Default: 50 messages (configurable via CONTEXT_WINDOW_SIZE env var)
+    WINDOW_SIZE = getattr(settings, 'context_window_size', 50)
     
     def __init__(self, database_url: Optional[str] = None):
         """Initialize repository with SHARED database connection."""

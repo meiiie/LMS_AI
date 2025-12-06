@@ -446,7 +446,9 @@ class UnifiedAgent:
                 logger.warning(f"PromptLoader failed, using fallback: {e}")
         
         # CHỈ THỊ SỐ 21: Add Deep Reasoning context for proactive behavior
-        if conversation_context is not None:
+        # Only add if deep_reasoning_enabled is True in settings
+        deep_reasoning_enabled = getattr(settings, 'deep_reasoning_enabled', True)
+        if deep_reasoning_enabled and conversation_context is not None:
             try:
                 if hasattr(conversation_context, 'should_offer_continuation') and conversation_context.should_offer_continuation:
                     topic = getattr(conversation_context, 'last_explanation_topic', 'chủ đề trước')

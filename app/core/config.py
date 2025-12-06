@@ -129,6 +129,10 @@ class Settings(BaseSettings):
     # Unified Agent Settings (CHỈ THỊ KỸ THUẬT SỐ 13)
     use_unified_agent: bool = Field(default=True, description="Use Unified Agent (LLM-driven orchestration) instead of IntentClassifier")
     
+    # Deep Reasoning Settings (CHỈ THỊ KỸ THUẬT SỐ 21)
+    deep_reasoning_enabled: bool = Field(default=True, description="Enable Deep Reasoning with <thinking> tags")
+    context_window_size: int = Field(default=50, description="Number of messages to include in context window")
+    
     # Vector Store
     chroma_host: str = Field(default="localhost", description="ChromaDB host")
     chroma_port: int = Field(default=8000, description="ChromaDB port")
