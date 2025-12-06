@@ -187,9 +187,9 @@ class TestHealthCheckIntegration:
     @pytest.mark.asyncio
     async def test_health_check_returns_all_components(self):
         """Test that health check endpoint returns all required components"""
-        from app.api.v1.health import health_check
+        from app.api.v1.health import health_check_deep
         
-        response = await health_check()
+        response = await health_check_deep()
         
         # Verify all required components are present
         assert "api" in response.components
