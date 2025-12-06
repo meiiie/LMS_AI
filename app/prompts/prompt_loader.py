@@ -369,6 +369,42 @@ class PromptLoader:
                 sections.append(f"{step_num}. {instruction}")
         
         # ============================================================
+        # CHỈ THỊ SỐ 21: DEEP REASONING (from YAML deep_reasoning.*)
+        # ============================================================
+        deep_reasoning = persona.get('deep_reasoning', {})
+        if deep_reasoning and deep_reasoning.get('enabled', False):
+            sections.append("\n" + "="*60)
+            sections.append("🧠 DEEP REASONING - TƯ DUY NỘI TÂM (BẮT BUỘC)")
+            sections.append("="*60)
+            
+            # Description
+            if deep_reasoning.get('description'):
+                sections.append(deep_reasoning['description'].strip())
+            
+            # Thinking rules
+            thinking_rules = deep_reasoning.get('thinking_rules', [])
+            if thinking_rules:
+                sections.append("\nQUY TẮC TƯ DUY:")
+                for rule in thinking_rules:
+                    sections.append(f"- {rule}")
+            
+            # Response format
+            if deep_reasoning.get('response_format'):
+                sections.append("\nĐỊNH DẠNG TRẢ LỜI:")
+                sections.append(deep_reasoning['response_format'].strip())
+            
+            # Proactive behavior
+            proactive = deep_reasoning.get('proactive_behavior', {})
+            if proactive:
+                sections.append("\nHÀNH VI CHỦ ĐỘNG:")
+                if proactive.get('description'):
+                    sections.append(proactive['description'].strip())
+                if proactive.get('example'):
+                    sections.append(f"Ví dụ: \"{proactive['example']}\"")
+            
+            sections.append("="*60)
+        
+        # ============================================================
         # DIRECTIVES SECTION (from YAML directives.*)
         # ============================================================
         directives = persona.get('directives', {})
