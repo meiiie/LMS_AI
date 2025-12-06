@@ -302,6 +302,10 @@ class ChatService:
         # Step 1: Input validation (CHỈ THỊ SỐ 21: Guardian Agent)
         # Use LLM-based Guardian Agent for contextual content filtering
         # Falls back to rule-based Guardrails if Guardian unavailable
+        
+        # CHỈ THỊ SỐ 22: Get session_id early for blocked message logging
+        session_id = self._get_or_create_session(user_id)
+        
         if self._guardian_agent is not None:
             guardian_decision = await self._guardian_agent.validate_message(
                 message=message,
@@ -309,6 +313,20 @@ class ChatService:
             )
             if guardian_decision.action == "BLOCK":
                 logger.warning(f"[GUARDIAN] Input blocked for user {user_id}: {guardian_decision.reason}")
+                
+                # CHỈ THỊ SỐ 22: Save blocked message to DB for admin review
+                # But DO NOT save to semantic memory (Vector DB)
+                if self._chat_history.is_available():
+                    self._chat_history.save_message(
+                        session_id=session_id,
+                        role="user",
+                        content=message,
+                        user_id=user_id,
+                        is_blocked=True,
+                        block_reason=guardian_decision.reason
+                    )
+                    logger.info(f"[MEMORY ISOLATION] Blocked message saved to chat_history with is_blocked=True")
+                
                 return self._create_blocked_response([guardian_decision.reason or "Nội dung không phù hợp"])
             elif guardian_decision.action == "FLAG":
                 logger.info(f"[GUARDIAN] Input flagged for user {user_id}: {guardian_decision.reason}")
@@ -318,15 +336,27 @@ class ChatService:
             input_result = await self._guardrails.validate_input(message)
             if not input_result.is_valid:
                 logger.warning(f"Input blocked for user {user_id}: {input_result.issues}")
+                
+                # CHỈ THỊ SỐ 22: Save blocked message to DB for admin review
+                if self._chat_history.is_available():
+                    self._chat_history.save_message(
+                        session_id=session_id,
+                        role="user",
+                        content=message,
+                        user_id=user_id,
+                        is_blocked=True,
+                        block_reason="; ".join(input_result.issues)
+                    )
+                    logger.info(f"[MEMORY ISOLATION] Blocked message saved to chat_history with is_blocked=True")
+                
                 return self._create_blocked_response(input_result.issues)
         
         # Log role for debugging
         logger.info(f"Processing request for user {user_id} with role: {user_role.value}")
         
-        # Step 2: Get or create session (Memory Lite)
-        session_id = self._get_or_create_session(user_id)
+        # Note: session_id already created in Step 1 (CHỈ THỊ SỐ 22)
         
-        # Step 3: Fetch learning profile (CHỈ THỊ SỐ 04)
+        # Step 2: Fetch learning profile (CHỈ THỊ SỐ 04)
         learning_profile = None
         if self._pg_profile_repo.is_available():
             learning_profile = await self._pg_profile_repo.get_or_create(user_id)

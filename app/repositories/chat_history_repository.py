@@ -24,12 +24,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ChatMessage:
-    """Chat message data class."""
+    """
+    Chat message data class.
+    
+    **CHỈ THỊ SỐ 22: Memory Isolation - is_blocked flag**
+    """
     id: UUID
     session_id: UUID
     role: str  # 'user' or 'assistant'
     content: str
     created_at: datetime
+    is_blocked: bool = False  # CHỈ THỊ SỐ 22: Blocked message flag
+    block_reason: Optional[str] = None  # CHỈ THỊ SỐ 22: Reason for blocking
 
 
 @dataclass
@@ -166,7 +172,9 @@ class ChatHistoryRepository:
         session_id: UUID, 
         role: str, 
         content: str,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        is_blocked: bool = False,
+        block_reason: Optional[str] = None
     ) -> Optional[ChatMessage]:
         """
         Save a message to the chat history.
@@ -176,11 +184,13 @@ class ChatHistoryRepository:
             role: 'user' or 'assistant'
             content: Message content
             user_id: User ID (required for new schema)
+            is_blocked: Whether message was blocked by Guardian (CHỈ THỊ SỐ 22)
+            block_reason: Reason for blocking (CHỈ THỊ SỐ 22)
             
         Returns:
             ChatMessage or None if failed
             
-        **Spec: CHỈ THỊ KỸ THUẬT SỐ 04**
+        **Spec: CHỈ THỊ KỸ THUẬT SỐ 04, CHỈ THỊ SỐ 22**
         """
         if not self._available:
             return None
@@ -193,15 +203,17 @@ class ChatHistoryRepository:
                     msg_id = uuid4()
                     session.execute(
                         text("""
-                            INSERT INTO chat_history (id, user_id, session_id, role, content)
-                            VALUES (:id, :user_id, :session_id, :role, :content)
+                            INSERT INTO chat_history (id, user_id, session_id, role, content, is_blocked, block_reason)
+                            VALUES (:id, :user_id, :session_id, :role, :content, :is_blocked, :block_reason)
                         """),
                         {
                             "id": str(msg_id),
                             "user_id": user_id or str(session_id),
                             "session_id": str(session_id),
                             "role": role,
-                            "content": content
+                            "content": content,
+                            "is_blocked": is_blocked,
+                            "block_reason": block_reason
                         }
                     )
                     session.commit()
@@ -210,7 +222,9 @@ class ChatHistoryRepository:
                         session_id=session_id,
                         role=role,
                         content=content,
-                        created_at=datetime.now(timezone.utc)
+                        created_at=datetime.now(timezone.utc),
+                        is_blocked=is_blocked,
+                        block_reason=block_reason
                     )
                 else:
                     # Use legacy schema (chat_messages table)
@@ -218,7 +232,9 @@ class ChatHistoryRepository:
                         id=uuid4(),
                         session_id=session_id,
                         role=role,
-                        content=content
+                        content=content,
+                        is_blocked=is_blocked,
+                        block_reason=block_reason
                     )
                     session.add(message)
                     session.commit()
@@ -228,7 +244,9 @@ class ChatHistoryRepository:
                         session_id=message.session_id,
                         role=message.role,
                         content=message.content,
-                        created_at=message.created_at
+                        created_at=message.created_at,
+                        is_blocked=message.is_blocked,
+                        block_reason=message.block_reason
                     )
         except Exception as e:
             logger.error(f"Failed to save message: {e}")
@@ -238,7 +256,8 @@ class ChatHistoryRepository:
         self, 
         session_id: UUID, 
         limit: Optional[int] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        include_blocked: bool = False
     ) -> List[ChatMessage]:
         """
         Get recent messages using Sliding Window strategy.
@@ -247,11 +266,13 @@ class ChatHistoryRepository:
             session_id: Session UUID
             limit: Number of messages (default: WINDOW_SIZE)
             user_id: User ID (for new schema query by user)
+            include_blocked: Whether to include blocked messages (CHỈ THỊ SỐ 22)
+                           Default False = exclude blocked messages from context
             
         Returns:
             List of recent messages, oldest first
             
-        **Spec: CHỈ THỊ KỸ THUẬT SỐ 04**
+        **Spec: CHỈ THỊ KỸ THUẬT SỐ 04, CHỈ THỊ SỐ 22**
         """
         if not self._available:
             return []
@@ -266,11 +287,15 @@ class ChatHistoryRepository:
                     query_field = "user_id" if user_id else "session_id"
                     query_value = user_id if user_id else str(session_id)
                     
+                    # CHỈ THỊ SỐ 22: Filter blocked messages by default
+                    blocked_filter = "" if include_blocked else "AND (is_blocked = FALSE OR is_blocked IS NULL)"
+                    
                     result = session.execute(
                         text(f"""
-                            SELECT id, user_id, session_id, role, content, created_at
+                            SELECT id, user_id, session_id, role, content, created_at, 
+                                   COALESCE(is_blocked, FALSE) as is_blocked, block_reason
                             FROM chat_history
-                            WHERE {query_field} = :query_value
+                            WHERE {query_field} = :query_value {blocked_filter}
                             ORDER BY created_at DESC
                             LIMIT :limit
                         """),
@@ -285,16 +310,25 @@ class ChatHistoryRepository:
                             session_id=UUID(row[2]) if isinstance(row[2], str) else session_id,
                             role=row[3],
                             content=row[4],
-                            created_at=row[5]
+                            created_at=row[5],
+                            is_blocked=row[6] if len(row) > 6 else False,
+                            block_reason=row[7] if len(row) > 7 else None
                         )
                         for row in reversed(rows)
                     ]
                     return messages
                 else:
                     # Use legacy schema (chat_messages table)
-                    stmt = select(ChatMessageModel).where(
-                        ChatMessageModel.session_id == session_id
-                    ).order_by(desc(ChatMessageModel.created_at)).limit(limit)
+                    # CHỈ THỊ SỐ 22: Filter blocked messages by default
+                    if include_blocked:
+                        stmt = select(ChatMessageModel).where(
+                            ChatMessageModel.session_id == session_id
+                        ).order_by(desc(ChatMessageModel.created_at)).limit(limit)
+                    else:
+                        stmt = select(ChatMessageModel).where(
+                            ChatMessageModel.session_id == session_id,
+                            ChatMessageModel.is_blocked == False
+                        ).order_by(desc(ChatMessageModel.created_at)).limit(limit)
                     
                     results = session.execute(stmt).scalars().all()
                     
@@ -305,7 +339,9 @@ class ChatHistoryRepository:
                             session_id=msg.session_id,
                             role=msg.role,
                             content=msg.content,
-                            created_at=msg.created_at
+                            created_at=msg.created_at,
+                            is_blocked=getattr(msg, 'is_blocked', False),
+                            block_reason=getattr(msg, 'block_reason', None)
                         )
                         for msg in reversed(results)
                     ]

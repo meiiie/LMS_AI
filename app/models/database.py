@@ -198,6 +198,7 @@ class ChatMessageModel(Base):
     Used for Sliding Window context retrieval.
     
     **Feature: maritime-ai-tutor, Week 2: Memory Lite**
+    **CHỈ THỊ SỐ 22: Memory Isolation - is_blocked flag**
     """
     __tablename__ = "chat_messages"
     
@@ -223,6 +224,16 @@ class ChatMessageModel(Base):
         DateTime(timezone=True), 
         default=_utc_now,
         index=True
+    )
+    
+    # CHỈ THỊ SỐ 22: Memory Isolation - Blocked message tracking
+    is_blocked: Mapped[bool] = mapped_column(
+        default=False,
+        index=True
+    )
+    block_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True
     )
     
     # Relationship to session
