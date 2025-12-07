@@ -381,13 +381,16 @@ maritime-ai-service/
 │   ├── api/v1/                      # API endpoints (chat, health, knowledge)
 │   ├── core/                        # Config, security, rate_limit
 │   ├── engine/
-│   │   ├── agents/chat_agent.py     # Chat Agent
+│   │   ├── unified_agent.py         # UnifiedAgent - Main LangGraph agent
 │   │   ├── tools/rag_tool.py        # RAG Agent with Neo4j
 │   │   ├── tools/tutor_agent.py     # Tutor Agent
-│   │   ├── graph.py                 # LangGraph Orchestrator
 │   │   ├── guardrails.py            # Input/Output validation (rule-based)
 │   │   ├── guardian_agent.py        # LLM Content Moderation (Gemini 2.5 Flash)
-│   │   ├── semantic_memory.py       # Semantic Memory v0.3
+│   │   ├── semantic_memory/         # Semantic Memory v0.5 (Modular)
+│   │   │   ├── core.py              # SemanticMemoryEngine (Facade)
+│   │   │   ├── context.py           # ContextRetriever
+│   │   │   └── extraction.py        # FactExtractor
+│   │   ├── semantic_memory.py       # Backward compatibility wrapper
 │   │   ├── gemini_embedding.py      # Gemini Embeddings (768 dims, L2 norm)
 │   │   ├── rrf_reranker.py          # RRF Reranker (k=60)
 │   │   └── pdf_processor.py         # PDF extraction for ingestion
@@ -403,18 +406,26 @@ maritime-ai-service/
 │       ├── hybrid_search_service.py # Dense + Sparse + RRF
 │       └── ingestion_service.py     # PDF ingestion pipeline
 ├── alembic/                         # Database migrations
+├── archive/                         # Archived legacy code
+│   ├── chat_agent.py                # Legacy ChatAgent (replaced by UnifiedAgent)
+│   └── graph.py                     # Legacy AgentOrchestrator
 ├── assets/                          # Static assets (images)
 ├── scripts/
-│   ├── import_colregs.py            # Import COLREGs to Neo4j
-│   ├── reingest_with_embeddings.py  # Re-ingest with pgvector embeddings
-│   ├── verify_all_systems.py        # System health verification
-│   ├── test_hybrid_search.py        # Test hybrid search
-│   └── create_*.sql                 # Database setup scripts
+│   ├── migrations/                  # SQL migration scripts
+│   ├── data/                        # Data import scripts
+│   │   ├── import_colregs.py        # Import COLREGs to Neo4j
+│   │   └── reingest_with_embeddings.py
+│   └── utils/                       # Utility scripts
+│       ├── check_*.py               # Health check scripts
+│       └── verify_all_systems.py    # System verification
 ├── tests/
 │   ├── property/                    # Property-based tests (Hypothesis)
 │   ├── unit/                        # Unit tests
-│   └── integration/                 # Integration tests
-├── docs/                            # Documentation
+│   ├── integration/                 # Integration tests
+│   └── e2e/                         # End-to-end tests
+├── docs/
+│   ├── SEMANTIC_MEMORY_ARCHITECTURE.md  # Consolidated documentation
+│   └── archive/                     # Old version guides
 ├── docker-compose.yml               # Local development stack
 ├── requirements.txt                 # Python dependencies
 └── render.yaml                      # Render.com deployment
@@ -882,6 +893,7 @@ TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.9.0 | 2025-12-07 | **PROJECT RESTRUCTURE**: CHỈ THỊ SỐ 25 - Modular Semantic Memory (core.py, context.py, extraction.py), Legacy Code Removal (UnifiedAgent required), Test Organization (e2e/integration/unit/property), Scripts Organization (migrations/data/utils), Documentation Consolidation |
 | v0.8.6 | 2025-12-07 | **SYSTEM LOGIC FLOW REPORT**: Báo cáo luồng logic thực sự - Complete System Flow diagram, Component Integration Verification table, Data Flow Verification, Xác minh tất cả components đã được tích hợp đúng cách |
 | v0.8.5 | 2025-12-07 | **INSIGHT MEMORY ENGINE v0.5**: CHỈ THỊ SỐ 23 CẢI TIẾN - Behavioral Insights thay vì Atomic Facts, 5 Insight Categories (learning_style, knowledge_gap, goal_evolution, habit, preference), InsightExtractor + InsightValidator + MemoryConsolidator, LLM-based Consolidation (40/50 threshold), Category-Prioritized Retrieval, Duplicate/Contradiction Detection, Evolution Notes tracking, Full integration vào ChatService |
 | v0.8.4 | 2025-12-07 | **MANAGED MEMORY LIST**: CHỈ THỊ SỐ 23 - Memory Capping (50 facts/user), True Deduplication (Upsert), Memory API `GET /api/v1/memories/{user_id}`, Fact Type Validation (6 types only) |

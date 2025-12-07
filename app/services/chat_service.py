@@ -23,11 +23,20 @@ from typing import Callable, List, Optional
 from uuid import UUID, uuid4
 
 from app.core.config import settings
-from app.engine.agents.chat_agent import ChatAgent
-from app.engine.graph import AgentOrchestrator, AgentType, IntentType
+# Legacy imports removed (CHỈ THỊ KỸ THUẬT SỐ 25 - Project Restructure)
+# from app.engine.agents.chat_agent import ChatAgent
+# from app.engine.graph import AgentOrchestrator, AgentType, IntentType
 from app.engine.guardrails import Guardrails, ValidationStatus
 from app.engine.tools.rag_tool import RAGAgent, get_knowledge_repository
 from app.engine.tools.tutor_agent import TutorAgent
+
+# Import AgentType from graph.py for backward compatibility (used in ProcessingResult)
+from enum import Enum
+class AgentType(str, Enum):
+    """Types of agents in the system."""
+    CHAT = "chat"
+    RAG = "rag"
+    TUTOR = "tutor"
 from app.models.learning_profile import LearningProfile
 from app.models.schemas import ChatRequest, InternalChatResponse, Source, UserRole
 from app.repositories.learning_profile_repository import (
@@ -225,10 +234,11 @@ class ChatService:
                 if self._unified_agent.is_available():
                     logger.info("✅ Unified Agent (CHỈ THỊ SỐ 13) initialized - LLM-driven orchestration ENABLED")
                 else:
-                    logger.warning("Unified Agent not available, falling back to legacy IntentClassifier")
+                    # CHỈ THỊ KỸ THUẬT SỐ 25: UnifiedAgent is required, no legacy fallback
+                    logger.error("UnifiedAgent not available - LLM API key may be missing")
                     self._unified_agent = None
             except Exception as e:
-                logger.warning(f"Failed to initialize Unified Agent: {e}")
+                logger.error(f"Failed to initialize Unified Agent: {e}")
                 self._unified_agent = None
         
         # CHỈ THỊ KỸ THUẬT SỐ 16 & 17: Humanization Components
@@ -583,31 +593,13 @@ class ChatService:
         
         else:
             # ================================================================
-            # LEGACY: Rule-based IntentClassifier (fallback)
+            # CHỈ THỊ KỸ THUẬT SỐ 25: UnifiedAgent is REQUIRED
+            # Legacy fallback has been removed for cleaner architecture
             # ================================================================
-            logger.info("[LEGACY] Processing with IntentClassifier (rule-based)")
-            
-            # Step 5: Process through orchestrator
-            orchestrator_response = self._orchestrator.process_message(
-                message=message,
-                session_id=str(session_id),
-                user_id=user_id
-            )
-            
-            # Step 6: Handle clarification request
-            if orchestrator_response.requires_clarification:
-                return self._create_clarification_response(orchestrator_response.content)
-            
-            # Step 7: Route to appropriate agent (with history context + role-based prompting + learning profile)
-            result = await self._route_to_agent(
-                agent_type=orchestrator_response.agent_type,
-                message=message,
-                user_id=user_id,
-                session_id=str(session_id),
-                conversation_history=conversation_history,
-                user_name=user_name,
-                user_role=user_role,  # Pass role for role-based prompting
-                learning_profile=learning_profile  # CHỈ THỊ SỐ 04
+            logger.error("[ERROR] UnifiedAgent not available - cannot process message")
+            raise RuntimeError(
+                "UnifiedAgent is required but not available. "
+                "Please check GOOGLE_API_KEY configuration."
             )
         
         # Step 8: Save AI response to history (use background task if provided)
@@ -663,10 +655,8 @@ class ChatService:
             **(result.metadata or {})
         }
         
-        # Add intent info only if using legacy orchestrator
-        if self._unified_agent is None:
-            response_metadata["intent"] = orchestrator_response.intent.type.value
-            response_metadata["confidence"] = orchestrator_response.intent.confidence
+        # CHỈ THỊ KỸ THUẬT SỐ 25: Legacy orchestrator removed
+        # UnifiedAgent is now required, no intent/confidence from legacy classifier
         
         return InternalChatResponse(
             response_id=uuid4(),
