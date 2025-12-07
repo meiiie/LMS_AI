@@ -758,6 +758,174 @@ class SemanticMemoryRepository:
             return []
 
 
+    # ========== v0.5 Methods (CHỈ THỊ 23 CẢI TIẾN - Insight Engine) ==========
+    
+    def update_last_accessed(self, memory_id: UUID) -> bool:
+        """
+        Update last_accessed timestamp for a memory.
+        
+        Args:
+            memory_id: UUID of the memory
+            
+        Returns:
+            True if update successful
+            
+        **Validates: Requirements 3.3**
+        """
+        self._ensure_initialized()
+        
+        try:
+            with self._session_factory() as session:
+                query = text(f"""
+                    UPDATE {self.TABLE_NAME}
+                    SET last_accessed = NOW()
+                    WHERE id = :memory_id
+                    RETURNING id
+                """)
+                
+                result = session.execute(query, {"memory_id": str(memory_id)})
+                row = result.fetchone()
+                session.commit()
+                
+                return row is not None
+                
+        except Exception as e:
+            logger.error(f"Failed to update last_accessed: {e}")
+            return False
+    
+    def delete_user_insights(self, user_id: str) -> int:
+        """
+        Delete all INSIGHT type memories for a user.
+        
+        Used during consolidation to replace old insights with consolidated ones.
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            Number of deleted insights
+        """
+        self._ensure_initialized()
+        
+        try:
+            with self._session_factory() as session:
+                query = text(f"""
+                    DELETE FROM {self.TABLE_NAME}
+                    WHERE user_id = :user_id
+                      AND memory_type = :memory_type
+                    RETURNING id
+                """)
+                
+                result = session.execute(query, {
+                    "user_id": user_id,
+                    "memory_type": MemoryType.INSIGHT.value if hasattr(MemoryType, 'INSIGHT') else 'insight'
+                })
+                
+                deleted = len(result.fetchall())
+                session.commit()
+                
+                logger.info(f"Deleted {deleted} insights for user {user_id}")
+                return deleted
+                
+        except Exception as e:
+            logger.error(f"Failed to delete user insights: {e}")
+            return 0
+    
+    def delete_memory(self, memory_id: UUID) -> bool:
+        """
+        Delete a specific memory by ID.
+        
+        Args:
+            memory_id: UUID of the memory to delete
+            
+        Returns:
+            True if deletion successful
+        """
+        self._ensure_initialized()
+        
+        try:
+            with self._session_factory() as session:
+                query = text(f"""
+                    DELETE FROM {self.TABLE_NAME}
+                    WHERE id = :memory_id
+                    RETURNING id
+                """)
+                
+                result = session.execute(query, {"memory_id": str(memory_id)})
+                row = result.fetchone()
+                session.commit()
+                
+                return row is not None
+                
+        except Exception as e:
+            logger.error(f"Failed to delete memory: {e}")
+            return False
+    
+    def get_insights_by_category(
+        self,
+        user_id: str,
+        category: str,
+        limit: int = 10
+    ) -> List[SemanticMemorySearchResult]:
+        """
+        Get insights filtered by category.
+        
+        Args:
+            user_id: User ID
+            category: Insight category (learning_style, knowledge_gap, etc.)
+            limit: Maximum number of results
+            
+        Returns:
+            List of insights for the category
+        """
+        self._ensure_initialized()
+        
+        try:
+            with self._session_factory() as session:
+                query = text(f"""
+                    SELECT 
+                        id,
+                        content,
+                        memory_type,
+                        importance,
+                        metadata,
+                        created_at,
+                        last_accessed,
+                        1.0 AS similarity
+                    FROM {self.TABLE_NAME}
+                    WHERE user_id = :user_id
+                      AND metadata->>'insight_category' = :category
+                    ORDER BY last_accessed DESC NULLS LAST, created_at DESC
+                    LIMIT :limit
+                """)
+                
+                result = session.execute(query, {
+                    "user_id": user_id,
+                    "category": category,
+                    "limit": limit
+                })
+                
+                rows = result.fetchall()
+                
+                insights = []
+                for row in rows:
+                    insights.append(SemanticMemorySearchResult(
+                        id=row.id,
+                        content=row.content,
+                        memory_type=MemoryType(row.memory_type) if row.memory_type in [m.value for m in MemoryType] else MemoryType.USER_FACT,
+                        importance=row.importance,
+                        similarity=1.0,
+                        metadata=row.metadata or {},
+                        created_at=row.created_at
+                    ))
+                
+                return insights
+                
+        except Exception as e:
+            logger.error(f"Failed to get insights by category: {e}")
+            return []
+
+
 # Factory function
 def get_semantic_memory_repository() -> SemanticMemoryRepository:
     """Get a configured SemanticMemoryRepository instance."""

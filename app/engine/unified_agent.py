@@ -159,7 +159,14 @@ async def tool_maritime_search(query: str) -> str:
 
 @tool(description="Lưu thông tin cá nhân của người dùng khi họ giới thiệu bản thân. Gọi khi user nói tên, nghề nghiệp, trường học.")
 async def tool_save_user_info(key: str, value: str) -> str:
-    """Save user personal information."""
+    """
+    Save user personal information with intelligent deduplication.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 24: Memory Manager & Deduplication
+    - Check before Write: Search existing memories first
+    - LLM Judge: Decide IGNORE/UPDATE/INSERT
+    - Exit 0: Skip if duplicate
+    """
     global _user_cache, _semantic_memory, _current_user_id
     
     try:
@@ -167,10 +174,10 @@ async def tool_save_user_info(key: str, value: str) -> str:
         user_id = _current_user_id or "current_user"
         logger.info(f"[TOOL] Save User Info: {key}={value} for user {user_id}")
         
+        # Update local cache (always)
         if user_id not in _user_cache:
             _user_cache[user_id] = {}
         _user_cache[user_id][key] = value
-        # Also update "current_user" cache for backward compatibility
         if "current_user" not in _user_cache:
             _user_cache["current_user"] = {}
         _user_cache["current_user"][key] = value
@@ -179,30 +186,62 @@ async def tool_save_user_info(key: str, value: str) -> str:
         fact_type_map = {
             "name": "name",
             "tên": "name",
-            "job": "background",
-            "nghề": "background",
-            "school": "background",
-            "trường": "background",
+            "job": "role",
+            "nghề": "role",
+            "school": "role",
+            "trường": "role",
+            "background": "role",
             "goal": "goal",
             "mục tiêu": "goal",
-            "interest": "interest",
-            "quan tâm": "interest",
+            "interest": "preference",
+            "quan tâm": "preference",
+            "weakness": "weakness",
+            "yếu": "weakness",
         }
         fact_type = fact_type_map.get(key.lower(), "preference")
+        fact_content = f"{key}: {value}"
         
+        # CHỈ THỊ SỐ 24: Use Memory Manager for intelligent deduplication
         if _semantic_memory:
             try:
-                fact_content = f"{key}: {value}"
+                from app.engine.memory_manager import get_memory_manager, MemoryAction
+                
+                memory_manager = get_memory_manager(_semantic_memory)
+                decision = await memory_manager.check_and_save(
+                    user_id=user_id,
+                    new_fact=fact_content,
+                    fact_type=fact_type
+                )
+                
+                if decision.action == MemoryAction.IGNORE:
+                    logger.info(f"[MEMORY MANAGER] Exit 0 - {decision.reason}")
+                    return f"Thông tin đã tồn tại, không cần lưu. (Exit 0)"
+                elif decision.action == MemoryAction.UPDATE:
+                    return f"Đã cập nhật thông tin: {key} = {value}"
+                else:
+                    return f"Đã ghi nhớ mới: {key} = {value}"
+                    
+            except ImportError:
+                # Fallback if MemoryManager not available
+                logger.warning("MemoryManager not available, using direct save")
                 await _semantic_memory.store_user_fact(
                     user_id=user_id,
                     fact_content=fact_content,
                     fact_type=fact_type,
-                    confidence=0.95  # High confidence for explicit user input
+                    confidence=0.95
                 )
+                return f"Đã ghi nhớ: {key} = {value}"
             except Exception as e:
-                logger.warning(f"Failed to save to semantic memory: {e}")
+                logger.warning(f"Memory Manager failed: {e}, using direct save")
+                await _semantic_memory.store_user_fact(
+                    user_id=user_id,
+                    fact_content=fact_content,
+                    fact_type=fact_type,
+                    confidence=0.95
+                )
+                return f"Đã ghi nhớ: {key} = {value}"
         
-        return f"Đã ghi nhớ: {key} = {value}"
+        return f"Đã ghi nhớ (cache only): {key} = {value}"
         
     except Exception as e:
         logger.error(f"Save user info error: {e}")

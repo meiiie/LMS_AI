@@ -16,12 +16,16 @@ from typing import List, Optional
 
 from app.core.config import settings
 from app.engine.gemini_embedding import GeminiOptimizedEmbeddings
+from datetime import datetime, timedelta
+
 from app.models.semantic_memory import (
     ALLOWED_FACT_TYPES,
     FACT_TYPE_MAPPING,
     IGNORED_FACT_TYPES,
     ConversationSummary,
     FactType,
+    Insight,
+    InsightCategory,
     MemoryType,
     SemanticContext,
     SemanticMemoryCreate,
@@ -52,6 +56,14 @@ class SemanticMemoryEngine:
     DEFAULT_USER_FACTS_LIMIT = 10
     MAX_USER_FACTS = 50  # Memory cap (CHỈ THỊ 23)
     
+    # Insight Engine v0.5 Configuration (CHỈ THỊ 23 CẢI TIẾN)
+    MAX_INSIGHTS = 50  # Hard limit for insights
+    CONSOLIDATION_THRESHOLD = 40  # Trigger consolidation at this count
+    PRESERVE_DAYS = 7  # Preserve memories accessed within 7 days
+    
+    # Priority categories for retrieval
+    PRIORITY_CATEGORIES = [InsightCategory.KNOWLEDGE_GAP, InsightCategory.LEARNING_STYLE]
+    
     def __init__(
         self,
         embeddings: Optional[GeminiOptimizedEmbeddings] = None,
@@ -71,7 +83,12 @@ class SemanticMemoryEngine:
         self._llm = llm
         self._initialized = False
         
-        logger.info("SemanticMemoryEngine initialized")
+        # Insight Engine v0.5 components (lazy initialization)
+        self._insight_extractor = None
+        self._insight_validator = None
+        self._memory_consolidator = None
+        
+        logger.info("SemanticMemoryEngine initialized (v0.5 - Insight Engine)")
     
     def _ensure_llm(self):
         """Lazy initialization of LLM for fact extraction."""
@@ -876,6 +893,402 @@ Return ONLY valid JSON:"""
         # Unknown type - ignore
         logger.warning(f"Unknown fact type ignored: {normalized}")
         return None
+
+
+    # ==================== INSIGHT ENGINE v0.5 METHODS ====================
+    
+    def _ensure_insight_components(self):
+        """Lazy initialization of Insight Engine components."""
+        if self._insight_extractor is None:
+            from app.engine.insight_extractor import InsightExtractor
+            self._insight_extractor = InsightExtractor()
+        
+        if self._insight_validator is None:
+            from app.engine.insight_validator import InsightValidator
+            self._insight_validator = InsightValidator()
+        
+        if self._memory_consolidator is None:
+            from app.engine.memory_consolidator import MemoryConsolidator
+            self._memory_consolidator = MemoryConsolidator()
+    
+    async def extract_and_store_insights(
+        self,
+        user_id: str,
+        message: str,
+        conversation_history: List[str] = None,
+        session_id: Optional[str] = None
+    ) -> List[Insight]:
+        """
+        Extract behavioral insights from message and store them.
+        
+        v0.5 (CHỈ THỊ 23 CẢI TIẾN):
+        1. Extract insights using InsightExtractor
+        2. Validate each insight using InsightValidator
+        3. Handle duplicates (merge) and contradictions (update)
+        4. Check consolidation threshold
+        5. Store valid insights
+        
+        Args:
+            user_id: User ID
+            message: User message to extract insights from
+            conversation_history: Previous messages for context
+            session_id: Optional session ID
+            
+        Returns:
+            List of stored insights
+            
+        **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 5.1, 5.2, 5.3, 5.4**
+        """
+        self._ensure_insight_components()
+        
+        try:
+            # Step 1: Extract insights
+            insights = await self._insight_extractor.extract_insights(
+                user_id=user_id,
+                message=message,
+                conversation_history=conversation_history
+            )
+            
+            if not insights:
+                return []
+            
+            # Step 2: Get existing insights for validation
+            existing_insights = await self._get_user_insights(user_id)
+            
+            # Step 3: Validate and process each insight
+            stored_insights = []
+            for insight in insights:
+                result = self._insight_validator.validate(insight, existing_insights)
+                
+                if not result.is_valid:
+                    logger.debug(f"Insight rejected: {result.reason}")
+                    continue
+                
+                if result.action == "merge":
+                    # Merge with existing insight
+                    await self._merge_insight(insight, result.target_insight)
+                    stored_insights.append(insight)
+                    
+                elif result.action == "update":
+                    # Update existing insight with evolution note
+                    await self._update_insight_with_evolution(insight, result.target_insight)
+                    stored_insights.append(insight)
+                    
+                elif result.action == "store":
+                    # Store as new insight
+                    await self._store_insight(insight, session_id)
+                    stored_insights.append(insight)
+                    existing_insights.append(insight)  # Add to existing for next validation
+            
+            # Step 4: Check consolidation threshold
+            await self._check_and_consolidate(user_id)
+            
+            logger.info(f"Stored {len(stored_insights)} insights for user {user_id}")
+            return stored_insights
+            
+        except Exception as e:
+            logger.error(f"Failed to extract and store insights: {e}")
+            return []
+    
+    async def _get_user_insights(self, user_id: str) -> List[Insight]:
+        """Get all insights for a user."""
+        try:
+            # Get all INSIGHT type memories
+            memories = self._repository.get_user_facts(
+                user_id=user_id,
+                limit=self.MAX_INSIGHTS,
+                deduplicate=False
+            )
+            
+            # Convert to Insight objects
+            insights = []
+            for mem in memories:
+                if mem.metadata.get("insight_category"):
+                    try:
+                        insight = Insight(
+                            id=mem.id,
+                            user_id=user_id,
+                            content=mem.content,
+                            category=InsightCategory(mem.metadata.get("insight_category")),
+                            sub_topic=mem.metadata.get("sub_topic"),
+                            confidence=mem.metadata.get("confidence", 0.8),
+                            source_messages=mem.metadata.get("source_messages", []),
+                            created_at=mem.created_at,
+                            evolution_notes=mem.metadata.get("evolution_notes", [])
+                        )
+                        insights.append(insight)
+                    except (ValueError, KeyError) as e:
+                        logger.debug(f"Skipping invalid insight: {e}")
+            
+            return insights
+            
+        except Exception as e:
+            logger.error(f"Failed to get user insights: {e}")
+            return []
+    
+    async def _store_insight(self, insight: Insight, session_id: Optional[str] = None) -> bool:
+        """Store a new insight."""
+        try:
+            # Generate embedding
+            embedding = self._embeddings.embed_documents([insight.content])[0]
+            
+            # Create memory
+            memory = SemanticMemoryCreate(
+                user_id=insight.user_id,
+                content=insight.content,
+                embedding=embedding,
+                memory_type=MemoryType.INSIGHT,
+                importance=insight.confidence,
+                metadata=insight.to_metadata(),
+                session_id=session_id
+            )
+            
+            self._repository.save_memory(memory)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to store insight: {e}")
+            return False
+    
+    async def _merge_insight(self, new_insight: Insight, existing_insight: Insight) -> bool:
+        """Merge new insight with existing one."""
+        try:
+            # Update existing insight's confidence (average)
+            new_confidence = (existing_insight.confidence + new_insight.confidence) / 2
+            
+            # Add evolution note
+            evolution_notes = existing_insight.evolution_notes.copy()
+            evolution_notes.append(f"Merged with similar insight: {new_insight.content[:50]}...")
+            
+            # Update in database
+            return self._repository.update_fact(
+                fact_id=existing_insight.id,
+                content=existing_insight.content,  # Keep existing content
+                embedding=None,  # Don't update embedding
+                metadata={
+                    **existing_insight.to_metadata(),
+                    "confidence": new_confidence,
+                    "evolution_notes": evolution_notes
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to merge insight: {e}")
+            return False
+    
+    async def _update_insight_with_evolution(self, new_insight: Insight, existing_insight: Insight) -> bool:
+        """Update existing insight with evolution note (for contradictions)."""
+        try:
+            # Generate new embedding for updated content
+            embedding = self._embeddings.embed_documents([new_insight.content])[0]
+            
+            # Add evolution note
+            evolution_notes = existing_insight.evolution_notes.copy()
+            evolution_notes.append(f"Updated from: {existing_insight.content[:50]}...")
+            
+            # Update in database with new content
+            return self._repository.update_fact(
+                fact_id=existing_insight.id,
+                content=new_insight.content,
+                embedding=embedding,
+                metadata={
+                    **new_insight.to_metadata(),
+                    "evolution_notes": evolution_notes
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to update insight with evolution: {e}")
+            return False
+    
+    async def _check_and_consolidate(self, user_id: str) -> bool:
+        """
+        Check if consolidation is needed and run it.
+        
+        **Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5**
+        """
+        self._ensure_insight_components()
+        
+        try:
+            # Count current insights
+            current_count = self._repository.count_user_memories(
+                user_id=user_id,
+                memory_type=MemoryType.INSIGHT
+            )
+            
+            if not await self._memory_consolidator.should_consolidate(current_count):
+                return False
+            
+            logger.info(f"Triggering consolidation for user {user_id} ({current_count} insights)")
+            
+            # Get all insights
+            insights = await self._get_user_insights(user_id)
+            
+            # Run consolidation
+            result = await self._memory_consolidator.consolidate(insights)
+            
+            if result.success:
+                # Delete old insights and store consolidated ones
+                self._repository.delete_user_insights(user_id)
+                
+                for insight in result.consolidated_insights:
+                    await self._store_insight(insight)
+                
+                logger.info(
+                    f"Consolidation complete for user {user_id}: "
+                    f"{result.original_count} -> {result.final_count} insights"
+                )
+                return True
+            else:
+                # Fallback to FIFO eviction
+                logger.warning(f"Consolidation failed, using FIFO fallback: {result.error}")
+                await self._fifo_eviction(user_id)
+                return False
+                
+        except Exception as e:
+            logger.error(f"Consolidation check failed: {e}")
+            return False
+    
+    async def _fifo_eviction(self, user_id: str) -> int:
+        """
+        FIFO eviction fallback when consolidation fails.
+        
+        **Validates: Requirements 3.2, 3.4**
+        """
+        try:
+            # Get all insights sorted by last_accessed
+            insights = await self._get_user_insights(user_id)
+            
+            if len(insights) <= self.MAX_INSIGHTS:
+                return 0
+            
+            # Calculate how many to delete
+            excess = len(insights) - self.CONSOLIDATION_THRESHOLD  # Target 40 after eviction
+            
+            # Sort by last_accessed (oldest first)
+            sorted_insights = sorted(
+                insights,
+                key=lambda x: x.last_accessed or x.created_at or datetime.min
+            )
+            
+            # Preserve recent memories (accessed within PRESERVE_DAYS)
+            cutoff_date = datetime.now() - timedelta(days=self.PRESERVE_DAYS)
+            
+            deleted = 0
+            for insight in sorted_insights:
+                if deleted >= excess:
+                    break
+                
+                # Check if this insight should be preserved
+                last_access = insight.last_accessed or insight.created_at
+                if last_access and last_access > cutoff_date:
+                    continue  # Preserve recent insights
+                
+                # Delete this insight
+                if insight.id:
+                    self._repository.delete_memory(insight.id)
+                    deleted += 1
+            
+            logger.info(f"FIFO eviction for user {user_id}: deleted {deleted} insights")
+            return deleted
+            
+        except Exception as e:
+            logger.error(f"FIFO eviction failed: {e}")
+            return 0
+    
+    async def update_last_accessed(self, memory_id) -> bool:
+        """
+        Update last_accessed timestamp for a memory.
+        
+        **Validates: Requirements 3.3**
+        """
+        try:
+            return self._repository.update_last_accessed(memory_id)
+        except Exception as e:
+            logger.error(f"Failed to update last_accessed: {e}")
+            return False
+    
+    async def retrieve_insights_prioritized(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 10
+    ) -> List[Insight]:
+        """
+        Retrieve insights with category prioritization.
+        
+        Prioritizes knowledge_gap and learning_style categories.
+        
+        **Validates: Requirements 4.3, 4.4**
+        """
+        try:
+            # Get all insights
+            all_insights = await self._get_user_insights(user_id)
+            
+            if not all_insights:
+                return []
+            
+            # Separate by priority
+            priority_insights = []
+            other_insights = []
+            
+            for insight in all_insights:
+                if insight.category in self.PRIORITY_CATEGORIES:
+                    priority_insights.append(insight)
+                else:
+                    other_insights.append(insight)
+            
+            # Sort each group by last_accessed (most recent first)
+            priority_insights.sort(
+                key=lambda x: x.last_accessed or x.created_at or datetime.min,
+                reverse=True
+            )
+            other_insights.sort(
+                key=lambda x: x.last_accessed or x.created_at or datetime.min,
+                reverse=True
+            )
+            
+            # Combine with priority first
+            result = priority_insights + other_insights
+            
+            # Update last_accessed for retrieved insights
+            for insight in result[:limit]:
+                if insight.id:
+                    await self.update_last_accessed(insight.id)
+            
+            return result[:limit]
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve prioritized insights: {e}")
+            return []
+    
+    async def enforce_hard_limit(self, user_id: str) -> bool:
+        """
+        Enforce hard limit of 50 insights.
+        
+        **Validates: Requirements 3.1**
+        """
+        try:
+            current_count = self._repository.count_user_memories(
+                user_id=user_id,
+                memory_type=MemoryType.INSIGHT
+            )
+            
+            if current_count <= self.MAX_INSIGHTS:
+                return True
+            
+            # Trigger consolidation first
+            consolidated = await self._check_and_consolidate(user_id)
+            
+            if not consolidated:
+                # Force FIFO eviction
+                await self._fifo_eviction(user_id)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to enforce hard limit: {e}")
+            return False
 
 
 # Factory function

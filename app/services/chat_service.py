@@ -392,9 +392,26 @@ class ChatService:
         semantic_context = ""
         user_name = None
         
-        # Try Semantic Memory v0.3 first (CHỈ THỊ KỸ THUẬT SỐ 06)
+        # Try Semantic Memory v0.5 first (CHỈ THỊ KỸ THUẬT SỐ 06 + CHỈ THỊ 23 CẢI TIẾN)
         if self._semantic_memory is not None:
             try:
+                # v0.5: Retrieve prioritized insights (knowledge_gap, learning_style first)
+                insights = await self._semantic_memory.retrieve_insights_prioritized(
+                    user_id=user_id,
+                    query=message,
+                    limit=10
+                )
+                
+                if insights:
+                    # Format insights for context
+                    insight_lines = []
+                    for insight in insights[:5]:  # Top 5 insights
+                        insight_lines.append(f"- [{insight.category.value}] {insight.content}")
+                    insights_text = "\n".join(insight_lines)
+                    semantic_context = f"=== Behavioral Insights ===\n{insights_text}"
+                    logger.info(f"[INSIGHT ENGINE] Retrieved {len(insights)} prioritized insights for user {user_id}")
+                
+                # Also get traditional context (facts + memories)
                 context = await self._semantic_memory.retrieve_context(
                     user_id=user_id,
                     query=message,
@@ -402,8 +419,13 @@ class ChatService:
                     similarity_threshold=0.7,
                     include_user_facts=True
                 )
-                semantic_context = context.to_prompt_context()
-                logger.debug(f"Semantic context retrieved: {len(context.relevant_memories)} memories, {len(context.user_facts)} facts")
+                traditional_context = context.to_prompt_context()
+                
+                # Combine insights with traditional context
+                if traditional_context:
+                    semantic_context = f"{semantic_context}\n\n{traditional_context}" if semantic_context else traditional_context
+                
+                logger.debug(f"Semantic context retrieved: {len(context.relevant_memories)} memories, {len(context.user_facts)} facts, {len(insights) if insights else 0} insights")
             except Exception as e:
                 logger.warning(f"Semantic memory retrieval failed: {e}")
         
@@ -953,21 +975,44 @@ class ChatService:
         session_id: str
     ) -> None:
         """
-        Store interaction in Semantic Memory v0.3 (for BackgroundTasks).
+        Store interaction in Semantic Memory v0.5 (for BackgroundTasks).
         
-        **Spec: CHỈ THỊ KỸ THUẬT SỐ 06**
+        **Spec: CHỈ THỊ KỸ THUẬT SỐ 06 + CHỈ THỊ 23 CẢI TIẾN**
+        
+        v0.5 Update: Uses Insight Engine for behavioral insight extraction
+        instead of atomic fact extraction.
         """
         if self._semantic_memory is None:
             return
         
         try:
-            # Store interaction with fact extraction
+            # v0.5: Extract and store behavioral insights (CHỈ THỊ 23 CẢI TIẾN)
+            # Get conversation history for context
+            conversation_history = []
+            if self._chat_history.is_available():
+                recent_messages = self._chat_history.get_recent_messages(
+                    self._get_or_create_session(user_id)
+                )
+                conversation_history = [msg.content for msg in recent_messages[-5:]]
+            
+            # Extract behavioral insights instead of atomic facts
+            insights = await self._semantic_memory.extract_and_store_insights(
+                user_id=user_id,
+                message=message,
+                conversation_history=conversation_history,
+                session_id=session_id
+            )
+            
+            if insights:
+                logger.info(f"[INSIGHT ENGINE] Extracted {len(insights)} behavioral insights for user {user_id}")
+            
+            # Also store interaction for message history (legacy compatibility)
             await self._semantic_memory.store_interaction(
                 user_id=user_id,
                 message=message,
                 response=response,
                 session_id=session_id,
-                extract_facts=True
+                extract_facts=True  # Keep fact extraction for backward compatibility
             )
             
             # Check and summarize if needed

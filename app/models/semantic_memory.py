@@ -19,6 +19,16 @@ class MemoryType(str, Enum):
     MESSAGE = "message"      # Regular conversation message
     SUMMARY = "summary"      # Conversation summary
     USER_FACT = "user_fact"  # Extracted user information
+    INSIGHT = "insight"      # Behavioral insight (v0.5)
+
+
+class InsightCategory(str, Enum):
+    """Categories for behavioral insights (v0.5 - CHỈ THỊ 23 CẢI TIẾN)."""
+    LEARNING_STYLE = "learning_style"      # Phong cách học tập
+    KNOWLEDGE_GAP = "knowledge_gap"        # Lỗ hổng kiến thức  
+    GOAL_EVOLUTION = "goal_evolution"      # Sự thay đổi mục tiêu
+    HABIT = "habit"                        # Thói quen học tập
+    PREFERENCE = "preference"              # Sở thích cá nhân
 
 
 class FactType(str, Enum):
@@ -169,6 +179,56 @@ class UserFact(BaseModel):
             "confidence": self.confidence,
             "source_message": self.source_message
         }
+
+
+class Insight(BaseModel):
+    """
+    Represents a behavioral insight (v0.5 - CHỈ THỊ 23 CẢI TIẾN).
+    
+    Unlike atomic facts, insights capture behavioral patterns, learning styles,
+    knowledge gaps, and goal evolution over time.
+    
+    Attributes:
+        id: Unique identifier
+        user_id: User who owns this insight
+        content: Complete sentence describing the insight
+        category: Type of insight (learning_style, knowledge_gap, etc.)
+        sub_topic: Specific topic (e.g., "Rule 15", "COLREGs")
+        confidence: Confidence score (0.0 - 1.0)
+        source_messages: Messages that led to this insight
+        created_at: Creation timestamp
+        updated_at: Last update timestamp
+        last_accessed: Last access timestamp (for FIFO eviction)
+        evolution_notes: Track changes over time
+    """
+    id: Optional[UUID] = None
+    user_id: str
+    content: str
+    category: InsightCategory
+    sub_topic: Optional[str] = None
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+    source_messages: List[str] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    last_accessed: Optional[datetime] = None
+    evolution_notes: List[str] = Field(default_factory=list)
+    
+    def to_content(self) -> str:
+        """Convert insight to storable content string."""
+        return self.content
+    
+    def to_metadata(self) -> Dict[str, Any]:
+        """Convert insight to metadata dict."""
+        return {
+            "insight_category": self.category.value,
+            "sub_topic": self.sub_topic,
+            "confidence": self.confidence,
+            "source_messages": self.source_messages,
+            "evolution_notes": self.evolution_notes
+        }
+    
+    class Config:
+        from_attributes = True
 
 
 class UserFactExtraction(BaseModel):

@@ -167,15 +167,74 @@ Hệ thống persona được cấu hình qua file YAML, hỗ trợ cá nhân h�
    - 9/9 test cases passed (100% accuracy)
 ```
 
-### Semantic Memory v0.4 (Managed Memory List - CHỈ THỊ 23)
+### Semantic Memory v0.5 (Insight Memory Engine - CHỈ THỊ 23 CẢI TIẾN)
 
-- **pgvector + Gemini Embeddings**: Vector similarity search (768 dimensions)
-- **User Facts Extraction**: Tự động trích xuất thông tin người dùng (tên, sở thích, mục tiêu)
-- **Cross-Session Persistence**: Ghi nhớ ngữ cảnh qua nhiều phiên chat
-- **Memory Capping**: Giới hạn 50 facts/user, xóa FIFO khi đầy
-- **True Deduplication**: Upsert thay vì Append (1 fact per type)
-- **Fact Type Validation**: 6 loại cho phép (name, role, level, goal, preference, weakness)
-- **Memory API**: `GET /api/v1/memories/{user_id}` - Lấy danh sách facts
+Nâng cấp từ "Atomic Facts" sang "Behavioral Insights" - biến AI từ "Thư ký" thành "Người Thầy (Mentor)".
+
+- **Behavioral Insight Extraction**: Trích xuất sự thấu hiểu hành vi thay vì dữ liệu đơn lẻ
+- **5 Insight Categories**: learning_style, knowledge_gap, goal_evolution, habit, preference
+- **LLM-based Consolidation**: Tự động gộp và tinh gọn khi đạt 40/50 memories
+- **Category-Prioritized Retrieval**: Ưu tiên knowledge_gap và learning_style
+- **Duplicate & Contradiction Detection**: Merge duplicates, update với evolution notes
+- **Hard Limit Enforcement**: 50 insights/user với FIFO fallback
+- **Last Accessed Tracking**: Bảo vệ memories được truy cập trong 7 ngày gần đây
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         INSIGHT MEMORY ENGINE v0.5                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   LUỒNG XỬ LÝ (Tích hợp vào ChatService):                                   │
+│                                                                              │
+│   User Message → API /chat                                                   │
+│        │                                                                     │
+│        ▼                                                                     │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │ 1. RETRIEVE: retrieve_insights_prioritized()                         │   │
+│   │    → Lấy insights ưu tiên (knowledge_gap, learning_style first)      │   │
+│   │    → Format vào semantic_context cho LLM prompt                      │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│        │                                                                     │
+│        ▼                                                                     │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │ 2. PROCESS: UnifiedAgent xử lý với context                           │   │
+│   │    → AI có thông tin về learning style, knowledge gaps của user      │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│        │                                                                     │
+│        ▼                                                                     │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │ 3. STORE (Background): extract_and_store_insights()                  │   │
+│   │    → InsightExtractor: Trích xuất behavioral insights từ message     │   │
+│   │    → InsightValidator: Validate, detect duplicates/contradictions    │   │
+│   │    → MemoryConsolidator: Consolidate nếu > 40 insights               │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│   COMPONENTS:                                                                │
+│   • InsightExtractor (app/engine/insight_extractor.py)                      │
+│   • InsightValidator (app/engine/insight_validator.py)                      │
+│   • MemoryConsolidator (app/engine/memory_consolidator.py)                  │
+│   • SemanticMemoryEngine v0.5 (app/engine/semantic_memory.py)               │
+│                                                                              │
+│   CATEGORIES:                                                                │
+│   • learning_style: "User thích học qua ví dụ thực tế"                      │
+│   • knowledge_gap: "User nhầm lẫn giữa Rule 13 và Rule 15"                  │
+│   • goal_evolution: "User chuyển từ học cơ bản sang thi thuyền trưởng"      │
+│   • habit: "User thường học vào buổi tối"                                   │
+│   • preference: "User quan tâm đến navigation hơn engine room"              │
+│                                                                              │
+│   DATABASE SCHEMA (v0.5):                                                    │
+│   • insight_category VARCHAR(50) - Category của insight                     │
+│   • sub_topic VARCHAR(100) - Sub-topic chi tiết                             │
+│   • last_accessed TIMESTAMP - Tracking để bảo vệ recent memories            │
+│   • evolution_notes JSONB - Lịch sử thay đổi của insight                    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Memory API**: `GET /api/v1/memories/{user_id}` - Lấy danh sách insights
+- **Documentation**: `docs/SEMANTIC_MEMORY_V05_GUIDE.md`
+- **Migration Script**: `scripts/upgrade_semantic_memory_v05.sql`
+- **Test Suite**: `scripts/test_insight_engine.py` (5/5 tests passed)
 
 ### Deep Reasoning v0.8.3 (CHỈ THỊ 21 & 22)
 
@@ -758,7 +817,7 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 | **Graph Database** | Neo4j 5.28 + Full-text Search |
 | **Vector Database** | PostgreSQL + pgvector (Neon) |
 | **Search** | Hybrid Search (Dense + Sparse + RRF) |
-| **Memory** | Semantic Memory v0.3 |
+| **Memory** | Semantic Memory v0.5 (Insight Engine) |
 | **Testing** | Pytest + Hypothesis |
 
 ---
@@ -823,6 +882,8 @@ TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.8.6 | 2025-12-07 | **SYSTEM LOGIC FLOW REPORT**: Báo cáo luồng logic thực sự - Complete System Flow diagram, Component Integration Verification table, Data Flow Verification, Xác minh tất cả components đã được tích hợp đúng cách |
+| v0.8.5 | 2025-12-07 | **INSIGHT MEMORY ENGINE v0.5**: CHỈ THỊ SỐ 23 CẢI TIẾN - Behavioral Insights thay vì Atomic Facts, 5 Insight Categories (learning_style, knowledge_gap, goal_evolution, habit, preference), InsightExtractor + InsightValidator + MemoryConsolidator, LLM-based Consolidation (40/50 threshold), Category-Prioritized Retrieval, Duplicate/Contradiction Detection, Evolution Notes tracking, Full integration vào ChatService |
 | v0.8.4 | 2025-12-07 | **MANAGED MEMORY LIST**: CHỈ THỊ SỐ 23 - Memory Capping (50 facts/user), True Deduplication (Upsert), Memory API `GET /api/v1/memories/{user_id}`, Fact Type Validation (6 types only) |
 | v0.8.3 | 2025-12-07 | **DEEP REASONING**: CHỈ THỊ SỐ 21 & 22 - `<thinking>` tags for reasoning, Proactive Continuation (AI hỏi user muốn nghe tiếp), Memory Isolation (blocked content không vào context), Context Window 50 messages, ConversationAnalyzer |
 | v0.8.2 | 2025-12-07 | **MEMORY ISOLATION**: CHỈ THỊ SỐ 22 - Blocked content filtering from context window, `is_blocked` column in chat_history |
@@ -850,7 +911,192 @@ TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 
 ---
 
+## System Logic Flow Report (v0.8.5)
+
+### Báo cáo Luồng Logic Thực Sự - Đã Xác Minh
+
+Dưới đây là luồng xử lý thực tế của hệ thống, đã được xác minh qua code analysis.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         COMPLETE SYSTEM FLOW                                 │
+│                    (ChatService → UnifiedAgent → Response)                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   [1] API LAYER (app/api/v1/chat.py)                                        │
+│       │                                                                      │
+│       ▼                                                                      │
+│   POST /api/v1/chat                                                          │
+│       │ ChatRequest(user_id, message, role, session_id)                     │
+│       │                                                                      │
+│       ▼                                                                      │
+│   [2] CHAT SERVICE (app/services/chat_service.py)                           │
+│       │                                                                      │
+│       ├──▶ [2.1] GUARDIAN AGENT (LLM Content Moderation)                    │
+│       │         ├── validate_message() → ALLOW/BLOCK/FLAG                   │
+│       │         ├── validate_pronoun_request() → Custom pronouns            │
+│       │         └── Fallback: Rule-based Guardrails                         │
+│       │                                                                      │
+│       ├──▶ [2.2] SESSION MANAGEMENT                                         │
+│       │         ├── get_or_create_session(user_id)                          │
+│       │         └── SessionState (anti-repetition, pronoun_style)           │
+│       │                                                                      │
+│       ├──▶ [2.3] MEMORY RETRIEVAL (Semantic Memory v0.5)                    │
+│       │         ├── retrieve_insights_prioritized() → Behavioral Insights   │
+│       │         │   └── Categories: knowledge_gap, learning_style (priority)│
+│       │         ├── retrieve_context() → User Facts + Memories              │
+│       │         └── get_recent_messages() → Sliding Window (50 msgs)        │
+│       │                                                                      │
+│       ├──▶ [2.4] CONVERSATION ANALYZER (Deep Reasoning)                     │
+│       │         ├── analyze() → ConversationContext                         │
+│       │         └── should_offer_continuation → Proactive hints             │
+│       │                                                                      │
+│       ▼                                                                      │
+│   [3] UNIFIED AGENT (app/engine/unified_agent.py)                           │
+│       │                                                                      │
+│       ├──▶ [3.1] PROMPT LOADER (Dynamic Persona)                            │
+│       │         ├── tutor.yaml → Student Role (Captain AI)                  │
+│       │         ├── assistant.yaml → Teacher/Admin Role                     │
+│       │         └── {{user_name}} replacement from Memory                   │
+│       │                                                                      │
+│       ├──▶ [3.2] BUILD MESSAGES                                             │
+│       │         ├── SystemMessage (persona + tools + deep reasoning hints)  │
+│       │         ├── Conversation History (last 10 messages)                 │
+│       │         └── HumanMessage (current query)                            │
+│       │                                                                      │
+│       ▼                                                                      │
+│   [4] MANUAL REACT LOOP (LangChain 1.x)                                     │
+│       │                                                                      │
+│       │   ┌─────────────────────────────────────────────────────────────┐   │
+│       │   │  ITERATION 1..N (max 5)                                      │   │
+│       │   │                                                              │   │
+│       │   │  LLM (Gemini 2.5 Flash) with bind_tools()                   │   │
+│       │   │       │                                                      │   │
+│       │   │       ├── No tool_calls → Return final answer               │   │
+│       │   │       │                                                      │   │
+│       │   │       └── Has tool_calls → Execute tools:                   │   │
+│       │   │                                                              │   │
+│       │   │           [TOOL 1] tool_maritime_search(query)              │   │
+│       │   │               └── RAGAgent.query() → Neo4j + pgvector       │   │
+│       │   │               └── Save sources to _last_retrieved_sources   │   │
+│       │   │                                                              │   │
+│       │   │           [TOOL 2] tool_save_user_info(key, value)          │   │
+│       │   │               └── MemoryManager.check_and_save()            │   │
+│       │   │               └── Deduplication: IGNORE/UPDATE/INSERT       │   │
+│       │   │                                                              │   │
+│       │   │           [TOOL 3] tool_get_user_info(key)                  │   │
+│       │   │               └── SemanticMemory.retrieve_context()         │   │
+│       │   │                                                              │   │
+│       │   │       → Append ToolMessage → Continue loop                  │   │
+│       │   └─────────────────────────────────────────────────────────────┘   │
+│       │                                                                      │
+│       ▼                                                                      │
+│   [5] POST-PROCESSING (ChatService)                                         │
+│       │                                                                      │
+│       ├──▶ [5.1] SAVE AI RESPONSE                                           │
+│       │         └── chat_history.save_message(session_id, "assistant", msg) │
+│       │                                                                      │
+│       ├──▶ [5.2] UPDATE SESSION STATE                                       │
+│       │         ├── increment_response()                                    │
+│       │         └── add_phrase() → Anti-repetition tracking                 │
+│       │                                                                      │
+│       ├──▶ [5.3] BACKGROUND TASKS (async)                                   │
+│       │         ├── extract_and_store_insights() → Insight Engine v0.5      │
+│       │         │   ├── InsightExtractor → Extract behavioral insights      │
+│       │         │   ├── InsightValidator → Validate, detect duplicates      │
+│       │         │   └── MemoryConsolidator → Consolidate if > 40 insights   │
+│       │         │                                                            │
+│       │         ├── store_interaction() → Legacy fact extraction            │
+│       │         └── add_message_async() → Memory Summarizer                 │
+│       │                                                                      │
+│       ├──▶ [5.4] OUTPUT VALIDATION                                          │
+│       │         └── guardrails.validate_output() → Safety check             │
+│       │                                                                      │
+│       ▼                                                                      │
+│   [6] API RESPONSE                                                          │
+│       │                                                                      │
+│       └── InternalChatResponse                                              │
+│           ├── message: AI response text                                     │
+│           ├── agent_type: RAG/CHAT/TUTOR                                    │
+│           ├── sources: List[Source] from tool_maritime_search               │
+│           └── metadata: session_id, tools_used, iterations                  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Component Integration Verification
+
+| Component | File | Status | Integration Point |
+|-----------|------|--------|-------------------|
+| **GuardianAgent** | `guardian_agent.py` | ✅ Active | ChatService Step 2.1 |
+| **ConversationAnalyzer** | `conversation_analyzer.py` | ✅ Active | ChatService Step 2.4 |
+| **SemanticMemory v0.5** | `semantic_memory.py` | ✅ Active | ChatService Step 2.3 |
+| **InsightExtractor** | `insight_extractor.py` | ✅ Active | Background Task 5.3 |
+| **InsightValidator** | `insight_validator.py` | ✅ Active | Background Task 5.3 |
+| **MemoryConsolidator** | `memory_consolidator.py` | ✅ Active | Background Task 5.3 |
+| **MemoryManager** | `memory_manager.py` | ✅ Active | tool_save_user_info |
+| **PromptLoader** | `prompt_loader.py` | ✅ Active | UnifiedAgent Step 3.1 |
+| **MemorySummarizer** | `memory_summarizer.py` | ✅ Active | Background Task 5.3 |
+| **UnifiedAgent** | `unified_agent.py` | ✅ Active | Main processing engine |
+| **RAGAgent** | `tools/rag_tool.py` | ✅ Active | tool_maritime_search |
+| **Guardrails** | `guardrails.py` | ✅ Active | Fallback + Output validation |
+| **RRFReranker** | `rrf_reranker.py` | ✅ Active | Hybrid Search |
+
+### Data Flow Verification
+
+```
+User Message → Guardian (ALLOW) → Session → Memory Retrieval
+                                              │
+                                              ├── Insights (v0.5)
+                                              ├── User Facts
+                                              └── Chat History
+                                              │
+                                              ▼
+                                    UnifiedAgent (ReAct)
+                                              │
+                                              ├── tool_maritime_search
+                                              │   └── RAG → Neo4j + pgvector
+                                              │
+                                              ├── tool_save_user_info
+                                              │   └── MemoryManager → Dedup
+                                              │
+                                              └── Final Response
+                                              │
+                                              ▼
+                                    Post-Processing (Background)
+                                              │
+                                              ├── InsightExtractor
+                                              ├── InsightValidator
+                                              ├── MemoryConsolidator
+                                              └── MemorySummarizer
+```
+
+### Kết luận Xác Minh
+
+✅ **Tất cả components đã được tích hợp đúng cách:**
+- GuardianAgent được gọi đầu tiên trong ChatService.process_message()
+- ConversationAnalyzer được gọi trước khi xử lý với UnifiedAgent
+- SemanticMemory v0.5 (Insight Engine) được sử dụng cho cả retrieve và store
+- PromptLoader được sử dụng trong UnifiedAgent._build_messages()
+- MemoryManager được sử dụng trong tool_save_user_info với deduplication
+- Background tasks chạy sau khi response được gửi về user
+
+✅ **Luồng xử lý hoàn chỉnh và nhất quán với thiết kế**
+
+---
+
 ## Van de da biet va Cong viec tuong lai
+
+### Da giai quyet (v0.8.5 - Insight Memory Engine)
+- **Behavioral Insights**: Chuyen tu "Atomic Facts" sang "Behavioral Insights" - AI hieu user hon
+- **5 Insight Categories**: learning_style, knowledge_gap, goal_evolution, habit, preference
+- **InsightExtractor**: Trich xuat insights tu message voi LLM prompt chuyen biet
+- **InsightValidator**: Validate content, detect duplicates (merge) va contradictions (update)
+- **MemoryConsolidator**: LLM-based consolidation khi dat 40/50 insights, target 30 core items
+- **Category-Prioritized Retrieval**: Uu tien knowledge_gap va learning_style khi retrieve
+- **Evolution Notes**: Theo doi lich su thay doi cua moi insight
+- **Full Integration**: Da tich hop vao ChatService - retrieve khi xu ly, store sau response
+- **Database Schema v0.5**: 4 columns moi (insight_category, sub_topic, last_accessed, evolution_notes) + 3 indexes
 
 ### Da giai quyet (v0.8.3 - Deep Reasoning)
 - **Thinking Tags**: AI su dung `<thinking>` tags de suy nghi truoc khi tra loi
