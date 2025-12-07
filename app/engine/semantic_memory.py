@@ -17,6 +17,9 @@ from typing import List, Optional
 from app.core.config import settings
 from app.engine.gemini_embedding import GeminiOptimizedEmbeddings
 from app.models.semantic_memory import (
+    ALLOWED_FACT_TYPES,
+    FACT_TYPE_MAPPING,
+    IGNORED_FACT_TYPES,
     ConversationSummary,
     FactType,
     MemoryType,
@@ -47,6 +50,7 @@ class SemanticMemoryEngine:
     DEFAULT_SEARCH_LIMIT = 5
     DEFAULT_SIMILARITY_THRESHOLD = 0.7
     DEFAULT_USER_FACTS_LIMIT = 10
+    MAX_USER_FACTS = 50  # Memory cap (CHỈ THỊ 23)
     
     def __init__(
         self,
@@ -223,6 +227,11 @@ class SemanticMemoryEngine:
         """
         Extract user facts from a message using LLM.
         
+        v0.4 Update (CHỈ THỊ 23):
+        - Uses store_user_fact_upsert() for upsert logic
+        - Validates fact_type before storing
+        - Enforces memory cap
+        
         Args:
             user_id: User ID
             message: Message to extract facts from
@@ -244,24 +253,25 @@ class SemanticMemoryEngine:
             if not extraction.has_facts:
                 return []
             
-            # Store each fact as a semantic memory
+            # Store each fact using upsert logic (v0.4)
+            stored_facts = []
             for fact in extraction.facts:
                 fact_content = fact.to_content()
-                fact_embedding = self._embeddings.embed_documents([fact_content])[0]
                 
-                fact_memory = SemanticMemoryCreate(
+                # Use upsert method which handles validation, dedup, and capping
+                success = await self.store_user_fact_upsert(
                     user_id=user_id,
-                    content=fact_content,
-                    embedding=fact_embedding,
-                    memory_type=MemoryType.USER_FACT,
-                    importance=fact.confidence,
-                    metadata=fact.to_metadata(),
+                    fact_content=fact_content,
+                    fact_type=fact.fact_type.value,
+                    confidence=fact.confidence,
                     session_id=session_id
                 )
-                self._repository.save_memory(fact_memory)
+                
+                if success:
+                    stored_facts.append(fact)
             
-            logger.info(f"Extracted {len(extraction.facts)} facts for user {user_id}")
-            return extraction.facts
+            logger.info(f"Extracted and stored {len(stored_facts)} facts for user {user_id}")
+            return stored_facts
             
         except RuntimeError as e:
             # Handle "Event loop is closed" gracefully
@@ -670,8 +680,8 @@ Return ONLY valid JSON:"""
         """
         Store a user fact directly (without LLM extraction).
         
-        Used by tools like tool_save_user_info to store user information
-        when the user explicitly provides it.
+        DEPRECATED: Use store_user_fact_upsert() instead for v0.4.
+        This method is kept for backward compatibility.
         
         Args:
             user_id: User ID
@@ -682,39 +692,190 @@ Return ONLY valid JSON:"""
             
         Returns:
             True if storage successful
+        """
+        # Delegate to upsert method for v0.4
+        return await self.store_user_fact_upsert(
+            user_id=user_id,
+            fact_content=fact_content,
+            fact_type=fact_type,
+            confidence=confidence,
+            session_id=session_id
+        )
+    
+    async def store_user_fact_upsert(
+        self,
+        user_id: str,
+        fact_content: str,
+        fact_type: str = "name",
+        confidence: float = 0.9,
+        session_id: Optional[str] = None
+    ) -> bool:
+        """
+        Store or update a user fact using upsert logic.
+        
+        v0.4 (CHỈ THỊ 23):
+        1. Validate fact_type is in ALLOWED_FACT_TYPES
+        2. Check if fact of same type exists
+        3. If exists: Update content, embedding, updated_at
+        4. If not: Insert new fact
+        5. Enforce memory cap (delete oldest if > 50)
+        
+        Args:
+            user_id: User ID
+            fact_content: The fact content (e.g., "User's name is Minh")
+            fact_type: Type of fact (name, role, level, goal, preference, weakness)
+            confidence: Confidence score (0.0 - 1.0)
+            session_id: Optional session ID
             
-        **Validates: Requirements 2.2, 2.4**
+        Returns:
+            True if storage successful
+            
+        **Validates: Requirements 2.1, 2.2, 2.3, 2.4**
         """
         try:
-            # Generate embedding for the fact
+            # Step 1: Validate and normalize fact_type
+            validated_type = self._validate_fact_type(fact_type)
+            if validated_type is None:
+                logger.debug(f"Fact type '{fact_type}' is invalid/ignored, skipping storage")
+                return False
+            
+            # Step 2: Generate embedding for the fact
             fact_embedding = self._embeddings.embed_documents([fact_content])[0]
             
-            # Create semantic memory for the fact
-            fact_memory = SemanticMemoryCreate(
-                user_id=user_id,
-                content=fact_content,
-                embedding=fact_embedding,
-                memory_type=MemoryType.USER_FACT,
-                importance=confidence,
-                metadata={
-                    "fact_type": fact_type,
-                    "confidence": confidence,
-                    "source": "explicit_save"
-                },
-                session_id=session_id
-            )
+            # Step 3: Check if fact of same type exists
+            existing_fact = self._repository.find_fact_by_type(user_id, validated_type)
             
-            self._repository.save_memory(fact_memory)
-            logger.info(f"Stored user fact for {user_id}: {fact_type}={fact_content[:50]}...")
-            return True
+            metadata = {
+                "fact_type": validated_type,
+                "confidence": confidence,
+                "source": "explicit_save"
+            }
+            
+            if existing_fact:
+                # Step 3a: Update existing fact (UPSERT - Update)
+                success = self._repository.update_fact(
+                    fact_id=existing_fact.id,
+                    content=fact_content,
+                    embedding=fact_embedding,
+                    metadata=metadata
+                )
+                if success:
+                    logger.info(f"Updated user fact for {user_id}: {validated_type}={fact_content[:50]}...")
+                return success
+            else:
+                # Step 3b: Insert new fact (UPSERT - Insert)
+                fact_memory = SemanticMemoryCreate(
+                    user_id=user_id,
+                    content=fact_content,
+                    embedding=fact_embedding,
+                    memory_type=MemoryType.USER_FACT,
+                    importance=confidence,
+                    metadata=metadata,
+                    session_id=session_id
+                )
+                
+                self._repository.save_memory(fact_memory)
+                logger.info(f"Stored new user fact for {user_id}: {validated_type}={fact_content[:50]}...")
+                
+                # Step 4: Enforce memory cap after insert
+                await self._enforce_memory_cap(user_id)
+                
+                return True
             
         except Exception as e:
-            logger.error(f"Failed to store user fact: {e}")
+            logger.error(f"Failed to store/update user fact: {e}")
             return False
+    
+    async def _enforce_memory_cap(self, user_id: str) -> int:
+        """
+        Enforce memory cap by deleting oldest facts.
+        
+        v0.4 (CHỈ THỊ 23):
+        - Count USER_FACT entries for user
+        - If count > MAX_USER_FACTS (50): delete oldest (FIFO)
+        - Log deletions for audit
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            Number of facts deleted
+            
+        **Validates: Requirements 1.1, 1.2, 1.3, 1.4**
+        """
+        try:
+            # Count current facts
+            current_count = self._repository.count_user_memories(
+                user_id=user_id,
+                memory_type=MemoryType.USER_FACT
+            )
+            
+            if current_count <= self.MAX_USER_FACTS:
+                return 0
+            
+            # Calculate how many to delete
+            excess = current_count - self.MAX_USER_FACTS
+            
+            # Delete oldest facts (FIFO)
+            deleted = self._repository.delete_oldest_facts(user_id, excess)
+            
+            if deleted > 0:
+                logger.info(
+                    f"Memory cap enforced for user {user_id}: "
+                    f"deleted {deleted} oldest facts (was {current_count}, now {current_count - deleted})"
+                )
+            
+            return deleted
+            
+        except Exception as e:
+            logger.error(f"Failed to enforce memory cap: {e}")
+            return 0
     
     def is_available(self) -> bool:
         """Check if semantic memory is available."""
         return self._repository.is_available()
+    
+    def _validate_fact_type(self, fact_type: str) -> Optional[str]:
+        """
+        Validate and normalize fact_type.
+        
+        v0.4 (CHỈ THỊ 23):
+        - Case-insensitive comparison
+        - Maps deprecated types to new types
+        - Returns None for ignored/invalid types
+        
+        Args:
+            fact_type: Raw fact type string
+            
+        Returns:
+            Normalized fact type or None if invalid/ignored
+            
+        **Validates: Requirements 4.1, 4.2, 4.3**
+        """
+        if not fact_type:
+            return None
+        
+        # Normalize to lowercase
+        normalized = fact_type.lower().strip()
+        
+        # Check if it's an ignored type
+        if normalized in IGNORED_FACT_TYPES:
+            logger.debug(f"Ignoring fact type: {normalized}")
+            return None
+        
+        # Check if it needs mapping to a new type
+        if normalized in FACT_TYPE_MAPPING:
+            mapped = FACT_TYPE_MAPPING[normalized]
+            logger.debug(f"Mapping deprecated fact type: {normalized} -> {mapped}")
+            return mapped
+        
+        # Check if it's an allowed type
+        if normalized in ALLOWED_FACT_TYPES:
+            return normalized
+        
+        # Unknown type - ignore
+        logger.warning(f"Unknown fact type ignored: {normalized}")
+        return None
 
 
 # Factory function

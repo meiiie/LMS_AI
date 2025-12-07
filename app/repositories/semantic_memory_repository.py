@@ -511,6 +511,251 @@ class SemanticMemoryRepository:
         except Exception as e:
             logger.warning(f"SemanticMemoryRepository not available: {e}")
             return False
+    
+    # ========== v0.4 Methods (CHỈ THỊ 23) ==========
+    
+    def find_fact_by_type(
+        self,
+        user_id: str,
+        fact_type: str
+    ) -> Optional[SemanticMemorySearchResult]:
+        """
+        Find existing fact by user_id and fact_type.
+        
+        Used for upsert logic - check if fact of same type exists.
+        
+        Args:
+            user_id: User ID
+            fact_type: Type of fact (name, role, level, etc.)
+            
+        Returns:
+            SemanticMemorySearchResult or None if not found
+            
+        **Validates: Requirements 2.1, 2.2**
+        """
+        self._ensure_initialized()
+        
+        try:
+            with self._session_factory() as session:
+                query = text(f"""
+                    SELECT 
+                        id,
+                        content,
+                        memory_type,
+                        importance,
+                        metadata,
+                        created_at,
+                        1.0 AS similarity
+                    FROM {self.TABLE_NAME}
+                    WHERE user_id = :user_id
+                      AND memory_type = :memory_type
+                      AND metadata->>'fact_type' = :fact_type
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """)
+                
+                result = session.execute(query, {
+                    "user_id": user_id,
+                    "memory_type": MemoryType.USER_FACT.value,
+                    "fact_type": fact_type
+                })
+                
+                row = result.fetchone()
+                
+                if row:
+                    return SemanticMemorySearchResult(
+                        id=row.id,
+                        content=row.content,
+                        memory_type=MemoryType(row.memory_type),
+                        importance=row.importance,
+                        similarity=1.0,
+                        metadata=row.metadata or {},
+                        created_at=row.created_at
+                    )
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to find fact by type: {e}")
+            return None
+    
+    def update_fact(
+        self,
+        fact_id: UUID,
+        content: str,
+        embedding: List[float],
+        metadata: dict
+    ) -> bool:
+        """
+        Update existing fact content and embedding.
+        
+        Preserves original ID and created_at, updates content, embedding, updated_at.
+        
+        Args:
+            fact_id: UUID of the fact to update
+            content: New content
+            embedding: New embedding vector
+            metadata: New metadata
+            
+        Returns:
+            True if update successful
+            
+        **Validates: Requirements 2.2, 2.4**
+        """
+        self._ensure_initialized()
+        
+        try:
+            with self._session_factory() as session:
+                embedding_str = self._format_embedding(embedding)
+                metadata_json = json.dumps(metadata)
+                
+                query = text(f"""
+                    UPDATE {self.TABLE_NAME}
+                    SET content = :content,
+                        embedding = CAST(:embedding AS vector),
+                        metadata = CAST(:metadata AS jsonb),
+                        updated_at = NOW()
+                    WHERE id = :fact_id
+                    RETURNING id
+                """)
+                
+                result = session.execute(query, {
+                    "fact_id": str(fact_id),
+                    "content": content,
+                    "embedding": embedding_str,
+                    "metadata": metadata_json
+                })
+                
+                row = result.fetchone()
+                session.commit()
+                
+                if row:
+                    logger.debug(f"Updated fact {fact_id}")
+                    return True
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to update fact: {e}")
+            return False
+    
+    def delete_oldest_facts(
+        self,
+        user_id: str,
+        count: int
+    ) -> int:
+        """
+        Delete N oldest USER_FACT entries for user (FIFO eviction).
+        
+        Used for memory capping - when user exceeds MAX_USER_FACTS.
+        
+        Args:
+            user_id: User ID
+            count: Number of oldest facts to delete
+            
+        Returns:
+            Number of facts actually deleted
+            
+        **Validates: Requirements 1.2**
+        """
+        self._ensure_initialized()
+        
+        if count <= 0:
+            return 0
+        
+        try:
+            with self._session_factory() as session:
+                # Delete oldest facts using subquery
+                query = text(f"""
+                    DELETE FROM {self.TABLE_NAME}
+                    WHERE id IN (
+                        SELECT id FROM {self.TABLE_NAME}
+                        WHERE user_id = :user_id
+                          AND memory_type = :memory_type
+                        ORDER BY created_at ASC
+                        LIMIT :count
+                    )
+                    RETURNING id
+                """)
+                
+                result = session.execute(query, {
+                    "user_id": user_id,
+                    "memory_type": MemoryType.USER_FACT.value,
+                    "count": count
+                })
+                
+                deleted_ids = result.fetchall()
+                session.commit()
+                
+                deleted_count = len(deleted_ids)
+                if deleted_count > 0:
+                    logger.info(f"Deleted {deleted_count} oldest facts for user {user_id} (FIFO eviction)")
+                
+                return deleted_count
+                
+        except Exception as e:
+            logger.error(f"Failed to delete oldest facts: {e}")
+            return 0
+    
+    def get_all_user_facts(
+        self,
+        user_id: str
+    ) -> List[SemanticMemorySearchResult]:
+        """
+        Get all facts for user (for API endpoint).
+        
+        Returns all USER_FACT entries without deduplication.
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            List of all user facts ordered by created_at DESC
+            
+        **Validates: Requirements 3.1**
+        """
+        self._ensure_initialized()
+        
+        try:
+            with self._session_factory() as session:
+                query = text(f"""
+                    SELECT 
+                        id,
+                        content,
+                        memory_type,
+                        importance,
+                        metadata,
+                        created_at,
+                        1.0 AS similarity
+                    FROM {self.TABLE_NAME}
+                    WHERE user_id = :user_id
+                      AND memory_type = :memory_type
+                    ORDER BY created_at DESC
+                """)
+                
+                result = session.execute(query, {
+                    "user_id": user_id,
+                    "memory_type": MemoryType.USER_FACT.value
+                })
+                
+                rows = result.fetchall()
+                
+                facts = []
+                for row in rows:
+                    facts.append(SemanticMemorySearchResult(
+                        id=row.id,
+                        content=row.content,
+                        memory_type=MemoryType(row.memory_type),
+                        importance=row.importance,
+                        similarity=1.0,
+                        metadata=row.metadata or {},
+                        created_at=row.created_at
+                    ))
+                
+                logger.debug(f"Retrieved {len(facts)} total facts for user {user_id}")
+                return facts
+                
+        except Exception as e:
+            logger.error(f"Failed to get all user facts: {e}")
+            return []
 
 
 # Factory function

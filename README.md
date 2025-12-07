@@ -167,12 +167,65 @@ Hệ thống persona được cấu hình qua file YAML, hỗ trợ cá nhân h�
    - 9/9 test cases passed (100% accuracy)
 ```
 
-### Semantic Memory v0.3 (Cross-Session)
+### Semantic Memory v0.4 (Managed Memory List - CHỈ THỊ 23)
 
 - **pgvector + Gemini Embeddings**: Vector similarity search (768 dimensions)
 - **User Facts Extraction**: Tự động trích xuất thông tin người dùng (tên, sở thích, mục tiêu)
 - **Cross-Session Persistence**: Ghi nhớ ngữ cảnh qua nhiều phiên chat
-- **Deduplication**: Tự động loại bỏ facts trùng lặp, giữ bản mới nhất
+- **Memory Capping**: Giới hạn 50 facts/user, xóa FIFO khi đầy
+- **True Deduplication**: Upsert thay vì Append (1 fact per type)
+- **Fact Type Validation**: 6 loại cho phép (name, role, level, goal, preference, weakness)
+- **Memory API**: `GET /api/v1/memories/{user_id}` - Lấy danh sách facts
+
+### Deep Reasoning v0.8.3 (CHỈ THỊ 21 & 22)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         DEEP REASONING FLOW                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   User Message                                                               │
+│        │                                                                     │
+│        ▼                                                                     │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                    CONVERSATION ANALYZER                             │   │
+│   │  • Detect incomplete explanations                                    │   │
+│   │  • Identify proactive continuation opportunities                     │   │
+│   │  • Track conversation context                                        │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│        │                                                                     │
+│        ▼                                                                     │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                    THINKING PROCESS                                  │   │
+│   │  <thinking>                                                          │   │
+│   │    Người dùng hỏi về Rule 15...                                      │   │
+│   │    Mình cần giải thích rõ ràng với ví dụ thực tế...                  │   │
+│   │  </thinking>                                                         │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│        │                                                                     │
+│        ▼                                                                     │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                    PROACTIVE CONTINUATION                            │   │
+│   │  • If user interrupts → Offer to continue previous topic             │   │
+│   │  • "Bạn có muốn quay lại với Rule 15 không?"                        │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│        │                                                                     │
+│        ▼                                                                     │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                    MEMORY ISOLATION                                  │   │
+│   │  • Blocked messages excluded from context                            │   │
+│   │  • Only clean history sent to LLM                                    │   │
+│   │  • Context window: 50 messages (configurable)                        │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Thinking Tags**: AI sử dụng `<thinking>` để suy nghĩ trước khi trả lời
+- **Proactive Continuation**: AI chủ động hỏi user muốn nghe tiếp khi bị ngắt
+- **Memory Isolation**: Tin nhắn bị block không xuất hiện trong context
+- **Context Window**: 50 messages (tăng từ 10), configurable qua `CONTEXT_WINDOW_SIZE`
+- **ConversationAnalyzer**: Phát hiện giải thích chưa hoàn thành
 
 ### Guardian Agent v0.8.1 (LLM Content Moderation)
 
@@ -770,7 +823,10 @@ TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 
 | Version | Date | Changes |
 |---------|------|---------|
-| v0.8.1 | 2025-12-07 | **GUARDIAN AGENT**: CHỈ THỊ SỐ 21 - LLM-based Content Moderation (Gemini 2.5 Flash), Custom Pronoun Validation ("gọi tôi là công chúa"), Contextual Content Filtering, Caching & Fallback |
+| v0.8.4 | 2025-12-07 | **MANAGED MEMORY LIST**: CHỈ THỊ SỐ 23 - Memory Capping (50 facts/user), True Deduplication (Upsert), Memory API `GET /api/v1/memories/{user_id}`, Fact Type Validation (6 types only) |
+| v0.8.3 | 2025-12-07 | **DEEP REASONING**: CHỈ THỊ SỐ 21 & 22 - `<thinking>` tags for reasoning, Proactive Continuation (AI hỏi user muốn nghe tiếp), Memory Isolation (blocked content không vào context), Context Window 50 messages, ConversationAnalyzer |
+| v0.8.2 | 2025-12-07 | **MEMORY ISOLATION**: CHỈ THỊ SỐ 22 - Blocked content filtering from context window, `is_blocked` column in chat_history |
+| v0.8.1 | 2025-12-07 | **GUARDIAN AGENT**: LLM-based Content Moderation (Gemini 2.5 Flash), Custom Pronoun Validation ("gọi tôi là công chúa"), Contextual Content Filtering, Caching & Fallback |
 | v0.8.0 | 2025-12-07 | **NEON MIGRATION**: CHỈ THỊ SỐ 19 - Migrate from Supabase to Neon Serverless Postgres, Optimized Health Check (shallow/deep), Code cleanup |
 | v0.7.5 | 2025-12-07 | **AI QUALITY**: Fix "À," repetition pattern, SessionState tracking, Explicit anti-repetition instructions |
 | v0.7.4 | 2025-12-05 | **PERSONA SYSTEM**: Dynamic YAML Persona - Full support for tutor.yaml/assistant.yaml structure, Template variable `{{user_name}}` replacement from Memory |
@@ -795,6 +851,18 @@ TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 ---
 
 ## Van de da biet va Cong viec tuong lai
+
+### Da giai quyet (v0.8.3 - Deep Reasoning)
+- **Thinking Tags**: AI su dung `<thinking>` tags de suy nghi truoc khi tra loi
+- **Proactive Continuation**: AI hoi user "Ban co muon nghe tiep khong?" khi bi ngat
+- **Memory Isolation**: Blocked content khong duoc dua vao context window
+- **Context Window 50**: Tang tu 10 len 50 messages, configurable qua CONTEXT_WINDOW_SIZE
+- **ConversationAnalyzer**: Phat hien giai thich chua hoan thanh va co hoi tiep tuc
+
+### Da giai quyet (v0.8.2 - Memory Isolation)
+- **Blocked Content Filtering**: Tin nhan bi block khong xuat hien trong context
+- **Database Schema**: Them `is_blocked` va `block_reason` columns vao chat_history
+- **Privacy Protection**: Noi dung doc hai khong anh huong den AI responses
 
 ### Da giai quyet (v0.8.1 - Guardian Agent)
 - **LLM Content Moderation**: Thay the hardcoded patterns bang Gemini 2.5 Flash

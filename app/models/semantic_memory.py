@@ -22,15 +22,42 @@ class MemoryType(str, Enum):
 
 
 class FactType(str, Enum):
-    """Types of user facts that can be extracted."""
+    """
+    Types of user facts that can be extracted.
+    
+    v0.4 Update (CHỈ THỊ 23):
+    - Limited to 6 essential types for cleaner memory management
+    - Deprecated types mapped to new types for backward compatibility
+    """
+    # Primary types (v0.4 - 6 essential types)
     NAME = "name"                    # User's name
-    PREFERENCE = "preference"        # Learning preferences
+    ROLE = "role"                    # Sinh viên/Giáo viên/Thuyền trưởng
+    LEVEL = "level"                  # Năm 3, Đại phó, Sĩ quan...
     GOAL = "goal"                    # Learning goals
-    BACKGROUND = "background"        # Professional background
-    WEAK_AREA = "weak_area"          # Areas needing improvement
-    STRONG_AREA = "strong_area"      # Areas of strength
-    INTEREST = "interest"            # Topics of interest
-    LEARNING_STYLE = "learning_style"  # Preferred learning style
+    PREFERENCE = "preference"        # Learning preferences/style
+    WEAKNESS = "weakness"            # Areas needing improvement
+    
+    # Deprecated types (kept for backward compatibility, mapped to new types)
+    BACKGROUND = "background"        # -> mapped to ROLE
+    WEAK_AREA = "weak_area"          # -> mapped to WEAKNESS
+    STRONG_AREA = "strong_area"      # -> ignored (not essential)
+    INTEREST = "interest"            # -> mapped to PREFERENCE
+    LEARNING_STYLE = "learning_style"  # -> mapped to PREFERENCE
+
+
+# Allowed fact types for v0.4 (6 essential types only)
+ALLOWED_FACT_TYPES = {"name", "role", "level", "goal", "preference", "weakness"}
+
+# Mapping deprecated types to new types
+FACT_TYPE_MAPPING = {
+    "background": "role",
+    "weak_area": "weakness",
+    "interest": "preference",
+    "learning_style": "preference",
+}
+
+# Types to ignore (not stored)
+IGNORED_FACT_TYPES = {"strong_area"}
 
 
 class SemanticMemory(BaseModel):
