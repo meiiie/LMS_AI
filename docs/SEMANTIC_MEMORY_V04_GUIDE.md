@@ -2,8 +2,21 @@
 
 ## CHỈ THỊ KỸ THUẬT SỐ 23
 
-**Status:** Production Ready
+**Status:** ✅ Production Verified (2025-12-07)
 **Previous Version:** v0.3 (Cross-Session Persistence)
+**Production URL:** https://maritime-ai-chatbot.onrender.com
+
+---
+
+## Production Test Results (2025-12-07)
+
+```
+✅ Health Check: PASS
+✅ Memory API: PASS (GET /api/v1/memories/{user_id})
+✅ Fact Extraction: PASS (4 facts extracted from conversation)
+✅ Upsert Logic: PASS (preference updated, not duplicated)
+✅ Background Task: PASS (facts stored via chat flow)
+```
 
 ---
 
@@ -109,6 +122,7 @@ No database migration required. Changes are backward compatible:
 
 ## Testing
 
+### Local Testing
 ```bash
 # Verify new methods
 python -c "
@@ -124,9 +138,49 @@ curl -X GET "http://localhost:8000/api/v1/memories/test_user" \
   -H "X-API-Key: your_key"
 ```
 
+### Production Testing
+```bash
+# Run production test script
+python scripts/test_memory_final_check.py
+
+# Expected output:
+# ✅ Facts were extracted and stored!
+# Extracted Facts:
+#   - [goal] ôn lại COLREGs
+#   - [role] thuyền trưởng tàu container
+#   - [preference] Rule 15 về tình huống cắt hướng
+#   - [name] Trần Văn Bình
+```
+
+### Test Scripts
+- `scripts/test_managed_memory_production.py` - Full production test
+- `scripts/test_memory_final_check.py` - Chat + verify facts
+- `scripts/test_semantic_memory_direct.py` - Direct engine test
+
+---
+
+## Integration Flow
+
+```
+User sends chat message
+    ↓
+ChatService.process_message()
+    ↓
+Background Task: _store_semantic_interaction_async()
+    ↓
+SemanticMemoryEngine.store_interaction(extract_facts=True)
+    ↓
+_extract_and_store_facts() → LLM extracts facts
+    ↓
+store_user_fact_upsert() → Validate, Upsert, Cap
+    ↓
+Facts stored in semantic_memories table (memory_type='user_fact')
+```
+
 ---
 
 ## Contact
 
 - **AI Backend Team** - Kiro & Co.
 - **Spec Reference:** CHỈ THỊ KỸ THUẬT SỐ 23
+- **Last Updated:** 2025-12-07
