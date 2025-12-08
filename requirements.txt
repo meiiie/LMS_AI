@@ -31,6 +31,7 @@ langchain-google-genai>=3.2.0
 # Google GenAI SDK (UNIFIED - CHỈ THỊ 26 + Semantic Memory)
 # SDK mới thống nhất cho Gemini API - hỗ trợ cả embeddings và vision
 # Thay thế google-generativeai (deprecated từ 31/8/2025)
+# Updated: 2025-12-08 - Force rebuild
 google-genai>=1.53.0
 
 # Semantic Memory
