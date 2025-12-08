@@ -171,20 +171,114 @@ interface EvidenceImage {
 
 ---
 
-## 6. Database Schema
+## 6. Semantic Chunking
+
+### Tổng quan
+
+Semantic Chunking chia nhỏ nội dung trang thành các chunks có ngữ nghĩa, thay vì 1 page = 1 chunk như trước.
+
+**Lợi ích:**
+- Tìm kiếm chính xác hơn (focused chunks)
+- Trích dẫn cụ thể hơn (Điều, Khoản, Điểm)
+- Confidence scoring cho quality filtering
+
+### Content Types
+
+| Type | Mô tả | Ví dụ |
+|------|-------|-------|
+| `text` | Văn bản thông thường | Đoạn văn, mô tả |
+| `heading` | Tiêu đề, điều khoản | Điều 15, Khoản 2, Rule 19 |
+| `table` | Bảng biểu | Bảng tốc độ, bảng đèn hiệu |
+| `diagram_reference` | Tham chiếu hình vẽ | Hình 1, Sơ đồ 2 |
+| `formula` | Công thức | Tính toán khoảng cách |
+
+### Document Hierarchy
+
+Hệ thống tự động extract cấu trúc văn bản pháp luật hàng hải:
+
+```json
+{
+  "section_hierarchy": {
+    "article": "15",      // Điều 15
+    "clause": "2",        // Khoản 2
+    "point": "a",         // Điểm a
+    "rule": "19"          // Rule 19 (COLREGs)
+  }
+}
+```
+
+### Confidence Scoring
+
+| Điều kiện | Score |
+|-----------|-------|
+| Chunk 200-600 chars | 1.0 |
+| Chunk < 50 chars | 0.6 |
+| Chunk > 1000 chars | 0.7 |
+| Structured content (heading, table) | +20% boost |
+
+### Configuration
+
+```python
+# app/core/config.py
+chunk_size: int = 800        # Target chunk size
+chunk_overlap: int = 100     # Overlap between chunks
+min_chunk_size: int = 50     # Minimum chunk size
+dpi_optimized: int = 100     # DPI for PDF conversion
+```
+
+### Re-ingestion với Chunking
+
+```bash
+# Re-ingest với semantic chunking
+python scripts/reingest_with_chunking.py \
+    --pdf data/COLREGs.pdf \
+    --document-id colregs_2024 \
+    --truncate-first
+
+# Kiểm tra kết quả
+SELECT content_type, COUNT(*) 
+FROM knowledge_embeddings 
+WHERE document_id = 'colregs_2024' 
+GROUP BY content_type;
+```
+
+### Search với Content Type Filter
+
+```python
+# Chỉ tìm trong headings (điều khoản)
+results = await dense_repo.search(
+    query_embedding=embedding,
+    limit=10,
+    content_types=["heading"],
+    min_confidence=0.8
+)
+```
+
+---
+
+## 7. Database Schema
 
 ### Migration
 
 ```sql
--- Thêm cột cho Multimodal RAG
+-- Migration 002: Multimodal columns
 ALTER TABLE knowledge_embeddings
 ADD COLUMN image_url TEXT,
 ADD COLUMN page_number INTEGER,
+ADD COLUMN chunk_index INTEGER DEFAULT 0,
 ADD COLUMN document_id VARCHAR(255);
+
+-- Migration 003: Semantic chunking columns
+ALTER TABLE knowledge_embeddings
+ADD COLUMN content_type VARCHAR(50) DEFAULT 'text',
+ADD COLUMN confidence_score FLOAT DEFAULT 1.0;
 
 -- Indexes
 CREATE INDEX idx_knowledge_embeddings_page ON knowledge_embeddings(page_number);
 CREATE INDEX idx_knowledge_embeddings_document ON knowledge_embeddings(document_id, page_number);
+CREATE INDEX idx_knowledge_chunks_ordering ON knowledge_embeddings(document_id, page_number, chunk_index);
+CREATE INDEX idx_knowledge_chunks_content_type ON knowledge_embeddings(content_type);
+CREATE INDEX idx_knowledge_chunks_confidence ON knowledge_embeddings(confidence_score);
 ```
 
 ### Chạy Migration
@@ -194,9 +288,25 @@ cd maritime-ai-service
 alembic upgrade head
 ```
 
+### Schema hiện tại
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| node_id | VARCHAR(255) | Unique identifier |
+| content | TEXT | Chunk content |
+| embedding | VECTOR(768) | Gemini embedding |
+| document_id | VARCHAR(255) | Parent document |
+| page_number | INTEGER | Page number |
+| chunk_index | INTEGER | Chunk index within page |
+| image_url | TEXT | Supabase image URL |
+| content_type | VARCHAR(50) | text/table/heading/etc |
+| confidence_score | FLOAT | Quality score 0.0-1.0 |
+| metadata | JSONB | Additional metadata |
+
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 ### Lỗi pdf2image
 
@@ -242,7 +352,7 @@ Error: Rate limit exceeded
 
 ---
 
-## 8. Performance Tips
+## 9. Performance Tips
 
 ### Batch Processing
 - Xử lý PDF theo batch 10 pages để tránh memory overflow
@@ -256,7 +366,12 @@ Error: Rate limit exceeded
 - Vision API: 10 requests/minute
 - Supabase Storage: Theo plan (Free tier: 1GB storage)
 
+### Semantic Chunking Performance
+- Chunk size 800 chars tối ưu cho maritime documents
+- Overlap 100 chars đảm bảo context continuity
+- Confidence filtering (>0.8) giảm noise trong search results
+
 ---
 
-*CHỈ THỊ KỸ THUẬT SỐ 26 - Version 1.0*
+*CHỈ THỊ KỸ THUẬT SỐ 26 + Semantic Chunking - Version 2.0*
 *Last Updated: December 2025*

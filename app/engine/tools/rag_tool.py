@@ -270,7 +270,7 @@ class RAGAgent:
         )
     
     def _hybrid_results_to_nodes(self, results: List[HybridSearchResult]) -> List[KnowledgeNode]:
-        """Convert HybridSearchResult to KnowledgeNode for compatibility."""
+        """Convert HybridSearchResult to KnowledgeNode for compatibility with chunking metadata."""
         from app.models.knowledge_graph import NodeType
         
         nodes = []
@@ -283,10 +283,13 @@ class RAGAgent:
                 logger.warning(f"Skipping result with empty title/content: {r.node_id}")
                 continue
             
+            # Build enhanced title with document hierarchy
+            enhanced_title = self._format_title_with_hierarchy(title, r)
+            
             nodes.append(KnowledgeNode(
                 id=r.node_id,
                 node_type=NodeType.CONCEPT,
-                title=title,
+                title=enhanced_title,
                 content=content,
                 source=r.source or "Maritime Knowledge Base",
                 metadata={
@@ -294,19 +297,73 @@ class RAGAgent:
                     "rrf_score": r.rrf_score,
                     "dense_score": r.dense_score,
                     "sparse_score": r.sparse_score,
-                    "search_method": r.search_method
+                    "search_method": r.search_method,
+                    # Semantic chunking metadata
+                    "content_type": r.content_type,
+                    "confidence_score": r.confidence_score,
+                    "page_number": r.page_number,
+                    "chunk_index": r.chunk_index,
+                    "image_url": r.image_url,
+                    "document_id": r.document_id,
+                    "section_hierarchy": r.section_hierarchy
                 }
             ))
         return nodes
     
+    def _format_title_with_hierarchy(self, title: str, result: HybridSearchResult) -> str:
+        """
+        Format title with document hierarchy (Điều, Khoản, etc.).
+        
+        **Feature: semantic-chunking**
+        **Validates: Requirements 8.4**
+        """
+        hierarchy = result.section_hierarchy or {}
+        if not hierarchy:
+            return title
+        
+        # Build hierarchy prefix
+        parts = []
+        if 'article' in hierarchy:
+            parts.append(f"Điều {hierarchy['article']}")
+        if 'clause' in hierarchy:
+            parts.append(f"Khoản {hierarchy['clause']}")
+        if 'point' in hierarchy:
+            parts.append(f"Điểm {hierarchy['point']}")
+        if 'rule' in hierarchy:
+            parts.append(f"Rule {hierarchy['rule']}")
+        
+        if parts:
+            hierarchy_prefix = " - ".join(parts)
+            # Avoid duplicate if title already contains hierarchy
+            if hierarchy_prefix.lower() not in title.lower():
+                return f"[{hierarchy_prefix}] {title}"
+        
+        return title
+    
     def _generate_hybrid_citations(self, results: List[HybridSearchResult]) -> List[Citation]:
-        """Generate citations from hybrid search results with relevance scores."""
+        """
+        Generate citations from hybrid search results with relevance scores and chunking metadata.
+        
+        **Feature: semantic-chunking**
+        **Validates: Requirements 8.4, 8.5**
+        """
         citations = []
         for r in results:
+            # Format title with hierarchy
+            enhanced_title = self._format_title_with_hierarchy(r.title, r)
+            
+            # Add content type indicator for special types
+            if r.content_type == "table":
+                enhanced_title = f"📊 {enhanced_title}"
+            elif r.content_type == "heading":
+                enhanced_title = f"📑 {enhanced_title}"
+            elif r.content_type == "diagram_reference":
+                enhanced_title = f"📈 {enhanced_title}"
+            
             citations.append(Citation(
                 node_id=r.node_id,
                 source=r.source or "Maritime Knowledge Base",
-                title=r.title,
+                title=enhanced_title,
                 relevance_score=r.rrf_score
             ))
         return citations

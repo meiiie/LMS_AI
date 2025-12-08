@@ -98,6 +98,96 @@ SUPABASE_STORAGE_BUCKET=maritime-docs
 
 ---
 
+## Semantic Chunking v2.7.0 (NEW)
+
+### Intelligent Document Segmentation
+
+Nâng cấp từ "Page-level indexing" sang "Semantic chunk-level indexing" với khả năng:
+
+- **Maritime-Specific Patterns**: Nhận diện cấu trúc Điều, Khoản, Điểm, Rule
+- **Content Type Classification**: text, table, heading, diagram_reference, formula
+- **Confidence Scoring**: Đánh giá chất lượng chunk (0.6-1.0)
+- **Document Hierarchy Extraction**: Tự động trích xuất cấu trúc văn bản pháp luật
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    SEMANTIC CHUNKING PIPELINE                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   Vision Extracted Text                                                      │
+│        │                                                                     │
+│        ▼                                                                     │
+│   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐         │
+│   │ 1. CHUNK        │ →  │ 2. CLASSIFY     │ →  │ 3. SCORE        │         │
+│   │ (800 chars)     │    │ (Content Type)  │    │ (Confidence)    │         │
+│   │ overlap=100     │    │ text/table/...  │    │ 0.6 - 1.0       │         │
+│   └─────────────────┘    └─────────────────┘    └─────────────────┘         │
+│                                                        │                     │
+│                                                        ▼                     │
+│                                              ┌─────────────────┐             │
+│                                              │ 4. EXTRACT      │             │
+│                                              │ (Hierarchy)     │             │
+│                                              │ Điều/Khoản/Rule │             │
+│                                              └─────────────────┘             │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Content Types
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| `heading` | Điều, Khoản, Rule, Chapter | "Điều 15. Tình huống cắt hướng" |
+| `table` | Markdown tables, \| separators | Bảng tốc độ tàu thuyền |
+| `formula` | Mathematical expressions | "V = D/T" |
+| `diagram_reference` | Hình, Figure, Sơ đồ | "Xem Hình 3.1" |
+| `text` | Default content | Nội dung văn bản thông thường |
+
+### Database Schema
+
+```sql
+-- Enhanced knowledge_embeddings table
+ALTER TABLE knowledge_embeddings ADD COLUMN content_type VARCHAR(50) DEFAULT 'text';
+ALTER TABLE knowledge_embeddings ADD COLUMN confidence_score FLOAT DEFAULT 1.0;
+ALTER TABLE knowledge_embeddings ADD COLUMN chunk_index INTEGER DEFAULT 0;
+
+-- Indexes for performance
+CREATE INDEX idx_knowledge_chunks_content_type ON knowledge_embeddings(content_type);
+CREATE INDEX idx_knowledge_chunks_confidence ON knowledge_embeddings(confidence_score);
+CREATE INDEX idx_knowledge_chunks_ordering ON knowledge_embeddings(document_id, page_number, chunk_index);
+```
+
+### Re-ingestion with Chunking
+
+```bash
+# Re-ingest documents with semantic chunking
+python scripts/reingest_with_chunking.py \
+    --pdf data/VanBanGoc_95.2015.QH13.P1.pdf \
+    --document-id maritime_law_2024 \
+    --truncate-first
+
+# Verify chunking results
+psql $DATABASE_URL -c "
+SELECT content_type, COUNT(*) as chunks, AVG(confidence_score) as avg_confidence 
+FROM knowledge_embeddings 
+WHERE document_id = 'maritime_law_2024' 
+GROUP BY content_type;
+"
+```
+
+### Property-Based Tests
+
+```bash
+# Run semantic chunking tests (15 tests)
+pytest tests/property/test_chunking_properties.py -v
+
+# Test specific properties
+pytest tests/property/test_chunking_properties.py::test_chunk_size_bounds -v
+pytest tests/property/test_chunking_properties.py::test_confidence_score_bounds -v
+```
+
+---
+
 ## Features
 
 ### Multi-Agent Architecture (v0.5.3)

@@ -19,9 +19,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class HybridSearchResult:
     """
-    Result from hybrid search with combined scoring.
+    Result from hybrid search with combined scoring and semantic chunking metadata.
     
-    Feature: hybrid-search
+    Feature: hybrid-search, semantic-chunking
     """
     node_id: str
     title: str
@@ -41,14 +41,27 @@ class HybridSearchResult:
     dense_rank: Optional[int] = None
     sparse_rank: Optional[int] = None
     
+    # Semantic chunking metadata
+    content_type: str = "text"  # text, table, heading, diagram_reference, formula
+    confidence_score: float = 1.0  # 0.0-1.0
+    page_number: int = 0
+    chunk_index: int = 0
+    image_url: str = ""
+    document_id: str = ""
+    section_hierarchy: dict = field(default_factory=dict)  # article, clause, point, rule
+    
     def appears_in_both(self) -> bool:
         """Check if result appeared in both dense and sparse searches."""
         return self.dense_score is not None and self.sparse_score is not None
+    
+    def has_document_hierarchy(self) -> bool:
+        """Check if result has document hierarchy (Điều, Khoản, etc.)."""
+        return bool(self.section_hierarchy)
 
 
 @dataclass
 class RankedItem:
-    """Internal item for RRF calculation."""
+    """Internal item for RRF calculation with chunking metadata."""
     node_id: str
     title: str
     content: str
@@ -58,6 +71,14 @@ class RankedItem:
     sparse_score: Optional[float] = None
     dense_rank: Optional[int] = None
     sparse_rank: Optional[int] = None
+    # Semantic chunking metadata
+    content_type: str = "text"
+    confidence_score: float = 1.0
+    page_number: int = 0
+    chunk_index: int = 0
+    image_url: str = ""
+    document_id: str = ""
+    section_hierarchy: dict = field(default_factory=dict)
 
 
 class RRFReranker:
@@ -291,12 +312,28 @@ class RRFReranker:
                 content = getattr(result, 'content', '') or ''
                 title = content.split('\n')[0][:100] if content else node_id
                 
+                # Extract chunking metadata from dense result
+                content_type = getattr(result, 'content_type', 'text') or 'text'
+                confidence_score = getattr(result, 'confidence_score', 1.0) or 1.0
+                page_number = getattr(result, 'page_number', 0) or 0
+                chunk_index = getattr(result, 'chunk_index', 0) or 0
+                image_url = getattr(result, 'image_url', '') or ''
+                document_id = getattr(result, 'document_id', '') or ''
+                section_hierarchy = getattr(result, 'section_hierarchy', {}) or {}
+                
                 items[node_id] = RankedItem(
                     node_id=node_id,
                     title=title,
                     content=content,
                     source="Maritime Knowledge Base",
-                    category="Knowledge"
+                    category="Knowledge",
+                    content_type=content_type,
+                    confidence_score=confidence_score,
+                    page_number=page_number,
+                    chunk_index=chunk_index,
+                    image_url=image_url,
+                    document_id=document_id,
+                    section_hierarchy=section_hierarchy
                 )
             
             items[node_id].dense_score = result.similarity
@@ -363,7 +400,15 @@ class RRFReranker:
                 rrf_score=final_rrf_score,
                 search_method="hybrid",
                 dense_rank=item.dense_rank,
-                sparse_rank=item.sparse_rank
+                sparse_rank=item.sparse_rank,
+                # Semantic chunking metadata
+                content_type=item.content_type,
+                confidence_score=item.confidence_score,
+                page_number=item.page_number,
+                chunk_index=item.chunk_index,
+                image_url=item.image_url,
+                document_id=item.document_id,
+                section_hierarchy=item.section_hierarchy
             ))
         
         # Sort by RRF score (descending) and limit
@@ -407,6 +452,15 @@ class RRFReranker:
                 content = getattr(result, 'content', '') or ''
                 title = content.split('\n')[0][:100] if content else result.node_id
                 
+                # Extract chunking metadata
+                content_type = getattr(result, 'content_type', 'text') or 'text'
+                confidence_score = getattr(result, 'confidence_score', 1.0) or 1.0
+                page_number = getattr(result, 'page_number', 0) or 0
+                chunk_index = getattr(result, 'chunk_index', 0) or 0
+                image_url = getattr(result, 'image_url', '') or ''
+                document_id = getattr(result, 'document_id', '') or ''
+                section_hierarchy = getattr(result, 'section_hierarchy', {}) or {}
+                
                 hybrid_results.append(HybridSearchResult(
                     node_id=result.node_id,
                     title=title,
@@ -418,7 +472,15 @@ class RRFReranker:
                     rrf_score=result.similarity,  # Use similarity as score
                     search_method="dense_only",
                     dense_rank=rank,
-                    sparse_rank=None
+                    sparse_rank=None,
+                    # Semantic chunking metadata
+                    content_type=content_type,
+                    confidence_score=confidence_score,
+                    page_number=page_number,
+                    chunk_index=chunk_index,
+                    image_url=image_url,
+                    document_id=document_id,
+                    section_hierarchy=section_hierarchy
                 ))
             else:  # sparse
                 hybrid_results.append(HybridSearchResult(

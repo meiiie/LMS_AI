@@ -42,14 +42,24 @@ def get_dense_search_repository() -> "DenseSearchRepository":
 
 @dataclass
 class DenseSearchResult:
-    """Result from dense (vector) search."""
+    """Result from dense (vector) search with semantic chunking metadata."""
     node_id: str
     similarity: float  # Cosine similarity score (0-1)
     content: str = ""  # Content from knowledge_embeddings table
+    # Semantic chunking fields
+    content_type: str = "text"  # text, table, heading, diagram_reference, formula
+    confidence_score: float = 1.0  # 0.0-1.0
+    page_number: int = 0
+    chunk_index: int = 0
+    image_url: str = ""
+    document_id: str = ""
+    section_hierarchy: dict = None  # article, clause, point, rule
     
     def __post_init__(self):
         # Ensure similarity is in valid range
         self.similarity = max(0.0, min(1.0, self.similarity))
+        if self.section_hierarchy is None:
+            self.section_hierarchy = {}
 
 
 class DenseSearchRepository:
@@ -104,19 +114,24 @@ class DenseSearchRepository:
     async def search(
         self,
         query_embedding: List[float],
-        limit: int = 10
+        limit: int = 10,
+        content_types: Optional[List[str]] = None,
+        min_confidence: Optional[float] = None
     ) -> List[DenseSearchResult]:
         """
-        Search for similar documents using cosine similarity.
+        Search for similar documents using cosine similarity with chunking filters.
         
         Args:
             query_embedding: 768-dim normalized query vector
             limit: Maximum results to return
+            content_types: Filter by content types (text, table, heading, etc.)
+            min_confidence: Minimum confidence score filter
             
         Returns:
             List of DenseSearchResult sorted by similarity (descending)
             
-        Requirements: 2.5
+        Requirements: 2.5, 8.1, 8.2, 8.3
+        **Feature: semantic-chunking**
         """
         if not self._available:
             logger.warning("Dense search not available")
@@ -129,30 +144,70 @@ class DenseSearchRepository:
             embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
             
             async with pool.acquire() as conn:
-                # Use cosine similarity (1 - cosine_distance)
-                # pgvector's <=> operator returns cosine distance
-                rows = await conn.fetch(
-                    """
+                # Build query with optional filters
+                query = """
                     SELECT 
                         node_id,
                         content,
+                        content_type,
+                        confidence_score,
+                        page_number,
+                        chunk_index,
+                        image_url,
+                        document_id,
+                        metadata,
                         1 - (embedding <=> $1::vector) as similarity
                     FROM knowledge_embeddings
-                    ORDER BY embedding <=> $1::vector
-                    LIMIT $2
-                    """,
-                    embedding_str,
-                    limit
-                )
+                    WHERE 1=1
+                """
+                params = [embedding_str]
+                param_idx = 2
                 
-                results = [
-                    DenseSearchResult(
+                # Add content type filter
+                if content_types:
+                    query += f" AND content_type = ANY(${param_idx})"
+                    params.append(content_types)
+                    param_idx += 1
+                
+                # Add confidence filter
+                if min_confidence is not None:
+                    query += f" AND confidence_score >= ${param_idx}"
+                    params.append(min_confidence)
+                    param_idx += 1
+                
+                query += f"""
+                    ORDER BY embedding <=> $1::vector
+                    LIMIT ${param_idx}
+                """
+                params.append(limit)
+                
+                rows = await conn.fetch(query, *params)
+                
+                results = []
+                for row in rows:
+                    # Parse section hierarchy from metadata
+                    metadata = row.get("metadata") or {}
+                    if isinstance(metadata, str):
+                        import json
+                        try:
+                            metadata = json.loads(metadata)
+                        except:
+                            metadata = {}
+                    
+                    section_hierarchy = metadata.get("section_hierarchy", {})
+                    
+                    results.append(DenseSearchResult(
                         node_id=row["node_id"],
                         similarity=float(row["similarity"]),
-                        content=row["content"] or ""
-                    )
-                    for row in rows
-                ]
+                        content=row["content"] or "",
+                        content_type=row.get("content_type") or "text",
+                        confidence_score=float(row.get("confidence_score") or 1.0),
+                        page_number=row.get("page_number") or 0,
+                        chunk_index=row.get("chunk_index") or 0,
+                        image_url=row.get("image_url") or "",
+                        document_id=row.get("document_id") or "",
+                        section_hierarchy=section_hierarchy
+                    ))
                 
                 logger.info(f"Dense search returned {len(results)} results")
                 return results
@@ -270,6 +325,102 @@ class DenseSearchRepository:
                 
         except Exception as e:
             logger.error(f"Failed to upsert embedding for {node_id}: {e}")
+            return False
+
+    async def store_document_chunk(
+        self,
+        node_id: str,
+        content: str,
+        embedding: List[float],
+        document_id: str,
+        page_number: int,
+        chunk_index: int,
+        content_type: str = "text",
+        confidence_score: float = 1.0,
+        image_url: str = "",
+        metadata: dict = None
+    ) -> bool:
+        """
+        Store a semantic chunk with full metadata.
+        
+        Args:
+            node_id: Unique chunk identifier
+            content: Text content
+            embedding: 768-dim L2-normalized vector
+            document_id: Parent document ID
+            page_number: Page number in document
+            chunk_index: Chunk index within page
+            content_type: Content type (text, table, heading, etc.)
+            confidence_score: Confidence score (0.0-1.0)
+            image_url: URL to source image
+            metadata: Additional metadata (section_hierarchy, etc.)
+            
+        Returns:
+            True if successful, False otherwise
+            
+        Requirements: 8.1, 8.2, 8.3
+        **Feature: semantic-chunking**
+        """
+        if not self._available:
+            logger.warning("Dense search not available for storing")
+            return False
+        
+        if len(embedding) != 768:
+            logger.error(f"Invalid embedding dimensions: {len(embedding)}, expected 768")
+            return False
+        
+        try:
+            pool = await self._get_pool()
+            
+            # Convert embedding to pgvector format
+            embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+            
+            # Convert metadata to JSON
+            import json
+            metadata_json = json.dumps(metadata) if metadata else '{}'
+            
+            async with pool.acquire() as conn:
+                # UPSERT with all chunking fields
+                await conn.execute(
+                    """
+                    INSERT INTO knowledge_embeddings (
+                        node_id, content, embedding, document_id, page_number, 
+                        chunk_index, content_type, confidence_score, image_url, metadata
+                    )
+                    VALUES ($1, $2, $3::vector, $4, $5, $6, $7, $8, $9, $10::jsonb)
+                    ON CONFLICT (node_id) 
+                    DO UPDATE SET 
+                        content = EXCLUDED.content,
+                        embedding = EXCLUDED.embedding,
+                        document_id = EXCLUDED.document_id,
+                        page_number = EXCLUDED.page_number,
+                        chunk_index = EXCLUDED.chunk_index,
+                        content_type = EXCLUDED.content_type,
+                        confidence_score = EXCLUDED.confidence_score,
+                        image_url = EXCLUDED.image_url,
+                        metadata = EXCLUDED.metadata,
+                        updated_at = NOW()
+                    """,
+                    node_id,
+                    content[:2000],  # Truncate content if too long
+                    embedding_str,
+                    document_id,
+                    page_number,
+                    chunk_index,
+                    content_type,
+                    confidence_score,
+                    image_url,
+                    metadata_json
+                )
+                
+                logger.debug(
+                    f"Stored chunk: {node_id}, type={content_type}, "
+                    f"confidence={confidence_score}, page={page_number}"
+                )
+                return True
+                
+        except Exception as e:
+            logger.error(f"Failed to store chunk {node_id}: {e}")
             return False
 
     async def delete_embedding(self, node_id: str) -> bool:

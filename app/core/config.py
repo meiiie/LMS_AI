@@ -136,6 +136,14 @@ class Settings(BaseSettings):
     deep_reasoning_enabled: bool = Field(default=True, description="Enable Deep Reasoning with <thinking> tags")
     context_window_size: int = Field(default=50, description="Number of messages to include in context window")
     
+    # Semantic Chunking Settings (Feature: semantic-chunking)
+    chunk_size: int = Field(default=800, description="Target chunk size in characters")
+    chunk_overlap: int = Field(default=100, description="Overlap between consecutive chunks")
+    min_chunk_size: int = Field(default=50, description="Minimum chunk size to avoid tiny fragments")
+    dpi_optimized: int = Field(default=100, description="Optimized DPI for PDF to image conversion")
+    vision_max_dimension: int = Field(default=1024, description="Max dimension for vision API images")
+    vision_image_quality: int = Field(default=85, description="JPEG quality for vision API images")
+    
     # Vector Store
     chroma_host: str = Field(default="localhost", description="ChromaDB host")
     chroma_port: int = Field(default=8000, description="ChromaDB port")
