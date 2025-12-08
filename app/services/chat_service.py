@@ -213,9 +213,8 @@ class ChatService:
                 logger.warning(f"Failed to initialize Semantic Memory: {e}")
                 self._semantic_memory = None
         
-        # Agents (Legacy - kept for backward compatibility)
-        self._orchestrator = AgentOrchestrator()
-        self._chat_agent = ChatAgent()  # No legacy memory, uses Semantic Memory v0.3
+        # Agents (CHỈ THỊ KỸ THUẬT SỐ 25: Legacy removed, UnifiedAgent is primary)
+        # Legacy AgentOrchestrator and ChatAgent have been removed
         self._rag_agent = RAGAgent(knowledge_graph=self._knowledge_graph)
         self._tutor_agent = TutorAgent()
         
