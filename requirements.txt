@@ -32,6 +32,10 @@ langchain-google-genai>=3.2.0
 # SDK mới của Google cho Gemini API - cần cho Semantic Memory
 google-genai>=0.3.0
 
+# Google Generative AI SDK (CHỈ THỊ 26: Vision Extractor)
+# SDK cũ cho Gemini Vision API - cần cho VisionExtractor
+google-generativeai>=0.8.0
+
 # Semantic Memory
 numpy>=1.24.0
 scikit-learn>=1.3.0
