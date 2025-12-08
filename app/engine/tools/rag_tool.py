@@ -55,20 +55,43 @@ def get_knowledge_repository():
 
 
 @dataclass
+class EvidenceImage:
+    """
+    Evidence image reference for Multimodal RAG.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 26: Evidence Images
+    **Feature: multimodal-rag-vision**
+    """
+    url: str
+    page_number: int
+    document_id: str = ""
+
+
+@dataclass
 class RAGResponse:
     """
     Response from RAG Agent with citations.
     
     **Validates: Requirements 4.1**
+    **Feature: multimodal-rag-vision** - Added evidence_images
     """
     content: str
     citations: List[Citation]
     is_fallback: bool = False
     disclaimer: Optional[str] = None
+    evidence_images: List[EvidenceImage] = None  # CHỈ THỊ 26: Evidence Images
+    
+    def __post_init__(self):
+        if self.evidence_images is None:
+            self.evidence_images = []
     
     def has_citations(self) -> bool:
         """Check if response has citations."""
         return len(self.citations) > 0
+    
+    def has_evidence_images(self) -> bool:
+        """Check if response has evidence images."""
+        return len(self.evidence_images) > 0
 
 
 class RAGAgent:
@@ -235,10 +258,15 @@ class RAGAgent:
         if search_method != "hybrid":
             content += f"\n\n*[Tìm kiếm: {search_method}]*"
         
+        # CHỈ THỊ 26: Collect evidence images
+        node_ids = [r.node_id for r in hybrid_results]
+        evidence_images = await self._collect_evidence_images(node_ids, max_images=3)
+        
         return RAGResponse(
             content=content,
             citations=citations,
-            is_fallback=False
+            is_fallback=False,
+            evidence_images=evidence_images
         )
     
     def _hybrid_results_to_nodes(self, results: List[HybridSearchResult]) -> List[KnowledgeNode]:
@@ -282,6 +310,71 @@ class RAGAgent:
                 relevance_score=r.rrf_score
             ))
         return citations
+    
+    async def _collect_evidence_images(
+        self,
+        node_ids: List[str],
+        max_images: int = 3
+    ) -> List[EvidenceImage]:
+        """
+        Collect evidence images from database for given node IDs.
+        
+        CHỈ THỊ KỸ THUẬT SỐ 26: Evidence Images
+        
+        **Property 3: Search Results Include Image URL**
+        **Property 11: Response Metadata Contains Evidence Images**
+        **Property 12: Maximum Evidence Images Per Response**
+        
+        Args:
+            node_ids: List of node IDs to get images for
+            max_images: Maximum number of images to return (default 3)
+            
+        Returns:
+            List of EvidenceImage objects
+        """
+        from app.core.database import get_db_pool
+        
+        evidence_images = []
+        seen_urls = set()
+        
+        try:
+            pool = await get_db_pool()
+            
+            async with pool.acquire() as conn:
+                # Query for image URLs
+                rows = await conn.fetch(
+                    """
+                    SELECT node_id, image_url, page_number, document_id
+                    FROM knowledge_embeddings
+                    WHERE node_id = ANY($1)
+                    AND image_url IS NOT NULL
+                    ORDER BY page_number
+                    """,
+                    node_ids
+                )
+                
+                for row in rows:
+                    image_url = row['image_url']
+                    
+                    # Skip duplicates
+                    if image_url in seen_urls:
+                        continue
+                    
+                    seen_urls.add(image_url)
+                    evidence_images.append(EvidenceImage(
+                        url=image_url,
+                        page_number=row['page_number'] or 0,
+                        document_id=row['document_id'] or ""
+                    ))
+                    
+                    # Limit to max_images
+                    if len(evidence_images) >= max_images:
+                        break
+                        
+        except Exception as e:
+            logger.warning(f"Failed to collect evidence images: {e}")
+        
+        return evidence_images
 
     
     async def _expand_context(

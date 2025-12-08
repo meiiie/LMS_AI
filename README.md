@@ -33,6 +33,68 @@ Maritime AI Tutor Service là một **Backend AI microservice** được thiết
 - **Semantic Memory v0.3**: Ghi nhớ ngữ cảnh cross-session với pgvector + Gemini embeddings
 - **Guardian Agent v0.8.1**: LLM-based Content Moderation với Gemini 2.5 Flash - Custom Pronoun Validation, Contextual Filtering
 - **Content Guardrails**: Bảo vệ nội dung với PII masking và prompt injection detection
+- **Multimodal RAG v1.0** (CHỈ THỊ 26): Vision-based document understanding với Evidence Images
+
+---
+
+## Multimodal RAG (CHỈ THỊ KỸ THUẬT SỐ 26)
+
+### Vision-based Document Understanding
+
+Hệ thống đã được nâng cấp từ "Đọc văn bản" sang "Hiểu tài liệu" với khả năng:
+
+- **AI "nhìn" thấy trang tài liệu** như con người (bảng biểu, sơ đồ đèn hiệu, hình vẽ tàu bè)
+- **Evidence Images**: Hiển thị ảnh trang sách luật gốc cùng câu trả lời
+- **Hybrid Infrastructure**: Neon (metadata) + Supabase Storage (images)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    MULTIMODAL INGESTION PIPELINE                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   PDF Document                                                               │
+│        │                                                                     │
+│        ▼                                                                     │
+│   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐         │
+│   │ 1. RASTERIZE    │ →  │ 2. UPLOAD       │ →  │ 3. VISION       │         │
+│   │ (pdf2image)     │    │ (Supabase)      │    │ (Gemini 2.5)    │         │
+│   │ PDF → Images    │    │ → public_url    │    │ Image → Text    │         │
+│   └─────────────────┘    └─────────────────┘    └─────────────────┘         │
+│                                                        │                     │
+│                                                        ▼                     │
+│                                              ┌─────────────────┐             │
+│                                              │ 4. INDEX        │             │
+│                                              │ (Neon pgvector) │             │
+│                                              │ Text + image_url│             │
+│                                              └─────────────────┘             │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Evidence Images in Response
+
+```json
+{
+  "answer": "Theo Điều 15 COLREGs...",
+  "sources": [...],
+  "evidence_images": [
+    {
+      "url": "https://xyz.supabase.co/.../page_15.jpg",
+      "page_number": 15,
+      "document_id": "colregs_2024"
+    }
+  ]
+}
+```
+
+### Environment Variables
+
+```env
+# Supabase Storage (CHỈ THỊ 26)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-supabase-anon-key
+SUPABASE_STORAGE_BUCKET=maritime-docs
+```
 
 ---
 

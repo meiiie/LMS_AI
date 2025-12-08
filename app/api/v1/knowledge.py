@@ -391,3 +391,113 @@ async def delete_document(
             status_code=500,
             detail=f"Failed to delete document: {str(e)}"
         )
+
+
+# =============================================================================
+# CHỈ THỊ KỸ THUẬT SỐ 26: Multimodal RAG Ingestion
+# =============================================================================
+
+class MultimodalIngestionResponse(BaseModel):
+    """Response for multimodal document ingestion."""
+    status: str
+    document_id: str
+    total_pages: int
+    successful_pages: int
+    failed_pages: int
+    success_rate: float
+    errors: list[str] = []
+    message: str
+
+
+@router.post("/ingest-multimodal", response_model=MultimodalIngestionResponse)
+async def ingest_multimodal_document(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    document_id: str = Form(...),
+    role: str = Form(...),
+    resume: bool = Form(default=True)
+) -> MultimodalIngestionResponse:
+    """
+    Upload a PDF document for Multimodal RAG ingestion.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 26: Vision-based Document Understanding
+    
+    Pipeline:
+    1. PDF → Images (pdf2image with poppler)
+    2. Images → Supabase Storage (public URLs)
+    3. Images → Gemini Vision (text extraction)
+    4. Text + Embeddings + image_url → Neon Database
+    
+    - **file**: PDF file to upload (max 50MB)
+    - **document_id**: Unique identifier for the document
+    - **role**: User role (must be "admin")
+    - **resume**: Resume from last successful page if interrupted (default: True)
+    
+    Returns ingestion result with page counts and errors.
+    
+    **Feature: multimodal-rag-vision**
+    **Validates: Requirements 2.1, 7.1, 7.4**
+    """
+    import tempfile
+    import os
+    
+    # Validate admin role
+    validate_admin_role(role)
+    
+    # Validate file
+    validate_file(file)
+    
+    # Read file content
+    content = await file.read()
+    
+    # Check file size
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is 50MB. Got: {len(content) / 1024 / 1024:.2f}MB"
+        )
+    
+    # Save to temp file for pdf2image processing
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        tmp_file.write(content)
+        tmp_path = tmp_file.name
+    
+    try:
+        # Import multimodal ingestion service
+        from app.services.multimodal_ingestion_service import get_ingestion_service as get_multimodal_service
+        
+        service = get_multimodal_service()
+        
+        # Process document
+        result = await service.ingest_pdf(
+            pdf_path=tmp_path,
+            document_id=document_id,
+            resume=resume
+        )
+        
+        logger.info(
+            f"Multimodal ingestion completed: {result.successful_pages}/{result.total_pages} pages "
+            f"({result.success_rate:.1f}%)"
+        )
+        
+        return MultimodalIngestionResponse(
+            status="completed" if result.failed_pages == 0 else "partial",
+            document_id=result.document_id,
+            total_pages=result.total_pages,
+            successful_pages=result.successful_pages,
+            failed_pages=result.failed_pages,
+            success_rate=result.success_rate,
+            errors=result.errors,
+            message=f"Processed {result.successful_pages}/{result.total_pages} pages successfully"
+        )
+        
+    except Exception as e:
+        logger.error(f"Multimodal ingestion failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Multimodal ingestion failed: {str(e)}"
+        )
+    finally:
+        # Cleanup temp file
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)

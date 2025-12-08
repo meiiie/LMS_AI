@@ -41,6 +41,11 @@ neo4j~=5.28.0
 
 # PDF Processing
 pypdf>=4.0.0
+pdf2image>=1.16.3  # CHỈ THỊ 26: PDF to image conversion for Multimodal RAG
+Pillow>=10.0.0  # CHỈ THỊ 26: Image processing
+
+# Supabase Storage (CHỈ THỊ 26: Hybrid Infrastructure)
+supabase>=2.0.0
 
 # Utils
 httpx>=0.28.1

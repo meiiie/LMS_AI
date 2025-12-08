@@ -1,0 +1,416 @@
+"""
+Multimodal Ingestion Service for Vision-based RAG
+
+CHỈ THỊ KỸ THUẬT SỐ 26: Multimodal RAG Pipeline
+Full pipeline: PDF → Images → Supabase → Vision → Embeddings → Database
+
+**Feature: multimodal-rag-vision**
+**Validates: Requirements 2.1, 7.1, 7.4, 7.5**
+"""
+import logging
+import os
+import json
+from typing import List, Optional
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from pdf2image import convert_from_path
+from PIL import Image
+
+from app.core.config import settings
+from app.core.database import get_shared_session_factory
+from app.services.supabase_storage import SupabaseStorageClient, get_storage_client
+from app.engine.vision_extractor import VisionExtractor, get_vision_extractor
+from app.engine.gemini_embedding import GeminiOptimizedEmbeddings
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class IngestionResult:
+    """Result of PDF ingestion"""
+    document_id: str
+    total_pages: int
+    successful_pages: int
+    failed_pages: int
+    errors: List[str] = field(default_factory=list)
+    
+    @property
+    def success_rate(self) -> float:
+        """Calculate success rate percentage"""
+        if self.total_pages == 0:
+            return 0.0
+        return (self.successful_pages / self.total_pages) * 100
+
+
+@dataclass
+class PageResult:
+    """Result of single page processing"""
+    page_number: int
+    success: bool
+    image_url: Optional[str] = None
+    text_length: int = 0
+    error: Optional[str] = None
+
+
+class MultimodalIngestionService:
+    """
+    Service for multimodal document ingestion.
+    
+    Pipeline:
+    1. Rasterization: PDF → High-quality images (pdf2image)
+    2. Storage: Upload images to Supabase Storage
+    3. Vision Extraction: Gemini Vision extracts text from images
+    4. Indexing: Store text + embeddings + image_url in Neon
+    
+    **Property 6: PDF Page Count Equals Image Count**
+    **Property 13: Ingestion Logs Progress**
+    **Property 14: Ingestion Summary Contains Counts**
+    **Property 15: Resume From Last Successful Page**
+    """
+    
+    DEFAULT_DPI = 300
+    PROGRESS_FILE_SUFFIX = ".progress.json"
+    
+    def __init__(
+        self,
+        storage_client: Optional[SupabaseStorageClient] = None,
+        vision_extractor: Optional[VisionExtractor] = None,
+        embedding_service: Optional[GeminiOptimizedEmbeddings] = None
+    ):
+        """
+        Initialize Multimodal Ingestion Service.
+        
+        Args:
+            storage_client: Supabase Storage client
+            vision_extractor: Vision extraction service
+            embedding_service: Embedding generation service
+        """
+        self.storage = storage_client or get_storage_client()
+        self.vision = vision_extractor or get_vision_extractor()
+        self.embeddings = embedding_service or GeminiOptimizedEmbeddings()
+    
+    def _get_progress_file(self, document_id: str) -> Path:
+        """Get path to progress tracking file"""
+        return Path(f"/tmp/{document_id}{self.PROGRESS_FILE_SUFFIX}")
+    
+    def _load_progress(self, document_id: str) -> int:
+        """
+        Load last successful page from progress file.
+        
+        **Property 15: Resume From Last Successful Page**
+        """
+        progress_file = self._get_progress_file(document_id)
+        if progress_file.exists():
+            try:
+                with open(progress_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get('last_successful_page', 0)
+            except Exception as e:
+                logger.warning(f"Failed to load progress: {e}")
+        return 0
+    
+    def _save_progress(self, document_id: str, page_number: int):
+        """Save progress to file for resume capability"""
+        progress_file = self._get_progress_file(document_id)
+        try:
+            with open(progress_file, 'w') as f:
+                json.dump({'last_successful_page': page_number}, f)
+        except Exception as e:
+            logger.warning(f"Failed to save progress: {e}")
+    
+    def _clear_progress(self, document_id: str):
+        """Clear progress file after successful completion"""
+        progress_file = self._get_progress_file(document_id)
+        if progress_file.exists():
+            progress_file.unlink()
+    
+    def convert_pdf_to_images(
+        self,
+        pdf_path: str,
+        dpi: int = DEFAULT_DPI
+    ) -> List[Image.Image]:
+        """
+        Convert PDF pages to high-quality images.
+        
+        Args:
+            pdf_path: Path to PDF file
+            dpi: Resolution for conversion (default 300)
+            
+        Returns:
+            List of PIL Image objects
+            
+        **Property 6: PDF Page Count Equals Image Count**
+        """
+        logger.info(f"Converting PDF to images: {pdf_path} at {dpi} DPI")
+        
+        images = convert_from_path(
+            pdf_path,
+            dpi=dpi,
+            fmt='jpeg'
+        )
+        
+        logger.info(f"Converted {len(images)} pages to images")
+        return images
+    
+    async def ingest_pdf(
+        self,
+        pdf_path: str,
+        document_id: str,
+        resume: bool = True
+    ) -> IngestionResult:
+        """
+        Full ingestion pipeline: PDF → Images → Vision → Database.
+        
+        Args:
+            pdf_path: Path to PDF file
+            document_id: Unique identifier for the document
+            resume: Whether to resume from last successful page
+            
+        Returns:
+            IngestionResult with summary statistics
+            
+        **Property 13: Ingestion Logs Progress**
+        **Property 14: Ingestion Summary Contains Counts**
+        """
+        logger.info(f"Starting multimodal ingestion for document: {document_id}")
+        
+        # Convert PDF to images
+        try:
+            images = self.convert_pdf_to_images(pdf_path)
+        except Exception as e:
+            logger.error(f"Failed to convert PDF: {e}")
+            return IngestionResult(
+                document_id=document_id,
+                total_pages=0,
+                successful_pages=0,
+                failed_pages=0,
+                errors=[f"PDF conversion failed: {e}"]
+            )
+        
+        total_pages = len(images)
+        successful_pages = 0
+        failed_pages = 0
+        errors = []
+        
+        # Check for resume point
+        start_page = 0
+        if resume:
+            start_page = self._load_progress(document_id)
+            if start_page > 0:
+                logger.info(f"Resuming from page {start_page + 1}")
+        
+        # Process each page
+        for page_num, image in enumerate(images):
+            # Skip already processed pages
+            if page_num < start_page:
+                successful_pages += 1
+                continue
+            
+            # Log progress
+            logger.info(f"Processing page {page_num + 1} of {total_pages}")
+            
+            try:
+                result = await self._process_page(
+                    image=image,
+                    document_id=document_id,
+                    page_number=page_num + 1  # 1-indexed
+                )
+                
+                if result.success:
+                    successful_pages += 1
+                    self._save_progress(document_id, page_num + 1)
+                else:
+                    failed_pages += 1
+                    if result.error:
+                        errors.append(f"Page {page_num + 1}: {result.error}")
+                        
+            except Exception as e:
+                failed_pages += 1
+                errors.append(f"Page {page_num + 1}: {str(e)}")
+                logger.error(f"Failed to process page {page_num + 1}: {e}")
+        
+        # Clear progress file on completion
+        self._clear_progress(document_id)
+        
+        # Log summary
+        result = IngestionResult(
+            document_id=document_id,
+            total_pages=total_pages,
+            successful_pages=successful_pages,
+            failed_pages=failed_pages,
+            errors=errors
+        )
+        
+        logger.info(
+            f"Ingestion complete: {successful_pages}/{total_pages} pages successful "
+            f"({result.success_rate:.1f}%)"
+        )
+        
+        return result
+    
+    async def _process_page(
+        self,
+        image: Image.Image,
+        document_id: str,
+        page_number: int
+    ) -> PageResult:
+        """
+        Process a single page through the pipeline.
+        
+        Steps:
+        1. Upload image to Supabase
+        2. Extract text using Vision
+        3. Generate embedding
+        4. Store in database
+        """
+        # Step 1: Upload to Supabase
+        upload_result = await self.storage.upload_pil_image(
+            image=image,
+            document_id=document_id,
+            page_number=page_number
+        )
+        
+        if not upload_result.success:
+            return PageResult(
+                page_number=page_number,
+                success=False,
+                error=f"Upload failed: {upload_result.error}"
+            )
+        
+        image_url = upload_result.public_url
+        
+        # Step 2: Extract text using Vision
+        extraction_result = await self.vision.extract_from_image(image)
+        
+        if not extraction_result.success:
+            return PageResult(
+                page_number=page_number,
+                success=False,
+                image_url=image_url,
+                error=f"Extraction failed: {extraction_result.error}"
+            )
+        
+        text = extraction_result.text
+        
+        # Validate extraction
+        if not self.vision.validate_extraction(extraction_result):
+            logger.warning(f"Page {page_number} extraction may be incomplete")
+        
+        # Step 3: Generate embedding
+        try:
+            embedding = await self.embeddings.aembed_query(text)
+        except Exception as e:
+            return PageResult(
+                page_number=page_number,
+                success=False,
+                image_url=image_url,
+                error=f"Embedding failed: {e}"
+            )
+        
+        # Step 4: Store in database
+        try:
+            await self._store_in_database(
+                document_id=document_id,
+                page_number=page_number,
+                text=text,
+                embedding=embedding,
+                image_url=image_url
+            )
+        except Exception as e:
+            return PageResult(
+                page_number=page_number,
+                success=False,
+                image_url=image_url,
+                error=f"Database storage failed: {e}"
+            )
+        
+        return PageResult(
+            page_number=page_number,
+            success=True,
+            image_url=image_url,
+            text_length=len(text)
+        )
+    
+    async def _store_in_database(
+        self,
+        document_id: str,
+        page_number: int,
+        text: str,
+        embedding: List[float],
+        image_url: str
+    ):
+        """
+        Store extracted content in Neon database.
+        
+        **Property 4: Database Stores Image Metadata**
+        **Property 8: Extraction Stores Text with Embedding**
+        """
+        from sqlalchemy import text as sql_text
+        import uuid
+        
+        session_factory = get_shared_session_factory()
+        
+        with session_factory() as session:
+            # Check if record exists
+            result = session.execute(
+                sql_text("""
+                    SELECT id FROM knowledge_embeddings 
+                    WHERE document_id = :doc_id AND page_number = :page_num
+                """),
+                {"doc_id": document_id, "page_num": page_number}
+            ).fetchone()
+            
+            if result:
+                # Update existing record
+                session.execute(
+                    sql_text("""
+                        UPDATE knowledge_embeddings 
+                        SET content = :content,
+                            embedding = :embedding,
+                            image_url = :image_url,
+                            updated_at = NOW()
+                        WHERE document_id = :doc_id AND page_number = :page_num
+                    """),
+                    {
+                        "content": text,
+                        "embedding": embedding,
+                        "image_url": image_url,
+                        "doc_id": document_id,
+                        "page_num": page_number
+                    }
+                )
+            else:
+                # Insert new record
+                session.execute(
+                    sql_text("""
+                        INSERT INTO knowledge_embeddings 
+                        (id, content, embedding, document_id, page_number, image_url, source)
+                        VALUES (:id, :content, :embedding, :doc_id, :page_num, :image_url, :source)
+                    """),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "content": text,
+                        "embedding": embedding,
+                        "doc_id": document_id,
+                        "page_num": page_number,
+                        "image_url": image_url,
+                        "source": f"{document_id}_page_{page_number}"
+                    }
+                )
+            
+            session.commit()
+        
+        logger.debug(f"Stored page {page_number} in database")
+
+
+# Singleton instance
+_ingestion_service: Optional[MultimodalIngestionService] = None
+
+
+def get_ingestion_service() -> MultimodalIngestionService:
+    """Get or create singleton MultimodalIngestionService instance"""
+    global _ingestion_service
+    if _ingestion_service is None:
+        _ingestion_service = MultimodalIngestionService()
+    return _ingestion_service

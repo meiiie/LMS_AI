@@ -170,6 +170,11 @@ class InternalChatResponse(BaseModel):
         description="Additional metadata (confidence, processing time, etc.)"
     )
     created_at: datetime = Field(default_factory=utc_now, description="Response timestamp")
+    # CHỈ THỊ 26: Evidence Images for Multimodal RAG
+    evidence_images: Optional[list["EvidenceImageSchema"]] = Field(
+        default=None,
+        description="Evidence images from document pages (CHỈ THỊ 26)"
+    )
 
 
 # =============================================================================
@@ -283,3 +288,121 @@ class GetHistoryResponse(BaseModel):
     """Response for GET /api/v1/history/{user_id}"""
     data: list[HistoryMessage] = Field(default_factory=list, description="Danh sách tin nhắn")
     pagination: HistoryPagination = Field(..., description="Thông tin phân trang")
+
+
+# =============================================================================
+# Multimodal RAG Schemas (CHỈ THỊ KỸ THUẬT SỐ 26)
+# =============================================================================
+
+class EvidenceImageSchema(BaseModel):
+    """
+    Evidence image reference for Multimodal RAG responses.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 26: Vision-based Document Understanding
+    **Feature: multimodal-rag-vision**
+    **Validates: Requirements 6.2**
+    """
+    url: str = Field(..., description="Public URL của ảnh trang tài liệu")
+    page_number: int = Field(..., description="Số trang trong tài liệu gốc")
+    document_id: str = Field(default="", description="ID của tài liệu nguồn")
+
+
+class IngestionResultSchema(BaseModel):
+    """
+    Result of PDF ingestion process.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 26: Multimodal Ingestion Pipeline
+    **Feature: multimodal-rag-vision**
+    **Validates: Requirements 7.4**
+    """
+    document_id: str = Field(..., description="ID của tài liệu đã nạp")
+    total_pages: int = Field(..., description="Tổng số trang")
+    successful_pages: int = Field(..., description="Số trang xử lý thành công")
+    failed_pages: int = Field(..., description="Số trang xử lý thất bại")
+    errors: list[str] = Field(default_factory=list, description="Danh sách lỗi (nếu có)")
+    
+    @property
+    def success_rate(self) -> float:
+        """Calculate success rate percentage"""
+        if self.total_pages == 0:
+            return 0.0
+        return (self.successful_pages / self.total_pages) * 100
+
+
+class ExtractionResultSchema(BaseModel):
+    """
+    Result of Vision extraction from image.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 26: Gemini Vision Extraction
+    **Feature: multimodal-rag-vision**
+    **Validates: Requirements 3.1, 3.2, 3.3**
+    """
+    text: str = Field(..., description="Văn bản trích xuất từ ảnh")
+    has_tables: bool = Field(default=False, description="Có chứa bảng biểu")
+    has_diagrams: bool = Field(default=False, description="Có chứa sơ đồ/hình vẽ")
+    headings_found: list[str] = Field(default_factory=list, description="Danh sách tiêu đề tìm thấy")
+    success: bool = Field(default=True, description="Trích xuất thành công")
+    error: Optional[str] = Field(default=None, description="Thông báo lỗi (nếu có)")
+    processing_time: float = Field(default=0.0, description="Thời gian xử lý (giây)")
+
+
+class MultimodalIngestRequest(BaseModel):
+    """
+    Request to ingest PDF document with Multimodal pipeline.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 26: Multimodal Ingestion
+    **Feature: multimodal-rag-vision**
+    """
+    document_id: str = Field(..., description="ID định danh cho tài liệu")
+    resume: bool = Field(default=True, description="Tiếp tục từ trang cuối nếu bị gián đoạn")
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "document_id": "colregs_2024",
+                    "resume": True
+                }
+            ]
+        }
+    }
+
+
+class ChatResponseDataWithEvidence(ChatResponseData):
+    """
+    Extended chat response data with evidence images.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 26: Evidence Images in Response
+    **Feature: multimodal-rag-vision**
+    **Validates: Requirements 6.2**
+    """
+    evidence_images: list[EvidenceImageSchema] = Field(
+        default_factory=list, 
+        description="Danh sách ảnh dẫn chứng từ tài liệu gốc (tối đa 3)"
+    )
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "answer": "Theo Điều 15 COLREGs, khi hai tàu máy đi cắt hướng nhau...",
+                    "sources": [
+                        {
+                            "title": "COLREGs Rule 15 - Crossing Situation",
+                            "content": "When two power-driven vessels are crossing..."
+                        }
+                    ],
+                    "suggested_questions": [
+                        "Tàu nào phải nhường đường trong tình huống cắt hướng?"
+                    ],
+                    "evidence_images": [
+                        {
+                            "url": "https://xyz.supabase.co/storage/v1/object/public/maritime-docs/colregs/page_15.jpg",
+                            "page_number": 15,
+                            "document_id": "colregs_2024"
+                        }
+                    ]
+                }
+            ]
+        }
+    }

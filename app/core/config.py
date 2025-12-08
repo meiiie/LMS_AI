@@ -46,8 +46,11 @@ class Settings(BaseSettings):
     
     # Database - Cloud (Production) - CHỈ THỊ 19: Now using Neon
     database_url: Optional[str] = Field(default=None, description="Full database URL (Neon/Cloud)")
-    supabase_url: Optional[str] = Field(default=None, description="Legacy Supabase URL (deprecated)")
-    supabase_key: Optional[str] = Field(default=None, description="Legacy Supabase key (deprecated)")
+    
+    # Supabase Settings (CHỈ THỊ 26: Multimodal RAG - Hybrid Infrastructure)
+    supabase_url: Optional[str] = Field(default=None, description="Supabase project URL")
+    supabase_key: Optional[str] = Field(default=None, description="Supabase anon/service key")
+    supabase_storage_bucket: str = Field(default="maritime-docs", description="Supabase Storage bucket for document images")
     
     # LMS API Key (for authentication from LMS)
     lms_api_key: Optional[str] = Field(default=None, description="API Key for LMS integration")

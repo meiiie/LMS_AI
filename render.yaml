@@ -1,11 +1,11 @@
 services:
   - type: web
     name: maritime-ai-chatbot
-    runtime: python
+    runtime: docker  # CHỈ THỊ 26: Changed to Docker for poppler-utils support
     region: singapore  # Gần Việt Nam nhất
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app.main:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 180 --graceful-timeout 90 --keep-alive 5
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"

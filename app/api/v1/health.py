@@ -106,6 +106,49 @@ async def check_memory_health() -> ComponentHealth:
 
 
 
+async def check_supabase_storage_health() -> ComponentHealth:
+    """
+    Check Supabase Storage health for Multimodal RAG.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 26: Hybrid Infrastructure
+    
+    Requirements: 4.5
+    """
+    start = time.time()
+    
+    try:
+        from app.services.supabase_storage import get_storage_client
+        
+        storage = get_storage_client()
+        is_healthy = await storage.check_health()
+        
+        latency = (time.time() - start) * 1000
+        
+        if is_healthy:
+            return ComponentHealth(
+                name="Supabase Storage",
+                status=ComponentStatus.HEALTHY,
+                latency_ms=round(latency, 2),
+                message="Supabase Storage connected",
+            )
+        else:
+            return ComponentHealth(
+                name="Supabase Storage",
+                status=ComponentStatus.UNAVAILABLE,
+                latency_ms=round(latency, 2),
+                message="Supabase Storage unavailable",
+            )
+    except Exception as e:
+        latency = (time.time() - start) * 1000
+        logger.warning(f"Supabase Storage health check failed: {e}")
+        return ComponentHealth(
+            name="Supabase Storage",
+            status=ComponentStatus.UNAVAILABLE,
+            latency_ms=round(latency, 2),
+            message=str(e),
+        )
+
+
 async def check_knowledge_graph_health() -> ComponentHealth:
     """
     Check Neo4j Knowledge Graph health using real connection.
@@ -274,11 +317,13 @@ async def health_check_deep() -> HealthResponse:
     api_health = await check_with_timeout(check_api_health, "API")
     memory_health = await check_with_timeout(check_memory_health, "Memory Engine")
     kg_health = await check_with_timeout(check_knowledge_graph_health, "Neo4j Knowledge Graph")
+    supabase_health = await check_with_timeout(check_supabase_storage_health, "Supabase Storage")
     
     components = {
         "api": api_health,
         "memory": memory_health,
         "knowledge_graph": kg_health,
+        "supabase_storage": supabase_health,  # CHỈ THỊ 26: Hybrid Infrastructure
     }
     
     overall_status = determine_overall_status(components)
