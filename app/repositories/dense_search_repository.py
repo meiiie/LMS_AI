@@ -90,13 +90,22 @@ class DenseSearchRepository:
             logger.warning("asyncpg not installed. Dense search unavailable.")
             self._available = False
     
+    def _get_asyncpg_url(self) -> str:
+        """Convert SQLAlchemy URL to asyncpg URL format."""
+        url = settings.database_url or ""
+        # asyncpg needs postgresql:// not postgresql+asyncpg://
+        url = url.replace("postgresql+asyncpg://", "postgresql://")
+        url = url.replace("postgres://", "postgresql://")
+        return url
+    
     async def _get_pool(self):
         """Get or create connection pool (MINIMAL for Supabase Free Tier)."""
         if self._pool is None:
             try:
                 import asyncpg
+                db_url = self._get_asyncpg_url()
                 self._pool = await asyncpg.create_pool(
-                    settings.database_url,
+                    db_url,
                     min_size=1,
                     max_size=1  # MINIMAL: Only 1 connection for async operations
                 )
@@ -145,9 +154,14 @@ class DenseSearchRepository:
             
             async with pool.acquire() as conn:
                 # Build query with optional filters
+                # Note: Schema uses 'id' (UUID) not 'node_id'
+                # Embedding is float8[] array, compute cosine similarity manually
                 query = """
+                    WITH query_emb AS (
+                        SELECT $1::float8[] as emb
+                    )
                     SELECT 
-                        node_id,
+                        id::text as node_id,
                         content,
                         content_type,
                         confidence_score,
@@ -156,11 +170,17 @@ class DenseSearchRepository:
                         image_url,
                         document_id,
                         metadata,
-                        1 - (embedding <=> $1::vector) as similarity
+                        (
+                            SELECT SUM(a * b) / (
+                                SQRT(SUM(a * a)) * SQRT(SUM(b * b))
+                            )
+                            FROM UNNEST(embedding, (SELECT emb FROM query_emb)) AS t(a, b)
+                        ) as similarity
                     FROM knowledge_embeddings
-                    WHERE 1=1
+                    WHERE embedding IS NOT NULL
                 """
-                params = [embedding_str]
+                # Pass embedding as Python list (asyncpg converts to float8[])
+                params = [query_embedding]
                 param_idx = 2
                 
                 # Add content type filter
@@ -176,7 +196,7 @@ class DenseSearchRepository:
                     param_idx += 1
                 
                 query += f"""
-                    ORDER BY embedding <=> $1::vector
+                    ORDER BY similarity DESC NULLS LAST
                     LIMIT ${param_idx}
                 """
                 params.append(limit)
