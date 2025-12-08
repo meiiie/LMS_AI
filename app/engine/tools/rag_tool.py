@@ -389,21 +389,25 @@ class RAGAgent:
         Returns:
             List of EvidenceImage objects
         """
-        from app.core.database import get_db_pool
+        import asyncpg
         
         evidence_images = []
         seen_urls = set()
         
         try:
-            pool = await get_db_pool()
+            # Get database URL and convert for asyncpg
+            db_url = settings.database_url or ""
+            db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+            db_url = db_url.replace("postgres://", "postgresql://")
             
-            async with pool.acquire() as conn:
-                # Query for image URLs
+            conn = await asyncpg.connect(db_url)
+            try:
+                # Query for image URLs - use id::text since schema uses UUID id not node_id
                 rows = await conn.fetch(
                     """
-                    SELECT node_id, image_url, page_number, document_id
+                    SELECT id::text as node_id, image_url, page_number, document_id
                     FROM knowledge_embeddings
-                    WHERE node_id = ANY($1)
+                    WHERE id::text = ANY($1)
                     AND image_url IS NOT NULL
                     ORDER BY page_number
                     """,
@@ -413,8 +417,8 @@ class RAGAgent:
                 for row in rows:
                     image_url = row['image_url']
                     
-                    # Skip duplicates
-                    if image_url in seen_urls:
+                    # Skip duplicates or empty URLs
+                    if not image_url or image_url in seen_urls:
                         continue
                     
                     seen_urls.add(image_url)
@@ -427,6 +431,8 @@ class RAGAgent:
                     # Limit to max_images
                     if len(evidence_images) >= max_images:
                         break
+            finally:
+                await conn.close()
                         
         except Exception as e:
             logger.warning(f"Failed to collect evidence images: {e}")
