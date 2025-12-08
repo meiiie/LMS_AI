@@ -69,7 +69,9 @@ class MultimodalIngestionService:
     **Property 15: Resume From Last Successful Page**
     """
     
-    DEFAULT_DPI = 300
+    # Giảm DPI từ 300 xuống 150 để tiết kiệm memory trên Render Free Tier
+    # 150 DPI vẫn đủ cho Gemini Vision đọc text
+    DEFAULT_DPI = 150
     PROGRESS_FILE_SUFFIX = ".progress.json"
     
     def __init__(
