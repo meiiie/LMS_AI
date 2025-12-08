@@ -207,6 +207,21 @@ class GeminiOptimizedEmbeddings:
         logger.debug(f"Embedded query with {len(embedding)} dimensions")
         return embedding
     
+    async def aembed_query(self, text: str) -> List[float]:
+        """
+        Async version of embed_query for compatibility with async code.
+        
+        Note: Currently wraps sync method. Google GenAI SDK supports async
+        but we keep sync for simplicity and compatibility.
+        
+        Args:
+            text: Query text to embed
+            
+        Returns:
+            Normalized embedding vector (768 dimensions)
+        """
+        return self.embed_query(text)
+    
     def embed_for_similarity(self, text: str) -> List[float]:
         """
         Embed text for semantic similarity comparison.

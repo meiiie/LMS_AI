@@ -28,13 +28,10 @@ langgraph-prebuilt>=1.0.0
 # Chỉ cần dòng này, nó sẽ tự cài google-generativeai tương thích
 langchain-google-genai>=3.2.0
 
-# Google GenAI SDK (NEW - Required for gemini_embedding.py)
-# SDK mới của Google cho Gemini API - cần cho Semantic Memory
-google-genai>=0.3.0
-
-# Google Generative AI SDK (CHỈ THỊ 26: Vision Extractor)
-# SDK cũ cho Gemini Vision API - cần cho VisionExtractor
-google-generativeai>=0.8.0
+# Google GenAI SDK (UNIFIED - CHỈ THỊ 26 + Semantic Memory)
+# SDK mới thống nhất cho Gemini API - hỗ trợ cả embeddings và vision
+# Thay thế google-generativeai (deprecated từ 31/8/2025)
+google-genai>=1.53.0
 
 # Semantic Memory
 numpy>=1.24.0

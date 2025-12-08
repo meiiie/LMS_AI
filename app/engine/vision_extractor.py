@@ -6,14 +6,20 @@ Uses Gemini 2.5 Flash to extract text from document images.
 
 **Feature: multimodal-rag-vision**
 **Validates: Requirements 3.1, 3.2, 3.3, 8.1**
+
+MIGRATION NOTE (12/2025):
+- Migrated from google-generativeai (deprecated 31/8/2025) to google-genai SDK
+- google-genai>=1.53.0 provides unified API for embeddings + vision
 """
 import logging
 import re
 import time
+import io
 from typing import Optional, List
 from dataclasses import dataclass, field
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from PIL import Image
 
 from app.core.config import settings
@@ -86,19 +92,16 @@ OUTPUT FORMAT:
         self.model_name = model
         self.api_key = api_key or settings.google_api_key
         
-        # Configure Gemini
-        if self.api_key:
-            genai.configure(api_key=self.api_key)
-        
-        self._model = None
+        # Initialize google-genai client (new unified SDK)
+        self._client = None
         self._last_request_time = 0.0
     
     @property
-    def model(self):
-        """Lazy initialization of Gemini model"""
-        if self._model is None:
-            self._model = genai.GenerativeModel(self.model_name)
-        return self._model
+    def client(self) -> genai.Client:
+        """Lazy initialization of Gemini client"""
+        if self._client is None:
+            self._client = genai.Client(api_key=self.api_key)
+        return self._client
     
     def _rate_limit(self):
         """Apply rate limiting between requests"""
@@ -125,11 +128,18 @@ OUTPUT FORMAT:
             # Apply rate limiting
             self._rate_limit()
             
-            # Generate content from image URL
-            response = self.model.generate_content([
-                self.MARITIME_EXTRACTION_PROMPT,
-                {"image_url": image_url}
-            ])
+            # Generate content from image URL using new SDK
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[
+                    types.Content(
+                        parts=[
+                            types.Part.from_text(text=self.MARITIME_EXTRACTION_PROMPT),
+                            types.Part.from_uri(file_uri=image_url, mime_type="image/jpeg")
+                        ]
+                    )
+                ]
+            )
             
             text = response.text
             processing_time = time.time() - start_time
@@ -171,11 +181,23 @@ OUTPUT FORMAT:
             # Apply rate limiting
             self._rate_limit()
             
-            # Generate content from PIL Image
-            response = self.model.generate_content([
-                self.MARITIME_EXTRACTION_PROMPT,
-                image
-            ])
+            # Convert PIL Image to bytes for new SDK
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=85)
+            image_bytes = buffer.getvalue()
+            
+            # Generate content from image bytes using new SDK
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[
+                    types.Content(
+                        parts=[
+                            types.Part.from_text(text=self.MARITIME_EXTRACTION_PROMPT),
+                            types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+                        ]
+                    )
+                ]
+            )
             
             text = response.text
             processing_time = time.time() - start_time
