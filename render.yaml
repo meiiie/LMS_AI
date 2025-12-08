@@ -6,6 +6,8 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    # Increase timeout for long-running ingestion requests
+    # Note: Free tier has 30s limit, paid plans support longer timeouts
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
