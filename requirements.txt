@@ -29,11 +29,8 @@ langchain-google-genai>=3.2.0
 
 # Google GenAI SDK (UNIFIED - CHỈ THỊ 26 + Semantic Memory)
 # SDK mới thống nhất cho Gemini API - hỗ trợ cả embeddings và vision
+# NOTE: Không dùng google-generativeai vì conflict với langchain-google-genai
 google-genai>=1.53.0
-
-# Google Generative AI SDK (Legacy - Required by langchain-google-genai)
-# Cần thiết cho ChatGoogleGenerativeAI trong các engine modules
-google-generativeai>=0.8.0
 
 # Semantic Memory
 numpy>=1.24.0
