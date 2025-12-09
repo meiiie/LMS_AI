@@ -77,6 +77,12 @@ class MultimodalIngestionResponse(BaseModel):
     success_rate: float
     errors: list[str] = []
     message: str
+    
+    # Hybrid Text/Vision Detection stats (Feature: hybrid-text-vision)
+    vision_pages: int = 0       # Pages processed via Gemini Vision API
+    direct_pages: int = 0       # Pages processed via PyMuPDF direct extraction
+    fallback_pages: int = 0     # Pages that fell back from direct to vision
+    api_savings_percent: float = 0.0  # Estimated API cost savings
 
 
 @router.post("/ingest-multimodal", response_model=MultimodalIngestionResponse)
@@ -159,7 +165,12 @@ async def ingest_multimodal_document(
             failed_pages=result.failed_pages,
             success_rate=result.success_rate,
             errors=result.errors,
-            message=f"Processed {result.successful_pages}/{result.total_pages} pages successfully"
+            message=f"Processed {result.successful_pages}/{result.total_pages} pages successfully",
+            # Hybrid Text/Vision Detection stats (Feature: hybrid-text-vision)
+            vision_pages=result.vision_pages,
+            direct_pages=result.direct_pages,
+            fallback_pages=result.fallback_pages,
+            api_savings_percent=result.api_savings_percent
         )
         
     except Exception as e:
