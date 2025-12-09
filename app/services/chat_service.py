@@ -938,6 +938,7 @@ class ChatService:
             metadata={"requires_clarification": True}
         )
     
+    
     def _save_message_async(self, session_id: UUID, role: str, content: str) -> None:
         """
         Save message to chat history (for BackgroundTasks).

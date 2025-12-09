@@ -480,6 +480,9 @@ class UnifiedAgent:
         
         CHỈ THỊ SỐ 21: Deep Reasoning
         - conversation_context: ConversationContext với incomplete topics và proactive hints
+        
+        Note: Tool calling is handled by LLM via SYSTEM_PROMPT guidance.
+        The LLM decides when to call tools based on the persona configuration.
         """
         global _user_cache, _current_user_id
         
@@ -498,6 +501,7 @@ class UnifiedAgent:
             }
         
         try:
+            # Build messages with persona from YAML config
             messages = self._build_messages(
                 message=message,
                 conversation_history=conversation_history,
@@ -512,7 +516,11 @@ class UnifiedAgent:
                 pronoun_style=pronoun_style,  # CHỈ THỊ SỐ 20
                 conversation_context=conversation_context  # CHỈ THỊ SỐ 21
             )
-            return await self._manual_react(messages, user_id)
+            
+            # Let LLM decide when to call tools via ReAct pattern
+            result = await self._manual_react(messages, user_id)
+            
+            return result
                 
         except Exception as e:
             logger.error(f"UnifiedAgent error: {e}")
@@ -724,3 +732,6 @@ def clear_retrieved_sources() -> None:
     """
     global _last_retrieved_sources
     _last_retrieved_sources = []
+
+
+
