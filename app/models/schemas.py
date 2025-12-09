@@ -94,6 +94,9 @@ class Source(BaseModel):
     source_type: str = Field(..., description="Type: regulation, concept, etc.")
     content_snippet: Optional[str] = Field(default=None, description="Relevant content snippet")
     image_url: Optional[str] = Field(default=None, description="URL ảnh trang tài liệu (CHỈ THỊ 26)")
+    page_number: Optional[int] = Field(default=None, description="Page number in PDF (Feature: source-highlight-citation)")
+    document_id: Optional[str] = Field(default=None, description="Document ID for PDF reference (Feature: source-highlight-citation)")
+    bounding_boxes: Optional[list[dict]] = Field(default=None, description="Normalized coordinates for text highlighting (Feature: source-highlight-citation)")
 
 
 class SourceInfo(BaseModel):
@@ -101,6 +104,9 @@ class SourceInfo(BaseModel):
     title: str = Field(..., description="Tiêu đề nguồn tài liệu")
     content: str = Field(..., description="Nội dung trích dẫn")
     image_url: Optional[str] = Field(default=None, description="URL ảnh trang tài liệu (CHỈ THỊ 26)")
+    page_number: Optional[int] = Field(default=None, description="Page number in PDF (Feature: source-highlight-citation)")
+    document_id: Optional[str] = Field(default=None, description="Document ID for PDF reference (Feature: source-highlight-citation)")
+    bounding_boxes: Optional[list[dict]] = Field(default=None, description="Normalized coordinates for text highlighting (Feature: source-highlight-citation)")
 
 
 class ChatResponseData(BaseModel):

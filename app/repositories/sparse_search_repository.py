@@ -33,10 +33,14 @@ class SparseSearchResult:
     image_url: str = ""
     page_number: int = 0
     document_id: str = ""
+    # Feature: source-highlight-citation
+    bounding_boxes: list = None  # Normalized coordinates for text highlighting
     
     def __post_init__(self):
         # Ensure score is non-negative
         self.score = max(0.0, self.score)
+        if self.bounding_boxes is None:
+            self.bounding_boxes = []
 
 
 class SparseSearchRepository:
@@ -261,6 +265,7 @@ class SparseSearchRepository:
             try:
                 # Execute PostgreSQL full-text search
                 # CHỈ THỊ 26: Include image_url for evidence images
+                # Feature: source-highlight-citation - Include bounding_boxes
                 sql = """
                     SELECT 
                         id::text as node_id,
@@ -271,7 +276,8 @@ class SparseSearchRepository:
                         ts_rank(search_vector, to_tsquery('simple', $1)) as score,
                         COALESCE(image_url, '') as image_url,
                         COALESCE(page_number, 0) as page_number,
-                        COALESCE(document_id, '') as document_id
+                        COALESCE(document_id, '') as document_id,
+                        bounding_boxes
                     FROM knowledge_embeddings
                     WHERE search_vector @@ to_tsquery('simple', $1)
                     ORDER BY score DESC
@@ -282,6 +288,17 @@ class SparseSearchRepository:
                 
                 results = []
                 for row in rows:
+                    # Parse bounding_boxes from JSONB
+                    bounding_boxes = row.get("bounding_boxes")
+                    if isinstance(bounding_boxes, str):
+                        import json
+                        try:
+                            bounding_boxes = json.loads(bounding_boxes)
+                        except:
+                            bounding_boxes = []
+                    elif bounding_boxes is None:
+                        bounding_boxes = []
+                    
                     results.append(SparseSearchResult(
                         node_id=row["node_id"],
                         title=row["title"],
@@ -291,7 +308,8 @@ class SparseSearchRepository:
                         score=float(row["score"]),
                         image_url=row["image_url"],
                         page_number=row["page_number"],
-                        document_id=row["document_id"]
+                        document_id=row["document_id"],
+                        bounding_boxes=bounding_boxes
                     ))
                 
                 # Apply number boosting

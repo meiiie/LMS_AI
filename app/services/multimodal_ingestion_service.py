@@ -35,6 +35,7 @@ from app.services.chunking_service import SemanticChunker, get_semantic_chunker,
 from app.engine.vision_extractor import VisionExtractor, get_vision_extractor
 from app.engine.gemini_embedding import GeminiOptimizedEmbeddings
 from app.engine.page_analyzer import PageAnalyzer, PageAnalysisResult, get_page_analyzer
+from app.engine.bounding_box_extractor import BoundingBoxExtractor, get_bounding_box_extractor
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -114,7 +115,8 @@ class MultimodalIngestionService:
         vision_extractor: Optional[VisionExtractor] = None,
         embedding_service: Optional[GeminiOptimizedEmbeddings] = None,
         chunker: Optional[SemanticChunker] = None,
-        page_analyzer: Optional[PageAnalyzer] = None
+        page_analyzer: Optional[PageAnalyzer] = None,
+        bbox_extractor: Optional[BoundingBoxExtractor] = None
     ):
         """
         Initialize Multimodal Ingestion Service.
@@ -125,12 +127,14 @@ class MultimodalIngestionService:
             embedding_service: Embedding generation service
             chunker: Semantic chunking service
             page_analyzer: Page analyzer for hybrid detection (Feature: hybrid-text-vision)
+            bbox_extractor: Bounding box extractor (Feature: source-highlight-citation)
         """
         self.storage = storage_client or get_storage_client()
         self.vision = vision_extractor or get_vision_extractor()
         self.embeddings = embedding_service or GeminiOptimizedEmbeddings()
         self.chunker = chunker or get_semantic_chunker()
         self.page_analyzer = page_analyzer or get_page_analyzer()
+        self.bbox_extractor = bbox_extractor or get_bounding_box_extractor()
         
         # Hybrid detection settings from config
         self.hybrid_detection_enabled = settings.hybrid_detection_enabled
@@ -640,11 +644,25 @@ class MultimodalIngestionService:
             )]
         
         # Step 4 & 5: Generate embedding and store each chunk
+        # Feature: source-highlight-citation - Extract bounding boxes for each chunk
         successful_chunks = 0
         for chunk in chunks:
             try:
                 # Generate embedding for chunk
                 embedding = await self.embeddings.aembed_query(chunk.content)
+                
+                # Extract bounding boxes for this chunk (Feature: source-highlight-citation)
+                bounding_boxes = None
+                if pdf_page is not None:
+                    try:
+                        boxes = self.bbox_extractor.extract_text_with_boxes(
+                            page=pdf_page,
+                            text_content=chunk.content
+                        )
+                        if boxes:
+                            bounding_boxes = [box.to_dict() for box in boxes]
+                    except Exception as bbox_err:
+                        logger.debug(f"Bounding box extraction failed for chunk {chunk.chunk_index}: {bbox_err}")
                 
                 # Store chunk in database
                 await self._store_chunk_in_database(
@@ -656,7 +674,8 @@ class MultimodalIngestionService:
                     image_url=image_url,
                     content_type=chunk.content_type,
                     confidence_score=chunk.confidence_score,
-                    metadata=chunk.metadata
+                    metadata=chunk.metadata,
+                    bounding_boxes=bounding_boxes  # Feature: source-highlight-citation
                 )
                 successful_chunks += 1
                 
@@ -694,7 +713,8 @@ class MultimodalIngestionService:
         image_url: str,
         content_type: str = 'text',
         confidence_score: float = 1.0,
-        metadata: Optional[dict] = None
+        metadata: Optional[dict] = None,
+        bounding_boxes: Optional[List[dict]] = None  # Feature: source-highlight-citation
     ):
         """
         Store a semantic chunk in Neon database.
@@ -711,6 +731,9 @@ class MultimodalIngestionService:
         
         # Convert metadata to JSON string
         metadata_json = json.dumps(metadata) if metadata else '{}'
+        
+        # Convert bounding_boxes to JSON string (Feature: source-highlight-citation)
+        bounding_boxes_json = json.dumps(bounding_boxes) if bounding_boxes else None
         
         with session_factory() as session:
             # Check if record exists (by document_id, page_number, chunk_index)
@@ -735,6 +758,7 @@ class MultimodalIngestionService:
                             content_type = :content_type,
                             confidence_score = :confidence_score,
                             metadata = :metadata,
+                            bounding_boxes = :bounding_boxes,
                             updated_at = NOW()
                         WHERE document_id = :doc_id 
                         AND page_number = :page_num 
@@ -747,6 +771,7 @@ class MultimodalIngestionService:
                         "content_type": content_type,
                         "confidence_score": confidence_score,
                         "metadata": metadata_json,
+                        "bounding_boxes": bounding_boxes_json,
                         "doc_id": document_id,
                         "page_num": page_number,
                         "chunk_idx": chunk_index
@@ -758,9 +783,9 @@ class MultimodalIngestionService:
                     sql_text("""
                         INSERT INTO knowledge_embeddings 
                         (id, content, embedding, document_id, page_number, chunk_index, 
-                         image_url, content_type, confidence_score, metadata, source)
+                         image_url, content_type, confidence_score, metadata, source, bounding_boxes)
                         VALUES (:id, :content, :embedding, :doc_id, :page_num, :chunk_idx,
-                                :image_url, :content_type, :confidence_score, :metadata, :source)
+                                :image_url, :content_type, :confidence_score, :metadata, :source, :bounding_boxes)
                     """),
                     {
                         "id": str(uuid.uuid4()),
@@ -773,7 +798,8 @@ class MultimodalIngestionService:
                         "content_type": content_type,
                         "confidence_score": confidence_score,
                         "metadata": metadata_json,
-                        "source": f"{document_id}_page_{page_number}_chunk_{chunk_index}"
+                        "source": f"{document_id}_page_{page_number}_chunk_{chunk_index}",
+                        "bounding_boxes": bounding_boxes_json
                     }
                 )
             

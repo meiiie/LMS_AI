@@ -54,12 +54,16 @@ class DenseSearchResult:
     image_url: str = ""
     document_id: str = ""
     section_hierarchy: dict = None  # article, clause, point, rule
+    # Source highlighting (Feature: source-highlight-citation)
+    bounding_boxes: list = None  # Normalized coordinates for text highlighting
     
     def __post_init__(self):
         # Ensure similarity is in valid range
         self.similarity = max(0.0, min(1.0, self.similarity))
         if self.section_hierarchy is None:
             self.section_hierarchy = {}
+        if self.bounding_boxes is None:
+            self.bounding_boxes = []
 
 
 class DenseSearchRepository:
@@ -170,6 +174,7 @@ class DenseSearchRepository:
                         image_url,
                         document_id,
                         metadata,
+                        bounding_boxes,
                         (
                             SELECT SUM(a * b) / (
                                 SQRT(SUM(a * a)) * SQRT(SUM(b * b))
@@ -216,6 +221,16 @@ class DenseSearchRepository:
                     
                     section_hierarchy = metadata.get("section_hierarchy", {})
                     
+                    # Parse bounding_boxes from JSONB
+                    bounding_boxes = row.get("bounding_boxes")
+                    if isinstance(bounding_boxes, str):
+                        try:
+                            bounding_boxes = json.loads(bounding_boxes)
+                        except:
+                            bounding_boxes = []
+                    elif bounding_boxes is None:
+                        bounding_boxes = []
+                    
                     results.append(DenseSearchResult(
                         node_id=row["node_id"],
                         similarity=float(row["similarity"]),
@@ -226,7 +241,8 @@ class DenseSearchRepository:
                         chunk_index=row.get("chunk_index") or 0,
                         image_url=row.get("image_url") or "",
                         document_id=row.get("document_id") or "",
-                        section_hierarchy=section_hierarchy
+                        section_hierarchy=section_hierarchy,
+                        bounding_boxes=bounding_boxes
                     ))
                 
                 logger.info(f"Dense search returned {len(results)} results")

@@ -221,13 +221,17 @@ async def tool_maritime_search(query: str) -> str:
         
         # CHỈ THỊ KỸ THUẬT SỐ 16: Lưu sources để API trả về
         # CHỈ THỊ 26: Include image_url for evidence images
+        # Feature: source-highlight-citation - Include bounding_boxes
         if response.citations:
             _last_retrieved_sources = [
                 {
                     "node_id": c.node_id,
                     "title": c.title,
                     "content": c.source[:500] if c.source else "",  # Truncate for API
-                    "image_url": getattr(c, 'image_url', None)  # CHỈ THỊ 26
+                    "image_url": getattr(c, 'image_url', None),  # CHỈ THỊ 26
+                    "page_number": getattr(c, 'page_number', None),
+                    "document_id": getattr(c, 'document_id', None),
+                    "bounding_boxes": getattr(c, 'bounding_boxes', None)
                 }
                 for c in response.citations[:5]  # Top 5 sources
             ]

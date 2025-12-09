@@ -360,8 +360,8 @@ class RAGAgent:
         """
         Generate citations from hybrid search results with relevance scores and chunking metadata.
         
-        **Feature: semantic-chunking**
-        **Validates: Requirements 8.4, 8.5**
+        **Feature: semantic-chunking, source-highlight-citation**
+        **Validates: Requirements 8.4, 8.5, 2.1, 2.3**
         """
         citations = []
         for r in results:
@@ -381,7 +381,11 @@ class RAGAgent:
                 source=r.source or "Maritime Knowledge Base",
                 title=enhanced_title,
                 relevance_score=r.rrf_score,
-                image_url=r.image_url  # CHỈ THỊ 26: Evidence images
+                image_url=r.image_url,  # CHỈ THỊ 26: Evidence images
+                # Feature: source-highlight-citation
+                page_number=r.page_number,
+                document_id=r.document_id,
+                bounding_boxes=r.bounding_boxes
             ))
         return citations
     

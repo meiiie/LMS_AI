@@ -21,7 +21,7 @@ class HybridSearchResult:
     """
     Result from hybrid search with combined scoring and semantic chunking metadata.
     
-    Feature: hybrid-search, semantic-chunking
+    Feature: hybrid-search, semantic-chunking, source-highlight-citation
     """
     node_id: str
     title: str
@@ -50,6 +50,9 @@ class HybridSearchResult:
     document_id: str = ""
     section_hierarchy: dict = field(default_factory=dict)  # article, clause, point, rule
     
+    # Source highlighting metadata (Feature: source-highlight-citation)
+    bounding_boxes: Optional[List[Dict]] = None  # Normalized coordinates for text highlighting
+    
     def appears_in_both(self) -> bool:
         """Check if result appeared in both dense and sparse searches."""
         return self.dense_score is not None and self.sparse_score is not None
@@ -57,6 +60,10 @@ class HybridSearchResult:
     def has_document_hierarchy(self) -> bool:
         """Check if result has document hierarchy (Điều, Khoản, etc.)."""
         return bool(self.section_hierarchy)
+    
+    def has_bounding_boxes(self) -> bool:
+        """Check if result has bounding box coordinates for highlighting."""
+        return self.bounding_boxes is not None and len(self.bounding_boxes) > 0
 
 
 @dataclass
@@ -79,6 +86,8 @@ class RankedItem:
     image_url: str = ""
     document_id: str = ""
     section_hierarchy: dict = field(default_factory=dict)
+    # Source highlighting metadata (Feature: source-highlight-citation)
+    bounding_boxes: Optional[List[Dict]] = None
 
 
 class RRFReranker:
@@ -320,6 +329,8 @@ class RRFReranker:
                 image_url = getattr(result, 'image_url', '') or ''
                 document_id = getattr(result, 'document_id', '') or ''
                 section_hierarchy = getattr(result, 'section_hierarchy', {}) or {}
+                # Feature: source-highlight-citation
+                bounding_boxes = getattr(result, 'bounding_boxes', None)
                 
                 items[node_id] = RankedItem(
                     node_id=node_id,
@@ -333,7 +344,8 @@ class RRFReranker:
                     chunk_index=chunk_index,
                     image_url=image_url,
                     document_id=document_id,
-                    section_hierarchy=section_hierarchy
+                    section_hierarchy=section_hierarchy,
+                    bounding_boxes=bounding_boxes
                 )
             
             items[node_id].dense_score = result.similarity
@@ -347,6 +359,8 @@ class RRFReranker:
             sparse_image_url = getattr(result, 'image_url', '') or ''
             sparse_page_number = getattr(result, 'page_number', 0) or 0
             sparse_document_id = getattr(result, 'document_id', '') or ''
+            # Feature: source-highlight-citation
+            sparse_bounding_boxes = getattr(result, 'bounding_boxes', None)
             
             if node_id not in items:
                 items[node_id] = RankedItem(
@@ -358,7 +372,8 @@ class RRFReranker:
                     # CHỈ THỊ 26: Include image metadata from sparse search
                     image_url=sparse_image_url,
                     page_number=sparse_page_number,
-                    document_id=sparse_document_id
+                    document_id=sparse_document_id,
+                    bounding_boxes=sparse_bounding_boxes
                 )
             else:
                 # Update with sparse result info (may have better metadata)
@@ -375,6 +390,9 @@ class RRFReranker:
                     items[node_id].image_url = sparse_image_url
                     items[node_id].page_number = sparse_page_number
                     items[node_id].document_id = sparse_document_id
+                # Feature: source-highlight-citation - Update bounding_boxes if not set
+                if sparse_bounding_boxes and not items[node_id].bounding_boxes:
+                    items[node_id].bounding_boxes = sparse_bounding_boxes
             
             items[node_id].sparse_score = result.score
             items[node_id].sparse_rank = rank
@@ -422,7 +440,9 @@ class RRFReranker:
                 chunk_index=item.chunk_index,
                 image_url=item.image_url,
                 document_id=item.document_id,
-                section_hierarchy=item.section_hierarchy
+                section_hierarchy=item.section_hierarchy,
+                # Feature: source-highlight-citation
+                bounding_boxes=item.bounding_boxes
             ))
         
         # Sort by RRF score (descending) and limit
@@ -474,6 +494,8 @@ class RRFReranker:
                 image_url = getattr(result, 'image_url', '') or ''
                 document_id = getattr(result, 'document_id', '') or ''
                 section_hierarchy = getattr(result, 'section_hierarchy', {}) or {}
+                # Feature: source-highlight-citation
+                bounding_boxes = getattr(result, 'bounding_boxes', None)
                 
                 hybrid_results.append(HybridSearchResult(
                     node_id=result.node_id,
@@ -494,13 +516,16 @@ class RRFReranker:
                     chunk_index=chunk_index,
                     image_url=image_url,
                     document_id=document_id,
-                    section_hierarchy=section_hierarchy
+                    section_hierarchy=section_hierarchy,
+                    bounding_boxes=bounding_boxes
                 ))
             else:  # sparse
                 # CHỈ THỊ 26: Include image metadata from sparse search
                 sparse_image_url = getattr(result, 'image_url', '') or ''
                 sparse_page_number = getattr(result, 'page_number', 0) or 0
                 sparse_document_id = getattr(result, 'document_id', '') or ''
+                # Feature: source-highlight-citation
+                sparse_bounding_boxes = getattr(result, 'bounding_boxes', None)
                 
                 hybrid_results.append(HybridSearchResult(
                     node_id=result.node_id,
@@ -517,7 +542,8 @@ class RRFReranker:
                     # CHỈ THỊ 26: Evidence images
                     image_url=sparse_image_url,
                     page_number=sparse_page_number,
-                    document_id=sparse_document_id
+                    document_id=sparse_document_id,
+                    bounding_boxes=sparse_bounding_boxes
                 ))
         
         return hybrid_results

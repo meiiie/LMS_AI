@@ -566,20 +566,27 @@ class ChatService:
             )
             
             # CHỈ THỊ KỸ THUẬT SỐ 16: Lấy sources từ tool_maritime_search
+            # Feature: source-highlight-citation - Include bounding_boxes and merge same-page sources
             retrieved_sources = get_last_retrieved_sources()
             sources_list = None
             if retrieved_sources:
+                # Merge same-page sources (Requirements 2.4)
+                merged_sources = self._merge_same_page_sources(retrieved_sources)
+                
                 sources_list = [
                     Source(
                         node_id=s.get("node_id", ""),
                         title=s.get("title", ""),
                         source_type="knowledge_graph",
                         content_snippet=s.get("content", "")[:200],  # Truncate for API
-                        image_url=s.get("image_url")  # CHỈ THỊ 26: Evidence images
+                        image_url=s.get("image_url"),  # CHỈ THỊ 26: Evidence images
+                        page_number=s.get("page_number"),
+                        document_id=s.get("document_id"),
+                        bounding_boxes=s.get("bounding_boxes")
                     )
-                    for s in retrieved_sources
+                    for s in merged_sources
                 ]
-                logger.info(f"[UNIFIED AGENT] Retrieved {len(sources_list)} sources for API response")
+                logger.info(f"[UNIFIED AGENT] Retrieved {len(sources_list)} sources for API response (merged from {len(retrieved_sources)})")
             
             # Convert to ProcessingResult
             result = ProcessingResult(
@@ -938,6 +945,74 @@ class ChatService:
             metadata={"requires_clarification": True}
         )
     
+    def _merge_same_page_sources(self, sources: List[dict]) -> List[dict]:
+        """
+        Merge sources from the same page into single entries with combined bounding_boxes.
+        
+        Feature: source-highlight-citation
+        **Validates: Requirements 2.4**
+        
+        Args:
+            sources: List of source dicts with page_number, document_id, bounding_boxes
+            
+        Returns:
+            Merged list where same-page sources are combined
+        """
+        if not sources:
+            return sources
+        
+        # Group by (document_id, page_number)
+        page_groups: dict = {}
+        
+        for source in sources:
+            doc_id = source.get("document_id") or ""
+            page_num = source.get("page_number")
+            
+            # If no page info, keep as separate entry
+            if page_num is None:
+                key = f"no_page_{source.get('node_id', '')}"
+            else:
+                key = f"{doc_id}_{page_num}"
+            
+            if key not in page_groups:
+                page_groups[key] = {
+                    "node_id": source.get("node_id", ""),
+                    "title": source.get("title", ""),
+                    "content": source.get("content", ""),
+                    "image_url": source.get("image_url"),
+                    "page_number": page_num,
+                    "document_id": doc_id,
+                    "bounding_boxes": list(source.get("bounding_boxes") or []),
+                    "_merged_count": 1
+                }
+            else:
+                # Merge bounding_boxes from same page
+                existing = page_groups[key]
+                new_boxes = source.get("bounding_boxes") or []
+                if new_boxes:
+                    existing["bounding_boxes"].extend(new_boxes)
+                
+                # Append content snippet if different
+                new_content = source.get("content", "")
+                if new_content and new_content not in existing["content"]:
+                    existing["content"] = f"{existing['content']}; {new_content}"[:500]
+                
+                existing["_merged_count"] += 1
+        
+        # Convert back to list, sorted by page number
+        merged = list(page_groups.values())
+        merged.sort(key=lambda x: (x.get("page_number") or 0))
+        
+        # Log merge statistics
+        total_merged = sum(1 for m in merged if m.get("_merged_count", 1) > 1)
+        if total_merged > 0:
+            logger.info(f"[SOURCE MERGE] Merged {len(sources)} sources into {len(merged)} ({total_merged} pages had multiple chunks)")
+        
+        # Remove internal tracking field
+        for m in merged:
+            m.pop("_merged_count", None)
+        
+        return merged
     
     def _save_message_async(self, session_id: UUID, role: str, content: str) -> None:
         """

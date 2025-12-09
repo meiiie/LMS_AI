@@ -305,6 +305,122 @@ pytest tests/property/test_chunking_properties.py::test_confidence_score_bounds 
 
 ---
 
+## Source Highlighting with Citation Jumping v0.9.8 (NEW)
+
+### PDF Text Highlighting for Frontend
+
+Tính năng cho phép frontend hiển thị chính xác vị trí text được trích dẫn trong PDF viewer.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    SOURCE HIGHLIGHTING ARCHITECTURE                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   PDF Document                                                               │
+│        │                                                                     │
+│        ▼                                                                     │
+│   ┌─────────────────┐                                                        │
+│   │ PyMuPDF Extract │  Extract text + bounding boxes                         │
+│   │ (fitz)          │  page.get_text("dict") → blocks with bbox              │
+│   └────────┬────────┘                                                        │
+│            │                                                                 │
+│            ▼                                                                 │
+│   ┌─────────────────┐                                                        │
+│   │ BoundingBox     │  Normalize coords to percentage (0-100)                │
+│   │ Normalizer      │  Handle multi-block chunks                             │
+│   └────────┬────────┘                                                        │
+│            │                                                                 │
+│            ▼                                                                 │
+│   ┌─────────────────┐                                                        │
+│   │ Neon PostgreSQL │  Store in knowledge_embeddings.bounding_boxes          │
+│   │ (JSONB column)  │  Format: [{"x0":0,"y0":0,"x1":100,"y1":10}, ...]       │
+│   └────────┬────────┘                                                        │
+│            │                                                                 │
+│            ▼                                                                 │
+│   ┌─────────────────┐                                                        │
+│   │ Chat API        │  Return sources with bounding_boxes                    │
+│   │ /api/v1/chat    │  + Source Details API /api/v1/sources/{node_id}        │
+│   └─────────────────┘                                                        │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### API Response with Bounding Boxes
+
+```json
+{
+  "data": {
+    "answer": "Theo Điều 15 COLREGs...",
+    "sources": [
+      {
+        "title": "Rule 15 - Crossing Situation",
+        "content": "When two power-driven vessels...",
+        "page_number": 15,
+        "image_url": "https://supabase.co/.../page_15.jpg",
+        "document_id": "colregs_2024",
+        "bounding_boxes": [
+          {"x0": 10.5, "y0": 45.2, "x1": 90.3, "y1": 52.7}
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Source Details API
+
+```bash
+# Get full source details by node_id
+GET /api/v1/sources/{node_id}
+
+# Response includes:
+# - content: Full text content
+# - bounding_boxes: Normalized coordinates (0-100%)
+# - page_number, document_id, image_url
+# - content_type, confidence_score
+```
+
+### Re-ingestion Script
+
+```bash
+# Update existing chunks with bounding boxes
+python scripts/reingest_bounding_boxes.py \
+    --pdf data/COLREGs.pdf \
+    --document-id colregs_2024
+
+# Dry run (preview changes)
+python scripts/reingest_bounding_boxes.py \
+    --pdf data/COLREGs.pdf \
+    --document-id colregs_2024 \
+    --dry-run --verbose
+
+# Check schema status
+python scripts/check_bounding_boxes_schema.py
+```
+
+### Database Schema
+
+```sql
+-- Migration 006: Add bounding_boxes column
+ALTER TABLE knowledge_embeddings 
+ADD COLUMN bounding_boxes JSONB DEFAULT NULL;
+
+-- GIN index for JSONB querying
+CREATE INDEX idx_knowledge_bounding_boxes 
+ON knowledge_embeddings USING GIN(bounding_boxes);
+```
+
+### Frontend Integration
+
+Frontend có thể sử dụng bounding_boxes để:
+1. **Jump to page**: Sử dụng `page_number` để navigate đến trang PDF
+2. **Highlight text**: Sử dụng `bounding_boxes` để vẽ highlight overlay
+3. **Show evidence**: Hiển thị `image_url` như preview thumbnail
+
+Coordinates được normalize về percentage (0-100) để responsive trên mọi kích thước màn hình.
+
+---
+
 ## Features
 
 ### Multi-Agent Architecture (v0.5.3)

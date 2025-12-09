@@ -141,6 +141,9 @@ class Citation(BaseModel):
         description="Relevance score"
     )
     image_url: Optional[str] = Field(default=None, description="URL ảnh trang tài liệu (CHỈ THỊ 26)")
+    page_number: Optional[int] = Field(default=None, description="Page number in PDF (Feature: source-highlight-citation)")
+    document_id: Optional[str] = Field(default=None, description="Document ID (Feature: source-highlight-citation)")
+    bounding_boxes: Optional[list] = Field(default=None, description="Normalized coordinates for highlighting (Feature: source-highlight-citation)")
 
 
 class IKnowledgeGraph(Protocol):
