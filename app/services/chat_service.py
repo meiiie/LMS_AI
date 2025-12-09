@@ -482,6 +482,7 @@ class ChatService:
             
             # Build conversation history as list for UnifiedAgent
             history_list = []
+            recent_messages = []  # Initialize for conversation_analyzer
             if self._chat_history.is_available():
                 recent_messages = self._chat_history.get_recent_messages(session_id)
                 for msg in recent_messages:
@@ -538,6 +539,9 @@ class ChatService:
             if self._conversation_analyzer is not None and recent_messages:
                 try:
                     conversation_context = self._conversation_analyzer.analyze(recent_messages)
+                    logger.info(f"[CONTEXT ANALYZER] Question type: {conversation_context.question_type.value}, "
+                               f"Topic: {conversation_context.current_topic}, "
+                               f"Inferred: {conversation_context.inferred_context[:100] if conversation_context.inferred_context else 'None'}")
                     if conversation_context.should_offer_continuation:
                         logger.info(f"[DEEP REASONING] Detected incomplete topic: {conversation_context.last_explanation_topic}")
                 except Exception as e:

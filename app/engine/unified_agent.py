@@ -75,6 +75,29 @@ GIỌNG VĂN:
    → User than vãn, chia sẻ cảm xúc
    → Câu hỏi không liên quan đến kiến thức hàng hải
 
+⚠️ QUY TẮC QUAN TRỌNG VỀ CÂU HỎI MƠ HỒ (AMBIGUOUS QUESTIONS):
+
+Khi user hỏi câu ngắn, mơ hồ như:
+- "Còn X thì sao?" / "Thế X thì sao?"
+- "Cần những giấy tờ gì?" / "Phí bao nhiêu?"
+- "Rồi sao?" / "Tiếp theo là gì?"
+
+→ PHẢI SUY LUẬN TỪ NGỮ CẢNH HỘI THOẠI TRƯỚC ĐÓ
+→ KHÔNG HỎI LẠI "Bạn muốn hỏi về gì?" nếu có thể suy luận được
+→ Trong <thinking>, phải phân tích: "User vừa hỏi về X, giờ hỏi Y, vậy Y liên quan đến X"
+
+VÍ DỤ SUY LUẬN NGỮ CẢNH:
+- User hỏi: "Điều kiện đăng ký tàu biển?" → AI trả lời
+- User hỏi tiếp: "Cần những giấy tờ gì?"
+- → AI PHẢI HIỂU: "giấy tờ" ở đây là giấy tờ để ĐĂNG KÝ TÀU BIỂN (từ câu trước)
+- → Gọi tool_maritime_search("giấy tờ đăng ký tàu biển Việt Nam")
+
+VÍ DỤ KHÁC:
+- User hỏi: "Khi thấy đèn đỏ trên tàu khác, tôi nên làm gì?"
+- User hỏi tiếp: "Còn đèn xanh thì sao?"
+- → AI PHẢI HIỂU: "đèn xanh" ở đây là đèn tín hiệu hàng hải (từ ngữ cảnh đèn đỏ)
+- → Gọi tool_maritime_search("đèn xanh tín hiệu hàng hải")
+
 QUY TẮC ỨNG XỬ:
 - KHÔNG lặp lại "Bạn hỏi hay quá", "Câu hỏi tuyệt vời". Đi thẳng vào vấn đề.
 - KHÔNG bắt đầu mọi câu bằng "Chào [tên]". Chỉ chào ở tin nhắn đầu tiên.
@@ -491,6 +514,16 @@ class UnifiedAgent:
         deep_reasoning_enabled = getattr(settings, 'deep_reasoning_enabled', True)
         if deep_reasoning_enabled and conversation_context is not None:
             try:
+                # Add context analysis for ambiguous questions
+                # Import ConversationAnalyzer to use build_context_prompt
+                from app.engine.conversation_analyzer import get_conversation_analyzer
+                analyzer = get_conversation_analyzer()
+                context_prompt = analyzer.build_context_prompt(conversation_context)
+                if context_prompt:
+                    system_prompt += f"\n\n{context_prompt}"
+                    logger.info(f"[CONTEXT ANALYZER] Added context prompt: question_type={conversation_context.question_type.value}, topic={conversation_context.current_topic}")
+                
+                # Add proactive hint for incomplete explanations
                 if hasattr(conversation_context, 'should_offer_continuation') and conversation_context.should_offer_continuation:
                     topic = getattr(conversation_context, 'last_explanation_topic', 'chủ đề trước')
                     proactive_hint = (

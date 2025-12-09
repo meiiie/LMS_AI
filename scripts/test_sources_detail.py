@@ -63,6 +63,8 @@ def test_sources_detail():
         print(f"   Source: {src.get('source', 'N/A')}")
         print(f"   Relevance: {src.get('relevance_score', 'N/A')}")
         print(f"   Image URL: {src.get('image_url', 'None')[:60] if src.get('image_url') else 'None'}...")
+        print(f"   Node ID: {src.get('node_id', 'N/A')[:20]}...")
+        print(f"   Content: {src.get('content_snippet', 'N/A')[:80]}...")
     
     print(f"\n📊 SUMMARY:")
     print(f"   With image_url: {with_image}/{len(sources)}")
