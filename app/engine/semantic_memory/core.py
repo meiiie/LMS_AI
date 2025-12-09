@@ -99,6 +99,23 @@ class SemanticMemoryEngine:
         
         logger.info("SemanticMemoryEngine initialized (v0.5 - Refactored)")
     
+    def is_available(self) -> bool:
+        """
+        Check if Semantic Memory Engine is available.
+        
+        Returns:
+            True if repository is available and embeddings are configured
+        """
+        try:
+            return (
+                self._repository is not None 
+                and self._repository.is_available()
+                and self._embeddings is not None
+            )
+        except Exception as e:
+            logger.warning(f"SemanticMemoryEngine availability check failed: {e}")
+            return False
+    
     def _ensure_llm(self):
         """Lazy initialization of LLM for fact extraction."""
         if self._llm is None:

@@ -285,6 +285,9 @@ class SupabaseLearningProfileRepository:
             return None
         
         try:
+            # Try to convert to UUID if the database expects UUID
+            user_id_param = self._convert_user_id(user_id)
+            
             with self._session_factory() as session:
                 result = session.execute(
                     text("""
@@ -293,13 +296,13 @@ class SupabaseLearningProfileRepository:
                         FROM learning_profile
                         WHERE user_id = :user_id
                     """),
-                    {"user_id": user_id}
+                    {"user_id": user_id_param}
                 )
                 row = result.fetchone()
                 
                 if row:
                     return {
-                        "user_id": row[0],
+                        "user_id": str(row[0]),  # Convert UUID to string
                         "attributes": row[1] or {},
                         "weak_areas": row[2] or [],
                         "strong_areas": row[3] or [],
@@ -311,6 +314,19 @@ class SupabaseLearningProfileRepository:
         except Exception as e:
             logger.error(f"Failed to get learning profile: {e}")
             return None
+    
+    def _convert_user_id(self, user_id: str):
+        """
+        Convert user_id to UUID if it's a valid UUID string.
+        Otherwise return as-is for TEXT column compatibility.
+        """
+        try:
+            # Try to parse as UUID
+            return UUID(user_id)
+        except (ValueError, TypeError):
+            # Not a valid UUID, return as string
+            # This handles cases like "test-user"
+            return user_id
     
     async def create(self, user_id: str, attributes: dict = None) -> Optional[dict]:
         """
@@ -327,6 +343,8 @@ class SupabaseLearningProfileRepository:
             return None
         
         try:
+            user_id_param = self._convert_user_id(user_id)
+            
             with self._session_factory() as session:
                 session.execute(
                     text("""
@@ -335,7 +353,7 @@ class SupabaseLearningProfileRepository:
                         ON CONFLICT (user_id) DO NOTHING
                     """),
                     {
-                        "user_id": user_id,
+                        "user_id": user_id_param,
                         "attributes": json.dumps(attributes or {"level": "beginner"})
                     }
                 )
@@ -376,6 +394,8 @@ class SupabaseLearningProfileRepository:
             return False
         
         try:
+            user_id_param = self._convert_user_id(user_id)
+            
             with self._session_factory() as session:
                 session.execute(
                     text("""
@@ -384,7 +404,7 @@ class SupabaseLearningProfileRepository:
                         WHERE user_id = :user_id
                     """),
                     {
-                        "user_id": user_id,
+                        "user_id": user_id_param,
                         "weak_areas": json.dumps(weak_areas)
                     }
                 )
@@ -410,6 +430,8 @@ class SupabaseLearningProfileRepository:
             return False
         
         try:
+            user_id_param = self._convert_user_id(user_id)
+            
             with self._session_factory() as session:
                 session.execute(
                     text("""
@@ -418,7 +440,7 @@ class SupabaseLearningProfileRepository:
                         WHERE user_id = :user_id
                     """),
                     {
-                        "user_id": user_id,
+                        "user_id": user_id_param,
                         "strong_areas": json.dumps(strong_areas)
                     }
                 )
@@ -447,6 +469,8 @@ class SupabaseLearningProfileRepository:
             # Ensure profile exists
             await self.get_or_create(user_id)
             
+            user_id_param = self._convert_user_id(user_id)
+            
             with self._session_factory() as session:
                 session.execute(
                     text("""
@@ -455,7 +479,7 @@ class SupabaseLearningProfileRepository:
                             updated_at = NOW()
                         WHERE user_id = :user_id
                     """),
-                    {"user_id": user_id, "messages": messages}
+                    {"user_id": user_id_param, "messages": messages}
                 )
                 session.commit()
                 return True
