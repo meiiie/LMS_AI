@@ -180,6 +180,54 @@ class MultimodalIngestionService:
         if progress_file.exists():
             progress_file.unlink()
     
+    def get_pdf_page_count(self, pdf_path: str) -> int:
+        """Get total page count without loading images into memory."""
+        doc = fitz.open(pdf_path)
+        total = len(doc)
+        doc.close()
+        return total
+    
+    def convert_single_page(
+        self,
+        pdf_path: str,
+        page_num: int,
+        dpi: int = DEFAULT_DPI
+    ) -> Optional[Image.Image]:
+        """
+        Convert a single PDF page to image.
+        
+        Memory-efficient: only one page in memory at a time.
+        
+        Args:
+            pdf_path: Path to PDF file
+            page_num: Page number (0-indexed)
+            dpi: Resolution for conversion
+            
+        Returns:
+            PIL Image object or None on error
+        """
+        try:
+            doc = fitz.open(pdf_path)
+            if page_num >= len(doc):
+                doc.close()
+                return None
+            
+            zoom = dpi / 72
+            matrix = fitz.Matrix(zoom, zoom)
+            page = doc.load_page(page_num)
+            pix = page.get_pixmap(matrix=matrix)
+            img_data = pix.tobytes("jpeg")
+            img = Image.open(io.BytesIO(img_data))
+            
+            # Clean up PyMuPDF objects
+            del pix
+            doc.close()
+            
+            return img
+        except Exception as e:
+            logger.error(f"Failed to convert page {page_num}: {e}")
+            return None
+    
     def convert_pdf_to_images(
         self,
         pdf_path: str,
@@ -189,6 +237,8 @@ class MultimodalIngestionService:
     ) -> tuple[List[Image.Image], int]:
         """
         Convert PDF pages to high-quality images.
+        
+        MEMORY OPTIMIZED: Converts pages one at a time to reduce peak memory usage.
         
         Args:
             pdf_path: Path to PDF file
@@ -203,12 +253,8 @@ class MultimodalIngestionService:
         **Feature: hybrid-text-vision (optimized batch conversion)**
         """
         if USE_PYMUPDF:
-            # Use PyMuPDF (no external dependencies like Poppler)
-            images = []
-            doc = fitz.open(pdf_path)
-            total_pages = len(doc)
-            zoom = dpi / 72  # 72 is default PDF DPI
-            matrix = fitz.Matrix(zoom, zoom)
+            # Get total pages first
+            total_pages = self.get_pdf_page_count(pdf_path)
             
             # Determine page range
             actual_start = start_page if start_page is not None else 0
@@ -217,15 +263,17 @@ class MultimodalIngestionService:
             
             logger.info(f"Converting pages {actual_start + 1}-{actual_end} of {total_pages} at {dpi} DPI")
             
+            # Convert pages one at a time to minimize memory
+            images = []
             for page_num in range(actual_start, actual_end):
-                page = doc.load_page(page_num)
-                pix = page.get_pixmap(matrix=matrix)
-                img_data = pix.tobytes("jpeg")
-                img = Image.open(io.BytesIO(img_data))
-                images.append(img)
+                img = self.convert_single_page(pdf_path, page_num, dpi)
+                if img is not None:
+                    images.append(img)
+                else:
+                    # Append None placeholder to maintain index alignment
+                    images.append(None)
             
-            doc.close()
-            logger.info(f"Converted {len(images)} pages to images (PyMuPDF)")
+            logger.info(f"Converted {len([i for i in images if i])} pages to images (PyMuPDF)")
             return images, total_pages
         else:
             # Fallback to pdf2image (requires Poppler)
@@ -242,10 +290,7 @@ class MultimodalIngestionService:
             )
             
             # Get total pages separately
-            import fitz as fitz_fallback
-            doc = fitz_fallback.open(pdf_path)
-            total_pages = len(doc)
-            doc.close()
+            total_pages = self.get_pdf_page_count(pdf_path)
             
             logger.info(f"Converted {len(images)} pages to images (pdf2image)")
             return images, total_pages
@@ -351,7 +396,11 @@ class MultimodalIngestionService:
         # Process each page in the batch
         # Note: images list now only contains pages from batch_start to batch_end
         # So enumerate index 0 = page batch_start, index 1 = page batch_start+1, etc.
-        for idx, image in enumerate(images):
+        for idx in range(len(images)):
+            # Get image and immediately remove from list to free memory
+            image = images[idx]
+            images[idx] = None  # Free memory immediately
+            
             # Calculate actual page number (0-indexed)
             page_num = batch_start + idx
             
@@ -395,6 +444,18 @@ class MultimodalIngestionService:
                 failed_pages += 1
                 errors.append(f"Page {page_num + 1}: {str(e)}")
                 logger.error(f"Failed to process page {page_num + 1}: {e}")
+            finally:
+                # Explicitly close and free image memory
+                if image is not None:
+                    try:
+                        image.close()
+                    except:
+                        pass
+                    del image
+                
+                # Force garbage collection after each page to prevent memory buildup
+                import gc
+                gc.collect()
         
         # Close PDF document
         if pdf_doc is not None:
