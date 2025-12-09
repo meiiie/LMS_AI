@@ -29,6 +29,10 @@ class SparseSearchResult:
     source: str
     category: str
     score: float
+    # CHỈ THỊ 26: Evidence images support
+    image_url: str = ""
+    page_number: int = 0
+    document_id: str = ""
     
     def __post_init__(self):
         # Ensure score is non-negative
@@ -256,6 +260,7 @@ class SparseSearchRepository:
             
             try:
                 # Execute PostgreSQL full-text search
+                # CHỈ THỊ 26: Include image_url for evidence images
                 sql = """
                     SELECT 
                         id::text as node_id,
@@ -263,7 +268,10 @@ class SparseSearchRepository:
                         content,
                         COALESCE(metadata->>'source', '') as source,
                         COALESCE(metadata->>'category', '') as category,
-                        ts_rank(search_vector, to_tsquery('simple', $1)) as score
+                        ts_rank(search_vector, to_tsquery('simple', $1)) as score,
+                        COALESCE(image_url, '') as image_url,
+                        COALESCE(page_number, 0) as page_number,
+                        COALESCE(document_id, '') as document_id
                     FROM knowledge_embeddings
                     WHERE search_vector @@ to_tsquery('simple', $1)
                     ORDER BY score DESC
@@ -280,7 +288,10 @@ class SparseSearchRepository:
                         content=row["content"],
                         source=row["source"],
                         category=row["category"],
-                        score=float(row["score"])
+                        score=float(row["score"]),
+                        image_url=row["image_url"],
+                        page_number=row["page_number"],
+                        document_id=row["document_id"]
                     ))
                 
                 # Apply number boosting

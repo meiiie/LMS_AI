@@ -67,10 +67,16 @@ def get_total_pages(pdf_path: str) -> int:
         return 0
 
 
-def get_processed_pages(document_id: str) -> set:
+def get_processed_pages(document_id: str) -> dict:
     """
-    Query database to find which pages have already been processed.
-    Returns set of page numbers (1-indexed).
+    Query database to find which pages have been fully processed.
+    
+    Returns dict with:
+    - 'pages': set of page numbers fully processed
+    - 'stats': processing statistics (vision/direct counts)
+    
+    Logic: Chỉ pages có record trong knowledge_embeddings mới được coi là "processed".
+    Nếu ảnh đã upload lên Supabase nhưng chưa có embedding → sẽ được retry.
     """
     try:
         import asyncpg
@@ -82,7 +88,7 @@ def get_processed_pages(document_id: str) -> set:
         
         if not db_url:
             print("⚠️ DATABASE_URL not set, cannot check processed pages")
-            return set()
+            return {'pages': set(), 'stats': {}}
         
         # Convert URL format
         db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
@@ -91,6 +97,7 @@ def get_processed_pages(document_id: str) -> set:
         async def query():
             conn = await asyncpg.connect(db_url)
             try:
+                # Get pages with embeddings (fully processed)
                 rows = await conn.fetch(
                     """
                     SELECT DISTINCT page_number 
@@ -99,14 +106,35 @@ def get_processed_pages(document_id: str) -> set:
                     """,
                     document_id
                 )
-                return {row['page_number'] for row in rows}
+                pages = {row['page_number'] for row in rows}
+                
+                # Get extraction method stats
+                stats_row = await conn.fetchrow(
+                    """
+                    SELECT 
+                        COUNT(DISTINCT page_number) as total_pages,
+                        COUNT(DISTINCT CASE WHEN extraction_method = 'vision' THEN page_number END) as vision_pages,
+                        COUNT(DISTINCT CASE WHEN extraction_method = 'direct' THEN page_number END) as direct_pages
+                    FROM knowledge_embeddings 
+                    WHERE document_id = $1 AND page_number IS NOT NULL
+                    """,
+                    document_id
+                )
+                
+                stats = {
+                    'total_pages': stats_row['total_pages'] if stats_row else 0,
+                    'vision_pages': stats_row['vision_pages'] if stats_row else 0,
+                    'direct_pages': stats_row['direct_pages'] if stats_row else 0
+                }
+                
+                return {'pages': pages, 'stats': stats}
             finally:
                 await conn.close()
         
         return asyncio.run(query())
     except Exception as e:
         print(f"⚠️ Cannot query processed pages: {e}")
-        return set()
+        return {'pages': set(), 'stats': {}}
 
 
 def ingest_batch(urls: dict, start_page: int, end_page: int) -> dict:
@@ -197,20 +225,25 @@ def main():
     
     # Check which pages are already processed
     if args.force:
-        processed_pages = set()
+        processed_data = {'pages': set(), 'stats': {}}
         print("🔄 Force mode: will re-process all pages")
     else:
         print("\n🔍 Checking already processed pages...")
-        processed_pages = get_processed_pages(DOCUMENT_ID)
+        processed_data = get_processed_pages(DOCUMENT_ID)
+        processed_pages = processed_data['pages']
+        stats = processed_data['stats']
+        
         if processed_pages:
             print(f"✅ Already processed: {len(processed_pages)} pages")
             print(f"   Pages: {sorted(processed_pages)[:10]}{'...' if len(processed_pages) > 10 else ''}")
+            if stats:
+                print(f"   📊 Vision: {stats.get('vision_pages', 0)}, Direct: {stats.get('direct_pages', 0)}")
         else:
             print("📝 No pages processed yet")
     
     # Determine pages to process
     all_pages = set(range(1, total_pages + 1))
-    pages_to_process = sorted(all_pages - processed_pages)
+    pages_to_process = sorted(all_pages - processed_data['pages'])
     
     if not pages_to_process:
         print("\n✅ All pages already processed!")
@@ -274,15 +307,21 @@ def main():
             print(f"   ⏳ Waiting {BATCH_DELAY}s...")
             time.sleep(BATCH_DELAY)
     
-    # Final summary
+    # Final summary - query DB for accurate stats
     print("\n" + "=" * 60)
     print("📊 FINAL RESULTS")
     print("=" * 60)
-    print(f"Total Pages: {total_pages}")
-    print(f"Previously Processed: {len(processed_pages)}")
-    print(f"Newly Processed: {total_successful}")
-    print(f"Vision Pages: {total_vision}")
-    print(f"Direct Pages: {total_direct}")
+    
+    final_data = get_processed_pages(DOCUMENT_ID)
+    final_stats = final_data['stats']
+    
+    print(f"Total PDF Pages: {total_pages}")
+    print(f"Previously Processed: {len(processed_data['pages'])}")
+    print(f"Newly Processed (this session): {total_successful}")
+    print(f"\n📊 DATABASE STATS (accurate):")
+    print(f"   Total in DB: {final_stats.get('total_pages', 0)} pages")
+    print(f"   Vision: {final_stats.get('vision_pages', 0)}")
+    print(f"   Direct: {final_stats.get('direct_pages', 0)}")
     
     if failed_batches:
         print(f"\n⚠️ Failed batches: {len(failed_batches)}")

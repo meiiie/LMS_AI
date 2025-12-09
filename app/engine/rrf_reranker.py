@@ -343,13 +343,22 @@ class RRFReranker:
         for rank, result in enumerate(sparse_results, start=1):
             node_id = result.node_id
             
+            # CHỈ THỊ 26: Get image_url from sparse result
+            sparse_image_url = getattr(result, 'image_url', '') or ''
+            sparse_page_number = getattr(result, 'page_number', 0) or 0
+            sparse_document_id = getattr(result, 'document_id', '') or ''
+            
             if node_id not in items:
                 items[node_id] = RankedItem(
                     node_id=node_id,
                     title=result.title,
                     content=result.content,
                     source=result.source,
-                    category=result.category
+                    category=result.category,
+                    # CHỈ THỊ 26: Include image metadata from sparse search
+                    image_url=sparse_image_url,
+                    page_number=sparse_page_number,
+                    document_id=sparse_document_id
                 )
             else:
                 # Update with sparse result info (may have better metadata)
@@ -361,6 +370,11 @@ class RRFReranker:
                     items[node_id].source = result.source
                 if result.category:
                     items[node_id].category = result.category
+                # CHỈ THỊ 26: Update image_url if not already set
+                if sparse_image_url and not items[node_id].image_url:
+                    items[node_id].image_url = sparse_image_url
+                    items[node_id].page_number = sparse_page_number
+                    items[node_id].document_id = sparse_document_id
             
             items[node_id].sparse_score = result.score
             items[node_id].sparse_rank = rank
@@ -483,6 +497,11 @@ class RRFReranker:
                     section_hierarchy=section_hierarchy
                 ))
             else:  # sparse
+                # CHỈ THỊ 26: Include image metadata from sparse search
+                sparse_image_url = getattr(result, 'image_url', '') or ''
+                sparse_page_number = getattr(result, 'page_number', 0) or 0
+                sparse_document_id = getattr(result, 'document_id', '') or ''
+                
                 hybrid_results.append(HybridSearchResult(
                     node_id=result.node_id,
                     title=result.title,
@@ -494,7 +513,11 @@ class RRFReranker:
                     rrf_score=result.score / 10.0,  # Normalize to similar range
                     search_method="sparse_only",
                     dense_rank=None,
-                    sparse_rank=rank
+                    sparse_rank=rank,
+                    # CHỈ THỊ 26: Evidence images
+                    image_url=sparse_image_url,
+                    page_number=sparse_page_number,
+                    document_id=sparse_document_id
                 ))
         
         return hybrid_results
