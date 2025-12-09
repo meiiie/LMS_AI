@@ -144,6 +144,12 @@ class Settings(BaseSettings):
     vision_max_dimension: int = Field(default=1024, description="Max dimension for vision API images")
     vision_image_quality: int = Field(default=85, description="JPEG quality for vision API images")
     
+    # Hybrid Text/Vision Detection Settings (Feature: hybrid-text-vision)
+    # Goal: Reduce Gemini Vision API calls by 50-70%
+    hybrid_detection_enabled: bool = Field(default=True, description="Enable hybrid text/vision detection")
+    min_text_length_for_direct: int = Field(default=100, description="Minimum text length for direct extraction")
+    force_vision_mode: bool = Field(default=False, description="Force Vision extraction for all pages (bypass hybrid detection)")
+    
     # Vector Store
     chroma_host: str = Field(default="localhost", description="ChromaDB host")
     chroma_port: int = Field(default=8000, description="ChromaDB port")

@@ -144,7 +144,78 @@ WITH CHECK (bucket_id = 'maritime-docs');
 
 ---
 
-## Semantic Chunking v2.7.0 (NEW)
+## Hybrid Text/Vision Detection v0.9.0 (NEW)
+
+### Cost Optimization for Ingestion Pipeline
+
+Tính năng mới giúp giảm 50-70% API calls cho Gemini Vision bằng cách phân loại thông minh các trang PDF:
+
+- **Text-only pages**: Extract trực tiếp bằng PyMuPDF (miễn phí, nhanh)
+- **Visual pages**: Gửi qua Gemini Vision (chính xác cho bảng/hình)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    HYBRID TEXT/VISION DETECTION                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   PDF Page                                                                   │
+│        │                                                                     │
+│        ▼                                                                     │
+│   ┌─────────────────┐                                                        │
+│   │ PAGE ANALYZER   │  Checks: images, tables, diagrams, maritime keywords   │
+│   └────────┬────────┘                                                        │
+│            │                                                                 │
+│     ┌──────┴──────┐                                                          │
+│     │             │                                                          │
+│     ▼             ▼                                                          │
+│ ┌────────┐   ┌────────┐                                                      │
+│ │ TEXT   │   │ VISUAL │                                                      │
+│ │ ONLY   │   │CONTENT │                                                      │
+│ └───┬────┘   └───┬────┘                                                      │
+│     │            │                                                           │
+│     ▼            ▼                                                           │
+│ ┌────────────┐ ┌────────────┐                                                │
+│ │ DIRECT     │ │ VISION     │                                                │
+│ │ EXTRACTION │ │ EXTRACTION │                                                │
+│ │ (PyMuPDF)  │ │ (Gemini)   │                                                │
+│ │ FREE ✓     │ │ PAID $     │                                                │
+│ └────────────┘ └────────────┘                                                │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Detection Criteria
+
+| Indicator | Detection Method | Result |
+|-----------|------------------|--------|
+| Embedded images | `page.get_images()` | → Vision |
+| Table patterns | Pipe characters, grid patterns | → Vision |
+| Diagram keywords | hình, figure, sơ đồ | → Vision |
+| Maritime signals | đèn, tín hiệu, cờ | → Vision |
+| Plain text only | No visual indicators | → Direct |
+
+### Configuration
+
+```env
+# Hybrid Detection Settings
+HYBRID_DETECTION_ENABLED=true
+MIN_TEXT_LENGTH_FOR_DIRECT=100
+FORCE_VISION_MODE=false
+```
+
+### Ingestion Result with Savings
+
+```python
+result = await ingestion_service.ingest_pdf(pdf_path, document_id)
+
+print(f"Vision pages: {result.vision_pages}")
+print(f"Direct pages: {result.direct_pages}")
+print(f"API savings: {result.api_savings_percent:.1f}%")
+```
+
+---
+
+## Semantic Chunking v2.7.0
 
 ### Intelligent Document Segmentation
 

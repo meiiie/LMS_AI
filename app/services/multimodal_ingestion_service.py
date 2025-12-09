@@ -10,9 +10,12 @@ Full pipeline: PDF → Images → Supabase → Vision → Embeddings → Databas
 import logging
 import os
 import json
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 from dataclasses import dataclass, field
 from pathlib import Path
+
+if TYPE_CHECKING:
+    import fitz
 
 from PIL import Image
 import io
@@ -31,6 +34,7 @@ from app.services.supabase_storage import SupabaseStorageClient, get_storage_cli
 from app.services.chunking_service import SemanticChunker, get_semantic_chunker, ChunkResult
 from app.engine.vision_extractor import VisionExtractor, get_vision_extractor
 from app.engine.gemini_embedding import GeminiOptimizedEmbeddings
+from app.engine.page_analyzer import PageAnalyzer, PageAnalysisResult, get_page_analyzer
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -45,12 +49,29 @@ class IngestionResult:
     failed_pages: int
     errors: List[str] = field(default_factory=list)
     
+    # Hybrid Text/Vision Detection tracking (Feature: hybrid-text-vision)
+    vision_pages: int = 0      # Pages processed via Gemini Vision
+    direct_pages: int = 0      # Pages processed via PyMuPDF direct extraction
+    fallback_pages: int = 0    # Pages that fell back from direct to vision
+    
     @property
     def success_rate(self) -> float:
         """Calculate success rate percentage"""
         if self.total_pages == 0:
             return 0.0
         return (self.successful_pages / self.total_pages) * 100
+    
+    @property
+    def api_savings_percent(self) -> float:
+        """
+        Calculate estimated API cost savings from hybrid detection.
+        
+        **Feature: hybrid-text-vision**
+        **Property 8: Savings Calculation**
+        """
+        if self.total_pages == 0:
+            return 0.0
+        return (self.direct_pages / self.total_pages) * 100
 
 
 @dataclass
@@ -62,6 +83,8 @@ class PageResult:
     text_length: int = 0
     total_chunks: int = 0  # Number of semantic chunks created
     error: Optional[str] = None
+    extraction_method: str = "vision"  # "direct" or "vision" (Feature: hybrid-text-vision)
+    was_fallback: bool = False  # True if fell back from direct to vision
 
 
 class MultimodalIngestionService:
@@ -90,7 +113,8 @@ class MultimodalIngestionService:
         storage_client: Optional[SupabaseStorageClient] = None,
         vision_extractor: Optional[VisionExtractor] = None,
         embedding_service: Optional[GeminiOptimizedEmbeddings] = None,
-        chunker: Optional[SemanticChunker] = None
+        chunker: Optional[SemanticChunker] = None,
+        page_analyzer: Optional[PageAnalyzer] = None
     ):
         """
         Initialize Multimodal Ingestion Service.
@@ -100,11 +124,24 @@ class MultimodalIngestionService:
             vision_extractor: Vision extraction service
             embedding_service: Embedding generation service
             chunker: Semantic chunking service
+            page_analyzer: Page analyzer for hybrid detection (Feature: hybrid-text-vision)
         """
         self.storage = storage_client or get_storage_client()
         self.vision = vision_extractor or get_vision_extractor()
         self.embeddings = embedding_service or GeminiOptimizedEmbeddings()
         self.chunker = chunker or get_semantic_chunker()
+        self.page_analyzer = page_analyzer or get_page_analyzer()
+        
+        # Hybrid detection settings from config
+        self.hybrid_detection_enabled = settings.hybrid_detection_enabled
+        self.force_vision_mode = settings.force_vision_mode
+        self.min_text_length = settings.min_text_length_for_direct
+        
+        logger.info(
+            f"MultimodalIngestionService initialized: "
+            f"hybrid_detection={self.hybrid_detection_enabled}, "
+            f"force_vision={self.force_vision_mode}"
+        )
     
     def _get_progress_file(self, document_id: str) -> Path:
         """Get path to progress tracking file (cross-platform)"""
@@ -231,6 +268,11 @@ class MultimodalIngestionService:
         failed_pages = 0
         errors = []
         
+        # Hybrid detection tracking (Feature: hybrid-text-vision)
+        vision_pages = 0
+        direct_pages = 0
+        fallback_pages = 0
+        
         # Check for resume point
         start_page = 0
         if resume:
@@ -243,6 +285,14 @@ class MultimodalIngestionService:
         if max_pages is not None and max_pages > 0:
             pages_to_process = min(max_pages, total_pages)
             logger.info(f"Limiting to {pages_to_process} pages (test mode)")
+        
+        # Open PDF for hybrid detection (need page objects)
+        pdf_doc = None
+        if self.hybrid_detection_enabled and USE_PYMUPDF:
+            try:
+                pdf_doc = fitz.open(pdf_path)
+            except Exception as e:
+                logger.warning(f"Could not open PDF for hybrid detection: {e}")
         
         # Process each page
         for page_num, image in enumerate(images):
@@ -259,16 +309,34 @@ class MultimodalIngestionService:
             # Log progress
             logger.info(f"Processing page {page_num + 1} of {pages_to_process}")
             
+            # Get PDF page for hybrid detection
+            pdf_page = None
+            if pdf_doc is not None:
+                try:
+                    pdf_page = pdf_doc.load_page(page_num)
+                except Exception as e:
+                    logger.warning(f"Could not load PDF page {page_num}: {e}")
+            
             try:
                 result = await self._process_page(
                     image=image,
                     document_id=document_id,
-                    page_number=page_num + 1  # 1-indexed
+                    page_number=page_num + 1,  # 1-indexed
+                    pdf_page=pdf_page
                 )
                 
                 if result.success:
                     successful_pages += 1
                     self._save_progress(document_id, page_num + 1)
+                    
+                    # Track extraction method (Feature: hybrid-text-vision)
+                    if result.extraction_method == "vision":
+                        vision_pages += 1
+                    else:
+                        direct_pages += 1
+                    
+                    if result.was_fallback:
+                        fallback_pages += 1
                 else:
                     failed_pages += 1
                     if result.error:
@@ -279,16 +347,23 @@ class MultimodalIngestionService:
                 errors.append(f"Page {page_num + 1}: {str(e)}")
                 logger.error(f"Failed to process page {page_num + 1}: {e}")
         
+        # Close PDF document
+        if pdf_doc is not None:
+            pdf_doc.close()
+        
         # Clear progress file on completion
         self._clear_progress(document_id)
         
-        # Log summary
+        # Log summary with hybrid detection stats
         result = IngestionResult(
             document_id=document_id,
             total_pages=total_pages,
             successful_pages=successful_pages,
             failed_pages=failed_pages,
-            errors=errors
+            errors=errors,
+            vision_pages=vision_pages,
+            direct_pages=direct_pages,
+            fallback_pages=fallback_pages
         )
         
         logger.info(
@@ -296,27 +371,76 @@ class MultimodalIngestionService:
             f"({result.success_rate:.1f}%)"
         )
         
+        # Log hybrid detection savings (Feature: hybrid-text-vision)
+        if self.hybrid_detection_enabled:
+            logger.info(
+                f"Hybrid detection: vision={vision_pages}, direct={direct_pages}, "
+                f"fallback={fallback_pages}, API savings={result.api_savings_percent:.1f}%"
+            )
+        
         return result
+    
+    def _extract_direct(self, page: "fitz.Page") -> str:
+        """
+        Extract text directly from PDF page using PyMuPDF.
+        
+        This is the "free" extraction method that doesn't use Vision API.
+        
+        Args:
+            page: PyMuPDF page object
+            
+        Returns:
+            Extracted text content
+            
+        **Feature: hybrid-text-vision**
+        **Property 9: Direct Extraction Text Quality**
+        **Validates: Requirements 5.1, 5.2**
+        """
+        try:
+            # Extract text with layout preservation
+            text = page.get_text("text")
+            
+            # Clean up excessive whitespace while preserving structure
+            lines = text.split('\n')
+            cleaned_lines = []
+            for line in lines:
+                stripped = line.strip()
+                if stripped:
+                    cleaned_lines.append(stripped)
+                elif cleaned_lines and cleaned_lines[-1]:
+                    # Preserve paragraph breaks (empty line after content)
+                    cleaned_lines.append('')
+            
+            return '\n'.join(cleaned_lines)
+            
+        except Exception as e:
+            logger.error(f"Direct extraction failed: {e}")
+            return ""
     
     async def _process_page(
         self,
         image: Image.Image,
         document_id: str,
-        page_number: int
+        page_number: int,
+        pdf_page: Optional["fitz.Page"] = None
     ) -> PageResult:
         """
         Process a single page through the pipeline with semantic chunking.
         
         Steps:
         1. Upload image to Supabase
-        2. Extract text using Vision
-        3. Apply semantic chunking
-        4. Generate embedding per chunk
-        5. Store chunks in database
+        2. Analyze page for hybrid detection (if enabled)
+        3. Extract text using Vision OR Direct method
+        4. Apply semantic chunking
+        5. Generate embedding per chunk
+        6. Store chunks in database
         
-        **Feature: semantic-chunking**
+        **Feature: semantic-chunking, hybrid-text-vision**
         **Validates: Requirements 1.1, 1.4, 7.1, 7.2**
         """
+        extraction_method = "vision"
+        was_fallback = False
+        
         # Step 1: Upload to Supabase
         upload_result = await self.storage.upload_pil_image(
             image=image,
@@ -333,30 +457,62 @@ class MultimodalIngestionService:
         
         image_url = upload_result.public_url
         
-        # Step 2: Extract text using Vision
-        extraction_result = await self.vision.extract_from_image(image)
+        # Step 2: Hybrid detection - decide extraction method
+        text = None
         
-        if not extraction_result.success:
-            return PageResult(
-                page_number=page_number,
-                success=False,
-                image_url=image_url,
-                error=f"Extraction failed: {extraction_result.error}"
-            )
+        if self.hybrid_detection_enabled and pdf_page is not None and not self.force_vision_mode:
+            # Analyze page to determine best extraction method
+            analysis = self.page_analyzer.analyze_page(pdf_page, page_number)
+            
+            if not self.page_analyzer.should_use_vision(analysis):
+                # Try direct extraction first
+                extraction_method = "direct"
+                text = self._extract_direct(pdf_page)
+                
+                # Fallback to vision if direct extraction is too short
+                if len(text.strip()) < self.min_text_length:
+                    logger.info(
+                        f"Page {page_number}: Direct extraction too short "
+                        f"({len(text)} chars), falling back to Vision"
+                    )
+                    text = None
+                    extraction_method = "vision"
+                    was_fallback = True
+                else:
+                    logger.info(
+                        f"Page {page_number}: Using direct extraction "
+                        f"({len(text)} chars, reasons: {analysis.detection_reasons})"
+                    )
         
-        text = extraction_result.text
+        # Step 3: Extract text using Vision (if not already extracted)
+        if text is None:
+            extraction_method = "vision"
+            extraction_result = await self.vision.extract_from_image(image)
+            
+            if not extraction_result.success:
+                return PageResult(
+                    page_number=page_number,
+                    success=False,
+                    image_url=image_url,
+                    error=f"Extraction failed: {extraction_result.error}",
+                    extraction_method=extraction_method,
+                    was_fallback=was_fallback
+                )
+            
+            text = extraction_result.text
+            
+            # Validate extraction
+            if not self.vision.validate_extraction(extraction_result):
+                logger.warning(f"Page {page_number} extraction may be incomplete")
         
-        # Validate extraction
-        if not self.vision.validate_extraction(extraction_result):
-            logger.warning(f"Page {page_number} extraction may be incomplete")
-        
-        # Step 3: Apply semantic chunking
+        # Step 4: Apply semantic chunking
         page_metadata = {
             'document_id': document_id,
             'page_number': page_number,
             'image_url': image_url,
             'processing_timestamp': datetime.utcnow().isoformat(),
-            'source_type': 'pdf'
+            'source_type': 'pdf',
+            'extraction_method': extraction_method  # Feature: hybrid-text-vision
         }
         
         try:
@@ -403,7 +559,9 @@ class MultimodalIngestionService:
                 page_number=page_number,
                 success=False,
                 image_url=image_url,
-                error="All chunks failed to process"
+                error="All chunks failed to process",
+                extraction_method=extraction_method,
+                was_fallback=was_fallback
             )
         
         return PageResult(
@@ -411,7 +569,9 @@ class MultimodalIngestionService:
             success=True,
             image_url=image_url,
             text_length=len(text),
-            total_chunks=successful_chunks
+            total_chunks=successful_chunks,
+            extraction_method=extraction_method,
+            was_fallback=was_fallback
         )
     
     async def _store_chunk_in_database(
