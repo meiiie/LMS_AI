@@ -1225,6 +1225,7 @@ TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.9.7 | 2025-12-10 | **DATABASE SCHEMA FIX & SOTA ARCHITECTURE**: Fix missing columns (is_blocked, block_reason, weak_areas, strong_areas, total_sessions, total_messages), Add SemanticMemoryEngine.is_available(), UUID/String conversion fix, Restore SOTA architecture (remove force search hardcode), Tool calling via YAML config (CHỈ THỊ SỐ 29), Alembic Migration 005 |
 | v0.9.1 | 2025-12-09 | **MULTIMODAL RAG ENHANCEMENT**: Replace pdf2image+Poppler with PyMuPDF (no external deps), Add `image_url` to API response (sources), Evidence Images support in chat response, Cross-platform PDF processing |
 | v0.9.0 | 2025-12-07 | **PROJECT RESTRUCTURE**: CHỈ THỊ SỐ 25 - Modular Semantic Memory (core.py, context.py, extraction.py), Legacy Code Removal (UnifiedAgent required), Test Organization (e2e/integration/unit/property), Scripts Organization (migrations/data/utils), Documentation Consolidation |
 | v0.8.6 | 2025-12-07 | **SYSTEM LOGIC FLOW REPORT**: Báo cáo luồng logic thực sự - Complete System Flow diagram, Component Integration Verification table, Data Flow Verification, Xác minh tất cả components đã được tích hợp đúng cách |
@@ -1432,6 +1433,16 @@ User Message → Guardian (ALLOW) → Session → Memory Retrieval
 ---
 
 ## Van de da biet va Cong viec tuong lai
+
+### Da giai quyet (v0.9.7 - Database Schema Fix & SOTA Architecture)
+- **Database Schema Fix**: Them cac columns con thieu vao production database
+  - `chat_messages`: `is_blocked`, `block_reason`
+  - `learning_profile`: `weak_areas`, `strong_areas`, `total_sessions`, `total_messages`
+- **SemanticMemoryEngine.is_available()**: Them method kiem tra tinh kha dung
+- **UUID/String Conversion**: Fix loi `_convert_user_id()` cho learning_profile_repository
+- **SOTA Architecture Restored**: Xoa "force search" logic, su dung YAML persona config thay vi hardcode
+- **Tool Calling via YAML**: Them section `tool_calling` vao tutor.yaml va assistant.yaml (CHI THI SO 29)
+- **Alembic Migration 005**: Script migration cho schema changes
 
 ### Da giai quyet (v0.9.1 - Multimodal RAG Enhancement)
 - **PyMuPDF Migration**: Thay the pdf2image+Poppler bang PyMuPDF - khong can external dependencies
