@@ -231,7 +231,9 @@ class MultimodalIngestionService:
         pdf_path: str,
         document_id: str,
         resume: bool = True,
-        max_pages: Optional[int] = None
+        max_pages: Optional[int] = None,
+        start_page: Optional[int] = None,
+        end_page: Optional[int] = None
     ) -> IngestionResult:
         """
         Full ingestion pipeline: PDF → Images → Vision → Database.
@@ -241,12 +243,15 @@ class MultimodalIngestionService:
             document_id: Unique identifier for the document
             resume: Whether to resume from last successful page
             max_pages: Maximum pages to process (for testing)
+            start_page: Start from this page (1-indexed, for batch processing)
+            end_page: Stop at this page (1-indexed, inclusive)
             
         Returns:
             IngestionResult with summary statistics
             
         **Property 13: Ingestion Logs Progress**
         **Property 14: Ingestion Summary Contains Counts**
+        **Feature: hybrid-text-vision (batch processing support)**
         """
         logger.info(f"Starting multimodal ingestion for document: {document_id}")
         
@@ -273,18 +278,34 @@ class MultimodalIngestionService:
         direct_pages = 0
         fallback_pages = 0
         
-        # Check for resume point
-        start_page = 0
-        if resume:
-            start_page = self._load_progress(document_id)
-            if start_page > 0:
-                logger.info(f"Resuming from page {start_page + 1}")
+        # Determine page range for batch processing
+        # start_page and end_page are 1-indexed from API
+        batch_start = 0  # 0-indexed for internal use
+        batch_end = total_pages  # exclusive
+        
+        if start_page is not None and start_page > 0:
+            batch_start = start_page - 1  # Convert to 0-indexed
+            logger.info(f"Batch processing: starting from page {start_page}")
+        
+        if end_page is not None and end_page > 0:
+            batch_end = min(end_page, total_pages)  # end_page is inclusive, convert to exclusive
+            logger.info(f"Batch processing: ending at page {end_page}")
+        
+        # Check for resume point (only if not using explicit start_page)
+        if start_page is None and resume:
+            resume_page = self._load_progress(document_id)
+            if resume_page > 0:
+                batch_start = resume_page
+                logger.info(f"Resuming from page {resume_page + 1}")
         
         # Limit pages if max_pages is set (for testing)
-        pages_to_process = total_pages
+        pages_to_process = batch_end - batch_start
         if max_pages is not None and max_pages > 0:
-            pages_to_process = min(max_pages, total_pages)
+            pages_to_process = min(max_pages, pages_to_process)
+            batch_end = batch_start + pages_to_process
             logger.info(f"Limiting to {pages_to_process} pages (test mode)")
+        
+        logger.info(f"Processing pages {batch_start + 1} to {batch_end} of {total_pages}")
         
         # Open PDF for hybrid detection (need page objects)
         pdf_doc = None
@@ -294,20 +315,19 @@ class MultimodalIngestionService:
             except Exception as e:
                 logger.warning(f"Could not open PDF for hybrid detection: {e}")
         
-        # Process each page
+        # Process each page in the batch range
         for page_num, image in enumerate(images):
-            # Stop if we've reached max_pages
-            if max_pages is not None and page_num >= max_pages:
-                logger.info(f"Reached max_pages limit ({max_pages}), stopping")
-                break
-            
-            # Skip already processed pages
-            if page_num < start_page:
-                successful_pages += 1
+            # Skip pages before batch_start
+            if page_num < batch_start:
                 continue
             
+            # Stop if we've reached batch_end
+            if page_num >= batch_end:
+                logger.info(f"Reached batch end (page {batch_end}), stopping")
+                break
+            
             # Log progress
-            logger.info(f"Processing page {page_num + 1} of {pages_to_process}")
+            logger.info(f"Processing page {page_num + 1} of {total_pages} (batch: {batch_start + 1}-{batch_end})")
             
             # Get PDF page for hybrid detection
             pdf_page = None

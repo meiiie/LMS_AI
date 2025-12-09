@@ -23,8 +23,8 @@ HEALTH_ENDPOINT = f"{RENDER_URL}/api/v1/health"  # Shallow health check (no DB)
 
 # Test PDF - use VanBanGoc for text-heavy content (should have high savings)
 TEST_PDF = "data/VanBanGoc_95.2015.QH13.P1.pdf"
-TEST_DOCUMENT_ID = "hybrid-test-vanban"
-MAX_PAGES = 5  # Limit pages for quick test
+TEST_DOCUMENT_ID = "hybrid-test-vanban-25"
+MAX_PAGES = 25  # Limit to 25 pages to avoid Render worker timeout
 
 
 def check_server_health():
@@ -62,8 +62,10 @@ def test_hybrid_ingestion():
             'document_id': TEST_DOCUMENT_ID,
             'role': 'admin',
             'resume': 'false',  # Fresh ingestion
-            'max_pages': str(MAX_PAGES)
         }
+        # Only add max_pages if specified
+        if MAX_PAGES is not None:
+            data['max_pages'] = str(MAX_PAGES)
         
         print(f"\n⏳ Uploading and processing (this may take a few minutes)...")
         

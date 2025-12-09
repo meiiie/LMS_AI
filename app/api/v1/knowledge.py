@@ -92,7 +92,9 @@ async def ingest_multimodal_document(
     document_id: str = Form(...),
     role: str = Form(...),
     resume: bool = Form(default=True),
-    max_pages: Optional[int] = Form(default=None)
+    max_pages: Optional[int] = Form(default=None),
+    start_page: Optional[int] = Form(default=None),
+    end_page: Optional[int] = Form(default=None)
 ) -> MultimodalIngestionResponse:
     """
     Upload a PDF document for Multimodal RAG ingestion.
@@ -111,10 +113,12 @@ async def ingest_multimodal_document(
     - **role**: User role (must be "admin")
     - **resume**: Resume from last successful page if interrupted (default: True)
     - **max_pages**: Maximum pages to process (optional, for testing)
+    - **start_page**: Start processing from this page (1-indexed, for batch processing)
+    - **end_page**: Stop processing at this page (1-indexed, inclusive)
     
     Returns ingestion result with page counts and errors.
     
-    **Feature: multimodal-rag-vision, semantic-chunking**
+    **Feature: multimodal-rag-vision, semantic-chunking, hybrid-text-vision**
     **Validates: Requirements 2.1, 7.1, 7.4**
     """
     # Validate admin role
@@ -149,7 +153,9 @@ async def ingest_multimodal_document(
             pdf_path=tmp_path,
             document_id=document_id,
             resume=resume,
-            max_pages=max_pages
+            max_pages=max_pages,
+            start_page=start_page,
+            end_page=end_page
         )
         
         logger.info(
