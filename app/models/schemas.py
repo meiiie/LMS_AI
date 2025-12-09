@@ -110,11 +110,34 @@ class ChatResponseData(BaseModel):
     suggested_questions: list[str] = Field(default_factory=list, description="3 câu hỏi gợi ý tiếp theo")
 
 
+class ToolUsageInfo(BaseModel):
+    """
+    Information about a tool that was used during processing.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 27: API Transparency
+    **Feature: api-transparency-thinking**
+    **Validates: Requirements 1.3**
+    """
+    name: str = Field(..., description="Tên tool đã gọi (tool_maritime_search, tool_save_user_info, tool_get_user_info)")
+    description: str = Field(default="", description="Mô tả ngắn về kết quả hoặc hành động của tool")
+
+
 class ChatResponseMetadata(BaseModel):
-    """Metadata in chat response"""
+    """
+    Metadata in chat response.
+    
+    CHỈ THỊ KỸ THUẬT SỐ 27: API Transparency - Added tools_used field
+    **Feature: api-transparency-thinking**
+    **Validates: Requirements 1.1, 1.4, 3.2**
+    """
     processing_time: float = Field(..., description="Thời gian xử lý (giây)")
     model: str = Field(default="maritime-rag-v1", description="Model AI sử dụng")
     agent_type: AgentType = Field(default=AgentType.RAG, description="Agent xử lý request")
+    session_id: Optional[str] = Field(default=None, description="Session ID của cuộc hội thoại")
+    tools_used: list[ToolUsageInfo] = Field(
+        default_factory=list, 
+        description="Danh sách tools đã sử dụng trong quá trình xử lý (CHỈ THỊ 27)"
+    )
 
 
 class ChatResponse(BaseModel):

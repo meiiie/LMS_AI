@@ -31,6 +31,7 @@ from app.models.schemas import (
     GetHistoryResponse,
     HistoryMessage,
     HistoryPagination,
+    ToolUsageInfo,  # CHỈ THỊ SỐ 27: API Transparency
 )
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,15 @@ async def chat_completion(
             internal_response.message
         )
         
+        # CHỈ THỊ SỐ 27: Extract tools_used from internal response metadata
+        tools_used = []
+        if internal_response.metadata and internal_response.metadata.get("tools_used"):
+            for tool in internal_response.metadata["tools_used"]:
+                tools_used.append(ToolUsageInfo(
+                    name=tool.get("name", "unknown"),
+                    description=_get_tool_description(tool)
+                ))
+        
         # Build LMS-compatible response
         response = ChatResponse(
             status="success",
@@ -128,7 +138,8 @@ async def chat_completion(
             metadata=ChatResponseMetadata(
                 processing_time=round(processing_time, 3),
                 model="maritime-rag-v1",
-                agent_type=internal_response.agent_type
+                agent_type=internal_response.agent_type,
+                tools_used=tools_used  # CHỈ THỊ SỐ 27: API Transparency
             )
         )
         
@@ -150,6 +161,32 @@ async def chat_completion(
                 "message": f"Lỗi xử lý request: {str(e)}"
             }
         )
+
+
+def _get_tool_description(tool: dict) -> str:
+    """
+    Generate human-readable description for a tool usage.
+    
+    CHỈ THỊ SỐ 27: API Transparency
+    **Feature: api-transparency-thinking**
+    **Validates: Requirements 1.3**
+    """
+    name = tool.get("name", "unknown")
+    args = tool.get("args", {})
+    result = tool.get("result", "")
+    
+    if name == "tool_maritime_search":
+        query = args.get("query", "")
+        return f"Tra cứu: {query}" if query else "Tra cứu kiến thức hàng hải"
+    elif name == "tool_save_user_info":
+        key = args.get("key", "")
+        value = args.get("value", "")
+        return f"Lưu thông tin: {key}={value}" if key else "Lưu thông tin người dùng"
+    elif name == "tool_get_user_info":
+        key = args.get("key", "all")
+        return f"Lấy thông tin: {key}"
+    else:
+        return result[:100] if result else f"Gọi tool: {name}"
 
 
 def _generate_suggested_questions(user_message: str, ai_response: str) -> list[str]:
