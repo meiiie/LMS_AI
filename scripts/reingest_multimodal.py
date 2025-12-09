@@ -58,10 +58,11 @@ async def main():
     service = get_ingestion_service()
     
     print("\n🚀 Starting ingestion pipeline...")
-    print("   1. PDF → Images (pdf2image)")
+    print("   1. PDF → Images (PyMuPDF - no external deps)")
     print("   2. Images → Supabase Storage")
     print("   3. Images → Gemini Vision (text extraction)")
-    print("   4. Text + Embeddings → Neon Database")
+    print("   4. Text → Semantic Chunking (maritime patterns)")
+    print("   5. Chunks + Embeddings → Neon Database")
     print()
     
     # Run ingestion

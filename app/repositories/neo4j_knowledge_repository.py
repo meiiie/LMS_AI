@@ -1,7 +1,20 @@
 """
 Neo4j Knowledge Graph Repository.
 
-Connects to Neo4j database for knowledge retrieval.
+LEGACY STATUS: This repository is RESERVED for future Learning Graph integration.
+
+As of sparse-search-migration (2025-12), Neo4j has been replaced by PostgreSQL
+for RAG/Knowledge search. This file is kept for:
+- Future Learning Graph (LMS integration)
+- Student progress tracking with graph relationships
+- Knowledge dependency mapping
+
+Current RAG search uses:
+- app/repositories/dense_search_repository.py (pgvector)
+- app/repositories/sparse_search_repository.py (tsvector)
+- app/services/hybrid_search_service.py (RRF fusion)
+
+See: .kiro/specs/sparse-search-migration/design.md for migration details.
 """
 
 import logging

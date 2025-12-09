@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![LangChain](https://img.shields.io/badge/LangChain-1.1.2-1c3c3c?style=flat-square&logo=chainlink&logoColor=white)](https://langchain.com)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.0.4-purple?style=flat-square)](https://langchain.com)
-[![Neo4j](https://img.shields.io/badge/Neo4j-5.28-008cc1?style=flat-square&logo=neo4j&logoColor=white)](https://neo4j.com)
+[![Neo4j](https://img.shields.io/badge/Neo4j-Optional-008cc1?style=flat-square&logo=neo4j&logoColor=white)](https://neo4j.com)
 [![Neon](https://img.shields.io/badge/Neon-pgvector-00E599?style=flat-square&logo=postgresql&logoColor=white)](https://neon.tech)
 [![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev)
 [![License](https://img.shields.io/badge/License-Proprietary-red?style=flat-square)](LICENSE)
@@ -95,6 +95,51 @@ Hệ thống đã được nâng cấp từ "Đọc văn bản" sang "Hiểu tà
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-supabase-anon-key
 SUPABASE_STORAGE_BUCKET=maritime-docs
+```
+
+### PDF Processing (PyMuPDF)
+
+Hệ thống sử dụng **PyMuPDF (fitz)** để chuyển đổi PDF sang images:
+
+- **No External Dependencies**: Không cần cài đặt Poppler hoặc các thư viện hệ thống khác
+- **Cross-Platform**: Hoạt động trên Windows, Linux, macOS
+- **High Quality**: 150 DPI đủ cho Gemini Vision đọc text
+- **Memory Efficient**: Tối ưu cho Render Free Tier
+
+```bash
+# Re-ingest với multimodal pipeline
+python scripts/reingest_multimodal.py \
+    --pdf data/VanBanGoc_95.2015.QH13.P1.pdf \
+    --document-id luat_hang_hai_2015 \
+    --no-resume
+
+# Test với giới hạn pages (development)
+python scripts/reingest_multimodal.py \
+    --pdf data/VanBanGoc_95.2015.QH13.P1.pdf \
+    --document-id luat_hang_hai_2015 \
+    --max-pages 5
+
+# Verify image URLs trong database
+python scripts/verify_image_urls.py
+```
+
+### Supabase Storage Policies
+
+Để upload images, cần cấu hình Storage Policies trong Supabase Dashboard:
+
+```sql
+-- Allow uploads to maritime-docs bucket
+CREATE POLICY "Allow uploads to maritime-docs"
+ON storage.objects FOR INSERT
+TO public
+WITH CHECK (bucket_id = 'maritime-docs');
+
+-- Allow updates (for upsert)
+CREATE POLICY "Allow updates to maritime-docs"
+ON storage.objects FOR UPDATE
+TO public
+USING (bucket_id = 'maritime-docs')
+WITH CHECK (bucket_id = 'maritime-docs');
 ```
 
 ---
@@ -577,7 +622,7 @@ maritime-ai-service/
 │   ├── core/                        # Config, security, rate_limit
 │   ├── engine/
 │   │   ├── unified_agent.py         # UnifiedAgent - Main LangGraph agent
-│   │   ├── tools/rag_tool.py        # RAG Agent with Neo4j
+│   │   ├── tools/rag_tool.py        # RAG Agent with Hybrid Search
 │   │   ├── tools/tutor_agent.py     # Tutor Agent
 │   │   ├── guardrails.py            # Input/Output validation (rule-based)
 │   │   ├── guardian_agent.py        # LLM Content Moderation (Gemini 2.5 Flash)
@@ -749,43 +794,58 @@ curl -X POST http://localhost:8000/api/v1/chat \
 
 ## Knowledge Ingestion API (Admin Only)
 
-API cho phép Admin upload tài liệu PDF vào Neo4j Knowledge Graph để hỗ trợ RAG queries.
+API cho phép Admin upload tài liệu PDF sử dụng Multimodal RAG pipeline (Vision-based).
 
-### POST /api/v1/knowledge/ingest
+### POST /api/v1/knowledge/ingest-multimodal
 
-Upload PDF document để xử lý và lưu vào Knowledge Graph.
+Upload PDF document để xử lý với Gemini Vision và lưu vào PostgreSQL (Neon).
+
+**Pipeline:**
+1. PDF → Images (PyMuPDF - no external deps)
+2. Images → Supabase Storage (public URLs)
+3. Images → Gemini Vision (text extraction)
+4. Text → Semantic Chunking (maritime patterns)
+5. Chunks + Embeddings + image_url → Neon Database
 
 **Request (multipart/form-data):**
 ```bash
-curl -X POST http://localhost:8000/api/v1/knowledge/ingest \
+curl -X POST http://localhost:8000/api/v1/knowledge/ingest-multimodal \
   -F "file=@colregs.pdf" \
-  -F "category=COLREGs" \
-  -F "role=admin"
+  -F "document_id=colregs_2024" \
+  -F "role=admin" \
+  -F "resume=true"
 ```
 
 **Response:**
 ```json
 {
-  "status": "accepted",
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "message": "Document 'colregs.pdf' accepted for processing."
+  "status": "completed",
+  "document_id": "colregs_2024",
+  "total_pages": 50,
+  "successful_pages": 50,
+  "failed_pages": 0,
+  "success_rate": 100.0,
+  "errors": [],
+  "message": "Processed 50/50 pages successfully"
 }
 ```
 
-### GET /api/v1/knowledge/jobs/{job_id}
+### GET /api/v1/knowledge/stats
 
-Kiểm tra trạng thái xử lý document.
+Lấy thống kê knowledge base từ PostgreSQL.
 
 **Response:**
 ```json
 {
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "completed",
-  "progress": 100,
-  "nodes_created": 45,
-  "error_message": null,
-  "filename": "colregs.pdf",
-  "category": "COLREGs"
+  "total_chunks": 1250,
+  "total_documents": 5,
+  "content_types": {
+    "text": 1000,
+    "heading": 150,
+    "table": 80,
+    "diagram_reference": 20
+  },
+  "avg_confidence": 0.85
 }
 ```
 
@@ -951,7 +1011,7 @@ curl -X GET "https://maritime-ai-chatbot.onrender.com/api/v1/history/student_123
    - pgvector cosine similarity search
    - Trả về top-K results với similarity scores (0-1)
 3. **Sparse Search (Keyword)**:
-   - Neo4j Full-text index với BM25-like scoring
+   - PostgreSQL tsvector với ts_rank scoring (migrated from Neo4j)
    - Exact keyword matching
    - Trả về top-K results với relevance scores
 4. **RRF Reranking**:
@@ -1026,7 +1086,7 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 | **Agent Pattern** | Manual ReAct (bind_tools + loop) |
 | **LLM Provider** | Google Gemini 2.5 Flash |
 | **Embeddings** | Gemini text-embedding-004 (768 dims) |
-| **Graph Database** | Neo4j 5.28 + Full-text Search |
+| **Graph Database** | Neo4j 5.28 (Optional - Reserved for Learning Graph) |
 | **Vector Database** | PostgreSQL + pgvector (Neon) |
 | **Search** | Hybrid Search (Dense + Sparse + RRF) |
 | **Memory** | Semantic Memory v0.5 (Insight Engine) |
@@ -1097,6 +1157,7 @@ TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 | v0.9.1 | 2025-12-09 | **MULTIMODAL RAG ENHANCEMENT**: Replace pdf2image+Poppler with PyMuPDF (no external deps), Add `image_url` to API response (sources), Evidence Images support in chat response, Cross-platform PDF processing |
 | v0.9.0 | 2025-12-07 | **PROJECT RESTRUCTURE**: CHỈ THỊ SỐ 25 - Modular Semantic Memory (core.py, context.py, extraction.py), Legacy Code Removal (UnifiedAgent required), Test Organization (e2e/integration/unit/property), Scripts Organization (migrations/data/utils), Documentation Consolidation |
 | v0.8.6 | 2025-12-07 | **SYSTEM LOGIC FLOW REPORT**: Báo cáo luồng logic thực sự - Complete System Flow diagram, Component Integration Verification table, Data Flow Verification, Xác minh tất cả components đã được tích hợp đúng cách |
+| v0.8.6 | 2025-12-09 | **LEGACY CLEANUP**: Archive legacy ingestion (ingestion_service.py, pdf_processor.py, ingestion_job.py), Update knowledge.py to multimodal-only, Archive legacy tests, Remove pdf2image script, Update README |
 | v0.8.5 | 2025-12-07 | **INSIGHT MEMORY ENGINE v0.5**: CHỈ THỊ SỐ 23 CẢI TIẾN - Behavioral Insights thay vì Atomic Facts, 5 Insight Categories (learning_style, knowledge_gap, goal_evolution, habit, preference), InsightExtractor + InsightValidator + MemoryConsolidator, LLM-based Consolidation (40/50 threshold), Category-Prioritized Retrieval, Duplicate/Contradiction Detection, Evolution Notes tracking, Full integration vào ChatService |
 | v0.8.4 | 2025-12-07 | **MANAGED MEMORY LIST**: CHỈ THỊ SỐ 23 - Memory Capping (50 facts/user), True Deduplication (Upsert), Memory API `GET /api/v1/memories/{user_id}`, Fact Type Validation (6 types only) |
 | v0.8.3 | 2025-12-07 | **DEEP REASONING**: CHỈ THỊ SỐ 21 & 22 - `<thinking>` tags for reasoning, Proactive Continuation (AI hỏi user muốn nghe tiếp), Memory Isolation (blocked content không vào context), Context Window 50 messages, ConversationAnalyzer |
@@ -1116,8 +1177,8 @@ TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 | v0.5.3 | 2025-12-04 | Intent Classifier HOTFIX - 70 Vietnamese keywords, Aggressive Routing, 100% classification accuracy |
 | v0.5.2 | 2025-12-04 | Title Match Boosting v2 - Strong Boost x3.0 cho số hiệu, Top-1 Citation Accuracy 100% |
 | v0.5.1 | 2025-12-04 | Project cleanup, removed redundant test scripts, security fix (.env.production.example) |
-| v0.5.0 | 2025-12-04 | Hybrid Search v0.5 - Dense (pgvector) + Sparse (Neo4j FTS) + RRF Reranking (k=60) |
-| v0.4.0 | 2025-12-03 | Knowledge Ingestion API - Admin PDF upload to Neo4j |
+| v0.5.0 | 2025-12-04 | Hybrid Search v0.5 - Dense (pgvector) + Sparse (Neo4j FTS → PostgreSQL tsvector) + RRF Reranking (k=60) |
+| v0.4.0 | 2025-12-03 | Knowledge Ingestion API - Admin PDF upload (now Multimodal RAG) |
 | v0.3.0 | 2025-12-02 | Semantic Memory v0.3, Cross-session persistence with pgvector |
 | v0.2.1 | 2025-12-01 | Memory Lite, Chat History, Learning Profile |
 | v0.2.0 | 2025-11-30 | Role-based prompting, Multi-agent architecture |
@@ -1191,7 +1252,7 @@ Dưới đây là luồng xử lý thực tế của hệ thống, đã được
 │       │   │       └── Has tool_calls → Execute tools:                   │   │
 │       │   │                                                              │   │
 │       │   │           [TOOL 1] tool_maritime_search(query)              │   │
-│       │   │               └── RAGAgent.query() → Neo4j + pgvector       │   │
+│       │   │               └── RAGAgent.query() → Hybrid Search (pgvector + tsvector) │
 │       │   │               └── Save sources to _last_retrieved_sources   │   │
 │       │   │                                                              │   │
 │       │   │           [TOOL 2] tool_save_user_info(key, value)          │   │
@@ -1269,7 +1330,7 @@ User Message → Guardian (ALLOW) → Session → Memory Retrieval
                                     UnifiedAgent (ReAct)
                                               │
                                               ├── tool_maritime_search
-                                              │   └── RAG → Neo4j + pgvector
+                                              │   └── RAG → Hybrid Search (pgvector + tsvector)
                                               │
                                               ├── tool_save_user_info
                                               │   └── MemoryManager → Dedup
@@ -1395,9 +1456,16 @@ User Message → Guardian (ALLOW) → Session → Memory Retrieval
 - **Tuan thu Pydantic v2**: Config su dung pattern `model_config = SettingsConfigDict()`
 - **Sua loi Circular Import**: Khac phuc circular import giua rag_tool.py va chat_service.py
 
+### Da giai quyet (v2.7.1 - 09/12/2024)
+- **PyMuPDF Migration**: Chuyen tu pdf2image+Poppler sang PyMuPDF (fitz) - khong can external dependencies
+- **Cross-Platform PDF Processing**: PyMuPDF hoat dong tren Windows/Linux/macOS ma khong can cai dat them
+- **Supabase Storage RLS Fix**: Cau hinh Storage Policies cho phep upload images
+- **Evidence Images Pipeline**: image_url duoc luu vao database va tra ve trong API response
+- **Verified Integration**: Test xac nhan 62 records co image_url, search tra ve image URLs
+
 ### Dang thuc hien
-- **Full Multimodal Re-ingestion**: Re-ingest tat ca PDF voi multimodal pipeline de co evidence images
-- **Vietnamese Text Chunking**: Phat hien ranh gioi cau cho PDF tieng Viet
+- **Full Multimodal Re-ingestion**: Re-ingest tat ca PDF voi multimodal pipeline de co evidence images day du
+- **Production Deployment**: Deploy code moi len Render va chay full re-ingestion
 
 ### Du kien
 - **Learning Graph Integration**: Tich hop Neo4j cho Learning Graph (LMS integration)
