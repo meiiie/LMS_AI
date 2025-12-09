@@ -150,7 +150,7 @@ async def get_source_details(node_id: str) -> SourceDetailResponse:
             row = await conn.fetchrow(
                 """
                 SELECT 
-                    node_id,
+                    id::text as node_id,
                     content,
                     document_id,
                     page_number,
@@ -161,7 +161,7 @@ async def get_source_details(node_id: str) -> SourceDetailResponse:
                     confidence_score,
                     metadata
                 FROM knowledge_embeddings
-                WHERE node_id = $1
+                WHERE id::text = $1
                 """,
                 node_id
             )
@@ -281,7 +281,7 @@ async def list_sources(
             params.extend([limit, offset])
             query = f"""
                 SELECT 
-                    node_id,
+                    id::text as node_id,
                     document_id,
                     page_number,
                     content_type,
