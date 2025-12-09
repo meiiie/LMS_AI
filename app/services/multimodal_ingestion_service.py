@@ -183,30 +183,41 @@ class MultimodalIngestionService:
     def convert_pdf_to_images(
         self,
         pdf_path: str,
-        dpi: int = DEFAULT_DPI
-    ) -> List[Image.Image]:
+        dpi: int = DEFAULT_DPI,
+        start_page: Optional[int] = None,
+        end_page: Optional[int] = None
+    ) -> tuple[List[Image.Image], int]:
         """
         Convert PDF pages to high-quality images.
         
         Args:
             pdf_path: Path to PDF file
             dpi: Resolution for conversion (default 150 for memory efficiency)
+            start_page: Start from this page (0-indexed, optional)
+            end_page: End at this page (0-indexed, exclusive, optional)
             
         Returns:
-            List of PIL Image objects
+            Tuple of (List of PIL Image objects, total_pages in PDF)
             
         **Property 6: PDF Page Count Equals Image Count**
+        **Feature: hybrid-text-vision (optimized batch conversion)**
         """
-        logger.info(f"Converting PDF to images: {pdf_path} at {dpi} DPI")
-        
         if USE_PYMUPDF:
             # Use PyMuPDF (no external dependencies like Poppler)
             images = []
             doc = fitz.open(pdf_path)
+            total_pages = len(doc)
             zoom = dpi / 72  # 72 is default PDF DPI
             matrix = fitz.Matrix(zoom, zoom)
             
-            for page_num in range(len(doc)):
+            # Determine page range
+            actual_start = start_page if start_page is not None else 0
+            actual_end = end_page if end_page is not None else total_pages
+            actual_end = min(actual_end, total_pages)
+            
+            logger.info(f"Converting pages {actual_start + 1}-{actual_end} of {total_pages} at {dpi} DPI")
+            
+            for page_num in range(actual_start, actual_end):
                 page = doc.load_page(page_num)
                 pix = page.get_pixmap(matrix=matrix)
                 img_data = pix.tobytes("jpeg")
@@ -215,16 +226,29 @@ class MultimodalIngestionService:
             
             doc.close()
             logger.info(f"Converted {len(images)} pages to images (PyMuPDF)")
+            return images, total_pages
         else:
             # Fallback to pdf2image (requires Poppler)
+            # Note: pdf2image uses 1-indexed pages
+            first_page = (start_page + 1) if start_page is not None else None
+            last_page = end_page if end_page is not None else None
+            
             images = convert_from_path(
                 pdf_path,
                 dpi=dpi,
-                fmt='jpeg'
+                fmt='jpeg',
+                first_page=first_page,
+                last_page=last_page
             )
+            
+            # Get total pages separately
+            import fitz as fitz_fallback
+            doc = fitz_fallback.open(pdf_path)
+            total_pages = len(doc)
+            doc.close()
+            
             logger.info(f"Converted {len(images)} pages to images (pdf2image)")
-        
-        return images
+            return images, total_pages
     
     async def ingest_pdf(
         self,
@@ -255,9 +279,33 @@ class MultimodalIngestionService:
         """
         logger.info(f"Starting multimodal ingestion for document: {document_id}")
         
-        # Convert PDF to images
+        # Determine page range for batch processing BEFORE converting
+        # start_page and end_page are 1-indexed from API
+        batch_start = 0  # 0-indexed for internal use
+        batch_end = None  # Will be set after knowing total_pages
+        
+        if start_page is not None and start_page > 0:
+            batch_start = start_page - 1  # Convert to 0-indexed
+            logger.info(f"Batch processing: starting from page {start_page}")
+        
+        if end_page is not None and end_page > 0:
+            batch_end = end_page  # Will be capped to total_pages later
+            logger.info(f"Batch processing: ending at page {end_page}")
+        
+        # Check for resume point (only if not using explicit start_page)
+        if start_page is None and resume:
+            resume_page = self._load_progress(document_id)
+            if resume_page > 0:
+                batch_start = resume_page
+                logger.info(f"Resuming from page {resume_page + 1}")
+        
+        # Convert ONLY the pages we need (optimized for batch processing)
         try:
-            images = self.convert_pdf_to_images(pdf_path)
+            images, total_pages = self.convert_pdf_to_images(
+                pdf_path,
+                start_page=batch_start,
+                end_page=batch_end
+            )
         except Exception as e:
             logger.error(f"Failed to convert PDF: {e}")
             return IngestionResult(
@@ -268,7 +316,19 @@ class MultimodalIngestionService:
                 errors=[f"PDF conversion failed: {e}"]
             )
         
-        total_pages = len(images)
+        # Finalize batch_end after knowing total_pages
+        if batch_end is None:
+            batch_end = total_pages
+        else:
+            batch_end = min(batch_end, total_pages)
+        
+        # Limit pages if max_pages is set (for testing)
+        pages_to_process = batch_end - batch_start
+        if max_pages is not None and max_pages > 0:
+            pages_to_process = min(max_pages, pages_to_process)
+            batch_end = batch_start + pages_to_process
+            logger.info(f"Limiting to {pages_to_process} pages (test mode)")
+        
         successful_pages = 0
         failed_pages = 0
         errors = []
@@ -277,33 +337,6 @@ class MultimodalIngestionService:
         vision_pages = 0
         direct_pages = 0
         fallback_pages = 0
-        
-        # Determine page range for batch processing
-        # start_page and end_page are 1-indexed from API
-        batch_start = 0  # 0-indexed for internal use
-        batch_end = total_pages  # exclusive
-        
-        if start_page is not None and start_page > 0:
-            batch_start = start_page - 1  # Convert to 0-indexed
-            logger.info(f"Batch processing: starting from page {start_page}")
-        
-        if end_page is not None and end_page > 0:
-            batch_end = min(end_page, total_pages)  # end_page is inclusive, convert to exclusive
-            logger.info(f"Batch processing: ending at page {end_page}")
-        
-        # Check for resume point (only if not using explicit start_page)
-        if start_page is None and resume:
-            resume_page = self._load_progress(document_id)
-            if resume_page > 0:
-                batch_start = resume_page
-                logger.info(f"Resuming from page {resume_page + 1}")
-        
-        # Limit pages if max_pages is set (for testing)
-        pages_to_process = batch_end - batch_start
-        if max_pages is not None and max_pages > 0:
-            pages_to_process = min(max_pages, pages_to_process)
-            batch_end = batch_start + pages_to_process
-            logger.info(f"Limiting to {pages_to_process} pages (test mode)")
         
         logger.info(f"Processing pages {batch_start + 1} to {batch_end} of {total_pages}")
         
@@ -315,16 +348,12 @@ class MultimodalIngestionService:
             except Exception as e:
                 logger.warning(f"Could not open PDF for hybrid detection: {e}")
         
-        # Process each page in the batch range
-        for page_num, image in enumerate(images):
-            # Skip pages before batch_start
-            if page_num < batch_start:
-                continue
-            
-            # Stop if we've reached batch_end
-            if page_num >= batch_end:
-                logger.info(f"Reached batch end (page {batch_end}), stopping")
-                break
+        # Process each page in the batch
+        # Note: images list now only contains pages from batch_start to batch_end
+        # So enumerate index 0 = page batch_start, index 1 = page batch_start+1, etc.
+        for idx, image in enumerate(images):
+            # Calculate actual page number (0-indexed)
+            page_num = batch_start + idx
             
             # Log progress
             logger.info(f"Processing page {page_num + 1} of {total_pages} (batch: {batch_start + 1}-{batch_end})")
