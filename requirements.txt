@@ -41,7 +41,8 @@ neo4j~=5.28.0
 
 # PDF Processing
 pypdf>=4.0.0
-pdf2image>=1.16.3  # CHỈ THỊ 26: PDF to image conversion for Multimodal RAG
+pymupdf>=1.26.0  # CHỈ THỊ 26: PDF to image (no external deps, replaces pdf2image+Poppler)
+pdf2image>=1.16.3  # Fallback: requires Poppler system package
 Pillow>=10.0.0  # CHỈ THỊ 26: Image processing
 
 # Supabase Storage (CHỈ THỊ 26: Hybrid Infrastructure)

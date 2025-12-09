@@ -1,11 +1,12 @@
 services:
   - type: web
     name: maritime-ai-chatbot
-    runtime: docker  # CHỈ THỊ 26: Changed to Docker for poppler-utils support
+    runtime: docker  # Keep Docker for consistent environment
     region: singapore  # Gần Việt Nam nhất
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    # Note: PyMuPDF replaces pdf2image+Poppler - no external deps needed
     # Increase timeout for long-running ingestion requests
     # Note: Free tier has 30s limit, paid plans support longer timeouts
     envVars:

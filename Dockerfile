@@ -1,13 +1,14 @@
 # Maritime AI Service Dockerfile
 # CHỈ THỊ 26: Multimodal RAG with Vision support
+# Updated: Using PyMuPDF instead of pdf2image+Poppler (no external deps)
 
 FROM python:3.11-slim
 
-# Install system dependencies including poppler-utils for pdf2image
+# Install system dependencies (poppler-utils no longer needed - using PyMuPDF)
 RUN apt-get update && apt-get install -y \
-    poppler-utils \
     libpq-dev \
     gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

@@ -140,6 +140,7 @@ class Citation(BaseModel):
         le=1.0,
         description="Relevance score"
     )
+    image_url: Optional[str] = Field(default=None, description="URL ảnh trang tài liệu (CHỈ THỊ 26)")
 
 
 class IKnowledgeGraph(Protocol):

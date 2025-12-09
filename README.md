@@ -28,8 +28,8 @@
 Maritime AI Tutor Service là một **Backend AI microservice** được thiết kế để tích hợp với hệ thống LMS (Learning Management System) hàng hải. Hệ thống cung cấp:
 
 - **Intelligent Tutoring**: AI Tutor với role-based prompting (Student/Teacher/Admin)
-- **Hybrid Search v0.5**: Kết hợp Dense Search (pgvector) + Sparse Search (Neo4j Full-text) với RRF Reranking
-- **GraphRAG Knowledge Retrieval**: Truy vấn kiến thức từ SOLAS, COLREGs, MARPOL
+- **Hybrid Search v0.6**: Kết hợp Dense Search (pgvector) + Sparse Search (PostgreSQL tsvector) với RRF Reranking
+- **GraphRAG Knowledge Retrieval**: Truy vấn kiến thức từ SOLAS, COLREGs, MARPOL (Neo4j reserved for Learning Graph)
 - **Semantic Memory v0.3**: Ghi nhớ ngữ cảnh cross-session với pgvector + Gemini embeddings
 - **Guardian Agent v0.8.1**: LLM-based Content Moderation với Gemini 2.5 Flash - Custom Pronoun Validation, Contextual Filtering
 - **Content Guardrails**: Bảo vệ nội dung với PII masking và prompt injection detection
@@ -57,8 +57,9 @@ Hệ thống đã được nâng cấp từ "Đọc văn bản" sang "Hiểu tà
 │        ▼                                                                     │
 │   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐         │
 │   │ 1. RASTERIZE    │ →  │ 2. UPLOAD       │ →  │ 3. VISION       │         │
-│   │ (pdf2image)     │    │ (Supabase)      │    │ (Gemini 2.5)    │         │
+│   │ (PyMuPDF)       │    │ (Supabase)      │    │ (Gemini 2.5)    │         │
 │   │ PDF → Images    │    │ → public_url    │    │ Image → Text    │         │
+│   │ No external deps│    │                 │    │                 │         │
 │   └─────────────────┘    └─────────────────┘    └─────────────────┘         │
 │                                                        │                     │
 │                                                        ▼                     │
@@ -258,7 +259,9 @@ Hệ thống persona được cấu hình qua file YAML, hỗ trợ cá nhân h�
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Hybrid Search v0.5.2 (Dense + Sparse + RRF + Title Boosting)
+### Hybrid Search v0.6.0 (Dense + Sparse + RRF + Title Boosting)
+
+**Feature: sparse-search-migration** - Sparse Search đã được migrate từ Neo4j sang PostgreSQL tsvector.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -271,11 +274,11 @@ Hệ thống persona được cấu hình qua file YAML, hỗ trợ cá nhân h�
 │         ▼                     ▼                                             │
 │   ┌───────────────┐    ┌───────────────┐                                    │
 │   │ Dense Search  │    │ Sparse Search │                                    │
-│   │ (pgvector)    │    │ (Neo4j FTS)   │                                    │
+│   │ (pgvector)    │    │ (tsvector)    │  ← MIGRATED from Neo4j             │
 │   │               │    │               │                                    │
 │   │ Semantic      │    │ Keyword       │                                    │
 │   │ Similarity    │    │ Matching      │                                    │
-│   │ (Cosine)      │    │ (BM25-like)   │                                    │
+│   │ (Cosine)      │    │ (ts_rank)     │                                    │
 │   └───────┬───────┘    └───────┬───────┘                                    │
 │           │                    │                                             │
 │           └────────┬───────────┘                                             │
@@ -284,8 +287,8 @@ Hệ thống persona được cấu hình qua file YAML, hỗ trợ cá nhân h�
 │           │   RRF Reranker    │                                             │
 │           │   (k=60)          │                                             │
 │           │                   │                                             │
-│           │ + Title Boosting  │  ← NEW in v0.5.2                            │
-│           │ + Sparse Priority │  ← Strong Boost x3.0                        │
+│           │ + Title Boosting  │                                             │
+│           │ + Number Boosting │  ← Rule numbers (15, 19...)                 │
 │           └─────────┬─────────┘                                             │
 │                     ▼                                                        │
 │           ┌───────────────────┐                                             │
@@ -293,18 +296,57 @@ Hệ thống persona được cấu hình qua file YAML, hỗ trợ cá nhân h�
 │           │  (Top-K by RRF)   │                                             │
 │           └───────────────────┘                                             │
 │                                                                              │
+│   Neo4j: Reserved for future Learning Graph (LMS integration)               │
+│                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - **Dense Search (pgvector)**: Semantic similarity với Gemini embeddings (768 dims, L2 normalized)
-- **Sparse Search (Neo4j Full-text)**: Keyword matching với BM25-like scoring
+- **Sparse Search (PostgreSQL tsvector)**: Keyword matching với ts_rank scoring + Vietnamese support
 - **RRF Reranker**: Reciprocal Rank Fusion (k=60) - boost documents xuất hiện ở cả 2 nguồn
-- **Title Match Boosting v2**: Strong Boost x3.0 cho số hiệu (Rule 15, 19...) và proper nouns (COLREGs, SOLAS, MARPOL)
-- **Sparse Priority Boost**: 1.5x boost cho exact keyword matches (sparse score > 15.0)
-- **Top-1 Citation Accuracy**: 100% - Rule đúng luôn ở vị trí #1
-- **Graceful Degradation**: Fallback về Sparse-only nếu Dense không khả dụng
+- **Number Boosting**: 2.0x boost cho rule numbers (Rule 15, Điều 19...)
+- **Vietnamese Support**: Stop words + Maritime synonyms (cảnh giới ↔ lookout, tàu ↔ vessel)
+- **Graceful Degradation**: Fallback về Dense-only nếu Sparse không khả dụng
 
-### Test Results (04/12/2024)
+### Sparse Search Migration v0.6.0 (NEW - 09/12/2024)
+
+**Feature: sparse-search-migration** - Migrate Sparse Search từ Neo4j sang PostgreSQL tsvector.
+
+**Mục tiêu:**
+- Đơn giản hóa architecture (1 database thay vì 2)
+- Giảm chi phí infrastructure
+- Neo4j reserved cho future Learning Graph (LMS integration)
+
+**Thay đổi chính:**
+
+| Component | Before | After |
+|-----------|--------|-------|
+| Sparse Search | Neo4j Full-text Index | PostgreSQL tsvector |
+| Scoring | BM25-like | ts_rank |
+| Index | Neo4j knowledge_fulltext | GIN idx_knowledge_search_vector |
+| Neo4j Role | RAG + Knowledge Graph | Learning Graph only (optional) |
+
+**Database Schema (Migration 004):**
+```sql
+-- Add tsvector column
+ALTER TABLE knowledge_embeddings ADD COLUMN search_vector tsvector;
+
+-- Create GIN index
+CREATE INDEX idx_knowledge_search_vector ON knowledge_embeddings USING GIN(search_vector);
+
+-- Auto-generate trigger
+CREATE TRIGGER trg_update_search_vector
+BEFORE INSERT OR UPDATE ON knowledge_embeddings
+FOR EACH ROW EXECUTE FUNCTION update_search_vector();
+```
+
+**Test Script:**
+```bash
+# Run sparse search migration test
+python scripts/test_sparse_search.py
+```
+
+### Test Results (09/12/2024)
 
 ```
 ✅ RAG Agent Response:
@@ -510,16 +552,17 @@ Nâng cấp từ "Atomic Facts" sang "Behavioral Insights" - biến AI từ "Th�
 │  └───────────────────────────────────────────────────────────────────────┘  │
 │                                    │                                         │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │                      Hybrid Search Service                             │  │
-│  │  Dense (pgvector) + Sparse (Neo4j FTS) → RRF Reranker → Merged Results │  │
+│  │                      Hybrid Search Service v0.6                        │  │
+│  │  Dense (pgvector) + Sparse (tsvector) → RRF Reranker → Merged Results  │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
           │                         │                         │
           ▼                         ▼                         ▼
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │   PostgreSQL    │     │     Neo4j       │     │  Google Gemini  │
-│   (Neon)        │     │  Knowledge      │     │  2.5 Flash      │
-│   + pgvector    │     │  Graph + FTS    │     │  + Embeddings   │
+│   (Neon)        │     │  (OPTIONAL)     │     │  2.5 Flash      │
+│   + pgvector    │     │  Reserved for   │     │  + Embeddings   │
+│   + tsvector    │     │  Learning Graph │     │                 │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
 ```
 
@@ -549,27 +592,30 @@ maritime-ai-service/
 │   ├── models/                      # Pydantic & SQLAlchemy models
 │   ├── repositories/
 │   │   ├── dense_search_repository.py   # pgvector similarity search
-│   │   ├── sparse_search_repository.py  # Neo4j full-text search
-│   │   ├── neo4j_knowledge_repository.py
+│   │   ├── sparse_search_repository.py  # PostgreSQL tsvector search (v0.6)
+│   │   ├── neo4j_knowledge_repository.py # Reserved for Learning Graph
 │   │   ├── semantic_memory_repository.py
 │   │   └── chat_history_repository.py
 │   └── services/
 │       ├── chat_service.py          # Main integration service
 │       ├── hybrid_search_service.py # Dense + Sparse + RRF
 │       └── ingestion_service.py     # PDF ingestion pipeline
-├── alembic/                         # Database migrations
+├── alembic/
+│   └── versions/
+│       ├── 001_initial_schema.py        # Initial tables
+│       ├── 002_add_multimodal_columns.py # Multimodal RAG
+│       ├── 003_add_chunking_columns.py   # Semantic chunking
+│       └── 004_add_sparse_search_support.py # tsvector + GIN index (NEW)
 ├── archive/                         # Archived legacy code
 │   ├── chat_agent.py                # Legacy ChatAgent (replaced by UnifiedAgent)
 │   └── graph.py                     # Legacy AgentOrchestrator
 ├── assets/                          # Static assets (images)
 ├── scripts/
-│   ├── migrations/                  # SQL migration scripts
-│   ├── data/                        # Data import scripts
-│   │   ├── import_colregs.py        # Import COLREGs to Neo4j
-│   │   └── reingest_with_embeddings.py
-│   └── utils/                       # Utility scripts
-│       ├── check_*.py               # Health check scripts
-│       └── verify_all_systems.py    # System verification
+│   ├── test_sparse_search.py        # Sparse search migration test (NEW)
+│   ├── test_hybrid_search.py        # Hybrid search test
+│   ├── reingest_with_chunking.py    # Re-ingest with semantic chunking
+│   ├── reingest_multimodal.py       # Multimodal ingestion
+│   └── ingest_local_chunking.py     # Local chunking ingestion
 ├── tests/
 │   ├── property/                    # Property-based tests (Hypothesis)
 │   ├── unit/                        # Unit tests
@@ -591,9 +637,12 @@ maritime-ai-service/
 
 - Python 3.11+
 - Docker & Docker Compose
-- Neo4j (local or Aura)
+- Neo4j (local or Aura) - Optional, reserved for Learning Graph
 - PostgreSQL with pgvector (local or Neon)
 - Google Gemini API Key
+- Supabase account (for image storage - CHỈ THỊ 26)
+
+**Note**: PDF processing uses PyMuPDF (no external dependencies like Poppler required).
 
 ### 1. Clone & Setup
 
@@ -1045,6 +1094,7 @@ TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.9.1 | 2025-12-09 | **MULTIMODAL RAG ENHANCEMENT**: Replace pdf2image+Poppler with PyMuPDF (no external deps), Add `image_url` to API response (sources), Evidence Images support in chat response, Cross-platform PDF processing |
 | v0.9.0 | 2025-12-07 | **PROJECT RESTRUCTURE**: CHỈ THỊ SỐ 25 - Modular Semantic Memory (core.py, context.py, extraction.py), Legacy Code Removal (UnifiedAgent required), Test Organization (e2e/integration/unit/property), Scripts Organization (migrations/data/utils), Documentation Consolidation |
 | v0.8.6 | 2025-12-07 | **SYSTEM LOGIC FLOW REPORT**: Báo cáo luồng logic thực sự - Complete System Flow diagram, Component Integration Verification table, Data Flow Verification, Xác minh tất cả components đã được tích hợp đúng cách |
 | v0.8.5 | 2025-12-07 | **INSIGHT MEMORY ENGINE v0.5**: CHỈ THỊ SỐ 23 CẢI TIẾN - Behavioral Insights thay vì Atomic Facts, 5 Insight Categories (learning_style, knowledge_gap, goal_evolution, habit, preference), InsightExtractor + InsightValidator + MemoryConsolidator, LLM-based Consolidation (40/50 threshold), Category-Prioritized Retrieval, Duplicate/Contradiction Detection, Evolution Notes tracking, Full integration vào ChatService |
@@ -1251,6 +1301,14 @@ User Message → Guardian (ALLOW) → Session → Memory Retrieval
 
 ## Van de da biet va Cong viec tuong lai
 
+### Da giai quyet (v0.9.1 - Multimodal RAG Enhancement)
+- **PyMuPDF Migration**: Thay the pdf2image+Poppler bang PyMuPDF - khong can external dependencies
+- **Evidence Images in API**: Them `image_url` vao sources trong chat response
+- **Cross-platform PDF Processing**: Hoat dong tren Windows/Linux/macOS khong can cai them gi
+- **Dockerfile Optimization**: Loai bo poppler-utils, giam kich thuoc Docker image
+- **Sparse Search Migration**: Migrate Sparse Search tu Neo4j sang PostgreSQL tsvector (Migration 004)
+- **Semantic Chunking v2.7.0**: Maritime-specific patterns (Dieu, Khoan, Rule), Content Type Classification
+
 ### Da giai quyet (v0.8.5 - Insight Memory Engine)
 - **Behavioral Insights**: Chuyen tu "Atomic Facts" sang "Behavioral Insights" - AI hieu user hon
 - **5 Insight Categories**: learning_style, knowledge_gap, goal_evolution, habit, preference
@@ -1338,9 +1396,12 @@ User Message → Guardian (ALLOW) → Session → Memory Retrieval
 - **Sua loi Circular Import**: Khac phuc circular import giua rag_tool.py va chat_service.py
 
 ### Dang thuc hien
+- **Full Multimodal Re-ingestion**: Re-ingest tat ca PDF voi multimodal pipeline de co evidence images
 - **Vietnamese Text Chunking**: Phat hien ranh gioi cau cho PDF tieng Viet
 
 ### Du kien
+- **Learning Graph Integration**: Tich hop Neo4j cho Learning Graph (LMS integration)
+- **Evidence Images UI**: Hien thi anh trang tai lieu trong frontend
 - Kiem tra bo nho cross-session
 - Phan tich learning profile
 - Ho tro da ngon ngu (EN/VN)

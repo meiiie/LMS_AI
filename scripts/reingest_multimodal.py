@@ -35,6 +35,7 @@ async def main():
     parser.add_argument("--document-id", required=True, help="Document identifier")
     parser.add_argument("--resume", action="store_true", default=True, help="Resume from last page")
     parser.add_argument("--no-resume", action="store_true", help="Start from beginning")
+    parser.add_argument("--max-pages", type=int, default=None, help="Maximum pages to process (for testing)")
     args = parser.parse_args()
     
     pdf_path = Path(args.pdf)
@@ -48,6 +49,8 @@ async def main():
     print(f"\n📄 PDF: {pdf_path}")
     print(f"🆔 Document ID: {args.document_id}")
     print(f"🔄 Resume: {not args.no_resume}")
+    if args.max_pages:
+        print(f"📑 Max Pages: {args.max_pages} (test mode)")
     
     # Import service
     from app.services.multimodal_ingestion_service import get_ingestion_service
@@ -65,7 +68,8 @@ async def main():
     result = await service.ingest_pdf(
         pdf_path=str(pdf_path),
         document_id=args.document_id,
-        resume=not args.no_resume
+        resume=not args.no_resume,
+        max_pages=args.max_pages
     )
     
     # Print results

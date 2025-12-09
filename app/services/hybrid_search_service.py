@@ -1,10 +1,10 @@
 """
 Hybrid Search Service for Maritime AI Tutor.
 
-Combines Dense Search (pgvector) and Sparse Search (Neo4j Full-text)
+Combines Dense Search (pgvector) and Sparse Search (PostgreSQL tsvector)
 with RRF reranking for optimal retrieval.
 
-Feature: hybrid-search
+Feature: hybrid-search, sparse-search-migration
 Requirements: 1.1, 1.2, 1.3, 1.4, 2.2, 2.3, 5.1, 5.2, 7.1, 7.2, 7.3, 7.4
 """
 
@@ -27,10 +27,10 @@ class HybridSearchService:
     Coordinates:
     1. Query preprocessing (extract keywords, rule numbers)
     2. Dense search via pgvector (semantic similarity)
-    3. Sparse search via Neo4j Full-text (keyword matching)
+    3. Sparse search via PostgreSQL tsvector (keyword matching)
     4. RRF reranking to merge results
     
-    Feature: hybrid-search
+    Feature: hybrid-search, sparse-search-migration
     Requirements: 1.1, 1.2, 1.3, 5.1, 5.2
     """
     
@@ -317,7 +317,7 @@ class HybridSearchService:
     async def close(self):
         """Close all connections."""
         await self._dense_repo.close()
-        self._sparse_repo.close()
+        await self._sparse_repo.close()
         logger.info("HybridSearchService closed")
 
 

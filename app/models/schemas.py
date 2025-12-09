@@ -93,12 +93,14 @@ class Source(BaseModel):
     title: str = Field(..., description="Source title")
     source_type: str = Field(..., description="Type: regulation, concept, etc.")
     content_snippet: Optional[str] = Field(default=None, description="Relevant content snippet")
+    image_url: Optional[str] = Field(default=None, description="URL ảnh trang tài liệu (CHỈ THỊ 26)")
 
 
 class SourceInfo(BaseModel):
     """Source citation info for LMS response"""
     title: str = Field(..., description="Tiêu đề nguồn tài liệu")
     content: str = Field(..., description="Nội dung trích dẫn")
+    image_url: Optional[str] = Field(default=None, description="URL ảnh trang tài liệu (CHỈ THỊ 26)")
 
 
 class ChatResponseData(BaseModel):

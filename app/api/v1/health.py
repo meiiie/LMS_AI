@@ -149,16 +149,65 @@ async def check_supabase_storage_health() -> ComponentHealth:
         )
 
 
+async def check_sparse_search_health() -> ComponentHealth:
+    """
+    Check PostgreSQL Sparse Search health.
+    
+    Feature: sparse-search-migration
+    Requirements: 5.2
+    
+    Sparse search uses PostgreSQL tsvector for keyword-based search.
+    This is part of the Hybrid Search system.
+    """
+    start = time.time()
+    
+    try:
+        from app.repositories.sparse_search_repository import SparseSearchRepository
+        
+        sparse_repo = SparseSearchRepository()
+        is_available = sparse_repo.is_available()
+        
+        latency = (time.time() - start) * 1000
+        
+        if is_available:
+            return ComponentHealth(
+                name="Sparse Search",
+                status=ComponentStatus.HEALTHY,
+                latency_ms=round(latency, 2),
+                message="PostgreSQL tsvector search available",
+            )
+        else:
+            return ComponentHealth(
+                name="Sparse Search",
+                status=ComponentStatus.UNAVAILABLE,
+                latency_ms=round(latency, 2),
+                message="Sparse search unavailable (DATABASE_URL not configured)",
+            )
+    except Exception as e:
+        latency = (time.time() - start) * 1000
+        logger.warning(f"Sparse search health check failed: {e}")
+        return ComponentHealth(
+            name="Sparse Search",
+            status=ComponentStatus.UNAVAILABLE,
+            latency_ms=round(latency, 2),
+            message=str(e),
+        )
+
+
 async def check_knowledge_graph_health() -> ComponentHealth:
     """
     Check Neo4j Knowledge Graph health using real connection.
+    
+    NOTE: Neo4j is OPTIONAL for RAG functionality after sparse-search-migration.
+    RAG now uses PostgreSQL for both dense (pgvector) and sparse (tsvector) search.
+    Neo4j is reserved for future Learning Graph integration with LMS.
     
     CRITICAL: This function runs a real query (RETURN 1) to Neo4j.
     This is essential for Neo4j Aura Free Tier which pauses after 72 hours
     of inactivity. Each health check ping resets the inactivity timer.
     
     Requirements: 1.2, 1.8
-    Expert Feedback: Must run actual query, not just check variable
+    Feature: sparse-search-migration (Neo4j now optional for RAG)
     """
     start = time.time()
     
@@ -180,7 +229,7 @@ async def check_knowledge_graph_health() -> ComponentHealth:
                 name="Neo4j Knowledge Graph",
                 status=ComponentStatus.HEALTHY,
                 latency_ms=round(latency, 2),
-                message="Neo4j connected (ping OK)",
+                message="Neo4j connected (reserved for Learning Graph)",
             )
         elif neo4j_repo.is_available():
             # Connection exists but ping failed
@@ -191,20 +240,22 @@ async def check_knowledge_graph_health() -> ComponentHealth:
                 message="Neo4j connected but ping failed",
             )
         else:
+            # Neo4j unavailable is OK - RAG works without it
             return ComponentHealth(
                 name="Neo4j Knowledge Graph",
                 status=ComponentStatus.UNAVAILABLE,
                 latency_ms=round(latency, 2),
-                message="Neo4j connection unavailable",
+                message="Neo4j unavailable (optional for RAG)",
             )
     except Exception as e:
         latency = (time.time() - start) * 1000
-        logger.error(f"Knowledge Graph health check failed: {e}")
+        # Log as warning, not error - Neo4j is optional
+        logger.warning(f"Knowledge Graph health check failed: {e}")
         return ComponentHealth(
             name="Neo4j Knowledge Graph",
             status=ComponentStatus.UNAVAILABLE,
             latency_ms=round(latency, 2),
-            message=str(e),
+            message=f"Neo4j unavailable (optional): {str(e)}",
         )
 
 
@@ -312,17 +363,23 @@ async def health_check_deep() -> HealthResponse:
     CHỈ THỊ 19: Chỉ dùng cho Debug/Admin
     - KHÔNG để Cronjob ping vào endpoint này
     - Sẽ tiêu tốn compute hours của Neon
+    
+    Feature: sparse-search-migration
+    - Added Sparse Search health check (PostgreSQL tsvector)
+    - Neo4j is now optional for RAG
     """
     # Check all components with timeout
     api_health = await check_with_timeout(check_api_health, "API")
     memory_health = await check_with_timeout(check_memory_health, "Memory Engine")
+    sparse_health = await check_with_timeout(check_sparse_search_health, "Sparse Search")
     kg_health = await check_with_timeout(check_knowledge_graph_health, "Neo4j Knowledge Graph")
     supabase_health = await check_with_timeout(check_supabase_storage_health, "Supabase Storage")
     
     components = {
         "api": api_health,
         "memory": memory_health,
-        "knowledge_graph": kg_health,
+        "sparse_search": sparse_health,  # Feature: sparse-search-migration
+        "knowledge_graph": kg_health,  # Optional for RAG, reserved for Learning Graph
         "supabase_storage": supabase_health,  # CHỈ THỊ 26: Hybrid Infrastructure
     }
     

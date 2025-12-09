@@ -101,13 +101,14 @@ async def chat_completion(
         
         processing_time = time.time() - start_time
         
-        # Convert sources to LMS format
+        # Convert sources to LMS format (CHỈ THỊ 26: include image_url)
         sources = []
         if internal_response.sources:
             for src in internal_response.sources:
                 sources.append(SourceInfo(
                     title=src.title,
-                    content=src.content_snippet or ""
+                    content=src.content_snippet or "",
+                    image_url=getattr(src, 'image_url', None)
                 ))
         
         # Generate suggested questions based on context

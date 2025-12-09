@@ -5,7 +5,12 @@ This module implements the RAG (Retrieval-Augmented Generation) agent
 that queries the Knowledge Graph and generates responses with citations.
 Now uses Hybrid Search (Dense + Sparse) for improved retrieval.
 
-**Feature: maritime-ai-tutor, hybrid-search**
+Feature: sparse-search-migration
+- RAG now uses PostgreSQL for both dense (pgvector) and sparse (tsvector) search
+- Neo4j is OPTIONAL and reserved for future Learning Graph integration
+- System works fully without Neo4j connection
+
+**Feature: maritime-ai-tutor, hybrid-search, sparse-search-migration**
 **Validates: Requirements 4.1, 4.2, 4.4, 8.3**
 """
 
@@ -39,7 +44,14 @@ _knowledge_repo = None
 
 
 def get_knowledge_repository():
-    """Get the Neo4j knowledge repository (cached)."""
+    """
+    Get the Neo4j knowledge repository (cached).
+    
+    Feature: sparse-search-migration
+    NOTE: Neo4j is now OPTIONAL for RAG. RAG uses PostgreSQL for both
+    dense (pgvector) and sparse (tsvector) search. Neo4j is reserved
+    for future Learning Graph integration with LMS.
+    """
     global _knowledge_repo
     
     if _knowledge_repo is not None:
@@ -47,9 +59,10 @@ def get_knowledge_repository():
     
     _knowledge_repo = Neo4jKnowledgeRepository()
     if _knowledge_repo.is_available():
-        logger.info("Using Neo4j knowledge repository")
+        logger.info("Neo4j available (reserved for Learning Graph)")
     else:
-        logger.warning("Neo4j unavailable - RAG queries will return empty results")
+        # This is OK - RAG works without Neo4j
+        logger.info("Neo4j unavailable - RAG uses PostgreSQL hybrid search")
     
     return _knowledge_repo
 
@@ -224,7 +237,10 @@ class RAGAgent:
         **Feature: hybrid-search**
         """
         # Check if search is available
-        if not self._hybrid_search.is_available() and not self._kg.is_available():
+        # Feature: sparse-search-migration - RAG works with PostgreSQL only (Neo4j optional)
+        if not self._hybrid_search.is_available():
+            # Hybrid search (PostgreSQL) is the primary search method
+            # Neo4j is optional and reserved for future Learning Graph
             return self._create_fallback_response(question)
         
         # Perform hybrid search (Dense + Sparse with RRF)
@@ -364,7 +380,8 @@ class RAGAgent:
                 node_id=r.node_id,
                 source=r.source or "Maritime Knowledge Base",
                 title=enhanced_title,
-                relevance_score=r.rrf_score
+                relevance_score=r.rrf_score,
+                image_url=r.image_url  # CHỈ THỊ 26: Evidence images
             ))
         return citations
     
@@ -622,8 +639,14 @@ Hãy trả lời câu hỏi dựa trên thông tin trên."""
         )
     
     def is_available(self) -> bool:
-        """Check if RAG Agent is available."""
-        return self._kg.is_available()
+        """
+        Check if RAG Agent is available.
+        
+        Feature: sparse-search-migration
+        RAG is available if hybrid search (PostgreSQL) is available.
+        Neo4j is optional and not required for RAG functionality.
+        """
+        return self._hybrid_search.is_available()
 
 
 class MaritimeDocumentParser:

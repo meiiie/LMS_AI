@@ -14,8 +14,16 @@ from typing import List, Optional
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pdf2image import convert_from_path
 from PIL import Image
+import io
+
+# Try PyMuPDF first (no external dependencies), fallback to pdf2image
+try:
+    import fitz  # PyMuPDF
+    USE_PYMUPDF = True
+except ImportError:
+    from pdf2image import convert_from_path
+    USE_PYMUPDF = False
 
 from app.core.config import settings
 from app.core.database import get_shared_session_factory
@@ -99,8 +107,10 @@ class MultimodalIngestionService:
         self.chunker = chunker or get_semantic_chunker()
     
     def _get_progress_file(self, document_id: str) -> Path:
-        """Get path to progress tracking file"""
-        return Path(f"/tmp/{document_id}{self.PROGRESS_FILE_SUFFIX}")
+        """Get path to progress tracking file (cross-platform)"""
+        import tempfile
+        temp_dir = Path(tempfile.gettempdir())
+        return temp_dir / f"{document_id}{self.PROGRESS_FILE_SUFFIX}"
     
     def _load_progress(self, document_id: str) -> int:
         """
@@ -143,7 +153,7 @@ class MultimodalIngestionService:
         
         Args:
             pdf_path: Path to PDF file
-            dpi: Resolution for conversion (default 300)
+            dpi: Resolution for conversion (default 150 for memory efficiency)
             
         Returns:
             List of PIL Image objects
@@ -152,20 +162,39 @@ class MultimodalIngestionService:
         """
         logger.info(f"Converting PDF to images: {pdf_path} at {dpi} DPI")
         
-        images = convert_from_path(
-            pdf_path,
-            dpi=dpi,
-            fmt='jpeg'
-        )
+        if USE_PYMUPDF:
+            # Use PyMuPDF (no external dependencies like Poppler)
+            images = []
+            doc = fitz.open(pdf_path)
+            zoom = dpi / 72  # 72 is default PDF DPI
+            matrix = fitz.Matrix(zoom, zoom)
+            
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                pix = page.get_pixmap(matrix=matrix)
+                img_data = pix.tobytes("jpeg")
+                img = Image.open(io.BytesIO(img_data))
+                images.append(img)
+            
+            doc.close()
+            logger.info(f"Converted {len(images)} pages to images (PyMuPDF)")
+        else:
+            # Fallback to pdf2image (requires Poppler)
+            images = convert_from_path(
+                pdf_path,
+                dpi=dpi,
+                fmt='jpeg'
+            )
+            logger.info(f"Converted {len(images)} pages to images (pdf2image)")
         
-        logger.info(f"Converted {len(images)} pages to images")
         return images
     
     async def ingest_pdf(
         self,
         pdf_path: str,
         document_id: str,
-        resume: bool = True
+        resume: bool = True,
+        max_pages: Optional[int] = None
     ) -> IngestionResult:
         """
         Full ingestion pipeline: PDF → Images → Vision → Database.
@@ -174,6 +203,7 @@ class MultimodalIngestionService:
             pdf_path: Path to PDF file
             document_id: Unique identifier for the document
             resume: Whether to resume from last successful page
+            max_pages: Maximum pages to process (for testing)
             
         Returns:
             IngestionResult with summary statistics
@@ -208,15 +238,26 @@ class MultimodalIngestionService:
             if start_page > 0:
                 logger.info(f"Resuming from page {start_page + 1}")
         
+        # Limit pages if max_pages is set (for testing)
+        pages_to_process = total_pages
+        if max_pages is not None and max_pages > 0:
+            pages_to_process = min(max_pages, total_pages)
+            logger.info(f"Limiting to {pages_to_process} pages (test mode)")
+        
         # Process each page
         for page_num, image in enumerate(images):
+            # Stop if we've reached max_pages
+            if max_pages is not None and page_num >= max_pages:
+                logger.info(f"Reached max_pages limit ({max_pages}), stopping")
+                break
+            
             # Skip already processed pages
             if page_num < start_page:
                 successful_pages += 1
                 continue
             
             # Log progress
-            logger.info(f"Processing page {page_num + 1} of {total_pages}")
+            logger.info(f"Processing page {page_num + 1} of {pages_to_process}")
             
             try:
                 result = await self._process_page(

@@ -78,8 +78,8 @@ PDF Document
      │
      ▼
 ┌─────────────────┐
-│ 1. RASTERIZE    │  pdf2image (300 DPI)
-│ PDF → Images    │  Requires: poppler-utils
+│ 1. RASTERIZE    │  PyMuPDF (150 DPI)
+│ PDF → Images    │  No external deps (replaces pdf2image+Poppler)
 └────────┬────────┘
          │
          ▼
@@ -308,13 +308,23 @@ alembic upgrade head
 
 ## 8. Troubleshooting
 
-### Lỗi pdf2image
+### Lỗi PDF Processing
 
+**Note**: Từ v2.7.1, hệ thống sử dụng **PyMuPDF** thay vì pdf2image+Poppler.
+PyMuPDF không cần external dependencies, hoạt động trên mọi platform.
+
+Nếu gặp lỗi với PyMuPDF:
 ```
-Error: Unable to get page count. Is poppler installed?
+Error: No module named 'fitz'
 ```
 
 **Giải pháp:**
+```bash
+pip install pymupdf
+```
+
+**Legacy (pdf2image - không còn cần thiết):**
+Nếu vẫn muốn dùng pdf2image (fallback):
 - Windows: Cài Poppler và thêm vào PATH
 - Linux/Docker: `apt-get install -y poppler-utils`
 - macOS: `brew install poppler`

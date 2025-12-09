@@ -1,16 +1,19 @@
 """
-Sparse Search Repository for Hybrid Search.
+Sparse Search Repository using PostgreSQL full-text search.
 
-Uses Neo4j Full-text Index for keyword-based search with BM25-style scoring.
+Provides keyword-based search with tsvector/tsquery and ts_rank scoring.
+Migrated from Neo4j to PostgreSQL for architecture simplification.
 
-Feature: hybrid-search
-Requirements: 3.1, 3.2, 3.3, 3.4
+Feature: sparse-search-migration
+Requirements: 3.1, 3.2, 3.3, 3.4, 4.1, 4.2, 4.3, 4.4
 """
 
 import logging
 import re
 from dataclasses import dataclass
 from typing import List, Optional
+
+import asyncpg
 
 from app.core.config import settings
 
@@ -19,13 +22,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SparseSearchResult:
-    """Result from sparse (keyword) search."""
+    """Result from sparse (keyword) search - unchanged interface."""
     node_id: str
     title: str
     content: str
     source: str
     category: str
-    score: float  # BM25-style relevance score
+    score: float
     
     def __post_init__(self):
         # Ensure score is non-negative
@@ -34,46 +37,45 @@ class SparseSearchResult:
 
 class SparseSearchRepository:
     """
-    Repository for keyword-based search using Neo4j Full-text Index.
+    PostgreSQL-based sparse search using tsvector/tsquery.
     
-    Provides BM25-style scoring with number boosting for rule numbers.
+    Replaces Neo4j full-text search with PostgreSQL native full-text search.
+    Uses 'simple' configuration for language-agnostic tokenization (Vietnamese support).
     
-    Feature: hybrid-search
-    Requirements: 3.1, 3.2, 3.3, 3.4
+    Feature: sparse-search-migration
+    Requirements: 4.1, 4.2, 4.3, 4.4
     """
     
-    # Full-text index name
-    INDEX_NAME = "knowledge_fulltext"
-    
-    # Number boost factor for rule numbers in titles
-    NUMBER_BOOST_FACTOR = 5.0
+    # Number boost factor for rule numbers
+    NUMBER_BOOST_FACTOR = 2.0
     
     def __init__(self):
-        """Initialize repository with Neo4j connection."""
-        self._driver = None
+        """Initialize repository."""
         self._available = False
-        self._init_driver()
+        self._init_connection()
     
-    def _init_driver(self):
-        """Initialize Neo4j driver."""
+    def _init_connection(self):
+        """Initialize PostgreSQL connection check."""
         try:
-            from neo4j import GraphDatabase
-            
-            username = settings.neo4j_username_resolved
-            
-            self._driver = GraphDatabase.driver(
-                settings.neo4j_uri,
-                auth=(username, settings.neo4j_password)
-            )
-            self._driver.verify_connectivity()
-            self._available = True
-            logger.info(f"SparseSearchRepository connected to {settings.neo4j_uri}")
+            if settings.database_url:
+                self._available = True
+                logger.info("PostgreSQL sparse search repository initialized")
+            else:
+                logger.warning("DATABASE_URL not configured, sparse search unavailable")
         except Exception as e:
-            logger.warning(f"Neo4j connection failed for sparse search: {e}")
+            logger.error(f"Failed to initialize PostgreSQL sparse search: {e}")
             self._available = False
     
+    def _get_asyncpg_url(self) -> str:
+        """Get database URL in asyncpg format (without +asyncpg suffix)."""
+        url = settings.database_url or ''
+        # Convert SQLAlchemy format to asyncpg format
+        if url.startswith('postgresql+asyncpg://'):
+            url = url.replace('postgresql+asyncpg://', 'postgresql://')
+        return url
+    
     def is_available(self) -> bool:
-        """Check if sparse search is available."""
+        """Check if PostgreSQL sparse search is available."""
         return self._available
     
     def _extract_numbers(self, query: str) -> List[str]:
@@ -88,44 +90,137 @@ class SparseSearchRepository:
         """
         return re.findall(r'\b(\d+)\b', query)
     
-    def _build_search_query(self, query: str) -> str:
+    def _get_synonyms(self, word: str) -> List[str]:
         """
-        Build Lucene query string for full-text search.
-        
-        Handles Vietnamese and English queries with fuzzy matching.
+        Get synonyms for maritime terms.
         
         Args:
-            query: User search query
+            word: Input word
             
         Returns:
-            Lucene query string
+            List of synonyms
         """
-        # Clean and tokenize query
-        words = query.lower().split()
+        SYNONYMS = {
+            "quy": ["rule", "regulation"],
+            "tắc": ["rule", "regulation"],
+            "rule": ["quy", "tắc", "regulation", "điều"],
+            "điều": ["rule", "quy", "tắc", "regulation"],
+            "cảnh": ["look", "watch"],
+            "giới": ["out", "watch"],
+            "look": ["cảnh", "watch"],
+            "out": ["giới", "watch"],
+            "lookout": ["cảnh", "giới", "watch"],
+            "tàu": ["vessel", "ship"],
+            "vessel": ["tàu", "ship"],
+            "ship": ["tàu", "vessel"],
+            "cắt": ["crossing", "cross"],
+            "hướng": ["crossing", "direction"],
+            "crossing": ["cắt", "hướng"],
+            "tầm": ["visibility", "range"],
+            "nhìn": ["visibility", "sight"],
+            "visibility": ["tầm", "nhìn"],
+            "đèn": ["light", "lighting"],
+            "light": ["đèn", "lighting"],
+            "âm": ["sound", "signal"],
+            "hiệu": ["signal", "sound"],
+            "sound": ["âm", "hiệu"],
+            "signal": ["âm", "hiệu"],
+            "neo": ["anchor", "anchoring"],
+            "anchor": ["neo", "anchoring"],
+        }
+        return SYNONYMS.get(word, [])
+    
+    def _build_tsquery(self, query: str) -> str:
+        """
+        Build PostgreSQL tsquery from natural language query.
         
-        # Remove common stop words
+        Handles:
+        - Vietnamese and English text
+        - Stop word removal
+        - OR between terms for broader matching
+        - Synonym expansion for maritime terms
+        
+        Args:
+            query: Original search query
+            
+        Returns:
+            PostgreSQL tsquery string
+            
+        Requirements: 3.2
+        """
+        # Stop words (Vietnamese and English)
         stop_words = {
-            "là", "gì", "the", "what", "is", "a", "an", "về", "cho", "tôi",
-            "me", "about", "of", "in", "on", "at", "to", "for", "and", "or",
-            "how", "why", "when", "where", "which", "who", "như", "thế", "nào"
+            "là", "gì", "về", "của", "và", "có", "được", "trong", "với", 
+            "cho", "từ", "này", "đó", "như", "thế", "nào", "tôi", "me",
+            "the", "what", "is", "a", "an", "and", "or", "but", "in", 
+            "on", "at", "to", "for", "of", "with", "by", "how", "why",
+            "when", "where", "which", "who", "about"
         }
         
-        words = [w for w in words if w not in stop_words and len(w) > 1]
+        # Extract meaningful words
+        words = [
+            w.strip() for w in query.lower().split() 
+            if w.strip() and w.strip() not in stop_words and len(w.strip()) > 1
+        ]
         
         if not words:
-            return query
+            # Fallback to original query if no meaningful words
+            return query.replace("'", "''")
         
-        # Build query with OR between terms
-        # Use wildcards for partial matching
-        query_parts = []
+        # Add synonyms for maritime terms
+        enhanced_words = []
         for word in words:
-            # Exact match gets higher priority
-            query_parts.append(word)
-            # Wildcard for partial match
-            if len(word) > 2:
-                query_parts.append(f"{word}*")
+            enhanced_words.append(word)
+            synonyms = self._get_synonyms(word)
+            enhanced_words.extend(synonyms)
         
-        return " OR ".join(query_parts)
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_words = []
+        for w in enhanced_words:
+            if w not in seen:
+                seen.add(w)
+                unique_words.append(w)
+        
+        # Build OR query: word1 | word2 | word3
+        # Escape single quotes for PostgreSQL
+        escaped_words = [w.replace("'", "''") for w in unique_words]
+        return " | ".join(escaped_words)
+    
+    def _apply_number_boost(
+        self, 
+        results: List[SparseSearchResult],
+        query: str
+    ) -> List[SparseSearchResult]:
+        """
+        Boost results containing rule numbers from query.
+        
+        E.g., "Rule 15" query boosts results with "15" in content.
+        
+        Args:
+            results: Original search results
+            query: Original search query
+            
+        Returns:
+            Results with number boosting applied
+            
+        Requirements: 3.3
+        """
+        numbers = self._extract_numbers(query)
+        
+        if not numbers:
+            return results
+        
+        # Apply boosting
+        for result in results:
+            for num in numbers:
+                if num in result.content or num in result.title:
+                    result.score *= self.NUMBER_BOOST_FACTOR
+                    logger.debug(f"Applied number boost for '{num}' to result {result.node_id}")
+        
+        # Re-sort by score
+        return sorted(results, key=lambda x: x.score, reverse=True)
+
     
     async def search(
         self,
@@ -133,140 +228,78 @@ class SparseSearchRepository:
         limit: int = 10
     ) -> List[SparseSearchResult]:
         """
-        Search using Neo4j full-text index.
+        Search using PostgreSQL full-text search.
+        
+        Uses ts_rank for scoring with number boosting.
         
         Args:
-            query: Search query (supports natural language)
-            limit: Maximum results to return
+            query: Search query
+            limit: Maximum number of results
             
         Returns:
-            List of SparseSearchResult sorted by score (descending)
+            List of sparse search results sorted by score (descending)
             
-        Requirements: 3.2, 3.3, 3.4
+        Requirements: 3.1, 3.2, 3.3, 3.4
         """
-        if not self._available:
-            logger.warning("Sparse search not available")
+        if not self.is_available():
+            logger.warning("PostgreSQL sparse search not available")
             return []
         
         try:
-            # Extract numbers for boosting
-            numbers = self._extract_numbers(query)
+            # Build tsquery from natural language query
+            tsquery = self._build_tsquery(query)
             
-            # Build search query
-            search_query = self._build_search_query(query)
+            logger.info(f"Sparse search tsquery: {tsquery}")
             
-            logger.info(f"Sparse search query: {search_query}, numbers: {numbers}")
+            # Connect to database
+            conn = await asyncpg.connect(self._get_asyncpg_url())
             
-            with self._driver.session() as session:
-                # Use full-text index search
-                cypher = """
-                CALL db.index.fulltext.queryNodes($index_name, $search_query)
-                YIELD node, score
-                WITH node as k, score
-                RETURN 
-                    k.id as node_id,
-                    k.title as title,
-                    k.content as content,
-                    k.source as source,
-                    k.category as category,
-                    score
-                ORDER BY score DESC
-                LIMIT $limit
+            try:
+                # Execute PostgreSQL full-text search
+                sql = """
+                    SELECT 
+                        id::text as node_id,
+                        COALESCE(metadata->>'title', '') as title,
+                        content,
+                        COALESCE(metadata->>'source', '') as source,
+                        COALESCE(metadata->>'category', '') as category,
+                        ts_rank(search_vector, to_tsquery('simple', $1)) as score
+                    FROM knowledge_embeddings
+                    WHERE search_vector @@ to_tsquery('simple', $1)
+                    ORDER BY score DESC
+                    LIMIT $2
                 """
                 
-                result = session.run(
-                    cypher,
-                    index_name=self.INDEX_NAME,
-                    search_query=search_query,
-                    limit=limit * 2  # Get more for boosting
-                )
+                rows = await conn.fetch(sql, tsquery, limit * 2)  # Get more for boosting
                 
                 results = []
-                for record in result:
-                    node_id = record["node_id"] or ""
-                    title = record["title"] or ""
-                    content = record["content"] or ""
-                    source = record["source"] or ""
-                    category = record["category"] or ""
-                    base_score = float(record["score"])
-                    
-                    # Apply number boosting
-                    final_score = base_score
-                    if numbers:
-                        for num in numbers:
-                            # Boost if number appears in title
-                            if num in title:
-                                final_score += self.NUMBER_BOOST_FACTOR
-                                logger.debug(f"Boosted '{title}' for number {num}")
-                    
+                for row in rows:
                     results.append(SparseSearchResult(
-                        node_id=node_id,
-                        title=title,
-                        content=content,
-                        source=source,
-                        category=category,
-                        score=final_score
+                        node_id=row["node_id"],
+                        title=row["title"],
+                        content=row["content"],
+                        source=row["source"],
+                        category=row["category"],
+                        score=float(row["score"])
                     ))
                 
-                # Re-sort by boosted score and limit
-                results.sort(key=lambda x: x.score, reverse=True)
+                # Apply number boosting
+                results = self._apply_number_boost(results, query)
+                
+                # Limit results
                 results = results[:limit]
                 
-                logger.info(f"Sparse search returned {len(results)} results")
+                logger.info(f"PostgreSQL sparse search returned {len(results)} results for query: {query}")
                 return results
                 
+            finally:
+                await conn.close()
+                
         except Exception as e:
-            logger.error(f"Sparse search failed: {e}")
+            logger.error(f"PostgreSQL sparse search failed: {e}")
             return []
     
-    async def create_fulltext_index(self) -> bool:
-        """
-        Create full-text index on Knowledge nodes.
-        
-        Should be called once during setup.
-        
-        Returns:
-            True if index created/exists, False on error
-            
-        Requirements: 3.1
-        """
-        if not self._available:
-            return False
-        
-        try:
-            with self._driver.session() as session:
-                # Create index if not exists
-                cypher = """
-                CREATE FULLTEXT INDEX knowledge_fulltext IF NOT EXISTS
-                FOR (k:Knowledge) ON EACH [k.title, k.content]
-                """
-                session.run(cypher)
-                logger.info("Created/verified full-text index: knowledge_fulltext")
-                return True
-                
-        except Exception as e:
-            logger.error(f"Failed to create full-text index: {e}")
-            return False
-    
-    async def check_index_exists(self) -> bool:
-        """Check if full-text index exists."""
-        if not self._available:
-            return False
-        
-        try:
-            with self._driver.session() as session:
-                result = session.run(
-                    "SHOW INDEXES WHERE name = $name",
-                    name=self.INDEX_NAME
-                )
-                return result.single() is not None
-                
-        except Exception as e:
-            logger.error(f"Failed to check index: {e}")
-            return False
-    
-    def close(self):
-        """Close Neo4j connection."""
-        if self._driver:
-            self._driver.close()
-            logger.info("Closed SparseSearchRepository connection")
+    async def close(self):
+        """Close database connections (if any)."""
+        # PostgreSQL connections are handled per-request
+        logger.info("PostgreSQL sparse search repository closed")

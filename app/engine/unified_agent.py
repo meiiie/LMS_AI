@@ -132,12 +132,14 @@ async def tool_maritime_search(query: str) -> str:
         result = response.content
         
         # CHỈ THỊ KỸ THUẬT SỐ 16: Lưu sources để API trả về
+        # CHỈ THỊ 26: Include image_url for evidence images
         if response.citations:
             _last_retrieved_sources = [
                 {
                     "node_id": c.node_id,
                     "title": c.title,
-                    "content": c.source[:500] if c.source else ""  # Truncate for API
+                    "content": c.source[:500] if c.source else "",  # Truncate for API
+                    "image_url": getattr(c, 'image_url', None)  # CHỈ THỊ 26
                 }
                 for c in response.citations[:5]  # Top 5 sources
             ]

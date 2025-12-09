@@ -570,7 +570,8 @@ class ChatService:
                         node_id=s.get("node_id", ""),
                         title=s.get("title", ""),
                         source_type="knowledge_graph",
-                        content_snippet=s.get("content", "")[:200]  # Truncate for API
+                        content_snippet=s.get("content", "")[:200],  # Truncate for API
+                        image_url=s.get("image_url")  # CHỈ THỊ 26: Evidence images
                     )
                     for s in retrieved_sources
                 ]
@@ -770,7 +771,8 @@ class ChatService:
                     node_id=c.node_id,
                     title=c.title,
                     source_type="knowledge_graph",
-                    content_snippet=c.source
+                    content_snippet=c.source,
+                    image_url=getattr(c, 'image_url', None)  # CHỈ THỊ 26
                 )
                 for c in response.citations
             ]
