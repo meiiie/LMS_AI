@@ -551,6 +551,212 @@ Return ONLY valid JSON:"""
             logger.error(f"Failed to update last_accessed: {e}")
             return False
     
+    async def extract_and_store_insights(
+        self,
+        user_id: str,
+        message: str,
+        conversation_history: List[str] = None,
+        session_id: Optional[str] = None
+    ) -> List[Insight]:
+        """
+        Extract behavioral insights from message and store them.
+        
+        v0.5 (CHỈ THỊ 23 CẢI TIẾN):
+        1. Extract insights using InsightExtractor
+        2. Validate each insight
+        3. Handle duplicates (merge) and contradictions (update)
+        4. Check consolidation threshold
+        5. Store valid insights
+        
+        Args:
+            user_id: User ID
+            message: User message to extract insights from
+            conversation_history: Previous messages for context
+            session_id: Optional session ID
+            
+        Returns:
+            List of stored insights
+            
+        **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 5.1, 5.2, 5.3, 5.4**
+        """
+        try:
+            # Lazy init insight components
+            if self._insight_extractor is None:
+                try:
+                    from app.engine.insight_extractor import InsightExtractor
+                    self._insight_extractor = InsightExtractor()
+                except ImportError:
+                    logger.warning("InsightExtractor not available, skipping insight extraction")
+                    return []
+            
+            if self._insight_validator is None:
+                try:
+                    from app.engine.insight_validator import InsightValidator
+                    self._insight_validator = InsightValidator()
+                except ImportError:
+                    logger.warning("InsightValidator not available")
+                    self._insight_validator = None
+            
+            if self._memory_consolidator is None:
+                try:
+                    from app.engine.memory_consolidator import MemoryConsolidator
+                    self._memory_consolidator = MemoryConsolidator()
+                except ImportError:
+                    logger.warning("MemoryConsolidator not available")
+                    self._memory_consolidator = None
+            
+            # Step 1: Extract insights
+            insights = await self._insight_extractor.extract_insights(
+                user_id=user_id,
+                message=message,
+                conversation_history=conversation_history
+            )
+            
+            if not insights:
+                return []
+            
+            # Step 2: Get existing insights for validation
+            existing_insights = await self._get_user_insights(user_id)
+            
+            # Step 3: Validate and process each insight
+            stored_insights = []
+            for insight in insights:
+                if self._insight_validator:
+                    result = self._insight_validator.validate(insight, existing_insights)
+                    
+                    if not result.is_valid:
+                        logger.debug(f"Insight rejected: {result.reason}")
+                        continue
+                    
+                    if result.action == "merge":
+                        await self._merge_insight(insight, result.target_insight)
+                        stored_insights.append(insight)
+                        
+                    elif result.action == "update":
+                        await self._update_insight_with_evolution(insight, result.target_insight)
+                        stored_insights.append(insight)
+                        
+                    elif result.action == "store":
+                        await self._store_insight(insight, session_id)
+                        stored_insights.append(insight)
+                        existing_insights.append(insight)
+                else:
+                    # No validator, just store
+                    await self._store_insight(insight, session_id)
+                    stored_insights.append(insight)
+            
+            # Step 4: Check consolidation threshold
+            if self._memory_consolidator:
+                await self._check_and_consolidate(user_id)
+            
+            logger.info(f"Stored {len(stored_insights)} insights for user {user_id}")
+            return stored_insights
+            
+        except Exception as e:
+            logger.error(f"Failed to extract and store insights: {e}")
+            return []
+    
+    async def _get_user_insights(self, user_id: str) -> List[Insight]:
+        """Get all insights for a user."""
+        try:
+            memories = self._repository.get_user_facts(
+                user_id=user_id,
+                limit=self.MAX_INSIGHTS,
+                deduplicate=False
+            )
+            
+            insights = []
+            for mem in memories:
+                if mem.metadata.get("insight_category"):
+                    try:
+                        insight = Insight(
+                            id=mem.id,
+                            user_id=user_id,
+                            content=mem.content,
+                            category=InsightCategory(mem.metadata.get("insight_category")),
+                            sub_topic=mem.metadata.get("sub_topic"),
+                            confidence=mem.metadata.get("confidence", 0.8),
+                            source_messages=mem.metadata.get("source_messages", []),
+                            created_at=mem.created_at,
+                            evolution_notes=mem.metadata.get("evolution_notes", [])
+                        )
+                        insights.append(insight)
+                    except (ValueError, KeyError) as e:
+                        logger.debug(f"Skipping invalid insight: {e}")
+            
+            return insights
+            
+        except Exception as e:
+            logger.error(f"Failed to get user insights: {e}")
+            return []
+    
+    async def _store_insight(self, insight: Insight, session_id: Optional[str] = None) -> bool:
+        """Store a new insight."""
+        try:
+            embedding = self._embeddings.embed_documents([insight.content])[0]
+            
+            memory = SemanticMemoryCreate(
+                user_id=insight.user_id,
+                content=insight.content,
+                embedding=embedding,
+                memory_type=MemoryType.INSIGHT,
+                importance=insight.confidence,
+                metadata=insight.to_metadata(),
+                session_id=session_id
+            )
+            
+            self._repository.save_memory(memory)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to store insight: {e}")
+            return False
+    
+    async def _merge_insight(self, new_insight: Insight, existing_insight: Insight) -> bool:
+        """Merge new insight with existing one."""
+        try:
+            new_confidence = (existing_insight.confidence + new_insight.confidence) / 2
+            
+            evolution_notes = existing_insight.evolution_notes.copy() if existing_insight.evolution_notes else []
+            evolution_notes.append(f"Merged with similar insight: {new_insight.content[:50]}...")
+            
+            return self._repository.update_fact(
+                fact_id=existing_insight.id,
+                content=existing_insight.content,
+                embedding=None,
+                metadata={
+                    **existing_insight.to_metadata(),
+                    "confidence": new_confidence,
+                    "evolution_notes": evolution_notes
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to merge insight: {e}")
+            return False
+    
+    async def _update_insight_with_evolution(self, new_insight: Insight, existing_insight: Insight) -> bool:
+        """Update existing insight with evolution note (for contradictions)."""
+        try:
+            embedding = self._embeddings.embed_documents([new_insight.content])[0]
+            
+            evolution_notes = existing_insight.evolution_notes.copy() if existing_insight.evolution_notes else []
+            evolution_notes.append(f"Updated from: {existing_insight.content[:50]}...")
+            
+            return self._repository.update_fact(
+                fact_id=existing_insight.id,
+                content=new_insight.content,
+                embedding=embedding,
+                metadata={
+                    **new_insight.to_metadata(),
+                    "evolution_notes": evolution_notes
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to update insight with evolution: {e}")
+            return False
+    
     async def enforce_hard_limit(self, user_id: str) -> bool:
         """
         Enforce hard limit of 50 insights.
