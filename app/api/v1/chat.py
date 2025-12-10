@@ -109,7 +109,11 @@ async def chat_completion(
                 sources.append(SourceInfo(
                     title=src.title,
                     content=src.content_snippet or "",
-                    image_url=getattr(src, 'image_url', None)
+                    image_url=getattr(src, 'image_url', None),
+                    # Feature: source-highlight-citation v0.9.8
+                    page_number=getattr(src, 'page_number', None),
+                    document_id=getattr(src, 'document_id', None),
+                    bounding_boxes=getattr(src, 'bounding_boxes', None)
                 ))
         
         # Generate suggested questions based on context
