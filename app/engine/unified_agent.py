@@ -235,6 +235,9 @@ async def tool_maritime_search(query: str) -> str:
                 }
                 for c in response.citations[:5]  # Top 5 sources
             ]
+            # Debug: Log source details for troubleshooting
+            for i, src in enumerate(_last_retrieved_sources[:2]):
+                logger.info(f"[TOOL] Source {i+1}: page={src.get('page_number')}, doc={src.get('document_id')}, bbox={bool(src.get('bounding_boxes'))}")
             logger.info(f"[TOOL] Saved {len(_last_retrieved_sources)} sources for API response")
             
             # Also append to text for LLM context

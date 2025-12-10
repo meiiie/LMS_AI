@@ -185,10 +185,11 @@ def test_chat_with_sources(base_url: str) -> dict:
     user_id = str(uuid.uuid4())
     
     try:
+        # Hỏi về Luật Hàng hải VN 2015 (document hiện có trong DB)
         resp = requests.post(
             f"{base_url}/api/v1/chat/",
             json={
-                "message": "Rule 15 COLREGs là gì?",
+                "message": "Điều 15 Luật Hàng hải Việt Nam quy định gì về chủ tàu? Hãy trích dẫn từ tài liệu.",
                 "session_id": session_id,
                 "user_id": user_id,
                 "role": "student"
@@ -199,8 +200,19 @@ def test_chat_with_sources(base_url: str) -> dict:
         
         if resp.status_code == 200:
             data = resp.json()
-            response_text = data.get("response", "")
-            sources = data.get("sources", [])
+            
+            # Debug: print full response structure
+            print(f"   Response keys: {list(data.keys())}")
+            print(f"   Full response (truncated): {str(data)[:500]}...")
+            
+            # Handle nested response structure
+            if data.get("status") == "success" and "data" in data:
+                inner_data = data.get("data", {})
+                response_text = inner_data.get("answer", "")
+                sources = inner_data.get("sources", [])
+            else:
+                response_text = data.get("response", "") or data.get("answer", "")
+                sources = data.get("sources", [])
             
             print(f"   Response length: {len(response_text)} chars")
             print(f"   Sources count: {len(sources)}")
@@ -213,15 +225,19 @@ def test_chat_with_sources(base_url: str) -> dict:
             if sources:
                 print(f"\n   Sources details:")
                 for i, src in enumerate(sources[:3]):
-                    print(f"   [{i+1}] page: {src.get('page_number')}, doc: {src.get('document_id')}")
-                    print(f"       bounding_boxes: {src.get('bounding_boxes', 'None')}")
+                    # Debug: print all keys in source
+                    print(f"   [{i+1}] keys: {list(src.keys()) if isinstance(src, dict) else type(src)}")
+                    print(f"       page: {src.get('page_number') if isinstance(src, dict) else 'N/A'}")
+                    print(f"       doc: {src.get('document_id') if isinstance(src, dict) else 'N/A'}")
+                    print(f"       bounding_boxes: {src.get('bounding_boxes', 'None') if isinstance(src, dict) else 'N/A'}")
                     
-                    if src.get('bounding_boxes'):
-                        has_bounding_boxes = True
-                    if src.get('page_number') is not None:
-                        has_page_number = True
-                    if src.get('document_id'):
-                        has_document_id = True
+                    if isinstance(src, dict):
+                        if src.get('bounding_boxes'):
+                            has_bounding_boxes = True
+                        if src.get('page_number') is not None:
+                            has_page_number = True
+                        if src.get('document_id'):
+                            has_document_id = True
             
             print(f"\n   Fields present:")
             print(f"   - page_number: {'✅' if has_page_number else '❌'}")
@@ -239,15 +255,16 @@ def test_chat_with_sources(base_url: str) -> dict:
             return {
                 "passed": passed,
                 "sources": sources,
-                "has_bounding_boxes": has_bounding_boxes
+                "has_bounding_boxes": has_bounding_boxes,
+                "has_page_number": has_page_number
             }
         
         print_result("Chat API with Sources", False, f"Status: {resp.status_code}")
-        return {"passed": False, "sources": [], "has_bounding_boxes": False}
+        return {"passed": False, "sources": [], "has_bounding_boxes": False, "has_page_number": False}
         
     except Exception as e:
         print_result("Chat API with Sources", False, str(e))
-        return {"passed": False, "sources": [], "has_bounding_boxes": False}
+        return {"passed": False, "sources": [], "has_bounding_boxes": False, "has_page_number": False}
 
 
 def test_sources_filter(base_url: str, document_id: str) -> bool:
@@ -344,9 +361,19 @@ def main():
     
     print(f"\n📊 Result: {passed}/{total} tests passed")
     
-    # Bounding boxes note
+    # Diagnostic notes
+    if not chat_result.get("has_page_number"):
+        print("\n⚠️ DEPLOYMENT ISSUE DETECTED:")
+        print("   Chat API sources missing page_number and document_id.")
+        print("   This indicates code changes have NOT been deployed to Render.")
+        print("\n   To fix:")
+        print("   1. git add -A && git commit -m 'Deploy source highlighting'")
+        print("   2. git push origin main")
+        print("   3. Wait for Render to redeploy")
+        print("   4. Run this test again")
+    
     if not chat_result.get("has_bounding_boxes"):
-        print("\n⚠️ Note: bounding_boxes not found in chat sources.")
+        print("\n⚠️ Note: bounding_boxes not populated in database.")
         print("   Run re-ingestion script to populate bounding_boxes:")
         print("   python scripts/reingest_bounding_boxes.py")
     
