@@ -131,6 +131,25 @@ async def chat_completion(
                     description=_get_tool_description(tool)
                 ))
         
+        # LMS Integration: Extract analytics metadata
+        topics_accessed = None
+        document_ids_used = None
+        confidence_score = None
+        query_type = None
+        
+        if sources:
+            # Extract topics from source titles
+            topics_accessed = [src.title for src in sources if src.title]
+            # Extract document IDs
+            document_ids_used = list(set(
+                src.document_id for src in sources if src.document_id
+            ))
+            # Confidence based on sources found (simple heuristic)
+            confidence_score = min(0.5 + len(sources) * 0.1, 1.0)
+        
+        # Classify query type (simple rule-based)
+        query_type = _classify_query_type(chat_request.message)
+        
         # Build LMS-compatible response
         response = ChatResponse(
             status="success",
@@ -143,7 +162,12 @@ async def chat_completion(
                 processing_time=round(processing_time, 3),
                 model="maritime-rag-v1",
                 agent_type=internal_response.agent_type,
-                tools_used=tools_used  # CHỈ THỊ SỐ 27: API Transparency
+                tools_used=tools_used,  # CHỈ THỊ SỐ 27: API Transparency
+                # LMS Integration: Analytics fields
+                topics_accessed=topics_accessed,
+                confidence_score=round(confidence_score, 2) if confidence_score else None,
+                document_ids_used=document_ids_used,
+                query_type=query_type
             )
         )
         
@@ -191,6 +215,45 @@ def _get_tool_description(tool: dict) -> str:
         return f"Lấy thông tin: {key}"
     else:
         return result[:100] if result else f"Gọi tool: {name}"
+
+
+def _classify_query_type(message: str) -> str:
+    """
+    Classify query type for LMS analytics.
+    
+    LMS Integration: Track learning patterns via query classification.
+    
+    Returns:
+        - factual: Questions about specific facts, definitions, articles
+        - conceptual: Questions about understanding concepts
+        - procedural: Questions about processes, how-to, steps
+    """
+    message_lower = message.lower()
+    
+    # Procedural keywords
+    procedural_keywords = [
+        "làm thế nào", "như thế nào", "cách", "thủ tục", "quy trình",
+        "bước", "how to", "steps", "process", "procedure"
+    ]
+    
+    # Factual keywords
+    factual_keywords = [
+        "điều", "khoản", "quy định", "là gì", "what is", "định nghĩa",
+        "nghĩa là", "rule", "article", "regulation"
+    ]
+    
+    # Check procedural first (more specific)
+    for kw in procedural_keywords:
+        if kw in message_lower:
+            return "procedural"
+    
+    # Check factual
+    for kw in factual_keywords:
+        if kw in message_lower:
+            return "factual"
+    
+    # Default to conceptual (understanding-based questions)
+    return "conceptual"
 
 
 def _generate_suggested_questions(user_message: str, ai_response: str) -> list[str]:

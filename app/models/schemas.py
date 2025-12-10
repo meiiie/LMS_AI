@@ -133,6 +133,7 @@ class ChatResponseMetadata(BaseModel):
     Metadata in chat response.
     
     CHỈ THỊ KỸ THUẬT SỐ 27: API Transparency - Added tools_used field
+    CHỈ THỊ LMS INTEGRATION: Added analytics fields (topics, confidence, etc.)
     **Feature: api-transparency-thinking**
     **Validates: Requirements 1.1, 1.4, 3.2**
     """
@@ -143,6 +144,23 @@ class ChatResponseMetadata(BaseModel):
     tools_used: list[ToolUsageInfo] = Field(
         default_factory=list, 
         description="Danh sách tools đã sử dụng trong quá trình xử lý (CHỈ THỊ 27)"
+    )
+    # LMS Integration: Analytics fields
+    topics_accessed: Optional[list[str]] = Field(
+        default=None,
+        description="Topics học viên quan tâm (extracted from query/response)"
+    )
+    confidence_score: Optional[float] = Field(
+        default=None,
+        description="Độ tin cậy câu trả lời (0.0-1.0)"
+    )
+    document_ids_used: Optional[list[str]] = Field(
+        default=None,
+        description="Danh sách document_id được sử dụng"
+    )
+    query_type: Optional[str] = Field(
+        default=None,
+        description="Loại câu hỏi: factual, conceptual, procedural"
     )
 
 
