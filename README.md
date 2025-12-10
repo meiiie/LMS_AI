@@ -8,34 +8,142 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![LangChain](https://img.shields.io/badge/LangChain-1.1.2-1c3c3c?style=flat-square&logo=chainlink&logoColor=white)](https://langchain.com)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.0.4-purple?style=flat-square)](https://langchain.com)
-[![Neo4j](https://img.shields.io/badge/Neo4j-Optional-008cc1?style=flat-square&logo=neo4j&logoColor=white)](https://neo4j.com)
-[![Neon](https://img.shields.io/badge/Neon-pgvector-00E599?style=flat-square&logo=postgresql&logoColor=white)](https://neon.tech)
 [![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev)
+[![Neon](https://img.shields.io/badge/Neon-pgvector-00E599?style=flat-square&logo=postgresql&logoColor=white)](https://neon.tech)
 [![License](https://img.shields.io/badge/License-Proprietary-red?style=flat-square)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-1.0.0-blue?style=flat-square)](CHANGELOG.md)
 
-**AI-Powered Maritime Education Platform with Agentic RAG, Semantic Memory & Long-term Personalization**
+**AI-Powered Maritime Education Platform with Agentic RAG, Semantic Memory & LMS Integration**
 
-*Backend AI Service cho hệ thống LMS Hàng hải*
+*Backend AI Service cho hệ thống LMS Hàng hải - Production Ready*
 
-[Architecture](#architecture) • [Quick Start](#quick-start) • [API Reference](#api-reference) • [Deployment](#deployment)
+[Quick Start](#quick-start) • [API Reference](#api-reference) • [LMS Integration](#lms-integration) • [Streaming API](#streaming-api)
 
 </div>
 
 ---
 
-## Overview
+## What's New in v1.0.0
 
-Maritime AI Tutor Service là một **Backend AI microservice** được thiết kế để tích hợp với hệ thống LMS (Learning Management System) hàng hải. Hệ thống cung cấp:
-
-- **Intelligent Tutoring**: AI Tutor với role-based prompting (Student/Teacher/Admin)
-- **Hybrid Search v0.6**: Kết hợp Dense Search (pgvector) + Sparse Search (PostgreSQL tsvector) với RRF Reranking
-- **GraphRAG Knowledge Retrieval**: Truy vấn kiến thức từ SOLAS, COLREGs, MARPOL (Neo4j reserved for Learning Graph)
-- **Semantic Memory v0.3**: Ghi nhớ ngữ cảnh cross-session với pgvector + Gemini embeddings
-- **Guardian Agent v0.8.1**: LLM-based Content Moderation với Gemini 2.5 Flash - Custom Pronoun Validation, Contextual Filtering
-- **Content Guardrails**: Bảo vệ nội dung với PII masking và prompt injection detection
-- **Multimodal RAG v1.0** (CHỈ THỊ 26): Vision-based document understanding với Evidence Images
+| Feature | Description |
+|---------|-------------|
+| **Streaming API** | Real-time SSE response with token streaming |
+| **LMS Analytics** | topics_accessed, confidence_score, query_type |
+| **Source Highlighting** | Bounding boxes + PDF.js integration |
+| **Semantic Memory v0.5** | Insight extraction + behavioral learning |
+| **Hybrid Search v0.6** | Dense + Sparse + RRF Reranking |
 
 ---
+
+## Overview
+
+Maritime AI Tutor Service is a **Backend AI microservice** designed for integration with maritime LMS (Learning Management System). Key features include:
+
+- **Intelligent Tutoring** — AI Tutor with role-based prompting (Student/Teacher/Admin)
+- **Hybrid Search v0.6** — Dense Search (pgvector) + Sparse Search (tsvector) + RRF Reranking
+- **GraphRAG Knowledge** — SOLAS, COLREGs, MARPOL (PostgreSQL-based, Neo4j reserved for Learning Graph)
+- **Semantic Memory v0.5** — Cross-session memory + Insight Engine (behavioral learning)
+- **Streaming API** — Server-Sent Events for real-time UX
+- **Guardian Agent v0.8.1** — LLM-based Content Moderation with Gemini 2.5 Flash
+- **Multimodal RAG v1.0** — Vision-based document understanding with Evidence Images
+- **Source Highlighting v0.9.8** — Bounding boxes + Citation jumping for PDF viewer
+
+---
+
+## LMS Integration
+
+### Architecture Pattern: Smart Orchestrator (Option 1)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        LMS SYSTEM                                    │
+│   [Angular Frontend] ──JWT──▶ [Spring Boot Backend]                 │
+│                                      │                               │
+│                                      │ API Key + user_id            │
+└──────────────────────────────────────┼───────────────────────────────┘
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     BACKEND AI SERVICE                               │
+│   POST /api/v1/chat/       → Full response                          │
+│   POST /api/v1/chat/stream → SSE streaming                          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Ownership
+
+| Data | Owner | Notes |
+|------|-------|-------|
+| Users, Auth, Logs | LMS | AI chỉ nhận user_id |
+| AI Memories | AI | Auto-managed per user_id |
+| Knowledge Base | AI | RAG documents, embeddings |
+
+### API Authentication
+
+```http
+POST /api/v1/chat/
+X-API-Key: {lms_api_key}
+Content-Type: application/json
+
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "message": "Điều 15 là gì?",
+  "role": "student",
+  "session_id": "session-uuid"
+}
+```
+
+---
+
+## Streaming API
+
+### Real-time Response (Server-Sent Events)
+
+```http
+POST /api/v1/chat/stream
+Content-Type: application/json
+Accept: text/event-stream
+```
+
+### Event Types
+
+| Event | Data | When |
+|-------|------|------|
+| `thinking` | `{content: "..."}` | AI reasoning |
+| `answer` | `{content: "..."}` | Text chunks |
+| `sources` | `{sources: [...]}` | After answer |
+| `metadata` | `{processing_time, ...}` | End |
+| `done` | `{}` | Final |
+
+### Response Stream Example
+
+```
+event: thinking
+data: {"content": "Đang tra cứu..."}
+
+event: answer
+data: {"content": "**Điều 15** quy định về"}
+
+event: answer
+data: {"content": " Chủ tàu và trách nhiệm..."}
+
+event: sources
+data: {"sources": [{"title": "Điều 15", "bounding_boxes": [...]}]}
+
+event: metadata
+data: {"processing_time": 5.2, "confidence_score": 0.9, "query_type": "factual"}
+
+event: done
+data: {}
+```
+
+### Analytics Metadata (LMS Integration)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `topics_accessed` | string[] | Topics từ sources |
+| `confidence_score` | float | 0.5-1.0 based on sources |
+| `document_ids_used` | string[] | Documents referenced |
+| `query_type` | string | factual/conceptual/procedural |
 
 ## Multimodal RAG (CHỈ THỊ KỸ THUẬT SỐ 26)
 
