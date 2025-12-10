@@ -468,23 +468,15 @@ class RAGAgent:
         """
         Expand context by traversing relations.
         
+        NOTE: Neo4j is DISABLED for RAG as of v0.6.0 (sparse-search-migration).
+        Neo4j is reserved for future Learning Graph integration.
+        This method is kept for backward compatibility but returns nodes unchanged.
+        
         **Validates: Requirements 4.4**
         """
-        expanded = list(nodes)
-        seen_ids = {n.id for n in nodes}
-        
-        for node in nodes:
-            related = await self._kg.traverse_relations(
-                node.id,
-                self.CONTEXT_RELATIONS,
-                depth=1
-            )
-            for related_node in related:
-                if related_node.id not in seen_ids:
-                    expanded.append(related_node)
-                    seen_ids.add(related_node.id)
-        
-        return expanded
+        # Neo4j disabled for RAG - reserved for Learning Graph (v0.6.0+)
+        # See README.md: "Neo4j: Reserved for future Learning Graph (LMS integration)"
+        return list(nodes)
     
     def _generate_response(
         self, 
