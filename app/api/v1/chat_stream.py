@@ -34,12 +34,10 @@ def format_sse(event: str, data: dict) -> str:
 
 
 @router.post("/chat/stream")
-@limiter.limit(chat_rate_limit)
 async def chat_stream(
     request: Request,
     chat_request: ChatRequest,
-    background_tasks: BackgroundTasks,
-    auth: RequireAuth = None
+    background_tasks: BackgroundTasks
 ):
     """
     Streaming Chat API - SSE Response
