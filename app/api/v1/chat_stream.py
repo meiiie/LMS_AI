@@ -162,8 +162,8 @@ async def chat_stream(
             }
             yield format_sse("metadata", metadata)
             
-            # Phase 7: Done
-            yield format_sse("done", {})
+            # Phase 7: Done - signal stream completion
+            yield format_sse("done", {"status": "complete"})
             
             logger.info(f"[STREAM] Completed in {processing_time:.3f}s")
             

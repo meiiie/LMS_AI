@@ -69,11 +69,11 @@ async def test_streaming():
     
     payload = {
         "user_id": "test-debug-user",
-        "message": "Hello",
+        "message": "Điều 15 Luật Hàng hải 2015 quy định gì?",  # Ask about sources
         "role": "student"
     }
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         try:
             resp = await client.post(
                 f"{BASE_URL}/api/v1/chat/stream",
@@ -91,13 +91,31 @@ async def test_streaming():
                 print(f"   Content-Type: {resp.headers.get('content-type')}")
                 print("   SSE Events received:")
                 event_count = 0
-                for line in resp.text.split('\n'):
+                has_sources = False
+                sources_content = ""
+                all_lines = resp.text.split('\n')
+                
+                # First pass: check ALL lines for sources
+                for line in all_lines:
+                    if 'event: sources' in line:
+                        has_sources = True
+                    if has_sources and line.startswith('data:'):
+                        sources_content = line
+                        break
+                
+                # Second pass: print first 15 events
+                for line in all_lines:
                     if line.startswith('event:') or line.startswith('data:'):
                         print(f"     {line[:100]}")
                         event_count += 1
-                        if event_count > 10:
-                            print("     ... (truncated)")
+                        if event_count > 15:
+                            print("     ... (truncated for display)")
                             break
+                
+                print(f"\n   Total lines in response: {len(all_lines)}")
+                print(f"   Has sources event: {'YES' if has_sources else 'NO'}")
+                if sources_content:
+                    print(f"   Sources data: {sources_content[:300]}...")
                 return True
             else:
                 print(f"   Error Response: {resp.text[:500]}")
