@@ -757,6 +757,73 @@ class SemanticMemoryRepository:
             logger.error(f"Failed to get all user facts: {e}")
             return []
 
+    def get_user_insights(
+        self,
+        user_id: str,
+        limit: int = 50
+    ) -> List[SemanticMemorySearchResult]:
+        """
+        Get all insights for user (for API endpoint).
+        
+        Returns all INSIGHT type entries.
+        
+        Args:
+            user_id: User ID
+            limit: Maximum number of insights
+            
+        Returns:
+            List of all user insights ordered by created_at DESC
+            
+        **Validates: Requirements 4.3, 4.4**
+        """
+        self._ensure_initialized()
+        
+        try:
+            with self._session_factory() as session:
+                query = text(f"""
+                    SELECT 
+                        id,
+                        content,
+                        memory_type,
+                        importance,
+                        metadata,
+                        created_at,
+                        updated_at,
+                        1.0 AS similarity
+                    FROM {self.TABLE_NAME}
+                    WHERE user_id = :user_id
+                      AND memory_type = :memory_type
+                    ORDER BY created_at DESC
+                    LIMIT :limit
+                """)
+                
+                result = session.execute(query, {
+                    "user_id": user_id,
+                    "memory_type": MemoryType.INSIGHT.value if hasattr(MemoryType, 'INSIGHT') else 'insight',
+                    "limit": limit
+                })
+                
+                rows = result.fetchall()
+                
+                insights = []
+                for row in rows:
+                    insights.append(SemanticMemorySearchResult(
+                        id=row.id,
+                        content=row.content,
+                        memory_type=MemoryType.INSIGHT if hasattr(MemoryType, 'INSIGHT') else MemoryType.USER_FACT,
+                        importance=row.importance,
+                        similarity=1.0,
+                        metadata=row.metadata or {},
+                        created_at=row.created_at,
+                        updated_at=row.updated_at
+                    ))
+                
+                logger.debug(f"Retrieved {len(insights)} insights for user {user_id}")
+                return insights
+                
+        except Exception as e:
+            logger.error(f"Failed to get user insights: {e}")
+            return []
 
     # ========== v0.5 Methods (CHỈ THỊ 23 CẢI TIẾN - Insight Engine) ==========
     
@@ -831,11 +898,12 @@ class SemanticMemoryRepository:
             logger.error(f"Failed to delete user insights: {e}")
             return 0
     
-    def delete_memory(self, memory_id: UUID) -> bool:
+    def delete_memory(self, user_id: str, memory_id: str) -> bool:
         """
         Delete a specific memory by ID.
         
         Args:
+            user_id: User ID who owns the memory (for RLS verification)
             memory_id: UUID of the memory to delete
             
         Returns:
@@ -847,11 +915,14 @@ class SemanticMemoryRepository:
             with self._session_factory() as session:
                 query = text(f"""
                     DELETE FROM {self.TABLE_NAME}
-                    WHERE id = :memory_id
+                    WHERE id = :memory_id AND user_id = :user_id
                     RETURNING id
                 """)
                 
-                result = session.execute(query, {"memory_id": str(memory_id)})
+                result = session.execute(query, {
+                    "memory_id": str(memory_id),
+                    "user_id": user_id
+                })
                 row = result.fetchone()
                 session.commit()
                 

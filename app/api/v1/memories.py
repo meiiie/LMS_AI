@@ -98,3 +98,61 @@ async def get_user_memories(
     except Exception as e:
         logger.error(f"Failed to get memories for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class DeleteMemoryResponse(BaseModel):
+    """Response for DELETE /memories/{user_id}/{memory_id}."""
+    success: bool
+    message: str
+
+
+@router.delete("/{user_id}/{memory_id}", response_model=DeleteMemoryResponse)
+async def delete_user_memory(
+    user_id: str,
+    memory_id: str,
+    auth: RequireAuth
+) -> DeleteMemoryResponse:
+    """
+    Delete a specific memory for a user.
+    
+    **Admin only** - requires admin role.
+    
+    Args:
+        user_id: User ID who owns the memory
+        memory_id: UUID of the memory to delete
+        
+    Returns:
+        DeleteMemoryResponse with success status
+        
+    **Validates: Requirements 3.4**
+    """
+    try:
+        # Check admin authorization
+        if auth.role != "admin":
+            raise HTTPException(
+                status_code=403, 
+                detail="Only admin can delete memories"
+            )
+        
+        repository = SemanticMemoryRepository()
+        
+        # Delete the memory
+        success = repository.delete_memory(user_id, memory_id)
+        
+        if success:
+            logger.info(f"Admin deleted memory {memory_id} for user {user_id}")
+            return DeleteMemoryResponse(
+                success=True,
+                message=f"Memory {memory_id} deleted successfully"
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Memory {memory_id} not found for user {user_id}"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete memory {memory_id} for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
