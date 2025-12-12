@@ -15,10 +15,13 @@ from app.core.config import settings
 from app.models.semantic_memory import (
     ALLOWED_FACT_TYPES,
     FACT_TYPE_MAPPING,
+    FACT_TYPE_TO_PREDICATE,
     IGNORED_FACT_TYPES,
     FactType,
     MemoryType,
+    Predicate,
     SemanticMemoryCreate,
+    SemanticTriple,
     UserFact,
     UserFactExtraction,
 )
@@ -284,6 +287,49 @@ class FactExtractor:
             
         except Exception as e:
             logger.error(f"Failed to store/update user fact: {e}")
+            return False
+    
+    async def store_as_triple(
+        self,
+        user_id: str,
+        fact: UserFact,
+    ) -> bool:
+        """
+        Store a UserFact as SemanticTriple (MemoriLabs Pattern).
+        
+        This method converts UserFact to SemanticTriple format for better
+        deduplication and query capabilities.
+        
+        Args:
+            user_id: User ID (becomes subject)
+            fact: UserFact to convert and store
+            
+        Returns:
+            True if storage successful
+            
+        Feature: semantic-triples-v1
+        """
+        try:
+            # Convert to SemanticTriple
+            triple = SemanticTriple.from_user_fact(user_id, fact)
+            
+            # Generate embedding for the object value
+            embedding = self._embeddings.embed_documents([triple.object])[0]
+            triple.embedding = embedding
+            
+            # Use repository's upsert_triple method
+            result = self._repository.upsert_triple(triple)
+            
+            if result:
+                logger.info(
+                    f"[SEMANTIC TRIPLE] Stored: {triple.subject} "
+                    f"-[{triple.predicate.value}]-> {triple.object[:30]}..."
+                )
+                return True
+            return False
+            
+        except Exception as e:
+            logger.error(f"Failed to store as triple: {e}")
             return False
     
     def _validate_fact_type(self, fact_type: str) -> Optional[str]:

@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://maritime-ai.example.com/schemas/user_context.json",
+  "title": "UserContext",
+  "description": "User context from LMS for AI personalization (Contextual RAG pattern)",
+  "type": "object",
+  "required": ["display_name", "role"],
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "description": "Tên hiển thị của user (từ LMS)",
+      "examples": ["Minh", "Nguyễn Văn A"]
+    },
+    "role": {
+      "type": "string",
+      "enum": ["student", "teacher", "admin"],
+      "description": "Vai trò của user"
+    },
+    "level": {
+      "type": "string",
+      "description": "Cấp độ học viên",
+      "examples": ["Sinh viên năm 3", "Sĩ quan hạng 2"]
+    },
+    "organization": {
+      "type": "string",
+      "description": "Tổ chức/Trường",
+      "examples": ["Đại học Hàng hải Việt Nam"]
+    },
+    "current_course_id": {
+      "type": "string",
+      "description": "ID khóa học hiện tại",
+      "examples": ["colregs_2024"]
+    },
+    "current_course_name": {
+      "type": "string",
+      "description": "Tên khóa học",
+      "examples": ["COLREGs - Quy tắc phòng ngừa đâm va"]
+    },
+    "current_module_id": {
+      "type": "string",
+      "description": "ID module hiện tại (dùng làm process_id cho multi-agent)",
+      "examples": ["rule_13_15"]
+    },
+    "current_module_name": {
+      "type": "string",
+      "description": "Tên module",
+      "examples": ["Rule 13-15: Overtaking & Crossing"]
+    },
+    "progress_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Tiến độ học (%)"
+    },
+    "completed_modules": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Danh sách module đã hoàn thành",
+      "examples": [["rule_1_3", "rule_4_10"]]
+    },
+    "quiz_scores": {
+      "type": "object",
+      "additionalProperties": {"type": "number"},
+      "description": "Điểm quiz theo module_id",
+      "examples": [{"rule_1_3": 85, "rule_4_10": 72}]
+    },
+    "language": {
+      "type": "string",
+      "default": "vi",
+      "enum": ["vi", "en"],
+      "description": "Ngôn ngữ ưa thích"
+    }
+  }
+}

@@ -28,6 +28,8 @@ from app.core.config import settings
 # from app.engine.graph import AgentOrchestrator, AgentType, IntentType
 from app.engine.guardrails import Guardrails, ValidationStatus
 from app.engine.tools.rag_tool import RAGAgent, get_knowledge_repository
+from app.repositories.user_graph_repository import get_user_graph_repository
+from app.services.learning_graph_service import get_learning_graph_service
 from app.engine.tools.tutor_agent import TutorAgent
 
 # Import AgentType from graph.py for backward compatibility (used in ProcessingResult)
@@ -189,6 +191,8 @@ class ChatService:
         """Initialize all components."""
         # Core components (Semantic Memory v0.3 is primary - no legacy fallback)
         self._knowledge_graph = get_knowledge_repository()  # Use Neo4j if available
+        self._user_graph = get_user_graph_repository()  # User Graph for Learning Paths
+        self._learning_graph = get_learning_graph_service()  # Learning Graph Service
         self._profile_repo = InMemoryLearningProfileRepository()  # Legacy
         self._pg_profile_repo = get_learning_profile_repository()  # CHỈ THỊ SỐ 04 (PostgreSQL/Neon)
         self._guardrails = Guardrails()
@@ -332,12 +336,28 @@ class ChatService:
         message = request.message
         user_role = request.role  # student | teacher | admin
         
+        # AI-LMS Integration v2.0: Extract user context for personalization
+        user_context = request.user_context
+        lms_user_name = user_context.display_name if user_context else None
+        lms_module_id = user_context.current_module_id if user_context else None
+        lms_course_name = user_context.current_course_name if user_context else None
+        lms_language = user_context.language if user_context else "vi"
+        
         # Step 1: Input validation (CHỈ THỊ SỐ 21: Guardian Agent)
         # Use LLM-based Guardian Agent for contextual content filtering
         # Falls back to rule-based Guardrails if Guardian unavailable
         
+        # v2.1: Thread-based sessions (like ChatGPT "New Chat")
+        # thread_id = "new" or None creates new thread
+        # thread_id = specific UUID continues that thread
+        # User facts persist across threads, only chat history is thread-scoped
+        thread_id = request.thread_id
+        if thread_id and thread_id.lower() == "new":
+            thread_id = None  # Force new thread
+        
         # CHỈ THỊ SỐ 22: Get session_id early for blocked message logging
-        session_id = self._get_or_create_session(user_id)
+        # Use thread_id if provided, otherwise default to user-based session
+        session_id = self._get_or_create_session(user_id, thread_id=thread_id)
         
         if self._guardian_agent is not None:
             guardian_decision = await self._guardian_agent.validate_message(
@@ -396,10 +416,19 @@ class ChatService:
             if learning_profile:
                 logger.debug(f"Loaded learning profile for user {user_id}: {learning_profile.get('attributes', {})}")
         
+        # Step 2b: Ensure User node in Neo4j (User Graph)
+        if self._user_graph.is_available():
+            self._user_graph.ensure_user_node(
+                user_id=user_id,
+                display_name=lms_user_name
+            )
+        
         # Step 4: Retrieve conversation history (Hybrid: Semantic + Sliding Window)
         conversation_history = ""
         semantic_context = ""
-        user_name = None
+        
+        # AI-LMS v2.0: Prioritize user_name from LMS context
+        user_name = lms_user_name  # From user_context
         
         # Try Semantic Memory v0.5 first (CHỈ THỊ KỸ THUẬT SỐ 06 + CHỈ THỊ 23 CẢI TIẾN)
         if self._semantic_memory is not None:
@@ -438,6 +467,28 @@ class ChatService:
             except Exception as e:
                 logger.warning(f"Semantic memory retrieval failed: {e}")
         
+        # Phase 4: Hybrid Retrieval - Add Learning Graph context from Neo4j
+        learning_graph_context = ""
+        if self._learning_graph.is_available():
+            try:
+                graph_context = await self._learning_graph.get_user_learning_context(user_id)
+                
+                # Format learning path
+                if graph_context.get("learning_path"):
+                    path_items = [f"- {m['title']}" for m in graph_context["learning_path"][:5]]
+                    learning_graph_context += f"=== Learning Path ===\n" + "\n".join(path_items) + "\n\n"
+                
+                # Format knowledge gaps
+                if graph_context.get("knowledge_gaps"):
+                    gap_items = [f"- {g['topic_name']}" for g in graph_context["knowledge_gaps"][:5]]
+                    learning_graph_context += f"=== Knowledge Gaps ===\n" + "\n".join(gap_items) + "\n"
+                
+                if learning_graph_context:
+                    semantic_context = f"{semantic_context}\n\n{learning_graph_context}".strip() if semantic_context else learning_graph_context
+                    logger.info(f"[LEARNING GRAPH] Added graph context for {user_id}")
+            except Exception as e:
+                logger.warning(f"Learning graph retrieval failed: {e}")
+        
         # Fallback/Hybrid: Also get sliding window history
         if self._chat_history.is_available():
             # Get recent messages
@@ -453,15 +504,19 @@ class ChatService:
             else:
                 self._chat_history.save_message(session_id, "user", message)
             
-            # Try to extract user name from message
+            # Try to extract user name from message (only if not provided by LMS)
             extracted_name = self._extract_user_name(message)
             if extracted_name and not user_name:
                 self._chat_history.update_user_name(session_id, extracted_name)
                 user_name = extracted_name
+            elif lms_user_name and not self._chat_history.get_user_name(session_id):
+                # Sync LMS name to chat history cache
+                self._chat_history.update_user_name(session_id, lms_user_name)
         
         # CHỈ THỊ KỸ THUẬT SỐ 12: Debug Logging để truy vết Memory
         logger.info(f"--- PREPARING PROMPT FOR USER {user_id} ---")
-        logger.info(f"Detected Name: {user_name or 'UNKNOWN'}")
+        logger.info(f"Detected Name: {user_name or 'UNKNOWN'} (from LMS: {lms_user_name is not None})")
+        logger.info(f"LMS Context: course={lms_course_name or 'N/A'}, module={lms_module_id or 'N/A'}")
         logger.info(f"Retrieved History Length: {len(conversation_history)} chars")
         logger.info(f"Semantic Context Length: {len(semantic_context)} chars")
         logger.info("-------------------------------------------")
@@ -860,8 +915,27 @@ class ChatService:
         except Exception as e:
             logger.warning(f"Failed to update learning profile: {e}")
     
-    def _get_or_create_session(self, user_id: str) -> UUID:
-        """Get or create a session for user (Memory Lite)."""
+    def _get_or_create_session(self, user_id: str, thread_id: Optional[str] = None) -> UUID:
+        """
+        Get or create a session for user (Memory Lite).
+        
+        v2.1: Thread-based sessions support.
+        - thread_id provided: Use as session_id (continue existing thread)
+        - thread_id None: Create new session for user
+        
+        User facts persist across threads (queried by user_id).
+        Chat history is thread-scoped (queried by session_id).
+        """
+        # v2.1: If thread_id provided, use it as session_id
+        if thread_id:
+            try:
+                session_uuid = UUID(thread_id)
+                self._sessions[user_id] = session_uuid
+                return session_uuid
+            except ValueError:
+                # Invalid UUID, create new session
+                pass
+        
         # Try to get from chat history (persistent)
         if self._chat_history.is_available():
             chat_session = self._chat_history.get_or_create_session(user_id)

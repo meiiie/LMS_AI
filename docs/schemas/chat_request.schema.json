@@ -1,0 +1,64 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://maritime-ai.example.com/schemas/chat_request.json",
+    "title": "ChatRequest",
+    "description": "Chat request payload from LMS to AI Backend (v2.0 with UserContext)",
+    "type": "object",
+    "required": [
+        "user_id",
+        "message",
+        "role"
+    ],
+    "properties": {
+        "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "UUID của user từ LMS",
+            "examples": [
+                "550e8400-e29b-41d4-a716-446655440000"
+            ]
+        },
+        "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "Câu hỏi của người dùng"
+        },
+        "role": {
+            "type": "string",
+            "enum": [
+                "student",
+                "teacher",
+                "admin"
+            ],
+            "description": "Vai trò của user"
+        },
+        "session_id": {
+            "type": "string",
+            "description": "ID phiên học (optional)",
+            "examples": [
+                "session-abc123"
+            ]
+        },
+        "user_context": {
+            "$ref": "user_context.schema.json",
+            "description": "User context từ LMS cho personalization"
+        }
+    },
+    "examples": [
+        {
+            "user_id": "550e8400-e29b-41d4-a716-446655440000",
+            "message": "Giải thích quy tắc 15 COLREGs về tình huống cắt hướng",
+            "role": "student",
+            "session_id": "session-abc123",
+            "user_context": {
+                "display_name": "Minh",
+                "role": "student",
+                "current_course_id": "colregs_2024",
+                "current_module_id": "rule_13_15",
+                "progress_percent": 45.0,
+                "language": "vi"
+            }
+        }
+    ]
+}

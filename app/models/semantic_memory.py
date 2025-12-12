@@ -70,6 +70,65 @@ FACT_TYPE_MAPPING = {
 IGNORED_FACT_TYPES = {"strong_area"}
 
 
+# =============================================================================
+# Semantic Triples - Subject-Predicate-Object (MemoriLabs Pattern)
+# =============================================================================
+
+class Predicate(str, Enum):
+    """
+    Predicate types for Semantic Triples.
+    
+    Maps to FactType for backward compatibility.
+    Pattern: Subject (user_id) - Predicate - Object (value)
+    
+    Feature: semantic-triples-v1
+    """
+    # Identity predicates
+    HAS_NAME = "has_name"
+    HAS_ROLE = "has_role"
+    HAS_LEVEL = "has_level"
+    
+    # Learning predicates
+    HAS_GOAL = "has_goal"
+    PREFERS = "prefers"
+    WEAK_AT = "weak_at"
+    
+    # Extended predicates (for future use)
+    STUDIED = "studied"
+    COMPLETED = "completed"
+    INTERESTED_IN = "interested_in"
+
+
+# Mapping FactType to Predicate
+FACT_TYPE_TO_PREDICATE = {
+    "name": Predicate.HAS_NAME,
+    "role": Predicate.HAS_ROLE,
+    "level": Predicate.HAS_LEVEL,
+    "goal": Predicate.HAS_GOAL,
+    "preference": Predicate.PREFERS,
+    "weakness": Predicate.WEAK_AT,
+    # Deprecated types mapped to predicates
+    "background": Predicate.HAS_ROLE,
+    "weak_area": Predicate.WEAK_AT,
+    "interest": Predicate.INTERESTED_IN,
+    "learning_style": Predicate.PREFERS,
+}
+
+
+# Mapping Predicate to object_type (classification)
+PREDICATE_TO_OBJECT_TYPE = {
+    Predicate.HAS_NAME: "identity",
+    Predicate.HAS_ROLE: "identity",
+    Predicate.HAS_LEVEL: "identity",
+    Predicate.HAS_GOAL: "learning",
+    Predicate.PREFERS: "learning",
+    Predicate.WEAK_AT: "learning",
+    Predicate.STUDIED: "progress",
+    Predicate.COMPLETED: "progress",
+    Predicate.INTERESTED_IN: "interest",
+}
+
+
 class SemanticMemory(BaseModel):
     """
     Represents a single semantic memory stored in the database.
@@ -179,6 +238,123 @@ class UserFact(BaseModel):
             "confidence": self.confidence,
             "source_message": self.source_message
         }
+    
+    def to_semantic_triple(self, subject: str) -> "SemanticTriple":
+        """
+        Convert UserFact to SemanticTriple.
+        
+        Args:
+            subject: Entity ID (usually user_id)
+            
+        Returns:
+            SemanticTriple representation
+            
+        Feature: semantic-triples-v1
+        """
+        predicate = FACT_TYPE_TO_PREDICATE.get(
+            self.fact_type.value, 
+            Predicate.PREFERS
+        )
+        return SemanticTriple(
+            subject=subject,
+            predicate=predicate,
+            object=self.value,
+            object_type=PREDICATE_TO_OBJECT_TYPE.get(predicate, "unknown"),
+            confidence=self.confidence,
+            source_message=self.source_message
+        )
+
+
+class SemanticTriple(BaseModel):
+    """
+    Semantic Triple for structured fact storage (MemoriLabs Pattern).
+    
+    Pattern: Subject - Predicate - Object (S-P-O)
+    Example: "user_123" - "has_name" - "Minh"
+    
+    Benefits:
+    - Easy deduplication (match predicate + object)
+    - Direct column queries (WHERE predicate = 'has_goal')
+    - Foundation for Knowledge Graph
+    
+    Feature: semantic-triples-v1
+    """
+    subject: str = Field(..., description="Entity ID (user_id)")
+    predicate: Predicate = Field(..., description="Relationship type")
+    object: str = Field(..., description="Value/target of relationship")
+    object_type: str = Field(default="unknown", description="Classification: identity, learning, progress")
+    confidence: float = Field(default=0.9, ge=0.0, le=1.0)
+    embedding: List[float] = Field(default_factory=list, description="768-dim vector for semantic search")
+    source_message: Optional[str] = Field(default=None, description="Original message")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = None
+    
+    def to_content(self) -> str:
+        """
+        Convert triple to human-readable content (backward compatible).
+        
+        Returns:
+            String like "name: Minh" for legacy compatibility
+        """
+        # Extract fact_type from predicate
+        fact_type = self.predicate.value.replace("has_", "").replace("_at", "")
+        if self.predicate == Predicate.PREFERS:
+            fact_type = "preference"
+        elif self.predicate == Predicate.WEAK_AT:
+            fact_type = "weakness"
+        return f"{fact_type}: {self.object}"
+    
+    def to_metadata(self) -> Dict[str, Any]:
+        """Convert triple to metadata dict (backward compatible)."""
+        # Map predicate back to fact_type for compatibility
+        fact_type_map = {
+            Predicate.HAS_NAME: "name",
+            Predicate.HAS_ROLE: "role",
+            Predicate.HAS_LEVEL: "level",
+            Predicate.HAS_GOAL: "goal",
+            Predicate.PREFERS: "preference",
+            Predicate.WEAK_AT: "weakness",
+            Predicate.STUDIED: "progress",
+            Predicate.COMPLETED: "progress",
+            Predicate.INTERESTED_IN: "interest",
+        }
+        return {
+            "fact_type": fact_type_map.get(self.predicate, "unknown"),
+            "confidence": self.confidence,
+            "source_message": self.source_message,
+            # New triple-specific fields
+            "predicate": self.predicate.value,
+            "object_type": self.object_type,
+            "is_semantic_triple": True
+        }
+    
+    @classmethod
+    def from_user_fact(cls, user_id: str, fact: "UserFact") -> "SemanticTriple":
+        """
+        Create SemanticTriple from legacy UserFact.
+        
+        Args:
+            user_id: Subject entity ID
+            fact: UserFact to convert
+            
+        Returns:
+            SemanticTriple instance
+        """
+        predicate = FACT_TYPE_TO_PREDICATE.get(
+            fact.fact_type.value,
+            Predicate.PREFERS
+        )
+        return cls(
+            subject=user_id,
+            predicate=predicate,
+            object=fact.value,
+            object_type=PREDICATE_TO_OBJECT_TYPE.get(predicate, "unknown"),
+            confidence=fact.confidence,
+            source_message=fact.source_message
+        )
+    
+    class Config:
+        from_attributes = True
 
 
 class Insight(BaseModel):

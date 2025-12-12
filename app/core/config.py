@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     
     # LMS API Key (for authentication from LMS)
     lms_api_key: Optional[str] = Field(default=None, description="API Key for LMS integration")
+    
+    # LMS Callback Configuration (AI-LMS Integration v2.0)
+    lms_callback_url: Optional[str] = Field(default=None, description="LMS callback URL for AI events")
+    lms_callback_secret: Optional[str] = Field(default=None, description="Shared secret for callback authentication")
 
     
     @property

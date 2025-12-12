@@ -18,9 +18,11 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 from app.models.semantic_memory import (
     MemoryType,
+    Predicate,
     SemanticMemory,
     SemanticMemoryCreate,
     SemanticMemorySearchResult,
+    SemanticTriple,
 )
 
 logger = logging.getLogger(__name__)
@@ -511,6 +513,171 @@ class SemanticMemoryRepository:
         except Exception as e:
             logger.warning(f"SemanticMemoryRepository not available: {e}")
             return False
+    
+    # ========== Semantic Triples v1 (MemoriLabs Pattern) ==========
+    
+    def save_triple(
+        self,
+        triple: SemanticTriple,
+        generate_embedding: bool = True
+    ) -> Optional[SemanticMemory]:
+        """
+        Save a Semantic Triple to database.
+        
+        Converts triple to SemanticMemoryCreate format for storage.
+        
+        Args:
+            triple: SemanticTriple to save
+            generate_embedding: If True and no embedding, generate one
+            
+        Returns:
+            Created SemanticMemory or None on failure
+            
+        Feature: semantic-triples-v1
+        """
+        self._ensure_initialized()
+        
+        try:
+            # If no embedding, try to generate one
+            embedding = triple.embedding
+            if not embedding and generate_embedding:
+                try:
+                    from app.engine.semantic_memory.embeddings import get_embedding_generator
+                    generator = get_embedding_generator()
+                    if generator.is_available():
+                        embedding = generator.generate(triple.object)
+                except Exception as e:
+                    logger.warning(f"Failed to generate embedding for triple: {e}")
+                    embedding = []
+            
+            # Convert triple to SemanticMemoryCreate
+            memory = SemanticMemoryCreate(
+                user_id=triple.subject,
+                content=triple.to_content(),
+                embedding=embedding,
+                memory_type=MemoryType.USER_FACT,
+                importance=triple.confidence,
+                metadata=triple.to_metadata(),
+                session_id=None  # Triples are cross-session
+            )
+            
+            return self.save_memory(memory)
+            
+        except Exception as e:
+            logger.error(f"Failed to save triple: {e}")
+            return None
+    
+    def find_by_predicate(
+        self,
+        user_id: str,
+        predicate: Predicate
+    ) -> Optional[SemanticMemorySearchResult]:
+        """
+        Find existing triple by user_id and predicate.
+        
+        Used for upsert logic - check if triple with same predicate exists.
+        
+        Args:
+            user_id: User ID (subject)
+            predicate: Predicate type
+            
+        Returns:
+            SemanticMemorySearchResult or None if not found
+            
+        Feature: semantic-triples-v1
+        """
+        self._ensure_initialized()
+        
+        try:
+            with self._session_factory() as session:
+                query = text(f"""
+                    SELECT 
+                        id,
+                        content,
+                        memory_type,
+                        importance,
+                        metadata,
+                        created_at,
+                        1.0 AS similarity
+                    FROM {self.TABLE_NAME}
+                    WHERE user_id = :user_id
+                      AND memory_type = :memory_type
+                      AND (
+                          metadata->>'predicate' = :predicate
+                          OR metadata->>'fact_type' = :fact_type
+                      )
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """)
+                
+                # Map predicate to fact_type for backward compatibility
+                fact_type_map = {
+                    Predicate.HAS_NAME: "name",
+                    Predicate.HAS_ROLE: "role",
+                    Predicate.HAS_LEVEL: "level",
+                    Predicate.HAS_GOAL: "goal",
+                    Predicate.PREFERS: "preference",
+                    Predicate.WEAK_AT: "weakness",
+                }
+                
+                result = session.execute(query, {
+                    "user_id": user_id,
+                    "memory_type": MemoryType.USER_FACT.value,
+                    "predicate": predicate.value,
+                    "fact_type": fact_type_map.get(predicate, predicate.value)
+                })
+                
+                row = result.fetchone()
+                
+                if row:
+                    return SemanticMemorySearchResult(
+                        id=row.id,
+                        content=row.content,
+                        memory_type=MemoryType(row.memory_type),
+                        importance=row.importance,
+                        similarity=1.0,
+                        metadata=row.metadata or {},
+                        created_at=row.created_at
+                    )
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to find by predicate: {e}")
+            return None
+    
+    def upsert_triple(
+        self,
+        triple: SemanticTriple
+    ) -> Optional[SemanticMemory]:
+        """
+        Upsert a Semantic Triple (insert or update if exists).
+        
+        Logic:
+        1. Find existing triple by predicate
+        2. If exists: update content and metadata
+        3. If not exists: insert new triple
+        
+        Args:
+            triple: SemanticTriple to upsert
+            
+        Returns:
+            Created/Updated SemanticMemory or None on failure
+            
+        Feature: semantic-triples-v1
+        """
+        existing = self.find_by_predicate(triple.subject, triple.predicate)
+        
+        if existing:
+            # Update existing
+            return self.update_memory_content(
+                memory_id=existing.id,
+                user_id=triple.subject,
+                new_content=triple.to_content(),
+                new_metadata=triple.to_metadata()
+            )
+        else:
+            # Insert new
+            return self.save_triple(triple, generate_embedding=True)
     
     # ========== v0.4 Methods (CHỈ THỊ 23) ==========
     

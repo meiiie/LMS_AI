@@ -27,6 +27,9 @@
 
 | Feature | Description |
 |---------|-------------|
+| **Knowledge Graph v1.0** | Hybrid Neon + Neo4j architecture (MemoriLabs pattern) |
+| **Thread-based Sessions** | Multi-thread support like ChatGPT "New Chat" |
+| **Admin Document API** | LMS admin can upload/manage knowledge base |
 | **Streaming API** | Real-time SSE response with token streaming |
 | **LMS Analytics** | topics_accessed, confidence_score, query_type |
 | **Source Highlighting** | Bounding boxes + PDF.js integration |
@@ -40,6 +43,7 @@
 Maritime AI Tutor Service is a **Backend AI microservice** designed for integration with maritime LMS (Learning Management System). Key features include:
 
 - **Intelligent Tutoring** — AI Tutor with role-based prompting (Student/Teacher/Admin)
+- **Knowledge Graph v1.0** — Hybrid Neon + Neo4j (STUDIED, WEAK_AT, PREREQUISITE relationships)
 - **Hybrid Search v0.6** — Dense Search (pgvector) + Sparse Search (tsvector) + RRF Reranking
 - **GraphRAG Knowledge** — SOLAS, COLREGs, MARPOL (PostgreSQL-based, Neo4j reserved for Learning Graph)
 - **Semantic Memory v0.5** — Cross-session memory + Insight Engine (behavioral learning)
@@ -88,8 +92,34 @@ Content-Type: application/json
   "user_id": "550e8400-e29b-41d4-a716-446655440000",
   "message": "Điều 15 là gì?",
   "role": "student",
-  "session_id": "session-uuid"
+  "session_id": "session-uuid",
+  "thread_id": "new"
 }
+```
+
+### Thread-based Sessions
+
+| `thread_id` | Behavior |
+|-------------|----------|
+| `"new"` or `null` | Creates new conversation thread |
+| `"uuid..."` | Continues existing thread |
+
+> **Note:** User facts persist across threads. Only chat history is thread-scoped.
+
+### Admin Document API
+
+```bash
+# Upload PDF to knowledge base
+POST /api/v1/admin/documents
+
+# List all documents
+GET /api/v1/admin/documents
+
+# Check ingestion status
+GET /api/v1/admin/documents/{job_id}
+
+# Delete document
+DELETE /api/v1/admin/documents/{document_id}
 ```
 
 ---

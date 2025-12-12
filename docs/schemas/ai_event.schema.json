@@ -1,0 +1,102 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://maritime-ai.example.com/schemas/ai_event.json",
+    "title": "AIEvent",
+    "description": "AI Event for callback from AI Backend to LMS",
+    "type": "object",
+    "required": [
+        "user_id",
+        "event_type",
+        "data"
+    ],
+    "properties": {
+        "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "UUID của user"
+        },
+        "event_type": {
+            "type": "string",
+            "enum": [
+                "knowledge_gap_detected",
+                "goal_evolution",
+                "module_completed_confidence",
+                "stuck_detected"
+            ],
+            "description": "Loại event"
+        },
+        "data": {
+            "type": "object",
+            "description": "Event payload",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "Topic liên quan",
+                    "examples": [
+                        "Rule 15 - Crossing Situation"
+                    ]
+                },
+                "gap_type": {
+                    "type": "string",
+                    "enum": [
+                        "conceptual",
+                        "procedural"
+                    ],
+                    "description": "Loại lỗ hổng kiến thức"
+                },
+                "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Độ tin cậy (0.0-1.0)"
+                },
+                "suggested_action": {
+                    "type": "string",
+                    "enum": [
+                        "review_module",
+                        "suggest_quiz",
+                        "trigger_support"
+                    ],
+                    "description": "Hành động đề xuất cho LMS"
+                },
+                "module_id": {
+                    "type": "string",
+                    "description": "Module ID liên quan"
+                },
+                "details": {
+                    "type": "object",
+                    "description": "Chi tiết bổ sung"
+                }
+            }
+        },
+        "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Thời gian event (ISO 8601)"
+        }
+    },
+    "examples": [
+        {
+            "user_id": "550e8400-e29b-41d4-a716-446655440000",
+            "event_type": "knowledge_gap_detected",
+            "data": {
+                "topic": "Rule 15 - Crossing Situation",
+                "gap_type": "conceptual",
+                "confidence": 0.9,
+                "suggested_action": "review_module",
+                "module_id": "rule_13_15"
+            },
+            "timestamp": "2025-12-13T00:00:00Z"
+        },
+        {
+            "user_id": "550e8400-e29b-41d4-a716-446655440000",
+            "event_type": "module_completed_confidence",
+            "data": {
+                "module_id": "rule_13_15",
+                "confidence": 0.85,
+                "suggested_action": "suggest_quiz"
+            },
+            "timestamp": "2025-12-13T00:00:00Z"
+        }
+    ]
+}

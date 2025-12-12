@@ -47,19 +47,77 @@ class UserRole(str, Enum):
     ADMIN = "admin"
 
 
+class UserContext(BaseModel):
+    """
+    User context from LMS for personalization.
+    
+    Spec: AI_LMS_INTEGRATION_PROPOSAL.md
+    Pattern: Contextual RAG
+    Feature: ai-lms-integration-v2
+    """
+    display_name: str = Field(..., description="Tên hiển thị (từ LMS)")
+    role: UserRole = Field(..., description="student | teacher | admin")
+    level: Optional[str] = Field(default=None, description="Cấp độ: Sinh viên năm 3, Sĩ quan hạng 2...")
+    organization: Optional[str] = Field(default=None, description="Tổ chức: Đại học Hàng hải...")
+    
+    # Course context
+    current_course_id: Optional[str] = Field(default=None, description="ID khóa học hiện tại")
+    current_course_name: Optional[str] = Field(default=None, description="Tên khóa học")
+    current_module_id: Optional[str] = Field(default=None, description="ID module (dùng làm process_id)")
+    current_module_name: Optional[str] = Field(default=None, description="Tên module")
+    
+    # Progress
+    progress_percent: Optional[float] = Field(default=None, ge=0, le=100, description="Tiến độ học (%)")
+    completed_modules: Optional[list[str]] = Field(default=None, description="Danh sách module đã hoàn thành")
+    quiz_scores: Optional[dict[str, float]] = Field(default=None, description="Điểm quiz theo module_id")
+    
+    # Localization
+    language: str = Field(default="vi", description="Language preference: vi | en")
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "display_name": "Minh",
+                    "role": "student",
+                    "level": "Sinh viên năm 3",
+                    "organization": "Đại học Hàng hải Việt Nam",
+                    "current_course_id": "colregs_2024",
+                    "current_course_name": "COLREGs - Quy tắc phòng ngừa đâm va",
+                    "current_module_id": "rule_13_15",
+                    "progress_percent": 45.0,
+                    "completed_modules": ["rule_1_3", "rule_4_10"],
+                    "language": "vi"
+                }
+            ]
+        }
+    }
+
+
 class ChatRequest(BaseModel):
     """
-    Chat request payload from LMS Core
-    Requirements: 1.1, 1.5
-    Spec: CHỈ THỊ KỸ THUẬT SỐ 03
+    Chat request payload from LMS Core.
+    
+    v2.0: Added user_context for Contextual RAG pattern.
+    Spec: AI_LMS_INTEGRATION_PROPOSAL.md
+    Feature: ai-lms-integration-v2
     """
-    user_id: str = Field(..., description="BẮT BUỘC: ID user từ LMS (để map lịch sử chat)")
+    user_id: str = Field(..., description="BẮT BUỘC: UUID user từ LMS")
     message: str = Field(..., min_length=1, max_length=10000, description="BẮT BUỘC: Câu hỏi người dùng")
     role: UserRole = Field(..., description="BẮT BUỘC: student | teacher | admin")
-    session_id: Optional[str] = Field(default=None, description="Tùy chọn: ID phiên học (nếu có)")
-    context: Optional[dict[str, Any]] = Field(
-        default=None, 
-        description="Tùy chọn: Dữ liệu ngữ cảnh thêm (course_id, lesson_id, etc.)"
+    session_id: Optional[str] = Field(default=None, description="Tùy chọn: ID phiên học")
+    
+    # v2.1: Thread-based sessions (like ChatGPT "New Chat")
+    thread_id: Optional[str] = Field(
+        default=None,
+        description="Thread ID cho phiên hội thoại. Nếu None hoặc 'new', tạo thread mới. "
+                    "User facts vẫn persist qua threads, chỉ chat history riêng."
+    )
+    
+    # v2.0: User context from LMS for personalization
+    user_context: Optional[UserContext] = Field(
+        default=None,
+        description="User context từ LMS cho personalization (Contextual RAG)"
     )
     
     @field_validator("message")
@@ -73,12 +131,17 @@ class ChatRequest(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "user_id": "student_12345",
-                    "session_id": "session_abc123",
+                    "user_id": "550e8400-e29b-41d4-a716-446655440000",
                     "message": "Giải thích quy tắc 15 COLREGs về tình huống cắt hướng",
                     "role": "student",
-                    "context": {
-                        "course_id": "COLREGs_101"
+                    "session_id": "session-abc123",
+                    "user_context": {
+                        "display_name": "Minh",
+                        "role": "student",
+                        "current_course_id": "colregs_2024",
+                        "current_module_id": "rule_13_15",
+                        "progress_percent": 45.0,
+                        "language": "vi"
                     }
                 }
             ]
@@ -455,3 +518,67 @@ class ChatResponseDataWithEvidence(ChatResponseData):
             ]
         }
     }
+
+
+# =============================================================================
+# AI Event Callback Schemas (AI-LMS Integration v2.0)
+# =============================================================================
+
+class AIEventType(str, Enum):
+    """
+    Types of AI events for LMS callback.
+    
+    Spec: LMS_RESPONSE_TO_AI_PROPOSAL.md
+    Feature: ai-lms-integration-v2
+    """
+    KNOWLEDGE_GAP_DETECTED = "knowledge_gap_detected"
+    GOAL_EVOLUTION = "goal_evolution"
+    MODULE_COMPLETED_CONFIDENCE = "module_completed_confidence"
+    STUCK_DETECTED = "stuck_detected"
+
+
+class AIEventData(BaseModel):
+    """
+    Event data payload for AI events.
+    
+    Feature: ai-lms-integration-v2
+    """
+    topic: Optional[str] = Field(default=None, description="Topic liên quan")
+    gap_type: Optional[str] = Field(default=None, description="Loại lỗ hổng: conceptual, procedural")
+    confidence: Optional[float] = Field(default=None, ge=0, le=1, description="Độ tin cậy (0.0-1.0)")
+    suggested_action: Optional[str] = Field(default=None, description="Hành động đề xuất: review_module, suggest_quiz")
+    module_id: Optional[str] = Field(default=None, description="Module ID liên quan")
+    details: Optional[dict] = Field(default=None, description="Chi tiết bổ sung")
+
+
+class AIEvent(BaseModel):
+    """
+    AI Event for callback to LMS.
+    
+    Spec: LMS_RESPONSE_TO_AI_PROPOSAL.md
+    Feature: ai-lms-integration-v2
+    """
+    user_id: str = Field(..., description="User UUID")
+    event_type: AIEventType = Field(..., description="Loại event")
+    data: AIEventData = Field(..., description="Payload data")
+    timestamp: datetime = Field(default_factory=utc_now, description="Thời gian event")
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "event_type": "knowledge_gap_detected",
+                    "data": {
+                        "topic": "Rule 15 - Crossing Situation",
+                        "gap_type": "conceptual",
+                        "confidence": 0.9,
+                        "suggested_action": "review_module",
+                        "module_id": "rule_13_15"
+                    },
+                    "timestamp": "2025-12-13T00:00:00Z"
+                }
+            ]
+        }
+    }
+
