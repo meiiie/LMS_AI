@@ -578,6 +578,79 @@ class SemanticMemoryRepository:
             logger.error(f"Failed to find fact by type: {e}")
             return None
     
+    def find_similar_fact_by_embedding(
+        self,
+        user_id: str,
+        embedding: List[float],
+        similarity_threshold: float = 0.90,
+        memory_type: MemoryType = MemoryType.USER_FACT
+    ) -> Optional[SemanticMemorySearchResult]:
+        """
+        SOTA: Find semantically similar fact using embedding cosine similarity.
+        
+        This enables detecting duplicate facts even when fact_type differs
+        but content is semantically the same.
+        
+        Args:
+            user_id: User ID
+            embedding: Query embedding vector
+            similarity_threshold: Minimum similarity (default: 0.90 for facts)
+            memory_type: Type of memory to search
+            
+        Returns:
+            SemanticMemorySearchResult if found, None otherwise
+            
+        **SOTA Enhancement: Semantic duplicate detection**
+        """
+        self._ensure_initialized()
+        
+        try:
+            with self._session_factory() as session:
+                query = text(f"""
+                    SELECT 
+                        id,
+                        content,
+                        memory_type,
+                        importance,
+                        metadata,
+                        created_at,
+                        1 - (embedding <=> :embedding::vector) AS similarity
+                    FROM {self.TABLE_NAME}
+                    WHERE user_id = :user_id
+                      AND memory_type = :memory_type
+                      AND embedding IS NOT NULL
+                    ORDER BY embedding <=> :embedding::vector
+                    LIMIT 1
+                """)
+                
+                result = session.execute(query, {
+                    "user_id": user_id,
+                    "memory_type": memory_type.value,
+                    "embedding": str(embedding)
+                })
+                
+                row = result.fetchone()
+                
+                if row and row.similarity >= similarity_threshold:
+                    logger.debug(
+                        f"Found similar fact with similarity {row.similarity:.3f} "
+                        f"(threshold: {similarity_threshold})"
+                    )
+                    return SemanticMemorySearchResult(
+                        id=row.id,
+                        content=row.content,
+                        memory_type=MemoryType(row.memory_type),
+                        importance=row.importance,
+                        similarity=row.similarity,
+                        metadata=row.metadata or {},
+                        created_at=row.created_at
+                    )
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to find similar fact by embedding: {e}")
+            return None
+    
     def update_fact(
         self,
         fact_id: UUID,

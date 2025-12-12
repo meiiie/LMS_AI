@@ -220,8 +220,14 @@ class FactExtractor:
             # Step 2: Generate embedding for the fact
             fact_embedding = self._embeddings.embed_documents([fact_content])[0]
             
-            # Step 3: Check if fact of same type exists
-            existing_fact = self._repository.find_fact_by_type(user_id, validated_type)
+            # Step 3: SOTA - Check for semantic duplicate first
+            # Find existing fact with high embedding similarity (>= 0.90)
+            semantic_duplicate = self._repository.find_similar_fact_by_embedding(
+                user_id=user_id,
+                embedding=fact_embedding,
+                similarity_threshold=0.90,  # SOTA threshold
+                memory_type=MemoryType.USER_FACT
+            )
             
             metadata = {
                 "fact_type": validated_type,
@@ -229,8 +235,24 @@ class FactExtractor:
                 "source": "explicit_save"
             }
             
+            if semantic_duplicate:
+                # SOTA: Update semantically similar fact
+                logger.info(f"Found semantic duplicate for {validated_type}, updating...")
+                success = self._repository.update_fact(
+                    fact_id=semantic_duplicate.id,
+                    content=fact_content,
+                    embedding=fact_embedding,
+                    metadata=metadata
+                )
+                if success:
+                    logger.info(f"Updated similar fact for {user_id}: {validated_type}={fact_content[:50]}...")
+                return success
+            
+            # Step 4: Fallback - Check if fact of same type exists
+            existing_fact = self._repository.find_fact_by_type(user_id, validated_type)
+            
             if existing_fact:
-                # Step 3a: Update existing fact (UPSERT - Update)
+                # Step 4a: Update existing fact (UPSERT - Update)
                 success = self._repository.update_fact(
                     fact_id=existing_fact.id,
                     content=fact_content,
@@ -241,7 +263,7 @@ class FactExtractor:
                     logger.info(f"Updated user fact for {user_id}: {validated_type}={fact_content[:50]}...")
                 return success
             else:
-                # Step 3b: Insert new fact (UPSERT - Insert)
+                # Step 4b: Insert new fact (UPSERT - Insert)
                 fact_memory = SemanticMemoryCreate(
                     user_id=user_id,
                     content=fact_content,
@@ -255,7 +277,7 @@ class FactExtractor:
                 self._repository.save_memory(fact_memory)
                 logger.info(f"Stored new user fact for {user_id}: {validated_type}={fact_content[:50]}...")
                 
-                # Step 4: Enforce memory cap after insert
+                # Step 5: Enforce memory cap after insert
                 await self._enforce_memory_cap(user_id)
                 
                 return True

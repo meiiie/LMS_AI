@@ -2,15 +2,25 @@
 Insight Validator - CHỈ THỊ KỸ THUẬT SỐ 23 CẢI TIẾN
 Validate and process insights before storage.
 
+SOTA Upgrade: Embedding-based semantic similarity for duplicate detection.
+
 Requirements: 5.1, 5.2, 5.3, 5.4
 """
 import logging
+import numpy as np
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 from app.models.semantic_memory import Insight, InsightCategory
 
+if TYPE_CHECKING:
+    from app.engine.gemini_embedding import GeminiOptimizedEmbeddings
+
 logger = logging.getLogger(__name__)
+
+# SOTA Thresholds
+DUPLICATE_SIMILARITY_THRESHOLD = 0.85  # Cosine similarity for duplicates
+CONTRADICTION_SIMILARITY_THRESHOLD = 0.70  # Lower threshold for contradictions
 
 
 @dataclass
@@ -20,6 +30,7 @@ class ValidationResult:
     reason: Optional[str] = None
     action: Optional[str] = None  # "store", "merge", "update", "reject"
     target_insight: Optional[Insight] = None  # For merge/update operations
+    similarity_score: Optional[float] = None  # SOTA: Include similarity score
 
 
 class InsightValidator:
@@ -27,20 +38,58 @@ class InsightValidator:
     
     MIN_INSIGHT_LENGTH = 20
     
-    def __init__(self):
-        """Initialize the validator."""
-        pass
+    def __init__(self, embeddings: Optional["GeminiOptimizedEmbeddings"] = None):
+        """
+        Initialize the validator.
+        
+        Args:
+            embeddings: Optional embeddings model for SOTA semantic similarity
+        """
+        self._embeddings = embeddings
+        self._embedding_cache = {}  # Cache embeddings for efficiency
+        
+    def _compute_embedding(self, text: str) -> Optional[np.ndarray]:
+        """Compute embedding for text with caching."""
+        if not self._embeddings:
+            return None
+            
+        # Check cache first
+        cache_key = hash(text[:100])  # Use first 100 chars as key
+        if cache_key in self._embedding_cache:
+            return self._embedding_cache[cache_key]
+        
+        try:
+            embedding = self._embeddings.embed_documents([text])[0]
+            embedding_array = np.array(embedding)
+            self._embedding_cache[cache_key] = embedding_array
+            return embedding_array
+        except Exception as e:
+            logger.warning(f"Failed to compute embedding: {e}")
+            return None
+    
+    def _cosine_similarity(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
+        """Compute cosine similarity between two vectors."""
+        if vec1 is None or vec2 is None:
+            return 0.0
+        
+        norm1 = np.linalg.norm(vec1)
+        norm2 = np.linalg.norm(vec2)
+        
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+            
+        return float(np.dot(vec1, vec2) / (norm1 * norm2))
     
     def validate(self, insight: Insight, existing_insights: List[Insight] = None) -> ValidationResult:
         """
-        Validate insight quality and determine action.
+        Validate insight quality and determine action (SOTA: semantic matching).
         
         Args:
             insight: Insight to validate
             existing_insights: List of existing insights for duplicate/contradiction detection
             
         Returns:
-            ValidationResult with action to take
+            ValidationResult with action to take and similarity score
         """
         existing_insights = existing_insights or []
         
@@ -49,14 +98,15 @@ class InsightValidator:
         if not basic_result.is_valid:
             return basic_result
         
-        # 2. Check for duplicates
-        duplicate = self.find_duplicate(insight, existing_insights)
+        # 2. Check for duplicates (SOTA: embedding similarity)
+        duplicate, similarity_score = self.find_duplicate(insight, existing_insights)
         if duplicate:
             return ValidationResult(
                 is_valid=True,
-                reason="Duplicate insight found",
+                reason=f"Duplicate insight found (similarity: {similarity_score:.2f})",
                 action="merge",
-                target_insight=duplicate
+                target_insight=duplicate,
+                similarity_score=similarity_score
             )
         
         # 3. Check for contradictions
@@ -73,7 +123,8 @@ class InsightValidator:
         return ValidationResult(
             is_valid=True,
             reason="Valid new insight",
-            action="store"
+            action="store",
+            similarity_score=similarity_score if similarity_score > 0 else None
         )
 
     
@@ -165,32 +216,38 @@ class InsightValidator:
         self,
         insight: Insight,
         existing: List[Insight]
-    ) -> Optional[Insight]:
+    ) -> tuple[Optional[Insight], float]:
         """
-        Find duplicate or very similar insight.
+        Find duplicate or very similar insight (SOTA: semantic similarity).
         
         Two insights are considered duplicates if:
-        1. Same category and sub_topic
-        2. Similar content (semantic similarity)
+        1. Same category
+        2. Similar content (>=0.85 cosine similarity with embeddings)
+        
+        Returns:
+            Tuple of (duplicate_insight, similarity_score)
         """
+        best_match = None
+        best_score = 0.0
+        
         for existing_insight in existing:
-            # Same category check
+            # Same category check is mandatory
             if existing_insight.category != insight.category:
                 continue
             
-            # Same sub_topic check (if both have sub_topic)
-            if (insight.sub_topic and existing_insight.sub_topic and 
-                insight.sub_topic.lower() == existing_insight.sub_topic.lower()):
-                # Check content similarity
-                if self._is_similar_content(insight.content, existing_insight.content):
-                    return existing_insight
+            # Check content similarity using embeddings
+            is_similar, score = self._is_similar_content(
+                insight.content, 
+                existing_insight.content
+            )
             
-            # For insights without sub_topic, check content similarity only
-            elif not insight.sub_topic and not existing_insight.sub_topic:
-                if self._is_similar_content(insight.content, existing_insight.content):
-                    return existing_insight
+            # Track best match
+            if score > best_score:
+                best_score = score
+                if is_similar:
+                    best_match = existing_insight
         
-        return None
+        return (best_match, best_score)
     
     def detect_contradiction(
         self,
@@ -218,9 +275,33 @@ class InsightValidator:
         
         return None
     
-    def _is_similar_content(self, content1: str, content2: str) -> bool:
-        """Check if two contents are semantically similar."""
-        # Simple similarity check based on word overlap
+    def _is_similar_content(self, content1: str, content2: str, threshold: float = None) -> tuple[bool, float]:
+        """
+        Check if two contents are semantically similar (SOTA: embedding-based).
+        
+        Uses cosine similarity of embeddings when available, falls back to Jaccard.
+        
+        Args:
+            content1: First content string
+            content2: Second content string
+            threshold: Similarity threshold (default: DUPLICATE_SIMILARITY_THRESHOLD)
+            
+        Returns:
+            Tuple of (is_similar, similarity_score)
+        """
+        threshold = threshold or DUPLICATE_SIMILARITY_THRESHOLD
+        
+        # SOTA: Try embedding-based similarity first
+        if self._embeddings:
+            emb1 = self._compute_embedding(content1)
+            emb2 = self._compute_embedding(content2)
+            
+            if emb1 is not None and emb2 is not None:
+                similarity = self._cosine_similarity(emb1, emb2)
+                logger.debug(f"Embedding similarity: {similarity:.3f} (threshold: {threshold})")
+                return (similarity >= threshold, similarity)
+        
+        # Fallback: Jaccard similarity (legacy)
         words1 = set(content1.lower().split())
         words2 = set(content2.lower().split())
         
@@ -230,15 +311,15 @@ class InsightValidator:
         words2 = words2 - common_words
         
         if not words1 or not words2:
-            return False
+            return (False, 0.0)
         
         # Calculate Jaccard similarity
         intersection = len(words1.intersection(words2))
         union = len(words1.union(words2))
         similarity = intersection / union if union > 0 else 0
         
-        # Consider similar if > 60% word overlap
-        return similarity > 0.6
+        # Lower threshold for fallback (0.6 Jaccard ≈ 0.85 cosine)
+        return (similarity > 0.6, similarity)
     
     def _is_contradicting_content(self, content1: str, content2: str) -> bool:
         """Check if two contents contradict each other."""

@@ -709,7 +709,7 @@ Nâng cấp từ "Atomic Facts" sang "Behavioral Insights" - biến AI từ "Th�
 - **5 Insight Categories**: learning_style, knowledge_gap, goal_evolution, habit, preference
 - **LLM-based Consolidation**: Tự động gộp và tinh gọn khi đạt 40/50 memories
 - **Category-Prioritized Retrieval**: Ưu tiên knowledge_gap và learning_style
-- **Duplicate & Contradiction Detection**: Merge duplicates, update với evolution notes
+- **SOTA Duplicate Detection (12/12/2025)**: Embedding cosine similarity (0.85 insight, 0.90 fact)
 - **Hard Limit Enforcement**: 50 insights/user với FIFO fallback
 - **Last Accessed Tracking**: Bảo vệ memories được truy cập trong 7 ngày gần đây
 

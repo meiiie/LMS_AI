@@ -592,7 +592,8 @@ Return ONLY valid JSON:"""
             if self._insight_validator is None:
                 try:
                     from app.engine.insight_validator import InsightValidator
-                    self._insight_validator = InsightValidator()
+                    # SOTA: Pass embeddings for semantic similarity
+                    self._insight_validator = InsightValidator(embeddings=self._embeddings)
                 except ImportError:
                     logger.warning("InsightValidator not available")
                     self._insight_validator = None
