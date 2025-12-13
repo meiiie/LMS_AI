@@ -1,0 +1,122 @@
+"""
+RAG Tools - Knowledge Retrieval Tools for Maritime AI Tutor
+
+Category: RAG (Knowledge Retrieval)
+Access: READ (safe, no mutations)
+"""
+
+import logging
+import re
+from typing import List, Dict, Optional
+
+from langchain_core.tools import tool
+
+from app.engine.tools.registry import (
+    ToolCategory, ToolAccess, get_tool_registry
+)
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Module-level state (will be initialized by UnifiedAgent)
+# =============================================================================
+
+_rag_agent = None
+_last_retrieved_sources: List[Dict[str, str]] = []
+
+
+def init_rag_tools(rag_agent):
+    """Initialize RAG tools with the RAG agent."""
+    global _rag_agent
+    _rag_agent = rag_agent
+    logger.info("RAG tools initialized")
+
+
+def get_last_retrieved_sources() -> List[Dict[str, str]]:
+    """Get the last retrieved sources for API response."""
+    return _last_retrieved_sources
+
+
+def clear_retrieved_sources():
+    """Clear the retrieved sources."""
+    global _last_retrieved_sources
+    _last_retrieved_sources = []
+
+
+# =============================================================================
+# RAG TOOLS
+# =============================================================================
+
+@tool(description="""
+Tra cứu các quy tắc, luật lệ hàng hải (COLREGs, SOLAS, MARPOL) hoặc thông tin kỹ thuật về tàu biển.
+CHỈ gọi khi user hỏi về kiến thức chuyên môn hàng hải.
+""")
+async def tool_maritime_search(query: str) -> str:
+    """Search maritime regulations and knowledge base."""
+    global _rag_agent, _last_retrieved_sources
+    
+    if not _rag_agent:
+        return "Lỗi: RAG Agent không khả dụng. Không thể tra cứu kiến thức."
+    
+    try:
+        logger.info(f"[TOOL] Maritime Search: {query}")
+        response = await _rag_agent.query(query, user_role="student")
+        
+        result = response.content
+        
+        # CHỈ THỊ KỸ THUẬT SỐ 16: Lưu sources để API trả về
+        # CHỈ THỊ 26: Include image_url for evidence images
+        # Feature: source-highlight-citation - Include bounding_boxes
+        if response.citations:
+            _last_retrieved_sources = [
+                {
+                    "node_id": c.node_id,
+                    "title": c.title,
+                    "content": c.source[:500] if c.source else "",  # Truncate for API
+                    "image_url": getattr(c, 'image_url', None),  # CHỈ THỊ 26
+                    "page_number": getattr(c, 'page_number', None),
+                    "document_id": getattr(c, 'document_id', None),
+                    "bounding_boxes": getattr(c, 'bounding_boxes', None)
+                }
+                for c in response.citations[:5]  # Top 5 sources
+            ]
+            # Debug: Log source details for troubleshooting
+            for i, src in enumerate(_last_retrieved_sources[:2]):
+                logger.info(f"[TOOL] Source {i+1}: page={src.get('page_number')}, doc={src.get('document_id')}, bbox={bool(src.get('bounding_boxes'))}")
+            logger.info(f"[TOOL] Saved {len(_last_retrieved_sources)} sources for API response")
+            
+            # Also append to text for LLM context
+            sources_text = [f"- {c.title}" for c in response.citations[:3]]
+            result += "\n\n**Nguồn tham khảo:**\n" + "\n".join(sources_text)
+        else:
+            _last_retrieved_sources = []
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Maritime search error: {e}")
+        _last_retrieved_sources = []
+        return f"Lỗi khi tra cứu: {str(e)}"
+
+
+# =============================================================================
+# REGISTER TOOLS
+# =============================================================================
+
+def register_rag_tools():
+    """Register all RAG tools with the registry."""
+    registry = get_tool_registry()
+    
+    registry.register(
+        tool=tool_maritime_search,
+        category=ToolCategory.RAG,
+        access=ToolAccess.READ,
+        description="Search maritime regulations (COLREGs, SOLAS, MARPOL)"
+    )
+    
+    logger.info("RAG tools registered")
+
+
+# Auto-register on import
+register_rag_tools()

@@ -213,7 +213,7 @@ async def check_knowledge_graph_health() -> ComponentHealth:
     
     try:
         # Import repository (lazy to avoid circular imports)
-        from app.engine.tools.rag_tool import get_knowledge_repository
+        from app.engine.agentic_rag.rag_agent import get_knowledge_repository
         
         # Get cached repository instance (singleton)
         neo4j_repo = get_knowledge_repository()

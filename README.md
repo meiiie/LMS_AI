@@ -17,7 +17,7 @@
 
 *Backend AI Service cho hệ thống LMS Hàng hải - Production Ready*
 
-[Quick Start](#quick-start) • [API Reference](#api-reference) • [LMS Integration](#lms-integration) • [Streaming API](#streaming-api)
+[Quick Start](#quick-start) • [API Reference](#api-reference) • [LMS Integration](#lms-integration) • [Changelog](CHANGELOG.md) • [Roadmap](ROADMAP.md)
 
 </div>
 
@@ -27,6 +27,10 @@
 
 | Feature | Description |
 |---------|-------------|
+| **Agentic RAG v1.0** | Self-correcting RAG with query analysis, grading, rewriting |
+| **Multi-Agent System** | Supervisor + RAG/Tutor/Memory/Grader agents |
+| **Memory Control** | User can say "Remember/Forget" to control AI memory |
+| **Memory Compression** | 70-90% token savings with intelligent summarization |
 | **Knowledge Graph v1.0** | Hybrid Neon + Neo4j architecture (MemoriLabs pattern) |
 | **Thread-based Sessions** | Multi-thread support like ChatGPT "New Chat" |
 | **Admin Document API** | LMS admin can upload/manage knowledge base |
@@ -35,6 +39,9 @@
 | **Source Highlighting** | Bounding boxes + PDF.js integration |
 | **Semantic Memory v0.5** | Insight extraction + behavioral learning |
 | **Hybrid Search v0.6** | Dense + Sparse + RRF Reranking |
+| **Tool Registry Pattern** | Modular tool management with categories (SOTA 2025) |
+
+> 📋 **Full version history:** See [CHANGELOG.md](CHANGELOG.md) | **Future plans:** See [ROADMAP.md](ROADMAP.md)
 
 ---
 
@@ -42,6 +49,10 @@
 
 Maritime AI Tutor Service is a **Backend AI microservice** designed for integration with maritime LMS (Learning Management System). Key features include:
 
+- **Agentic RAG v1.0** — Self-correcting RAG with query analysis, grading, and verification
+- **Multi-Agent System** — Supervisor + specialized agents (RAG/Tutor/Memory/Grader)
+- **Memory Control** — User can say "Remember/Forget" to explicitly control AI memory
+- **Memory Compression** — 70-90% token savings with intelligent summarization (Mem0-style)
 - **Intelligent Tutoring** — AI Tutor with role-based prompting (Student/Teacher/Admin)
 - **Knowledge Graph v1.0** — Hybrid Neon + Neo4j (STUDIED, WEAK_AT, PREREQUISITE relationships)
 - **Hybrid Search v0.6** — Dense Search (pgvector) + Sparse Search (tsvector) + RRF Reranking
@@ -943,57 +954,82 @@ Nâng cấp từ "Atomic Facts" sang "Behavioral Insights" - biến AI từ "Th�
 ```
 maritime-ai-service/
 ├── app/
-│   ├── api/v1/                      # API endpoints (chat, health, knowledge)
-│   ├── core/                        # Config, security, rate_limit
+│   ├── api/v1/                      # API endpoints (chat, health, knowledge, memories, insights)
+│   ├── core/                        # Config, security, rate_limit, database
 │   ├── engine/
 │   │   ├── unified_agent.py         # UnifiedAgent - Main LangGraph agent
-│   │   ├── tools/rag_tool.py        # RAG Agent with Hybrid Search
-│   │   ├── tools/tutor_agent.py     # Tutor Agent
-│   │   ├── guardrails.py            # Input/Output validation (rule-based)
-│   │   ├── guardian_agent.py        # LLM Content Moderation (Gemini 2.5 Flash)
+│   │   ├── agentic_rag/             # RAG Agent module
+│   │   │   └── rag_agent.py         # RAGAgent with Hybrid Search
+│   │   ├── tutor/                   # Tutor Agent module (NEW)
+│   │   │   └── tutor_agent.py       # TutorAgent for teaching sessions
+│   │   ├── agents/                  # Agent Registry (NEW)
+│   │   │   ├── config.py            # AgentConfig, CrewAI-inspired fields
+│   │   │   ├── base.py              # BaseAgent protocol
+│   │   │   └── registry.py          # AgentRegistry + AgentTracer
+│   │   ├── tools/                   # Tool Registry
+│   │   │   ├── registry.py          # ToolRegistry with categories
+│   │   │   ├── rag_tools.py         # RAG search tools
+│   │   │   └── memory_tools.py      # Memory management tools
+│   │   ├── multi_agent/             # Multi-Agent LangGraph (Optional)
+│   │   │   ├── agents/              # Agent nodes (wrappers)
+│   │   │   │   ├── rag_node.py      # RAGAgentNode (LangGraph wrapper)
+│   │   │   │   ├── tutor_node.py    # TutorAgentNode (LangGraph wrapper)
+│   │   │   │   ├── memory_agent.py  # MemoryAgentNode
+│   │   │   │   └── grader_agent.py  # GraderAgentNode
+│   │   │   ├── supervisor.py        # Supervisor Agent
+│   │   │   └── graph.py             # LangGraph workflow
 │   │   ├── semantic_memory/         # Semantic Memory v0.5 (Modular)
 │   │   │   ├── core.py              # SemanticMemoryEngine (Facade)
 │   │   │   ├── context.py           # ContextRetriever
 │   │   │   └── extraction.py        # FactExtractor
-│   │   ├── semantic_memory.py       # Backward compatibility wrapper
+│   │   ├── guardrails.py            # Input/Output validation (rule-based)
+│   │   ├── guardian_agent.py        # LLM Content Moderation (Gemini 2.5 Flash)
 │   │   ├── gemini_embedding.py      # Gemini Embeddings (768 dims, L2 norm)
 │   │   ├── rrf_reranker.py          # RRF Reranker (k=60)
 │   │   └── pdf_processor.py         # PDF extraction for ingestion
 │   ├── models/                      # Pydantic & SQLAlchemy models
+│   │   ├── schemas.py               # API Request/Response schemas
+│   │   ├── database.py              # SQLAlchemy ORM (ChatSession, ChatMessage)
+│   │   ├── learning_profile.py      # LearningProfile domain model
+│   │   ├── semantic_memory.py       # Memory-related models
+│   │   └── knowledge_graph.py       # Knowledge graph models
+│   ├── prompts/                     # Persona YAML configs (Refactored)
+│   │   ├── base/                    # Shared rules
+│   │   │   └── _shared.yaml         # Common directives (tool_calling, reasoning)
+│   │   └── agents/                  # Agent-specific personas
+│   │       ├── tutor.yaml           # Student role (Captain AI)
+│   │       ├── assistant.yaml       # Teacher/Admin role
+│   │       ├── rag.yaml             # RAG agent persona
+│   │       └── memory.yaml          # Memory agent persona
 │   ├── repositories/
 │   │   ├── dense_search_repository.py   # pgvector similarity search
-│   │   ├── sparse_search_repository.py  # PostgreSQL tsvector search (v0.6)
+│   │   ├── sparse_search_repository.py  # PostgreSQL tsvector search
 │   │   ├── neo4j_knowledge_repository.py # Reserved for Learning Graph
 │   │   ├── semantic_memory_repository.py
+│   │   ├── learning_profile_repository.py
+│   │   ├── user_graph_repository.py
 │   │   └── chat_history_repository.py
 │   └── services/
 │       ├── chat_service.py          # Main integration service
 │       ├── hybrid_search_service.py # Dense + Sparse + RRF
-│       └── ingestion_service.py     # PDF ingestion pipeline
+│       ├── multimodal_ingestion_service.py  # PDF ingestion pipeline
+│       ├── learning_graph_service.py
+│       └── supabase_storage.py      # Supabase Storage for images
 ├── alembic/
-│   └── versions/
-│       ├── 001_initial_schema.py        # Initial tables
-│       ├── 002_add_multimodal_columns.py # Multimodal RAG
-│       ├── 003_add_chunking_columns.py   # Semantic chunking
-│       └── 004_add_sparse_search_support.py # tsvector + GIN index (NEW)
+│   └── versions/                    # Database migrations
 ├── archive/                         # Archived legacy code
-│   ├── chat_agent.py                # Legacy ChatAgent (replaced by UnifiedAgent)
-│   └── graph.py                     # Legacy AgentOrchestrator
-├── assets/                          # Static assets (images)
-├── scripts/
-│   ├── test_sparse_search.py        # Sparse search migration test (NEW)
-│   ├── test_hybrid_search.py        # Hybrid search test
-│   ├── reingest_with_chunking.py    # Re-ingest with semantic chunking
-│   ├── reingest_multimodal.py       # Multimodal ingestion
-│   └── ingest_local_chunking.py     # Local chunking ingestion
+├── assets/                          # Static assets (images, banner)
+├── scripts/                         # Utility scripts
 ├── tests/
 │   ├── property/                    # Property-based tests (Hypothesis)
 │   ├── unit/                        # Unit tests
 │   ├── integration/                 # Integration tests
 │   └── e2e/                         # End-to-end tests
 ├── docs/
-│   ├── SEMANTIC_MEMORY_ARCHITECTURE.md  # Consolidated documentation
-│   └── archive/                     # Old version guides
+│   ├── architecture/                # Architecture documentation
+│   │   ├── tool-registry.md         # Tool Registry architecture
+│   │   └── README.md
+│   └── SEMANTIC_MEMORY_ARCHITECTURE.md
 ├── docker-compose.yml               # Local development stack
 ├── requirements.txt                 # Python dependencies
 └── render.yaml                      # Render.com deployment

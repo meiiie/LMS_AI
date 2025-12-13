@@ -27,10 +27,11 @@ from app.core.config import settings
 # from app.engine.agents.chat_agent import ChatAgent
 # from app.engine.graph import AgentOrchestrator, AgentType, IntentType
 from app.engine.guardrails import Guardrails, ValidationStatus
-from app.engine.tools.rag_tool import RAGAgent, get_knowledge_repository
+from app.engine.agentic_rag.rag_agent import RAGAgent, get_knowledge_repository
 from app.repositories.user_graph_repository import get_user_graph_repository
 from app.services.learning_graph_service import get_learning_graph_service
-from app.engine.tools.tutor_agent import TutorAgent
+from app.services.chat_response_builder import ChatResponseBuilder, get_chat_response_builder
+from app.engine.tutor.tutor_agent import TutorAgent
 
 # Import AgentType from graph.py for backward compatibility (used in ProcessingResult)
 from enum import Enum
@@ -115,6 +116,24 @@ try:
 except ImportError:
     CONVERSATION_ANALYZER_AVAILABLE = False
     def get_conversation_analyzer():
+        return None
+
+# Phase 8: Multi-Agent System (SOTA 2025)
+try:
+    from app.engine.multi_agent.graph import process_with_multi_agent, get_multi_agent_graph
+    MULTI_AGENT_AVAILABLE = True
+except ImportError:
+    MULTI_AGENT_AVAILABLE = False
+    async def process_with_multi_agent(*args, **kwargs):
+        return {"response": "Multi-Agent not available", "sources": []}
+
+# Phase 11: Memory Compression (SOTA 2025)
+try:
+    from app.engine.memory_compression import MemoryCompressionEngine, get_compression_engine
+    MEMORY_COMPRESSION_AVAILABLE = True
+except ImportError:
+    MEMORY_COMPRESSION_AVAILABLE = False
+    def get_compression_engine():
         return None
 
 logger = logging.getLogger(__name__)
@@ -244,6 +263,18 @@ class ChatService:
                 logger.error(f"Failed to initialize Unified Agent: {e}")
                 self._unified_agent = None
         
+        # Phase 8: Multi-Agent System (SOTA 2025)
+        self._use_multi_agent = getattr(settings, 'use_multi_agent', False)
+        self._multi_agent_graph = None
+        
+        if MULTI_AGENT_AVAILABLE and self._use_multi_agent:
+            try:
+                self._multi_agent_graph = get_multi_agent_graph()
+                logger.info("✅ Multi-Agent System (Phase 8) initialized - SOTA 2025 ENABLED")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Multi-Agent System: {e}")
+                self._multi_agent_graph = None
+        
         # CHỈ THỊ KỸ THUẬT SỐ 16 & 17: Humanization Components
         self._prompt_loader = None
         self._memory_summarizer = None
@@ -265,6 +296,18 @@ class ChatService:
                     self._memory_summarizer = None
             except Exception as e:
                 logger.warning(f"Failed to initialize MemorySummarizer: {e}")
+        
+        # Phase 11: Memory Compression Engine (SOTA 2025)
+        self._compression_engine = None
+        if MEMORY_COMPRESSION_AVAILABLE:
+            try:
+                self._compression_engine = get_compression_engine()
+                if self._compression_engine.is_available():
+                    logger.info("✅ MemoryCompressionEngine (Phase 11) initialized - 70-90% token savings")
+                else:
+                    self._compression_engine = None
+            except Exception as e:
+                logger.warning(f"Failed to initialize CompressionEngine: {e}")
         
         # CHỈ THỊ KỸ THUẬT SỐ 21: Guardian Agent (LLM-based Content Moderation)
         # Replaces hardcoded content filtering with contextual LLM validation
@@ -300,6 +343,9 @@ class ChatService:
         logger.info(f"Unified Agent (ReAct) available: {self._unified_agent is not None}")
         logger.info(f"Guardian Agent (LLM) available: {self._guardian_agent is not None}")
         logger.info(f"Conversation Analyzer available: {self._conversation_analyzer is not None}")
+        
+        # Response Builder (Phase 3 Refactoring)
+        self._response_builder = get_chat_response_builder()
         
         # Session tracking (in-memory fallback)
         self._sessions: dict[str, UUID] = {}  # user_id -> session_id
@@ -524,6 +570,72 @@ class ChatService:
         # Combine semantic context with conversation history
         if semantic_context:
             conversation_history = f"{semantic_context}\n\n{conversation_history}".strip()
+        
+        # ================================================================
+        # PHASE 8: MULTI-AGENT SYSTEM (SOTA 2025)
+        # Supervisor Agent coordinates specialized agents
+        # ================================================================
+        if self._use_multi_agent and self._multi_agent_graph is not None:
+            logger.info("[MULTI-AGENT] Processing with Multi-Agent System (SOTA 2025)")
+            
+            try:
+                # Build context for multi-agent
+                multi_agent_context = {
+                    "user_name": user_name,
+                    "user_role": user_role.value,
+                    "lms_course": lms_course_name,
+                    "lms_module": lms_module_id,
+                    "conversation_history": conversation_history,
+                    "semantic_context": semantic_context
+                }
+                
+                # Process with Multi-Agent graph
+                result = await process_with_multi_agent(
+                    query=message,
+                    user_id=user_id,
+                    session_id=str(session_id),
+                    context=multi_agent_context
+                )
+                
+                response_text = result.get("response", "")
+                sources = result.get("sources", [])
+                grader_score = result.get("grader_score", 0)
+                
+                logger.info(f"[MULTI-AGENT] Response generated, grader_score={grader_score}")
+                
+                # Save AI response
+                if self._chat_history.is_available():
+                    if background_save:
+                        background_save(self._save_message_async, session_id, "assistant", response_text)
+                    else:
+                        self._chat_history.save_message(session_id, "assistant", response_text)
+                
+                # Convert sources to Source objects
+                source_objects = []
+                for s in sources:
+                    source_objects.append(Source(
+                        node_id=s.get("node_id", ""),
+                        title=s.get("title", ""),
+                        source_type="knowledge_graph",
+                        content_snippet=s.get("content", "")[:200],
+                        image_url=s.get("image_url")
+                    ))
+                
+                return InternalChatResponse(
+                    response_id=uuid4(),
+                    message=response_text,
+                    agent_type=AgentType.RAG,
+                    sources=source_objects,
+                    metadata={
+                        "multi_agent": True,
+                        "grader_score": grader_score,
+                        "user_name": user_name
+                    }
+                )
+                
+            except Exception as e:
+                logger.error(f"[MULTI-AGENT] Error: {e}, falling back to Unified Agent")
+                # Fall through to Unified Agent
         
         # ================================================================
         # CHỈ THỊ KỸ THUẬT SỐ 13: UNIFIED AGENT (LLM-driven Orchestration)
@@ -1023,70 +1135,12 @@ class ChatService:
         """
         Merge sources from the same page into single entries with combined bounding_boxes.
         
+        Delegates to ChatResponseBuilder for clean code organization.
+        
         Feature: source-highlight-citation
         **Validates: Requirements 2.4**
-        
-        Args:
-            sources: List of source dicts with page_number, document_id, bounding_boxes
-            
-        Returns:
-            Merged list where same-page sources are combined
         """
-        if not sources:
-            return sources
-        
-        # Group by (document_id, page_number)
-        page_groups: dict = {}
-        
-        for source in sources:
-            doc_id = source.get("document_id") or ""
-            page_num = source.get("page_number")
-            
-            # If no page info, keep as separate entry
-            if page_num is None:
-                key = f"no_page_{source.get('node_id', '')}"
-            else:
-                key = f"{doc_id}_{page_num}"
-            
-            if key not in page_groups:
-                page_groups[key] = {
-                    "node_id": source.get("node_id", ""),
-                    "title": source.get("title", ""),
-                    "content": source.get("content", ""),
-                    "image_url": source.get("image_url"),
-                    "page_number": page_num,
-                    "document_id": doc_id,
-                    "bounding_boxes": list(source.get("bounding_boxes") or []),
-                    "_merged_count": 1
-                }
-            else:
-                # Merge bounding_boxes from same page
-                existing = page_groups[key]
-                new_boxes = source.get("bounding_boxes") or []
-                if new_boxes:
-                    existing["bounding_boxes"].extend(new_boxes)
-                
-                # Append content snippet if different
-                new_content = source.get("content", "")
-                if new_content and new_content not in existing["content"]:
-                    existing["content"] = f"{existing['content']}; {new_content}"[:500]
-                
-                existing["_merged_count"] += 1
-        
-        # Convert back to list, sorted by page number
-        merged = list(page_groups.values())
-        merged.sort(key=lambda x: (x.get("page_number") or 0))
-        
-        # Log merge statistics
-        total_merged = sum(1 for m in merged if m.get("_merged_count", 1) > 1)
-        if total_merged > 0:
-            logger.info(f"[SOURCE MERGE] Merged {len(sources)} sources into {len(merged)} ({total_merged} pages had multiple chunks)")
-        
-        # Remove internal tracking field
-        for m in merged:
-            m.pop("_merged_count", None)
-        
-        return merged
+        return self._response_builder.merge_same_page_sources(sources)
     
     def _save_message_async(self, session_id: UUID, role: str, content: str) -> None:
         """

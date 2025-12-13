@@ -140,6 +140,13 @@ class Settings(BaseSettings):
     deep_reasoning_enabled: bool = Field(default=True, description="Enable Deep Reasoning with <thinking> tags")
     context_window_size: int = Field(default=50, description="Number of messages to include in context window")
     
+    # Multi-Agent System Settings (Phase 8: SOTA 2025)
+    use_multi_agent: bool = Field(default=False, description="Use Multi-Agent System instead of Unified Agent")
+    multi_agent_grading_threshold: float = Field(default=6.0, description="Minimum grader score to accept response")
+    enable_corrective_rag: bool = Field(default=True, description="Enable Corrective RAG with self-correction")
+    retrieval_grade_threshold: float = Field(default=7.0, description="Minimum score for retrieval grading")
+    enable_answer_verification: bool = Field(default=True, description="Enable hallucination checking")
+    
     # Semantic Chunking Settings (Feature: semantic-chunking)
     chunk_size: int = Field(default=800, description="Target chunk size in characters")
     chunk_overlap: int = Field(default=100, description="Overlap between consecutive chunks")

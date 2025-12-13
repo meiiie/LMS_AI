@@ -1,11 +1,11 @@
 """
 SQLAlchemy database models for Maritime AI Service.
 
-This module defines the database schema using SQLAlchemy ORM,
-including tables for memory storage, learning profiles, and conversation sessions.
+This module defines the database schema using SQLAlchemy ORM
+for chat sessions and messages.
 
-**Feature: maritime-ai-tutor**
-**Validates: Requirements 3.5, 6.4**
+**Feature: maritime-ai-tutor, Memory Lite**
+**Validates: Requirements 3.5**
 """
 
 from datetime import datetime, timezone
@@ -13,16 +13,13 @@ from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import (
-    Column,
     DateTime,
-    Enum as SQLEnum,
     ForeignKey,
-    Integer,
     String,
     Text,
     create_engine,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -36,120 +33,8 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class MemoriStoreModel(Base):
-    """
-    SQLAlchemy model for memory storage.
-    
-    Stores user memories with vector embeddings for similarity search.
-    
-    **Validates: Requirements 3.5**
-    """
-    __tablename__ = "memori_store"
-    
-    id: Mapped[UUID] = mapped_column(
-        UUID(as_uuid=True), 
-        primary_key=True, 
-        default=uuid4
-    )
-    namespace: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    memory_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    # Note: Vector type requires pgvector extension
-    # embedding = mapped_column(ARRAY(Float), nullable=True)
-    entities: Mapped[dict] = mapped_column(JSONB, default=list)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), 
-        default=_utc_now
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), 
-        default=_utc_now, 
-        onupdate=_utc_now
-    )
-
-
-class LearningProfileModel(Base):
-    """
-    SQLAlchemy model for learning profiles.
-    
-    Tracks user learning progress, level, style, and weak topics.
-    
-    **Validates: Requirements 6.4**
-    """
-    __tablename__ = "learning_profile"
-    
-    user_id: Mapped[UUID] = mapped_column(
-        UUID(as_uuid=True), 
-        primary_key=True
-    )
-    current_level: Mapped[str] = mapped_column(
-        String(20), 
-        default="CADET",
-        nullable=False
-    )
-    learning_style: Mapped[Optional[str]] = mapped_column(
-        String(20), 
-        nullable=True
-    )
-    weak_topics: Mapped[dict] = mapped_column(JSONB, default=list)
-    completed_topics: Mapped[dict] = mapped_column(JSONB, default=list)
-    assessment_history: Mapped[dict] = mapped_column(JSONB, default=list)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), 
-        default=_utc_now
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), 
-        default=_utc_now, 
-        onupdate=_utc_now
-    )
-    
-    # Relationship to conversation sessions
-    sessions: Mapped[list["ConversationSessionModel"]] = relationship(
-        back_populates="user_profile"
-    )
-
-
-class ConversationSessionModel(Base):
-    """
-    SQLAlchemy model for conversation sessions.
-    
-    Tracks individual conversation sessions with users.
-    
-    **Validates: Requirements 3.5**
-    """
-    __tablename__ = "conversation_session"
-    
-    id: Mapped[UUID] = mapped_column(
-        UUID(as_uuid=True), 
-        primary_key=True, 
-        default=uuid4
-    )
-    user_id: Mapped[UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("learning_profile.user_id"),
-        nullable=False,
-        index=True
-    )
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), 
-        default=_utc_now
-    )
-    ended_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), 
-        nullable=True
-    )
-    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    turn_count: Mapped[int] = mapped_column(Integer, default=0)
-    
-    # Relationship to learning profile
-    user_profile: Mapped["LearningProfileModel"] = relationship(
-        back_populates="sessions"
-    )
-
-
 # ============================================================================
-# MEMORY LITE - Chat History Tables (Week 2)
+# MEMORY LITE - Chat History Tables
 # ============================================================================
 
 class ChatSessionModel(Base):

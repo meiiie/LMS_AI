@@ -15,10 +15,11 @@ Architecture:
                                          -> Quyết định gọi Tool hay trả lời trực tiếp
                                          -> Response
 
-Tools:
+Tools (via ToolRegistry):
     - tool_maritime_search: Tra cứu luật hàng hải (RAG)
     - tool_save_user_info: Lưu thông tin user (Memory)
     - tool_get_user_info: Lấy thông tin user đã lưu
+    - tool_remember/forget/list/clear: Phase 10 Memory Control
 
 **Feature: maritime-ai-tutor**
 **Spec: CHỈ THỊ KỸ THUẬT SỐ 13, 15**
@@ -26,17 +27,31 @@ Tools:
 
 import logging
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
-
-# LangChain 1.x imports
-try:
-    from langchain.tools import tool
-except ImportError:
-    from langchain_core.tools import tool
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 
 from app.core.config import settings
+
+# Tool Registry Pattern - SOTA 2025
+from app.engine.tools import (
+    get_tool_registry,
+    get_all_tools,
+    init_all_tools,
+    get_last_retrieved_sources,
+    clear_retrieved_sources,
+    set_current_user,
+    get_user_cache,
+    # Individual tools for backward compat
+    tool_maritime_search,
+    tool_save_user_info,
+    tool_get_user_info,
+    tool_remember,
+    tool_forget,
+    tool_list_memories,
+    tool_clear_all_memories
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +105,13 @@ GIỌNG VĂN:
 3. KHI CẦN BIẾT THÔNG TIN USER:
    → GỌI `tool_get_user_info` để lấy thông tin đã lưu
 
-4. CHỈ TRẢ LỜI TRỰC TIẾP (KHÔNG CẦN TOOL) KHI:
+4. PHASE 10 - MEMORY CONTROL (User yêu cầu nhớ/quên):
+   → "Hãy nhớ rằng..." / "Ghi nhớ..." → gọi `tool_remember`
+   → "Quên đi..." / "Xóa thông tin..." → gọi `tool_forget`
+   → "Bạn nhớ gì về tôi?" / "Xem memory" → gọi `tool_list_memories`
+   → "Xóa hết dữ liệu" / "Reset" → gọi `tool_clear_all_memories`
+
+5. CHỈ TRẢ LỜI TRỰC TIẾP (KHÔNG CẦN TOOL) KHI:
    → Chào hỏi xã giao đơn giản
    → User than vãn, chia sẻ cảm xúc
    → Câu hỏi không liên quan đến kiến thức hàng hải
@@ -188,202 +209,24 @@ AI: "Chào Minh! Rất vui được làm quen. Hôm nay bạn muốn tìm hiểu
 
 # ============================================================================
 # GLOBAL REFERENCES (set during initialization)
+# Now mostly managed by app.engine.tools module
 # ============================================================================
 _rag_agent = None
 _semantic_memory = None
 _chat_history = None
-_user_cache: Dict[str, Dict[str, Any]] = {}
 _prompt_loader = None  # CHỈ THỊ SỐ 16: PromptLoader for dynamic persona
 _current_user_id: Optional[str] = None  # Track current user for tools
 
-# CHỈ THỊ KỸ THUẬT SỐ 16: Lưu sources từ tool_maritime_search
-# Để API có thể trả về sources trong response
-_last_retrieved_sources: List[Dict[str, str]] = []
+# Note: _user_cache and _last_retrieved_sources are now in app.engine.tools.memory_tools
 
 
 # ============================================================================
-# TOOL DEFINITIONS (LangChain @tool decorator)
+# TOOL LIST (from Tool Registry)
 # ============================================================================
 
-@tool(description="Tra cứu các quy tắc, luật lệ hàng hải (COLREGs, SOLAS, MARPOL) hoặc thông tin kỹ thuật về tàu biển. CHỈ gọi khi user hỏi về kiến thức chuyên môn hàng hải.")
-async def tool_maritime_search(query: str) -> str:
-    """Search maritime regulations and knowledge base."""
-    global _rag_agent, _last_retrieved_sources
-    
-    if not _rag_agent:
-        return "Lỗi: RAG Agent không khả dụng. Không thể tra cứu kiến thức."
-    
-    try:
-        logger.info(f"[TOOL] Maritime Search: {query}")
-        response = await _rag_agent.query(query, user_role="student")
-        
-        result = response.content
-        
-        # CHỈ THỊ KỸ THUẬT SỐ 16: Lưu sources để API trả về
-        # CHỈ THỊ 26: Include image_url for evidence images
-        # Feature: source-highlight-citation - Include bounding_boxes
-        if response.citations:
-            _last_retrieved_sources = [
-                {
-                    "node_id": c.node_id,
-                    "title": c.title,
-                    "content": c.source[:500] if c.source else "",  # Truncate for API
-                    "image_url": getattr(c, 'image_url', None),  # CHỈ THỊ 26
-                    "page_number": getattr(c, 'page_number', None),
-                    "document_id": getattr(c, 'document_id', None),
-                    "bounding_boxes": getattr(c, 'bounding_boxes', None)
-                }
-                for c in response.citations[:5]  # Top 5 sources
-            ]
-            # Debug: Log source details for troubleshooting
-            for i, src in enumerate(_last_retrieved_sources[:2]):
-                logger.info(f"[TOOL] Source {i+1}: page={src.get('page_number')}, doc={src.get('document_id')}, bbox={bool(src.get('bounding_boxes'))}")
-            logger.info(f"[TOOL] Saved {len(_last_retrieved_sources)} sources for API response")
-            
-            # Also append to text for LLM context
-            sources_text = [f"- {c.title}" for c in response.citations[:3]]
-            result += "\n\n**Nguồn tham khảo:**\n" + "\n".join(sources_text)
-        else:
-            _last_retrieved_sources = []
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Maritime search error: {e}")
-        _last_retrieved_sources = []
-        return f"Lỗi khi tra cứu: {str(e)}"
-
-
-@tool(description="Lưu thông tin cá nhân của người dùng khi họ giới thiệu bản thân. Gọi khi user nói tên, nghề nghiệp, trường học.")
-async def tool_save_user_info(key: str, value: str) -> str:
-    """
-    Save user personal information with intelligent deduplication.
-    
-    CHỈ THỊ KỸ THUẬT SỐ 24: Memory Manager & Deduplication
-    - Check before Write: Search existing memories first
-    - LLM Judge: Decide IGNORE/UPDATE/INSERT
-    - Exit 0: Skip if duplicate
-    """
-    global _user_cache, _semantic_memory, _current_user_id
-    
-    try:
-        # Use actual user_id if available, fallback to "current_user"
-        user_id = _current_user_id or "current_user"
-        logger.info(f"[TOOL] Save User Info: {key}={value} for user {user_id}")
-        
-        # Update local cache (always)
-        if user_id not in _user_cache:
-            _user_cache[user_id] = {}
-        _user_cache[user_id][key] = value
-        if "current_user" not in _user_cache:
-            _user_cache["current_user"] = {}
-        _user_cache["current_user"][key] = value
-        
-        # Map key to fact_type for SemanticMemory
-        fact_type_map = {
-            "name": "name",
-            "tên": "name",
-            "job": "role",
-            "nghề": "role",
-            "school": "role",
-            "trường": "role",
-            "background": "role",
-            "goal": "goal",
-            "mục tiêu": "goal",
-            "interest": "preference",
-            "quan tâm": "preference",
-            "weakness": "weakness",
-            "yếu": "weakness",
-        }
-        fact_type = fact_type_map.get(key.lower(), "preference")
-        fact_content = f"{key}: {value}"
-        
-        # CHỈ THỊ SỐ 24: Use Memory Manager for intelligent deduplication
-        if _semantic_memory:
-            try:
-                from app.engine.memory_manager import get_memory_manager, MemoryAction
-                
-                memory_manager = get_memory_manager(_semantic_memory)
-                decision = await memory_manager.check_and_save(
-                    user_id=user_id,
-                    new_fact=fact_content,
-                    fact_type=fact_type
-                )
-                
-                if decision.action == MemoryAction.IGNORE:
-                    logger.info(f"[MEMORY MANAGER] Exit 0 - {decision.reason}")
-                    return f"Thông tin đã tồn tại, không cần lưu. (Exit 0)"
-                elif decision.action == MemoryAction.UPDATE:
-                    return f"Đã cập nhật thông tin: {key} = {value}"
-                else:
-                    return f"Đã ghi nhớ mới: {key} = {value}"
-                    
-            except ImportError:
-                # Fallback if MemoryManager not available
-                logger.warning("MemoryManager not available, using direct save")
-                await _semantic_memory.store_user_fact(
-                    user_id=user_id,
-                    fact_content=fact_content,
-                    fact_type=fact_type,
-                    confidence=0.95
-                )
-                return f"Đã ghi nhớ: {key} = {value}"
-            except Exception as e:
-                logger.warning(f"Memory Manager failed: {e}, using direct save")
-                await _semantic_memory.store_user_fact(
-                    user_id=user_id,
-                    fact_content=fact_content,
-                    fact_type=fact_type,
-                    confidence=0.95
-                )
-                return f"Đã ghi nhớ: {key} = {value}"
-        
-        return f"Đã ghi nhớ (cache only): {key} = {value}"
-        
-    except Exception as e:
-        logger.error(f"Save user info error: {e}")
-        return f"Lỗi khi lưu thông tin: {str(e)}"
-
-
-@tool(description="Lấy thông tin đã lưu về người dùng. Gọi khi cần biết tên hoặc thông tin user để cá nhân hóa câu trả lời.")
-async def tool_get_user_info(key: str = "all") -> str:
-    """Get saved user information."""
-    global _user_cache, _semantic_memory
-    
-    try:
-        logger.info(f"[TOOL] Get User Info: {key}")
-        
-        user_id = "current_user"
-        user_data = _user_cache.get(user_id, {})
-        
-        if not user_data and _semantic_memory:
-            try:
-                context = await _semantic_memory.retrieve_context(
-                    user_id=user_id,
-                    query="user information",
-                    include_user_facts=True
-                )
-                if context.user_facts:
-                    for fact in context.user_facts:
-                        if "name is" in fact.lower():
-                            match = re.search(r"name is (\w+)", fact, re.IGNORECASE)
-                            if match:
-                                user_data["name"] = match.group(1)
-            except Exception as e:
-                logger.warning(f"Semantic memory retrieval failed: {e}")
-        
-        if key == "all":
-            return f"Thông tin user: {user_data}" if user_data else "Chưa có thông tin user."
-        else:
-            value = user_data.get(key)
-            return f"{key}: {value}" if value else f"Chưa có thông tin về {key}."
-            
-    except Exception as e:
-        logger.error(f"Get user info error: {e}")
-        return f"Lỗi khi lấy thông tin: {str(e)}"
-
-
-TOOLS = [tool_maritime_search, tool_save_user_info, tool_get_user_info]
+# Get tools from registry - SOTA 2025 Pattern
+TOOLS = get_all_tools()
+logger.info(f"Loaded {len(TOOLS)} tools from registry")
 
 
 # ============================================================================

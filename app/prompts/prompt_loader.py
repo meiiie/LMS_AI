@@ -168,11 +168,20 @@ class PromptLoader:
         self._load_personas()
     
     def _load_personas(self) -> None:
-        """Load all persona YAML files."""
-        yaml_files = {
+        """Load all persona YAML files with inheritance support."""
+        # Legacy structure (for backward compatibility)
+        legacy_files = {
             "student": "tutor.yaml",
             "teacher": "assistant.yaml",
             "admin": "assistant.yaml"
+        }
+        
+        # New SOTA 2025 structure (agents folder)
+        new_agent_files = {
+            "tutor_agent": "agents/tutor.yaml",
+            "assistant_agent": "agents/assistant.yaml",
+            "rag_agent": "agents/rag.yaml",
+            "memory_agent": "agents/memory.yaml"
         }
         
         # Log prompts directory for debugging deployment issues
@@ -181,13 +190,18 @@ class PromptLoader:
         
         if self._prompts_dir.exists():
             try:
-                files_in_dir = list(self._prompts_dir.glob("*.yaml"))
-                logger.info(f"PromptLoader: Found YAML files: {[f.name for f in files_in_dir]}")
+                files_in_dir = list(self._prompts_dir.glob("**/*.yaml"))
+                logger.info(f"PromptLoader: Found YAML files: {[str(f.relative_to(self._prompts_dir)) for f in files_in_dir]}")
             except Exception as e:
                 logger.warning(f"PromptLoader: Could not list directory: {e}")
         
+        # Load shared base config first (for inheritance)
+        shared_config = self._load_shared_config()
+        
         loaded_count = 0
-        for role, filename in yaml_files.items():
+        
+        # Load legacy files first
+        for role, filename in legacy_files.items():
             filepath = self._prompts_dir / filename
             if filepath.exists():
                 try:
@@ -202,7 +216,62 @@ class PromptLoader:
                 logger.warning(f"⚠️ Persona file not found: {filepath} - using default")
                 self._personas[role] = self._get_default_persona()
         
-        logger.info(f"PromptLoader: Loaded {loaded_count}/{len(yaml_files)} persona files")
+        # Load new agent personas with inheritance
+        for agent_id, filename in new_agent_files.items():
+            filepath = self._prompts_dir / filename
+            if filepath.exists():
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        agent_config = yaml.safe_load(f)
+                    
+                    # Apply inheritance from shared config
+                    if agent_config.get("extends"):
+                        agent_config = self._merge_with_base(agent_config, shared_config)
+                    
+                    self._personas[agent_id] = agent_config
+                    logger.info(f"✅ Loaded agent persona '{agent_id}' from {filename}")
+                    loaded_count += 1
+                except Exception as e:
+                    logger.error(f"❌ Failed to load {filename}: {e}")
+        
+        logger.info(f"PromptLoader: Loaded {loaded_count} persona files")
+    
+    def _load_shared_config(self) -> Dict[str, Any]:
+        """Load shared base configuration for inheritance."""
+        shared_path = self._prompts_dir / "base" / "_shared.yaml"
+        if shared_path.exists():
+            try:
+                with open(shared_path, "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+                logger.info("✅ Loaded shared base config from base/_shared.yaml")
+                return config
+            except Exception as e:
+                logger.error(f"❌ Failed to load shared config: {e}")
+        return {}
+    
+    def _merge_with_base(
+        self, 
+        agent_config: Dict[str, Any], 
+        base_config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Merge agent config with base config (inheritance pattern).
+        
+        Agent config overrides base config values.
+        """
+        merged = base_config.copy()
+        
+        for key, value in agent_config.items():
+            if key == "extends":
+                continue  # Skip extends key
+            elif isinstance(value, dict) and key in merged and isinstance(merged[key], dict):
+                # Deep merge for dicts
+                merged[key] = {**merged[key], **value}
+            else:
+                # Override for other types
+                merged[key] = value
+        
+        return merged
     
     def _get_default_persona(self) -> Dict[str, Any]:
         """Get default persona if YAML not found."""
