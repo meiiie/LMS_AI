@@ -264,6 +264,7 @@ async def process_with_multi_agent(
     return {
         "response": result.get("final_response", ""),
         "sources": result.get("sources", []),
+        "tools_used": result.get("tools_used", []),  # SOTA: Track tool usage
         "grader_score": result.get("grader_score", 0),
         "agent_outputs": result.get("agent_outputs", {}),
         "error": result.get("error"),

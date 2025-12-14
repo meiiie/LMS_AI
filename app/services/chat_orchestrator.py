@@ -344,13 +344,20 @@ class ChatOrchestrator:
                 image_url=s.get("image_url")
             ))
         
+        # Extract tools_used from Multi-Agent result (SOTA: API transparency)
+        tools_used = result.get("agent_outputs", {}).get("tutor_tools_used", [])
+        if not tools_used:
+            # Fallback: check top-level tools_used
+            tools_used = result.get("tools_used", [])
+        
         return ProcessingResult(
             message=response_text,
             agent_type=AgentType.RAG,
             sources=source_objects if source_objects else None,
             metadata={
                 "multi_agent": True,
-                "grader_score": result.get("grader_score", 0)
+                "grader_score": result.get("grader_score", 0),
+                "tools_used": tools_used  # SOTA: Track tool usage
             }
         )
 

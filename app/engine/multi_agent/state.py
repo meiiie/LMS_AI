@@ -49,6 +49,7 @@ class AgentState(TypedDict, total=False):
     # Final
     final_response: str
     sources: List[Dict[str, Any]]
+    tools_used: List[Dict[str, Any]]  # SOTA: Track tool usage for transparency
     
     # Metadata
     iteration: int
