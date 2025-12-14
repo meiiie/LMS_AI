@@ -41,8 +41,9 @@ graph TD
     end
     
     subgraph "Databases"
-        PG[(PostgreSQL + pgvector)]
-        NEO[(Neo4j Graph)]
+        PG[(Neon PostgreSQL<br>+ pgvector)]
+        NEO[(Neo4j Graph<br>OPTIONAL)]
+        SB[(Supabase Storage<br>Images only)]
     end
     
     SMR --> PG
@@ -54,7 +55,19 @@ graph TD
     UGR --> NEO
     
     style Repositories fill:#e1f5fe
+    style PG fill:#00E599
+    style SB fill:#3ECF8E
 ```
+
+## 🗄️ Database Infrastructure
+
+| Service | Type | Purpose | Tables |
+|---------|------|---------|--------|
+| **Neon PostgreSQL** | Primary Database | All data storage | `knowledge_embeddings`, `semantic_memories`, `chat_history`, `learning_profiles` |
+| **Neo4j** | Graph Database | Learning Graph (OPTIONAL) | User→Module relationships |
+| **Supabase** | Cloud Storage | PDF images only | N/A (file storage) |
+
+> ⚠️ **Important:** Tất cả SQL queries chạy trên **Neon**, không phải Supabase. Supabase chỉ dùng cho image storage.
 
 ---
 

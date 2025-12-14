@@ -283,6 +283,15 @@ class ChatService:
             guardrails=self._guardrails
         )
         
+        # Initialize Tool Registry with dependencies
+        # CRITICAL: Without this, tool_maritime_search cannot access RAG Agent!
+        from app.engine.tools import init_all_tools
+        init_all_tools(
+            rag_agent=self._rag_agent,
+            semantic_memory=self._semantic_memory
+        )
+        logger.info("✅ Tool Registry initialized (RAG, Memory tools)")
+        
         # Get the orchestrator
         self._orchestrator = get_chat_orchestrator()
         

@@ -27,6 +27,9 @@ API_KEY = "secret_key_cho_team_lms"  # From env vars
 TEST_USER_ID = "test_user_refactor_check"
 TEST_ROLE = "student"
 
+# Debug mode - print full API responses
+VERBOSE = True
+
 # Colors for output
 class Colors:
     GREEN = "\033[92m"
@@ -104,13 +107,19 @@ async def test_chat_simple(client: httpx.AsyncClient) -> TestResult:
         
         if response.status_code == 200:
             data = response.json()
-            message = data.get("message", "")[:100]
-            agent_type = data.get("agent_type", "unknown")
+            # Parse nested response structure: data.data.answer, data.metadata
+            response_data = data.get("data", {})
+            metadata = data.get("metadata", {})
+            message = response_data.get("answer", "")[:300]
+            agent_type = metadata.get("agent_type", "unknown")
+            session_id = metadata.get("session_id", "N/A")
+            tools_used = metadata.get("tools_used", [])
+            tool_info = f", Tools: {[t.get('name') for t in tools_used]}" if tools_used else ""
             return TestResult(
                 name="Chat Simple",
                 passed=True,
                 duration_ms=duration,
-                message=f"Agent: {agent_type}, Response: {message}...",
+                message=f"Agent: {agent_type}{tool_info}, Response: {message}...",
                 response_data=data
             )
         else:
@@ -151,18 +160,36 @@ async def test_chat_rag_query(client: httpx.AsyncClient) -> TestResult:
         
         if response.status_code == 200:
             data = response.json()
-            sources = data.get("sources", [])
-            agent_type = data.get("agent_type", "unknown")
-            message_preview = data.get("message", "")[:150]
+            # Parse nested response structure: data.data.sources, data.metadata
+            response_data = data.get("data", {})
+            metadata = data.get("metadata", {})
+            sources = response_data.get("sources", [])
+            agent_type = metadata.get("agent_type", "unknown")
+            tools_used = metadata.get("tools_used", [])
+            message_preview = response_data.get("answer", "")[:400]
             
             has_sources = len(sources) > 0
             source_info = f"{len(sources)} sources" if has_sources else "No sources"
+            tool_info = f", Tools: {[t.get('name') for t in tools_used]}" if tools_used else ", Tools: []"
+            
+            # VERBOSE DEBUG OUTPUT
+            if VERBOSE:
+                print(f"\n{Colors.YELLOW}--- RAG DEBUG INFO ---{Colors.RESET}")
+                print(f"  metadata.session_id: {metadata.get('session_id', 'N/A')}")
+                print(f"  metadata.agent_type: {agent_type}")
+                print(f"  metadata.tools_used: {tools_used}")
+                print(f"  data.sources count: {len(sources)}")
+                if sources:
+                    for i, src in enumerate(sources[:3]):
+                        print(f"    Source {i+1}: {src.get('title', 'N/A')}")
+                print(f"  Full answer length: {len(response_data.get('answer', ''))}")
+                print(f"{Colors.YELLOW}----------------------{Colors.RESET}\n")
             
             return TestResult(
                 name="Chat RAG Query",
                 passed=True,
                 duration_ms=duration,
-                message=f"Agent: {agent_type}, {source_info}, Response: {message_preview}...",
+                message=f"Agent: {agent_type}{tool_info}, {source_info}\nResponse: {message_preview}...",
                 response_data=data
             )
         else:
