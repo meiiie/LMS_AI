@@ -127,7 +127,7 @@ graph LR
     UA --> TT
     TT --> TA
     RT --> RA
-    RA --> CRAG
+    CRAG -.->|auto-composes| RA
     CRAG --> RG
     UA --> SMC
     
@@ -170,7 +170,7 @@ graph LR
 
 | Subfolder | Chức năng | Key Components |
 |-----------|-----------|----------------|
-| **`agentic_rag/`** | Corrective RAG system | `rag_agent.py`, `corrective_rag.py`, grader, verifier |
+| **`agentic_rag/`** | Corrective RAG system (Composition Pattern) | `rag_agent.py`, `corrective_rag.py` (auto-composes RAGAgent), grader, verifier |
 | **`multi_agent/`** | LangGraph SOTA 2025 orchestration | `supervisor.py`, `graph.py`, `tutor_node.py` (ReAct) |
 | **`tools/`** | 11 LangChain tools | `rag_tools.py`, `memory_tools.py`, `tutor_tools.py` |
 | **`semantic_memory/`** | Vector-based user memory | `core.py`, `extraction.py`, `context.py` |

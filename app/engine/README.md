@@ -161,11 +161,11 @@ response = await rag.query(
 3. **Synthesis** → LLM with role-based prompts
 4. **Citations** → Bounding boxes for PDF highlighting
 
-**CRAG Components:**
+**CRAG Components (Composition Pattern):**
+- `corrective_rag.py` - Self-correction loop (auto-composes RAGAgent)
 - `retrieval_grader.py` - Score relevance (0-10)
 - `query_rewriter.py` - Expand/refine query
 - `answer_verifier.py` - Check hallucination
-- `corrective_rag.py` - Self-correction loop
 
 ---
 

@@ -348,6 +348,7 @@ class RAGAgent:
                 content=gr.content,
                 title=gr.content[:50] + "..." if len(gr.content) > 50 else gr.content,
                 source=gr.document_id or "Maritime Knowledge Base",
+                category=getattr(gr, 'category', 'Knowledge'),  # SOTA: graceful fallback
                 rrf_score=gr.score,
                 dense_score=gr.dense_score,
                 sparse_score=gr.sparse_score,

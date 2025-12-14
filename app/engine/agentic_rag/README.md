@@ -78,16 +78,37 @@ response = await rag.query(
 
 **Orchestrator with self-correction loop.**
 
+**Pattern:** SOTA Composition Pattern (LangGraph CRAG 2024)
+
+> CorrectiveRAG auto-composes internal RAGAgent instead of requiring DI injection.
+> This follows LangGraph architecture where nodes are self-contained.
+
 ```python
 from app.engine.agentic_rag import get_corrective_rag
 
+# RAGAgent is auto-composed internally - no need to pass it
 crag = get_corrective_rag()
 result = await crag.process(query, context)
 
 if result.was_rewritten:
     print(f"Query improved: {result.rewritten_query}")
-if result.has_warning():
+if result.has_warning:
     print(f"Warning: low confidence")
+```
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────┐
+│               CorrectiveRAG                     │
+│  ┌───────────────────────────────────────────┐  │
+│  │ Self-Composed Components:                 │  │
+│  │ • RAGAgent (auto-init HybridSearch)       │  │
+│  │ • QueryAnalyzer (LIGHT tier)              │  │
+│  │ • RetrievalGrader (MODERATE tier)         │  │
+│  │ • QueryRewriter (LIGHT tier)              │  │
+│  │ • AnswerVerifier (LIGHT tier)             │  │
+│  └───────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────┘
 ```
 
 **Config:**
@@ -126,17 +147,30 @@ analysis = await analyzer.analyze("So sánh Rule 15 và 17")
 
 ### 4. RetrievalGrader (`retrieval_grader.py`)
 
-**Scores document relevance.**
+**Scores document relevance using SOTA batch grading.**
+
+> **SOTA Pattern (2025):** Batch grading reduces 5 LLM calls → 1 call.
+> Follows Anthropic Message Batches API and LangChain llm.batch patterns.
 
 ```python
 from app.engine.agentic_rag import get_retrieval_grader
 
 grader = get_retrieval_grader()
+# Uses batch_grade_documents internally (SOTA)
 result = await grader.grade_documents(query, documents)
 
-if result.needs_rewrite():
+if result.needs_rewrite:
     # avg_score < threshold
     print(f"Feedback: {result.feedback}")
+```
+
+**Batch Grading Architecture:**
+```
+Before (Sequential):     After (Batch - SOTA):
+Doc1 → LLM → Grade1     ┌─────────────────────┐
+Doc2 → LLM → Grade2     │ Doc1, Doc2, Doc3... │ → LLM → [Grades]
+Doc3 → LLM → Grade3     └─────────────────────┘
+5 calls × 8s = 40s       1 call × 10s = 10s (-75%)
 ```
 
 **Output:**

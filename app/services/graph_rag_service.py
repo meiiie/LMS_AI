@@ -31,6 +31,7 @@ class GraphEnhancedResult:
     page_number: Optional[int] = None
     document_id: Optional[str] = None
     image_url: Optional[str] = None
+    category: str = "Knowledge"  # From source HybridSearchResult
     
     # Graph-enhanced context
     related_entities: List[Dict[str, Any]] = field(default_factory=list)
@@ -126,6 +127,7 @@ class GraphRAGService:
                 page_number=result.page_number,
                 document_id=result.document_id,
                 image_url=result.image_url,
+                category=result.category,  # Pass category from HybridSearchResult
                 search_method="graph_enhanced" if self._neo4j_available else result.search_method,
                 dense_score=result.dense_score or 0.0,
                 sparse_score=result.sparse_score or 0.0

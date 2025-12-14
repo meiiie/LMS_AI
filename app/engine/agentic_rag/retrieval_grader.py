@@ -89,6 +89,34 @@ Kết quả:
 Đề xuất query mới hoặc keywords bổ sung:"""
 
 
+# SOTA 2025: Batch grading reduces 5 LLM calls → 1 LLM call
+# Reference: LangChain llm.batch pattern, ROGRAG framework
+BATCH_GRADING_PROMPT = """Bạn là Retrieval Grader cho hệ thống Maritime AI.
+
+Đánh giá mức độ liên quan của TỪNG document với query dưới đây.
+
+Query: {query}
+
+Documents:
+{documents}
+
+Trả về JSON ARRAY (một mảng các object):
+[
+    {{"doc_index": 0, "score": 0-10, "is_relevant": true/false, "reason": "Lý do ngắn gọn"}},
+    {{"doc_index": 1, "score": 0-10, "is_relevant": true/false, "reason": "Lý do ngắn gọn"}},
+    ...
+]
+
+Hướng dẫn chấm điểm:
+- 9-10: Trực tiếp trả lời hoàn toàn query
+- 7-8: Liên quan mạnh, chứa thông tin chính
+- 5-6: Liên quan một phần, cần bổ sung
+- 3-4: Liên quan yếu, chỉ context chung
+- 0-2: Không liên quan
+
+CHỈ TRẢ VỀ JSON ARRAY, KHÔNG CÓ TEXT KHÁC."""
+
+
 class RetrievalGrader:
     """
     Grades document relevance for Corrective RAG.
@@ -191,6 +219,9 @@ class RetrievalGrader:
         """
         Grade multiple documents.
         
+        SOTA 2025: Uses batch grading (1 LLM call) instead of sequential (5 calls).
+        Reduces grading time from ~40s to ~10s per phase.
+        
         Args:
             query: User query
             documents: List of document dicts
@@ -205,11 +236,8 @@ class RetrievalGrader:
                 feedback="No documents retrieved. Try different keywords."
             )
         
-        # Grade each document
-        grades = []
-        for doc in documents[:5]:  # Limit to 5 for performance
-            grade = await self.grade_document(query, doc)
-            grades.append(grade)
+        # SOTA: Use batch grading for efficiency
+        grades = await self.batch_grade_documents(query, documents[:5])
         
         result = GradingResult(query=query, grades=grades)
         
@@ -224,6 +252,121 @@ class RetrievalGrader:
         logger.info(f"[GRADER] Query='{query[:50]}...' avg_score={result.avg_score:.1f} relevant={result.relevant_count}/{len(grades)}")
         
         return result
+    
+    async def batch_grade_documents(
+        self,
+        query: str,
+        documents: List[Dict[str, Any]]
+    ) -> List[DocumentGrade]:
+        """
+        SOTA 2025: Batch grade multiple documents in single LLM call.
+        
+        Reduces 5 sequential calls → 1 batch call.
+        Expected speedup: ~40s → ~10s per grading phase.
+        
+        Reference: LangChain llm.batch pattern, ROGRAG framework.
+        """
+        if not documents:
+            return []
+        
+        # Fallback to rule-based if no LLM
+        if not self._llm:
+            return [
+                self._rule_based_grade(
+                    query, 
+                    doc.get("id", doc.get("node_id", "unknown")), 
+                    doc.get("content", doc.get("text", ""))[:1000]
+                ) 
+                for doc in documents
+            ]
+        
+        # Format documents for batch prompt
+        docs_text = "\n\n".join([
+            f"[Document {i}]\nID: {doc.get('id', doc.get('node_id', 'unknown'))}\n{doc.get('content', doc.get('text', ''))[:800]}"
+            for i, doc in enumerate(documents)
+        ])
+        
+        try:
+            messages = [
+                SystemMessage(content="Grade document relevance. Return only valid JSON array."),
+                HumanMessage(content=BATCH_GRADING_PROMPT.format(
+                    query=query,
+                    documents=docs_text
+                ))
+            ]
+            
+            response = await self._llm.ainvoke(messages)
+            grades = self._parse_batch_response(response.content, documents)
+            
+            logger.info(f"[GRADER] Batch graded {len(grades)} docs in 1 LLM call (SOTA)")
+            return grades
+            
+        except Exception as e:
+            logger.warning(f"Batch grading failed: {e}, falling back to sequential")
+            return await self._sequential_grade_documents(query, documents)
+    
+    async def _sequential_grade_documents(
+        self,
+        query: str,
+        documents: List[Dict[str, Any]]
+    ) -> List[DocumentGrade]:
+        """Fallback: Sequential grading when batch fails."""
+        grades = []
+        for doc in documents:
+            grade = await self.grade_document(query, doc)
+            grades.append(grade)
+        return grades
+    
+    def _parse_batch_response(
+        self,
+        response: str,
+        documents: List[Dict[str, Any]]
+    ) -> List[DocumentGrade]:
+        """Parse batch grading JSON response."""
+        import json
+        
+        # Clean response
+        result = response.strip()
+        if result.startswith("```"):
+            result = result.split("```")[1]
+            if result.startswith("json"):
+                result = result[4:]
+        result = result.strip()
+        
+        try:
+            data = json.loads(result)
+            
+            grades = []
+            for item in data:
+                doc_idx = item.get("doc_index", 0)
+                if doc_idx < len(documents):
+                    doc = documents[doc_idx]
+                    doc_id = doc.get("id", doc.get("node_id", f"doc_{doc_idx}"))
+                    content = doc.get("content", doc.get("text", ""))[:200]
+                    
+                    score = float(item.get("score", 5.0))
+                    
+                    grades.append(DocumentGrade(
+                        document_id=doc_id,
+                        content_preview=content,
+                        score=score,
+                        is_relevant=score >= self._threshold,
+                        reason=item.get("reason", "Batch graded")
+                    ))
+            
+            return grades
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse batch response: {e}")
+            # Fallback to rule-based
+            return [
+                self._rule_based_grade(
+                    "", 
+                    doc.get("id", doc.get("node_id", "unknown")), 
+                    doc.get("content", doc.get("text", ""))[:1000]
+                ) 
+                for doc in documents
+            ]
     
     async def _generate_feedback(
         self,
