@@ -151,6 +151,11 @@ async def chat_completion(
         query_type = _classify_query_type(chat_request.message)
         
         # Build LMS-compatible response
+        # Extract session_id from internal response metadata
+        session_id = None
+        if internal_response.metadata:
+            session_id = internal_response.metadata.get("session_id")
+        
         response = ChatResponse(
             status="success",
             data=ChatResponseData(
@@ -162,6 +167,7 @@ async def chat_completion(
                 processing_time=round(processing_time, 3),
                 model="maritime-rag-v1",
                 agent_type=internal_response.agent_type,
+                session_id=session_id,  # FIX: Add session_id for thread continuity
                 tools_used=tools_used,  # CHỈ THỊ SỐ 27: API Transparency
                 # LMS Integration: Analytics fields
                 topics_accessed=topics_accessed,

@@ -561,27 +561,9 @@ def get_unified_agent(rag_agent=None, semantic_memory=None, chat_history=None) -
     return _unified_agent
 
 
-def get_last_retrieved_sources() -> List[Dict[str, str]]:
-    """
-    Get sources from the last tool_maritime_search call.
-    
-    CHỈ THỊ KỸ THUẬT SỐ 16: Trả về sources cho API response.
-    
-    Returns:
-        List of source dicts with node_id, title, content
-    """
-    global _last_retrieved_sources
-    return _last_retrieved_sources.copy()
 
-
-def clear_retrieved_sources() -> None:
-    """
-    Clear the last retrieved sources.
-    
-    Should be called at the start of each request to avoid stale data.
-    """
-    global _last_retrieved_sources
-    _last_retrieved_sources = []
-
-
+# NOTE: get_last_retrieved_sources() and clear_retrieved_sources() 
+# are imported from app.engine.tools (line 42-43)
+# Do NOT define them here as it will shadow the correct implementation
+# from rag_tools.py and cause sources to always return empty!
 
