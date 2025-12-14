@@ -30,6 +30,73 @@ class ProcessingResult:
     sources: Optional[List[Source]] = None
     blocked: bool = False
     metadata: dict = None
+    thinking: Optional[str] = None  # CHỈ THỊ SỐ 28: Gemini thinking trace
+
+
+# =============================================================================
+# THINKING EXTRACTION UTILITIES (Phase 10 - CHỈ THỊ SỐ 28)
+# =============================================================================
+
+def extract_thinking_from_response(content: Any) -> tuple[str, Optional[str]]:
+    """
+    Extract thinking trace and text from Gemini response with include_thoughts=True.
+    
+    Gemini response format when thinking is enabled:
+    response.content = [
+        {'type': 'thinking', 'thinking': '...'},  # Reasoning trace
+        {'type': 'text', 'text': '...'}           # Final answer
+    ]
+    
+    Args:
+        content: Response content (can be string or list of content blocks)
+        
+    Returns:
+        Tuple of (text_content, thinking_trace)
+        - text_content: The actual response text
+        - thinking_trace: The model's reasoning (if available)
+        
+    Example:
+        >>> text, thinking = extract_thinking_from_response(response.content)
+        >>> if thinking:
+        ...     logger.info(f"Model reasoning: {thinking[:100]}...")
+    """
+    # Case 1: Already a plain string
+    if isinstance(content, str):
+        return content, None
+    
+    # Case 2: List of content blocks (Gemini thinking format)
+    if isinstance(content, list):
+        text_parts = []
+        thinking_parts = []
+        
+        for block in content:
+            if isinstance(block, dict):
+                block_type = block.get('type', '')
+                
+                if block_type == 'thinking':
+                    thinking_content = block.get('thinking', '')
+                    if thinking_content:
+                        thinking_parts.append(thinking_content)
+                        
+                elif block_type == 'text':
+                    text_content = block.get('text', '')
+                    if text_content:
+                        text_parts.append(text_content)
+                        
+            elif isinstance(block, str):
+                # Plain string in list
+                text_parts.append(block)
+        
+        text = '\n'.join(text_parts) if text_parts else ''
+        thinking = '\n'.join(thinking_parts) if thinking_parts else None
+        
+        if thinking:
+            logger.debug(f"[THINKING] Extracted {len(thinking)} chars of reasoning")
+        
+        return text, thinking
+    
+    # Case 3: Unknown format, try to convert to string
+    return str(content), None
 
 
 # =============================================================================
@@ -101,6 +168,11 @@ class OutputProcessor:
             "user_role": user_role.value,
             **(result.metadata or {})
         }
+        
+        # CHỈ THỊ SỐ 28: Include thinking trace if available
+        if result.thinking:
+            response_metadata["thinking"] = result.thinking
+            logger.info(f"[THINKING] Included {len(result.thinking)} chars of reasoning in response")
         
         # Step 3: Create response
         return InternalChatResponse(

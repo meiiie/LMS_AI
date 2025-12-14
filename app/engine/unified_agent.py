@@ -34,6 +34,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, Tool
 
 from app.core.config import settings
 from app.engine.llm_factory import create_tutor_llm
+from app.services.output_processor import extract_thinking_from_response
 
 # Tool Registry Pattern - SOTA 2025
 from app.engine.tools import (
@@ -489,14 +490,19 @@ class UnifiedAgent:
             
             # No tool calls = final answer
             if not tool_calls:
-                content = self._extract_content(response)
-                return {
+                content, thinking = self._extract_content_and_thinking(response)
+                result = {
                     "content": content,
                     "agent_type": "unified",
                     "tools_used": tools_used,
                     "method": "manual_react",
                     "iterations": iteration + 1
                 }
+                # CHỈ THỊ SỐ 28: Include thinking if extracted
+                if thinking:
+                    result["thinking"] = thinking
+                    logger.info(f"[ReAct] Thinking extracted: {len(thinking)} chars")
+                return result
             
             # Execute tools
             messages.append(response)
@@ -530,16 +536,21 @@ class UnifiedAgent:
             "error": "Max iterations reached"
         }
     
+    def _extract_content_and_thinking(self, response) -> tuple[str, Optional[str]]:
+        """
+        Extract text content and thinking from AIMessage.
+        
+        CHỈ THỊ SỐ 28: Handles Gemini thinking format:
+        [{'type': 'thinking', 'thinking': '...'}, {'type': 'text', 'text': '...'}]
+        
+        Returns:
+            Tuple of (content, thinking)
+        """
+        return extract_thinking_from_response(response.content)
+    
     def _extract_content(self, response) -> str:
-        """Extract text content from AIMessage (handles list format)."""
-        content = response.content
-        
-        # Gemini sometimes returns content as list
-        if isinstance(content, list):
-            if content and isinstance(content[0], dict):
-                return content[0].get('text', str(content))
-            return str(content)
-        
+        """Extract text content from AIMessage (legacy, for compatibility)."""
+        content, _ = self._extract_content_and_thinking(response)
         return content if content else ""
     
     def is_available(self) -> bool:

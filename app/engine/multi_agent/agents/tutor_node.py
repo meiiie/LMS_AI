@@ -19,6 +19,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, Tool
 
 from app.core.config import settings
 from app.engine.llm_factory import create_tutor_llm
+from app.services.output_processor import extract_thinking_from_response
 from app.engine.multi_agent.state import AgentState
 from app.engine.agents import TUTOR_AGENT_CONFIG, AgentConfig
 from app.engine.tools.rag_tools import (
@@ -263,32 +264,18 @@ Bạn muốn tôi giải thích khái niệm nào cụ thể?"""
         """
         Safely extract text from LLM response content.
         
-        Gemini can return content as:
-        - str: direct text
-        - list: list of content parts (each may be str or dict with 'text')
-        - None: empty response
+        CHỈ THỊ SỐ 28: Uses shared utility for Gemini thinking format.
         
         Returns:
             Extracted text as string
         """
-        if content is None:
-            return ""
+        text, thinking = extract_thinking_from_response(content)
         
-        if isinstance(content, str):
-            return content.strip()
+        # Log thinking if extracted (for debugging)
+        if thinking:
+            logger.debug(f"[TUTOR] Thinking extracted: {len(thinking)} chars")
         
-        if isinstance(content, list):
-            # Extract text from list of parts
-            parts = []
-            for part in content:
-                if isinstance(part, str):
-                    parts.append(part)
-                elif isinstance(part, dict) and 'text' in part:
-                    parts.append(part['text'])
-            return " ".join(parts).strip()
-        
-        # Fallback: convert to string
-        return str(content).strip()
+        return text.strip() if text else ""
     
     def is_available(self) -> bool:
         """Check if LLM is available."""
