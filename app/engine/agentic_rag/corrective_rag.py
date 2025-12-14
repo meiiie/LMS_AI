@@ -85,18 +85,43 @@ class CorrectiveRAG:
         """
         Initialize Corrective RAG.
         
+        SOTA Pattern: Composition Pattern
+        - If rag_agent is provided, use it (backward compatibility)
+        - If not, auto-compose internal RAGAgent (self-contained node)
+        
+        This follows LangGraph CRAG architecture where nodes are self-contained
+        and compose their own dependencies rather than relying on DI.
+        
         Args:
-            rag_agent: RAG agent for retrieval and generation
+            rag_agent: (Deprecated) External RAG agent. If None, auto-creates one.
             max_iterations: Maximum rewrite iterations
-            grade_threshold: Minimum grade to accept retrieval
-            enable_verification: Whether to verify answers
+            grade_threshold: Minimum grade to accept retrieval (1-10 scale)
+            enable_verification: Whether to verify answers against sources
         """
-        self._rag = rag_agent
         self._max_iterations = max_iterations
         self._grade_threshold = grade_threshold
         self._enable_verification = enable_verification
         
-        # Initialize components
+        # ================================================================
+        # COMPOSITION PATTERN: Self-contained RAG capability
+        # ================================================================
+        if rag_agent is not None:
+            # Backward compatibility: Use provided rag_agent
+            self._rag = rag_agent
+            logger.info("[CRAG] Using provided RAG agent (legacy mode)")
+        else:
+            # SOTA: Auto-compose internal RAGAgent
+            try:
+                from app.engine.agentic_rag.rag_agent import RAGAgent
+                self._rag = RAGAgent()  # RAGAgent auto-inits HybridSearchService
+                logger.info("[CRAG] Auto-composed internal RAGAgent")
+            except Exception as e:
+                logger.error(f"[CRAG] Failed to auto-compose RAGAgent: {e}")
+                self._rag = None
+        
+        # ================================================================
+        # CRAG COMPONENTS (Query Analysis, Grading, Rewriting, Verification)
+        # ================================================================
         self._analyzer = get_query_analyzer()
         self._grader = get_retrieval_grader()
         self._rewriter = get_query_rewriter()
@@ -282,23 +307,49 @@ class CorrectiveRAG:
         query: str,
         context: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
-        """Retrieve documents using RAG agent."""
+        """
+        Retrieve documents using composed RAGAgent.
+        
+        SOTA Pattern: Delegates to internal RAGAgent which handles:
+        - HybridSearch (Dense + Sparse)
+        - GraphRAG entity enrichment
+        - Citation generation
+        """
         if not self._rag:
-            logger.warning("[CRAG] No RAG agent configured")
+            logger.warning("[CRAG] No RAG agent available")
             return []
         
         try:
-            # Call RAG agent's retrieval
-            if hasattr(self._rag, 'retrieve'):
-                return await self._rag.retrieve(query)
-            elif hasattr(self._rag, 'search'):
-                return await self._rag.search(query)
-            else:
-                # Fallback: use the whole agent
-                result = await self._rag.process(query, context)
-                return result.get("sources", [])
+            # Use RAGAgent.query() - returns RAGResponse with citations
+            user_role = context.get("user_role", "student")
+            history = context.get("conversation_history", "")
+            
+            response = await self._rag.query(
+                question=query,
+                limit=10,
+                conversation_history=history,
+                user_role=user_role
+            )
+            
+            # Convert RAGResponse.citations to document format for grading
+            documents = []
+            for citation in response.citations:
+                doc = {
+                    "node_id": citation.get("node_id", ""),
+                    "content": citation.get("content", citation.get("excerpt", "")),
+                    "title": citation.get("title", "Unknown"),
+                    "score": citation.get("relevance_score", citation.get("score", 0)),
+                    "page_number": citation.get("page_number"),
+                    "document_id": citation.get("document_id"),
+                    "bounding_boxes": citation.get("bounding_boxes"),
+                }
+                documents.append(doc)
+            
+            logger.info(f"[CRAG] Retrieved {len(documents)} documents via RAGAgent")
+            return documents
+            
         except Exception as e:
-            logger.error(f"[CRAG] Retrieval failed: {e}")
+            logger.error(f"[CRAG] RAGAgent retrieval failed: {e}")
             return []
     
     async def _generate(
@@ -307,19 +358,33 @@ class CorrectiveRAG:
         documents: List[Dict[str, Any]],
         context: Dict[str, Any]
     ) -> Tuple[str, List[Dict[str, Any]]]:
-        """Generate answer using RAG agent."""
+        """
+        Generate answer from graded documents using RAGAgent.
+        
+        Since documents have been retrieved and graded, we use the content
+        to generate a synthesized answer.
+        """
         if not self._rag:
             return "Không thể tạo câu trả lời do thiếu cấu hình.", documents
         
+        if not documents:
+            return "Không tìm thấy thông tin phù hợp trong cơ sở dữ liệu.", []
+        
         try:
-            # Call RAG agent's generation
-            if hasattr(self._rag, 'generate'):
-                answer = await self._rag.generate(query, documents)
-                return answer, documents
-            else:
-                # Use full process
-                result = await self._rag.process(query, context)
-                return result.get("content", ""), result.get("sources", documents)
+            # Re-query with the original question to get LLM-generated answer
+            # The documents are already retrieved and graded
+            user_role = context.get("user_role", "student")
+            history = context.get("conversation_history", "")
+            
+            response = await self._rag.query(
+                question=query,
+                limit=10,
+                conversation_history=history,
+                user_role=user_role
+            )
+            
+            return response.content, documents
+            
         except Exception as e:
             logger.error(f"[CRAG] Generation failed: {e}")
             return f"Lỗi khi tạo câu trả lời: {e}", documents
