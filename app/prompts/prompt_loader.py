@@ -170,10 +170,11 @@ class PromptLoader:
     def _load_personas(self) -> None:
         """Load all persona YAML files with inheritance support."""
         # Legacy structure (for backward compatibility)
+        # FIXED: Updated paths to correct location in agents/ folder
         legacy_files = {
-            "student": "tutor.yaml",
-            "teacher": "assistant.yaml",
-            "admin": "assistant.yaml"
+            "student": "agents/tutor.yaml",
+            "teacher": "agents/assistant.yaml",
+            "admin": "agents/assistant.yaml"
         }
         
         # New SOTA 2025 structure (agents folder)

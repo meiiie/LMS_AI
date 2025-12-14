@@ -241,11 +241,14 @@ async def test_chat_thread_continuity(client: httpx.AsyncClient) -> TestResult:
             # Check if name was remembered
             remembers_name = "minh" in message2
             
+            # Handle None thread_id
+            thread_display = thread_id[:8] if thread_id else "N/A"
+            
             return TestResult(
                 name="Thread Continuity",
                 passed=True,
                 duration_ms=duration,
-                message=f"Thread ID: {thread_id[:8]}..., Remembers name: {remembers_name}",
+                message=f"Thread ID: {thread_display}..., Remembers name: {remembers_name}",
                 response_data={"thread_id": thread_id, "remembers_name": remembers_name}
             )
         else:

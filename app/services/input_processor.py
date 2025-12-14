@@ -263,7 +263,11 @@ class InputProcessor:
                 logger.warning(f"Semantic memory retrieval failed: {e}")
         
         # 2. Add Learning Graph context from Neo4j
-        if self._learning_graph and self._learning_graph.is_available():
+        # SOTA 2025: Skip for non-student roles (teacher/admin don't need learning path tracking)
+        # Teacher will have separate "Teaching Graph" context in future implementation
+        if (self._learning_graph and 
+            self._learning_graph.is_available() and 
+            request.role == UserRole.STUDENT):
             try:
                 graph_context = await self._learning_graph.get_user_learning_context(user_id)
                 

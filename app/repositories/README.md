@@ -70,13 +70,28 @@ graph TD
 
 ---
 
-## ⚠️ Audit Findings (2025-12-14)
+## 🧠 SOTA 2025: Role-Specific Knowledge Graphs
 
-| Check | Status |
-|-------|--------|
-| Dead code | ✅ None |
-| All files used | ✅ 8/8 |
-| SOTA compliance | ✅ Repository Pattern |
+Theo nghiên cứu SOTA 2025, hệ thống sử dụng **role-specific knowledge graphs** riêng biệt:
+
+| Role | Graph | Repository | Status |
+|------|-------|------------|--------|
+| **Student** | Learning Graph | `user_graph_repository` | ✅ Implemented |
+| **Teacher** | Teaching Graph | `user_graph_repository` (future) | 🔜 Planned |
+| **Admin** | System Graph | TBD | 🔜 Planned |
+
+**Student Learning Graph:**
+- `STUDIED`: User → Module (progress tracking)
+- `COMPLETED`: User → Module (completion)
+- `WEAK_AT`: User → Topic (knowledge gaps)
+- `PREREQUISITE`: Module → Module (dependencies)
+
+**Future Teacher Graph:**
+```
+Teacher → TEACHES → Module
+Teacher → CREATED → Quiz
+Teacher → ASSIGNED → Student
+```
 
 ---
 

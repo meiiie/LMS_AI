@@ -59,6 +59,7 @@ Maritime AI Tutor Service is a **Backend AI microservice** designed for integrat
 - **Memory Compression** — 70-90% token savings with intelligent summarization (Mem0-style)
 - **Intelligent Tutoring** — AI Tutor with role-based prompting (Student/Teacher/Admin)
 - **Knowledge Graph v1.0** — Hybrid Neon + Neo4j (STUDIED, WEAK_AT, PREREQUISITE relationships)
+- **Role-Specific Knowledge Graphs** — SOTA 2025 multi-role architecture (see below)
 - **Hybrid Search v0.6** — Dense Search (pgvector) + Sparse Search (tsvector) + RRF Reranking
 - **GraphRAG Knowledge** — SOLAS, COLREGs, MARPOL (PostgreSQL-based, Neo4j reserved for Learning Graph)
 - **Semantic Memory v0.5** — Cross-session memory + Insight Engine (behavioral learning)
@@ -66,6 +67,31 @@ Maritime AI Tutor Service is a **Backend AI microservice** designed for integrat
 - **Guardian Agent v0.8.1** — LLM-based Content Moderation with Gemini 2.5 Flash
 - **Multimodal RAG v1.0** — Vision-based document understanding with Evidence Images
 - **Source Highlighting v0.9.8** — Bounding boxes + Citation jumping for PDF viewer
+
+### SOTA 2025: Role-Specific Knowledge Graphs
+
+Theo nghiên cứu SOTA 2025, các hệ thống LMS hiện đại sử dụng **role-specific knowledge graphs** riêng biệt cho từng loại người dùng:
+
+| Role | Knowledge Graph | Nodes/Relationships | Status |
+|------|----------------|---------------------|--------|
+| **Student** | Learning Graph | `User→STUDIED→Module`, `User→WEAK_AT→Topic` | ✅ Implemented |
+| **Teacher** | Teaching Graph | `Teacher→TEACHES→Module`, `Teacher→CREATED→Quiz` | 🔜 Future |
+| **Admin** | System Graph | `Admin→MANAGES→Department`, Analytics | 🔜 Future |
+
+**Current Implementation (Student-focused):**
+- 学Learning paths tracking (modules studied/completed)
+- Knowledge gap detection (topics user is weak at)
+- Prerequisites mapping (module dependencies)
+
+**Future: Teacher Graph Context**
+```
+Teacher → TEACHES → Module
+Teacher → CREATED → Quiz
+Teacher → ASSIGNED → Student (for tutoring)
+Student → WEAK_AT → Topic (visible to teacher)
+```
+
+> 📚 **Research basis:** Educational Knowledge Graphs (EduKG), Tenant-specific Knowledge Graphs (Neo4j pattern), Multi-tenant LMS architectures
 
 ---
 
