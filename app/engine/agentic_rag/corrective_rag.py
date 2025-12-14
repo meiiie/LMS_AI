@@ -332,16 +332,17 @@ class CorrectiveRAG:
             )
             
             # Convert RAGResponse.citations to document format for grading
+            # Citation is a Pydantic BaseModel, use attribute access
             documents = []
             for citation in response.citations:
                 doc = {
-                    "node_id": citation.get("node_id", ""),
-                    "content": citation.get("content", citation.get("excerpt", "")),
-                    "title": citation.get("title", "Unknown"),
-                    "score": citation.get("relevance_score", citation.get("score", 0)),
-                    "page_number": citation.get("page_number"),
-                    "document_id": citation.get("document_id"),
-                    "bounding_boxes": citation.get("bounding_boxes"),
+                    "node_id": getattr(citation, 'node_id', ''),
+                    "content": getattr(citation, 'source', ''),  # Use source as content
+                    "title": getattr(citation, 'title', 'Unknown'),
+                    "score": getattr(citation, 'relevance_score', 0),
+                    "page_number": getattr(citation, 'page_number', None),
+                    "document_id": getattr(citation, 'document_id', None),
+                    "bounding_boxes": getattr(citation, 'bounding_boxes', None),
                 }
                 documents.append(doc)
             
