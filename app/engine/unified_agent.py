@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 
 from app.core.config import settings
+from app.engine.llm_factory import create_tutor_llm
 
 # Tool Registry Pattern - SOTA 2025
 from app.engine.tools import (
@@ -267,20 +268,15 @@ class UnifiedAgent:
         logger.info("UnifiedAgent initialized (Manual ReAct)")
     
     def _init_llm(self):
-        """Initialize Gemini LLM."""
+        """Initialize Gemini LLM with DEEP tier thinking."""
         try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            
             if not settings.google_api_key:
                 logger.warning("No Google API key")
                 return None
             
-            llm = ChatGoogleGenerativeAI(
-                google_api_key=settings.google_api_key,
-                model=settings.google_model,
-                temperature=0.7,
-            )
-            logger.info(f"UnifiedAgent using Gemini: {settings.google_model}")
+            # CHỈ THỊ SỐ 28: Use DEEP tier thinking (8192 tokens) for teaching
+            llm = create_tutor_llm(temperature=0.7)
+            logger.info(f"UnifiedAgent using Gemini with DEEP thinking: {settings.google_model}")
             return llm
             
         except Exception as e:

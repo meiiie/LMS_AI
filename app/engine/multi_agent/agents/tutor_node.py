@@ -18,6 +18,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
 from app.core.config import settings
+from app.engine.llm_factory import create_tutor_llm
 from app.engine.multi_agent.state import AgentState
 from app.engine.agents import TUTOR_AGENT_CONFIG, AgentConfig
 from app.engine.tools.rag_tools import (
@@ -87,17 +88,13 @@ class TutorAgentNode:
         logger.info(f"TutorAgentNode initialized with config: {self._config.id}, tools: {len(self._tools)}")
     
     def _init_llm(self):
-        """Initialize teaching LLM with tools."""
+        """Initialize teaching LLM with tools and native thinking."""
         try:
-            self._llm = ChatGoogleGenerativeAI(
-                model=settings.google_model,
-                google_api_key=settings.google_api_key,
-                temperature=0.7,  # Some creativity for teaching
-                max_output_tokens=2000
-            )
+            # CHỈ THỊ SỐ 28: Use DEEP tier thinking (8192 tokens) for teaching
+            self._llm = create_tutor_llm(temperature=0.7)
             # Bind tools to LLM (SOTA pattern)
             self._llm_with_tools = self._llm.bind_tools(self._tools)
-            logger.info(f"[TUTOR_AGENT] LLM bound with {len(self._tools)} tools")
+            logger.info(f"[TUTOR_AGENT] LLM with DEEP thinking bound with {len(self._tools)} tools")
         except Exception as e:
             logger.error(f"Failed to initialize Tutor LLM: {e}")
             self._llm = None

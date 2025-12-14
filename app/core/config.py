@@ -147,6 +147,35 @@ class Settings(BaseSettings):
     retrieval_grade_threshold: float = Field(default=7.0, description="Minimum score for retrieval grading")
     enable_answer_verification: bool = Field(default=True, description="Enable hallucination checking")
     
+    # =============================================================================
+    # GEMINI THINKING CONFIGURATION (SOTA 2025 - CHỈ THỊ SỐ 28)
+    # =============================================================================
+    # 4-Tier Thinking Strategy based on Chain of Draft (CoD) pattern
+    # All components need thinking, but level varies by task complexity
+    # Budget values: -1=dynamic, 0=disabled, 1-24576=fixed tokens
+    
+    # Global settings
+    thinking_enabled: bool = Field(default=True, description="Enable Gemini native thinking globally")
+    include_thought_summaries: bool = Field(default=True, description="Include thinking summaries in API response")
+    
+    # Per-tier budgets (4-tier strategy)
+    thinking_budget_deep: int = Field(
+        default=8192, 
+        description="DEEP tier: Teaching agents (tutor, unified_agent) - requires full explanation"
+    )
+    thinking_budget_moderate: int = Field(
+        default=4096, 
+        description="MODERATE tier: RAG synthesis agents (rag_agent, grader) - requires summarization"
+    )
+    thinking_budget_light: int = Field(
+        default=1024, 
+        description="LIGHT tier: Quick check agents (analyzer, verifier) - basic self-check"
+    )
+    thinking_budget_minimal: int = Field(
+        default=512, 
+        description="MINIMAL tier: Structured tasks (extraction, memory) - minimal buffer"
+    )
+    
     # Similarity Thresholds (Configurable - Phase 2 Refactoring)
     similarity_threshold: float = Field(default=0.7, description="Default similarity threshold for semantic search")
     fact_similarity_threshold: float = Field(default=0.90, description="Similarity threshold for fact deduplication")

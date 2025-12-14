@@ -23,8 +23,9 @@ BASE_URL = "https://maritime-ai-chatbot.onrender.com"
 API_PREFIX = "/api/v1"
 API_KEY = "secret_key_cho_team_lms"  # From env vars
 
-# Test user
-TEST_USER_ID = "test_user_refactor_check"
+# Test user - Use valid UUID for learning_profile table compatibility
+# CHỈ THỊ SỐ 28: learning_profile.user_id requires UUID type
+TEST_USER_ID = "12345678-1234-5678-1234-567812345678"  # Valid UUID format
 TEST_ROLE = "student"
 
 # Debug mode - print full API responses
