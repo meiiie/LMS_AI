@@ -196,7 +196,7 @@ class TutorAgentNode:
             # Check if LLM wants to call tools
             if not response.tool_calls:
                 # No tool calls = LLM is done, extract final response
-                final_response = response.content.strip() if response.content else ""
+                final_response = self._extract_content(response.content)
                 logger.info(f"[TUTOR_AGENT] No more tool calls, generating final response")
                 break
             
@@ -241,7 +241,7 @@ class TutorAgentNode:
         if not final_response:
             try:
                 final_msg = await self._llm.ainvoke(messages)
-                final_response = final_msg.content.strip() if final_msg.content else ""
+                final_response = self._extract_content(final_msg.content)
             except Exception as e:
                 logger.error(f"[TUTOR_AGENT] Final generation error: {e}")
                 final_response = "Đã xảy ra lỗi khi tạo câu trả lời."
@@ -261,6 +261,37 @@ class TutorAgentNode:
 3. Làm bài tập thực hành
 
 Bạn muốn tôi giải thích khái niệm nào cụ thể?"""
+    
+    def _extract_content(self, content) -> str:
+        """
+        Safely extract text from LLM response content.
+        
+        Gemini can return content as:
+        - str: direct text
+        - list: list of content parts (each may be str or dict with 'text')
+        - None: empty response
+        
+        Returns:
+            Extracted text as string
+        """
+        if content is None:
+            return ""
+        
+        if isinstance(content, str):
+            return content.strip()
+        
+        if isinstance(content, list):
+            # Extract text from list of parts
+            parts = []
+            for part in content:
+                if isinstance(part, str):
+                    parts.append(part)
+                elif isinstance(part, dict) and 'text' in part:
+                    parts.append(part['text'])
+            return " ".join(parts).strip()
+        
+        # Fallback: convert to string
+        return str(content).strip()
     
     def is_available(self) -> bool:
         """Check if LLM is available."""

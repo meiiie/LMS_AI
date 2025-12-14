@@ -2,9 +2,9 @@
 
 > Master architecture document following **C4 Model + arc42** best practices.
 
-**Last Updated:** 2025-12-14  
+**Last Updated:** 2025-12-15  
 **Status:** ✅ Complete  
-**Version:** 2.0
+**Version:** 2.1 (SOTA Multi-Agent Update)
 
 ---
 
@@ -171,7 +171,7 @@ graph LR
 | Subfolder | Chức năng | Key Components |
 |-----------|-----------|----------------|
 | **`agentic_rag/`** | Corrective RAG system | `rag_agent.py`, `corrective_rag.py`, grader, verifier |
-| **`multi_agent/`** | LangGraph orchestration (disabled) | `supervisor.py`, `graph.py`, agents/ |
+| **`multi_agent/`** | LangGraph SOTA 2025 orchestration | `supervisor.py`, `graph.py`, `tutor_node.py` (ReAct) |
 | **`tools/`** | 11 LangChain tools | `rag_tools.py`, `memory_tools.py`, `tutor_tools.py` |
 | **`semantic_memory/`** | Vector-based user memory | `core.py`, `extraction.py`, `context.py` |
 | **`tutor/`** | State machine tutoring | `tutor_agent.py` |
