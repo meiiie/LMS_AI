@@ -95,6 +95,77 @@ Response includes `trace_id` and `trace_summary`.
 
 ---
 
+## ⚡ SOTA 2025: TutorAgentNode ReAct Pattern
+
+**Updated:** TutorAgentNode now implements SOTA ReAct pattern (Think→Act→Observe):
+
+```python
+# ReAct Loop with tool calling
+llm_with_tools = self._llm.bind_tools([tool_maritime_search])
+
+for iteration in range(max_iterations):
+    response = await llm_with_tools.ainvoke(messages)
+    if response.tool_calls:
+        # ACT: Execute tools
+        result = await tool_maritime_search.ainvoke(args)
+        # OBSERVE: Add result to context
+        messages.append(ToolMessage(content=result))
+    else:
+        break  # THINK: Generate final response
+```
+
+**Key Features:**
+- ✅ Tool binding (tool_maritime_search → CorrectiveRAG)
+- ✅ RAG-First system prompt (force retrieval before answering)
+- ✅ Max 3 iterations per query
+- ✅ tools_used tracking for API transparency
+
+---
+
+## 🚀 Future Enhancements (Phase 8+)
+
+> Based on [Anthropic: Effective Context Engineering for AI Agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
+
+### 1. Self-Reflection (Self-RAG Style)
+```python
+# Add critique step after generation
+critique = await llm.ainvoke([
+    SystemMessage("Critique this answer for accuracy..."),
+    HumanMessage(f"Answer: {response}\nSources: {sources}")
+])
+if critique.needs_revision:
+    # Re-retrieve and regenerate
+```
+**Benefit:** Prevents hallucination in edge cases where LLM ignores RAG-first prompt.
+
+### 2. Structured Outputs (Pydantic)
+```python
+from pydantic import BaseModel
+
+class TutorDecision(BaseModel):
+    needs_retrieval: bool
+    query: str
+    reasoning: str
+
+# Force structured decision
+llm_with_structure = llm.with_structured_output(TutorDecision)
+```
+**Benefit:** Guarantee tool calls, prevent prompt-ignoring behavior.
+
+### 3. Sub-Agent Architecture
+```
+TutorAgent (coordinator)
+├── KnowledgeRetriever (sub-agent, isolated context)
+├── ExplanationGenerator (sub-agent)
+└── VerificationAgent (sub-agent, checks accuracy)
+```
+**Benefit:** Clean context per task, parallel processing, better long-horizon performance.
+
+### 4. Context Compaction
+Summarize long conversations to prevent context rot. Already partially implemented via `ReasoningTracer`.
+
+---
+
 ## 📝 Related
 
 - [agents/](../agents/README.md) - Provides AgentConfig, AgentTracer
