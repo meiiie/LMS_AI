@@ -4,7 +4,7 @@
 
 **Last Updated:** 2025-12-15  
 **Status:** ✅ Complete  
-**Version:** 2.1 (SOTA Multi-Agent Update)
+**Version:** 2.2 (SOTA Native Thinking)
 
 ---
 
@@ -176,6 +176,13 @@ graph LR
 | **`semantic_memory/`** | Vector-based user memory | `core.py`, `extraction.py`, `context.py` |
 | **`tutor/`** | State machine tutoring | `tutor_agent.py` |
 | **`agents/`** | Agent base classes, registry | `base.py`, `config.py`, `registry.py` |
+
+**Key Engine Files:**
+
+| File | Chức năng | CHỈ THỊ |
+|------|-----------|----------|
+| `llm_factory.py` | **NEW** Centralized LLM creation with 4-tier thinking | SỐ 28 |
+| `unified_agent.py` | Main ReAct agent (uses DEEP tier thinking) | SỐ 13, 28 |
 
 ---
 

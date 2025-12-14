@@ -21,6 +21,7 @@ from typing import List, Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
+from app.engine.llm_factory import create_rag_llm
 
 # Lazy import for optional LLM providers
 ChatOpenAI = None  # Will be imported if needed
@@ -181,24 +182,17 @@ class RAGAgent:
         """
         Initialize LLM for response synthesis.
         
+        CHỈ THỊ SỐ 28: Uses MODERATE tier thinking (4096 tokens) for RAG synthesis.
         Supports Google Gemini (primary) and OpenAI/OpenRouter (fallback).
         """
         provider = getattr(settings, 'llm_provider', 'google')
         
-        # Try Google Gemini first
+        # Try Google Gemini first with MODERATE tier thinking
         if provider == "google" or (not settings.openai_api_key and settings.google_api_key):
             if settings.google_api_key:
                 try:
-                    from langchain_google_genai import ChatGoogleGenerativeAI
-                    logger.info(f"RAG using Google Gemini: {settings.google_model}")
-                    return ChatGoogleGenerativeAI(
-                        google_api_key=settings.google_api_key,
-                        model=settings.google_model,
-                        temperature=0.3,  # Lower for factual responses
-                        convert_system_message_to_human=True,
-                    )
-                except ImportError:
-                    logger.warning("langchain-google-genai not installed")
+                    logger.info(f"RAG using Gemini with MODERATE thinking: {settings.google_model}")
+                    return create_rag_llm(temperature=0.3)  # Lower for factual responses
                 except Exception as e:
                     logger.error(f"Failed to initialize Gemini for RAG: {e}")
         

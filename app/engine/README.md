@@ -2,7 +2,7 @@
 
 > Core AI/ML components: Agents, RAG, Memory, and Multi-Agent System.
 
-**Last Updated:** 2025-12-14
+**Last Updated:** 2025-12-15 (v2.2 - SOTA Native Thinking)
 
 ---
 
@@ -43,6 +43,7 @@ app/engine/                     # ~44 Python files
 │   ├── base.py                # BaseAgent
 │   ├── config.py              # Agent configs
 │   └── registry.py            # Agent registry
+├── llm_factory.py             # **NEW** SOTA 2025: 4-tier thinking config (CHỈ THỊ 28)
 ├── gemini_embedding.py        # Embedding service
 ├── rrf_reranker.py            # RRF reranking (22KB)
 ├── memory_manager.py          # Memory consolidation
@@ -103,8 +104,30 @@ response = await agent.process(
 **Features:**
 - LLM-driven orchestration (CHỈ THỊ 13)
 - Tool binding with `bind_tools()`
-- Deep reasoning with `<thinking>` tags
+- **Native Gemini thinking with DEEP tier** (CHỈ THỊ 28)
 - Dynamic persona via PromptLoader
+
+### 1.1. LLM Factory (`llm_factory.py`) - NEW
+
+**Pattern:** Factory with 4-Tier Thinking (CHỈ THỊ 28)
+
+```python
+from app.engine.llm_factory import create_tutor_llm, create_rag_llm
+
+# DEEP tier (8192 tokens) - for teaching agents
+tutor_llm = create_tutor_llm(temperature=0.7)
+
+# MODERATE tier (4096 tokens) - for RAG synthesis  
+rag_llm = create_rag_llm(temperature=0.5)
+```
+
+**4-Tier Strategy:**
+| Tier | Budget | Components |
+|------|--------|------------|
+| DEEP | 8192 | `unified_agent`, `tutor_node` |
+| MODERATE | 4096 | `rag_agent`, `grader_agent` |
+| LIGHT | 1024 | `query_analyzer`, `verifier` |
+| MINIMAL | 512 | `extraction`, `memory` |
 
 **Tools Available:**
 | Tool | Function | Description |

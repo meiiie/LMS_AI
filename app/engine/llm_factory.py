@@ -90,6 +90,13 @@ def create_llm(
     Returns:
         ChatGoogleGenerativeAI instance with thinking config
         
+    Note:
+        Response format when include_thoughts=True:
+        response.content = [
+            {'type': 'thinking', 'thinking': '...'},  # Reasoning
+            {'type': 'text', 'text': '...'}           # Answer
+        ]
+        
     Example:
         >>> llm = create_llm(tier=ThinkingTier.DEEP)
         >>> response = await llm.ainvoke(messages)
@@ -103,34 +110,24 @@ def create_llm(
     # Model selection
     model_name = model or settings.google_model
     
-    # Build thinking config
-    thinking_config = None
-    if settings.thinking_enabled and thinking_budget != 0:
-        thinking_config = {
-            "thinking_budget": thinking_budget,
-        }
-        if include_thoughts:
-            thinking_config["include_thoughts"] = True
-    
-    logger.debug(
+    logger.info(
         f"[LLM_FACTORY] Creating LLM: model={model_name}, tier={tier.value}, "
         f"budget={thinking_budget}, include_thoughts={include_thoughts}"
     )
     
-    # Create LLM with thinking config
+    # LangChain ChatGoogleGenerativeAI supports direct params (langchain-google-genai >= 3.1.0)
+    # thinking_budget and include_thoughts are TOP-LEVEL parameters, not nested!
     llm_kwargs = {
         "model": model_name,
         "temperature": temperature,
         "google_api_key": settings.google_api_key,
     }
     
-    # Add thinking config if enabled
-    if thinking_config:
-        llm_kwargs["model_kwargs"] = {
-            "generation_config": {
-                "thinking_config": thinking_config
-            }
-        }
+    # Add thinking config if enabled (requires langchain-google-genai >= 3.0.0)
+    if settings.thinking_enabled and thinking_budget != 0:
+        llm_kwargs["thinking_budget"] = thinking_budget
+        if include_thoughts:
+            llm_kwargs["include_thoughts"] = True
     
     return ChatGoogleGenerativeAI(**llm_kwargs)
 

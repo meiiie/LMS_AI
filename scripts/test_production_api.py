@@ -146,7 +146,8 @@ async def test_chat_rag_query(client: httpx.AsyncClient) -> TestResult:
         response = await client.post(
             f"{API_PREFIX}/chat",
             json={
-                "message": "Giải thích Rule 15 trong COLREGs về tình huống cắt hướng.",
+                # Updated to match Vietnamese Maritime Law (Bộ luật hàng hải Việt Nam)
+                "message": "Giải thích Điều 15 về trách nhiệm của chủ tàu theo Bộ luật hàng hải Việt Nam.",
                 "user_id": TEST_USER_ID,
                 "role": TEST_ROLE
             },

@@ -13,6 +13,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
+from app.engine.llm_factory import create_rag_llm
 from app.engine.multi_agent.state import AgentState
 from app.engine.agents import GRADER_AGENT_CONFIG, AgentConfig
 
@@ -70,14 +71,10 @@ class GraderAgentNode:
         logger.info(f"GraderAgentNode initialized with config: {self._config.id}")
     
     def _init_llm(self):
-        """Initialize grading LLM."""
+        """Initialize grading LLM with MODERATE tier thinking."""
         try:
-            self._llm = ChatGoogleGenerativeAI(
-                model=settings.google_model,
-                google_api_key=settings.google_api_key,
-                temperature=0.0,  # Consistent grading
-                max_output_tokens=300
-            )
+            # CHỈ THỊ SỐ 28: Use MODERATE tier (4096 tokens) for grading
+            self._llm = create_rag_llm(temperature=0.0)  # Consistent grading
         except Exception as e:
             logger.error(f"Failed to initialize Grader LLM: {e}")
             self._llm = None

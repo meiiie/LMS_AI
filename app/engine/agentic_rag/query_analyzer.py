@@ -19,6 +19,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
+from app.engine.llm_factory import create_analyzer_llm
 
 logger = logging.getLogger(__name__)
 
@@ -88,15 +89,11 @@ class QueryAnalyzer:
         self._init_llm()
     
     def _init_llm(self):
-        """Initialize Gemini LLM for analysis."""
+        """Initialize Gemini LLM for analysis with LIGHT tier thinking."""
         try:
-            self._llm = ChatGoogleGenerativeAI(
-                model=settings.google_model,
-                google_api_key=settings.google_api_key,
-                temperature=0.1,  # Low temperature for consistent analysis
-                max_output_tokens=500
-            )
-            logger.info(f"QueryAnalyzer initialized with {settings.google_model}")
+            # CHỈ THỊ SỐ 28: Use LIGHT tier (1024 tokens) for quick analysis
+            self._llm = create_analyzer_llm(temperature=0.1)  # Low for consistent output
+            logger.info(f"QueryAnalyzer initialized with LIGHT thinking tier")
         except Exception as e:
             logger.error(f"Failed to initialize QueryAnalyzer LLM: {e}")
             self._llm = None

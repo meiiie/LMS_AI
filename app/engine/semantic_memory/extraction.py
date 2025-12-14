@@ -12,6 +12,7 @@ import logging
 from typing import List, Optional
 
 from app.core.config import settings
+from app.engine.llm_factory import create_extraction_llm
 from app.models.semantic_memory import (
     ALLOWED_FACT_TYPES,
     FACT_TYPE_MAPPING,
@@ -69,13 +70,9 @@ class FactExtractor:
         """Lazy initialization of LLM for fact extraction."""
         if self._llm is None:
             try:
-                from langchain_google_genai import ChatGoogleGenerativeAI
-                self._llm = ChatGoogleGenerativeAI(
-                    model=settings.google_model,
-                    google_api_key=settings.google_api_key,
-                    temperature=0.1  # Low temperature for consistent extraction
-                )
-                logger.info(f"LLM initialized for fact extraction ({settings.google_model})")
+                # CHỈ THỊ SỐ 28: Use MINIMAL tier (512 tokens) for structured extraction
+                self._llm = create_extraction_llm(temperature=0.1)
+                logger.info(f"LLM initialized for fact extraction (MINIMAL tier)")
             except Exception as e:
                 logger.warning(f"Failed to initialize LLM: {e}")
     
