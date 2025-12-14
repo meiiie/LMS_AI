@@ -205,6 +205,7 @@ class SemanticMemorySearchResult(BaseModel):
     similarity: float = Field(ge=0.0, le=1.0)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+    updated_at: Optional[datetime] = None  # Added for insights
     
     class Config:
         from_attributes = True

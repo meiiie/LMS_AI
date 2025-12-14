@@ -781,12 +781,12 @@ class SemanticMemoryRepository:
                         importance,
                         metadata,
                         created_at,
-                        1 - (embedding <=> :embedding::vector) AS similarity
+                        1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
                     FROM {self.TABLE_NAME}
                     WHERE user_id = :user_id
                       AND memory_type = :memory_type
                       AND embedding IS NOT NULL
-                    ORDER BY embedding <=> :embedding::vector
+                    ORDER BY embedding <=> CAST(:embedding AS vector)
                     LIMIT 1
                 """)
                 
