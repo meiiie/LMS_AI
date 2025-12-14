@@ -132,9 +132,9 @@ class CorrectiveRAG:
         analysis = await self._analyzer.analyze(query)
         logger.info(f"[CRAG] Analysis: {analysis}")
         tracer.end_step(
-            result=f"Độ phức tạp: {analysis.complexity.value}, Intent: {analysis.intent}",
+            result=f"Độ phức tạp: {analysis.complexity.value}, Maritime: {analysis.is_maritime_related}",
             confidence=analysis.confidence,
-            details={"complexity": analysis.complexity.value, "intent": analysis.intent}
+            details={"complexity": analysis.complexity.value, "is_maritime": analysis.is_maritime_related, "topics": analysis.detected_topics}
         )
         
         # Step 2: Initial retrieval
