@@ -16,7 +16,7 @@ async def test_search():
     
     # Get embedding
     result = genai.embed_content(
-        model="models/text-embedding-004",
+        model="models/gemini-embedding-001",
         content=query,
         task_type="retrieval_query"
     )

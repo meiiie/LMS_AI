@@ -2,6 +2,8 @@
 Tutor Agent Node - Teaching Specialist
 
 Handles educational interactions, explanations, and quizzes.
+
+**Integrated with agents/ framework for config and tracing.**
 """
 
 import logging
@@ -12,6 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
 from app.engine.multi_agent.state import AgentState
+from app.engine.agents import TUTOR_AGENT_CONFIG, AgentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -48,19 +51,22 @@ class TutorAgentNode:
     - Explain concepts clearly
     - Create quizzes and exercises
     - Adapt to learner level
+    
+    Implements agents/ framework integration.
     """
     
     def __init__(self):
         """Initialize Tutor Agent."""
         self._llm = None
+        self._config = TUTOR_AGENT_CONFIG
         self._init_llm()
-        logger.info("TutorAgentNode initialized")
+        logger.info(f"TutorAgentNode initialized with config: {self._config.id}")
     
     def _init_llm(self):
         """Initialize teaching LLM."""
         try:
             self._llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model=settings.google_model,
                 google_api_key=settings.google_api_key,
                 temperature=0.7,  # Some creativity for teaching
                 max_output_tokens=2000

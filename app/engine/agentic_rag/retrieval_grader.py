@@ -115,12 +115,12 @@ class RetrievalGrader:
         """Initialize Gemini LLM for grading."""
         try:
             self._llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model=settings.google_model,
                 google_api_key=settings.google_api_key,
                 temperature=0.0,  # Deterministic grading
                 max_output_tokens=300
             )
-            logger.info("RetrievalGrader initialized with Gemini")
+            logger.info(f"RetrievalGrader initialized with {settings.google_model}")
         except Exception as e:
             logger.error(f"Failed to initialize RetrievalGrader LLM: {e}")
             self._llm = None

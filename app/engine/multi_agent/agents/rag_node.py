@@ -2,6 +2,8 @@
 RAG Agent Node - Knowledge Retrieval Specialist
 
 Uses Corrective RAG for intelligent document retrieval and generation.
+
+**Integrated with agents/ framework for config and tracing.**
 """
 
 import logging
@@ -9,6 +11,7 @@ from typing import Optional
 
 from app.engine.multi_agent.state import AgentState
 from app.engine.agentic_rag.corrective_rag import CorrectiveRAG, get_corrective_rag
+from app.engine.agents import RAG_AGENT_CONFIG, AgentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +21,10 @@ class RAGAgentNode:
     RAG Agent - Knowledge retrieval specialist.
     
     Uses Corrective RAG with self-correction loop.
+    
+    Implements agents/ framework integration:
+    - config property from RAG_AGENT_CONFIG
+    - agent_id from config
     """
     
     def __init__(self, rag_agent=None):
@@ -28,7 +35,8 @@ class RAGAgentNode:
             rag_agent: Optional base RAG agent for retrieval
         """
         self._corrective_rag = get_corrective_rag(rag_agent)
-        logger.info("RAGAgentNode initialized with Corrective RAG")
+        self._config = RAG_AGENT_CONFIG
+        logger.info(f"RAGAgentNode initialized with config: {self._config.id}")
     
     async def process(self, state: AgentState) -> AgentState:
         """
@@ -70,6 +78,16 @@ class RAGAgentNode:
             state["error"] = str(e)
         
         return state
+    
+    @property
+    def config(self) -> AgentConfig:
+        """Get agent configuration."""
+        return self._config
+    
+    @property
+    def agent_id(self) -> str:
+        """Get unique agent identifier."""
+        return self._config.id
     
     def is_available(self) -> bool:
         """Check if RAG is available."""

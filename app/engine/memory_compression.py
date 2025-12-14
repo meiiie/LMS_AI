@@ -152,12 +152,12 @@ class MemoryCompressionEngine:
         try:
             if settings.google_api_key:
                 self._llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.0-flash",
+                    model=settings.google_model,
                     google_api_key=settings.google_api_key,
                     temperature=0.1,  # Low for consistent compression
                     max_output_tokens=500
                 )
-                logger.info("MemoryCompressionEngine initialized with Gemini Flash")
+                logger.info(f"MemoryCompressionEngine initialized with {settings.google_model}")
         except Exception as e:
             logger.error(f"Failed to initialize compression LLM: {e}")
     

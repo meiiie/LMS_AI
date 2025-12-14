@@ -147,6 +147,25 @@ class Settings(BaseSettings):
     retrieval_grade_threshold: float = Field(default=7.0, description="Minimum score for retrieval grading")
     enable_answer_verification: bool = Field(default=True, description="Enable hallucination checking")
     
+    # Similarity Thresholds (Configurable - Phase 2 Refactoring)
+    similarity_threshold: float = Field(default=0.7, description="Default similarity threshold for semantic search")
+    fact_similarity_threshold: float = Field(default=0.90, description="Similarity threshold for fact deduplication")
+    memory_duplicate_threshold: float = Field(default=0.90, description="Similarity threshold for memory duplicates")
+    memory_related_threshold: float = Field(default=0.75, description="Similarity threshold for related memories")
+    
+    # Rate Limits (Configurable)
+    chat_rate_limit: str = Field(default="30/minute", description="Rate limit for chat endpoint")
+    default_history_limit: int = Field(default=20, description="Default chat history limit")
+    max_history_limit: int = Field(default=100, description="Maximum chat history limit")
+    
+    # Contextual RAG Settings (Anthropic-style Context Enrichment)
+    contextual_rag_enabled: bool = Field(default=True, description="Enable Contextual RAG for chunk enrichment")
+    contextual_rag_batch_size: int = Field(default=5, description="Number of chunks to enrich concurrently")
+    
+    # Document KG Entity Extraction Settings (Feature: document-kg)
+    entity_extraction_enabled: bool = Field(default=True, description="Enable entity extraction during ingestion")
+    entity_extraction_batch_size: int = Field(default=3, description="Chunks to process concurrently for extraction")
+    
     # Semantic Chunking Settings (Feature: semantic-chunking)
     chunk_size: int = Field(default=800, description="Target chunk size in characters")
     chunk_overlap: int = Field(default=100, description="Overlap between consecutive chunks")

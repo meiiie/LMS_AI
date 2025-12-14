@@ -2,6 +2,8 @@
 Grader Agent Node - Quality Control Specialist
 
 Evaluates response quality and provides feedback.
+
+**Integrated with agents/ framework for config and tracing.**
 """
 
 import logging
@@ -12,6 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
 from app.engine.multi_agent.state import AgentState
+from app.engine.agents import GRADER_AGENT_CONFIG, AgentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,8 @@ class GraderAgentNode:
     - Evaluate response quality
     - Check accuracy
     - Provide improvement feedback
+    
+    Implements agents/ framework integration.
     """
     
     def __init__(self, min_score: float = 6.0):
@@ -60,14 +65,15 @@ class GraderAgentNode:
         """
         self._llm = None
         self._min_score = min_score
+        self._config = GRADER_AGENT_CONFIG
         self._init_llm()
-        logger.info("GraderAgentNode initialized")
+        logger.info(f"GraderAgentNode initialized with config: {self._config.id}")
     
     def _init_llm(self):
         """Initialize grading LLM."""
         try:
             self._llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model=settings.google_model,
                 google_api_key=settings.google_api_key,
                 temperature=0.0,  # Consistent grading
                 max_output_tokens=300

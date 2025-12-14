@@ -41,6 +41,11 @@ class AgentState(TypedDict, total=False):
     grader_score: float
     grader_feedback: str
     
+    # KG Builder outputs (Feature: document-kg)
+    kg_builder_output: Dict[str, Any]
+    extracted_entities: List[Any]
+    extracted_relations: List[Any]
+    
     # Final
     final_response: str
     sources: List[Dict[str, Any]]
@@ -49,3 +54,4 @@ class AgentState(TypedDict, total=False):
     iteration: int
     max_iterations: int
     error: Optional[str]
+

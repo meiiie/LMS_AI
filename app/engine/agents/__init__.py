@@ -32,7 +32,8 @@ from app.engine.agents.config import (
     TUTOR_AGENT_CONFIG,
     MEMORY_AGENT_CONFIG,
     GRADER_AGENT_CONFIG,
-    SUPERVISOR_AGENT_CONFIG
+    SUPERVISOR_AGENT_CONFIG,
+    KG_BUILDER_AGENT_CONFIG
 )
 
 from app.engine.agents.base import (
@@ -76,6 +77,7 @@ __all__ = [
     "MEMORY_AGENT_CONFIG",
     "GRADER_AGENT_CONFIG",
     "SUPERVISOR_AGENT_CONFIG",
+    "KG_BUILDER_AGENT_CONFIG",
     
     # Base
     "BaseAgent",

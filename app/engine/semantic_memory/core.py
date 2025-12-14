@@ -122,13 +122,13 @@ class SemanticMemoryEngine:
             try:
                 from langchain_google_genai import ChatGoogleGenerativeAI
                 self._llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.0-flash-exp",
+                    model=settings.google_model,
                     google_api_key=settings.google_api_key,
                     temperature=0.1  # Low temperature for consistent extraction
                 )
                 # Update fact extractor with LLM
                 self._fact_extractor._llm = self._llm
-                logger.info("LLM initialized for fact extraction")
+                logger.info(f"LLM initialized for fact extraction ({settings.google_model})")
             except Exception as e:
                 logger.warning(f"Failed to initialize LLM: {e}")
     
@@ -232,8 +232,15 @@ class SemanticMemoryEngine:
         """
         Store a user fact directly (without LLM extraction).
         
-        DEPRECATED: Use store_user_fact_upsert() instead for v0.4.
+        .. deprecated:: 0.4
+            Use :meth:`store_user_fact_upsert` instead for proper upsert logic.
         """
+        import warnings
+        warnings.warn(
+            "store_user_fact() is deprecated, use store_user_fact_upsert() instead",
+            DeprecationWarning,
+            stacklevel=2
+        )
         return await self.store_user_fact_upsert(
             user_id=user_id,
             fact_content=fact_content,

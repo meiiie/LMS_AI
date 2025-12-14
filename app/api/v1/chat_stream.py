@@ -37,7 +37,8 @@ def format_sse(event: str, data: dict) -> str:
 async def chat_stream(
     request: Request,
     chat_request: ChatRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    auth: RequireAuth  # LMS Integration: Require authentication
 ):
     """
     Streaming Chat API - SSE Response

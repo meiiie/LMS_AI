@@ -71,11 +71,11 @@ class FactExtractor:
             try:
                 from langchain_google_genai import ChatGoogleGenerativeAI
                 self._llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.0-flash-exp",
+                    model=settings.google_model,
                     google_api_key=settings.google_api_key,
                     temperature=0.1  # Low temperature for consistent extraction
                 )
-                logger.info("LLM initialized for fact extraction")
+                logger.info(f"LLM initialized for fact extraction ({settings.google_model})")
             except Exception as e:
                 logger.warning(f"Failed to initialize LLM: {e}")
     
@@ -224,11 +224,11 @@ class FactExtractor:
             fact_embedding = self._embeddings.embed_documents([fact_content])[0]
             
             # Step 3: SOTA - Check for semantic duplicate first
-            # Find existing fact with high embedding similarity (>= 0.90)
+            # Find existing fact with high embedding similarity
             semantic_duplicate = self._repository.find_similar_fact_by_embedding(
                 user_id=user_id,
                 embedding=fact_embedding,
-                similarity_threshold=0.90,  # SOTA threshold
+                similarity_threshold=settings.fact_similarity_threshold,  # Configurable
                 memory_type=MemoryType.USER_FACT
             )
             

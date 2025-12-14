@@ -723,6 +723,226 @@ class Neo4jKnowledgeRepository:
             logger.error(f"Failed to get all knowledge nodes: {e}")
             return []
     
+    # =========================================================================
+    # Document KG Entity Methods (Feature: document-kg)
+    # =========================================================================
+    
+    async def create_entity(
+        self,
+        entity_id: str,
+        entity_type: str,
+        name: str,
+        name_vi: Optional[str] = None,
+        description: str = "",
+        document_id: Optional[str] = None,
+        chunk_id: Optional[str] = None
+    ) -> bool:
+        """
+        Create an Entity node extracted from document.
+        
+        **Feature: document-kg**
+        **CHỈ THỊ KỸ THUẬT SỐ 29: Automated Knowledge Graph Construction**
+        
+        Args:
+            entity_id: Unique entity ID (snake_case)
+            entity_type: Type (ARTICLE, REGULATION, VESSEL_TYPE, etc.)
+            name: English name
+            name_vi: Vietnamese name
+            description: Brief description
+            document_id: Source document ID
+            chunk_id: Source chunk ID
+            
+        Returns:
+            True if created successfully
+        """
+        if not self._available:
+            logger.warning("Neo4j not available for entity creation")
+            return False
+        
+        try:
+            with self._driver.session() as session:
+                cypher = """
+                MERGE (e:Entity {id: $entity_id})
+                ON CREATE SET 
+                    e.type = $entity_type,
+                    e.name = $name,
+                    e.name_vi = $name_vi,
+                    e.description = $description,
+                    e.created_at = datetime(),
+                    e.document_id = $document_id,
+                    e.chunk_id = $chunk_id
+                ON MATCH SET
+                    e.updated_at = datetime(),
+                    e.description = CASE WHEN size($description) > size(e.description) 
+                                         THEN $description ELSE e.description END
+                RETURN e.id as id
+                """
+                result = session.run(
+                    cypher,
+                    entity_id=entity_id,
+                    entity_type=entity_type,
+                    name=name,
+                    name_vi=name_vi,
+                    description=description,
+                    document_id=document_id,
+                    chunk_id=chunk_id
+                )
+                record = result.single()
+                logger.debug(f"Created/merged entity: {entity_id} ({entity_type})")
+                return record is not None
+                
+        except Exception as e:
+            logger.error(f"Failed to create entity {entity_id}: {e}")
+            return False
+    
+    async def create_entity_relation(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: str,
+        description: str = ""
+    ) -> bool:
+        """
+        Create a relation between two entities.
+        
+        **Feature: document-kg**
+        
+        Args:
+            source_id: Source entity ID
+            target_id: Target entity ID
+            relation_type: Type (REFERENCES, APPLIES_TO, etc.)
+            description: Relation description
+            
+        Returns:
+            True if created successfully
+        """
+        if not self._available:
+            return False
+        
+        try:
+            with self._driver.session() as session:
+                # Use dynamic relationship type
+                cypher = f"""
+                MATCH (s:Entity {{id: $source_id}})
+                MATCH (t:Entity {{id: $target_id}})
+                MERGE (s)-[r:{relation_type}]->(t)
+                ON CREATE SET r.description = $description, r.created_at = datetime()
+                RETURN type(r) as rel_type
+                """
+                result = session.run(
+                    cypher,
+                    source_id=source_id,
+                    target_id=target_id,
+                    description=description
+                )
+                record = result.single()
+                if record:
+                    logger.debug(f"Created relation: {source_id} -[{relation_type}]-> {target_id}")
+                    return True
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to create relation {source_id}->{target_id}: {e}")
+            return False
+    
+    async def link_entity_to_chunk(
+        self,
+        entity_id: str,
+        chunk_id: str
+    ) -> bool:
+        """
+        Link an entity to its source chunk for provenance.
+        
+        **Feature: document-kg**
+        """
+        if not self._available:
+            return False
+        
+        try:
+            with self._driver.session() as session:
+                cypher = """
+                MATCH (e:Entity {id: $entity_id})
+                MERGE (c:Chunk {id: $chunk_id})
+                MERGE (c)-[:MENTIONS]->(e)
+                RETURN c.id as chunk_id
+                """
+                result = session.run(cypher, entity_id=entity_id, chunk_id=chunk_id)
+                return result.single() is not None
+                
+        except Exception as e:
+            logger.error(f"Failed to link entity {entity_id} to chunk {chunk_id}: {e}")
+            return False
+    
+    async def get_entities_by_type(self, entity_type: str, limit: int = 50) -> List[dict]:
+        """
+        Get entities by type.
+        
+        **Feature: document-kg**
+        """
+        if not self._available:
+            return []
+        
+        try:
+            with self._driver.session() as session:
+                cypher = """
+                MATCH (e:Entity {type: $entity_type})
+                RETURN e.id as id, e.name as name, e.name_vi as name_vi, 
+                       e.description as description, e.type as type
+                LIMIT $limit
+                """
+                result = session.run(cypher, entity_type=entity_type, limit=limit)
+                return [dict(record) for record in result]
+                
+        except Exception as e:
+            logger.error(f"Failed to get entities by type {entity_type}: {e}")
+            return []
+    
+    async def get_entity_relations(self, entity_id: str) -> List[dict]:
+        """
+        Get all relations for an entity.
+        
+        **Feature: document-kg**
+        """
+        if not self._available:
+            return []
+        
+        try:
+            with self._driver.session() as session:
+                cypher = """
+                MATCH (e:Entity {id: $entity_id})-[r]->(t:Entity)
+                RETURN type(r) as relation_type, t.id as target_id, 
+                       t.name as target_name, t.type as target_type
+                """
+                result = session.run(cypher, entity_id=entity_id)
+                return [dict(record) for record in result]
+                
+        except Exception as e:
+            logger.error(f"Failed to get relations for {entity_id}: {e}")
+            return []
+    
+    async def get_document_entities(self, document_id: str) -> List[dict]:
+        """
+        Get all entities extracted from a document.
+        
+        **Feature: document-kg**
+        """
+        if not self._available:
+            return []
+        
+        try:
+            with self._driver.session() as session:
+                cypher = """
+                MATCH (e:Entity {document_id: $document_id})
+                RETURN e.id as id, e.name as name, e.name_vi as name_vi,
+                       e.type as type, e.description as description
+                """
+                result = session.run(cypher, document_id=document_id)
+                return [dict(record) for record in result]
+                
+        except Exception as e:
+            logger.error(f"Failed to get entities for document {document_id}: {e}")
+            return []
+    
     def close(self):
         """Close Neo4j connection."""
         if self._driver:

@@ -10,6 +10,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Contextual RAG (Anthropic-style)**:
+  - `ContextEnricher` class for LLM-based chunk context generation
+  - ~49% improvement in retrieval accuracy (per Anthropic research)
+  - Configurable via `CONTEXTUAL_RAG_ENABLED` and `CONTEXTUAL_RAG_BATCH_SIZE`
+  - Database migration for `contextual_content` column
+- **Reasoning Trace (Explainability Layer)**:
+  - `ReasoningTracer` class for step-by-step AI reasoning transparency
+  - `ReasoningStep` and `ReasoningTrace` models in API response
+  - Shows query analysis, retrieval, grading, rewriting, generation steps
+  - Per-step timing, confidence scores, and details
+  - Integrated into `CorrectiveRAG` pipeline
+- **Document Knowledge Graph (Entity Extraction)**:
+  - `KGBuilderAgentNode` - new agent in multi-agent system
+  - Uses SOTA `with_structured_output()` for guaranteed JSON
+  - Extracts ARTICLE, REGULATION, VESSEL_TYPE, MANEUVER, EQUIPMENT entities
+  - Extracts REFERENCES, APPLIES_TO, REQUIRES, DEFINES, PART_OF relations
+  - Neo4j integration with `create_entity`, `create_entity_relation` methods
+  - Configurable via `ENTITY_EXTRACTION_ENABLED` and `ENTITY_EXTRACTION_BATCH_SIZE`
+- **GraphRAG Service (Microsoft-style)**:
+  - `GraphRAGService` combining HybridSearch with Neo4j entity context
+  - Entity-enhanced retrieval with `GraphEnhancedResult`
+  - Auto entity extraction during PDF ingestion pipeline
+  - Graph context for LLM prompts (`search_with_graph_context`)
+  - **RAGAgent Integration**: Automatic GraphRAG usage with entity context in LLM prompts
+  - `RAGResponse.entity_context` and `related_entities` fields for API exposure
 - Phase 9: Proactive Learning (planned)
 - Phase 12: Scheduled Tasks (planned)
 
@@ -81,6 +106,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Extracted `ChatResponseBuilder` module for response formatting.
   - Delegated `_merge_same_page_sources` to `ChatResponseBuilder` (-58 lines).
   - Reduced `chat_service.py` from 59 KB → 56.7 KB.
+
+- **Model Configuration Refactoring**:
+  - Replaced 12 hardcoded `model="gemini-2.0-flash"` with `settings.google_model`.
+  - Files updated: `agentic_rag/` (4), `multi_agent/` (3), memory engines (3), `semantic_memory/` (2).
+  - All components now use centralized model config from `.env`.
+  - Added configurable thresholds: `similarity_threshold`, `fact_similarity_threshold`, `memory_duplicate_threshold`.
+  - Added rate limit configs: `chat_rate_limit`, `default_history_limit`, `max_history_limit`.
 
 - **Unified Agent**:
   - Updated to use dynamic tool importing from registry.

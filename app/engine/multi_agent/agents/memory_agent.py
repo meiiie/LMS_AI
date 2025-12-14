@@ -2,12 +2,15 @@
 Memory Agent Node - Context Specialist
 
 Retrieves and manages user context and memory.
+
+**Integrated with agents/ framework for config and tracing.**
 """
 
 import logging
 from typing import Optional
 
 from app.engine.multi_agent.state import AgentState
+from app.engine.agents import MEMORY_AGENT_CONFIG, AgentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,8 @@ class MemoryAgentNode:
     - Retrieve user facts and preferences
     - Inject learning history
     - Personalize responses
+    
+    Implements agents/ framework integration.
     """
     
     def __init__(self, semantic_memory=None, learning_graph=None):
@@ -32,7 +37,8 @@ class MemoryAgentNode:
         """
         self._semantic_memory = semantic_memory
         self._learning_graph = learning_graph
-        logger.info("MemoryAgentNode initialized")
+        self._config = MEMORY_AGENT_CONFIG
+        logger.info(f"MemoryAgentNode initialized with config: {self._config.id}")
     
     async def process(self, state: AgentState) -> AgentState:
         """

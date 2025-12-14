@@ -4,6 +4,8 @@ Supervisor Agent - Phase 8.2
 Coordinator agent that routes queries to specialized agents.
 
 Pattern: LangGraph Supervisor with tool-based handoffs
+
+**Integrated with agents/ framework for config and tracing.**
 """
 
 import logging
@@ -15,6 +17,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
 from app.engine.multi_agent.state import AgentState
+from app.engine.agents import SUPERVISOR_AGENT_CONFIG, AgentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,7 @@ class AgentType(str, Enum):
     RAG = "rag_agent"
     TUTOR = "tutor_agent"
     MEMORY = "memory_agent"
+    KG_BUILDER = "kg_builder"  # Feature: document-kg
     DIRECT = "direct"
 
 
@@ -58,6 +62,8 @@ class SupervisorAgent:
     """
     Supervisor Agent - Coordinates specialized agents.
     
+    Implements agents/ framework integration.
+    
     Responsibilities:
     - Analyze query intent
     - Route to appropriate agent
@@ -75,7 +81,7 @@ class SupervisorAgent:
         """Initialize LLM for routing decisions."""
         try:
             self._llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model=settings.google_model,
                 google_api_key=settings.google_api_key,
                 temperature=0.1,  # Low for consistent routing
                 max_output_tokens=50

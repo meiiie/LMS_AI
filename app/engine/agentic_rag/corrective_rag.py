@@ -34,6 +34,10 @@ from app.engine.agentic_rag.query_rewriter import (
 from app.engine.agentic_rag.answer_verifier import (
     AnswerVerifier, VerificationResult, get_answer_verifier
 )
+from app.engine.reasoning_tracer import (
+    ReasoningTracer, StepNames, get_reasoning_tracer
+)
+from app.models.schemas import ReasoningTrace
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,7 @@ class CorrectiveRAGResult:
     rewritten_query: Optional[str] = None
     iterations: int = 1
     confidence: float = 0.8
+    reasoning_trace: Optional[ReasoningTrace] = None  # Feature: reasoning-trace
     
     @property
     def has_warning(self) -> bool:
@@ -113,13 +118,24 @@ class CorrectiveRAG:
             
         Returns:
             CorrectiveRAGResult with answer and metadata
+        
+        **Feature: reasoning-trace**
         """
         context = context or {}
         
+        # Initialize reasoning tracer (Feature: reasoning-trace)
+        tracer = get_reasoning_tracer()
+        
         # Step 1: Analyze query
+        tracer.start_step(StepNames.QUERY_ANALYSIS, "Phân tích độ phức tạp câu hỏi")
         logger.info(f"[CRAG] Step 1: Analyzing query: '{query[:50]}...'")
         analysis = await self._analyzer.analyze(query)
         logger.info(f"[CRAG] Analysis: {analysis}")
+        tracer.end_step(
+            result=f"Độ phức tạp: {analysis.complexity.value}, Intent: {analysis.intent}",
+            confidence=analysis.confidence,
+            details={"complexity": analysis.complexity.value, "intent": analysis.intent}
+        )
         
         # Step 2: Initial retrieval
         current_query = query
@@ -131,6 +147,9 @@ class CorrectiveRAG:
         
         for iteration in range(self._max_iterations):
             iterations = iteration + 1
+            
+            # Retrieval step
+            tracer.start_step(StepNames.RETRIEVAL, f"Tìm kiếm tài liệu (lần {iterations})")
             logger.info(f"[CRAG] Step 2.{iterations}: Retrieving for '{current_query[:50]}...'")
             
             # Retrieve documents
@@ -138,28 +157,52 @@ class CorrectiveRAG:
             
             if not documents:
                 logger.warning(f"[CRAG] No documents retrieved")
+                tracer.end_step(result="Không tìm thấy tài liệu", confidence=0.0)
+                
                 if iteration < self._max_iterations - 1:
                     # Try rewriting
+                    tracer.start_step(StepNames.QUERY_REWRITE, "Viết lại query do không có kết quả")
                     current_query = await self._rewriter.rewrite(
                         current_query, 
                         "No documents found"
                     )
                     rewritten_query = current_query
                     was_rewritten = True
+                    tracer.end_step(result=f"Query mới: {current_query[:50]}...", confidence=0.7)
+                    tracer.record_correction("Không tìm thấy tài liệu")
                     continue
                 break
+            else:
+                tracer.end_step(
+                    result=f"Tìm thấy {len(documents)} tài liệu",
+                    confidence=0.8,
+                    details={"doc_count": len(documents)}
+                )
             
             # Step 3: Grade documents
+            tracer.start_step(StepNames.GRADING, "Đánh giá độ liên quan của tài liệu")
             logger.info(f"[CRAG] Step 3.{iterations}: Grading {len(documents)} documents")
             grading_result = await self._grader.grade_documents(current_query, documents)
             
             # Check if good enough
             if grading_result.avg_score >= self._grade_threshold:
                 logger.info(f"[CRAG] Grade passed: {grading_result.avg_score:.1f}")
+                tracer.end_step(
+                    result=f"Điểm: {grading_result.avg_score:.1f}/10 - ĐẠT",
+                    confidence=grading_result.avg_score / 10,
+                    details={"score": grading_result.avg_score, "passed": True}
+                )
                 break
+            else:
+                tracer.end_step(
+                    result=f"Điểm: {grading_result.avg_score:.1f}/10 - Cần cải thiện",
+                    confidence=grading_result.avg_score / 10,
+                    details={"score": grading_result.avg_score, "passed": False}
+                )
             
             # Step 4: Rewrite if needed
             if iteration < self._max_iterations - 1:
+                tracer.start_step(StepNames.QUERY_REWRITE, "Viết lại query để cải thiện kết quả")
                 logger.info(f"[CRAG] Step 4.{iterations}: Rewriting query (score={grading_result.avg_score:.1f})")
                 
                 if analysis.complexity == QueryComplexity.COMPLEX:
@@ -176,24 +219,48 @@ class CorrectiveRAG:
                 
                 rewritten_query = current_query
                 was_rewritten = True
+                tracer.end_step(
+                    result=f"Query mới: {current_query[:50]}...",
+                    confidence=0.8
+                )
+                tracer.record_correction(f"Điểm liên quan thấp ({grading_result.avg_score:.1f}/10)")
         
         # Step 5: Generate answer
+        tracer.start_step(StepNames.GENERATION, "Tạo câu trả lời từ context")
         logger.info(f"[CRAG] Step 5: Generating answer")
         answer, sources = await self._generate(query, documents, context)
+        tracer.end_step(
+            result=f"Tạo câu trả lời dựa trên {len(sources)} nguồn",
+            confidence=0.85,
+            details={"source_count": len(sources)}
+        )
         
         # Step 6: Verify (optional)
         verification_result = None
         if self._enable_verification and analysis.requires_verification:
+            tracer.start_step(StepNames.VERIFICATION, "Kiểm tra độ chính xác và hallucination")
             logger.info(f"[CRAG] Step 6: Verifying answer")
             verification_result = await self._verifier.verify(answer, sources)
             
             if verification_result.warning:
                 answer = f"⚠️ {verification_result.warning}\n\n{answer}"
+                tracer.end_step(
+                    result=f"Cảnh báo: {verification_result.warning}",
+                    confidence=verification_result.confidence / 100 if verification_result.confidence else 0.5
+                )
+            else:
+                tracer.end_step(
+                    result="Đã xác minh - Không phát hiện vấn đề",
+                    confidence=verification_result.confidence / 100 if verification_result.confidence else 0.9
+                )
         
         # Calculate overall confidence
         confidence = self._calculate_confidence(
             analysis, grading_result, verification_result
         )
+        
+        # Build reasoning trace
+        reasoning_trace = tracer.build_trace(final_confidence=confidence / 100)
         
         logger.info(f"[CRAG] Complete: iterations={iterations}, confidence={confidence:.0f}%")
         
@@ -206,7 +273,8 @@ class CorrectiveRAG:
             was_rewritten=was_rewritten,
             rewritten_query=rewritten_query,
             iterations=iterations,
-            confidence=confidence
+            confidence=confidence,
+            reasoning_trace=reasoning_trace
         )
     
     async def _retrieve(

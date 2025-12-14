@@ -160,6 +160,20 @@ SUPERVISOR_AGENT_CONFIG = AgentConfig(
     tags=["supervisor", "routing", "orchestration"]
 )
 
+KG_BUILDER_AGENT_CONFIG = AgentConfig(
+    id="kg_builder",
+    name="KG Builder Agent",
+    role="Knowledge Graph Construction Specialist",
+    goal="Extract entities and relations from documents to build knowledge graphs",
+    category=AgentCategory.RETRIEVAL,
+    access_level=AccessLevel.WRITE,
+    tools=[],
+    persona_file=None,
+    allow_delegation=False,
+    description="Extracts entities and relations using LLM structured output for Neo4j",
+    tags=["kg", "extraction", "neo4j", "document-kg"]
+)
+
 
 # Default configurations for easy access
 DEFAULT_AGENT_CONFIGS = {
@@ -167,5 +181,6 @@ DEFAULT_AGENT_CONFIGS = {
     "tutor_agent": TUTOR_AGENT_CONFIG,
     "memory_agent": MEMORY_AGENT_CONFIG,
     "grader_agent": GRADER_AGENT_CONFIG,
-    "supervisor": SUPERVISOR_AGENT_CONFIG
+    "supervisor": SUPERVISOR_AGENT_CONFIG,
+    "kg_builder": KG_BUILDER_AGENT_CONFIG
 }

@@ -191,13 +191,46 @@ class ToolUsageInfo(BaseModel):
     description: str = Field(default="", description="Mô tả ngắn về kết quả hoặc hành động của tool")
 
 
+class ReasoningStep(BaseModel):
+    """
+    A single step in the AI reasoning process.
+    
+    **Feature: reasoning-trace**
+    **CHỈ THỊ KỸ THUẬT SỐ 28: Explainability Layer**
+    """
+    step_name: str = Field(..., description="Tên bước: query_analysis, retrieval, grading, rewrite, generation, verification")
+    description: str = Field(..., description="Mô tả ngắn gọn bước này")
+    result: str = Field(..., description="Kết quả/summary của bước")
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Độ tin cậy của bước (0.0-1.0)")
+    duration_ms: int = Field(default=0, description="Thời gian xử lý bước (milliseconds)")
+    details: Optional[dict] = Field(default=None, description="Chi tiết bổ sung (optional)")
+
+
+class ReasoningTrace(BaseModel):
+    """
+    Complete reasoning trace for AI transparency.
+    
+    Shows user how AI arrived at the answer step-by-step.
+    
+    **Feature: reasoning-trace**
+    **CHỈ THỊ KỸ THUẬT SỐ 28: Explainability Layer**
+    """
+    total_steps: int = Field(..., description="Tổng số bước xử lý")
+    total_duration_ms: int = Field(..., description="Tổng thời gian xử lý (milliseconds)")
+    was_corrected: bool = Field(default=False, description="Query có được viết lại không?")
+    correction_reason: Optional[str] = Field(default=None, description="Lý do viết lại query (nếu có)")
+    final_confidence: float = Field(default=0.8, ge=0.0, le=1.0, description="Độ tin cậy cuối cùng")
+    steps: list[ReasoningStep] = Field(default_factory=list, description="Danh sách các bước suy luận")
+
+
 class ChatResponseMetadata(BaseModel):
     """
     Metadata in chat response.
     
     CHỈ THỊ KỸ THUẬT SỐ 27: API Transparency - Added tools_used field
+    CHỈ THỊ KỸ THUẬT SỐ 28: Explainability - Added reasoning_trace field
     CHỈ THỊ LMS INTEGRATION: Added analytics fields (topics, confidence, etc.)
-    **Feature: api-transparency-thinking**
+    **Feature: api-transparency-thinking, reasoning-trace**
     **Validates: Requirements 1.1, 1.4, 3.2**
     """
     processing_time: float = Field(..., description="Thời gian xử lý (giây)")
@@ -207,6 +240,11 @@ class ChatResponseMetadata(BaseModel):
     tools_used: list[ToolUsageInfo] = Field(
         default_factory=list, 
         description="Danh sách tools đã sử dụng trong quá trình xử lý (CHỈ THỊ 27)"
+    )
+    # Reasoning Trace (Feature: reasoning-trace)
+    reasoning_trace: Optional[ReasoningTrace] = Field(
+        default=None,
+        description="Chi tiết quá trình suy luận của AI (CHỈ THỊ 28)"
     )
     # LMS Integration: Analytics fields
     topics_accessed: Optional[list[str]] = Field(

@@ -68,12 +68,12 @@ class QueryRewriter:
         """Initialize Gemini LLM."""
         try:
             self._llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model=settings.google_model,
                 google_api_key=settings.google_api_key,
                 temperature=0.3,  # Some creativity for rewriting
                 max_output_tokens=200
             )
-            logger.info("QueryRewriter initialized with Gemini")
+            logger.info(f"QueryRewriter initialized with {settings.google_model}")
         except Exception as e:
             logger.error(f"Failed to initialize QueryRewriter LLM: {e}")
             self._llm = None

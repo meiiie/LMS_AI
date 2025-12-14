@@ -48,10 +48,6 @@ class MemoryManager:
     to prevent duplicate and conflicting memories.
     """
     
-    # Thresholds - CHỈ THỊ SỐ 24
-    DUPLICATE_THRESHOLD = 0.90  # Similarity > 90% = duplicate (stricter)
-    RELATED_THRESHOLD = 0.75   # Similarity > 75% = related (check for conflict)
-    
     def __init__(self, semantic_memory=None):
         """
         Initialize Memory Manager.
@@ -59,6 +55,10 @@ class MemoryManager:
         Args:
             semantic_memory: SemanticMemoryEngine instance
         """
+        # Thresholds from config - CHỈ THỊ SỐ 24
+        self.DUPLICATE_THRESHOLD = settings.memory_duplicate_threshold  # Default 0.90
+        self.RELATED_THRESHOLD = settings.memory_related_threshold      # Default 0.75
+        
         self._semantic_memory = semantic_memory
         self._llm = None
         
@@ -68,11 +68,11 @@ class MemoryManager:
             try:
                 from langchain_google_genai import ChatGoogleGenerativeAI
                 self._llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.0-flash-exp",
+                    model=settings.google_model,
                     google_api_key=settings.google_api_key,
                     temperature=0.1  # Low temperature for consistent decisions
                 )
-                logger.info("Memory Manager LLM Judge initialized")
+                logger.info(f"Memory Manager LLM Judge initialized with {settings.google_model}")
             except Exception as e:
                 logger.warning(f"Failed to initialize LLM Judge: {e}")
     

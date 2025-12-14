@@ -17,6 +17,8 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel, Field
 
+from app.api.deps import RequireAuth, RequireAdmin
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -126,6 +128,7 @@ async def _run_ingestion_background(
 @router.post("/documents", response_model=DocumentUploadResponse)
 async def upload_document(
     background_tasks: BackgroundTasks,
+    auth: RequireAdmin,  # LMS Integration: Admin only
     file: UploadFile = File(..., description="PDF file to ingest"),
     document_id: Optional[str] = Form(None, description="Document ID (auto-generated if not provided)"),
     create_module_node: bool = Form(True, description="Create Module node in Neo4j")
@@ -194,7 +197,7 @@ async def upload_document(
 
 
 @router.get("/documents/{job_id}", response_model=DocumentStatus)
-async def get_document_status(job_id: str):
+async def get_document_status(job_id: str, auth: RequireAuth):  # LMS Integration
     """
     Check ingestion job status.
     
@@ -208,7 +211,7 @@ async def get_document_status(job_id: str):
 
 
 @router.get("/documents", response_model=list)
-async def list_documents():
+async def list_documents(auth: RequireAuth):  # LMS Integration
     """
     List all documents in knowledge base.
     
@@ -246,7 +249,7 @@ async def list_documents():
 
 
 @router.delete("/documents/{document_id}")
-async def delete_document(document_id: str):
+async def delete_document(document_id: str, auth: RequireAdmin):  # LMS Integration: Admin only
     """
     Delete a document from knowledge base.
     

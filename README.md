@@ -28,6 +28,9 @@
 | Feature | Description |
 |---------|-------------|
 | **Agentic RAG v1.0** | Self-correcting RAG with query analysis, grading, rewriting |
+| **Contextual RAG** | Anthropic-style context enrichment for 49% better retrieval |
+| **Reasoning Trace** | Step-by-step AI reasoning visibility for transparency |
+| **Document KG** | LLM entity extraction from PDFs into Neo4j graph |
 | **Multi-Agent System** | Supervisor + RAG/Tutor/Memory/Grader agents |
 | **Memory Control** | User can say "Remember/Forget" to control AI memory |
 | **Memory Compression** | 70-90% token savings with intelligent summarization |
@@ -50,6 +53,7 @@
 Maritime AI Tutor Service is a **Backend AI microservice** designed for integration with maritime LMS (Learning Management System). Key features include:
 
 - **Agentic RAG v1.0** — Self-correcting RAG with query analysis, grading, and verification
+- **Contextual RAG** — Anthropic-style chunk enrichment for ~49% better retrieval accuracy
 - **Multi-Agent System** — Supervisor + specialized agents (RAG/Tutor/Memory/Grader)
 - **Memory Control** — User can say "Remember/Forget" to explicitly control AI memory
 - **Memory Compression** — 70-90% token savings with intelligent summarization (Mem0-style)
@@ -1446,7 +1450,7 @@ docker run -d -p 8000:8000 maritime-ai-service:latest
 | **AI/LLM** | LangChain 1.1.x + LangGraph 1.0.x |
 | **Agent Pattern** | Manual ReAct (bind_tools + loop) |
 | **LLM Provider** | Google Gemini 2.5 Flash |
-| **Embeddings** | Gemini text-embedding-004 (768 dims) |
+| **Embeddings** | Gemini gemini-embedding-001 (768 dims) |
 | **Graph Database** | Neo4j 5.28 (Optional - Reserved for Learning Graph) |
 | **Vector Database** | PostgreSQL + pgvector (Neon) |
 | **Search** | Hybrid Search (Dense + Sparse + RRF) |

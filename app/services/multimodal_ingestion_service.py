@@ -36,6 +36,10 @@ from app.engine.vision_extractor import VisionExtractor, get_vision_extractor
 from app.engine.gemini_embedding import GeminiOptimizedEmbeddings
 from app.engine.page_analyzer import PageAnalyzer, PageAnalysisResult, get_page_analyzer
 from app.engine.bounding_box_extractor import BoundingBoxExtractor, get_bounding_box_extractor
+from app.engine.context_enricher import ContextEnricher, get_context_enricher
+# GraphRAG entity extraction (Feature: document-kg)
+from app.engine.multi_agent.agents.kg_builder_agent import KGBuilderAgentNode, get_kg_builder_agent
+from app.repositories.neo4j_knowledge_repository import Neo4jKnowledgeRepository
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -116,7 +120,10 @@ class MultimodalIngestionService:
         embedding_service: Optional[GeminiOptimizedEmbeddings] = None,
         chunker: Optional[SemanticChunker] = None,
         page_analyzer: Optional[PageAnalyzer] = None,
-        bbox_extractor: Optional[BoundingBoxExtractor] = None
+        bbox_extractor: Optional[BoundingBoxExtractor] = None,
+        context_enricher: Optional[ContextEnricher] = None,
+        kg_builder: Optional[KGBuilderAgentNode] = None,
+        neo4j_repo: Optional[Neo4jKnowledgeRepository] = None
     ):
         """
         Initialize Multimodal Ingestion Service.
@@ -128,6 +135,8 @@ class MultimodalIngestionService:
             chunker: Semantic chunking service
             page_analyzer: Page analyzer for hybrid detection (Feature: hybrid-text-vision)
             bbox_extractor: Bounding box extractor (Feature: source-highlight-citation)
+            kg_builder: KG Builder Agent for entity extraction (Feature: document-kg)
+            neo4j_repo: Neo4j repository for storing entities (Feature: document-kg)
         """
         self.storage = storage_client or get_storage_client()
         self.vision = vision_extractor or get_vision_extractor()
@@ -135,6 +144,12 @@ class MultimodalIngestionService:
         self.chunker = chunker or get_semantic_chunker()
         self.page_analyzer = page_analyzer or get_page_analyzer()
         self.bbox_extractor = bbox_extractor or get_bounding_box_extractor()
+        self.context_enricher = context_enricher or get_context_enricher()
+        
+        # GraphRAG entity extraction (Feature: document-kg)
+        self.kg_builder = kg_builder or get_kg_builder_agent()
+        self.neo4j = neo4j_repo or Neo4jKnowledgeRepository()
+        self.entity_extraction_enabled = settings.entity_extraction_enabled
         
         # Hybrid detection settings from config
         self.hybrid_detection_enabled = settings.hybrid_detection_enabled
@@ -144,7 +159,9 @@ class MultimodalIngestionService:
         logger.info(
             f"MultimodalIngestionService initialized: "
             f"hybrid_detection={self.hybrid_detection_enabled}, "
-            f"force_vision={self.force_vision_mode}"
+            f"force_vision={self.force_vision_mode}, "
+            f"contextual_rag={settings.contextual_rag_enabled}, "
+            f"entity_extraction={self.entity_extraction_enabled}"
         )
     
     def _get_progress_file(self, document_id: str) -> Path:
@@ -643,13 +660,33 @@ class MultimodalIngestionService:
                 metadata=page_metadata
             )]
         
-        # Step 4 & 5: Generate embedding and store each chunk
+        # Step 4.5: Contextual RAG - Enrich chunks with LLM-generated context
+        # Feature: contextual-rag (Anthropic-style Context Enrichment)
+        if settings.contextual_rag_enabled and len(chunks) > 0:
+            try:
+                # Get total pages from metadata or estimate
+                total_pages_in_doc = page_metadata.get('total_pages', 1)
+                
+                chunks = await self.context_enricher.enrich_chunks(
+                    chunks=chunks,
+                    document_id=document_id,
+                    document_title=document_id,  # Use document_id as title
+                    total_pages=total_pages_in_doc,
+                    batch_size=settings.contextual_rag_batch_size
+                )
+                logger.info(f"Page {page_number}: Contextual enrichment complete")
+            except Exception as ctx_err:
+                logger.warning(f"Context enrichment failed, continuing without: {ctx_err}")
+        
+        # Step 5 & 6: Generate embedding and store each chunk
         # Feature: source-highlight-citation - Extract bounding boxes for each chunk
         successful_chunks = 0
         for chunk in chunks:
             try:
                 # Generate embedding for chunk
-                embedding = await self.embeddings.aembed_query(chunk.content)
+                # Use contextual_content if available (better retrieval), fallback to original
+                text_to_embed = chunk.contextual_content or chunk.content
+                embedding = await self.embeddings.aembed_query(text_to_embed)
                 
                 # Extract bounding boxes for this chunk (Feature: source-highlight-citation)
                 bounding_boxes = None
@@ -670,6 +707,7 @@ class MultimodalIngestionService:
                     page_number=page_number,
                     chunk_index=chunk.chunk_index,
                     content=chunk.content,
+                    contextual_content=chunk.contextual_content,  # Feature: contextual-rag
                     embedding=embedding,
                     image_url=image_url,
                     content_type=chunk.content_type,
@@ -682,6 +720,18 @@ class MultimodalIngestionService:
             except Exception as e:
                 logger.error(f"Failed to process chunk {chunk.chunk_index} on page {page_number}: {e}")
                 continue
+        
+        # Step 6.5: Entity Extraction for GraphRAG (Feature: document-kg)
+        # Extract entities from page text and store in Neo4j
+        if self.entity_extraction_enabled and successful_chunks > 0:
+            try:
+                await self._extract_and_store_entities(
+                    text=text,
+                    document_id=document_id,
+                    page_number=page_number
+                )
+            except Exception as e:
+                logger.warning(f"Entity extraction failed for page {page_number}: {e}")
         
         if successful_chunks == 0:
             return PageResult(
@@ -709,6 +759,7 @@ class MultimodalIngestionService:
         page_number: int,
         chunk_index: int,
         content: str,
+        contextual_content: Optional[str],  # Feature: contextual-rag
         embedding: List[float],
         image_url: str,
         content_type: str = 'text',
@@ -753,6 +804,7 @@ class MultimodalIngestionService:
                     sql_text("""
                         UPDATE knowledge_embeddings 
                         SET content = :content,
+                            contextual_content = :contextual_content,
                             embedding = :embedding,
                             image_url = :image_url,
                             content_type = :content_type,
@@ -766,6 +818,7 @@ class MultimodalIngestionService:
                     """),
                     {
                         "content": content,
+                        "contextual_content": contextual_content,
                         "embedding": embedding,
                         "image_url": image_url,
                         "content_type": content_type,
@@ -782,14 +835,15 @@ class MultimodalIngestionService:
                 session.execute(
                     sql_text("""
                         INSERT INTO knowledge_embeddings 
-                        (id, content, embedding, document_id, page_number, chunk_index, 
+                        (id, content, contextual_content, embedding, document_id, page_number, chunk_index, 
                          image_url, content_type, confidence_score, metadata, source, bounding_boxes)
-                        VALUES (:id, :content, :embedding, :doc_id, :page_num, :chunk_idx,
+                        VALUES (:id, :content, :contextual_content, :embedding, :doc_id, :page_num, :chunk_idx,
                                 :image_url, :content_type, :confidence_score, :metadata, :source, :bounding_boxes)
                     """),
                     {
                         "id": str(uuid.uuid4()),
                         "content": content,
+                        "contextual_content": contextual_content,
                         "embedding": embedding,
                         "doc_id": document_id,
                         "page_num": page_number,
@@ -806,6 +860,69 @@ class MultimodalIngestionService:
             session.commit()
         
         logger.debug(f"Stored chunk {chunk_index} of page {page_number} in database")
+    
+    async def _extract_and_store_entities(
+        self,
+        text: str,
+        document_id: str,
+        page_number: int
+    ):
+        """
+        Extract entities from page text and store in Neo4j.
+        
+        **Feature: document-kg**
+        **CHỈ THỊ KỸ THUẬT SỐ 29: Automated Knowledge Graph Construction**
+        
+        Args:
+            text: Page text content
+            document_id: Document ID
+            page_number: Page number
+        """
+        if not self.kg_builder.is_available():
+            return
+        
+        if not self.neo4j.is_available():
+            logger.debug("Neo4j not available, skipping entity storage")
+            return
+        
+        # Extract entities using KG Builder Agent
+        source = f"{document_id}_page_{page_number}"
+        extraction = await self.kg_builder.extract(text, source)
+        
+        if not extraction.entities:
+            return
+        
+        # Store entities in Neo4j
+        entity_count = 0
+        for entity in extraction.entities:
+            success = await self.neo4j.create_entity(
+                entity_id=entity.id,
+                entity_type=entity.entity_type,
+                name=entity.name,
+                name_vi=entity.name_vi,
+                description=entity.description,
+                document_id=document_id,
+                chunk_id=source
+            )
+            if success:
+                entity_count += 1
+        
+        # Store relations
+        relation_count = 0
+        for relation in extraction.relations:
+            success = await self.neo4j.create_entity_relation(
+                source_id=relation.source_id,
+                target_id=relation.target_id,
+                relation_type=relation.relation_type,
+                description=relation.description
+            )
+            if success:
+                relation_count += 1
+        
+        logger.info(
+            f"[GraphRAG] Page {page_number}: Extracted {entity_count} entities, "
+            f"{relation_count} relations"
+        )
 
 
 # Singleton instance

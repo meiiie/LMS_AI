@@ -111,10 +111,10 @@ class MemorySummarizer:
                 # Use Flash model for fast summarization
                 self._llm = ChatGoogleGenerativeAI(
                     google_api_key=settings.google_api_key,
-                    model="gemini-2.0-flash",  # Fast model for summarization
+                    model=settings.google_model,
                     temperature=0.3,  # Low temperature for consistent summaries
                 )
-                logger.info("MemorySummarizer initialized with Gemini Flash")
+                logger.info(f"MemorySummarizer initialized with {settings.google_model}")
             else:
                 logger.warning("No Google API key for MemorySummarizer")
         except Exception as e:

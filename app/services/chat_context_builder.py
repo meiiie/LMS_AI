@@ -11,6 +11,8 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional, TYPE_CHECKING
 
+from app.core.config import settings
+
 if TYPE_CHECKING:
     from app.engine.semantic_memory.core import SemanticMemoryEngine
     from app.services.learning_graph_service import LearningGraphService
@@ -56,7 +58,7 @@ class ChatContextBuilder:
         message: str,
         insight_limit: int = 10,
         search_limit: int = 5,
-        similarity_threshold: float = 0.7
+        similarity_threshold: float = None
     ) -> ContextResult:
         """
         Build full context for a chat message.
@@ -71,6 +73,10 @@ class ChatContextBuilder:
         Returns:
             ContextResult with semantic context and metadata
         """
+        # Use settings default if not provided
+        if similarity_threshold is None:
+            similarity_threshold = settings.similarity_threshold
+        
         result = ContextResult()
         
         # Step 1: Retrieve Semantic Memory context

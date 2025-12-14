@@ -88,12 +88,12 @@ class AnswerVerifier:
         """Initialize Gemini LLM for verification."""
         try:
             self._llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model=settings.google_model,
                 google_api_key=settings.google_api_key,
                 temperature=0.0,  # Strict verification
                 max_output_tokens=500
             )
-            logger.info("AnswerVerifier initialized with Gemini")
+            logger.info(f"AnswerVerifier initialized with {settings.google_model}")
         except Exception as e:
             logger.error(f"Failed to initialize AnswerVerifier LLM: {e}")
             self._llm = None

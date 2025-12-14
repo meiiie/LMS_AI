@@ -125,7 +125,7 @@ async def tool_save_user_info(key: str, value: str) -> str:
             except ImportError:
                 # Fallback if MemoryManager not available
                 logger.warning("MemoryManager not available, using direct save")
-                await _semantic_memory.store_user_fact(
+                await _semantic_memory.store_user_fact_upsert(
                     user_id=user_id,
                     fact_content=fact_content,
                     fact_type=fact_type,
@@ -134,7 +134,7 @@ async def tool_save_user_info(key: str, value: str) -> str:
                 return f"Đã ghi nhớ: {key} = {value}"
             except Exception as e:
                 logger.warning(f"Memory Manager failed: {e}, using direct save")
-                await _semantic_memory.store_user_fact(
+                await _semantic_memory.store_user_fact_upsert(
                     user_id=user_id,
                     fact_content=fact_content,
                     fact_type=fact_type,

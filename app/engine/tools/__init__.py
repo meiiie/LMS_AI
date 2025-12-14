@@ -12,6 +12,7 @@ Usage:
     # Get by category
     rag_tools = get_tool_registry().get_by_category(ToolCategory.RAG)
     memory_tools = get_tool_registry().get_by_category(ToolCategory.MEMORY)
+    learning_tools = get_tool_registry().get_by_category(ToolCategory.LEARNING)
 """
 
 import logging
@@ -46,6 +47,17 @@ from app.engine.tools.memory_tools import (
     get_user_cache
 )
 
+# Tutor Tools - Structured Learning (SOTA 2024)
+from app.engine.tools.tutor_tools import (
+    tool_start_lesson,
+    tool_continue_lesson,
+    tool_lesson_status,
+    tool_end_lesson,
+    init_tutor_tools,
+    set_tutor_user,
+    get_current_session_id
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,6 +84,10 @@ def init_all_tools(rag_agent=None, semantic_memory=None, user_id: str = None):
     
     if semantic_memory:
         init_memory_tools(semantic_memory, user_id)
+    
+    # Initialize tutor tools with user context
+    if user_id:
+        init_tutor_tools(user_id)
     
     registry = get_tool_registry()
     summary = registry.summary()
@@ -108,8 +124,18 @@ __all__ = [
     "set_current_user",
     "get_user_cache",
     
+    # Tutor Tools (Structured Learning)
+    "tool_start_lesson",
+    "tool_continue_lesson",
+    "tool_lesson_status",
+    "tool_end_lesson",
+    "init_tutor_tools",
+    "set_tutor_user",
+    "get_current_session_id",
+    
     # Convenience
     "get_all_tools",
     "init_all_tools",
     "TOOLS"
 ]
+

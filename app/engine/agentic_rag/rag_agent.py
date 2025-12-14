@@ -87,16 +87,21 @@ class RAGResponse:
     
     **Validates: Requirements 4.1**
     **Feature: multimodal-rag-vision** - Added evidence_images
+    **Feature: document-kg** - Added entity_context for GraphRAG
     """
     content: str
     citations: List[Citation]
     is_fallback: bool = False
     disclaimer: Optional[str] = None
     evidence_images: List[EvidenceImage] = None  # CHỈ THỊ 26: Evidence Images
+    entity_context: Optional[str] = None  # Feature: document-kg - GraphRAG entity context
+    related_entities: List[str] = None  # Feature: document-kg - Related entity names
     
     def __post_init__(self):
         if self.evidence_images is None:
             self.evidence_images = []
+        if self.related_entities is None:
+            self.related_entities = []
     
     def has_citations(self) -> bool:
         """Check if response has citations."""
@@ -105,6 +110,10 @@ class RAGResponse:
     def has_evidence_images(self) -> bool:
         """Check if response has evidence images."""
         return len(self.evidence_images) > 0
+    
+    def has_entity_context(self) -> bool:
+        """Check if response has entity context from GraphRAG."""
+        return bool(self.entity_context)
 
 
 class RAGAgent:
@@ -134,7 +143,8 @@ class RAGAgent:
     def __init__(
         self,
         knowledge_graph=None,
-        hybrid_search_service=None
+        hybrid_search_service=None,
+        graph_rag_service=None  # Feature: document-kg
     ):
         """
         Initialize RAG Agent.
@@ -142,6 +152,7 @@ class RAGAgent:
         Args:
             knowledge_graph: Knowledge graph repository instance
             hybrid_search_service: Hybrid search service for Dense+Sparse search
+            graph_rag_service: GraphRAG service for entity-enriched search
         """
         self._kg = knowledge_graph or get_knowledge_repository()
         
@@ -151,6 +162,18 @@ class RAGAgent:
             self._hybrid_search = get_hybrid_search_service()
         else:
             self._hybrid_search = hybrid_search_service
+        
+        # Feature: document-kg - GraphRAG for entity context
+        if graph_rag_service is None:
+            try:
+                from app.services.graph_rag_service import get_graph_rag_service
+                self._graph_rag = get_graph_rag_service()
+                logger.info("GraphRAG service initialized for entity context")
+            except Exception as e:
+                logger.warning(f"GraphRAG not available: {e}")
+                self._graph_rag = None
+        else:
+            self._graph_rag = graph_rag_service
             
         self._llm = self._init_llm()
     
@@ -221,7 +244,7 @@ class RAGAgent:
         """
         Query the knowledge graph and generate response.
         
-        Uses Hybrid Search (Dense + Sparse) for improved retrieval.
+        Uses GraphRAG (Hybrid Search + Entity Context) for improved retrieval.
         
         Args:
             question: User's question
@@ -230,21 +253,52 @@ class RAGAgent:
             user_role: User role for role-based prompting (student/teacher/admin)
             
         Returns:
-            RAGResponse with content and citations
+            RAGResponse with content, citations, and entity context
             
         **Validates: Requirements 4.1, 8.3**
         **Spec: CHỈ THỊ KỸ THUẬT SỐ 03 - Role-Based Prompting**
-        **Feature: hybrid-search**
+        **Feature: hybrid-search, document-kg**
         """
         # Check if search is available
-        # Feature: sparse-search-migration - RAG works with PostgreSQL only (Neo4j optional)
         if not self._hybrid_search.is_available():
-            # Hybrid search (PostgreSQL) is the primary search method
-            # Neo4j is optional and reserved for future Learning Graph
             return self._create_fallback_response(question)
         
-        # Perform hybrid search (Dense + Sparse with RRF)
-        hybrid_results = await self._hybrid_search.search(question, limit=limit)
+        # Feature: document-kg - Use GraphRAG for entity-enriched search
+        entity_context = ""
+        related_entities = []
+        hybrid_results = []
+        
+        if self._graph_rag and self._graph_rag.is_available():
+            try:
+                # GraphRAG search with entity context
+                graph_results, entity_ctx = await self._graph_rag.search_with_graph_context(
+                    query=question,
+                    limit=limit
+                )
+                
+                if graph_results:
+                    # Convert GraphEnhancedResult to HybridSearchResult format
+                    hybrid_results = self._graph_to_hybrid_results(graph_results)
+                    entity_context = entity_ctx
+                    
+                    # Collect related entities from results
+                    for gr in graph_results:
+                        if gr.related_entities:
+                            related_entities.extend(gr.related_entities[:3])
+                        if gr.related_regulations:
+                            related_entities.extend(gr.related_regulations[:3])
+                    
+                    # Deduplicate
+                    related_entities = list(dict.fromkeys(related_entities))[:10]
+                    
+                    logger.info(f"[GraphRAG] Found {len(hybrid_results)} results with entity context")
+            except Exception as e:
+                logger.warning(f"GraphRAG search failed, falling back to hybrid: {e}")
+                hybrid_results = []
+        
+        # Fallback to standard hybrid search if GraphRAG unavailable or failed
+        if not hybrid_results:
+            hybrid_results = await self._hybrid_search.search(question, limit=limit)
         
         if not hybrid_results:
             # Fallback to legacy Neo4j search
@@ -254,7 +308,7 @@ class RAGAgent:
                 return self._create_no_results_response(question)
             expanded_nodes = await self._expand_context(nodes)
             citations = await self._kg.get_citations(nodes)
-            content = self._generate_response(question, expanded_nodes, conversation_history, user_role)
+            content = self._generate_response(question, expanded_nodes, conversation_history, user_role, entity_context)
             return RAGResponse(content=content, citations=citations, is_fallback=False)
         
         # Convert hybrid results to KnowledgeNodes for compatibility
@@ -266,12 +320,16 @@ class RAGAgent:
         # Generate citations with relevance scores
         citations = self._generate_hybrid_citations(hybrid_results)
         
-        # Generate response content with conversation history and role-based prompting
-        content = self._generate_response(question, expanded_nodes, conversation_history, user_role)
+        # Generate response content with entity context
+        content = self._generate_response(
+            question, expanded_nodes, conversation_history, user_role, entity_context
+        )
         
         # Add search method info to response
         search_method = hybrid_results[0].search_method if hybrid_results else "hybrid"
-        if search_method != "hybrid":
+        if entity_context:
+            search_method = "graph_enhanced"
+        if search_method not in ["hybrid", "graph_enhanced"]:
             content += f"\n\n*[Tìm kiếm: {search_method}]*"
         
         # CHỈ THỊ 26: Collect evidence images
@@ -282,8 +340,29 @@ class RAGAgent:
             content=content,
             citations=citations,
             is_fallback=False,
-            evidence_images=evidence_images
+            evidence_images=evidence_images,
+            entity_context=entity_context,
+            related_entities=related_entities
         )
+    
+    def _graph_to_hybrid_results(self, graph_results) -> List[HybridSearchResult]:
+        """Convert GraphEnhancedResult to HybridSearchResult for compatibility."""
+        hybrid_results = []
+        for gr in graph_results:
+            hybrid_results.append(HybridSearchResult(
+                node_id=gr.chunk_id,
+                content=gr.content,
+                title=gr.content[:50] + "..." if len(gr.content) > 50 else gr.content,
+                source=gr.document_id or "Maritime Knowledge Base",
+                rrf_score=gr.score,
+                dense_score=gr.dense_score,
+                sparse_score=gr.sparse_score,
+                search_method=gr.search_method,
+                page_number=gr.page_number,
+                document_id=gr.document_id,
+                image_url=gr.image_url
+            ))
+        return hybrid_results
     
     def _hybrid_results_to_nodes(self, results: List[HybridSearchResult]) -> List[KnowledgeNode]:
         """Convert HybridSearchResult to KnowledgeNode for compatibility with chunking metadata."""
@@ -483,19 +562,21 @@ class RAGAgent:
         question: str, 
         nodes: List[KnowledgeNode],
         conversation_history: str = "",
-        user_role: str = "student"
+        user_role: str = "student",
+        entity_context: str = ""  # Feature: document-kg
     ) -> str:
         """
         Generate response using LLM to synthesize retrieved knowledge.
         
         Uses RAG pattern: Retrieve -> Augment -> Generate
         Includes conversation history for context continuity.
+        Now includes entity context from GraphRAG for enriched responses.
         
         Role-Based Prompting (CHỈ THỊ KỸ THUẬT SỐ 03):
         - student: AI đóng vai Gia sư (Tutor) - giọng văn khuyến khích, giải thích cặn kẽ
         - teacher/admin: AI đóng vai Trợ lý (Assistant) - chuyên nghiệp, ngắn gọn
         
-        **Feature: maritime-ai-tutor, Week 2: Memory Lite**
+        **Feature: maritime-ai-tutor, Week 2: Memory Lite, document-kg**
         **Spec: CHỈ THỊ KỸ THUẬT SỐ 03**
         """
         if not nodes:
@@ -516,6 +597,8 @@ class RAGAgent:
         if not self._llm:
             logger.info("No LLM available, returning raw content")
             response = context
+            if entity_context:
+                response = f"**Ngữ cảnh thực thể:** {entity_context}\n\n" + response
             if sources:
                 response += "\n\n**Nguồn tham khảo:**\n" + "\n".join(sources)
             return response
@@ -537,6 +620,7 @@ QUY TẮC VARIATION:
 
 NHIỆM VỤ:
 - Trả lời dựa trên KIẾN THỨC TRA CỨU ĐƯỢC bên dưới
+- Nếu có NGỮ CẢNH THỰC THỂ, sử dụng để liên kết các khái niệm và điều luật liên quan
 - Trích dẫn nguồn khi đề cập quy định cụ thể
 - Dịch thuật ngữ: starboard = mạn phải, port = mạn trái, give-way = nhường đường
 - Trả lời bằng tiếng Việt nếu câu hỏi bằng tiếng Việt"""
@@ -550,9 +634,10 @@ QUY TẮC:
 
 NHIỆM VỤ:
 - Trả lời dựa trên KIẾN THỨC TRA CỨU ĐƯỢC bên dưới
+- Nếu có NGỮ CẢNH THỰC THỂ, tham chiếu các điều luật liên quan
 - Trả lời bằng tiếng Việt nếu câu hỏi bằng tiếng Việt"""
 
-        # Build user prompt with history
+        # Build user prompt with history and entity context
         history_section = ""
         if conversation_history:
             history_section = f"""
@@ -562,7 +647,17 @@ LỊCH SỬ HỘI THOẠI (Gần nhất):
 ---
 """
 
-        user_prompt = f"""{history_section}
+        # Feature: document-kg - Add entity context section
+        entity_section = ""
+        if entity_context:
+            entity_section = f"""
+---
+NGỮ CẢNH THỰC THỂ (GraphRAG):
+{entity_context}
+---
+"""
+
+        user_prompt = f"""{history_section}{entity_section}
 KIẾN THỨC TRA CỨU ĐƯỢC (RAG):
 {context}
 ---

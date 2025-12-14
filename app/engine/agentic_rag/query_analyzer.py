@@ -91,12 +91,12 @@ class QueryAnalyzer:
         """Initialize Gemini LLM for analysis."""
         try:
             self._llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model=settings.google_model,
                 google_api_key=settings.google_api_key,
                 temperature=0.1,  # Low temperature for consistent analysis
                 max_output_tokens=500
             )
-            logger.info("QueryAnalyzer initialized with Gemini")
+            logger.info(f"QueryAnalyzer initialized with {settings.google_model}")
         except Exception as e:
             logger.error(f"Failed to initialize QueryAnalyzer LLM: {e}")
             self._llm = None

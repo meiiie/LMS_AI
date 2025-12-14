@@ -27,6 +27,7 @@ class ChunkResult:
     content_type: str = "text"  # text, table, heading, diagram_reference, formula
     confidence_score: float = 1.0  # 0.0-1.0
     metadata: Dict[str, Any] = field(default_factory=dict)
+    contextual_content: Optional[str] = None  # Contextual RAG: LLM-enriched content
 
 
 class SemanticChunker:
