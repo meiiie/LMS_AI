@@ -55,4 +55,8 @@ class AgentState(TypedDict, total=False):
     iteration: int
     max_iterations: int
     error: Optional[str]
+    
+    # CHỈ THỊ SỐ 28: SOTA Reasoning Trace for API transparency
+    reasoning_trace: Optional[Any]  # ReasoningTrace from CorrectiveRAG
+
 

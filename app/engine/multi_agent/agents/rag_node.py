@@ -70,6 +70,10 @@ class RAGAgentNode:
             if result.grading_result:
                 state["grader_score"] = result.grading_result.avg_score
             
+            # CHỈ THỊ SỐ 28: Include reasoning_trace for SOTA transparency
+            if result.reasoning_trace:
+                state["reasoning_trace"] = result.reasoning_trace
+            
             logger.info(f"[RAG_AGENT] Processed query with confidence={result.confidence:.0f}%")
             
         except Exception as e:
