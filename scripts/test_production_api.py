@@ -244,6 +244,10 @@ async def test_chat_thread_continuity(client: httpx.AsyncClient) -> TestResult:
         metadata = data1.get("metadata", {})
         thread_id = metadata.get("session_id")
         
+        # Wait for background task to save facts to database
+        # Fact extraction happens async, so we need to wait before testing retrieval
+        await asyncio.sleep(3)
+        
         # Second message - use thread_id
         response2 = await client.post(
             f"{API_PREFIX}/chat",
@@ -280,7 +284,11 @@ async def test_chat_thread_continuity(client: httpx.AsyncClient) -> TestResult:
                 passed=True,
                 duration_ms=duration,
                 message=f"Thread ID: {thread_display}..., Remembers name: {remembers_name}",
-                response_data={"thread_id": thread_id, "remembers_name": remembers_name}
+                response_data={
+                    "thread_id": thread_id, 
+                    "remembers_name": remembers_name,
+                    "ai_response": answer[:500] + "..." if len(answer) > 500 else answer  # Debug: log actual response
+                }
             )
         else:
             return TestResult(
