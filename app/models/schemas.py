@@ -263,6 +263,12 @@ class ChatResponseMetadata(BaseModel):
         default=None,
         description="Loại câu hỏi: factual, conceptual, procedural"
     )
+    # CHỈ THỊ SỐ 28: SOTA Thinking Content (Claude/OpenAI style)
+    # Raw prose format for LMS frontend "Thought Process" display
+    thinking_content: Optional[str] = Field(
+        default=None,
+        description="Nội dung suy nghĩ của AI (prose format) - hiển thị 'Thought Process' cho LMS frontend"
+    )
 
 
 class ChatResponse(BaseModel):

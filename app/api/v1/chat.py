@@ -162,6 +162,12 @@ async def chat_completion(
             reasoning_trace = internal_response.metadata["reasoning_trace"]
             logger.info(f"[REASONING_TRACE] Included {reasoning_trace.total_steps} steps in response")
         
+        # CHỈ THỊ SỐ 28: Extract thinking_content for LMS frontend display (Claude/OpenAI style)
+        thinking_content = None
+        if internal_response.metadata and internal_response.metadata.get("thinking"):
+            thinking_content = internal_response.metadata["thinking"]
+            logger.info(f"[THINKING] Included {len(thinking_content)} chars in response")
+        
         response = ChatResponse(
             status="success",
             data=ChatResponseData(
@@ -175,8 +181,9 @@ async def chat_completion(
                 agent_type=internal_response.agent_type,
                 session_id=session_id,  # FIX: Add session_id for thread continuity
                 tools_used=tools_used,  # CHỈ THỊ SỐ 27: API Transparency
-                # CHỈ THỊ SỐ 28: SOTA Reasoning Trace
+                # CHỈ THỊ SỐ 28: SOTA Reasoning Trace + Thinking Content
                 reasoning_trace=reasoning_trace,
+                thinking_content=thinking_content,  # SOTA: Raw thinking for LMS display
                 # LMS Integration: Analytics fields
                 topics_accessed=topics_accessed,
                 confidence_score=round(confidence_score, 2) if confidence_score else None,

@@ -97,6 +97,11 @@ Response includes `trace_id` and `trace_summary`.
 
 ## 📝 Changelog
 
+### 2025-12-15: ReasoningTrace Integration (CHỈ THỊ SỐ 28)
+- **Feature:** SOTA reasoning transparency - expose AI thinking process in API
+- **Fixes:** 4 gaps in data flow (state.py, rag_node.py, graph.py, chat_orchestrator.py)
+- **Result:** API now returns structured `reasoning_trace` with steps, durations, confidence
+
 ### 2025-12-15: Memory Agent Fix
 - **Bug:** `MemoryAgentNode._semantic_memory` was `None` → returned "Không có thông tin về user"
 - **Fix:** `graph.py:memory_node()` now injects `get_semantic_memory_engine()` singleton

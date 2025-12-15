@@ -563,6 +563,16 @@ prompts/
 | **Rationale** | Best recall for technical docs |
 | **Status** | ✅ Active |
 
+### ADR-004: API Transparency (CHỈ THỊ SỐ 28)
+
+| Decision | Structured ReasoningTrace in API |
+|----------|--------------------------------|
+| **Context** | SOTA providers (ChatGPT, Claude, Gemini) expose thinking |
+| **Decision** | Return `reasoning_trace` with steps, durations, confidence |
+| **Rationale** | Transparency, explainability, debugging |
+| **Files** | `state.py`, `rag_node.py`, `graph.py`, `chat_orchestrator.py`, `chat.py` |
+| **Status** | ✅ Active (2025-12-15) |
+
 ---
 
 ## 8. Audit Summary (2025-12-14)
@@ -582,6 +592,13 @@ prompts/
 | Services files | 11 | 16 (+5 new modules) |
 | Pattern | Monolithic | Pipeline + Processors |
 
+### ADDED (2025-12-15)
+
+| Feature | Files Modified | CHỈ THỊ |
+|---------|---------------|---------|
+| ReasoningTrace Flow | 5 files | SỐ 28 |
+| Memory Agent DI | `graph.py` | SOTA Pattern |
+
 ### Deprecated Fixed
 
 | Method | Fix |
@@ -594,6 +611,7 @@ prompts/
 |------|--------|
 | LMS Event Callbacks | 🟡 Awaiting LMS deploy |
 | Multi-Agent Path | ⏸️ Disabled |
+| Bounding Box Extraction | 🟡 Needs PyMuPDF + Supabase PDF |
 
 ---
 
