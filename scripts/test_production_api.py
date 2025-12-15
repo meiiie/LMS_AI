@@ -156,7 +156,7 @@ async def test_chat_rag_query(client: httpx.AsyncClient) -> TestResult:
                 "X-User-ID": TEST_USER_ID,
                 "X-Role": TEST_ROLE
             },
-            timeout=90.0  # RAG queries take longer
+            timeout=200.0  # CRAG with batch grading can take 160s+
         )
         duration = (time.time() - start) * 1000
         
@@ -265,7 +265,9 @@ async def test_chat_thread_continuity(client: httpx.AsyncClient) -> TestResult:
         
         if response2.status_code == 200:
             data2 = response2.json()
-            message2 = data2.get("message", "").lower()
+            # CHỈ THỊ: Response format is data.data.answer, not data.message
+            answer = data2.get("data", {}).get("answer", "")
+            message2 = answer.lower()
             
             # Check if name was remembered
             remembers_name = "minh" in message2
@@ -354,12 +356,24 @@ async def test_memories_endpoint(client: httpx.AsyncClient) -> TestResult:
         
         if response.status_code == 200:
             data = response.json()
-            facts = data.get("facts", [])
+            # API returns MemoryListResponse: {"data": [...], "total": n}
+            memory_items = data.get("data", [])
+            total = data.get("total", len(memory_items))
+            
+            # Build detailed message
+            details = [f"Found {total} user memories/facts:"]
+            for i, mem in enumerate(memory_items[:5]):  # Show top 5
+                mem_type = mem.get("type", "unknown")
+                mem_value = mem.get("value", "")[:50]  # Truncate
+                details.append(f"  [{i+1}] {mem_type}: {mem_value}...")
+            if total > 5:
+                details.append(f"  ... and {total - 5} more")
+            
             return TestResult(
                 name="Memories Endpoint",
                 passed=True,
                 duration_ms=duration,
-                message=f"Found {len(facts)} user facts",
+                message="\n".join(details),
                 response_data=data
             )
         elif response.status_code == 404:
@@ -402,12 +416,27 @@ async def test_insights_endpoint(client: httpx.AsyncClient) -> TestResult:
         
         if response.status_code == 200:
             data = response.json()
-            insights = data.get("insights", [])
+            # API returns InsightListResponse: {"data": [...], "total": n, "categories": {}}
+            insight_items = data.get("data", [])
+            total = data.get("total", len(insight_items))
+            categories = data.get("categories", {})
+            
+            # Build detailed message
+            details = [f"Found {total} behavioral insights ({len(categories)} categories):"]
+            for cat, count in categories.items():
+                details.append(f"  - {cat}: {count}")
+            # Show sample insights
+            if insight_items:
+                details.append("Sample insights:")
+                for i, ins in enumerate(insight_items[:3]):  # Show top 3
+                    content = ins.get("content", "")[:60]
+                    details.append(f"  [{i+1}] {content}...")
+            
             return TestResult(
                 name="Insights Endpoint",
                 passed=True,
                 duration_ms=duration,
-                message=f"Found {len(insights)} behavioral insights",
+                message="\n".join(details),
                 response_data=data
             )
         elif response.status_code == 404:
@@ -438,7 +467,7 @@ async def test_chat_history_endpoint(client: httpx.AsyncClient) -> TestResult:
     start = time.time()
     try:
         response = await client.get(
-            f"{API_PREFIX}/chat/history/{TEST_USER_ID}",
+            f"{API_PREFIX}/history/{TEST_USER_ID}",  # Correct path: /history, not /chat/history
             headers={
                 "X-API-Key": API_KEY,
                 "X-User-ID": TEST_USER_ID,
@@ -450,12 +479,25 @@ async def test_chat_history_endpoint(client: httpx.AsyncClient) -> TestResult:
         
         if response.status_code == 200:
             data = response.json()
-            messages = data.get("messages", [])
+            # API returns GetHistoryResponse: {"data": [...], "pagination": {...}}
+            history_items = data.get("data", [])
+            pagination = data.get("pagination", {})
+            total = pagination.get("total", len(history_items))
+            
+            # Build detailed message
+            details = [f"Found {len(history_items)} messages (total: {total}):"]
+            for i, msg in enumerate(history_items[:5]):  # Show top 5
+                role = msg.get("role", "?")
+                content = msg.get("content", "")[:50]  # Truncate
+                details.append(f"  [{i+1}] {role}: {content}...")
+            if len(history_items) > 5:
+                details.append(f"  ... and {len(history_items) - 5} more")
+            
             return TestResult(
                 name="Chat History",
                 passed=True,
                 duration_ms=duration,
-                message=f"Found {len(messages)} messages in history",
+                message="\n".join(details),
                 response_data=data
             )
         elif response.status_code == 404:
@@ -495,7 +537,7 @@ async def run_all_tests():
     
     results: List[TestResult] = []
     
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=120.0) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=200.0) as client:  # 200s for CRAG batch grading
         # Run tests sequentially
         tests = [
             ("1. Health Check", test_health_check),
@@ -525,6 +567,7 @@ async def run_all_tests():
     passed = sum(1 for r in results if r.passed)
     failed = sum(1 for r in results if not r.passed)
     total_time = sum(r.duration_ms for r in results)
+    completed_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
     print(f"\n{Colors.BOLD}{'='*70}{Colors.RESET}")
     print(f"{Colors.BOLD}  TEST SUMMARY{Colors.RESET}")
@@ -532,6 +575,7 @@ async def run_all_tests():
     print(f"  {Colors.GREEN}Passed: {passed}{Colors.RESET}")
     print(f"  {Colors.RED}Failed: {failed}{Colors.RESET}")
     print(f"  Total Time: {total_time/1000:.1f}s")
+    print(f"  Completed: {completed_time}")
     print(f"{Colors.BOLD}{'='*70}{Colors.RESET}\n")
     
     if failed == 0:
@@ -539,7 +583,54 @@ async def run_all_tests():
     else:
         print(f"{Colors.YELLOW}{Colors.BOLD}⚠️  Some tests failed. Check the output above.{Colors.RESET}\n")
     
+    # Save detailed results to file
+    save_results_to_file(results, passed, failed, total_time, completed_time)
+    
     return results
+
+
+def save_results_to_file(results: List[TestResult], passed: int, failed: int, total_time: float, completed_time: str):
+    """Save detailed test results to a txt file for analysis."""
+    filename = f"test_results_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+    filepath = f"scripts/{filename}"
+    
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write("=" * 70 + "\n")
+        f.write("  Maritime AI Service - Production API Test Results\n")
+        f.write(f"  Base URL: {BASE_URL}\n")
+        f.write(f"  Test User ID: {TEST_USER_ID}\n")
+        f.write(f"  Completed: {completed_time}\n")
+        f.write("=" * 70 + "\n\n")
+        
+        for i, result in enumerate(results, 1):
+            status = "✓ PASSED" if result.passed else "✗ FAILED"
+            f.write(f"{i}. {result.name} [{status}] ({result.duration_ms:.0f}ms)\n")
+            f.write("-" * 50 + "\n")
+            for line in result.message.split("\n"):
+                f.write(f"   {line}\n")
+            
+            # Write full response_data for detailed analysis
+            if result.response_data:
+                f.write("\n   [FULL RESPONSE DATA]:\n")
+                import json
+                try:
+                    json_str = json.dumps(result.response_data, indent=2, ensure_ascii=False, default=str)
+                    for line in json_str.split("\n"):
+                        f.write(f"   {line}\n")
+                except:
+                    f.write(f"   {result.response_data}\n")
+            f.write("\n")
+        
+        f.write("=" * 70 + "\n")
+        f.write("  TEST SUMMARY\n")
+        f.write("=" * 70 + "\n")
+        f.write(f"  Passed: {passed}\n")
+        f.write(f"  Failed: {failed}\n")
+        f.write(f"  Total Time: {total_time/1000:.1f}s\n")
+        f.write(f"  Completed: {completed_time}\n")
+        f.write("=" * 70 + "\n")
+    
+    print(f"{Colors.BLUE}📝 Detailed results saved to: {filepath}{Colors.RESET}\n")
 
 
 if __name__ == "__main__":

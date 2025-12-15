@@ -190,6 +190,66 @@ class SemanticMemoryEngine:
             update_last_accessed_callback=self.update_last_accessed
         )
     
+    async def get_user_facts(self, user_id: str) -> dict:
+        """
+        Get user facts as a dictionary for easy access.
+        
+        This method converts the List[SemanticMemorySearchResult] from 
+        repository.get_user_facts() into a dict format with keys:
+        - name, role, goal, preference, weakness, background, etc.
+        
+        Used by:
+        - MemoryAgentNode._get_user_facts() for personalization
+        - tool_get_user_info() for tool-based retrieval
+        
+        Args:
+            user_id: User ID to get facts for
+            
+        Returns:
+            Dict with fact_type as keys and fact content as values.
+            Example: {"name": "Minh", "role": "sinh viên", "goal": "học COLREGs"}
+            
+        **SOTA Pattern:** MemGPT/Mem0 style archival memory access
+        **Validates: Requirements 2.2, 4.3**
+        """
+        try:
+            # Get facts from repository (returns List[SemanticMemorySearchResult])
+            facts_list = self._repository.get_user_facts(
+                user_id=user_id,
+                limit=20,
+                deduplicate=True  # Keep only latest of each type
+            )
+            
+            if not facts_list:
+                logger.debug(f"No user facts found for {user_id}")
+                return {}
+            
+            # Convert to dict format
+            result = {}
+            for fact in facts_list:
+                # Get fact_type from metadata
+                fact_type = fact.metadata.get("fact_type", "unknown")
+                
+                # Extract value from content
+                # Format can be "fact_type: value" or just "value"
+                content = fact.content
+                if ": " in content:
+                    # Split and get value part
+                    value = content.split(": ", 1)[-1]
+                else:
+                    value = content
+                
+                # Only set if not already present (keep first/latest)
+                if fact_type not in result:
+                    result[fact_type] = value
+            
+            logger.debug(f"Retrieved {len(result)} user facts for {user_id}: {list(result.keys())}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get user facts for {user_id}: {e}")
+            return {}
+    
     # ==================== FACT EXTRACTION (Delegated) ====================
     
     async def _extract_and_store_facts(
