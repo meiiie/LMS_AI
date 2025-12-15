@@ -295,7 +295,11 @@ class ChatOrchestrator:
             metadata={
                 "unified_agent": True,
                 "tools_used": unified_result.get("tools_used", []),
-                "iterations": unified_result.get("iterations", 1)
+                "iterations": unified_result.get("iterations", 1),
+                # CHỈ THỊ SỐ 28: Structured reasoning trace (SOTA)
+                "reasoning_trace": unified_result.get("reasoning_trace"),
+                # Also include raw thinking for debugging (optional)
+                "thinking": unified_result.get("thinking"),
             }
         )
     

@@ -156,6 +156,12 @@ async def chat_completion(
         if internal_response.metadata:
             session_id = internal_response.metadata.get("session_id")
         
+        # CHỈ THỊ SỐ 28: Extract reasoning_trace from internal response (SOTA)
+        reasoning_trace = None
+        if internal_response.metadata and internal_response.metadata.get("reasoning_trace"):
+            reasoning_trace = internal_response.metadata["reasoning_trace"]
+            logger.info(f"[REASONING_TRACE] Included {reasoning_trace.total_steps} steps in response")
+        
         response = ChatResponse(
             status="success",
             data=ChatResponseData(
@@ -169,6 +175,8 @@ async def chat_completion(
                 agent_type=internal_response.agent_type,
                 session_id=session_id,  # FIX: Add session_id for thread continuity
                 tools_used=tools_used,  # CHỈ THỊ SỐ 27: API Transparency
+                # CHỈ THỊ SỐ 28: SOTA Reasoning Trace
+                reasoning_trace=reasoning_trace,
                 # LMS Integration: Analytics fields
                 topics_accessed=topics_accessed,
                 confidence_score=round(confidence_score, 2) if confidence_score else None,

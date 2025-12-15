@@ -95,6 +95,15 @@ Response includes `trace_id` and `trace_summary`.
 
 ---
 
+## 📝 Changelog
+
+### 2025-12-15: Memory Agent Fix
+- **Bug:** `MemoryAgentNode._semantic_memory` was `None` → returned "Không có thông tin về user"
+- **Fix:** `graph.py:memory_node()` now injects `get_semantic_memory_engine()` singleton
+- **Result:** Test 5 Thread Continuity passes (`remembers_name: true`)
+
+---
+
 ## ⚡ SOTA 2025: TutorAgentNode ReAct Pattern
 
 **Updated:** TutorAgentNode now implements SOTA ReAct pattern (Think→Act→Observe):

@@ -35,6 +35,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, Tool
 from app.core.config import settings
 from app.engine.llm_factory import create_tutor_llm
 from app.services.output_processor import extract_thinking_from_response
+from app.engine.reasoning_tracer import get_reasoning_tracer, StepNames
 
 # Tool Registry Pattern - SOTA 2025
 from app.engine.tools import (
@@ -475,14 +476,28 @@ class UnifiedAgent:
         Manual ReAct implementation (LangChain 1.x API).
         
         Loop: LLM -> Check tool_calls -> Execute tools -> Repeat until no tool_calls
+        
+        CHỈ THỊ SỐ 28: SOTA Explainability with ReasoningTracer
+        - Tracks each step: query_analysis, tool_call, generation
+        - Outputs structured ReasoningTrace for API transparency
+        - Matches Claude/OpenAI reasoning trace patterns
         """
         tools_used = []
         tools_map = {t.name: t for t in TOOLS}
         
+        # CHỈ THỊ SỐ 28: Initialize ReasoningTracer for SOTA explainability
+        tracer = get_reasoning_tracer()
+        tracer.start_step(StepNames.QUERY_ANALYSIS, "Phân tích câu hỏi và quyết định chiến lược")
+        
         for iteration in range(max_iterations):
             logger.info(f"[ReAct] Iteration {iteration + 1}")
             
+            # End previous analysis, start new iteration
+            if iteration == 0:
+                tracer.end_step(result=f"Bắt đầu ReAct loop với {len(TOOLS)} tools", confidence=0.9)
+            
             # Call LLM with tools
+            tracer.start_step(StepNames.GENERATION, f"LLM Iteration {iteration + 1}")
             response = await self._llm_with_tools.ainvoke(messages)
             tool_calls = getattr(response, 'tool_calls', [])
             
@@ -491,18 +506,39 @@ class UnifiedAgent:
             # No tool calls = final answer
             if not tool_calls:
                 content, thinking = self._extract_content_and_thinking(response)
+                
+                # Record thinking in tracer if available
+                if thinking:
+                    tracer.end_step(
+                        result=f"Generated response with thinking ({len(thinking)} chars)",
+                        confidence=0.85,
+                        details={"has_thinking": True, "thinking_length": len(thinking)}
+                    )
+                else:
+                    tracer.end_step(result="Generated final response", confidence=0.8)
+                
+                # Build structured ReasoningTrace (SOTA)
+                reasoning_trace = tracer.build_trace()
+                
                 result = {
                     "content": content,
                     "agent_type": "unified",
                     "tools_used": tools_used,
                     "method": "manual_react",
-                    "iterations": iteration + 1
+                    "iterations": iteration + 1,
+                    # CHỈ THỊ SỐ 28: Structured reasoning trace (SOTA)
+                    "reasoning_trace": reasoning_trace,
                 }
-                # CHỈ THỊ SỐ 28: Include thinking if extracted
+                # Also include raw thinking for debugging
                 if thinking:
                     result["thinking"] = thinking
                     logger.info(f"[ReAct] Thinking extracted: {len(thinking)} chars")
+                
+                logger.info(f"[ReAct] Trace: {reasoning_trace.total_steps} steps, {reasoning_trace.total_duration_ms}ms")
                 return result
+            
+            # End generation step, will be followed by tool calls
+            tracer.end_step(result=f"LLM requested {len(tool_calls)} tool calls", confidence=0.9)
             
             # Execute tools
             messages.append(response)
@@ -513,27 +549,41 @@ class UnifiedAgent:
                 
                 logger.info(f"[ReAct] Calling: {tool_name}({tool_args})")
                 
+                # Track tool execution in tracer
+                tracer.start_step(StepNames.TOOL_CALL, f"Tool: {tool_name}")
+                
                 # Execute tool
                 if tool_name in tools_map:
                     try:
                         result = await tools_map[tool_name].ainvoke(tool_args)
+                        tracer.end_step(
+                            result=f"Tool returned {len(str(result))} chars",
+                            confidence=0.9,
+                            details={"tool_name": tool_name, "args": tool_args}
+                        )
                     except Exception as e:
                         logger.error(f"Tool {tool_name} error: {e}")
                         result = f"Error executing tool: {e}"
+                        tracer.end_step(result=f"Tool error: {e}", confidence=0.3)
                 else:
                     result = f"Tool '{tool_name}' not found"
+                    tracer.end_step(result=f"Tool not found: {tool_name}", confidence=0.0)
                 
                 tools_used.append({"name": tool_name, "args": tool_args, "result": str(result)[:100]})
                 messages.append(ToolMessage(content=str(result), tool_call_id=tool_id))
         
         # Max iterations reached
         logger.warning(f"[ReAct] Max iterations ({max_iterations}) reached")
+        tracer.end_step(result="Max iterations reached", confidence=0.4)
+        reasoning_trace = tracer.build_trace(final_confidence=0.5)
+        
         return {
             "content": "Xin lỗi, tôi gặp khó khăn khi xử lý yêu cầu này. Vui lòng thử lại.",
             "agent_type": "unified",
             "tools_used": tools_used,
             "method": "manual_react",
-            "error": "Max iterations reached"
+            "error": "Max iterations reached",
+            "reasoning_trace": reasoning_trace
         }
     
     def _extract_content_and_thinking(self, response) -> tuple[str, Optional[str]]:
