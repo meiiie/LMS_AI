@@ -58,7 +58,11 @@ async def memory_node(state: AgentState) -> AgentState:
     """Memory agent node - context retrieval."""
     registry = get_agent_registry()
     with registry.tracer.span("memory_agent", "process"):
-        memory_agent = get_memory_agent_node()
+        # SOTA FIX: Use singleton pattern (like ChatGPT/Claude) for memory engine
+        # Avoids creating new instances each call - resource efficient
+        from app.engine.semantic_memory import get_semantic_memory_engine
+        semantic_memory = get_semantic_memory_engine()
+        memory_agent = get_memory_agent_node(semantic_memory=semantic_memory)
         return await memory_agent.process(state)
 
 
