@@ -272,7 +272,9 @@ async def process_with_multi_agent(
         "grader_score": result.get("grader_score", 0),
         "agent_outputs": result.get("agent_outputs", {}),
         "error": result.get("error"),
-        # Trace info (new)
+        # CHỈ THỊ SỐ 28: SOTA Reasoning Trace for API transparency
+        "reasoning_trace": result.get("reasoning_trace"),
+        # Trace info
         "trace_id": trace_id,
         "trace_summary": trace_summary
     }
