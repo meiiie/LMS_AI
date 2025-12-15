@@ -55,6 +55,7 @@ class CorrectiveRAGResult:
     iterations: int = 1
     confidence: float = 0.8
     reasoning_trace: Optional[ReasoningTrace] = None  # Feature: reasoning-trace
+    thinking_content: Optional[str] = None  # CHỈ THỊ SỐ 28: SOTA prose thinking (OpenAI/DeepSeek style)
     
     @property
     def has_warning(self) -> bool:
@@ -287,7 +288,12 @@ class CorrectiveRAG:
         # Build reasoning trace
         reasoning_trace = tracer.build_trace(final_confidence=confidence / 100)
         
+        # CHỈ THỊ SỐ 28: Generate prose thinking summary (SOTA: OpenAI/DeepSeek pattern)
+        thinking_content = tracer.build_thinking_summary()
+        
         logger.info(f"[CRAG] Complete: iterations={iterations}, confidence={confidence:.0f}%")
+        if thinking_content:
+            logger.info(f"[CRAG] Thinking summary: {len(thinking_content)} chars")
         
         return CorrectiveRAGResult(
             answer=answer,
@@ -299,7 +305,8 @@ class CorrectiveRAG:
             rewritten_query=rewritten_query,
             iterations=iterations,
             confidence=confidence,
-            reasoning_trace=reasoning_trace
+            reasoning_trace=reasoning_trace,
+            thinking_content=thinking_content  # CHỈ THỊ SỐ 28: SOTA prose thinking
         )
     
     async def _retrieve(

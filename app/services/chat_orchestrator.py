@@ -363,7 +363,9 @@ class ChatOrchestrator:
                 "grader_score": result.get("grader_score", 0),
                 "tools_used": tools_used,  # SOTA: Track tool usage
                 # CHỈ THỊ SỐ 28: Include reasoning_trace from multi-agent flow
-                "reasoning_trace": result.get("reasoning_trace")
+                "reasoning_trace": result.get("reasoning_trace"),
+                # CHỈ THỊ SỐ 28: SOTA prose thinking (mapped to "thinking" for consistency with UnifiedAgent)
+                "thinking": result.get("thinking_content")
             }
         )
 

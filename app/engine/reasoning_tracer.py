@@ -193,6 +193,42 @@ class ReasoningTracer:
         
         return trace
     
+    def build_thinking_summary(self) -> str:
+        """
+        Generate prose thinking summary from traced steps.
+        
+        SOTA Pattern: OpenAI o1's reasoning.summary / DeepSeek R1's reasoning_content
+        CHỈ THỊ SỐ 28: Explainability for LMS frontend display
+        
+        Converts structured ReasoningTrace steps into human-readable
+        narrative format suitable for "Thought Process" UI display.
+        
+        Returns:
+            Markdown-formatted thinking summary string
+        """
+        if not self._steps:
+            return ""
+        
+        lines = ["**Quá trình suy nghĩ:**\n"]
+        
+        for i, step in enumerate(self._steps, 1):
+            # Format: "1. **Description**: Result"
+            lines.append(f"{i}. **{step.description}**: {step.result}")
+            
+            # Add confidence if available
+            if step.confidence is not None:
+                confidence_pct = step.confidence * 100
+                lines.append(f"   _(Độ tin cậy: {confidence_pct:.0f}%)_")
+        
+        # Add correction note if applicable
+        if self._was_corrected and self._correction_reason:
+            lines.append(f"\n⚠️ **Lưu ý**: {self._correction_reason}")
+        
+        summary = "\n".join(lines)
+        logger.debug(f"[Tracer] Built thinking summary: {len(summary)} chars")
+        
+        return summary
+    
     def reset(self) -> None:
         """Reset tracer for reuse"""
         self._steps = []

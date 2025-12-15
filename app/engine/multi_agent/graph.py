@@ -274,6 +274,8 @@ async def process_with_multi_agent(
         "error": result.get("error"),
         # CHỈ THỊ SỐ 28: SOTA Reasoning Trace for API transparency
         "reasoning_trace": result.get("reasoning_trace"),
+        # CHỈ THỊ SỐ 28: SOTA Prose Thinking (OpenAI/DeepSeek pattern)
+        "thinking_content": result.get("thinking_content"),
         # Trace info
         "trace_id": trace_id,
         "trace_summary": trace_summary
