@@ -265,6 +265,17 @@ enable_answer_verification: bool = True # Check hallucinations
 
 ---
 
+## 📋 Changelog
+
+### 2025-12-15: CHỈ THỊ SỐ 28 - SOTA Thinking Content
+
+- **Added `thinking_content`** field to `CorrectiveRAGResult`
+- Uses `ReasoningTracer.build_thinking_summary()` to generate prose
+- SOTA Pattern: OpenAI o1 `reasoning.summary` / DeepSeek R1 `reasoning_content`
+- Output: Human-readable markdown for LMS frontend "Thought Process" display
+
+---
+
 ## 📝 Related
 
 - [Parent: engine](../README.md)

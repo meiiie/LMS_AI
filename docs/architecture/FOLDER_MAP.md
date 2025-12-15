@@ -570,7 +570,7 @@ prompts/
 | **Context** | SOTA providers (ChatGPT, Claude, Gemini) expose thinking |
 | **Decision** | Return `reasoning_trace` with steps, durations, confidence |
 | **Rationale** | Transparency, explainability, debugging |
-| **Files** | `state.py`, `rag_node.py`, `graph.py`, `chat_orchestrator.py`, `chat.py` |
+| **Files** | `reasoning_tracer.py`, `corrective_rag.py`, `state.py`, `rag_node.py`, `graph.py`, `chat_orchestrator.py`, `schemas.py`, `chat.py` |
 | **Status** | ✅ Active (2025-12-15) |
 
 ---
@@ -598,6 +598,9 @@ prompts/
 |---------|---------------|---------|
 | ReasoningTrace Flow | 5 files | SỐ 28 |
 | Memory Agent DI | `graph.py` | SOTA Pattern |
+| **`thinking_content` (SOTA)** | 8 files | SỐ 28 |
+
+> `thinking_content`: SOTA prose thinking following OpenAI o1 `reasoning.summary` and DeepSeek R1 `reasoning_content` patterns. Generated from `ReasoningTracer.build_thinking_summary()`.
 
 ### Deprecated Fixed
 
