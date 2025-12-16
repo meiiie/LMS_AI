@@ -93,7 +93,7 @@ class ThinkingGenerator:
             )
             logger.info("[ThinkingGenerator] Initialized with LIGHT tier LLM")
         except Exception as e:
-            logger.error(f"[ThinkingGenerator] Failed to initialize LLM: {e}")
+            logger.error(f"[ThinkingGenerator] Failed to initialize LLM: {e}", exc_info=True)
             self._llm = None
     
     def _format_trace_summary(self, trace: ReasoningTrace) -> str:
@@ -143,6 +143,11 @@ class ThinkingGenerator:
         Returns:
             Natural Vietnamese thinking prose, or None if generation fails
         """
+        # Debug: Log entry
+        logger.info(f"[ThinkingGenerator] generate() called")
+        logger.info(f"[ThinkingGenerator] LLM available: {self._llm is not None}")
+        logger.info(f"[ThinkingGenerator] trace: {trace is not None}, steps: {len(trace.steps) if trace and trace.steps else 0}")
+        
         if not self._llm:
             logger.warning("[ThinkingGenerator] LLM not available, skipping")
             return None
@@ -154,6 +159,7 @@ class ThinkingGenerator:
         try:
             # Format trace summary
             trace_summary = self._format_trace_summary(trace)
+            logger.info(f"[ThinkingGenerator] Trace summary: {len(trace_summary)} chars")
             
             # Truncate answer for preview
             answer_preview = answer[:200] + "..." if len(answer) > 200 else answer
@@ -171,10 +177,30 @@ class ThinkingGenerator:
             ]
             
             # Generate thinking
-            logger.info("[ThinkingGenerator] Generating natural thinking...")
+            logger.info("[ThinkingGenerator] Calling LLM.ainvoke()...")
             response = await self._llm.ainvoke(messages)
+            logger.info(f"[ThinkingGenerator] LLM response received: {type(response)}")
+            logger.info(f"[ThinkingGenerator] response.content type: {type(response.content)}")
             
-            thinking = response.content.strip()
+            # Extract text content - handle both string and list formats
+            content = response.content
+            if isinstance(content, str):
+                thinking = content.strip()
+            elif isinstance(content, list):
+                # Handle Gemini content blocks
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict):
+                        if block.get('type') == 'text':
+                            text_parts.append(block.get('text', ''))
+                        elif block.get('type') == 'thinking':
+                            # Skip thinking blocks, we want the generated text
+                            continue
+                    elif isinstance(block, str):
+                        text_parts.append(block)
+                thinking = '\n'.join(text_parts).strip()
+            else:
+                thinking = str(content).strip()
             
             # Clean up any accidental formatting
             thinking = thinking.strip('"\'')
@@ -187,7 +213,7 @@ class ThinkingGenerator:
             return thinking
             
         except Exception as e:
-            logger.error(f"[ThinkingGenerator] Generation failed: {e}")
+            logger.error(f"[ThinkingGenerator] Generation failed: {e}", exc_info=True)
             return None
 
 
