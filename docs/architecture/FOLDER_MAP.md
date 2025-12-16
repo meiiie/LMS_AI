@@ -4,7 +4,7 @@
 
 **Last Updated:** 2025-12-16  
 **Status:** ✅ Complete  
-**Version:** 2.5 (SOTA Vietnamese Thinking - CHỈ THỊ SỐ 29 v7)
+**Version:** 2.6 (Centralized Vietnamese Thinking - CHỈ THỊ SỐ 29 v8)
 
 
 ---
@@ -160,6 +160,7 @@ graph LR
 | **`session_manager.py`** | Session CRUD, anti-repetition state | ~230 | Singleton |
 | **`input_processor.py`** | Validation, Guardian, context | ~380 | Processor |
 | **`output_processor.py`** | Response formatting, sources | ~220 | Processor |
+| **`thinking_post_processor.py`** | ★ Centralized thinking extraction (v8) | ~180 | Post-Processor |
 | **`background_tasks.py`** | Async task runner | ~260 | Task Runner |
 | `chat_context_builder.py` | Context assembly | ~100 | Builder |
 | `chat_response_builder.py` | Response assembly | ~100 | Builder |
@@ -603,8 +604,17 @@ prompts/
 | Memory Agent DI | `graph.py` | SOTA Pattern |
 | **`thinking_content` (SOTA)** | 8 files | SỐ 28 |
 
-> **`thinking` (v2)**: Native Gemini thinking (zero extra latency). Pattern: Claude Extended Thinking, Qwen QwQ, Gemini 2.5.
-> **`thinking_content`**: Structured summary fallback from `ReasoningTracer.build_thinking_summary()`.
+### ADDED (2025-12-16)
+
+| Feature | Files Modified | CHỈ THỊ |
+|---------|---------------|---------|
+| **Centralized ThinkingPostProcessor** | `thinking_post_processor.py` (NEW), `output_processor.py` | SỐ 29 v8 |
+| **Vietnamese `<thinking>` tags** | `rag_agent.py` | SỐ 29 v8 |
+| Cleanup unused YAML config | `_shared.yaml`, `prompt_loader.py` | SỐ 29 v8 |
+
+> **`thinking` (v8)**: Vietnamese prose from `<thinking>` tags in response. Pattern: unified_agent.py.
+> **`thinking_content`**: Structured summary from `ReasoningTracer.build_thinking_summary()`.
+> **`reasoning_trace`**: Full step-by-step trace with confidence scores.
 
 ### Deprecated Fixed
 

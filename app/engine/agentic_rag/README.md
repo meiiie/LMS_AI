@@ -267,13 +267,20 @@ enable_answer_verification: bool = True # Check hallucinations
 
 ## 📋 Changelog
 
-### 2025-12-16: CHỈ THỊ SỐ 29 v7 - SOTA Vietnamese Thinking
+### 2025-12-16: CHỈ THỊ SỐ 29 v8 - Centralized Vietnamese Thinking ✅
+
+- **Pattern**: Direct `<thinking>` tags in prompts (same as `unified_agent.py`)
+- **New Service**: `thinking_post_processor.py` - centralized extraction
+- **Thinking Output**: Vietnamese prose (100% tiếng Việt)
+- **Cleanup**: Removed YAML config, deprecated `build_thinking_instruction()`
+- **Test Result**: ✅ `"thinking": "Minh đang hỏi về Điều 15..."` (Vietnamese)
+
+### 2025-12-16: CHỈ THỊ SỐ 29 v7 - SOTA Vietnamese Thinking (Deprecated)
 
 - **SOTA Pattern**: Claude + Qwen3 + OpenAI combined best practices
 - **XML Tags**: Language control block with `<language_control>`, `<thinking_examples>`
-- **Examples**: 5 correct (Vietnamese) + 7 incorrect (English) examples
-- **Integration**: `_shared.yaml` → `prompt_loader.py` → `rag_agent.py`
-- **Research**: Based on OpenAI o1/o3, Claude Extended Thinking, Qwen3, DeepSeek R1
+- **Status**: ❌ Deprecated - Gemini native API outputs English regardless
+
 
 ### 2025-12-16: CHỈ THỊ SỐ 29 v2 - SOTA Native-First Thinking
 
