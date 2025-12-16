@@ -16,9 +16,12 @@ Feature: sparse-search-migration
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
+
+# CHỈ THỊ SỐ 29: Import thinking extraction utility
+from app.services.output_processor import extract_thinking_from_response
 
 from app.core.config import settings
 from app.engine.llm_factory import create_rag_llm
@@ -97,6 +100,7 @@ class RAGResponse:
     evidence_images: List[EvidenceImage] = None  # CHỈ THỊ 26: Evidence Images
     entity_context: Optional[str] = None  # Feature: document-kg - GraphRAG entity context
     related_entities: List[str] = None  # Feature: document-kg - Related entity names
+    native_thinking: Optional[str] = None  # CHỈ THỊ SỐ 29: Gemini native thinking for hybrid display
     
     def __post_init__(self):
         if self.evidence_images is None:
@@ -302,8 +306,9 @@ class RAGAgent:
                 return self._create_no_results_response(question)
             expanded_nodes = await self._expand_context(nodes)
             citations = await self._kg.get_citations(nodes)
-            content = self._generate_response(question, expanded_nodes, conversation_history, user_role, entity_context)
-            return RAGResponse(content=content, citations=citations, is_fallback=False)
+            # CHỈ THỊ SỐ 29: Unpack tuple with native_thinking
+            content, native_thinking = self._generate_response(question, expanded_nodes, conversation_history, user_role, entity_context)
+            return RAGResponse(content=content, citations=citations, is_fallback=False, native_thinking=native_thinking)
         
         # Convert hybrid results to KnowledgeNodes for compatibility
         nodes = self._hybrid_results_to_nodes(hybrid_results)
@@ -315,7 +320,8 @@ class RAGAgent:
         citations = self._generate_hybrid_citations(hybrid_results)
         
         # Generate response content with entity context
-        content = self._generate_response(
+        # CHỈ THỊ SỐ 29: Unpack tuple with native_thinking
+        content, native_thinking = self._generate_response(
             question, expanded_nodes, conversation_history, user_role, entity_context
         )
         
@@ -336,7 +342,8 @@ class RAGAgent:
             is_fallback=False,
             evidence_images=evidence_images,
             entity_context=entity_context,
-            related_entities=related_entities
+            related_entities=related_entities,
+            native_thinking=native_thinking  # CHỈ THỊ SỐ 29: Propagate native thinking
         )
     
     def _graph_to_hybrid_results(self, graph_results) -> List[HybridSearchResult]:
@@ -559,7 +566,7 @@ class RAGAgent:
         conversation_history: str = "",
         user_role: str = "student",
         entity_context: str = ""  # Feature: document-kg
-    ) -> str:
+    ) -> Tuple[str, Optional[str]]:
         """
         Generate response using LLM to synthesize retrieved knowledge.
         
@@ -567,15 +574,20 @@ class RAGAgent:
         Includes conversation history for context continuity.
         Now includes entity context from GraphRAG for enriched responses.
         
+        CHỈ THỊ SỐ 29: Returns tuple of (answer, native_thinking) for hybrid display.
+        
         Role-Based Prompting (CHỈ THỊ KỸ THUẬT SỐ 03):
         - student: AI đóng vai Gia sư (Tutor) - giọng văn khuyến khích, giải thích cặn kẽ
         - teacher/admin: AI đóng vai Trợ lý (Assistant) - chuyên nghiệp, ngắn gọn
         
+        Returns:
+            Tuple of (answer_text, native_thinking) where native_thinking may be None
+        
         **Feature: maritime-ai-tutor, Week 2: Memory Lite, document-kg**
-        **Spec: CHỈ THỊ KỸ THUẬT SỐ 03**
+        **Spec: CHỈ THỊ KỸ THUẬT SỐ 03, CHỈ THỊ SỐ 29**
         """
         if not nodes:
-            return "I couldn't find specific information about that topic."
+            return "I couldn't find specific information about that topic.", None
         
         # Build context from retrieved nodes
         context_parts = []
@@ -596,7 +608,7 @@ class RAGAgent:
                 response = f"**Ngữ cảnh thực thể:** {entity_context}\n\n" + response
             if sources:
                 response += "\n\n**Nguồn tham khảo:**\n" + "\n".join(sources)
-            return response
+            return response, None  # No native thinking when no LLM
         
         # CHỈ THỊ KỸ THUẬT SỐ 12: System Prompt tối ưu cho RAG v2
         if user_role == "student":
@@ -669,13 +681,19 @@ Hãy trả lời câu hỏi dựa trên thông tin trên."""
             ]
             
             response = self._llm.invoke(messages)
-            answer = response.content
+            
+            # CHỈ THỊ SỐ 29: Extract native thinking from Gemini response
+            # When include_thoughts=True, response.content may be a list of content blocks
+            answer, native_thinking = extract_thinking_from_response(response.content)
+            
+            if native_thinking:
+                logger.info(f"[RAG] Native thinking extracted: {len(native_thinking)} chars")
             
             # Add sources
             if sources:
                 answer += "\n\n**Nguồn tham khảo:**\n" + "\n".join(sources)
             
-            return answer
+            return answer, native_thinking
             
         except Exception as e:
             logger.error(f"LLM synthesis failed: {e}")
@@ -683,7 +701,7 @@ Hãy trả lời câu hỏi dựa trên thông tin trên."""
             response = context
             if sources:
                 response += "\n\n**Nguồn tham khảo:**\n" + "\n".join(sources)
-            return response
+            return response, None  # No native thinking on error
     
     def _create_fallback_response(self, question: str) -> RAGResponse:
         """

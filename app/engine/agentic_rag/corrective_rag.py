@@ -254,7 +254,8 @@ class CorrectiveRAG:
         # Step 5: Generate answer
         tracer.start_step(StepNames.GENERATION, "Tạo câu trả lời từ context")
         logger.info(f"[CRAG] Step 5: Generating answer")
-        answer, sources = await self._generate(query, documents, context)
+        # CHỈ THỊ SỐ 29: Unpack native_thinking from _generate()
+        answer, sources, native_thinking = await self._generate(query, documents, context)
         tracer.end_step(
             result=f"Tạo câu trả lời dựa trên {len(sources)} nguồn",
             confidence=0.85,
@@ -288,8 +289,16 @@ class CorrectiveRAG:
         # Build reasoning trace
         reasoning_trace = tracer.build_trace(final_confidence=confidence / 100)
         
-        # CHỈ THỊ SỐ 28: Generate prose thinking summary (SOTA: OpenAI/DeepSeek pattern)
-        thinking_content = tracer.build_thinking_summary()
+        # CHỈ THỊ SỐ 29: Hybrid fallback for thinking content
+        # Priority: Native Gemini thinking > Structured summary > None
+        if native_thinking:
+            thinking_content = native_thinking
+            logger.info(f"[CRAG] Using native Gemini thinking: {len(thinking_content)} chars")
+        else:
+            # Fallback to structured summary from tracer
+            thinking_content = tracer.build_thinking_summary()
+            if thinking_content:
+                logger.info(f"[CRAG] Using structured thinking summary: {len(thinking_content)} chars")
         
         logger.info(f"[CRAG] Complete: iterations={iterations}, confidence={confidence:.0f}%")
         if thinking_content:
@@ -365,18 +374,23 @@ class CorrectiveRAG:
         query: str,
         documents: List[Dict[str, Any]],
         context: Dict[str, Any]
-    ) -> Tuple[str, List[Dict[str, Any]]]:
+    ) -> Tuple[str, List[Dict[str, Any]], Optional[str]]:
         """
         Generate answer from graded documents using RAGAgent.
         
         Since documents have been retrieved and graded, we use the content
         to generate a synthesized answer.
+        
+        CHỈ THỊ SỐ 29: Now returns native_thinking from Gemini for hybrid display.
+        
+        Returns:
+            Tuple of (answer, documents, native_thinking)
         """
         if not self._rag:
-            return "Không thể tạo câu trả lời do thiếu cấu hình.", documents
+            return "Không thể tạo câu trả lời do thiếu cấu hình.", documents, None
         
         if not documents:
-            return "Không tìm thấy thông tin phù hợp trong cơ sở dữ liệu.", []
+            return "Không tìm thấy thông tin phù hợp trong cơ sở dữ liệu.", [], None
         
         try:
             # Re-query with the original question to get LLM-generated answer
@@ -391,11 +405,16 @@ class CorrectiveRAG:
                 user_role=user_role
             )
             
-            return response.content, documents
+            # CHỈ THỊ SỐ 29: Capture native_thinking from RAGResponse
+            native_thinking = response.native_thinking
+            if native_thinking:
+                logger.info(f"[CRAG] Native thinking from Gemini: {len(native_thinking)} chars")
+            
+            return response.content, documents, native_thinking
             
         except Exception as e:
             logger.error(f"[CRAG] Generation failed: {e}")
-            return f"Lỗi khi tạo câu trả lời: {e}", documents
+            return f"Lỗi khi tạo câu trả lời: {e}", documents, None
     
     def _calculate_confidence(
         self,

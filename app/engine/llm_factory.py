@@ -156,11 +156,13 @@ def create_rag_llm(temperature: float = 0.5) -> ChatGoogleGenerativeAI:
     
     Uses MODERATE tier (4096 tokens) for summarization.
     Lower temperature for more consistent outputs.
+    
+    CHỈ THỊ SỐ 29: Include thoughts for SOTA transparency (hybrid display).
     """
     return create_llm(
         tier=ThinkingTier.MODERATE,
         temperature=temperature,
-        include_thoughts=False,  # Internal processing
+        include_thoughts=True,  # CHỈ THỊ SỐ 29: Enable native thinking for LMS display
     )
 
 
