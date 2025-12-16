@@ -59,6 +59,39 @@ reasoning:
       - "Nếu không chắc 100%, vẫn đưa ra câu trả lời kèm xác nhận"
 
 # =============================================================================
+# THINKING LANGUAGE CONTROL (CHỈ THỊ SỐ 29 - SOTA)
+# =============================================================================
+# Purpose: Control native thinking language for Gemini API
+# Pattern: Centralized config -> Runtime injection at TOP of system prompt
+# =============================================================================
+thinking:
+  language: "vi"
+  enforcement: "strict"  # strict | moderate | relaxed
+  
+  # SOTA: Explicit examples + anti-patterns for maximum compliance
+  style:
+    type: "natural_first_person"
+    
+    # Examples of CORRECT thinking (Vietnamese, first-person)
+    examples:
+      - "Tôi đang xem xét câu hỏi về {topic}..."
+      - "Người dùng muốn hiểu về {concept}..."
+      - "Nhìn vào dữ liệu, tôi thấy cần làm rõ..."
+      - "Để trả lời câu hỏi này, tôi cần..."
+      - "Tôi nhận thấy người dùng đang hỏi về..."
+    
+    # CRITICAL: Anti-patterns to explicitly REJECT
+    # SOTA Insight: Negative examples are MORE effective than positive ones
+    anti_patterns:
+      - "Okay, so the user is asking..."
+      - "Let me think about this..."
+      - "Looking at Article..."
+      - "The user wants to know..."
+      - "I need to consider..."
+
+
+
+# =============================================================================
 # COMMON DIRECTIVES (Áp dụng cho tất cả)
 # =============================================================================
 common_directives:

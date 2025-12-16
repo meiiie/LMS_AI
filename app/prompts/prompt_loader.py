@@ -330,6 +330,81 @@ class PromptLoader:
         
         return text
     
+    def build_thinking_instruction(self, role: str = "student") -> str:
+        """
+        Build SOTA thinking language instruction from YAML config.
+        
+        Reads 'thinking' section from _shared.yaml and generates a 
+        language enforcement block to be injected at TOP of system prompt.
+        
+        CHỈ THỊ SỐ 29: SOTA Vietnamese Thinking
+        
+        SOTA Pattern:
+        - Explicit language enforcement at prompt top
+        - Positive examples (what TO do)
+        - Negative examples/anti-patterns (what NOT to do)
+        - Anti-patterns are MORE effective than positive examples
+        
+        Args:
+            role: User role (student, teacher, admin)
+            
+        Returns:
+            Formatted thinking instruction string
+            
+        **Validates: CHỈ THỊ SỐ 29**
+        """
+        persona = self.get_persona(role)
+        thinking = persona.get('thinking', {})
+        
+        # Default values if not configured
+        lang = thinking.get('language', 'vi')
+        enforcement = thinking.get('enforcement', 'strict')
+        style = thinking.get('style', {})
+        
+        # Get examples and anti-patterns
+        examples = style.get('examples', [
+            "Tôi đang xem xét câu hỏi...",
+            "Người dùng muốn hiểu về...",
+        ])
+        anti_patterns = style.get('anti_patterns', [
+            "Okay, so the user is asking...",
+            "Let me think about this...",
+        ])
+        
+        # Build instruction based on enforcement level
+        if enforcement == 'strict':
+            # SOTA: Maximum enforcement with explicit anti-patterns
+            instruction = """🚨 BẮT BUỘC - NGÔN NGỮ SUY NGHĨ (CHỈ THỊ SỐ 29):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ PHẢI suy nghĩ bằng TIẾNG VIỆT 100%
+⚠️ TUYỆT ĐỐI KHÔNG suy nghĩ bằng tiếng Anh
+
+✅ Mẫu suy nghĩ ĐÚNG:
+"""
+            for ex in examples[:3]:
+                # Clean template variables for display
+                clean_ex = ex.replace("{topic}", "...").replace("{concept}", "...")
+                instruction += f"  • {clean_ex}\n"
+            
+            instruction += """
+❌ Mẫu suy nghĩ SAI (KHÔNG ĐƯỢC DÙNG):
+"""
+            for anti in anti_patterns[:3]:
+                instruction += f"  • {anti}\n"
+            
+            instruction += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            
+        elif enforcement == 'moderate':
+            instruction = """📝 NGÔN NGỮ SUY NGHĨ:
+- Ưu tiên suy nghĩ bằng tiếng Việt
+- Phong cách: tự nhiên, ngôi thứ nhất
+"""
+        else:  # relaxed
+            instruction = "Suy nghĩ bằng tiếng Việt nếu có thể.\n"
+        
+        return instruction
+
+
     def build_system_prompt(
         self,
         role: str,

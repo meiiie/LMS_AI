@@ -23,6 +23,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 # CHỈ THỊ SỐ 29: Import thinking extraction utility
 from app.services.output_processor import extract_thinking_from_response
 
+# CHỈ THỊ SỐ 29: PromptLoader for SOTA thinking instruction
+from app.prompts.prompt_loader import PromptLoader
+
 from app.core.config import settings
 from app.engine.llm_factory import create_rag_llm
 
@@ -179,6 +182,9 @@ class RAGAgent:
                 self._graph_rag = None
         else:
             self._graph_rag = graph_rag_service
+        
+        # CHỈ THỊ SỐ 29: Initialize PromptLoader for SOTA thinking instruction
+        self._prompt_loader = PromptLoader()
             
         self._llm = self._init_llm()
     
@@ -610,9 +616,13 @@ class RAGAgent:
                 response += "\n\n**Nguồn tham khảo:**\n" + "\n".join(sources)
             return response, None  # No native thinking when no LLM
         
+        # CHỈ THỊ SỐ 29: SOTA Vietnamese Thinking Injection
+        # Get thinking instruction from centralized YAML config
+        thinking_instruction = self._prompt_loader.build_thinking_instruction(user_role)
+        
         # CHỈ THỊ KỸ THUẬT SỐ 12: System Prompt tối ưu cho RAG v2
         if user_role == "student":
-            system_prompt = """BẠN LÀ: Maritime AI Tutor - Chuyên gia tra cứu luật hàng hải.
+            base_prompt = """BẠN LÀ: Maritime AI Tutor - Chuyên gia tra cứu luật hàng hải.
 
 QUY TẮC GỌI TÊN (RẤT QUAN TRỌNG - PHẢI TUÂN THỦ):
 - KHÔNG gọi tên ở đầu mỗi câu trả lời
@@ -630,9 +640,9 @@ NHIỆM VỤ:
 - Nếu có NGỮ CẢNH THỰC THỂ, sử dụng để liên kết các khái niệm và điều luật liên quan
 - Trích dẫn nguồn khi đề cập quy định cụ thể
 - Dịch thuật ngữ: starboard = mạn phải, port = mạn trái, give-way = nhường đường
-- Trả lời bằng tiếng Việt nếu câu hỏi bằng tiếng Việt"""
+- Trả lời bằng tiếng Việt"""
         else:
-            system_prompt = """BẠN LÀ: Maritime AI Assistant - Trợ lý tra cứu luật hàng hải.
+            base_prompt = """BẠN LÀ: Maritime AI Assistant - Trợ lý tra cứu luật hàng hải.
 
 QUY TẮC:
 - Đi thẳng vào vấn đề, KHÔNG greeting
@@ -642,7 +652,11 @@ QUY TẮC:
 NHIỆM VỤ:
 - Trả lời dựa trên KIẾN THỨC TRA CỨU ĐƯỢC bên dưới
 - Nếu có NGỮ CẢNH THỰC THỂ, tham chiếu các điều luật liên quan
-- Trả lời bằng tiếng Việt nếu câu hỏi bằng tiếng Việt"""
+- Trả lời bằng tiếng Việt"""
+        
+        # SOTA Pattern: Thinking instruction at TOP of prompt for maximum effect
+        system_prompt = f"{thinking_instruction}\n{base_prompt}"
+
 
         # Build user prompt with history and entity context
         history_section = ""
