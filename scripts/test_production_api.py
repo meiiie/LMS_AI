@@ -12,7 +12,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Callable
 import httpx
 
 # ============================================================================
@@ -31,6 +31,11 @@ TEST_ROLE = "student"
 # Debug mode - print full API responses
 VERBOSE = True
 
+# Retry configuration for 502 errors (Render auto-restart)
+MAX_RETRIES = 3
+RETRY_DELAY_BASE = 5  # seconds
+RETRY_STATUS_CODES = [502, 503, 504]  # Gateway errors
+
 # Colors for output
 class Colors:
     GREEN = "\033[92m"
@@ -48,6 +53,53 @@ class TestResult:
     duration_ms: float
     message: str
     response_data: Optional[dict] = None
+    thinking: Optional[str] = None  # CHỈ THỊ SỐ 29: Vietnamese thinking process
+    retry_count: int = 0  # Number of retries needed
+
+
+# ============================================================================
+# RETRY HELPER (for 502 errors during Render deploys)
+# ============================================================================
+
+async def retry_request(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    **kwargs
+) -> httpx.Response:
+    """
+    Retry a request with exponential backoff for gateway errors.
+    
+    This handles Render free tier auto-restarts and deployments that
+    can cause 502 errors mid-request.
+    """
+    last_error = None
+    
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            if method.upper() == "GET":
+                response = await client.get(url, **kwargs)
+            else:
+                response = await client.post(url, **kwargs)
+            
+            if response.status_code in RETRY_STATUS_CODES and attempt < MAX_RETRIES:
+                delay = RETRY_DELAY_BASE * (2 ** attempt)  # Exponential backoff
+                print(f"{Colors.YELLOW}  ⚠️  Got {response.status_code}, retrying in {delay}s (attempt {attempt + 1}/{MAX_RETRIES})...{Colors.RESET}")
+                await asyncio.sleep(delay)
+                continue
+            
+            return response
+            
+        except (httpx.ConnectError, httpx.ReadTimeout) as e:
+            last_error = e
+            if attempt < MAX_RETRIES:
+                delay = RETRY_DELAY_BASE * (2 ** attempt)
+                print(f"{Colors.YELLOW}  ⚠️  Connection error, retrying in {delay}s (attempt {attempt + 1}/{MAX_RETRIES})...{Colors.RESET}")
+                await asyncio.sleep(delay)
+                continue
+            raise
+    
+    raise last_error if last_error else Exception("Max retries exceeded")
 
 
 # ============================================================================
@@ -142,8 +194,12 @@ async def test_chat_simple(client: httpx.AsyncClient) -> TestResult:
 async def test_chat_rag_query(client: httpx.AsyncClient) -> TestResult:
     """Test RAG query that should trigger knowledge search."""
     start = time.time()
+    retry_count = 0
     try:
-        response = await client.post(
+        # Use retry_request for handling 502 during Render deploys
+        response = await retry_request(
+            client,
+            "POST",
             f"{API_PREFIX}/chat",
             json={
                 # Updated to match Vietnamese Maritime Law (Bộ luật hàng hải Việt Nam)
@@ -170,6 +226,10 @@ async def test_chat_rag_query(client: httpx.AsyncClient) -> TestResult:
             tools_used = metadata.get("tools_used", [])
             message_preview = response_data.get("answer", "")[:400]
             
+            # CHỈ THỊ SỐ 29: Extract thinking process
+            thinking = metadata.get("thinking")  # Natural Vietnamese thinking
+            thinking_content = metadata.get("thinking_content")  # Structured summary
+            
             has_sources = len(sources) > 0
             source_info = f"{len(sources)} sources" if has_sources else "No sources"
             tool_info = f", Tools: {[t.get('name') for t in tools_used]}" if tools_used else ", Tools: []"
@@ -184,15 +244,45 @@ async def test_chat_rag_query(client: httpx.AsyncClient) -> TestResult:
                 if sources:
                     for i, src in enumerate(sources[:3]):
                         print(f"    Source {i+1}: {src.get('title', 'N/A')}")
+                        # CHỈ THỊ 26: Check image_url and page_number
+                        print(f"      - image_url: {src.get('image_url', 'N/A')}")
+                        print(f"      - page_number: {src.get('page_number', 'N/A')}")
                 print(f"  Full answer length: {len(response_data.get('answer', ''))}")
-                print(f"{Colors.YELLOW}----------------------{Colors.RESET}\n")
+                
+                # CHỈ THỊ SỐ 29: Display Thinking Process
+                print(f"\n{Colors.BLUE}--- QUÁ TRÌNH SUY NGHĨ (Thinking) ---{Colors.RESET}")
+                if thinking:
+                    # Show first 500 chars of Vietnamese thinking
+                    thinking_preview = thinking[:500] + "..." if len(thinking) > 500 else thinking
+                    print(f"  {Colors.GREEN}✓ Vietnamese Thinking:{Colors.RESET}")
+                    for line in thinking_preview.split("\n")[:10]:
+                        print(f"    {line}")
+                    print(f"  [Total: {len(thinking)} chars]")
+                else:
+                    print(f"  {Colors.YELLOW}⚠️  No thinking field in response{Colors.RESET}")
+                
+                if thinking_content:
+                    print(f"\n  {Colors.GREEN}✓ Thinking Content (Summary):{Colors.RESET}")
+                    content_preview = thinking_content[:300] + "..." if len(thinking_content) > 300 else thinking_content
+                    print(f"    {content_preview}")
+                
+                # Reasoning trace summary
+                reasoning_trace = metadata.get("reasoning_trace")
+                if reasoning_trace:
+                    print(f"\n  {Colors.GREEN}✓ Reasoning Trace:{Colors.RESET}")
+                    print(f"    Steps: {reasoning_trace.get('total_steps', 0)}")
+                    print(f"    Confidence: {reasoning_trace.get('overall_confidence', 0):.0%}")
+                
+                print(f"{Colors.YELLOW}--------------------------------------{Colors.RESET}\n")
             
             return TestResult(
                 name="Chat RAG Query",
                 passed=True,
                 duration_ms=duration,
                 message=f"Agent: {agent_type}{tool_info}, {source_info}\nResponse: {message_preview}...",
-                response_data=data
+                response_data=data,
+                thinking=thinking,
+                retry_count=retry_count
             )
         else:
             return TestResult(
@@ -616,6 +706,17 @@ def save_results_to_file(results: List[TestResult], passed: int, failed: int, to
             f.write("-" * 50 + "\n")
             for line in result.message.split("\n"):
                 f.write(f"   {line}\n")
+            
+            # CHỈ THỊ SỐ 29: Write thinking process if available
+            if result.thinking:
+                f.write("\n   [QUÁ TRÌNH SUY NGHĨ]:\n")
+                f.write("-" * 50 + "\n")
+                thinking_lines = result.thinking.split("\n")
+                for line in thinking_lines[:20]:  # Limit to first 20 lines
+                    f.write(f"   {line}\n")
+                if len(thinking_lines) > 20:
+                    f.write(f"   ... [{len(thinking_lines) - 20} more lines]\n")
+                f.write("-" * 50 + "\n")
             
             # Write full response_data for detailed analysis
             if result.response_data:

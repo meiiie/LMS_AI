@@ -265,6 +265,27 @@ enable_answer_verification: bool = True # Check hallucinations
 
 ---
 
+## ⚠️ Known Issues (as of 2025-12-16)
+
+### 1. Low Grading Scores During RAG Query
+**Symptom:** `RetrievalGrader` returns low scores (3.0/10, 0.0/10) even for valid queries
+**Cause:** Potential data quality issues in `knowledge_embeddings` table
+**Impact:** Query rewrites triggered unnecessarily, low confidence warnings
+**Status:** Under investigation - requires SQL team verification
+
+### 2. Missing Source Metadata
+**Symptom:** `page_number`, `document_id`, `bounding_boxes` return `null`
+**Cause:** Legacy data ingested before these columns were added
+**Impact:** Cannot highlight specific locations in PDFs
+**Fix:** Re-ingest documents or run migration script
+
+### 3. Long RAG Query Time (~160s)
+**Symptom:** `test_chat_rag_query` takes 160+ seconds
+**Cause:** Multiple retrieval rounds + batch grading + LLM calls on free tier
+**Status:** Expected behavior given CRAG complexity and hosting limits
+
+---
+
 ## 📋 Changelog
 
 ### 2025-12-16: CHỈ THỊ SỐ 29 v8 - Centralized Vietnamese Thinking ✅
