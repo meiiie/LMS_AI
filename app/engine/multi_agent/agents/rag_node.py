@@ -74,9 +74,14 @@ class RAGAgentNode:
             if result.reasoning_trace:
                 state["reasoning_trace"] = result.reasoning_trace
             
-            # CHỈ THỊ SỐ 28: Include thinking_content (SOTA prose thinking)
+            # CHỈ THỊ SỐ 28: Include thinking_content (structured summary fallback)
             if result.thinking_content:
                 state["thinking_content"] = result.thinking_content
+            
+            # CHỈ THỊ SỐ 29: Include thinking (natural Vietnamese thinking)
+            if result.thinking:
+                state["thinking"] = result.thinking
+
             
             logger.info(f"[RAG_AGENT] Processed query with confidence={result.confidence:.0f}%")
             
