@@ -275,6 +275,12 @@ enable_answer_verification: bool = True # Check hallucinations
 - **Cleanup**: Removed YAML config, deprecated `build_thinking_instruction()`
 - **Test Result**: ✅ `"thinking": "Minh đang hỏi về Điều 15..."` (Vietnamese)
 
+### 2025-12-16: BUGFIX - Missing image_url in Sources
+
+- **Bug**: `_retrieve()` not copying `image_url` from Citation → Dict
+- **Impact**: API returned `image_url: null` despite data existing
+- **Fix**: Added `"image_url": getattr(citation, 'image_url', None)` to dict
+
 ### 2025-12-16: CHỈ THỊ SỐ 29 v7 - SOTA Vietnamese Thinking (Deprecated)
 
 - **SOTA Pattern**: Claude + Qwen3 + OpenAI combined best practices

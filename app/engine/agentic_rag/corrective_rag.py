@@ -371,6 +371,8 @@ class CorrectiveRAG:
                     "content": getattr(citation, 'source', ''),  # Use source as content
                     "title": getattr(citation, 'title', 'Unknown'),
                     "score": getattr(citation, 'relevance_score', 0),
+                    # Source highlighting fields (CHỈ THỊ 26 + Feature: source-highlight-citation)
+                    "image_url": getattr(citation, 'image_url', None),  # FIX: was missing!
                     "page_number": getattr(citation, 'page_number', None),
                     "document_id": getattr(citation, 'document_id', None),
                     "bounding_boxes": getattr(citation, 'bounding_boxes', None),
