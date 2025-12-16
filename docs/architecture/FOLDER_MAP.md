@@ -2,9 +2,9 @@
 
 > Master architecture document following **C4 Model + arc42** best practices.
 
-**Last Updated:** 2025-12-15  
+**Last Updated:** 2025-12-16  
 **Status:** ✅ Complete  
-**Version:** 2.2 (SOTA Native Thinking)
+**Version:** 2.3 (SOTA Native-First Thinking - CHỈ THỊ SỐ 29 v2)
 
 ---
 
@@ -581,6 +581,7 @@ prompts/
 
 | File | Lines | Reason |
 |------|-------|--------|
+| `thinking_generator.py` | 244 | CHỈ THỊ SỐ 29 v2: Replaced by native Gemini thinking |
 | `entity_extractor.py` | 358 | Duplicate of kg_builder_agent |
 | TutorAgent init | ~5 | Now via tutor_tools |
 
@@ -596,11 +597,13 @@ prompts/
 
 | Feature | Files Modified | CHỈ THỊ |
 |---------|---------------|---------|
+| **SOTA Native-First Thinking** | `corrective_rag.py` | SỐ 29 v2 |
 | ReasoningTrace Flow | 5 files | SỐ 28 |
 | Memory Agent DI | `graph.py` | SOTA Pattern |
 | **`thinking_content` (SOTA)** | 8 files | SỐ 28 |
 
-> `thinking_content`: SOTA prose thinking following OpenAI o1 `reasoning.summary` and DeepSeek R1 `reasoning_content` patterns. Generated from `ReasoningTracer.build_thinking_summary()`.
+> **`thinking` (v2)**: Native Gemini thinking (zero extra latency). Pattern: Claude Extended Thinking, Qwen QwQ, Gemini 2.5.
+> **`thinking_content`**: Structured summary fallback from `ReasoningTracer.build_thinking_summary()`.
 
 ### Deprecated Fixed
 

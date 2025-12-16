@@ -2,7 +2,7 @@
 
 > Core AI/ML components: Agents, RAG, Memory, and Multi-Agent System.
 
-**Last Updated:** 2025-12-15 (v2.2 - SOTA Native Thinking)
+**Last Updated:** 2025-12-16 (v2.3 - SOTA Native-First Thinking - CHỈ THỊ 29 v2)
 
 ---
 

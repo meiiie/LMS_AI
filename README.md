@@ -1545,6 +1545,7 @@ TOTAL CONNECTIONS: 12 (increased from 4, Neon handles it)
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v1.0.1 | 2025-12-16 | **SOTA NATIVE-FIRST THINKING**: CHỈ THỊ SỐ 29 v2 - Native Gemini thinking (zero extra latency), Removed ThinkingGenerator (dead code), SOTA alignment with Claude/Qwen/Gemini 2025 patterns |
 | v0.9.7 | 2025-12-10 | **DATABASE SCHEMA FIX & SOTA ARCHITECTURE**: Fix missing columns (is_blocked, block_reason, weak_areas, strong_areas, total_sessions, total_messages), Add SemanticMemoryEngine.is_available(), UUID/String conversion fix, Restore SOTA architecture (remove force search hardcode), Tool calling via YAML config (CHỈ THỊ SỐ 29), Alembic Migration 005 |
 | v0.9.1 | 2025-12-09 | **MULTIMODAL RAG ENHANCEMENT**: Replace pdf2image+Poppler with PyMuPDF (no external deps), Add `image_url` to API response (sources), Evidence Images support in chat response, Cross-platform PDF processing |
 | v0.9.0 | 2025-12-07 | **PROJECT RESTRUCTURE**: CHỈ THỊ SỐ 25 - Modular Semantic Memory (core.py, context.py, extraction.py), Legacy Code Removal (UnifiedAgent required), Test Organization (e2e/integration/unit/property), Scripts Organization (migrations/data/utils), Documentation Consolidation |

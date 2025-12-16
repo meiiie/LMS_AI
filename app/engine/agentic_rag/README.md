@@ -267,6 +267,14 @@ enable_answer_verification: bool = True # Check hallucinations
 
 ## 📋 Changelog
 
+### 2025-12-16: CHỈ THỊ SỐ 29 v2 - SOTA Native-First Thinking
+
+- **Simplified to Native-First Pattern**: Removed ThinkingGenerator
+- **Pattern**: Gemini native thinking (zero extra latency) → Structured summary (fallback)
+- **SOTA Alignment**: Claude Extended Thinking, Qwen QwQ, Gemini 2.5
+- **Deleted**: `thinking_generator.py` (dead code)
+- **Performance**: Reduced 2-3s latency by removing dual LLM call
+
 ### 2025-12-15: CHỈ THỊ SỐ 28 - SOTA Thinking Content
 
 - **Added `thinking_content`** field to `CorrectiveRAGResult`

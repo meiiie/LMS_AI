@@ -37,8 +37,8 @@ from app.engine.agentic_rag.answer_verifier import (
 from app.engine.reasoning_tracer import (
     ReasoningTracer, StepNames, get_reasoning_tracer
 )
-# CHỈ THỊ SỐ 29: Natural Vietnamese Thinking Generator
-from app.engine.thinking_generator import get_thinking_generator
+# CHỈ THỊ SỐ 29 v2: SOTA Native-First Thinking (no ThinkingGenerator needed)
+# Pattern: Use Gemini's native thinking directly (aligns with Claude/Qwen/Gemini 2025)
 from app.models.schemas import ReasoningTrace
 
 logger = logging.getLogger(__name__)
@@ -292,38 +292,29 @@ class CorrectiveRAG:
         # Build reasoning trace
         reasoning_trace = tracer.build_trace(final_confidence=confidence / 100)
         
-        # CHỈ THỊ SỐ 29: Generate natural Vietnamese thinking
-        # Priority: ThinkingGenerator > Native Gemini > Structured summary
+        # CHỈ THỊ SỐ 29 v2: SOTA Native-First Thinking
+        # SOTA Pattern (2025): Use native model thinking directly
+        # - Claude: Extended Thinking blocks
+        # - Qwen QwQ: <think> blocks  
+        # - Gemini 2.5: include_thoughts=True
+        # No dual LLM call needed - Gemini already provides thinking
         thinking = None
         thinking_content = None
         
-        # Step 1: Try ThinkingGenerator (SOTA - Dual LLM approach)
-        try:
-            thinking_generator = get_thinking_generator()
-            thinking = await thinking_generator.generate(
-                trace=reasoning_trace,
-                question=query,
-                answer=answer
-            )
-            if thinking:
-                logger.info(f"[CRAG] Generated natural thinking: {len(thinking)} chars")
-        except Exception as e:
-            logger.warning(f"[CRAG] ThinkingGenerator failed: {e}")
-        
-        # Step 2: Fallback to native Gemini thinking
-        if not thinking and native_thinking:
+        # Priority 1: Native Gemini thinking (SOTA - zero extra latency)
+        if native_thinking:
             thinking = native_thinking
             logger.info(f"[CRAG] Using native Gemini thinking: {len(thinking)} chars")
         
-        # Step 3: Fallback to structured summary (always available)
+        # Priority 2: Structured summary (fallback when native unavailable)
         thinking_content = tracer.build_thinking_summary()
         if thinking_content:
             logger.info(f"[CRAG] Built structured thinking summary: {len(thinking_content)} chars")
         
-        # If no natural thinking, use structured as fallback
+        # Fallback: if no native thinking, use structured
         if not thinking:
             thinking = thinking_content
-            logger.info("[CRAG] Using structured summary as thinking fallback")
+            logger.info("[CRAG] Native thinking unavailable, using structured summary")
         
         logger.info(f"[CRAG] Complete: iterations={iterations}, confidence={confidence:.0f}%")
         
