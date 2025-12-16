@@ -26,6 +26,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# APPLICATION READINESS FLAG (SOTA: Proper Kubernetes/Cloud Readiness Pattern)
+# =============================================================================
+# This flag is set to True ONLY after pre-warming completes.
+# Health check returns 503 until ready, preventing premature traffic routing.
+_app_ready = False
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -105,12 +112,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     # 1. Pre-warm ChatService (triggers lazy init of all services)
     try:
-        from app.services.chat_service import ChatService
-        chat_service = ChatService()
-        if chat_service.is_available():
-            logger.info("✅ ChatService pre-warmed (all agents initialized)")
-        else:
-            logger.warning("⚠️ ChatService initialized but agents unavailable")
+        from app.services.chat_service import get_chat_service
+        chat_service = get_chat_service()  # CRITICAL: Use singleton to avoid double init!
+        # ChatService init triggers all agent/service initialization
+        logger.info("✅ ChatService pre-warmed (all agents initialized)")
     except Exception as e:
         logger.warning(f"⚠️ ChatService pre-warm failed: {e} (will init on first request)")
     
@@ -152,7 +157,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     prewarm_duration = time.time() - prewarm_start
     logger.info(f"🔥 Pre-warming complete in {prewarm_duration:.1f}s")
     
-    logger.info(f"🚀 {settings.app_name} started successfully")
+    # Mark application as ready AFTER pre-warming
+    global _app_ready
+    _app_ready = True
+    
+    logger.info(f"🚀 {settings.app_name} started successfully (ready for traffic)")
     
     yield
     
@@ -318,10 +327,26 @@ async def health_check_simple():
     """
     Simple health check endpoint for LMS/DevOps.
     
+    SOTA Pattern: Returns 503 during startup/pre-warming.
+    This prevents Render/K8s from routing traffic before app is ready.
+    
     Spec: CHỈ THỊ KỸ THUẬT SỐ 03
     URL: GET /health
-    Response: {"status": "ok", "database": "connected"}
+    Response: {"status": "ok", "database": "connected", "ready": true}
     """
+    from fastapi.responses import JSONResponse as HealthJSONResponse
+    
+    # SOTA: Return 503 if not ready (pre-warming not complete)
+    if not _app_ready:
+        return HealthJSONResponse(
+            status_code=503,
+            content={
+                "status": "starting",
+                "ready": False,
+                "message": "Application is still warming up"
+            }
+        )
+    
     # Check database connection
     db_status = "connected"
     try:
@@ -334,5 +359,6 @@ async def health_check_simple():
     
     return {
         "status": "ok",
-        "database": db_status
+        "database": db_status,
+        "ready": True
     }
