@@ -34,25 +34,27 @@ class ProcessingResult:
 
 
 # =============================================================================
-# THINKING EXTRACTION UTILITIES (Phase 10 - CHỈ THỊ SỐ 28)
+# THINKING EXTRACTION UTILITIES (CHỈ THỊ SỐ 29 v8 - Centralized)
 # =============================================================================
 
 def extract_thinking_from_response(content: Any) -> tuple[str, Optional[str]]:
     """
-    Extract thinking trace and text from Gemini response with include_thoughts=True.
+    Extract thinking trace and text from LLM response.
     
-    Gemini response format when thinking is enabled:
-    response.content = [
-        {'type': 'thinking', 'thinking': '...'},  # Reasoning trace
-        {'type': 'text', 'text': '...'}           # Final answer
-    ]
+    CHỈ THỊ SỐ 29 v8: Now delegates to centralized ThinkingPostProcessor
+    which handles both formats:
+    1. Text-based <thinking> tags (preferred - Vietnamese)
+    2. Gemini native format {'type': 'thinking'}
+    
+    This is a backward-compatible wrapper - all existing code that calls
+    this function will automatically use the new centralized processor.
     
     Args:
-        content: Response content (can be string or list of content blocks)
+        content: Response content (str, list of content blocks, or other)
         
     Returns:
         Tuple of (text_content, thinking_trace)
-        - text_content: The actual response text
+        - text_content: The actual response text (with <thinking> removed)
         - thinking_trace: The model's reasoning (if available)
         
     Example:
@@ -60,43 +62,10 @@ def extract_thinking_from_response(content: Any) -> tuple[str, Optional[str]]:
         >>> if thinking:
         ...     logger.info(f"Model reasoning: {thinking[:100]}...")
     """
-    # Case 1: Already a plain string
-    if isinstance(content, str):
-        return content, None
+    # Import here to avoid circular imports
+    from app.services.thinking_post_processor import get_thinking_processor
     
-    # Case 2: List of content blocks (Gemini thinking format)
-    if isinstance(content, list):
-        text_parts = []
-        thinking_parts = []
-        
-        for block in content:
-            if isinstance(block, dict):
-                block_type = block.get('type', '')
-                
-                if block_type == 'thinking':
-                    thinking_content = block.get('thinking', '')
-                    if thinking_content:
-                        thinking_parts.append(thinking_content)
-                        
-                elif block_type == 'text':
-                    text_content = block.get('text', '')
-                    if text_content:
-                        text_parts.append(text_content)
-                        
-            elif isinstance(block, str):
-                # Plain string in list
-                text_parts.append(block)
-        
-        text = '\n'.join(text_parts) if text_parts else ''
-        thinking = '\n'.join(thinking_parts) if thinking_parts else None
-        
-        if thinking:
-            logger.debug(f"[THINKING] Extracted {len(thinking)} chars of reasoning")
-        
-        return text, thinking
-    
-    # Case 3: Unknown format, try to convert to string
-    return str(content), None
+    return get_thinking_processor().process(content)
 
 
 # =============================================================================

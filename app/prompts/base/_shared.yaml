@@ -59,50 +59,13 @@ reasoning:
       - "Nếu không chắc 100%, vẫn đưa ra câu trả lời kèm xác nhận"
 
 # =============================================================================
-# THINKING LANGUAGE CONTROL (CHỈ THỊ SỐ 29 v7 - SOTA)
+# THINKING LANGUAGE CONTROL (CHỈ THỊ SỐ 29 v8)
 # =============================================================================
-# Pattern: Claude + Qwen3 + OpenAI combined best practices
-# - XML tags for clear structure (Claude pattern)
-# - Explicit examples + anti-patterns (OpenAI o1 pattern)  
-# - Thinking mode toggle concept (Qwen3 pattern)
+# NOTE: This section is DEPRECATED as of v8.
+# Thinking instruction is now embedded directly in rag_agent.py prompts
+# using <thinking> tag pattern (same as unified_agent.py).
+# This ensures Vietnamese output because model writes thinking in response text.
 # =============================================================================
-thinking:
-  language: "vi"
-  enforcement: "strict"  # strict | moderate | relaxed
-  
-  # SOTA Pattern 1: XML-style language control block
-  # This block is injected at TOP of system prompt for maximum effect
-  language_control_xml: |
-    <language_control>
-      <thinking_language>Vietnamese</thinking_language>
-      <output_language>Vietnamese</output_language>
-      <requirement>ALL internal reasoning and thought process MUST be in Vietnamese</requirement>
-      <prohibition>NEVER use English for thinking, analyzing, or reasoning</prohibition>
-    </language_control>
-  
-  # SOTA Pattern 2: Thinking style definition
-  style:
-    type: "natural_first_person_vietnamese"
-    persona: "Vietnamese AI tutor reasoning naturally in first-person"
-    
-    # CORRECT examples (Vietnamese, first-person, natural)
-    correct_examples:
-      - "Tôi đang xem xét câu hỏi về Điều 15 của Bộ luật Hàng hải..."
-      - "Người dùng có vẻ đang cần tìm hiểu về trách nhiệm pháp lý của chủ tàu..."
-      - "Nhìn vào các nguồn tài liệu, tôi thấy cần làm rõ sự khác biệt giữa định nghĩa và trách nhiệm..."
-      - "Để trả lời câu hỏi này một cách chính xác, tôi cần phân tích các điều khoản liên quan..."
-      - "Tôi nhận thấy đây là một câu hỏi về COLREGs Rule 15, cần giải thích rõ về tình huống cắt hướng..."
-    
-    # CRITICAL: Anti-patterns to explicitly REJECT
-    # SOTA Insight: Negative examples are MORE effective than positive ones
-    incorrect_examples:
-      - "Okay, so the user is asking about Article 15..."
-      - "Let me think about this question..."
-      - "Looking at the Maritime Code..."
-      - "The user wants to understand the shipowner's responsibilities..."
-      - "I need to consider what Article 15 says..."
-      - "First, I should analyze the context..."
-      - "My understanding of Article 15 is..."
 
 
 

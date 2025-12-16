@@ -24,6 +24,7 @@ app/services/
 ├── session_manager.py           # 📦 Session & state management
 ├── input_processor.py           # 🛡️ Validation, Guardian, context
 ├── output_processor.py          # 📤 Response formatting
+├── thinking_post_processor.py   # 🧠 Centralized thinking extraction (CHỈ THỊ SỐ 29 v8)
 ├── background_tasks.py          # ⏳ Async task runner
 ├── chat_context_builder.py      # Context assembly
 ├── chat_response_builder.py     # Response assembly
@@ -260,4 +261,4 @@ response = await chat_service.process_message(request)
 
 ---
 
-*Last Updated: 2025-12-14*
+*Last Updated: 2025-12-16 (CHỈ THỊ SỐ 29 v8 - Centralized Thinking)*

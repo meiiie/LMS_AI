@@ -616,19 +616,36 @@ class RAGAgent:
                 response += "\n\n**Nguồn tham khảo:**\n" + "\n".join(sources)
             return response, None  # No native thinking when no LLM
         
-        # CHỈ THỊ SỐ 29: SOTA Vietnamese Thinking Injection
-        # Get thinking instruction from centralized YAML config
-        thinking_instruction = self._prompt_loader.build_thinking_instruction(user_role)
+        # CHỈ THỊ SỐ 29 v8: Vietnamese thinking instruction removed from YAML
+        # Now using direct <thinking> tag instruction (like unified_agent.py)
         
         # CHỈ THỊ KỸ THUẬT SỐ 12: System Prompt tối ưu cho RAG v2
         if user_role == "student":
             base_prompt = """BẠN LÀ: Maritime AI Tutor - Chuyên gia tra cứu luật hàng hải.
 
-QUY TẮC GỌI TÊN (RẤT QUAN TRỌNG - PHẢI TUÂN THỦ):
+⚠️ QUY TẮC BẮT BUỘC VỀ SUY LUẬN (<thinking>) - CHỈ THỊ SỐ 29:
+
+LUÔN bắt đầu response bằng <thinking> (BẰNG TIẾNG VIỆT):
+- Trong <thinking>, giải thích:
+  + User đang hỏi về gì? (phân tích câu hỏi)
+  + Kết quả tra cứu cho thấy điều gì? (tóm tắt thông tin từ sources)
+  + Cách tổng hợp thông tin để trả lời (reasoning)
+- Sau </thinking>, mới đưa ra câu trả lời chính thức
+
+VÍ DỤ:
+<thinking>
+Người dùng hỏi về Điều 15 của Bộ luật Hàng hải.
+Kết quả tra cứu cho thấy Điều 15 quy định về định nghĩa chủ tàu.
+Tôi sẽ giải thích rõ ràng và trích dẫn nguồn.
+</thinking>
+
+Theo Điều 15 Bộ luật Hàng hải Việt Nam...
+
+QUY TẮC GỌI TÊN (RẤT QUAN TRỌNG):
 - KHÔNG gọi tên ở đầu mỗi câu trả lời
 - KHÔNG bắt đầu bằng "Chào [tên]" - đây là lỗi phổ biến cần tránh
 - Đi thẳng vào nội dung: "Quy tắc 15 quy định rằng...", "Theo COLREGs..."
-- Chỉ gọi tên khi CẦN THIẾT trong ngữ cảnh (VD: "Như Minh đã hỏi trước đó...")
+- Chỉ gọi tên khi CẦN THIẾT trong ngữ cảnh
 
 QUY TẮC VARIATION:
 - Đa dạng cách mở đầu: "Theo quy định...", "Cụ thể là...", "Về vấn đề này..."
@@ -644,6 +661,12 @@ NHIỆM VỤ:
         else:
             base_prompt = """BẠN LÀ: Maritime AI Assistant - Trợ lý tra cứu luật hàng hải.
 
+⚠️ QUY TẮC BẮT BUỘC VỀ SUY LUẬN (<thinking>) - CHỈ THỊ SỐ 29:
+
+LUÔN bắt đầu response bằng <thinking> (BẰNG TIẾNG VIỆT):
+- Phân tích ngắn gọn câu hỏi và sources
+- Sau </thinking>, đưa ra câu trả lời
+
 QUY TẮC:
 - Đi thẳng vào vấn đề, KHÔNG greeting
 - Trích dẫn chính xác số hiệu quy định
@@ -654,8 +677,8 @@ NHIỆM VỤ:
 - Nếu có NGỮ CẢNH THỰC THỂ, tham chiếu các điều luật liên quan
 - Trả lời bằng tiếng Việt"""
         
-        # SOTA Pattern: Thinking instruction at TOP of prompt for maximum effect
-        system_prompt = f"{thinking_instruction}\n{base_prompt}"
+        # Use base_prompt directly (thinking instruction now embedded)
+        system_prompt = base_prompt
 
 
         # Build user prompt with history and entity context
