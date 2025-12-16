@@ -1,0 +1,1004 @@
+======================================================================
+  Maritime AI Service - Production API Test Results
+  Base URL: https://maritime-ai-chatbot.onrender.com
+  Test User ID: 12345678-1234-5678-1234-567812345678
+  Completed: 2025-12-16 23:14:20
+======================================================================
+
+1. Health Check [✓ PASSED] (566ms)
+--------------------------------------------------
+   Status: ok
+
+   [FULL RESPONSE DATA]:
+   {
+     "status": "ok",
+     "service": "maritime-ai-tutor",
+     "version": "0.1.0",
+     "environment": "production"
+   }
+
+2. Auth Required [✓ PASSED] (126ms)
+--------------------------------------------------
+   Correctly rejected with status 401
+
+3. Chat Simple [✓ PASSED] (30149ms)
+--------------------------------------------------
+   Agent: rag, Response: Tôi có thể giúp gì cho bạn?...
+
+   [FULL RESPONSE DATA]:
+   {
+     "status": "success",
+     "data": {
+       "answer": "Tôi có thể giúp gì cho bạn?",
+       "sources": [],
+       "suggested_questions": [
+         "Bạn có câu hỏi nào về hàng hải không?",
+         "Tôi có thể giúp gì về COLREGs, SOLAS, hoặc MARPOL?",
+         "Bạn muốn tìm hiểu về quy định hàng hải nào?"
+       ]
+     },
+     "metadata": {
+       "processing_time": 30.001,
+       "model": "maritime-rag-v1",
+       "agent_type": "rag",
+       "session_id": "baf3be34-e55d-4cb9-873b-ac4d372e2aef",
+       "tools_used": [],
+       "reasoning_trace": null,
+       "topics_accessed": null,
+       "confidence_score": null,
+       "document_ids_used": null,
+       "query_type": "conceptual",
+       "thinking_content": null,
+       "thinking": null
+     }
+   }
+
+4. Chat RAG Query [✓ PASSED] (123897ms)
+--------------------------------------------------
+   Agent: rag, Tools: [], 10 sources
+   Response: ⚠️ Câu trả lời có thể chứa thông tin chưa được xác minh
+   
+   Theo Bộ luật Hàng hải Việt Nam, Điều 15 tập trung vào việc định nghĩa "Chủ tàu" và xác định các chủ thể khác có thể thực hiện quyền và nghĩa vụ của chủ tàu, chứ không trực tiếp liệt kê các trách nhiệm cụ thể.
+   
+   Cụ thể, Điều 15 quy định như sau:
+   
+   *   **Khoản 1: Định nghĩa Chủ tàu**
+       Chủ tàu được định nghĩa là người sở hữu tàu biển. Đây là k...
+
+   [QUÁ TRÌNH SUY NGHĨ]:
+--------------------------------------------------
+   Người dùng Minh, một sinh viên đang học về hàng hải, muốn được giải thích về Điều 15 của Bộ luật Hàng hải Việt Nam, đặc biệt là liên quan đến "trách nhiệm của chủ tàu".
+   
+   Kết quả tra cứu cho thấy Điều 15 chủ yếu tập trung vào việc định nghĩa "Chủ tàu" và xác định các chủ thể khác có thể thực hiện quyền và nghĩa vụ của chủ tàu. Điều này có nghĩa là Điều 15 không trực tiếp liệt kê các trách nhiệm cụ thể. Các trách nhiệm này được quy định rải rác ở các điều khoản khác trong Bộ luật, ví dụ như Điều 114 - Khoản 4 về trách nhiệm sửa chữa, khắc phục khiếm khuyết của tàu.
+   
+   Tôi sẽ tổng hợp thông tin bằng cách:
+   1.  Giải thích rõ ràng nội dung của từng khoản trong Điều 15 để làm rõ về định nghĩa chủ tàu và các chủ thể khác.
+   2.  Nhấn mạnh rằng Điều 15 không phải là nơi liệt kê trách nhiệm cụ thể.
+   3.  Cung cấp một ví dụ về trách nhiệm của chủ tàu được quy định ở điều luật khác (Điều 114 - Khoản 4) để Minh có cái nhìn đầy đủ hơn.
+   4.  Trích dẫn các nguồn tham khảo liên quan.
+--------------------------------------------------
+
+   [FULL RESPONSE DATA]:
+   {
+     "status": "success",
+     "data": {
+       "answer": "⚠️ Câu trả lời có thể chứa thông tin chưa được xác minh\n\nTheo Bộ luật Hàng hải Việt Nam, Điều 15 tập trung vào việc định nghĩa \"Chủ tàu\" và xác định các chủ thể khác có thể thực hiện quyền và nghĩa vụ của chủ tàu, chứ không trực tiếp liệt kê các trách nhiệm cụ thể.\n\nCụ thể, Điều 15 quy định như sau:\n\n*   **Khoản 1: Định nghĩa Chủ tàu**\n    Chủ tàu được định nghĩa là người sở hữu tàu biển. Đây là khái niệm cơ bản để xác định chủ thể chịu trách nhiệm chính dựa trên quyền sở hữu ([Điều 15. Chủ tàu](https://luat.hcmulaw.edu.vn/kien-thuc-phap-luat/dieu-15-chu-tau)).\n\n*   **Khoản 2: Các chủ thể khác thực hiện quyền và nghĩa vụ của chủ tàu**\n    Quy định này mở rộng phạm vi chủ thể có thể thay mặt chủ tàu thực hiện các hoạt động hàng hải. Cụ thể, người quản lý, người khai thác và người thuê tàu trần (thuê tàu không kèm thuyền viên) được phép thực hiện các quyền và nghĩa vụ của chủ tàu theo quy định tại Bộ luật này, dựa trên hợp đồng đã ký kết với chủ tàu ([Điều 15. Chủ tàu](https://luat.hcmulaw.edu.vn/kien-thuc-phap-luat/dieu-15-chu-tau)).\n\n*   **Khoản 3: Tổ chức được Nhà nước giao quản lý, khai thác**\n    Đối với các tổ chức được Nhà nước giao nhiệm vụ quản lý, khai thác tàu biển, các quy định của Bộ luật Hàng hải Việt Nam và các quy định pháp luật liên quan cũng được áp dụng tương tự như đối với chủ tàu ([Điều 15. Chủ tàu](https://luat.hcmulaw.edu.vn/kien-thuc-phap-luat/dieu-15-chu-tau)). Điều này đảm bảo tính thống nhất trong việc áp dụng pháp luật cho các đơn vị sự nghiệp hoặc doanh nghiệp nhà nước.\n\n**Về trách nhiệm cụ thể của chủ tàu:**\nMặc dù Điều 15 thiết lập nền tảng để xác định ai là chủ thể chịu trách nhiệm, các trách nhiệm chi tiết của chủ tàu lại được quy định rải rác trong các điều khoản khác của Bộ luật Hàng hải Việt Nam.\n\nVí dụ, theo **Khoản 4 Điều 114** của Bộ luật Hàng hải Việt Nam, chủ tàu và thuyền trưởng có trách nhiệm sửa chữa, khắc phục các khiếm khuyết của tàu biển liên quan đến an toàn hàng hải, an ninh hàng hải, lao động hàng hải, phòng chống cháy, nổ và bảo vệ môi trường, theo yêu cầu của Thanh tra hàng hải hoặc Cảng vụ hàng hải ([Điều 114 - Khoản 4](https://luat.hcmulaw.edu.vn/kien-thuc-phap-luat/dieu-114-khoan-4-chu-tau-va-thuyen-truong-co-trach-nhiem-sua-chua-khac-phuc-cac-khiem)).\n\nNhư vậy, Điều 15 là điều khoản nền tảng xác định chủ thể có liên quan đến tàu biển, còn các trách nhiệm cụ thể của họ sẽ được quy định chi tiết ở các điều khoản khác để đảm bảo an toàn, an ninh và hiệu quả trong hoạt động hàng hải.\n\n**Nguồn tham khảo:**\n- ### Điều 15. Chủ tàu (Maritime Knowledge Base)\n- [Điều 114 - Khoản 1] 4. Chủ tàu và thuyền trưởng có trách nhiệm sửa chữa, khắc phục các khiếm (Maritime Knowledge Base)\n- [Điều 58] CÔNG BÁO/Số 1257 + 1258/Ngày 30-12-2015 (Maritime Knowledge Base)",
+       "sources": [
+         {
+           "title": "*   1. Chủ tàu có trách nhiệm cung cấp đầy đủ các giấy tờ và khai báo đầy đủ, chính xác các nội dung",
+           "content": "*   1. Chủ tàu có trách nhiệm cung cấp đầy đủ các giấy tờ và khai báo đầy đủ, chính xác các nội dung liên quan đến tàu biển đăng ký quy định tại Điều 20 và Điều 24 của Bộ luật này cho Cơ quan đăng ký ",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_11.jpg",
+           "page_number": null,
+           "document_id": null,
+           "bounding_boxes": null
+         },
+         {
+           "title": "2. Việc đăng kiểm các loại tàu biển không thuộc trường hợp quy định tại khoản 1",
+           "content": "2. Việc đăng kiểm các loại tàu biển không thuộc trường hợp quy định tại khoản 1\nĐiều này do Bộ trưởng Bộ Giao thông vận tải quy định.\nĐiều 31. Trách nhiệm về đăng kiểm tàu biển\n1. Chủ tàu biển có trác",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_14.jpg",
+           "page_number": null,
+           "document_id": null,
+           "bounding_boxes": null
+         },
+         {
+           "title": "Điều 70. Khai báo, điều tra, thống kê, báo cáo tai nạn lao động hàng hải",
+           "content": "Điều 70. Khai báo, điều tra, thống kê, báo cáo tai nạn lao động hàng hải\nvà bệnh nghề nghiệp\n1. Khi xảy ra tai nạn lao động hàng hải, chủ tàu hoặc thuyền trưởng có trách\nnhiệm khai báo tai nạn lao độn",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_32.jpg",
+           "page_number": null,
+           "document_id": null,
+           "bounding_boxes": null
+         },
+         {
+           "title": "tàu có ảnh hưởng đến sức khỏe và an toàn;",
+           "content": "tàu có ảnh hưởng đến sức khỏe và an toàn;\ni) Xây dựng phương án ứng cứu khẩn cấp đối với tai nạn lao động hàng hải\nliên quan đến thuyền viên và tổ chức diễn tập hàng năm.\n2. Chủ tàu có trách nhiệm mua",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_33.jpg",
+           "page_number": null,
+           "document_id": null,
+           "bounding_boxes": null
+         },
+         {
+           "title": "4. Chủ tàu và thuyền trưởng có trách nhiệm sửa chữa, khắc phục các khiếm",
+           "content": "4. Chủ tàu và thuyền trưởng có trách nhiệm sửa chữa, khắc phục các khiếm\nkhuyết của tàu biển về an toàn hàng hải, an ninh hàng hải, lao động hàng hải,\nphòng chống cháy, nổ và bảo vệ môi trường theo yê",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_49.jpg",
+           "page_number": null,
+           "document_id": null,
+           "bounding_boxes": null
+         },
+         {
+           "title": "Điều 28. Đăng kiểm tàu biển Việt Nam",
+           "content": "Điều 28. Đăng kiểm tàu biển Việt Nam\n1. Tàu biển Việt Nam phải được tổ chức đăng kiểm Việt Nam hoặc tổ chức\nđăng kiểm nước ngoài được Bộ trưởng Bộ Giao thông vận tải ủy quyền kiểm định,\nphân cấp, cấp ",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_13.jpg",
+           "page_number": null,
+           "document_id": null,
+           "bounding_boxes": null
+         },
+         {
+           "title": "2. Thực hiện trách nhiệm để tàu biển có đủ các điều kiện an toàn hàng hải, an",
+           "content": "2. Thực hiện trách nhiệm để tàu biển có đủ các điều kiện an toàn hàng hải, an\nninh hàng hải, điều kiện bảo đảm lao động hàng hải và phòng ngừa ô nhiễm môi\ntrường cần thiết, phù hợp với tiêu chuẩn chuy",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_23.jpg",
+           "page_number": null,
+           "document_id": null,
+           "bounding_boxes": null
+         },
+         {
+           "title": "### Điều 15. Chủ tàu",
+           "content": "### Điều 15. Chủ tàu\n1. Chủ tàu là người sở hữu tàu biển.\n2. Người quản lý, người khai thác và người thuê tàu trần được thực hiện các quyền, nghĩa vụ của chủ tàu quy định tại Bộ luật này theo hợp đồng",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_8.jpg",
+           "page_number": null,
+           "document_id": null,
+           "bounding_boxes": null
+         },
+         {
+           "title": "",
+           "content": "Điều 11. Thanh tra hàng hải\n1. Thanh tra hàng hải trực thuộc Cơ quan quản lý nhà nước chuyên ngành hàng\nhải thực hiện chức năng thanh tra chuyên ngành về hàng hải.\n2. Thanh tra hàng hải có các nhiệm v",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_7.jpg",
+           "page_number": null,
+           "document_id": null,
+           "bounding_boxes": null
+         },
+         {
+           "title": "",
+           "content": "trưởng Bộ Giao thông vận tải.\n3. Trong luồng hàng hải, tại các vị trí cần thiết ven bờ biển, trên đảo, tại vùng\nnước có chướng ngại vật, công trình khác trên biển và vùng nước cảng biển mà tàu\nbiển đư",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_45.jpg",
+           "page_number": null,
+           "document_id": null,
+           "bounding_boxes": null
+         }
+       ],
+       "suggested_questions": [
+         "Bạn muốn tìm hiểu thêm về quy định nào?",
+         "Có câu hỏi nào khác về hàng hải không?",
+         "Bạn cần giải thích chi tiết hơn không?"
+       ]
+     },
+     "metadata": {
+       "processing_time": 122.744,
+       "model": "maritime-rag-v1",
+       "agent_type": "rag",
+       "session_id": "baf3be34-e55d-4cb9-873b-ac4d372e2aef",
+       "tools_used": [],
+       "reasoning_trace": {
+         "total_steps": 8,
+         "total_duration_ms": 100504,
+         "was_corrected": true,
+         "correction_reason": "Điểm liên quan thấp (6.0/10)",
+         "final_confidence": 0.8266666666666667,
+         "steps": [
+           {
+             "step_name": "query_analysis",
+             "description": "Phân tích độ phức tạp câu hỏi",
+             "result": "Độ phức tạp: simple, Maritime: True",
+             "confidence": 1.0,
+             "duration_ms": 6605,
+             "details": {
+               "complexity": "simple",
+               "is_maritime": true,
+               "topics": [
+                 "Bộ luật hàng hải Việt Nam",
+                 "Trách nhiệm chủ tàu",
+                 "Điều 15",
+                 "Luật hàng hải"
+               ]
+             }
+           },
+           {
+             "step_name": "retrieval",
+             "description": "Tìm kiếm tài liệu (lần 1)",
+             "result": "Tìm thấy 10 tài liệu",
+             "confidence": 0.8,
+             "duration_ms": 1430,
+             "details": {
+               "doc_count": 10
+             }
+           },
+           {
+             "step_name": "grading",
+             "description": "Đánh giá độ liên quan của tài liệu",
+             "result": "Điểm: 6.0/10 - Cần cải thiện",
+             "confidence": 0.6,
+             "duration_ms": 34369,
+             "details": {
+               "score": 6.0,
+               "passed": false
+             }
+           },
+           {
+             "step_name": "query_rewrite",
+             "description": "Viết lại query để cải thiện kết quả",
+             "result": "Query mới: Trách nhiệm của chủ tàu theo Bộ luật hàng hải Việt...",
+             "confidence": 0.8,
+             "duration_ms": 12902,
+             "details": null
+           },
+           {
+             "step_name": "retrieval",
+             "description": "Tìm kiếm tài liệu (lần 2)",
+             "result": "Tìm thấy 10 tài liệu",
+             "confidence": 0.8,
+             "duration_ms": 588,
+             "details": {
+               "doc_count": 10
+             }
+           },
+           {
+             "step_name": "grading",
+             "description": "Đánh giá độ liên quan của tài liệu",
+             "result": "Điểm: 8.8/10 - ĐẠT",
+             "confidence": 0.8800000000000001,
+             "duration_ms": 8702,
+             "details": {
+               "score": 8.8,
+               "passed": true
+             }
+           },
+           {
+             "step_name": "generation",
+             "description": "Tạo câu trả lời từ context",
+             "result": "Tạo câu trả lời dựa trên 10 nguồn",
+             "confidence": 0.85,
+             "duration_ms": 20213,
+             "details": {
+               "source_count": 10
+             }
+           },
+           {
+             "step_name": "verification",
+             "description": "Kiểm tra độ chính xác và hallucination",
+             "result": "Cảnh báo: Câu trả lời có thể chứa thông tin chưa được xác minh",
+             "confidence": 0.6,
+             "duration_ms": 15694,
+             "details": null
+           }
+         ]
+       },
+       "topics_accessed": [
+         "*   1. Chủ tàu có trách nhiệm cung cấp đầy đủ các giấy tờ và khai báo đầy đủ, chính xác các nội dung",
+         "2. Việc đăng kiểm các loại tàu biển không thuộc trường hợp quy định tại khoản 1",
+         "Điều 70. Khai báo, điều tra, thống kê, báo cáo tai nạn lao động hàng hải",
+         "tàu có ảnh hưởng đến sức khỏe và an toàn;",
+         "4. Chủ tàu và thuyền trưởng có trách nhiệm sửa chữa, khắc phục các khiếm",
+         "Điều 28. Đăng kiểm tàu biển Việt Nam",
+         "2. Thực hiện trách nhiệm để tàu biển có đủ các điều kiện an toàn hàng hải, an",
+         "### Điều 15. Chủ tàu"
+       ],
+       "confidence_score": 1.0,
+       "document_ids_used": [],
+       "query_type": "factual",
+       "thinking_content": "**Quá trình suy nghĩ:**\n\n1. **Phân tích độ phức tạp câu hỏi**: Độ phức tạp: simple, Maritime: True\n   _(Độ tin cậy: 100%)_\n2. **Tìm kiếm tài liệu (lần 1)**: Tìm thấy 10 tài liệu\n   _(Độ tin cậy: 80%)_\n3. **Đánh giá độ liên quan của tài liệu**: Điểm: 6.0/10 - Cần cải thiện\n   _(Độ tin cậy: 60%)_\n4. **Viết lại query để cải thiện kết quả**: Query mới: Trách nhiệm của chủ tàu theo Bộ luật hàng hải Việt...\n   _(Độ tin cậy: 80%)_\n5. **Tìm kiếm tài liệu (lần 2)**: Tìm thấy 10 tài liệu\n   _(Độ tin cậy: 80%)_\n6. **Đánh giá độ liên quan của tài liệu**: Điểm: 8.8/10 - ĐẠT\n   _(Độ tin cậy: 88%)_\n7. **Tạo câu trả lời từ context**: Tạo câu trả lời dựa trên 10 nguồn\n   _(Độ tin cậy: 85%)_\n8. **Kiểm tra độ chính xác và hallucination**: Cảnh báo: Câu trả lời có thể chứa thông tin chưa được xác minh\n   _(Độ tin cậy: 60%)_\n\n⚠️ **Lưu ý**: Điểm liên quan thấp (6.0/10)",
+       "thinking": "Người dùng Minh, một sinh viên đang học về hàng hải, muốn được giải thích về Điều 15 của Bộ luật Hàng hải Việt Nam, đặc biệt là liên quan đến \"trách nhiệm của chủ tàu\".\n\nKết quả tra cứu cho thấy Điều 15 chủ yếu tập trung vào việc định nghĩa \"Chủ tàu\" và xác định các chủ thể khác có thể thực hiện quyền và nghĩa vụ của chủ tàu. Điều này có nghĩa là Điều 15 không trực tiếp liệt kê các trách nhiệm cụ thể. Các trách nhiệm này được quy định rải rác ở các điều khoản khác trong Bộ luật, ví dụ như Điều 114 - Khoản 4 về trách nhiệm sửa chữa, khắc phục khiếm khuyết của tàu.\n\nTôi sẽ tổng hợp thông tin bằng cách:\n1.  Giải thích rõ ràng nội dung của từng khoản trong Điều 15 để làm rõ về định nghĩa chủ tàu và các chủ thể khác.\n2.  Nhấn mạnh rằng Điều 15 không phải là nơi liệt kê trách nhiệm cụ thể.\n3.  Cung cấp một ví dụ về trách nhiệm của chủ tàu được quy định ở điều luật khác (Điều 114 - Khoản 4) để Minh có cái nhìn đầy đủ hơn.\n4.  Trích dẫn các nguồn tham khảo liên quan."
+     }
+   }
+
+5. Thread Continuity [✓ PASSED] (28561ms)
+--------------------------------------------------
+   Thread ID: baf3be34..., Remembers name: True
+
+   [FULL RESPONSE DATA]:
+   {
+     "thread_id": "baf3be34-e55d-4cb9-873b-ac4d372e2aef",
+     "remembers_name": true,
+     "ai_response": "Tên: Minh"
+   }
+
+6. Memories Endpoint [✓ PASSED] (167ms)
+--------------------------------------------------
+   Found 5 user memories/facts:
+     [1] preference: luật hàng hải Việt Nam...
+     [2] weakness: Điều 15 về trách nhiệm của chủ tàu theo Bộ luật hà...
+     [3] goal: tìm hiểu/học về Điều 15 Bộ luật hàng hải Việt Nam ...
+     [4] name: Minh...
+     [5] role: học về hàng hải...
+
+   [FULL RESPONSE DATA]:
+   {
+     "data": [
+       {
+         "id": "b787b9a8-b8fe-4d8f-8a8c-811605f0f093",
+         "type": "preference",
+         "value": "luật hàng hải Việt Nam",
+         "created_at": "2025-12-14T19:52:53.313039+00:00"
+       },
+       {
+         "id": "18dbd78a-f2ba-458e-b2cc-1314e48751ed",
+         "type": "weakness",
+         "value": "Điều 15 về trách nhiệm của chủ tàu theo Bộ luật hàng hải Việt Nam",
+         "created_at": "2025-12-14T19:52:52.985828+00:00"
+       },
+       {
+         "id": "153ebc54-1a5a-4e5f-8fca-a62d178ed758",
+         "type": "goal",
+         "value": "tìm hiểu/học về Điều 15 Bộ luật hàng hải Việt Nam (trách nhiệm của chủ tàu)",
+         "created_at": "2025-12-14T19:52:52.672364+00:00"
+       },
+       {
+         "id": "b509f451-1da1-4f37-85d7-74d03ac9683e",
+         "type": "name",
+         "value": "Minh",
+         "created_at": "2025-12-14T19:52:45.148133+00:00"
+       },
+       {
+         "id": "74ec0726-6716-4bac-89f0-2d823deaa110",
+         "type": "role",
+         "value": "học về hàng hải",
+         "created_at": "2025-12-14T19:52:13.122251+00:00"
+       }
+     ],
+     "total": 5
+   }
+
+7. Insights Endpoint [✓ PASSED] (151ms)
+--------------------------------------------------
+   Found 50 behavioral insights (5 categories):
+     - preference: 16
+     - knowledge_gap: 13
+     - learning_style: 15
+     - goal_evolution: 3
+     - habit: 3
+   Sample insights:
+     [1] User quan tâm đặc biệt đến các vấn đề pháp lý trong lĩnh vực...
+     [2] User có thể đang có sự nhầm lẫn hoặc thiếu hiểu biết về cách...
+     [3] User có xu hướng học tập theo hướng tìm hiểu chi tiết và giả...
+
+   [FULL RESPONSE DATA]:
+   {
+     "data": [
+       {
+         "id": "d944a1d9-2b8b-422d-ad22-f8297ec67c31",
+         "category": "preference",
+         "content": "User quan tâm đặc biệt đến các vấn đề pháp lý trong lĩnh vực hàng hải, cụ thể là các quy định về chủ thể và trách nhiệm theo Bộ luật Hàng hải Việt Nam.",
+         "sub_topic": "maritime_law_regulations",
+         "confidence": 0.85,
+         "created_at": "2025-12-16T16:14:01.203334+00:00",
+         "updated_at": "2025-12-16T16:14:01.203334+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "f305493f-8b01-48c4-931e-9ef24afa6ee6",
+         "category": "knowledge_gap",
+         "content": "User có thể đang có sự nhầm lẫn hoặc thiếu hiểu biết về cách thức phân bổ thông tin trong Bộ luật Hàng hải, đặc biệt là việc Điều 15 tập trung định nghĩa chủ thể chứ không trực tiếp liệt kê các trách nhiệm cụ thể của chủ tàu.",
+         "sub_topic": "legal_structure_comprehension",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T16:14:00.861111+00:00",
+         "updated_at": "2025-12-16T16:14:00.861111+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "7de6aa46-d1a8-42c1-8706-7063743a4209",
+         "category": "learning_style",
+         "content": "User có xu hướng học tập theo hướng tìm hiểu chi tiết và giải thích các quy định pháp luật cụ thể, cho thấy sự quan tâm đến cấu trúc và ngữ cảnh của các điều luật.",
+         "sub_topic": "legal_framework_understanding",
+         "confidence": 0.8,
+         "created_at": "2025-12-16T16:14:00.507070+00:00",
+         "updated_at": "2025-12-16T16:14:00.507070+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "bb644e33-140e-4de3-8935-7b18892f5c76",
+         "category": "goal_evolution",
+         "content": "Mục tiêu học tập hiện tại của user có xu hướng tập trung vào việc làm quen và tiếp thu kiến thức nền tảng, thay vì các chủ đề chuyên sâu hoặc nâng cao, phù hợp với vai trò là người mới bắt đầu.",
+         "sub_topic": "foundational_goals_orientation",
+         "confidence": 0.85,
+         "created_at": "2025-12-16T16:12:01.881152+00:00",
+         "updated_at": "2025-12-16T16:12:01.881152+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "0584ee90-18f3-4f38-b8d2-d68a91b06093",
+         "category": "knowledge_gap",
+         "content": "User có khả năng đang trong giai đoạn đầu tiếp cận các kiến thức mới, ngụ ý rằng họ có thể cần hỗ trợ về các khái niệm cơ bản hoặc hướng dẫn làm quen với nội dung học tập ban đầu.",
+         "sub_topic": "foundational_knowledge_acquisition",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T16:12:01.446802+00:00",
+         "updated_at": "2025-12-16T16:12:01.446802+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "33306a3d-67d0-4fa9-822d-f27b0b31a993",
+         "category": "learning_style",
+         "content": "User có xu hướng kiểm tra khả năng ghi nhớ và duy trì ngữ cảnh của hệ thống AI, điều này có thể phản ánh một phong cách học tập chủ động bằng cách xác nhận và củng cố các thông tin quan trọng đã được cung cấp.",
+         "sub_topic": "active_confirmation_and_context_testing",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T12:08:39.728502+00:00",
+         "updated_at": "2025-12-16T12:08:39.728502+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "bfda9a7f-a72d-4502-89ce-597a5c4bdd50",
+         "category": "preference",
+         "content": "Người dùng thể hiện sự quan tâm đặc biệt đến các khía cạnh pháp lý và quy định trong lĩnh vực hàng hải, cụ thể là các định nghĩa và trách nhiệm pháp lý của các bên liên quan như chủ tàu.",
+         "sub_topic": "maritime_legal_frameworks",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T12:08:11.688567+00:00",
+         "updated_at": "2025-12-16T12:08:11.688567+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "dae51cc6-d812-4fab-82e1-82630837805b",
+         "category": "knowledge_gap",
+         "content": "Người dùng có lỗ hổng kiến thức về phạm vi nội dung cụ thể của Điều 15 Bộ luật Hàng hải Việt Nam, khi kỳ vọng điều này sẽ liệt kê các trách nhiệm cụ thể của chủ tàu, trong khi Điều 15 chủ yếu tập trung vào việc định nghĩa 'Chủ tàu' và các chủ thể liên quan.",
+         "sub_topic": "legal_article_scope",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T12:08:11.342249+00:00",
+         "updated_at": "2025-12-16T12:08:11.342249+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "c9fbde59-e793-42cd-b234-9cd7af1d73ce",
+         "category": "learning_style",
+         "content": "Người dùng có xu hướng tiếp cận kiến thức bằng cách hỏi trực tiếp về các điều khoản cụ thể của luật, thể hiện phong cách học tập có cấu trúc nhưng có thể ban đầu kỳ vọng điều khoản đó bao gồm mọi khía cạnh liên quan, như yêu cầu giải thích trách nhiệm trong Điều 15 vốn chỉ định nghĩa chủ thể.",
+         "sub_topic": "structured_legal_inquiry",
+         "confidence": 0.8,
+         "created_at": "2025-12-16T12:08:10.985771+00:00",
+         "updated_at": "2025-12-16T12:08:10.985771+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "3000e1c7-43be-4356-90eb-34d7a58470f3",
+         "category": "preference",
+         "content": "User thể hiện sở thích nhận thông tin đã được điều chỉnh phù hợp với vai trò và nhu cầu của một sinh viên mới, thông qua việc chủ động giới thiệu về tình trạng hiện tại của mình.",
+         "sub_topic": "contextual_information_preference",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T12:05:36.642230+00:00",
+         "updated_at": "2025-12-16T12:05:36.642230+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "3791773b-d1d9-4c06-9dc8-fb7142d81893",
+         "category": "knowledge_gap",
+         "content": "User có lỗ hổng kiến thức nền tảng và cần được cung cấp thông tin định hướng do đang ở giai đoạn khởi đầu của hành trình học tập với vai trò sinh viên mới.",
+         "sub_topic": "foundational_knowledge_needs",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T12:05:36.193767+00:00",
+         "updated_at": "2025-12-16T12:05:36.193767+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "aa7a2b6b-2dca-49fd-829e-de63d54c583e",
+         "category": "preference",
+         "content": "User thể hiện sự quan tâm đặc biệt đến việc tìm hiểu các khía cạnh pháp lý về trách nhiệm và nghĩa vụ của các chủ thể trong hoạt động hàng hải, tập trung vào vai trò của chủ tàu.",
+         "sub_topic": "maritime_legal_obligations",
+         "confidence": 0.8,
+         "created_at": "2025-12-16T11:55:32.801288+00:00",
+         "updated_at": "2025-12-16T11:55:32.801288+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "c35cce80-2dc3-48ed-b15b-0ec59dfbeef2",
+         "category": "knowledge_gap",
+         "content": "User đang có sự hiểu lầm về phạm vi nội dung của Điều 15 Bộ luật Hàng hải Việt Nam, khi kỳ vọng điều này sẽ trực tiếp liệt kê các trách nhiệm cụ thể của chủ tàu thay vì tập trung vào định nghĩa chủ thể và xác định đối tượng chịu trách nhiệm.",
+         "sub_topic": "legal_provision_scope",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T11:55:32.475092+00:00",
+         "updated_at": "2025-12-16T11:55:32.475092+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "fb0388ee-4244-4d32-96c6-5b8d67149dfb",
+         "category": "preference",
+         "content": "Người dùng thể hiện sự quan tâm đến việc được nhận diện và có xu hướng mong muốn một trải nghiệm tương tác cá nhân hóa, được suy ra từ câu hỏi 'Bạn có nhớ tên tôi không?' sau khi đã cung cấp tên. Điều này cho thấy họ đặt giá trị vào việc được ghi nhớ và cá nhân hóa trong giao tiếp.",
+         "sub_topic": "personalized_interaction_preference",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T11:53:43.748143+00:00",
+         "updated_at": "2025-12-16T11:53:43.748143+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "d127ed05-a54b-43d5-9686-b6750b7408fa",
+         "category": "habit",
+         "content": "Người dùng có thói quen xác nhận và củng cố thông tin cá nhân đã cung cấp, cụ thể là tên của mình, thể hiện qua việc hỏi 'Bạn có nhớ tên tôi không?' sau khi đã giới thiệu và sau đó nhắc lại tên. Điều này cho thấy xu hướng muốn đảm bảo hệ thống nhận diện đúng và duy trì thông tin trong suốt quá trình tương tác.",
+         "sub_topic": "information_confirmation_habit",
+         "confidence": 0.8,
+         "created_at": "2025-12-16T11:53:42.823248+00:00",
+         "updated_at": "2025-12-16T11:53:42.823248+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "1d9fe2b7-4bea-4627-91c2-f6959abb9b79",
+         "category": "learning_style",
+         "content": "User có xu hướng học tập theo lộ trình và chương trình đào tạo có cấu trúc, thể hiện qua việc họ đang 'học về hàng hải' (ngụ ý một quá trình học tập có tổ chức).",
+         "sub_topic": "structured_learning_preference",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T11:53:14.679607+00:00",
+         "updated_at": "2025-12-16T11:53:14.679607+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "7175b340-deda-49a6-bb6b-f2edd3788e11",
+         "category": "preference",
+         "content": "User thể hiện sự quan tâm và sở thích rõ rệt đối với lĩnh vực hàng hải, được suy ra từ việc họ đang theo học chuyên ngành này.",
+         "sub_topic": "subject_matter_preference",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T11:53:14.318102+00:00",
+         "updated_at": "2025-12-16T11:53:14.318102+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "9a34c3bd-e1a9-4ad2-bb45-12f1a2f8f5a8",
+         "category": "goal_evolution",
+         "content": "Mục tiêu ban đầu của User là làm quen và định hướng bản thân trong môi trường học tập mới, thể hiện sự cần thiết được hỗ trợ để bắt đầu hành trình học tập một cách hiệu quả và chưa có mục tiêu chuyên sâu cụ thể.",
+         "sub_topic": "initial_orientation_goal",
+         "confidence": 0.8,
+         "created_at": "2025-12-16T11:52:52.430724+00:00",
+         "updated_at": "2025-12-16T11:52:52.430724+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "ed11a1b5-110c-4cba-98c5-f5b97685ef00",
+         "category": "knowledge_gap",
+         "content": "User khả năng cao đang thiếu các kiến thức chuyên môn cơ bản và cần được cung cấp thông tin tổng quan, hệ thống do đang trong vai trò 'sinh viên mới' ở giai đoạn đầu của hành trình học tập.",
+         "sub_topic": "general_foundational_gap",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T11:52:52.097709+00:00",
+         "updated_at": "2025-12-16T11:52:52.097709+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "5b10c85a-0eba-4e76-9b84-4a7cd4b869b8",
+         "category": "learning_style",
+         "content": "User có xu hướng tiếp cận kiến thức từ cơ bản, ưu tiên nắm vững các khái niệm nền tảng và cần sự dẫn dắt, thay vì đi sâu vào phân tích phức tạp ngay lập tức do tự nhận là 'sinh viên mới'.",
+         "sub_topic": "foundational_learning_preference",
+         "confidence": 0.8,
+         "created_at": "2025-12-16T11:52:51.653195+00:00",
+         "updated_at": "2025-12-16T11:52:51.653195+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "d66b6644-00ea-42e7-a652-f37905c32c4b",
+         "category": "preference",
+         "content": "User có sở thích rõ rệt đối với các tương tác học tập được cá nhân hóa và mong muốn được hệ thống nhận diện, điều này thể hiện qua việc hỏi liệu AI có nhớ tên mình không ngay sau khi tự giới thiệu.",
+         "sub_topic": "personalized_interaction_and_recognition",
+         "confidence": 0.85,
+         "created_at": "2025-12-16T11:26:01.507822+00:00",
+         "updated_at": "2025-12-16T11:26:01.507822+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "b56e6b4a-6e9c-458a-aff2-ee33b10e2f6b",
+         "category": "learning_style",
+         "content": "User thể hiện phong cách học tập chủ động và có xu hướng xác minh thông tin, điều này được thể hiện rõ qua hành động kiểm tra khả năng ghi nhớ tên của hệ thống sau khi đã cung cấp thông tin, cho thấy họ thích tương tác để xác nhận sự hiểu biết.",
+         "sub_topic": "active_verification_and_testing",
+         "confidence": 0.75,
+         "created_at": "2025-12-16T11:26:01.191064+00:00",
+         "updated_at": "2025-12-16T11:26:01.191064+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "760db86d-4cc4-49fe-884c-2afe598edfe5",
+         "category": "preference",
+         "content": "User thể hiện sự quan tâm đến các khía cạnh pháp lý trong ngành hàng hải, đặc biệt là về các quy định liên quan đến vai trò, định nghĩa và nghĩa vụ của chủ tàu theo Bộ luật hàng hải Việt Nam.",
+         "sub_topic": "maritime_law_and_regulations",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T11:25:30.772639+00:00",
+         "updated_at": "2025-12-16T11:25:30.772639+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "0137dcf5-c521-4132-b9de-d33fd4646c58",
+         "category": "learning_style",
+         "content": "User có xu hướng tìm kiếm thông tin mang tính ứng dụng và thực tiễn (như 'trách nhiệm cụ thể') ngay cả khi hỏi về một điều khoản chủ yếu mang tính định nghĩa, thể hiện mong muốn hiểu rõ hành động cần thực hiện.",
+         "sub_topic": "practical_application_focus",
+         "confidence": 0.85,
+         "created_at": "2025-12-16T11:25:30.452051+00:00",
+         "updated_at": "2025-12-16T11:25:30.452051+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "3f0f3a85-d4d8-46e7-a757-e6d370920803",
+         "category": "knowledge_gap",
+         "content": "User có vẻ nhầm lẫn về nội dung cụ thể của Điều 15, khi kỳ vọng điều khoản này sẽ trực tiếp liệt kê các trách nhiệm của chủ tàu, trong khi thực tế nó chủ yếu tập trung vào định nghĩa chủ thể.",
+         "sub_topic": "misinterpretation_of_legal_text",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T11:25:30.105553+00:00",
+         "updated_at": "2025-12-16T11:25:30.105553+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "c5efd97c-f677-496b-88bc-41220bb43a72",
+         "category": "goal_evolution",
+         "content": "Mục tiêu học tập hiện tại của User đang ở giai đoạn khởi đầu, tập trung vào việc làm quen và thích nghi với môi trường cũng như kiến thức cơ bản, phản ánh vai trò 'sinh viên mới' của họ và chưa có mục tiêu chuyên sâu rõ ràng.",
+         "sub_topic": "initial_goal_setting",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T11:23:16.663482+00:00",
+         "updated_at": "2025-12-16T11:23:16.663482+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "dc7c2257-b4e9-4b28-99e6-cbb395b2acf1",
+         "category": "knowledge_gap",
+         "content": "User có khả năng cao có nhiều lỗ hổng kiến thức nền tảng và cần được giới thiệu các khái niệm cơ bản trong lĩnh vực học tập, do họ tự nhận là 'sinh viên mới' và chưa có thời gian tiếp thu kiến thức chuyên sâu.",
+         "sub_topic": "foundational_knowledge_gaps",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T11:23:16.296916+00:00",
+         "updated_at": "2025-12-16T11:23:16.296916+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "261f97bd-5008-41e9-8b45-8603c7bf4ff5",
+         "category": "learning_style",
+         "content": "User có xu hướng cần sự hướng dẫn cấu trúc và các tài liệu nền tảng rõ ràng để bắt đầu việc học, điển hình cho một 'sinh viên mới' đang làm quen với lĩnh vực và chưa có phong cách học tập cố định trong môi trường này.",
+         "sub_topic": "structured_learning_preference",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T11:23:15.697506+00:00",
+         "updated_at": "2025-12-16T11:23:15.697506+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "d3255094-fe67-4835-8848-173d0c51f9eb",
+         "category": "preference",
+         "content": "User thể hiện sự ưu tiên đối với trải nghiệm học tập hoặc tương tác được cá nhân hóa, mong muốn hệ thống có khả năng nhận diện và ghi nhớ các chi tiết riêng về người dùng.",
+         "sub_topic": "personalized_interaction",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T10:53:28.027141+00:00",
+         "updated_at": "2025-12-16T10:53:28.027141+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "92ec7236-c894-4da9-82b3-34ec8687eaf6",
+         "category": "habit",
+         "content": "User có thói quen xác nhận thông tin đã cung cấp bằng cách kiểm tra hệ thống, sau đó cung cấp lại thông tin một cách chủ động, thể hiện sự cẩn trọng trong việc đảm bảo dữ liệu được ghi nhận.",
+         "sub_topic": "information_reinforcement",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T10:53:27.721979+00:00",
+         "updated_at": "2025-12-16T10:53:27.721979+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "7c963815-472e-45b3-b689-f5d64af5df24",
+         "category": "learning_style",
+         "content": "User thể hiện phong cách tương tác chủ động, thường xuyên kiểm tra khả năng ghi nhớ và nhận diện thông tin của hệ thống, cho thấy xu hướng xác minh thông tin đã cung cấp.",
+         "sub_topic": "information_verification",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T10:53:27.424258+00:00",
+         "updated_at": "2025-12-16T10:53:27.424258+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "f1bb8421-3979-472f-9b9f-1c54ac4619b1",
+         "category": "learning_style",
+         "content": "Người dùng có thể có xu hướng học tập thực tế và thông qua trải nghiệm, do tính chất đặc thù và yêu cầu ứng dụng cao của ngành hàng hải mà họ đang theo học.",
+         "sub_topic": "practical_learning",
+         "confidence": 0.6,
+         "created_at": "2025-12-16T10:53:04.838610+00:00",
+         "updated_at": "2025-12-16T10:53:04.838610+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "6baf8da4-e357-4d05-a855-6e61ada0da2f",
+         "category": "preference",
+         "content": "Người dùng có xu hướng quan tâm và lựa chọn các lĩnh vực học tập liên quan đến biển cả và tàu thuyền, thể hiện qua việc đang theo học ngành hàng hải.",
+         "sub_topic": "domain_interest",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T10:53:04.539118+00:00",
+         "updated_at": "2025-12-16T10:53:04.539118+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "f7e1a691-7cf6-4135-a026-cf9fe99a7835",
+         "category": "preference",
+         "content": "Người dùng thể hiện sự quan tâm đến các khía cạnh pháp lý trong lĩnh vực hàng hải, đặc biệt là các quy định về vai trò và trách nhiệm của các chủ thể chính như chủ tàu.",
+         "sub_topic": "maritime_law_interest",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T10:52:52.803827+00:00",
+         "updated_at": "2025-12-16T10:52:52.803827+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "aeb7690b-0605-41a4-9e5e-35f259cdf42a",
+         "category": "knowledge_gap",
+         "content": "Người dùng có lỗ hổng kiến thức về phạm vi của Điều 15 Bộ luật Hàng hải Việt Nam, khi cho rằng điều khoản này trực tiếp liệt kê các trách nhiệm cụ thể của chủ tàu, trong khi nó chủ yếu tập trung vào định nghĩa 'Chủ tàu' và các chủ thể liên quan.",
+         "sub_topic": "misunderstanding_legal_scope",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T10:52:52.492863+00:00",
+         "updated_at": "2025-12-16T10:52:52.492863+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "59572ce4-e428-44e3-a4cc-35fcafcce9c4",
+         "category": "learning_style",
+         "content": "Người dùng có xu hướng tìm kiếm các thông tin liên quan đến nghĩa vụ và trách nhiệm cụ thể của một điều luật, cho thấy họ ưu tiên kiến thức ứng dụng hơn là chỉ định nghĩa cơ bản khi hỏi về 'trách nhiệm của chủ tàu'.",
+         "sub_topic": "practical_application_focus",
+         "confidence": 0.8,
+         "created_at": "2025-12-16T10:52:52.104459+00:00",
+         "updated_at": "2025-12-16T10:52:52.104459+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "c0bfafdf-9ed7-496b-ac35-b1d105d72d96",
+         "category": "preference",
+         "content": "User có vẻ thích sự tương tác cá nhân hóa và muốn hệ thống thể hiện khả năng ghi nhớ thông tin đã cung cấp, thể hiện mong muốn được nhận diện và công nhận trong cuộc trò chuyện.",
+         "sub_topic": "personalized_interaction_preference",
+         "confidence": 0.75,
+         "created_at": "2025-12-16T10:06:46.265553+00:00",
+         "updated_at": "2025-12-16T10:06:46.265553+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "d462d513-5468-4502-8faf-b9531149e24f",
+         "category": "knowledge_gap",
+         "content": "User có thể có lỗ hổng trong việc hiểu rõ khả năng lưu giữ thông tin của hệ thống AI, dẫn đến việc phải xác nhận lại thông tin cá nhân ('Bạn có nhớ tên tôi không?') ngay sau khi cung cấp.",
+         "sub_topic": "ai_system_understanding",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T10:06:45.932099+00:00",
+         "updated_at": "2025-12-16T10:06:45.932099+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "b752ebc1-0a31-4957-aefd-b36850574587",
+         "category": "learning_style",
+         "content": "User có phong cách học tập chủ động và xác minh, thể hiện qua hành vi kiểm tra khả năng ghi nhớ thông tin đã cung cấp của hệ thống ngay lập tức ('Bạn có nhớ tên tôi không?'), cho thấy xu hướng học hỏi thông qua việc đặt câu hỏi và phản hồi trực tiếp.",
+         "sub_topic": "active_verification_learning",
+         "confidence": 0.8,
+         "created_at": "2025-12-16T10:06:45.610954+00:00",
+         "updated_at": "2025-12-16T10:06:45.610954+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "771c15aa-2096-4f48-b100-094372383dac",
+         "category": "learning_style",
+         "content": "User có phong cách học tập yêu cầu giải thích chi tiết và có hệ thống các điều khoản pháp lý, đồng thời được cung cấp ngữ cảnh và các ví dụ liên quan để hiểu rõ hơn về sự phân biệt giữa định nghĩa và trách nhiệm cụ thể.",
+         "sub_topic": "structured_explanation_preference",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T10:06:13.295696+00:00",
+         "updated_at": "2025-12-16T10:06:13.295696+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "b3be683b-77c5-47ec-b3e8-69f1a2b3be4c",
+         "category": "preference",
+         "content": "User có sở thích tìm hiểu sâu về các khía cạnh pháp lý và quy định trách nhiệm trong lĩnh vực hàng hải, cụ thể là về nghĩa vụ của chủ tàu theo bộ luật.",
+         "sub_topic": "maritime_law_and_responsibilities",
+         "confidence": 0.8,
+         "created_at": "2025-12-16T10:06:12.976891+00:00",
+         "updated_at": "2025-12-16T10:06:12.976891+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "f5df9d6f-affa-40ac-b48f-72b49d4b7b93",
+         "category": "knowledge_gap",
+         "content": "User có lỗ hổng kiến thức về nội dung cụ thể của Điều 15 Bộ luật Hàng hải Việt Nam, khi kỳ vọng điều khoản này sẽ liệt kê trực tiếp các trách nhiệm của chủ tàu thay vì chỉ định nghĩa chủ thể và phạm vi áp dụng.",
+         "sub_topic": "legal_clause_content_misunderstanding",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T10:06:12.617537+00:00",
+         "updated_at": "2025-12-16T10:06:12.617537+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "90b01c31-f7fd-4e1e-80cf-ac1a73aac598",
+         "category": "preference",
+         "content": "User có sở thích rõ ràng về việc tương tác được cá nhân hóa và mong muốn được hệ thống nhận diện một cách chính xác. Việc họ quan tâm đến việc AI có nhớ tên mình hay không thể hiện một nhu cầu cơ bản về sự công nhận và kết nối cá nhân trong giao tiếp.",
+         "sub_topic": "personalized_interaction",
+         "confidence": 0.85,
+         "created_at": "2025-12-16T09:36:46.436794+00:00",
+         "updated_at": "2025-12-16T09:36:46.436794+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "171d0a43-3337-4e8e-a39c-3b9abd54841c",
+         "category": "habit",
+         "content": "User có thói quen xác nhận lại hoặc củng cố các thông tin cơ bản, đặc biệt là những thông tin định danh quan trọng. Hành động hỏi 'Bạn có nhớ tên tôi không?' và ngay sau đó lặp lại 'Tên: Minh' cho thấy xu hướng đảm bảo rằng thông tin đã được tiếp nhận và ghi nhớ chính xác.",
+         "sub_topic": "information_confirmation_and_reinforcement",
+         "confidence": 0.75,
+         "created_at": "2025-12-16T09:36:46.122807+00:00",
+         "updated_at": "2025-12-16T09:36:46.122807+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "339f0bff-6baa-4455-ab05-f0bbc5baf989",
+         "category": "knowledge_gap",
+         "content": "User có thể có lỗ hổng trong việc hiểu cơ chế ghi nhớ hoặc duy trì ngữ cảnh của hệ thống AI, thể hiện qua câu hỏi trực tiếp về việc AI có nhớ tên họ không, ngụ ý họ đang cố gắng thăm dò giới hạn hoặc nguyên tắc hoạt động của AI về mặt này.",
+         "sub_topic": "system_memory_understanding",
+         "confidence": 0.8,
+         "created_at": "2025-12-16T09:36:45.803372+00:00",
+         "updated_at": "2025-12-16T09:36:45.803372+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "8fa5b64e-1a83-4c34-a064-fc8c7f36c7fa",
+         "category": "learning_style",
+         "content": "User thể hiện một phong cách học tập và tương tác mang tính thử nghiệm và xác nhận, được thể hiện qua việc hỏi 'Bạn có nhớ tên tôi không?' để kiểm tra khả năng ghi nhớ thông tin của hệ thống, cho thấy họ có xu hướng chủ động đánh giá mức độ hiểu biết của đối phương.",
+         "sub_topic": "active_verification_approach",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T09:36:45.489082+00:00",
+         "updated_at": "2025-12-16T09:36:45.489082+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "53731481-b068-4990-ba14-a6072739348b",
+         "category": "preference",
+         "content": "User thể hiện sự quan tâm và sở thích đối với lĩnh vực hàng hải thông qua việc đang theo học chuyên ngành này, đây là một yếu tố định hướng hành vi học tập của họ.",
+         "sub_topic": "domain_interest",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T09:36:25.824827+00:00",
+         "updated_at": "2025-12-16T09:36:25.824827+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "72e27941-bdae-42a0-a479-27b208e38600",
+         "category": "preference",
+         "content": "Người dùng có sở thích tìm hiểu sâu về các quy định pháp luật liên quan đến trách nhiệm và nghĩa vụ trong lĩnh vực hàng hải, điều này cho thấy sự quan tâm đặc biệt đến khía cạnh tuân thủ pháp lý và vận hành an toàn.",
+         "sub_topic": "legal_responsibility_focus",
+         "confidence": 0.7,
+         "created_at": "2025-12-16T09:36:19.476377+00:00",
+         "updated_at": "2025-12-16T09:36:19.476377+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "1fb7be16-bb39-45a1-8927-2b273a28301f",
+         "category": "learning_style",
+         "content": "Người dùng thể hiện phong cách học tập trực tiếp, mong muốn nhận được giải thích rõ ràng và cụ thể về các điều khoản pháp luật, đặc biệt là khi tìm kiếm thông tin về trách nhiệm hoặc nghĩa vụ, thay vì phải tự suy luận từ các định nghĩa chung.",
+         "sub_topic": "direct_legal_explanation_seeking",
+         "confidence": 0.8,
+         "created_at": "2025-12-16T09:36:19.146355+00:00",
+         "updated_at": "2025-12-16T09:36:19.146355+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "a8cd8407-53ed-4d7c-a7e4-250d42672d0b",
+         "category": "knowledge_gap",
+         "content": "Người dùng có lỗ hổng kiến thức về cấu trúc và nội dung của Bộ luật Hàng hải Việt Nam, cụ thể là nhầm lẫn Điều 15 là nơi quy định các trách nhiệm chi tiết của chủ tàu, trong khi điều khoản này chủ yếu tập trung vào việc định nghĩa chủ thể và các bên liên quan.",
+         "sub_topic": "legal_article_scope_misconception",
+         "confidence": 0.9,
+         "created_at": "2025-12-16T09:36:18.795041+00:00",
+         "updated_at": "2025-12-16T09:36:18.795041+00:00",
+         "evolution_notes": []
+       }
+     ],
+     "total": 50,
+     "categories": {
+       "preference": 16,
+       "knowledge_gap": 13,
+       "learning_style": 15,
+       "goal_evolution": 3,
+       "habit": 3
+     }
+   }
+
+8. Chat History [✓ PASSED] (211ms)
+--------------------------------------------------
+   Found 20 messages (total: 624):
+     [1] user: Bạn có nhớ tên tôi không?...
+     [2] assistant: Tên: Minh...
+     [3] user: Bạn có nhớ tên tôi không?...
+     [4] assistant: Tên: Minh...
+     [5] user: Xin chào! Tôi là sinh viên mới....
+     ... and 15 more
+
+   [FULL RESPONSE DATA]:
+   {
+     "data": [
+       {
+         "role": "user",
+         "content": "Bạn có nhớ tên tôi không?",
+         "timestamp": "2025-12-16T12:08:21.252537Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-16T12:08:21.268206Z"
+       },
+       {
+         "role": "user",
+         "content": "Bạn có nhớ tên tôi không?",
+         "timestamp": "2025-12-16T12:08:21.283782Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-16T12:08:21.299157Z"
+       },
+       {
+         "role": "user",
+         "content": "Xin chào! Tôi là sinh viên mới.",
+         "timestamp": "2025-12-16T16:11:48.091188Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tôi có thể giúp gì cho bạn?",
+         "timestamp": "2025-12-16T16:11:48.121367Z"
+       },
+       {
+         "role": "user",
+         "content": "Xin chào! Tôi là sinh viên mới.",
+         "timestamp": "2025-12-16T16:11:48.142227Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tôi có thể giúp gì cho bạn?",
+         "timestamp": "2025-12-16T16:11:48.160977Z"
+       },
+       {
+         "role": "user",
+         "content": "Giải thích Điều 15 về trách nhiệm của chủ tàu theo Bộ luật hàng hải Việt Nam.",
+         "timestamp": "2025-12-16T16:13:51.948227Z"
+       },
+       {
+         "role": "assistant",
+         "content": "⚠️ Câu trả lời có thể chứa thông tin chưa được xác minh\n\nTheo Bộ luật Hàng hải Việt Nam, Điều 15 tập trung vào việc định nghĩa \"Chủ tàu\" và xác định các chủ thể khác có thể thực hiện quyền và nghĩa vụ của chủ tàu, chứ không trực tiếp liệt kê các trách nhiệm cụ thể.\n\nCụ thể, Điều 15 quy định như sau:\n\n*   **Khoản 1: Định nghĩa Chủ tàu**\n    Chủ tàu được định nghĩa là người sở hữu tàu biển. Đây là khái niệm cơ bản để xác định chủ thể chịu trách nhiệm chính dựa trên quyền sở hữu ([Điều 15. Chủ tàu](https://luat.hcmulaw.edu.vn/kien-thuc-phap-luat/dieu-15-chu-tau)).\n\n*   **Khoản 2: Các chủ thể khác thực hiện quyền và nghĩa vụ của chủ tàu**\n    Quy định này mở rộng phạm vi chủ thể có thể thay mặt chủ tàu thực hiện các hoạt động hàng hải. Cụ thể, người quản lý, người khai thác và người thuê tàu trần (thuê tàu không kèm thuyền viên) được phép thực hiện các quyền và nghĩa vụ của chủ tàu theo quy định tại Bộ luật này, dựa trên hợp đồng đã ký kết với chủ tàu ([Điều 15. Chủ tàu](https://luat.hcmulaw.edu.vn/kien-thuc-phap-luat/dieu-15-chu-tau)).\n\n*   **Khoản 3: Tổ chức được Nhà nước giao quản lý, khai thác**\n    Đối với các tổ chức được Nhà nước giao nhiệm vụ quản lý, khai thác tàu biển, các quy định của Bộ luật Hàng hải Việt Nam và các quy định pháp luật liên quan cũng được áp dụng tương tự như đối với chủ tàu ([Điều 15. Chủ tàu](https://luat.hcmulaw.edu.vn/kien-thuc-phap-luat/dieu-15-chu-tau)). Điều này đảm bảo tính thống nhất trong việc áp dụng pháp luật cho các đơn vị sự nghiệp hoặc doanh nghiệp nhà nước.\n\n**Về trách nhiệm cụ thể của chủ tàu:**\nMặc dù Điều 15 thiết lập nền tảng để xác định ai là chủ thể chịu trách nhiệm, các trách nhiệm chi tiết của chủ tàu lại được quy định rải rác trong các điều khoản khác của Bộ luật Hàng hải Việt Nam.\n\nVí dụ, theo **Khoản 4 Điều 114** của Bộ luật Hàng hải Việt Nam, chủ tàu và thuyền trưởng có trách nhiệm sửa chữa, khắc phục các khiếm khuyết của tàu biển liên quan đến an toàn hàng hải, an ninh hàng hải, lao động hàng hải, phòng chống cháy, nổ và bảo vệ môi trường, theo yêu cầu của Thanh tra hàng hải hoặc Cảng vụ hàng hải ([Điều 114 - Khoản 4](https://luat.hcmulaw.edu.vn/kien-thuc-phap-luat/dieu-114-khoan-4-chu-tau-va-thuyen-truong-co-trach-nhiem-sua-chua-khac-phuc-cac-khiem)).\n\nNhư vậy, Điều 15 là điều khoản nền tảng xác định chủ thể có liên quan đến tàu biển, còn các trách nhiệm cụ thể của họ sẽ được quy định chi tiết ở các điều khoản khác để đảm bảo an toàn, an ninh và hiệu quả trong hoạt động hàng hải.\n\n**Nguồn tham khảo:**\n- ### Điều 15. Chủ tàu (Maritime Knowledge Base)\n- [Điều 114 - Khoản 1] 4. Chủ tàu và thuyền trưởng có trách nhiệm sửa chữa, khắc phục các khiếm (Maritime Knowledge Base)\n- [Điều 58] CÔNG BÁO/Số 1257 + 1258/Ngày 30-12-2015 (Maritime Knowledge Base)",
+         "timestamp": "2025-12-16T16:13:51.968234Z"
+       },
+       {
+         "role": "user",
+         "content": "Giải thích Điều 15 về trách nhiệm của chủ tàu theo Bộ luật hàng hải Việt Nam.",
+         "timestamp": "2025-12-16T16:13:51.987200Z"
+       },
+       {
+         "role": "assistant",
+         "content": "⚠️ Câu trả lời có thể chứa thông tin chưa được xác minh\n\nTheo Bộ luật Hàng hải Việt Nam, Điều 15 tập trung vào việc định nghĩa \"Chủ tàu\" và xác định các chủ thể khác có thể thực hiện quyền và nghĩa vụ của chủ tàu, chứ không trực tiếp liệt kê các trách nhiệm cụ thể.\n\nCụ thể, Điều 15 quy định như sau:\n\n*   **Khoản 1: Định nghĩa Chủ tàu**\n    Chủ tàu được định nghĩa là người sở hữu tàu biển. Đây là khái niệm cơ bản để xác định chủ thể chịu trách nhiệm chính dựa trên quyền sở hữu ([Điều 15. Chủ tàu](https://luat.hcmulaw.edu.vn/kien-thuc-phap-luat/dieu-15-chu-tau)).\n\n*   **Khoản 2: Các chủ thể khác thực hiện quyền và nghĩa vụ của chủ tàu**\n    Quy định này mở rộng phạm vi chủ thể có thể thay mặt chủ tàu thực hiện các hoạt động hàng hải. Cụ thể, người quản lý, người khai thác và người thuê tàu trần (thuê tàu không kèm thuyền viên) được phép thực hiện các quyền và nghĩa vụ của chủ tàu theo quy định tại Bộ luật này, dựa trên hợp đồng đã ký kết với chủ tàu ([Điều 15. Chủ tàu](https://luat.hcmulaw.edu.vn/kien-thuc-phap-luat/dieu-15-chu-tau)).\n\n*   **Khoản 3: Tổ chức được Nhà nước giao quản lý, khai thác**\n    Đối với các tổ chức được Nhà nước giao nhiệm vụ quản lý, khai thác tàu biển, các quy định của Bộ luật Hàng hải Việt Nam và các quy định pháp luật liên quan cũng được áp dụng tương tự như đối với chủ tàu ([Điều 15. Chủ tàu](https://luat.hcmulaw.edu.vn/kien-thuc-phap-luat/dieu-15-chu-tau)). Điều này đảm bảo tính thống nhất trong việc áp dụng pháp luật cho các đơn vị sự nghiệp hoặc doanh nghiệp nhà nước.\n\n**Về trách nhiệm cụ thể của chủ tàu:**\nMặc dù Điều 15 thiết lập nền tảng để xác định ai là chủ thể chịu trách nhiệm, các trách nhiệm chi tiết của chủ tàu lại được quy định rải rác trong các điều khoản khác của Bộ luật Hàng hải Việt Nam.\n\nVí dụ, theo **Khoản 4 Điều 114** của Bộ luật Hàng hải Việt Nam, chủ tàu và thuyền trưởng có trách nhiệm sửa chữa, khắc phục các khiếm khuyết của tàu biển liên quan đến an toàn hàng hải, an ninh hàng hải, lao động hàng hải, phòng chống cháy, nổ và bảo vệ môi trường, theo yêu cầu của Thanh tra hàng hải hoặc Cảng vụ hàng hải ([Điều 114 - Khoản 4](https://luat.hcmulaw.edu.vn/kien-thuc-phap-luat/dieu-114-khoan-4-chu-tau-va-thuyen-truong-co-trach-nhiem-sua-chua-khac-phuc-cac-khiem)).\n\nNhư vậy, Điều 15 là điều khoản nền tảng xác định chủ thể có liên quan đến tàu biển, còn các trách nhiệm cụ thể của họ sẽ được quy định chi tiết ở các điều khoản khác để đảm bảo an toàn, an ninh và hiệu quả trong hoạt động hàng hải.\n\n**Nguồn tham khảo:**\n- ### Điều 15. Chủ tàu (Maritime Knowledge Base)\n- [Điều 114 - Khoản 1] 4. Chủ tàu và thuyền trưởng có trách nhiệm sửa chữa, khắc phục các khiếm (Maritime Knowledge Base)\n- [Điều 58] CÔNG BÁO/Số 1257 + 1258/Ngày 30-12-2015 (Maritime Knowledge Base)",
+         "timestamp": "2025-12-16T16:13:52.005938Z"
+       },
+       {
+         "role": "user",
+         "content": "Tên tôi là Minh, tôi đang học về hàng hải.",
+         "timestamp": "2025-12-16T16:13:58.891505Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tôi có thể giúp gì cho bạn?",
+         "timestamp": "2025-12-16T16:13:58.910359Z"
+       },
+       {
+         "role": "user",
+         "content": "Tên tôi là Minh, tôi đang học về hàng hải.",
+         "timestamp": "2025-12-16T16:13:58.927959Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tôi có thể giúp gì cho bạn?",
+         "timestamp": "2025-12-16T16:13:58.945666Z"
+       },
+       {
+         "role": "user",
+         "content": "Bạn có nhớ tên tôi không?",
+         "timestamp": "2025-12-16T16:14:20.480245Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-16T16:14:20.498274Z"
+       },
+       {
+         "role": "user",
+         "content": "Bạn có nhớ tên tôi không?",
+         "timestamp": "2025-12-16T16:14:20.517142Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-16T16:14:20.534494Z"
+       }
+     ],
+     "pagination": {
+       "total": 624,
+       "limit": 20,
+       "offset": 0
+     }
+   }
+
+======================================================================
+  TEST SUMMARY
+======================================================================
+  Passed: 8
+  Failed: 0
+  Total Time: 183.8s
+  Completed: 2025-12-16 23:14:20
+======================================================================
