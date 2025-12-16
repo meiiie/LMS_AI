@@ -267,6 +267,14 @@ enable_answer_verification: bool = True # Check hallucinations
 
 ## 📋 Changelog
 
+### 2025-12-16: CHỈ THỊ SỐ 29 v7 - SOTA Vietnamese Thinking
+
+- **SOTA Pattern**: Claude + Qwen3 + OpenAI combined best practices
+- **XML Tags**: Language control block with `<language_control>`, `<thinking_examples>`
+- **Examples**: 5 correct (Vietnamese) + 7 incorrect (English) examples
+- **Integration**: `_shared.yaml` → `prompt_loader.py` → `rag_agent.py`
+- **Research**: Based on OpenAI o1/o3, Claude Extended Thinking, Qwen3, DeepSeek R1
+
 ### 2025-12-16: CHỈ THỊ SỐ 29 v2 - SOTA Native-First Thinking
 
 - **Simplified to Native-First Pattern**: Removed ThinkingGenerator
@@ -274,6 +282,7 @@ enable_answer_verification: bool = True # Check hallucinations
 - **SOTA Alignment**: Claude Extended Thinking, Qwen QwQ, Gemini 2.5
 - **Deleted**: `thinking_generator.py` (dead code)
 - **Performance**: Reduced 2-3s latency by removing dual LLM call
+
 
 ### 2025-12-15: CHỈ THỊ SỐ 28 - SOTA Thinking Content
 

@@ -133,6 +133,8 @@ AI: "Hay quá Minh! Mình sẽ giúp cậu hiểu Rule 15 nhé..."
 | **Empathy detection** | #16 | Pattern matching |
 | **Anti-repetition** | #16 | Variation phrases pool |
 | **Template variables** | #16 | `{{user_name}}`, `{{honorific}}` |
+| **Vietnamese Thinking** | #29 v7 | XML-based `build_thinking_instruction()` + YAML config |
+
 
 ---
 

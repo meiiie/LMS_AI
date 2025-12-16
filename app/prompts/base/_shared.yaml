@@ -59,35 +59,50 @@ reasoning:
       - "Nếu không chắc 100%, vẫn đưa ra câu trả lời kèm xác nhận"
 
 # =============================================================================
-# THINKING LANGUAGE CONTROL (CHỈ THỊ SỐ 29 - SOTA)
+# THINKING LANGUAGE CONTROL (CHỈ THỊ SỐ 29 v7 - SOTA)
 # =============================================================================
-# Purpose: Control native thinking language for Gemini API
-# Pattern: Centralized config -> Runtime injection at TOP of system prompt
+# Pattern: Claude + Qwen3 + OpenAI combined best practices
+# - XML tags for clear structure (Claude pattern)
+# - Explicit examples + anti-patterns (OpenAI o1 pattern)  
+# - Thinking mode toggle concept (Qwen3 pattern)
 # =============================================================================
 thinking:
   language: "vi"
   enforcement: "strict"  # strict | moderate | relaxed
   
-  # SOTA: Explicit examples + anti-patterns for maximum compliance
+  # SOTA Pattern 1: XML-style language control block
+  # This block is injected at TOP of system prompt for maximum effect
+  language_control_xml: |
+    <language_control>
+      <thinking_language>Vietnamese</thinking_language>
+      <output_language>Vietnamese</output_language>
+      <requirement>ALL internal reasoning and thought process MUST be in Vietnamese</requirement>
+      <prohibition>NEVER use English for thinking, analyzing, or reasoning</prohibition>
+    </language_control>
+  
+  # SOTA Pattern 2: Thinking style definition
   style:
-    type: "natural_first_person"
+    type: "natural_first_person_vietnamese"
+    persona: "Vietnamese AI tutor reasoning naturally in first-person"
     
-    # Examples of CORRECT thinking (Vietnamese, first-person)
-    examples:
-      - "Tôi đang xem xét câu hỏi về {topic}..."
-      - "Người dùng muốn hiểu về {concept}..."
-      - "Nhìn vào dữ liệu, tôi thấy cần làm rõ..."
-      - "Để trả lời câu hỏi này, tôi cần..."
-      - "Tôi nhận thấy người dùng đang hỏi về..."
+    # CORRECT examples (Vietnamese, first-person, natural)
+    correct_examples:
+      - "Tôi đang xem xét câu hỏi về Điều 15 của Bộ luật Hàng hải..."
+      - "Người dùng có vẻ đang cần tìm hiểu về trách nhiệm pháp lý của chủ tàu..."
+      - "Nhìn vào các nguồn tài liệu, tôi thấy cần làm rõ sự khác biệt giữa định nghĩa và trách nhiệm..."
+      - "Để trả lời câu hỏi này một cách chính xác, tôi cần phân tích các điều khoản liên quan..."
+      - "Tôi nhận thấy đây là một câu hỏi về COLREGs Rule 15, cần giải thích rõ về tình huống cắt hướng..."
     
     # CRITICAL: Anti-patterns to explicitly REJECT
     # SOTA Insight: Negative examples are MORE effective than positive ones
-    anti_patterns:
-      - "Okay, so the user is asking..."
-      - "Let me think about this..."
-      - "Looking at Article..."
-      - "The user wants to know..."
-      - "I need to consider..."
+    incorrect_examples:
+      - "Okay, so the user is asking about Article 15..."
+      - "Let me think about this question..."
+      - "Looking at the Maritime Code..."
+      - "The user wants to understand the shipowner's responsibilities..."
+      - "I need to consider what Article 15 says..."
+      - "First, I should analyze the context..."
+      - "My understanding of Article 15 is..."
 
 
 

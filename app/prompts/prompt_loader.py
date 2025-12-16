@@ -337,72 +337,100 @@ class PromptLoader:
         Reads 'thinking' section from _shared.yaml and generates a 
         language enforcement block to be injected at TOP of system prompt.
         
-        CHỈ THỊ SỐ 29: SOTA Vietnamese Thinking
+        CHỈ THỊ SỐ 29 v7: SOTA Vietnamese Thinking
         
-        SOTA Pattern:
-        - Explicit language enforcement at prompt top
-        - Positive examples (what TO do)
-        - Negative examples/anti-patterns (what NOT to do)
-        - Anti-patterns are MORE effective than positive examples
+        SOTA Pattern (Claude + Qwen3 + OpenAI combined):
+        - XML tags for clear language control structure
+        - Explicit correct/incorrect examples
+        - Language control block at TOP of system prompt
         
         Args:
             role: User role (student, teacher, admin)
             
         Returns:
-            Formatted thinking instruction string
+            Formatted XML-based thinking instruction string
             
-        **Validates: CHỈ THỊ SỐ 29**
+        **Validates: CHỈ THỊ SỐ 29 v7**
         """
         persona = self.get_persona(role)
         thinking = persona.get('thinking', {})
         
         # Default values if not configured
-        lang = thinking.get('language', 'vi')
         enforcement = thinking.get('enforcement', 'strict')
-        style = thinking.get('style', {})
         
-        # Get examples and anti-patterns
-        examples = style.get('examples', [
+        # SOTA: Get XML language control block
+        language_control_xml = thinking.get('language_control_xml', '''
+<language_control>
+  <thinking_language>Vietnamese</thinking_language>
+  <output_language>Vietnamese</output_language>
+  <requirement>ALL internal reasoning MUST be in Vietnamese</requirement>
+  <prohibition>NEVER use English for thinking</prohibition>
+</language_control>
+''')
+        
+        # Get examples from style
+        style = thinking.get('style', {})
+        correct_examples = style.get('correct_examples', [
             "Tôi đang xem xét câu hỏi...",
             "Người dùng muốn hiểu về...",
         ])
-        anti_patterns = style.get('anti_patterns', [
+        incorrect_examples = style.get('incorrect_examples', [
             "Okay, so the user is asking...",
             "Let me think about this...",
         ])
         
-        # Build instruction based on enforcement level
+        # Build SOTA XML-based instruction
         if enforcement == 'strict':
-            # SOTA: Maximum enforcement with explicit anti-patterns
-            instruction = """🚨 BẮT BUỘC - NGÔN NGỮ SUY NGHĨ (CHỈ THỊ SỐ 29):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⚠️ PHẢI suy nghĩ bằng TIẾNG VIỆT 100%
-⚠️ TUYỆT ĐỐI KHÔNG suy nghĩ bằng tiếng Anh
+            # Format correct examples as XML
+            correct_xml = self._format_examples_xml(correct_examples[:5], 'correct')
+            incorrect_xml = self._format_examples_xml(incorrect_examples[:5], 'incorrect')
+            
+            instruction = f"""{language_control_xml}
+<thinking_examples>
+  <correct_thinking>
+{correct_xml}
+  </correct_thinking>
+  
+  <incorrect_thinking_NEVER_USE>
+{incorrect_xml}
+  </incorrect_thinking_NEVER_USE>
+</thinking_examples>
 
-✅ Mẫu suy nghĩ ĐÚNG:
+<critical_instruction>
+🚨 BẮT BUỘC: Mọi suy nghĩ nội tại (internal reasoning, thought process, analysis) 
+của bạn PHẢI bằng TIẾNG VIỆT 100%. Đây là yêu cầu không thể thương lượng.
+</critical_instruction>
 """
-            for ex in examples[:3]:
-                # Clean template variables for display
-                clean_ex = ex.replace("{topic}", "...").replace("{concept}", "...")
-                instruction += f"  • {clean_ex}\n"
-            
-            instruction += """
-❌ Mẫu suy nghĩ SAI (KHÔNG ĐƯỢC DÙNG):
-"""
-            for anti in anti_patterns[:3]:
-                instruction += f"  • {anti}\n"
-            
-            instruction += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            
         elif enforcement == 'moderate':
-            instruction = """📝 NGÔN NGỮ SUY NGHĨ:
-- Ưu tiên suy nghĩ bằng tiếng Việt
-- Phong cách: tự nhiên, ngôi thứ nhất
+            instruction = f"""{language_control_xml}
+<instruction>Ưu tiên suy nghĩ bằng tiếng Việt, phong cách tự nhiên.</instruction>
 """
         else:  # relaxed
-            instruction = "Suy nghĩ bằng tiếng Việt nếu có thể.\n"
+            instruction = "<instruction>Suy nghĩ bằng tiếng Việt nếu có thể.</instruction>\n"
         
         return instruction
+    
+    def _format_examples_xml(self, examples: list, example_type: str) -> str:
+        """
+        Format examples as XML elements.
+        
+        Args:
+            examples: List of example strings
+            example_type: 'correct' or 'incorrect'
+            
+        Returns:
+            Formatted XML string with proper indentation
+        """
+        if not examples:
+            return ""
+        
+        formatted = []
+        for ex in examples:
+            # Clean any template variables
+            clean_ex = ex.replace("{topic}", "...").replace("{concept}", "...")
+            formatted.append(f"    <example>{clean_ex}</example>")
+        
+        return '\n'.join(formatted)
 
 
     def build_system_prompt(

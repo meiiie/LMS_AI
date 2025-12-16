@@ -97,10 +97,16 @@ Response includes `trace_id` and `trace_summary`.
 
 ## 📝 Changelog
 
+### 2025-12-16: SOTA Vietnamese Thinking (CHỈ THỊ SỐ 29 v6)
+- **Feature:** Centralized thinking language config in `_shared.yaml`
+- **Integration:** `PromptLoader.build_thinking_instruction()` in `rag_agent.py`
+- **Pattern:** TOP injection for maximum Gemini thinking compliance
+
 ### 2025-12-16: Native Thinking Propagation Fix (CHỈ THỊ SỐ 29 v2)
 - **Bug:** `thinking` field missing in `AgentState` TypedDict → native thinking lost in LangGraph
 - **Fix:** Added `thinking: Optional[str]` to `state.py`
 - **Result:** Native Gemini thinking now properly propagates through Multi-Agent pipeline
+
 
 ### 2025-12-15: ReasoningTrace Integration (CHỈ THỊ SỐ 28)
 - **Feature:** SOTA reasoning transparency - expose AI thinking process in API
