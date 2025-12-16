@@ -37,6 +37,8 @@ from app.engine.agentic_rag.answer_verifier import (
 from app.engine.reasoning_tracer import (
     ReasoningTracer, StepNames, get_reasoning_tracer
 )
+# CHỈ THỊ SỐ 29: Natural Vietnamese Thinking Generator
+from app.engine.thinking_generator import get_thinking_generator
 from app.models.schemas import ReasoningTrace
 
 logger = logging.getLogger(__name__)
@@ -55,7 +57,8 @@ class CorrectiveRAGResult:
     iterations: int = 1
     confidence: float = 0.8
     reasoning_trace: Optional[ReasoningTrace] = None  # Feature: reasoning-trace
-    thinking_content: Optional[str] = None  # CHỈ THỊ SỐ 28: SOTA prose thinking (OpenAI/DeepSeek style)
+    thinking_content: Optional[str] = None  # Legacy: structured summary (fallback)
+    thinking: Optional[str] = None  # CHỈ THỊ SỐ 29: Natural Vietnamese thinking
     
     @property
     def has_warning(self) -> bool:
@@ -289,20 +292,40 @@ class CorrectiveRAG:
         # Build reasoning trace
         reasoning_trace = tracer.build_trace(final_confidence=confidence / 100)
         
-        # CHỈ THỊ SỐ 29: Hybrid fallback for thinking content
-        # Priority: Native Gemini thinking > Structured summary > None
-        if native_thinking:
-            thinking_content = native_thinking
-            logger.info(f"[CRAG] Using native Gemini thinking: {len(thinking_content)} chars")
-        else:
-            # Fallback to structured summary from tracer
-            thinking_content = tracer.build_thinking_summary()
-            if thinking_content:
-                logger.info(f"[CRAG] Using structured thinking summary: {len(thinking_content)} chars")
+        # CHỈ THỊ SỐ 29: Generate natural Vietnamese thinking
+        # Priority: ThinkingGenerator > Native Gemini > Structured summary
+        thinking = None
+        thinking_content = None
+        
+        # Step 1: Try ThinkingGenerator (SOTA - Dual LLM approach)
+        try:
+            thinking_generator = get_thinking_generator()
+            thinking = await thinking_generator.generate(
+                trace=reasoning_trace,
+                question=query,
+                answer=answer
+            )
+            if thinking:
+                logger.info(f"[CRAG] Generated natural thinking: {len(thinking)} chars")
+        except Exception as e:
+            logger.warning(f"[CRAG] ThinkingGenerator failed: {e}")
+        
+        # Step 2: Fallback to native Gemini thinking
+        if not thinking and native_thinking:
+            thinking = native_thinking
+            logger.info(f"[CRAG] Using native Gemini thinking: {len(thinking)} chars")
+        
+        # Step 3: Fallback to structured summary (always available)
+        thinking_content = tracer.build_thinking_summary()
+        if thinking_content:
+            logger.info(f"[CRAG] Built structured thinking summary: {len(thinking_content)} chars")
+        
+        # If no natural thinking, use structured as fallback
+        if not thinking:
+            thinking = thinking_content
+            logger.info("[CRAG] Using structured summary as thinking fallback")
         
         logger.info(f"[CRAG] Complete: iterations={iterations}, confidence={confidence:.0f}%")
-        if thinking_content:
-            logger.info(f"[CRAG] Thinking summary: {len(thinking_content)} chars")
         
         return CorrectiveRAGResult(
             answer=answer,
@@ -315,7 +338,8 @@ class CorrectiveRAG:
             iterations=iterations,
             confidence=confidence,
             reasoning_trace=reasoning_trace,
-            thinking_content=thinking_content  # CHỈ THỊ SỐ 28: SOTA prose thinking
+            thinking_content=thinking_content,  # Structured summary (legacy)
+            thinking=thinking  # CHỈ THỊ SỐ 29: Natural thinking
         )
     
     async def _retrieve(

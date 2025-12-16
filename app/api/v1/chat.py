@@ -164,9 +164,15 @@ async def chat_completion(
         
         # CHỈ THỊ SỐ 28: Extract thinking_content for LMS frontend display (Claude/OpenAI style)
         thinking_content = None
-        if internal_response.metadata and internal_response.metadata.get("thinking"):
-            thinking_content = internal_response.metadata["thinking"]
-            logger.info(f"[THINKING] Included {len(thinking_content)} chars in response")
+        thinking = None  # CHỈ THỊ SỐ 29: Natural Vietnamese thinking
+        if internal_response.metadata:
+            # Legacy: thinking_content (structured summary)
+            if internal_response.metadata.get("thinking_content"):
+                thinking_content = internal_response.metadata["thinking_content"]
+            # CHỈ THỊ SỐ 29: thinking (natural Vietnamese)
+            if internal_response.metadata.get("thinking"):
+                thinking = internal_response.metadata["thinking"]
+                logger.info(f"[THINKING] Included {len(thinking)} chars natural thinking")
         
         response = ChatResponse(
             status="success",
@@ -183,7 +189,8 @@ async def chat_completion(
                 tools_used=tools_used,  # CHỈ THỊ SỐ 27: API Transparency
                 # CHỈ THỊ SỐ 28: SOTA Reasoning Trace + Thinking Content
                 reasoning_trace=reasoning_trace,
-                thinking_content=thinking_content,  # SOTA: Raw thinking for LMS display
+                thinking_content=thinking_content,  # Structured summary (legacy)
+                thinking=thinking,  # CHỈ THỊ SỐ 29: Natural Vietnamese thinking
                 # LMS Integration: Analytics fields
                 topics_accessed=topics_accessed,
                 confidence_score=round(confidence_score, 2) if confidence_score else None,

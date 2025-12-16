@@ -267,7 +267,12 @@ class ChatResponseMetadata(BaseModel):
     # Raw prose format for LMS frontend "Thought Process" display
     thinking_content: Optional[str] = Field(
         default=None,
-        description="Nội dung suy nghĩ của AI (prose format) - hiển thị 'Thought Process' cho LMS frontend"
+        description="Nội dung suy nghĩ có cấu trúc (structured summary) - legacy fallback"
+    )
+    # CHỈ THỊ SỐ 29: Natural Vietnamese Thinking (Qwen/Claude style)
+    thinking: Optional[str] = Field(
+        default=None,
+        description="Quá trình suy nghĩ tự nhiên bằng Tiếng Việt - hiển thị 'Đang suy luận' cho LMS frontend"
     )
 
 
