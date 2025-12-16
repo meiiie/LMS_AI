@@ -339,19 +339,54 @@ class CorrectiveRAG:
         context: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve documents using composed RAGAgent.
+        Retrieve documents for grading using HybridSearchService directly.
         
-        SOTA Pattern: Delegates to internal RAGAgent which handles:
-        - HybridSearch (Dense + Sparse)
-        - GraphRAG entity enrichment
-        - Citation generation
+        SOTA Pattern (2024-2025): CRAG grading requires FULL document content.
+        
+        Previous implementation used RAGAgent.query() → Citation → lost content.
+        Now uses HybridSearchService.search() → HybridSearchResult → full content.
+        
+        Reference: LangChain CRAG grading requires knowledge strips (full chunks).
         """
         if not self._rag:
             logger.warning("[CRAG] No RAG agent available")
             return []
         
         try:
-            # Use RAGAgent.query() - returns RAGResponse with citations
+            # ================================================================
+            # SOTA FIX: Use HybridSearchService directly for full content
+            # ================================================================
+            # Access HybridSearchService from RAGAgent
+            hybrid_search = getattr(self._rag, '_hybrid_search', None)
+            
+            if hybrid_search and hybrid_search.is_available():
+                # Direct hybrid search - returns HybridSearchResult with content
+                results = await hybrid_search.search(
+                    query=query,
+                    limit=10
+                )
+                
+                # Convert to grading format WITH full content
+                documents = []
+                for r in results:
+                    doc = {
+                        "node_id": r.node_id,
+                        "content": r.content,  # ✅ FULL CONTENT for grading!
+                        "title": r.title,
+                        "score": r.rrf_score,
+                        # Source highlighting fields
+                        "image_url": r.image_url,
+                        "page_number": r.page_number if hasattr(r, 'page_number') else None,
+                        "document_id": r.document_id if hasattr(r, 'document_id') else None,
+                        "bounding_boxes": r.bounding_boxes if hasattr(r, 'bounding_boxes') else None,
+                    }
+                    documents.append(doc)
+                
+                logger.info(f"[CRAG] Retrieved {len(documents)} documents via HybridSearchService (SOTA)")
+                return documents
+            
+            # Fallback: Use RAGAgent.query() if HybridSearch unavailable
+            logger.warning("[CRAG] HybridSearch unavailable, falling back to RAGAgent")
             user_role = context.get("user_role", "student")
             history = context.get("conversation_history", "")
             
@@ -362,29 +397,28 @@ class CorrectiveRAG:
                 user_role=user_role
             )
             
-            # Convert RAGResponse.citations to document format for grading
-            # Citation is a Pydantic BaseModel, use attribute access
+            # Convert RAGResponse.citations - use title as content (best effort)
             documents = []
             for citation in response.citations:
                 doc = {
                     "node_id": getattr(citation, 'node_id', ''),
-                    "content": getattr(citation, 'source', ''),  # Use source as content
+                    "content": getattr(citation, 'title', ''),  # Use title (has actual text)
                     "title": getattr(citation, 'title', 'Unknown'),
                     "score": getattr(citation, 'relevance_score', 0),
-                    # Source highlighting fields (CHỈ THỊ 26 + Feature: source-highlight-citation)
-                    "image_url": getattr(citation, 'image_url', None),  # FIX: was missing!
+                    "image_url": getattr(citation, 'image_url', None),
                     "page_number": getattr(citation, 'page_number', None),
                     "document_id": getattr(citation, 'document_id', None),
                     "bounding_boxes": getattr(citation, 'bounding_boxes', None),
                 }
                 documents.append(doc)
             
-            logger.info(f"[CRAG] Retrieved {len(documents)} documents via RAGAgent")
+            logger.info(f"[CRAG] Retrieved {len(documents)} documents via RAGAgent (fallback)")
             return documents
             
         except Exception as e:
             logger.error(f"[CRAG] RAGAgent retrieval failed: {e}")
             return []
+
     
     async def _generate(
         self,
