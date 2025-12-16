@@ -97,6 +97,11 @@ Response includes `trace_id` and `trace_summary`.
 
 ## 📝 Changelog
 
+### 2025-12-16: Native Thinking Propagation Fix (CHỈ THỊ SỐ 29 v2)
+- **Bug:** `thinking` field missing in `AgentState` TypedDict → native thinking lost in LangGraph
+- **Fix:** Added `thinking: Optional[str]` to `state.py`
+- **Result:** Native Gemini thinking now properly propagates through Multi-Agent pipeline
+
 ### 2025-12-15: ReasoningTrace Integration (CHỈ THỊ SỐ 28)
 - **Feature:** SOTA reasoning transparency - expose AI thinking process in API
 - **Fixes:** 4 gaps in data flow (state.py, rag_node.py, graph.py, chat_orchestrator.py)

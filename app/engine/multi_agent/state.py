@@ -58,6 +58,9 @@ class AgentState(TypedDict, total=False):
     
     # CHỈ THỊ SỐ 28: SOTA Reasoning Trace for API transparency
     reasoning_trace: Optional[Any]  # ReasoningTrace from CorrectiveRAG
-    thinking_content: Optional[str]  # SOTA prose thinking (OpenAI/DeepSeek pattern)
+    thinking_content: Optional[str]  # Structured prose summary (fallback)
+    
+    # CHỈ THỊ SỐ 29: Native thinking from Gemini (SOTA 2025)
+    thinking: Optional[str]  # Native Gemini thinking (priority)
 
 
