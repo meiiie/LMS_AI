@@ -99,7 +99,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Purpose: Initialize heavy AI components at startup instead of first request.
     # This reduces cold-start latency from ~512s to ~30s.
     #
-    # Components pre-warmed:
+    # Components pre-warmed (in order to ensure singletons are initialized):
+    # 0. RAGAgent singleton (CRITICAL: prevents memory overflow)
     # 1. ChatService (triggers all agent initialization)
     # 2. Multi-Agent Graph (LangGraph compilation)
     # 3. Supervisor Agent (routing LLM)
@@ -109,6 +110,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     import time
     prewarm_start = time.time()
     logger.info("🔥 Pre-warming AI components (this may take 30-60s on cold start)...")
+    
+    # 0. Pre-warm RAGAgent singleton (CRITICAL for memory optimization)
+    # This ensures the singleton is created BEFORE any concurrent requests
+    try:
+        from app.engine.agentic_rag import get_rag_agent, is_rag_agent_initialized
+        rag_agent = get_rag_agent()
+        if is_rag_agent_initialized():
+            logger.info("✅ RAGAgent singleton pre-warmed (memory optimized)")
+    except Exception as e:
+        logger.warning(f"⚠️ RAGAgent pre-warm failed: {e}")
     
     # 1. Pre-warm ChatService (triggers lazy init of all services)
     try:
