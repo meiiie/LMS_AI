@@ -85,6 +85,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"⚠️ PromptLoader initialization failed: {e} (using defaults)")
     
+    # =========================================================================
+    # PRE-WARMING AI COMPONENTS (SOTA Memory Optimization - Dec 2025)
+    # =========================================================================
+    # Purpose: Initialize heavy AI components at startup instead of first request
+    # Reference: SOTA_DEEP_ROOT_CAUSE_ANALYSIS.md
+    # Impact: Eliminates ~45s cold start on first request
+    # =========================================================================
+    
+    # 1. Pre-warm RAGAgent singleton (contains LLM ~100MB)
+    try:
+        from app.engine.agentic_rag import get_rag_agent, is_rag_agent_initialized
+        get_rag_agent()
+        if is_rag_agent_initialized():
+            logger.info("✅ RAGAgent singleton pre-warmed (memory optimized)")
+    except Exception as e:
+        logger.warning(f"⚠️ RAGAgent pre-warm failed: {e}")
+    
+    # 2. Pre-warm CorrectiveRAG singleton (contains all CRAG components)
+    try:
+        from app.engine.agentic_rag import get_corrective_rag
+        get_corrective_rag()
+        logger.info("✅ CorrectiveRAG pre-warmed (QueryAnalyzer, RetrievalGrader, etc.)")
+    except Exception as e:
+        logger.warning(f"⚠️ CorrectiveRAG pre-warm failed: {e}")
+    
+    # 3. Pre-warm ChatService (triggers all other service initialization)
+    try:
+        from app.services.chat_service import get_chat_service
+        get_chat_service()
+        logger.info("✅ ChatService pre-warmed (all agents initialized)")
+    except Exception as e:
+        logger.warning(f"⚠️ ChatService pre-warm failed: {e}")
+    
     logger.info(f"🚀 {settings.app_name} started successfully")
     
     yield

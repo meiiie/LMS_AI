@@ -114,13 +114,14 @@ class CorrectiveRAG:
             self._rag = rag_agent
             logger.info("[CRAG] Using provided RAG agent (legacy mode)")
         else:
-            # SOTA: Auto-compose internal RAGAgent
+            # SOTA: Use RAGAgent singleton (memory-efficient)
+            # Reference: SOTA_DEEP_ROOT_CAUSE_ANALYSIS.md
             try:
-                from app.engine.agentic_rag.rag_agent import RAGAgent
-                self._rag = RAGAgent()  # RAGAgent auto-inits HybridSearchService
-                logger.info("[CRAG] Auto-composed internal RAGAgent")
+                from app.engine.agentic_rag.rag_agent import get_rag_agent
+                self._rag = get_rag_agent()  # ✓ Singleton = reuse LLM!
+                logger.info("[CRAG] Using RAGAgent singleton (memory optimized)")
             except Exception as e:
-                logger.error(f"[CRAG] Failed to auto-compose RAGAgent: {e}")
+                logger.error(f"[CRAG] Failed to get RAGAgent singleton: {e}")
                 self._rag = None
         
         # ================================================================

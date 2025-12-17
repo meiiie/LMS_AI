@@ -9,6 +9,7 @@ Components:
 - QueryRewriter: Rewrite queries for better retrieval
 - AnswerVerifier: Check for hallucinations
 - CorrectiveRAG: Main orchestrator
+- RAGAgent: Knowledge retrieval with LLM
 """
 
 from app.engine.agentic_rag.query_analyzer import QueryAnalyzer, QueryAnalysis
@@ -16,6 +17,12 @@ from app.engine.agentic_rag.retrieval_grader import RetrievalGrader, GradingResu
 from app.engine.agentic_rag.query_rewriter import QueryRewriter
 from app.engine.agentic_rag.answer_verifier import AnswerVerifier, VerificationResult
 from app.engine.agentic_rag.corrective_rag import CorrectiveRAG, get_corrective_rag
+from app.engine.agentic_rag.rag_agent import (
+    RAGAgent, 
+    get_rag_agent,
+    is_rag_agent_initialized,
+    reset_rag_agent
+)
 
 __all__ = [
     "QueryAnalyzer",
@@ -26,5 +33,10 @@ __all__ = [
     "AnswerVerifier",
     "VerificationResult",
     "CorrectiveRAG",
-    "get_corrective_rag"
+    "get_corrective_rag",
+    "RAGAgent",
+    "get_rag_agent",
+    "is_rag_agent_initialized",
+    "reset_rag_agent",
 ]
+
