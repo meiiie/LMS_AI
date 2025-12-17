@@ -118,6 +118,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"⚠️ ChatService pre-warm failed: {e}")
     
+    # 4. Pre-warm Neural Reranker (SOTA Dec 2025 - loads BGE cross-encoder model)
+    # This can take 5-15s on first load, but eliminates cold start on first request
+    try:
+        from app.services.neural_reranker import get_neural_reranker
+        reranker = get_neural_reranker()
+        if reranker.is_available():
+            logger.info("✅ Neural Reranker pre-warmed (BGE cross-encoder loaded)")
+        else:
+            logger.warning("⚠️ Neural Reranker unavailable (sentence-transformers not installed)")
+    except Exception as e:
+        logger.warning(f"⚠️ Neural Reranker pre-warm failed: {e}")
+    
     logger.info(f"🚀 {settings.app_name} started successfully")
     
     yield
