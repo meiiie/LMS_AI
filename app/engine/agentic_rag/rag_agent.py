@@ -15,14 +15,13 @@ Feature: sparse-search-migration
 """
 
 import logging
-import threading
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-# CHỈ THỊ SỐ 29: Import thinking extraction utility (lazy import to avoid circular dependency)
-# from app.services.output_processor import extract_thinking_from_response
+# CHỈ THỊ SỐ 29: Import thinking extraction utility
+from app.services.output_processor import extract_thinking_from_response
 
 # CHỈ THỊ SỐ 29: PromptLoader for SOTA thinking instruction
 from app.prompts.prompt_loader import PromptLoader
@@ -722,8 +721,6 @@ Hãy trả lời câu hỏi dựa trên thông tin trên."""
             
             # CHỈ THỊ SỐ 29: Extract native thinking from Gemini response
             # When include_thoughts=True, response.content may be a list of content blocks
-            # Lazy import to avoid circular dependency
-            from app.services.output_processor import extract_thinking_from_response
             answer, native_thinking = extract_thinking_from_response(response.content)
             
             if native_thinking:
@@ -861,111 +858,3 @@ class MaritimeDocumentParser:
             parts.append(f"Source: {node.source}")
         
         return "\n".join(parts)
-
-
-# =============================================================================
-# SINGLETON PATTERN (Professional Implementation)
-# =============================================================================
-# Pattern: Thread-safe lazy initialization with double-check locking
-# Reference: Python `logging` module pattern, Google style guide
-# 
-# Why singleton for LLM:
-# - Each RAGAgent creates an LLM instance (~100MB RAM)
-# - Without singleton, each request creates new instances → memory overflow
-# - Singleton is VALID pattern for single-process Python apps (expert verified)
-# =============================================================================
-
-# Note: imports moved to top of file
-
-_rag_agent: Optional[RAGAgent] = None
-_rag_agent_lock = threading.Lock()
-
-
-def get_rag_agent(
-    knowledge_graph=None,
-    hybrid_search_service=None,
-    graph_rag_service=None,
-    force_new: bool = False
-) -> RAGAgent:
-    """
-    Get or create RAGAgent singleton (thread-safe).
-    
-    This is the RECOMMENDED way to obtain a RAGAgent instance.
-    Direct instantiation via RAGAgent() should be avoided in production
-    to prevent memory overflow from creating multiple LLM instances.
-    
-    Pattern: Double-check locking for thread-safety without performance penalty.
-    
-    Args:
-        knowledge_graph: Optional knowledge graph repository
-        hybrid_search_service: Optional hybrid search service
-        graph_rag_service: Optional GraphRAG service
-        force_new: If True, create a new instance (for testing only)
-        
-    Returns:
-        RAGAgent singleton instance
-        
-    Example:
-        >>> agent = get_rag_agent()
-        >>> response = await agent.query("What is Rule 15?")
-        
-    Note:
-        For testing, use `reset_rag_agent()` to clear singleton between tests.
-    """
-    global _rag_agent
-    
-    # Fast path: return existing instance (no lock needed)
-    if _rag_agent is not None and not force_new:
-        return _rag_agent
-    
-    # Slow path: create new instance with lock
-    with _rag_agent_lock:
-        # Double-check inside lock (another thread might have created it)
-        if _rag_agent is None or force_new:
-            try:
-                logger.info("[RAGAgent] Creating singleton instance...")
-                _rag_agent = RAGAgent(
-                    knowledge_graph=knowledge_graph,
-                    hybrid_search_service=hybrid_search_service,
-                    graph_rag_service=graph_rag_service
-                )
-                logger.info("[RAGAgent] Singleton created successfully")
-            except Exception as e:
-                logger.error(f"[RAGAgent] Failed to create singleton: {e}")
-                raise  # Re-raise to let caller handle
-    
-    return _rag_agent
-
-
-def reset_rag_agent() -> None:
-    """
-    Reset the RAGAgent singleton (for testing only).
-    
-    This clears the cached instance, allowing the next call to
-    get_rag_agent() to create a fresh instance.
-    
-    WARNING: Do NOT call in production - only for unit tests.
-    
-    Example:
-        >>> # In test teardown
-        >>> reset_rag_agent()
-    """
-    global _rag_agent
-    with _rag_agent_lock:
-        if _rag_agent is not None:
-            logger.info("[RAGAgent] Resetting singleton (test mode)")
-            _rag_agent = None
-
-
-def is_rag_agent_initialized() -> bool:
-    """
-    Check if RAGAgent singleton is already initialized.
-    
-    Useful for health checks and pre-warming verification.
-    
-    Returns:
-        True if singleton exists, False otherwise
-    """
-    return _rag_agent is not None
-
-

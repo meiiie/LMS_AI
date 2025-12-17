@@ -19,7 +19,6 @@ Features:
 """
 
 import logging
-import threading
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any, Tuple
 
@@ -115,14 +114,13 @@ class CorrectiveRAG:
             self._rag = rag_agent
             logger.info("[CRAG] Using provided RAG agent (legacy mode)")
         else:
-            # SOTA + MEMORY FIX: Use RAGAgent singleton to prevent memory overflow
-            # Each RAGAgent creates ~100MB LLM, so reusing singleton is critical
+            # SOTA: Auto-compose internal RAGAgent
             try:
-                from app.engine.agentic_rag.rag_agent import get_rag_agent
-                self._rag = get_rag_agent()  # CRITICAL: Use singleton, not RAGAgent()
-                logger.info("[CRAG] Using RAGAgent singleton (memory optimized)")
+                from app.engine.agentic_rag.rag_agent import RAGAgent
+                self._rag = RAGAgent()  # RAGAgent auto-inits HybridSearchService
+                logger.info("[CRAG] Auto-composed internal RAGAgent")
             except Exception as e:
-                logger.error(f"[CRAG] Failed to get RAGAgent singleton: {e}")
+                logger.error(f"[CRAG] Failed to auto-compose RAGAgent: {e}")
                 self._rag = None
         
         # ================================================================
@@ -341,13 +339,14 @@ class CorrectiveRAG:
         context: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve documents for grading using HybridSearchService with Neural Reranking.
+        Retrieve documents for grading using HybridSearchService directly.
         
-        SOTA Dec 2025: Two-stage retrieval:
-        1. Hybrid search for candidate pool
-        2. Neural reranker (BGE/Cohere) for precision ranking
+        SOTA Pattern (2024-2025): CRAG grading requires FULL document content.
         
-        This provides +15-25% accuracy improvement over RRF alone.
+        Previous implementation used RAGAgent.query() → Citation → lost content.
+        Now uses HybridSearchService.search() → HybridSearchResult → full content.
+        
+        Reference: LangChain CRAG grading requires knowledge strips (full chunks).
         """
         if not self._rag:
             logger.warning("[CRAG] No RAG agent available")
@@ -355,51 +354,27 @@ class CorrectiveRAG:
         
         try:
             # ================================================================
-            # SOTA FIX Dec 2025: Use Neural Reranker for better grading
+            # SOTA FIX: Use HybridSearchService directly for full content
             # ================================================================
+            # Access HybridSearchService from RAGAgent
             hybrid_search = getattr(self._rag, '_hybrid_search', None)
             
             if hybrid_search and hybrid_search.is_available():
-                # Try Neural Reranking first (SOTA)
-                try:
-                    reranked_results = await hybrid_search.search_with_neural_rerank(
-                        query=query,
-                        limit=10,
-                        rerank_top_k=20  # Get 20 candidates, rerank to top 10
-                    )
-                    
-                    if reranked_results:
-                        # Convert RerankedResult to grading format
-                        documents = []
-                        for r in reranked_results:
-                            doc = {
-                                "node_id": r.node_id,
-                                "content": r.content,  # ✅ FULL CONTENT
-                                "title": r.title,
-                                "score": r.final_score,  # Neural rerank score
-                                "image_url": r.image_url,
-                                "page_number": r.page_number,
-                                "document_id": r.document_id,
-                                "bounding_boxes": r.bounding_boxes,
-                            }
-                            documents.append(doc)
-                        
-                        logger.info(f"[CRAG] Retrieved {len(documents)} docs via Neural Reranker (SOTA Dec 2025)")
-                        return documents
-                        
-                except Exception as rerank_err:
-                    logger.warning(f"[CRAG] Neural rerank failed, falling back: {rerank_err}")
+                # Direct hybrid search - returns HybridSearchResult with content
+                results = await hybrid_search.search(
+                    query=query,
+                    limit=10
+                )
                 
-                # Fallback: Standard hybrid search
-                results = await hybrid_search.search(query=query, limit=10)
-                
+                # Convert to grading format WITH full content
                 documents = []
                 for r in results:
                     doc = {
                         "node_id": r.node_id,
-                        "content": r.content,
+                        "content": r.content,  # ✅ FULL CONTENT for grading!
                         "title": r.title,
                         "score": r.rrf_score,
+                        # Source highlighting fields
                         "image_url": r.image_url,
                         "page_number": r.page_number if hasattr(r, 'page_number') else None,
                         "document_id": r.document_id if hasattr(r, 'document_id') else None,
@@ -407,7 +382,7 @@ class CorrectiveRAG:
                     }
                     documents.append(doc)
                 
-                logger.info(f"[CRAG] Retrieved {len(documents)} documents via HybridSearch")
+                logger.info(f"[CRAG] Retrieved {len(documents)} documents via HybridSearchService (SOTA)")
                 return documents
             
             # Fallback: Use RAGAgent.query() if HybridSearch unavailable
@@ -523,83 +498,12 @@ class CorrectiveRAG:
         )
 
 
-# =============================================================================
-# SINGLETON PATTERN (Professional Implementation)
-# =============================================================================
-# Pattern: Thread-safe lazy initialization with double-check locking
-# Reference: Python `logging` module pattern, Google style guide
-# =============================================================================
-
-# Note: imports moved to top of file
-
+# Singleton
 _corrective_rag: Optional[CorrectiveRAG] = None
-_corrective_rag_lock = threading.Lock()
 
-
-def get_corrective_rag(
-    rag_agent=None,
-    max_iterations: int = 2,
-    grade_threshold: float = 7.0,
-    force_new: bool = False
-) -> CorrectiveRAG:
-    """
-    Get or create CorrectiveRAG singleton (thread-safe).
-    
-    This is the RECOMMENDED way to obtain a CorrectiveRAG instance.
-    Direct instantiation should be avoided in production to prevent
-    memory overflow from creating multiple LLM instances.
-    
-    Args:
-        rag_agent: Optional RAG agent (uses singleton if None)
-        max_iterations: Maximum rewrite iterations
-        grade_threshold: Minimum grade to accept retrieval
-        force_new: If True, create a new instance (for testing only)
-        
-    Returns:
-        CorrectiveRAG singleton instance
-    """
+def get_corrective_rag(rag_agent=None) -> CorrectiveRAG:
+    """Get or create CorrectiveRAG singleton."""
     global _corrective_rag
-    
-    # Fast path: return existing instance
-    if _corrective_rag is not None and not force_new:
-        return _corrective_rag
-    
-    # Slow path: create with lock
-    with _corrective_rag_lock:
-        if _corrective_rag is None or force_new:
-            try:
-                logger.info("[CRAG] Creating singleton instance...")
-                _corrective_rag = CorrectiveRAG(
-                    rag_agent=rag_agent,
-                    max_iterations=max_iterations,
-                    grade_threshold=grade_threshold
-                )
-                logger.info("[CRAG] Singleton created successfully")
-            except Exception as e:
-                logger.error(f"[CRAG] Failed to create singleton: {e}")
-                raise
-    
+    if _corrective_rag is None:
+        _corrective_rag = CorrectiveRAG(rag_agent=rag_agent)
     return _corrective_rag
-
-
-def reset_corrective_rag() -> None:
-    """
-    Reset the CorrectiveRAG singleton (for testing only).
-    
-    WARNING: Do NOT call in production - only for unit tests.
-    """
-    global _corrective_rag
-    with _corrective_rag_lock:
-        if _corrective_rag is not None:
-            logger.info("[CRAG] Resetting singleton (test mode)")
-            _corrective_rag = None
-
-
-def is_corrective_rag_initialized() -> bool:
-    """
-    Check if CorrectiveRAG singleton is already initialized.
-    
-    Useful for health checks and pre-warming verification.
-    """
-    return _corrective_rag is not None
-

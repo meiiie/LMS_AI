@@ -26,13 +26,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# =============================================================================
-# APPLICATION READINESS FLAG (SOTA: Proper Kubernetes/Cloud Readiness Pattern)
-# =============================================================================
-# This flag is set to True ONLY after pre-warming completes.
-# Health check returns 503 until ready, preventing premature traffic routing.
-_app_ready = False
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -92,98 +85,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"⚠️ PromptLoader initialization failed: {e} (using defaults)")
     
-    # =========================================================================
-    # PRE-WARMING AI COMPONENTS (SOTA Dec 2025 - Performance Optimization)
-    # =========================================================================
-    # 
-    # Purpose: Initialize heavy AI components at startup instead of first request.
-    # This reduces cold-start latency from ~512s to ~30s.
-    #
-    # Components pre-warmed (in order to ensure singletons are initialized):
-    # 0. RAGAgent singleton (CRITICAL: prevents memory overflow)
-    # 1. ChatService (triggers all agent initialization)
-    # 2. Multi-Agent Graph (LangGraph compilation)
-    # 3. Supervisor Agent (routing LLM)
-    # 4. HybridSearchService (search infrastructure)
-    # =========================================================================
-    
-    import time
-    prewarm_start = time.time()
-    logger.info("🔥 Pre-warming AI components (this may take 30-60s on cold start)...")
-    
-    # 0. Pre-warm RAGAgent singleton (CRITICAL for memory optimization)
-    # This ensures the singleton is created BEFORE any concurrent requests
-    try:
-        from app.engine.agentic_rag import get_rag_agent, is_rag_agent_initialized
-        rag_agent = get_rag_agent()
-        if is_rag_agent_initialized():
-            logger.info("✅ RAGAgent singleton pre-warmed (memory optimized)")
-    except Exception as e:
-        logger.warning(f"⚠️ RAGAgent pre-warm failed: {e}")
-    
-    # 0.5. Pre-warm CorrectiveRAG singleton (CRITICAL for first-request latency)
-    # This initializes QueryAnalyzer, RetrievalGrader, QueryRewriter, AnswerVerifier
-    # Without this, first request takes 45s+ for LLM initialization!
-    try:
-        from app.engine.agentic_rag import get_corrective_rag, is_corrective_rag_initialized
-        corrective_rag = get_corrective_rag()
-        if is_corrective_rag_initialized():
-            logger.info("✅ CorrectiveRAG pre-warmed (QueryAnalyzer, RetrievalGrader, etc.)")
-    except Exception as e:
-        logger.warning(f"⚠️ CorrectiveRAG pre-warm failed: {e}")
-    
-    # 1. Pre-warm ChatService (triggers lazy init of all services)
-    try:
-        from app.services.chat_service import get_chat_service
-        chat_service = get_chat_service()  # CRITICAL: Use singleton to avoid double init!
-        # ChatService init triggers all agent/service initialization
-        logger.info("✅ ChatService pre-warmed (all agents initialized)")
-    except Exception as e:
-        logger.warning(f"⚠️ ChatService pre-warm failed: {e} (will init on first request)")
-    
-    # 2. Pre-warm Multi-Agent Graph
-    try:
-        from app.engine.multi_agent.graph import get_multi_agent_graph
-        multi_agent_graph = get_multi_agent_graph()
-        if multi_agent_graph:
-            logger.info("✅ Multi-Agent Graph pre-warmed")
-    except Exception as e:
-        logger.warning(f"⚠️ Multi-Agent Graph pre-warm failed: {e}")
-    
-    # 3. Pre-warm Supervisor Agent
-    try:
-        from app.engine.multi_agent.supervisor import get_supervisor_agent
-        supervisor = get_supervisor_agent()
-        if supervisor.is_available():
-            logger.info("✅ Supervisor Agent pre-warmed (routing LLM ready)")
-    except Exception as e:
-        logger.warning(f"⚠️ Supervisor Agent pre-warm failed: {e}")
-    
-    # 4. Pre-warm HybridSearchService
-    try:
-        from app.services.hybrid_search_service import get_hybrid_search_service
-        hybrid_search = get_hybrid_search_service()
-        if hybrid_search.is_available():
-            logger.info("✅ HybridSearchService pre-warmed")
-    except Exception as e:
-        logger.warning(f"⚠️ HybridSearchService pre-warm failed: {e}")
-    
-    # 5. Pre-warm Embedding Model (triggers Gemini embedding init)
-    try:
-        from app.engine.gemini_embedding import get_embeddings
-        embedding_model = get_embeddings()
-        logger.info("✅ Embedding model pre-warmed")
-    except Exception as e:
-        logger.warning(f"⚠️ Embedding model pre-warm failed: {e}")
-    
-    prewarm_duration = time.time() - prewarm_start
-    logger.info(f"🔥 Pre-warming complete in {prewarm_duration:.1f}s")
-    
-    # Mark application as ready AFTER pre-warming
-    global _app_ready
-    _app_ready = True
-    
-    logger.info(f"🚀 {settings.app_name} started successfully (ready for traffic)")
+    logger.info(f"🚀 {settings.app_name} started successfully")
     
     yield
     
@@ -349,26 +251,10 @@ async def health_check_simple():
     """
     Simple health check endpoint for LMS/DevOps.
     
-    SOTA Pattern: Returns 503 during startup/pre-warming.
-    This prevents Render/K8s from routing traffic before app is ready.
-    
     Spec: CHỈ THỊ KỸ THUẬT SỐ 03
     URL: GET /health
-    Response: {"status": "ok", "database": "connected", "ready": true}
+    Response: {"status": "ok", "database": "connected"}
     """
-    from fastapi.responses import JSONResponse as HealthJSONResponse
-    
-    # SOTA: Return 503 if not ready (pre-warming not complete)
-    if not _app_ready:
-        return HealthJSONResponse(
-            status_code=503,
-            content={
-                "status": "starting",
-                "ready": False,
-                "message": "Application is still warming up"
-            }
-        )
-    
     # Check database connection
     db_status = "connected"
     try:
@@ -381,6 +267,5 @@ async def health_check_simple():
     
     return {
         "status": "ok",
-        "database": db_status,
-        "ready": True
+        "database": db_status
     }

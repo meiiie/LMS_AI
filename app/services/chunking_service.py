@@ -160,14 +160,9 @@ class SemanticChunker:
             # Build metadata
             metadata = self._build_metadata(chunk_text, page_metadata, content_type, hierarchy)
             
-            # SOTA Dec 2025: Add document header for better retrieval
-            content_with_header = self._format_with_document_header(
-                chunk_text, page_metadata, hierarchy
-            )
-            
             processed_chunks.append(ChunkResult(
                 chunk_index=len(processed_chunks),  # Sequential index
-                content=content_with_header,  # SOTA: Use header version
+                content=chunk_text,
                 content_type=content_type,
                 confidence_score=confidence_score,
                 metadata=metadata
@@ -179,51 +174,6 @@ class SemanticChunker:
         )
         
         return processed_chunks
-    
-    def _format_with_document_header(
-        self,
-        chunk_content: str,
-        page_metadata: Dict[str, Any],
-        hierarchy: Dict[str, Any]
-    ) -> str:
-        """
-        Prepend document context header to chunk.
-        
-        SOTA Dec 2025: Contextual Chunk Headers
-        Improves retrieval by +10-15% by making chunks self-describing.
-        
-        **Feature: document-headers**
-        """
-        header_parts = []
-        
-        # Document ID/Title
-        doc_id = page_metadata.get('document_id', '')
-        if doc_id:
-            # Clean up document ID for readability
-            readable_name = doc_id.replace('-', ' ').replace('_', ' ').title()
-            header_parts.append(f"[Tài liệu: {readable_name}]")
-        
-        # Page number
-        page_num = page_metadata.get('page_number')
-        if page_num:
-            header_parts.append(f"[Trang {page_num}]")
-        
-        # Section hierarchy (maritime-specific)
-        if hierarchy.get('article'):
-            header_parts.append(f"[Điều {hierarchy['article']}]")
-        if hierarchy.get('clause'):
-            header_parts.append(f"[Khoản {hierarchy['clause']}]")
-        if hierarchy.get('point'):
-            header_parts.append(f"[Điểm {hierarchy['point']}]")
-        if hierarchy.get('rule'):
-            header_parts.append(f"[Rule {hierarchy['rule']}]")
-        
-        # If no header parts, return original content
-        if not header_parts:
-            return chunk_content
-        
-        header = " ".join(header_parts)
-        return f"{header}\n\n{chunk_content}"
     
     def _detect_content_type(self, text: str) -> str:
         """
