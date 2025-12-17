@@ -9,6 +9,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2025-12-18)
+- **Gemini 2.5 Flash Content Block Handling**:
+  - Fixed `'list' object has no attribute 'strip'` errors across 16 files (25 locations)
+  - Root cause: Gemini 2.5 Flash returns `response.content` as list of content blocks when `thinking_enabled=True`
+  - Solution: Implemented `extract_thinking_from_response()` utility for consistent content extraction
+  - Affected agents: RetrievalGrader, AnswerVerifier, QueryAnalyzer, QueryRewriter, RAGAgent
+  - Affected memory: MemorySummarizer, MemoryConsolidator, MemoryCompression, InsightExtractor
+  - Affected services: GuardianAgent, ContextEnricher, HydeService, Supervisor, TutorNode
+  - Result: LLM grading/verification now works correctly with 88% confidence scores
+
 ### Added
 - **Contextual RAG (Anthropic-style)**:
   - `ContextEnricher` class for LLM-based chunk context generation

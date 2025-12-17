@@ -43,6 +43,8 @@
 | **Semantic Memory v0.5** | Insight extraction + behavioral learning |
 | **Hybrid Search v0.6** | Dense + Sparse + RRF Reranking |
 | **Tool Registry Pattern** | Modular tool management with categories (SOTA 2025) |
+| **LLM Singleton Pool** | Memory optimization: ~600MB → ~120MB (3 shared instances) |
+| **Gemini 2.5 Flash Fix** | Content block handling for 88% confidence scores |
 
 > 📋 **Full version history:** See [CHANGELOG.md](CHANGELOG.md) | **Future plans:** See [ROADMAP.md](ROADMAP.md)
 
