@@ -121,6 +121,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"⚠️ RAGAgent pre-warm failed: {e}")
     
+    # 0.5. Pre-warm CorrectiveRAG singleton (CRITICAL for first-request latency)
+    # This initializes QueryAnalyzer, RetrievalGrader, QueryRewriter, AnswerVerifier
+    # Without this, first request takes 45s+ for LLM initialization!
+    try:
+        from app.engine.agentic_rag import get_corrective_rag, is_corrective_rag_initialized
+        corrective_rag = get_corrective_rag()
+        if is_corrective_rag_initialized():
+            logger.info("✅ CorrectiveRAG pre-warmed (QueryAnalyzer, RetrievalGrader, etc.)")
+    except Exception as e:
+        logger.warning(f"⚠️ CorrectiveRAG pre-warm failed: {e}")
+    
     # 1. Pre-warm ChatService (triggers lazy init of all services)
     try:
         from app.services.chat_service import get_chat_service
