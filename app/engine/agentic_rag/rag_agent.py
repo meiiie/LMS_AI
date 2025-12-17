@@ -286,14 +286,30 @@ class RAGAgent:
                     entity_context = entity_ctx
                     
                     # Collect related entities from results
+                    # SOTA FIX: Separate entity dicts and regulation strings to avoid unhashable dict error
+                    related_entity_dicts = []  # List[Dict] - not hashable
+                    related_regulation_names = []  # List[str] - hashable
+                    
                     for gr in graph_results:
                         if gr.related_entities:
-                            related_entities.extend(gr.related_entities[:3])
+                            related_entity_dicts.extend(gr.related_entities[:3])
                         if gr.related_regulations:
-                            related_entities.extend(gr.related_regulations[:3])
+                            related_regulation_names.extend(gr.related_regulations[:3])
                     
-                    # Deduplicate
-                    related_entities = list(dict.fromkeys(related_entities))[:10]
+                    # Deduplicate entities by ID (SOTA: hashable key extraction)
+                    seen_entity_ids = set()
+                    unique_entities = []
+                    for entity in related_entity_dicts:
+                        entity_id = entity.get("id") or entity.get("name", str(entity))
+                        if entity_id not in seen_entity_ids:
+                            seen_entity_ids.add(entity_id)
+                            unique_entities.append(entity)
+                    
+                    # Deduplicate regulation names (strings are hashable)
+                    unique_regulations = list(dict.fromkeys(related_regulation_names))
+                    
+                    # Combine for backward compatibility
+                    related_entities = unique_entities[:5] + unique_regulations[:5]
                     
                     logger.info(f"[GraphRAG] Found {len(hybrid_results)} results with entity context")
             except Exception as e:
@@ -720,7 +736,9 @@ Hãy trả lời câu hỏi dựa trên thông tin trên."""
             response = self._llm.invoke(messages)
             
             # CHỈ THỊ SỐ 29: Extract native thinking from Gemini response
-            # When include_thoughts=True, response.content may be a list of content blocks
+            # Lazy import to avoid circular dependency (as documented at line 23-24)
+            # When thinking_enabled=True, response.content may be a list of content blocks
+            from app.services.output_processor import extract_thinking_from_response
             answer, native_thinking = extract_thinking_from_response(response.content)
             
             if native_thinking:

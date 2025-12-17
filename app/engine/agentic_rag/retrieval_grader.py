@@ -182,7 +182,12 @@ class RetrievalGrader:
             ]
             
             response = await self._llm.ainvoke(messages)
-            result = response.content.strip()
+            
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            # When thinking_enabled=True, response.content may be list, not string
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            result = text_content.strip()
             
             # Parse JSON
             import json
@@ -322,8 +327,13 @@ class RetrievalGrader:
         """Parse batch grading JSON response."""
         import json
         
-        # Clean response
-        result = response.strip()
+        # SOTA FIX: Handle Gemini 2.5 Flash content block format
+        # When thinking_enabled=True, response may be list, not string
+        from app.services.output_processor import extract_thinking_from_response
+        text_content, _ = extract_thinking_from_response(response)
+        result = text_content.strip()
+        
+        # Clean markdown code blocks if present
         if result.startswith("```"):
             result = result.split("```")[1]
             if result.startswith("json"):
