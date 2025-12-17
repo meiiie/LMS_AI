@@ -1,6 +1,6 @@
 # Archive - Legacy Components
 
-**Last Updated:** 2025-12-09
+**Last Updated:** 2025-12-18
 
 This directory contains archived legacy code that has been replaced by newer implementations.
 Files are kept for reference and potential rollback if needed.
@@ -58,6 +58,11 @@ Files are kept for reference and potential rollback if needed.
 - **Date:** 2025-12
 - **Summary:** Basic text splitting replaced by maritime-specific semantic chunking
 
+### Gemini 2.5 Flash Content Block Fix (2025-12-18)
+- **Summary:** Fixed `'list' object has no attribute 'strip'` errors
+- **Solution:** `extract_thinking_from_response()` utility in `output_processor.py`
+- **Affected:** 16 files, 25 locations across engine and services
+
 ---
 
 ## ⚠️ Restoration (if needed)
@@ -77,7 +82,7 @@ cp archive/ingestion_service_legacy.py app/services/ingestion_service.py
 
 ---
 
-## 📊 Current Architecture
+## 📊 Current Architecture (v2.8)
 
 ```
 Current RAG Pipeline:
@@ -88,8 +93,11 @@ Query → Dense (pgvector) + Sparse (tsvector) → RRF Reranking → Results
 
 Current Agent:
 UnifiedAgent (ReAct) → Guardian Agent → RAG Tool → Response
+
+Current LLM:
+LLM Singleton Pool (3 shared instances) → extract_thinking_from_response() → Response
 ```
 
 ---
 
-*Maintained by Kiro AI Assistant*
+*Maintained by AI Assistant - Last audit: 2025-12-18*

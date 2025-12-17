@@ -2,9 +2,9 @@
 
 > Master architecture document following **C4 Model + arc42** best practices.
 
-**Last Updated:** 2025-12-17  
+**Last Updated:** 2025-12-18  
 **Status:** ✅ Complete  
-**Version:** 2.7 (LLM Singleton Pool - SOTA Memory Optimization)
+**Version:** 2.8 (Gemini 2.5 Flash Content Block Fix)
 
 
 ---
@@ -626,6 +626,19 @@ prompts/
 - `retrieval_grader.py`, `answer_verifier.py` → `get_llm_moderate()`
 - `unified_agent.py` → `get_llm_deep()`
 - `supervisor.py`, `guardian_agent.py`, `memory_summarizer.py`, `insight_extractor.py`, `memory_consolidator.py` → `get_llm_light()`
+
+### FIXED (2025-12-18)
+
+| Issue | Files Fixed | Solution |
+|-------|------------|----------|
+| **Gemini 2.5 Flash Content Block** | 16 files, 25 locations | `extract_thinking_from_response()` |
+| `'list' object has no attribute 'strip'` | LLM response handlers | Consistent content extraction |
+| LLM grading fallback | RetrievalGrader, AnswerVerifier | 88% confidence restored |
+
+**Key Utility:**
+- `app/services/output_processor.py::extract_thinking_from_response()`
+- Handles Gemini 2.5 Flash's content block format when `thinking_enabled=True`
+- Returns `(text_content, thinking_content)` tuple
 
 > **`thinking` (v8)**: Vietnamese prose from `<thinking>` tags in response. Pattern: unified_agent.py.
 > **`thinking_content`**: Structured summary from `ReasoningTracer.build_thinking_summary()`.
