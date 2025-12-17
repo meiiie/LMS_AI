@@ -147,6 +147,7 @@ class SparseSearchRepository:
         - Stop word removal
         - OR between terms for broader matching
         - Synonym expansion for maritime terms
+        - Special character sanitization for tsquery
         
         Args:
             query: Original search query
@@ -165,19 +166,24 @@ class SparseSearchRepository:
             "when", "where", "which", "who", "about"
         }
         
-        # Extract meaningful words
+        # First, remove special characters that break tsquery syntax
+        # Keep only alphanumeric, Vietnamese chars, and spaces
+        sanitized_query = re.sub(r"[().,?!;:\"'\[\]{}|&<>@#$%^*+=~/\\]", " ", query)
+        
+        # Extract meaningful words using regex (handles punctuation better)
         words = [
-            w.strip() for w in query.lower().split() 
-            if w.strip() and w.strip() not in stop_words and len(w.strip()) > 1
+            w.strip().lower() for w in sanitized_query.split() 
+            if w.strip() and w.strip().lower() not in stop_words and len(w.strip()) > 1
         ]
         
         if not words:
-            # Fallback to original query if no meaningful words
-            return query.replace("'", "''")
+            # Fallback: return simple search term
+            return "maritime"
         
         # Add synonyms for maritime terms
         enhanced_words = []
         for word in words:
+            # Skip words that are just numbers (they'll be handled separately)
             enhanced_words.append(word)
             synonyms = self._get_synonyms(word)
             enhanced_words.extend(synonyms)
@@ -186,14 +192,17 @@ class SparseSearchRepository:
         seen = set()
         unique_words = []
         for w in enhanced_words:
-            if w not in seen:
-                seen.add(w)
-                unique_words.append(w)
+            # Final sanitization: only keep alphanumeric and Vietnamese chars
+            sanitized_word = re.sub(r"[^a-zA-Z0-9àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]", "", w)
+            if sanitized_word and sanitized_word not in seen and len(sanitized_word) > 1:
+                seen.add(sanitized_word)
+                unique_words.append(sanitized_word)
+        
+        if not unique_words:
+            return "maritime"
         
         # Build OR query: word1 | word2 | word3
-        # Escape single quotes for PostgreSQL
-        escaped_words = [w.replace("'", "''") for w in unique_words]
-        return " | ".join(escaped_words)
+        return " | ".join(unique_words)
     
     def _apply_number_boost(
         self, 
