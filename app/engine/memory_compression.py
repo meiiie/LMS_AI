@@ -261,7 +261,11 @@ class MemoryCompressionEngine:
         prompt = COMPRESSION_PROMPT.format(input_text=text[:3000])  # Limit input
         
         response = await self._llm.ainvoke([HumanMessage(content=prompt)])
-        content = response.content.strip()
+        
+        # SOTA FIX: Handle Gemini 2.5 Flash content block format
+        from app.services.output_processor import extract_thinking_from_response
+        text_content, _ = extract_thinking_from_response(response.content)
+        content = text_content.strip()
         
         # Parse JSON
         import json
@@ -310,7 +314,11 @@ class MemoryCompressionEngine:
             # Group similar facts and merge
             prompt = FACT_MERGE_PROMPT.format(facts="\n".join(facts))
             response = await self._llm.ainvoke([HumanMessage(content=prompt)])
-            merged = response.content.strip()
+            
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            merged = text_content.strip()
             
             stats = self.get_stats(user_id)
             stats.facts_merged += len(facts) - 1

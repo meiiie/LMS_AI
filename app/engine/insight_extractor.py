@@ -67,8 +67,12 @@ class InsightExtractor:
             # Call LLM
             response = await self._llm.ainvoke(prompt)
             
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            
             # Parse response
-            insights = self._parse_extraction_response(user_id, response.content, message)
+            insights = self._parse_extraction_response(user_id, text_content, message)
             
             logger.info(f"Extracted {len(insights)} insights for user {user_id}")
             return insights

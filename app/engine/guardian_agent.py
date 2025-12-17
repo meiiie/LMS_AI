@@ -338,7 +338,11 @@ class GuardianAgent:
         
         try:
             response = await self._llm.ainvoke(prompt)
-            content = response.content.strip()
+            
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            content = text_content.strip()
             
             # Parse JSON response
             decision = self._parse_llm_response(content)

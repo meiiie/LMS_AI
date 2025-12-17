@@ -122,7 +122,11 @@ class ContextEnricher:
             
             # Generate context
             response = await llm.ainvoke([HumanMessage(content=prompt)])
-            context = response.content.strip()
+            
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            context = text_content.strip()
             
             # Create enriched content: [Context]\n\n[Original]
             contextual_content = f"[Context: {context}]\n\n{chunk_content}"

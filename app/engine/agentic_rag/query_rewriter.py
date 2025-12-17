@@ -99,7 +99,11 @@ class QueryRewriter:
             ]
             
             response = await self._llm.ainvoke(messages)
-            new_query = response.content.strip()
+            
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            new_query = text_content.strip()
             
             # Clean up
             new_query = new_query.strip('"\'')
@@ -130,7 +134,11 @@ class QueryRewriter:
             ]
             
             response = await self._llm.ainvoke(messages)
-            return response.content.strip()
+            
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            return text_content.strip()
             
         except Exception as e:
             logger.warning(f"Query expansion failed: {e}")
@@ -155,7 +163,11 @@ class QueryRewriter:
             ]
             
             response = await self._llm.ainvoke(messages)
-            lines = response.content.strip().split("\n")
+            
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            lines = text_content.strip().split("\n")
             
             # Clean up
             sub_queries = []

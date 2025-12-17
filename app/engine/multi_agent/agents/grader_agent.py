@@ -140,7 +140,11 @@ class GraderAgentNode:
             ]
             
             response = await self._llm.ainvoke(messages)
-            result = response.content.strip()
+            
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            result = text_content.strip()
             
             # Parse JSON
             import json

@@ -79,8 +79,12 @@ class MemoryConsolidator:
             # Call LLM for consolidation
             response = await self._llm.ainvoke(prompt)
             
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            
             # Parse consolidated insights
-            consolidated = self._parse_consolidation_response(response.content, insights)
+            consolidated = self._parse_consolidation_response(text_content, insights)
             
             # Verify we achieved target count
             final_count = len(consolidated)

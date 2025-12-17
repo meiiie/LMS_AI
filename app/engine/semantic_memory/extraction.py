@@ -168,8 +168,12 @@ class FactExtractor:
             prompt = self._build_fact_extraction_prompt(message)
             response = await self._llm.ainvoke(prompt)
             
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            
             # Parse JSON response
-            facts = self._parse_fact_extraction_response(response.content, message)
+            facts = self._parse_fact_extraction_response(text_content, message)
             
             return UserFactExtraction(
                 facts=facts,

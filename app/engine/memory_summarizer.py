@@ -230,7 +230,11 @@ class MemorySummarizer:
         
         try:
             response = self._llm.invoke(prompt)
-            return self._parse_summary_response(response.content, len(messages))
+            
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            return self._parse_summary_response(text_content, len(messages))
         except Exception as e:
             logger.error(f"Summary creation failed: {e}")
             return None
@@ -244,7 +248,11 @@ class MemorySummarizer:
         
         try:
             response = await self._llm.ainvoke(prompt)
-            return self._parse_summary_response(response.content, len(messages))
+            
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            return self._parse_summary_response(text_content, len(messages))
         except Exception as e:
             logger.error(f"Async summary creation failed: {e}")
             return None

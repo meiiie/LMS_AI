@@ -399,7 +399,11 @@ class RetrievalGrader:
             ]
             
             response = await self._llm.ainvoke(messages)
-            return response.content.strip()
+            
+            # SOTA FIX: Handle Gemini 2.5 Flash content block format
+            from app.services.output_processor import extract_thinking_from_response
+            text_content, _ = extract_thinking_from_response(response.content)
+            return text_content.strip()
             
         except Exception as e:
             logger.warning(f"Feedback generation failed: {e}")
