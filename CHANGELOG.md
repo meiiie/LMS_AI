@@ -40,6 +40,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Shows query analysis, retrieval, grading, rewriting, generation steps
   - Per-step timing, confidence scores, and details
   - Integrated into `CorrectiveRAG` pipeline
+
+- **Semantic Response Cache (SOTA 2025 - RAG Latency Optimization)**:
+  - Multi-tier caching architecture: L1 Response, L2 Retrieval (future), L3 Embedding (future)
+  - `SemanticResponseCache` with cosine similarity matching (threshold 0.95)
+  - `CacheInvalidationManager` with document version tracking
+  - `CacheManager` with circuit breaker pattern for resilience
+  - Integrated cache-first lookup in `CorrectiveRAG.process()`
+  - Cache hits return in <5s vs ~107s for full pipeline
+  - 7 new config settings: `SEMANTIC_CACHE_ENABLED`, `CACHE_SIMILARITY_THRESHOLD`, etc.
+
 - **Document Knowledge Graph (Entity Extraction)**:
   - `KGBuilderAgentNode` - new agent in multi-agent system
   - Uses SOTA `with_structured_output()` for guaranteed JSON
