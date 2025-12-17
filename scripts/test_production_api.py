@@ -271,7 +271,7 @@ async def test_chat_rag_query(client: httpx.AsyncClient) -> TestResult:
                 if reasoning_trace:
                     print(f"\n  {Colors.GREEN}✓ Reasoning Trace:{Colors.RESET}")
                     print(f"    Steps: {reasoning_trace.get('total_steps', 0)}")
-                    print(f"    Confidence: {reasoning_trace.get('overall_confidence', 0):.0%}")
+                    print(f"    Confidence: {reasoning_trace.get('final_confidence', 0):.0%}")
                 
                 print(f"{Colors.YELLOW}--------------------------------------{Colors.RESET}\n")
             
