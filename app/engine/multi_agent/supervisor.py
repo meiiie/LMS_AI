@@ -16,6 +16,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
+from app.engine.llm_pool import get_llm_light  # SOTA: Shared LLM Pool
 from app.engine.multi_agent.state import AgentState
 from app.engine.agents import SUPERVISOR_AGENT_CONFIG, AgentConfig
 
@@ -78,14 +79,11 @@ class SupervisorAgent:
         logger.info("SupervisorAgent initialized")
     
     def _init_llm(self):
-        """Initialize LLM for routing decisions."""
+        """Initialize LLM from shared pool for routing decisions."""
         try:
-            self._llm = ChatGoogleGenerativeAI(
-                model=settings.google_model,
-                google_api_key=settings.google_api_key,
-                temperature=0.1,  # Low for consistent routing
-                max_output_tokens=50
-            )
+            # SOTA: Use shared LLM from pool (memory optimized)
+            self._llm = get_llm_light()
+            logger.info(f"SupervisorAgent initialized with shared LIGHT tier LLM")
         except Exception as e:
             logger.error(f"Failed to initialize Supervisor LLM: {e}")
             self._llm = None

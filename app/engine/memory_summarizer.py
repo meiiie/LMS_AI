@@ -103,18 +103,14 @@ class MemorySummarizer:
         self._init_llm()
     
     def _init_llm(self) -> None:
-        """Initialize LLM for summarization."""
+        """Initialize LLM from shared pool for summarization."""
         try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
+            from app.engine.llm_pool import get_llm_light
             
             if settings.google_api_key:
-                # Use Flash model for fast summarization
-                self._llm = ChatGoogleGenerativeAI(
-                    google_api_key=settings.google_api_key,
-                    model=settings.google_model,
-                    temperature=0.3,  # Low temperature for consistent summaries
-                )
-                logger.info(f"MemorySummarizer initialized with {settings.google_model}")
+                # SOTA: Use shared LLM from pool (memory optimized)
+                self._llm = get_llm_light()
+                logger.info(f"MemorySummarizer initialized with shared LIGHT tier LLM")
             else:
                 logger.warning("No Google API key for MemorySummarizer")
         except Exception as e:

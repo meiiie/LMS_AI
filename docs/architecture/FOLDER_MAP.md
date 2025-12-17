@@ -2,9 +2,9 @@
 
 > Master architecture document following **C4 Model + arc42** best practices.
 
-**Last Updated:** 2025-12-16  
+**Last Updated:** 2025-12-17  
 **Status:** ✅ Complete  
-**Version:** 2.6 (Centralized Vietnamese Thinking - CHỈ THỊ SỐ 29 v8)
+**Version:** 2.7 (LLM Singleton Pool - SOTA Memory Optimization)
 
 
 ---
@@ -183,7 +183,8 @@ graph LR
 
 | File | Chức năng | CHỈ THỊ |
 |------|-----------|----------|
-| `llm_factory.py` | **NEW** Centralized LLM creation with 4-tier thinking | SỐ 28 |
+| `llm_pool.py` | **NEW** SOTA LLM Singleton Pool (3 shared instances) | MEMORY OPT |
+| `llm_factory.py` | Centralized LLM creation with 4-tier thinking | SỐ 28 |
 | `unified_agent.py` | Main ReAct agent (uses DEEP tier thinking) | SỐ 13, 28 |
 
 ---
@@ -611,6 +612,20 @@ prompts/
 | **Centralized ThinkingPostProcessor** | `thinking_post_processor.py` (NEW), `output_processor.py` | SỐ 29 v8 |
 | **Vietnamese `<thinking>` tags** | `rag_agent.py` | SỐ 29 v8 |
 | Cleanup unused YAML config | `_shared.yaml`, `prompt_loader.py` | SỐ 29 v8 |
+
+### ADDED (2025-12-17)
+
+| Feature | Files Modified | Pattern |
+|---------|---------------|--------|
+| **LLM Singleton Pool** | `llm_pool.py` (NEW) | SOTA Memory Optimization |
+| Memory reduction | 10 components refactored | ~600MB → ~120MB |
+| Startup optimization | `main.py` | LLMPool.initialize() |
+
+**Refactored Components (use shared LLM pool):**
+- `query_analyzer.py`, `query_rewriter.py` → `get_llm_light()`
+- `retrieval_grader.py`, `answer_verifier.py` → `get_llm_moderate()`
+- `unified_agent.py` → `get_llm_deep()`
+- `supervisor.py`, `guardian_agent.py`, `memory_summarizer.py`, `insight_extractor.py`, `memory_consolidator.py` → `get_llm_light()`
 
 > **`thinking` (v8)**: Vietnamese prose from `<thinking>` tags in response. Pattern: unified_agent.py.
 > **`thinking_content`**: Structured summary from `ReasoningTracer.build_thinking_summary()`.

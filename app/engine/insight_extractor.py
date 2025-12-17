@@ -32,12 +32,10 @@ class InsightExtractor:
         self._llm = None
         if settings.google_api_key:
             try:
-                self._llm = ChatGoogleGenerativeAI(
-                    model=settings.google_model,
-                    google_api_key=settings.google_api_key,
-                    temperature=0.1
-                )
-                logger.info("InsightExtractor initialized with Google LLM")
+                from app.engine.llm_pool import get_llm_light
+                # SOTA: Use shared LLM from pool (memory optimized)
+                self._llm = get_llm_light()
+                logger.info("InsightExtractor initialized with shared LIGHT tier LLM")
             except Exception as e:
                 logger.error(f"Failed to initialize LLM: {e}")
     

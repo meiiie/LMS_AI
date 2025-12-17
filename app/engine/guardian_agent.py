@@ -154,24 +154,21 @@ class GuardianAgent:
         logger.info("GuardianAgent initialized")
     
     def _init_llm(self):
-        """Initialize Gemini LLM for validation."""
+        """Initialize Gemini LLM from shared pool for validation."""
         if not self._config.enable_llm:
             logger.info("GuardianAgent: LLM disabled by config")
             return
         
         try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
+            from app.engine.llm_pool import get_llm_light
             
             if not settings.google_api_key:
                 logger.warning("GuardianAgent: No Google API key")
                 return
             
-            self._llm = ChatGoogleGenerativeAI(
-                google_api_key=settings.google_api_key,
-                model="gemini-2.5-flash",  # Consistent with project standard
-                temperature=0.1,  # Low temperature for consistent decisions
-            )
-            logger.info("GuardianAgent: LLM initialized (gemini-2.5-flash)")
+            # SOTA: Use shared LLM from pool (memory optimized)
+            self._llm = get_llm_light()
+            logger.info("GuardianAgent: LLM initialized (shared LIGHT tier)")
             
         except Exception as e:
             logger.error(f"GuardianAgent: Failed to initialize LLM: {e}")

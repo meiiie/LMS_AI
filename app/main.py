@@ -88,35 +88,42 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # =========================================================================
     # PRE-WARMING AI COMPONENTS (SOTA Memory Optimization - Dec 2025)
     # =========================================================================
-    # Purpose: Initialize heavy AI components at startup instead of first request
-    # Reference: SOTA_DEEP_ROOT_CAUSE_ANALYSIS.md
-    # Impact: Eliminates ~45s cold start on first request
+    # Purpose: Initialize shared LLM Pool instead of individual components
+    # Reference: MEMORY_OVERFLOW_SOTA_ANALYSIS.md
+    # Impact: Reduces memory from ~600MB to ~120MB (3 shared LLM instances)
     # =========================================================================
     
-    # 1. Pre-warm RAGAgent singleton (contains LLM ~100MB)
+    # 1. CRITICAL: Initialize LLM Singleton Pool FIRST (SOTA Pattern)
+    #    This creates only 3 shared LLM instances (DEEP, MODERATE, LIGHT)
+    #    All components will share these instances instead of creating their own
+    try:
+        from app.engine.llm_pool import LLMPool
+        LLMPool.initialize()
+        logger.info("✅ LLM Singleton Pool initialized (3 shared instances, ~120MB)")
+    except Exception as e:
+        logger.warning(f"⚠️ LLM Pool initialization failed: {e}")
+    
+    # 2. Pre-warm RAGAgent singleton (now uses shared LLM from pool)
     try:
         from app.engine.agentic_rag import get_rag_agent, is_rag_agent_initialized
         get_rag_agent()
         if is_rag_agent_initialized():
-            logger.info("✅ RAGAgent singleton pre-warmed (memory optimized)")
+            logger.info("✅ RAGAgent singleton pre-warmed (using shared LLM)")
     except Exception as e:
         logger.warning(f"⚠️ RAGAgent pre-warm failed: {e}")
     
-    # 2. Pre-warm CorrectiveRAG singleton (contains all CRAG components)
+    # 3. Pre-warm CorrectiveRAG singleton (now uses shared LLMs from pool)
     try:
         from app.engine.agentic_rag import get_corrective_rag
         get_corrective_rag()
-        logger.info("✅ CorrectiveRAG pre-warmed (QueryAnalyzer, RetrievalGrader, etc.)")
+        logger.info("✅ CorrectiveRAG pre-warmed (using shared LLMs)")
     except Exception as e:
         logger.warning(f"⚠️ CorrectiveRAG pre-warm failed: {e}")
     
-    # 3. Pre-warm ChatService (triggers all other service initialization)
-    try:
-        from app.services.chat_service import get_chat_service
-        get_chat_service()
-        logger.info("✅ ChatService pre-warmed (all agents initialized)")
-    except Exception as e:
-        logger.warning(f"⚠️ ChatService pre-warm failed: {e}")
+    # NOTE: ChatService pre-warming is REMOVED to save memory
+    # The service will be initialized on first request instead
+    # This eliminates ~10 additional LLM instance creations
+    logger.info("ℹ️ ChatService will initialize on first request (memory optimized)")
     
     logger.info(f"🚀 {settings.app_name} started successfully")
     

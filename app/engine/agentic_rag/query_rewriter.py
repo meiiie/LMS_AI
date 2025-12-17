@@ -16,6 +16,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
+from app.engine.llm_pool import get_llm_light  # SOTA: Shared LLM Pool
 
 logger = logging.getLogger(__name__)
 
@@ -65,15 +66,11 @@ class QueryRewriter:
         self._init_llm()
     
     def _init_llm(self):
-        """Initialize Gemini LLM."""
+        """Initialize Gemini LLM from shared pool."""
         try:
-            self._llm = ChatGoogleGenerativeAI(
-                model=settings.google_model,
-                google_api_key=settings.google_api_key,
-                temperature=0.3,  # Some creativity for rewriting
-                max_output_tokens=200
-            )
-            logger.info(f"QueryRewriter initialized with {settings.google_model}")
+            # SOTA: Use shared LLM from pool (memory optimized)
+            self._llm = get_llm_light()
+            logger.info(f"QueryRewriter initialized with shared LIGHT tier LLM")
         except Exception as e:
             logger.error(f"Failed to initialize QueryRewriter LLM: {e}")
             self._llm = None

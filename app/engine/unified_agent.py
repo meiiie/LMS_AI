@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 
 from app.core.config import settings
-from app.engine.llm_factory import create_tutor_llm
+from app.engine.llm_pool import get_llm_deep  # SOTA: Shared LLM Pool
 from app.services.output_processor import extract_thinking_from_response
 from app.engine.reasoning_tracer import get_reasoning_tracer, StepNames
 
@@ -270,15 +270,15 @@ class UnifiedAgent:
         logger.info("UnifiedAgent initialized (Manual ReAct)")
     
     def _init_llm(self):
-        """Initialize Gemini LLM with DEEP tier thinking."""
+        """Initialize Gemini LLM with DEEP tier thinking from shared pool."""
         try:
             if not settings.google_api_key:
                 logger.warning("No Google API key")
                 return None
             
-            # CHỈ THỊ SỐ 28: Use DEEP tier thinking (8192 tokens) for teaching
-            llm = create_tutor_llm(temperature=0.7)
-            logger.info(f"UnifiedAgent using Gemini with DEEP thinking: {settings.google_model}")
+            # SOTA: Use shared LLM from pool (memory optimized)
+            llm = get_llm_deep()
+            logger.info(f"UnifiedAgent using shared DEEP tier LLM: {settings.google_model}")
             return llm
             
         except Exception as e:

@@ -17,6 +17,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
+from app.engine.llm_pool import get_llm_moderate  # SOTA: Shared LLM Pool
 
 logger = logging.getLogger(__name__)
 
@@ -140,15 +141,11 @@ class RetrievalGrader:
         self._init_llm()
     
     def _init_llm(self):
-        """Initialize Gemini LLM for grading."""
+        """Initialize Gemini LLM from shared pool for grading."""
         try:
-            self._llm = ChatGoogleGenerativeAI(
-                model=settings.google_model,
-                google_api_key=settings.google_api_key,
-                temperature=0.0,  # Deterministic grading
-                max_output_tokens=300
-            )
-            logger.info(f"RetrievalGrader initialized with {settings.google_model}")
+            # SOTA: Use shared LLM from pool (memory optimized)
+            self._llm = get_llm_moderate()
+            logger.info(f"RetrievalGrader initialized with shared MODERATE tier LLM")
         except Exception as e:
             logger.error(f"Failed to initialize RetrievalGrader LLM: {e}")
             self._llm = None
