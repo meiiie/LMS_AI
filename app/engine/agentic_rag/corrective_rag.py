@@ -41,10 +41,6 @@ from app.engine.reasoning_tracer import (
 # Pattern: Use Gemini's native thinking directly (aligns with Claude/Qwen/Gemini 2025)
 from app.models.schemas import ReasoningTrace
 
-# SOTA Dec 2025: Neural Reranker replaces LLM grading (200x faster)
-# Cross-encoder scoring: 40s → 200ms
-from app.services.neural_reranker import get_neural_reranker, BaseReranker
-
 logger = logging.getLogger(__name__)
 
 
@@ -132,23 +128,9 @@ class CorrectiveRAG:
         # CRAG COMPONENTS (Query Analysis, Grading, Rewriting, Verification)
         # ================================================================
         self._analyzer = get_query_analyzer()
-        self._grader = get_retrieval_grader()  # Fallback if neural reranker unavailable
+        self._grader = get_retrieval_grader()
         self._rewriter = get_query_rewriter()
         self._verifier = get_answer_verifier()
-        
-        #  ================================================================
-        # SOTA Dec 2025: Neural Reranker (replaces LLM grading)
-        # Cross-encoder scoring: 40s → 200ms (200x faster)
-        # ================================================================
-        self._neural_reranker: BaseReranker = None
-        try:
-            self._neural_reranker = get_neural_reranker()
-            if self._neural_reranker.is_available():
-                logger.info("[CRAG] ✅ Neural Reranker available (SOTA - 200x faster grading)")
-            else:
-                logger.warning("[CRAG] ⚠️ Neural Reranker unavailable, using LLM grading fallback")
-        except Exception as e:
-            logger.warning(f"[CRAG] Neural Reranker init failed: {e}")
         
         logger.info(f"CorrectiveRAG initialized (max_iter={max_iterations}, threshold={grade_threshold})")
     
@@ -227,62 +209,10 @@ class CorrectiveRAG:
                     details={"doc_count": len(documents)}
                 )
             
-            # Step 3: Grade documents using Neural Reranker (SOTA Dec 2025)
-            # Cross-encoder scoring: 40s → 200ms (200x faster)
-            tracer.start_step(StepNames.GRADING, "Đánh giá độ liên quan (Neural Reranker)")
+            # Step 3: Grade documents
+            tracer.start_step(StepNames.GRADING, "Đánh giá độ liên quan của tài liệu")
             logger.info(f"[CRAG] Step 3.{iterations}: Grading {len(documents)} documents")
-            
-            # SOTA: Use neural reranker if available (200x faster than LLM)
-            if self._neural_reranker and self._neural_reranker.is_available():
-                import time
-                start_time = time.time()
-                
-                # Rerank documents using cross-encoder
-                reranked = await self._neural_reranker.rerank(
-                    current_query, 
-                    documents, 
-                    top_k=min(5, len(documents))
-                )
-                
-                rerank_time = (time.time() - start_time) * 1000  # ms
-                
-                if reranked:
-                    # Convert neural scores to grading result format
-                    # Neural scores are typically -10 to +10, normalize to 0-10
-                    avg_rerank_score = sum(r.rerank_score for r in reranked) / len(reranked)
-                    # Scale: rerank_score > 0 is good, > 5 is excellent
-                    avg_score_scaled = max(0, min(10, (avg_rerank_score + 5)))  # Shift and clamp
-                    
-                    grading_result = GradingResult(
-                        query=current_query,
-                        avg_score=avg_score_scaled,
-                        relevant_count=sum(1 for r in reranked if r.rerank_score > 0),
-                        feedback=f"Neural reranking: {avg_rerank_score:.2f} → {avg_score_scaled:.1f}/10"
-                    )
-                    
-                    # Replace documents with reranked (better ordered)
-                    documents = [
-                        {
-                            "node_id": r.node_id,
-                            "content": r.content,
-                            "title": r.title,
-                            "score": r.final_score,
-                            "image_url": r.image_url,
-                            "page_number": r.page_number,
-                            "document_id": r.document_id,
-                            "bounding_boxes": r.bounding_boxes
-                        }
-                        for r in reranked
-                    ]
-                    
-                    logger.info(f"[CRAG] ⚡ Neural grading: {avg_score_scaled:.1f}/10 in {rerank_time:.0f}ms (SOTA)")
-                else:
-                    # Empty reranked, fallback
-                    grading_result = await self._grader.grade_documents(current_query, documents)
-            else:
-                # Fallback: LLM-based grading (slower but works without sentence-transformers)
-                logger.info(f"[CRAG] Using LLM grading (neural reranker unavailable)")
-                grading_result = await self._grader.grade_documents(current_query, documents)
+            grading_result = await self._grader.grade_documents(current_query, documents)
             
             # Check if good enough
             if grading_result.avg_score >= self._grade_threshold:
