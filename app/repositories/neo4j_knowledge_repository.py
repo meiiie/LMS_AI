@@ -17,8 +17,10 @@ Current RAG search uses:
 See: .kiro/specs/sparse-search-migration/design.md for migration details.
 """
 
+import asyncio
 import logging
 from datetime import datetime
+from functools import wraps
 from typing import Any, List, Optional
 
 from app.core.config import settings
@@ -30,6 +32,64 @@ from app.models.knowledge_graph import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def neo4j_retry(max_attempts: int = 2, backoff: float = 1.0):
+    """
+    SOTA: Retry decorator for Neo4j transient failures.
+    
+    Handles ServiceUnavailable, SessionExpired, and OSError (defunct connection).
+    Uses exponential backoff between retries.
+    
+    Based on: https://neo4j.com/docs/python-manual/current/transactions/
+    
+    Args:
+        max_attempts: Maximum number of retry attempts
+        backoff: Initial backoff time in seconds (doubles each retry)
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(self, *args, **kwargs):
+            last_exception = None
+            
+            for attempt in range(max_attempts):
+                try:
+                    return await func(self, *args, **kwargs)
+                except OSError as e:
+                    # Defunct connection - needs reconnect
+                    last_exception = e
+                    logger.warning(
+                        f"Neo4j connection error (attempt {attempt+1}/{max_attempts}): {e}"
+                    )
+                    if attempt < max_attempts - 1:
+                        await asyncio.sleep(backoff * (2 ** attempt))
+                        # Try to reconnect
+                        self._init_driver()
+                except Exception as e:
+                    # Check for neo4j-specific transient errors
+                    error_name = type(e).__name__
+                    if error_name in ('ServiceUnavailable', 'SessionExpired', 'TransientError'):
+                        last_exception = e
+                        logger.warning(
+                            f"Neo4j transient error (attempt {attempt+1}/{max_attempts}): {e}"
+                        )
+                        if attempt < max_attempts - 1:
+                            await asyncio.sleep(backoff * (2 ** attempt))
+                            self._init_driver()
+                    else:
+                        # Non-transient error, propagate immediately
+                        raise
+            
+            logger.error(f"Neo4j operation failed after {max_attempts} attempts: {last_exception}")
+            # Return appropriate default based on return type hint
+            return_type = func.__annotations__.get('return')
+            if return_type == bool:
+                return False
+            elif return_type and 'List' in str(return_type):
+                return []
+            return None
+        return wrapper
+    return decorator
 
 
 class Neo4jKnowledgeRepository:
@@ -71,20 +131,36 @@ class Neo4jKnowledgeRepository:
         return value
     
     def _init_driver(self):
-        """Initialize Neo4j driver (supports both local Docker and Neo4j Aura)."""
+        """
+        Initialize Neo4j driver with Aura-optimized settings.
+        
+        SOTA Pattern (Neo4j Official Docs):
+        - max_connection_lifetime < 60 min (Aura idle timeout)
+        - liveness_check_timeout for connection health
+        - connection_acquisition_timeout for waiting
+        """
         try:
             from neo4j import GraphDatabase
             
             # Use neo4j_username_resolved to support both formats
             username = settings.neo4j_username_resolved
             
+            # SOTA: Aura Free Tier connection settings
+            # Based on: https://neo4j.com/docs/python-manual/current/connect-advanced/
             self._driver = GraphDatabase.driver(
                 settings.neo4j_uri,
-                auth=(username, settings.neo4j_password)
+                auth=(username, settings.neo4j_password),
+                # Retire connections before Aura's 60-min idle timeout
+                max_connection_lifetime=3000,      # 50 minutes (seconds)
+                # Keep-alive check interval  
+                liveness_check_timeout=300,        # 5 minutes (seconds)
+                # Connection pool settings
+                max_connection_pool_size=10,
+                connection_acquisition_timeout=60  # 1 minute
             )
             self._driver.verify_connectivity()
             self._available = True
-            logger.info(f"Neo4j connection established to {settings.neo4j_uri}")
+            logger.info(f"Neo4j connected with Aura-optimized settings to {settings.neo4j_uri}")
         except Exception as e:
             logger.warning(f"Neo4j connection failed: {e}")
             self._available = False
@@ -92,6 +168,35 @@ class Neo4jKnowledgeRepository:
     def is_available(self) -> bool:
         """Check if Neo4j is available."""
         return self._available
+    
+    def _ensure_connection(self) -> bool:
+        """
+        Ensure Neo4j connection is alive, auto-reconnect if needed.
+        
+        This handles Neo4j Aura Free Tier connection timeouts and defunct connections.
+        
+        Returns:
+            True if connection is available, False otherwise
+        """
+        if not self._available:
+            return False
+        
+        try:
+            # Try a lightweight query to check connection
+            with self._driver.session() as session:
+                session.run("RETURN 1").single()
+            return True
+        except Exception as e:
+            logger.warning(f"Neo4j connection check failed: {e}, attempting reconnect...")
+            # Try to reconnect
+            try:
+                if self._driver:
+                    self._driver.close()
+            except Exception:
+                pass
+            
+            self._init_driver()
+            return self._available
     
     def ping(self) -> bool:
         """
@@ -920,13 +1025,17 @@ class Neo4jKnowledgeRepository:
             logger.error(f"Failed to get relations for {entity_id}: {e}")
             return []
     
+    @neo4j_retry(max_attempts=2, backoff=1.0)
     async def get_document_entities(self, document_id: str) -> List[dict]:
         """
         Get all entities extracted from a document.
         
+        SOTA: Uses retry decorator for transient failures.
+        
         **Feature: document-kg**
         """
         if not self._available:
+            logger.warning(f"Neo4j not available for get_document_entities({document_id})")
             return []
         
         try:
@@ -941,7 +1050,7 @@ class Neo4jKnowledgeRepository:
                 
         except Exception as e:
             logger.error(f"Failed to get entities for document {document_id}: {e}")
-            return []
+            raise  # Let retry decorator handle it
     
     def close(self):
         """Close Neo4j connection."""

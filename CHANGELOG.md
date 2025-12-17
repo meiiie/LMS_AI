@@ -19,6 +19,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Affected services: GuardianAgent, ContextEnricher, HydeService, Supervisor, TutorNode
   - Result: LLM grading/verification now works correctly with 88% confidence scores
 
+- **SOTA Repository Error Fixes**:
+  - Fixed `'NoneType' object is not iterable` in `update_fact()` (Root cause: `_merge_insight()` passing `embedding=None`)
+  - Solution: Added explicit `update_metadata_only()` API following Single Responsibility Principle
+  - Added validation to `update_fact()` requiring non-None embedding
+  - Fixed Neo4j defunct connection errors with Aura-optimized settings:
+    - `max_connection_lifetime=3000` (50 mins < Aura's 60 min timeout)
+    - `liveness_check_timeout=300` (5 minutes)
+  - Added `neo4j_retry` decorator with exponential backoff for transient failures
+
 ### Added
 - **Contextual RAG (Anthropic-style)**:
   - `ContextEnricher` class for LLM-based chunk context generation
