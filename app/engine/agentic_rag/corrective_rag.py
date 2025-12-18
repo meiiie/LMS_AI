@@ -312,10 +312,19 @@ class CorrectiveRAG:
                     details={"doc_count": len(documents)}
                 )
             
-            # Step 3: Grade documents
+            # Step 3: Grade documents (PHASE 3: Tiered grading with fast-pass)
             tracer.start_step(StepNames.GRADING, "Đánh giá độ liên quan của tài liệu")
             logger.info(f"[CRAG] Step 3.{iterations}: Grading {len(documents)} documents")
-            grading_result = await self._grader.grade_documents(current_query, documents)
+            
+            # Ensure query_embedding for tiered grading
+            if query_embedding is None:
+                from app.engine.gemini_embedding import get_embeddings
+                embeddings = get_embeddings()
+                query_embedding = embeddings.embed_query(current_query)
+            
+            grading_result = await self._grader.grade_documents(
+                current_query, documents, query_embedding=query_embedding
+            )
             
             # Check if good enough
             if grading_result.avg_score >= self._grade_threshold:

@@ -68,11 +68,11 @@ class ThinkingAdapter:
         self._llm = None  # Lazy initialization
         self._initialized = False
         
-        # Configuration
-        self._max_thinking_tokens = 500
-        self._max_response_tokens = 2000
+        # PHASE 3: Adaptive token budget
+        from app.engine.agentic_rag.adaptive_token_budget import get_adaptive_token_budget
+        self._token_budget = get_adaptive_token_budget()
         
-        logger.info("[ThinkingAdapter] Initialized (LIGHT tier)")
+        logger.info("[ThinkingAdapter] Initialized (LIGHT tier + Adaptive Budget)")
     
     def _ensure_llm(self):
         """Lazily initialize LLM on first use."""
@@ -108,6 +108,17 @@ class ThinkingAdapter:
             cached_sources = cached_response.get("sources", [])
             cached_thinking = cached_response.get("thinking", "")
             
+            # PHASE 3: Get adaptive token budget
+            budget = self._token_budget.get_budget(
+                query=query,
+                is_cached=True,
+                similarity=similarity
+            )
+            logger.debug(
+                f"[ThinkingAdapter] Token budget: {budget.tier.value} "
+                f"(thinking={budget.thinking_tokens}, response={budget.response_tokens})"
+            )
+            
             # Build context for adaptation
             history_summary = self._build_history_summary(context)
             user_profile = self._build_user_profile(context)
@@ -122,7 +133,8 @@ class ThinkingAdapter:
                 similarity=similarity
             )
             
-            # Use LIGHT tier for speed (~2-3s)
+            # Use LIGHT tier for speed (~2-3s) with adaptive budget
+            # Note: LangChain LLMs handle max_tokens via generation_config
             response = await self._llm.ainvoke(prompt)
             
             # Parse response

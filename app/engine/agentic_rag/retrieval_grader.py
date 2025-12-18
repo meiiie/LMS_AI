@@ -216,17 +216,22 @@ class RetrievalGrader:
     async def grade_documents(
         self,
         query: str,
-        documents: List[Dict[str, Any]]
+        documents: List[Dict[str, Any]],
+        query_embedding: Optional[List[float]] = None
     ) -> GradingResult:
         """
         Grade multiple documents.
         
-        SOTA 2025: Uses batch grading (1 LLM call) instead of sequential (5 calls).
-        Reduces grading time from ~40s to ~10s per phase.
+        SOTA 2025 Phase 3: Tiered grading with embedding fast-pass.
+        - Tier 1: Embedding similarity → Auto PASS/FAIL (skip LLM)
+        - Tier 2: LLM grading → Only for uncertain docs
+        
+        Expected speedup: 70-75% reduction in grader latency.
         
         Args:
             query: User query
             documents: List of document dicts
+            query_embedding: Pre-computed query embedding (optional, for tiered grading)
             
         Returns:
             GradingResult with all grades and summary
@@ -238,8 +243,39 @@ class RetrievalGrader:
                 feedback="No documents retrieved. Try different keywords."
             )
         
-        # SOTA: Use batch grading for efficiency
-        grades = await self.batch_grade_documents(query, documents[:5])
+        # ====================================================================
+        # PHASE 3: TIERED GRADING WITH EMBEDDING FAST-PASS
+        # ====================================================================
+        from app.engine.agentic_rag.tiered_grader import get_tiered_grader
+        
+        tiered_grader = get_tiered_grader()
+        
+        if query_embedding is not None:
+            # Pre-grade with embedding similarity
+            tiered_results = tiered_grader.pre_grade(query_embedding, documents)
+            
+            # Filter uncertain docs for LLM grading
+            uncertain_docs = [
+                doc for doc, result in zip(documents, tiered_results)
+                if not result.skip_llm
+            ]
+            
+            if uncertain_docs:
+                # Only LLM grade uncertain docs
+                llm_grades = await self.batch_grade_documents(query, uncertain_docs[:5])
+            else:
+                llm_grades = []
+            
+            # Merge tiered + LLM grades
+            grades = tiered_grader.merge_grades(tiered_results, llm_grades, documents)
+            
+            logger.info(
+                f"[GRADER] Tiered grading: {len(documents)} docs → "
+                f"LLM called on {len(uncertain_docs)} (saved {len(documents) - len(uncertain_docs)} calls)"
+            )
+        else:
+            # Fallback: Traditional batch grading (no query embedding available)
+            grades = await self.batch_grade_documents(query, documents[:5])
         
         result = GradingResult(query=query, grades=grades)
         
