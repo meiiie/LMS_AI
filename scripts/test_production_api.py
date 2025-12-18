@@ -203,7 +203,7 @@ async def test_chat_rag_query(client: httpx.AsyncClient) -> TestResult:
             f"{API_PREFIX}/chat",
             json={
                 # Updated to match Vietnamese Maritime Law (Bộ luật hàng hải Việt Nam)
-                "message": "Giải thích Điều 15 về trách nhiệm của chủ tàu theo Bộ luật hàng hải Việt Nam.",
+                "message": "Giải thích Điều 28 về trách nhiệm của chủ tàu theo Bộ luật hàng hải Việt Nam.",
                 "user_id": TEST_USER_ID,
                 "role": TEST_ROLE
             },

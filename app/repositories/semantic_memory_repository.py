@@ -918,6 +918,12 @@ class SemanticMemoryRepository:
         """
         self._ensure_initialized()
         
+        # BUGFIX: Validate fact_id to prevent psycopg2.errors.InvalidTextRepresentation
+        # This can happen when merging insights with existing_fact that has no valid id
+        if fact_id is None or str(fact_id) in ('None', '', 'null'):
+            logger.warning(f"[BUGFIX] Invalid fact_id: {fact_id}, skipping metadata update")
+            return False
+        
         try:
             with self._session_factory() as session:
                 metadata_json = json.dumps(metadata)

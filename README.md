@@ -28,6 +28,7 @@
 | Feature | Description |
 |---------|-------------|
 | **Agentic RAG v1.0** | Self-correcting RAG with query analysis, grading, rewriting |
+| **RAG Latency Optimization** | SOTA Phase 1-3.6: Semantic caching, Mini-Judge, Direct feedback (~75% grading latency reduction) |
 | **Contextual RAG** | Anthropic-style context enrichment for 49% better retrieval |
 | **Reasoning Trace** | Step-by-step AI reasoning visibility for transparency |
 | **Document KG** | LLM entity extraction from PDFs into Neo4j graph |
