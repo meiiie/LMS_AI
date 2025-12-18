@@ -296,12 +296,17 @@ class RetrievalGrader:
         
         result = GradingResult(query=query, grades=grades)
         
-        # Generate feedback if needed
+        # ====================================================================
+        # SOTA FIX: Direct rule-based feedback (NO LLM call!)
+        # ====================================================================
+        # Root Cause: _generate_feedback() used MODERATE LLM (~19s latency)
+        # SOTA Pattern: GradingResult already has avg_score + grades[].reason
+        # Reference: LangChain CRAG, Meta CRAG Benchmark, OpenAI RAG 2025
+        # ====================================================================
         if result.needs_rewrite:
-            issues = [g.reason for g in grades if not g.is_relevant]
-            result.feedback = await self._generate_feedback(
-                query, result.avg_score, result.relevant_count, 
-                len(grades), issues
+            issues = [g.reason for g in grades if not g.is_relevant][:3]
+            result.feedback = self._build_feedback_direct(
+                result.avg_score, result.relevant_count, len(grades), issues
             )
         
         logger.info(f"[GRADER] Query='{query[:50]}...' avg_score={result.avg_score:.1f} relevant={result.relevant_count}/{len(grades)}")
@@ -427,6 +432,49 @@ class RetrievalGrader:
                 ) 
                 for doc in documents
             ]
+    
+    def _build_feedback_direct(
+        self,
+        avg_score: float,
+        relevant_count: int,
+        total: int,
+        issues: List[str]
+    ) -> str:
+        """
+        SOTA: Zero-latency feedback generation using rule-based approach.
+        
+        Replaces LLM call (~19s) with direct string formatting (0ms).
+        Reference: LangChain CRAG, Meta CRAG Benchmark, OpenAI RAG 2025
+        
+        Args:
+            avg_score: Average relevance score (0-10)
+            relevant_count: Number of relevant documents
+            total: Total documents graded
+            issues: List of reasons why documents weren't relevant
+            
+        Returns:
+            Formatted feedback string for QueryRewriter
+        """
+        # Format issues - take top 3 unique issues
+        unique_issues = list(dict.fromkeys(issues))[:3]
+        issues_text = "; ".join(unique_issues) if unique_issues else "Documents không trực tiếp trả lời query"
+        
+        # Rule-based feedback based on score severity
+        if avg_score < 3.0:
+            severity = "Rất thấp"
+            suggestion = "Thử sử dụng thuật ngữ hàng hải chuẩn (SOLAS, COLREGs, MARPOL)"
+        elif avg_score < 5.0:
+            severity = "Thấp"
+            suggestion = "Thêm từ khóa cụ thể hoặc diễn đạt lại câu hỏi"
+        else:
+            severity = "Trung bình"
+            suggestion = "Cân nhắc thêm context hoặc phạm vi cụ thể hơn"
+        
+        return (
+            f"Độ liên quan {severity} ({avg_score:.1f}/10, {relevant_count}/{total} docs). "
+            f"Vấn đề: {issues_text[:200]}. "
+            f"Gợi ý: {suggestion}"
+        )
     
     async def _generate_feedback(
         self,
