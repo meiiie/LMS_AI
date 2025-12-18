@@ -3,7 +3,7 @@
 > Self-correcting RAG pipeline with query analysis, grading, and verification.
 
 **Location:** `app/engine/agentic_rag/`  
-**Pattern:** Corrective RAG (CRAG) - SOTA 2024
+**Pattern:** Corrective RAG (CRAG) - SOTA 2025 + Gemini 3 Flash
 
 ---
 

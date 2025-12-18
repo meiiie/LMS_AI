@@ -8,8 +8,9 @@ Key Features:
 - Creates only 3 LLM instances (DEEP, MODERATE, LIGHT) instead of 15+
 - All components share the same instances
 - Memory usage: ~120MB vs ~600MB (5x reduction)
+- Gemini 3 Flash (Dec 2025): 3× faster inference than Gemini 2.5
 
-Reference: MEMORY_OVERFLOW_SOTA_ANALYSIS.md
+Reference: MEMORY_OVERFLOW_SOTA_ANALYSIS.md, RAG_LATENCY_PHASE4_SOTA_ANALYSIS.md
 """
 
 import logging

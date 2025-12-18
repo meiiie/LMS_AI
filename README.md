@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![LangChain](https://img.shields.io/badge/LangChain-1.1.2-1c3c3c?style=flat-square&logo=chainlink&logoColor=white)](https://langchain.com)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.0.4-purple?style=flat-square)](https://langchain.com)
-[![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev)
+[![Gemini](https://img.shields.io/badge/Gemini-3.0_Flash-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev)
 [![Neon](https://img.shields.io/badge/Neon-pgvector-00E599?style=flat-square&logo=postgresql&logoColor=white)](https://neon.tech)
 [![License](https://img.shields.io/badge/License-Proprietary-red?style=flat-square)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-1.0.0-blue?style=flat-square)](CHANGELOG.md)
@@ -45,7 +45,7 @@
 | **Hybrid Search v0.6** | Dense + Sparse + RRF Reranking |
 | **Tool Registry Pattern** | Modular tool management with categories (SOTA 2025) |
 | **LLM Singleton Pool** | Memory optimization: ~600MB → ~120MB (3 shared instances) |
-| **Gemini 2.5 Flash Fix** | Content block handling for 88% confidence scores |
+| **Gemini 3 Flash Upgrade** | 3× faster inference, centralized model config (Dec 2025) |
 
 > 📋 **Full version history:** See [CHANGELOG.md](CHANGELOG.md) | **Future plans:** See [ROADMAP.md](ROADMAP.md)
 
@@ -1106,7 +1106,7 @@ Edit `.env`:
 # LLM Provider
 LLM_PROVIDER=google
 GOOGLE_API_KEY=your_gemini_api_key
-GOOGLE_MODEL=gemini-2.5-flash
+GOOGLE_MODEL=gemini-3-flash-preview
 
 # Database (Neon Serverless Postgres)
 DATABASE_URL=postgresql+asyncpg://user:pass@host/db?ssl=require

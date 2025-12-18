@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     
     # LLM Settings - Google Gemini (primary)
     google_api_key: Optional[str] = Field(default=None, description="Google Gemini API key")
-    google_model: str = Field(default="gemini-2.5-flash", description="Google Gemini model")
+    google_model: str = Field(default="gemini-3-flash-preview", description="Google Gemini model (3.0 Flash = 3× faster)")
     llm_provider: str = Field(default="google", description="LLM provider: google, openai, openrouter")
     
     # Memori Settings (Legacy v0.2)

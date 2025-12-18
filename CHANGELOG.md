@@ -9,6 +9,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2025-12-19)
+- **Gemini 3 Flash Upgrade (Dec 2025 SOTA)**:
+  - Upgraded default model from `gemini-2.5-flash` to `gemini-3-flash-preview`
+  - 3× faster inference speed (Google DeepMind benchmark)
+  - Removed all hardcoded model names, now uses centralized `settings.google_model`
+  - Updated files: `config.py`, `llm_pool.py`, `vision_extractor.py`, `hyde_service.py`
+  - Best practice: Single source of truth for model configuration
+
 ### Fixed (2025-12-18)
 - **Gemini 2.5 Flash Content Block Handling**:
   - Fixed `'list' object has no attribute 'strip'` errors across 16 files (25 locations)

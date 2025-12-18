@@ -113,10 +113,11 @@ class HyDEService:
     def _ensure_llm(self) -> ChatGoogleGenerativeAI:
         """Lazy initialize LLM when first needed."""
         if self._llm is None:
+            # SOTA Pattern: Use centralized config, no hardcoded model names
             self._llm = ChatGoogleGenerativeAI(
-                model="gemini-1.5-flash",  # Fast model for quick generation
+                model=settings.google_model,  # Use config instead of hardcoded
                 temperature=0.3,  # Low temp for consistent output
-                google_api_key=settings.gemini_api_key,
+                google_api_key=settings.google_api_key,
             )
         return self._llm
     

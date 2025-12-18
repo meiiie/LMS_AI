@@ -2,7 +2,7 @@
 Vision Extractor for Multimodal RAG
 
 CHỈ THỊ KỸ THUẬT SỐ 26: Vision-based Document Understanding
-Uses Gemini 2.5 Flash to extract text from document images.
+Uses Gemini 3 Flash (via settings.google_model) to extract text from document images.
 
 **Feature: multimodal-rag-vision**
 **Validates: Requirements 3.1, 3.2, 3.3, 8.1**
@@ -79,17 +79,18 @@ OUTPUT FORMAT:
     
     def __init__(
         self,
-        model: str = "gemini-2.5-flash",
+        model: Optional[str] = None,
         api_key: Optional[str] = None
     ):
         """
         Initialize Vision Extractor.
         
         Args:
-            model: Gemini model name
+            model: Gemini model name (defaults to settings.google_model)
             api_key: Google API key (defaults to settings)
         """
-        self.model_name = model
+        # SOTA Pattern: Use centralized config, no hardcoded model names
+        self.model_name = model or settings.google_model
         self.api_key = api_key or settings.google_api_key
         
         # Initialize google-genai client (new unified SDK)
