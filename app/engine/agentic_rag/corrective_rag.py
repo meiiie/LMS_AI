@@ -199,17 +199,57 @@ class CorrectiveRAG:
                         f"[CRAG] CACHE HIT! similarity={cache_result.similarity:.3f} "
                         f"lookup_time={cache_result.lookup_time_ms:.1f}ms"
                     )
-                    # Return cached result
-                    cached_data = cache_result.value
-                    return CorrectiveRAGResult(
-                        answer=cached_data.get("answer", ""),
-                        sources=cached_data.get("sources", []),
-                        iterations=0,
-                        confidence=cached_data.get("confidence", 0.9),
-                        reasoning_trace=None,  # No trace for cached responses
-                        thinking=cached_data.get("thinking"),
-                        thinking_content="[Cached response - no new reasoning]"
-                    )
+                    
+                    # ============================================================
+                    # PHASE 2: Cache-Augmented Generation (SOTA 2025)
+                    # Use ThinkingAdapter for natural, context-aware responses
+                    # Instead of returning raw cache (anti-pattern)
+                    # ============================================================
+                    from app.engine.agentic_rag.thinking_adapter import get_thinking_adapter
+                    from app.engine.agentic_rag.adaptive_router import get_adaptive_router
+                    
+                    # Get routing decision
+                    router = get_adaptive_router()
+                    routing = router.route(cache_result=cache_result)
+                    
+                    logger.info(f"[CRAG] Router: {routing.path.value} ({routing.reason})")
+                    
+                    if routing.use_thinking_adapter:
+                        # Adapt cached response with fresh thinking
+                        adapter = get_thinking_adapter()
+                        adapted = await adapter.adapt(
+                            query=query,
+                            cached_response=cache_result.value,
+                            context=context,
+                            similarity=cache_result.similarity
+                        )
+                        
+                        logger.info(
+                            f"[CRAG] ThinkingAdapter: {adapted.adaptation_time_ms:.0f}ms "
+                            f"(method={adapted.adaptation_method})"
+                        )
+                        
+                        return CorrectiveRAGResult(
+                            answer=adapted.answer,
+                            sources=cache_result.value.get("sources", []),
+                            iterations=0,
+                            confidence=cache_result.value.get("confidence", 0.9),
+                            reasoning_trace=None,
+                            thinking=adapted.thinking,
+                            thinking_content=f"[Cache-Augmented Generation]\n{adapted.thinking}"
+                        )
+                    else:
+                        # Fallback for edge cases
+                        cached_data = cache_result.value
+                        return CorrectiveRAGResult(
+                            answer=cached_data.get("answer", ""),
+                            sources=cached_data.get("sources", []),
+                            iterations=0,
+                            confidence=cached_data.get("confidence", 0.9),
+                            reasoning_trace=None,
+                            thinking=cached_data.get("thinking"),
+                            thinking_content="[Low similarity - fallback response]"
+                        )
                 else:
                     logger.debug(f"[CRAG] Cache MISS, proceeding with full pipeline")
                     
