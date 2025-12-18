@@ -187,8 +187,8 @@ class CorrectiveRAG:
         if self._cache_enabled and self._cache:
             try:
                 # Get query embedding for semantic matching
-                from app.engine.gemini_embedding import get_gemini_embeddings
-                embeddings = get_gemini_embeddings()
+                from app.engine.gemini_embedding import get_embeddings
+                embeddings = get_embeddings()
                 query_embedding = embeddings.embed_query(query)
                 
                 # Check cache
@@ -389,8 +389,8 @@ class CorrectiveRAG:
             try:
                 # Get embedding if not already computed
                 if query_embedding is None:
-                    from app.engine.gemini_embedding import get_gemini_embeddings
-                    embeddings = get_gemini_embeddings()
+                    from app.engine.gemini_embedding import get_embeddings
+                    embeddings = get_embeddings()
                     query_embedding = embeddings.embed_query(query)
                 
                 # Extract document IDs for cache invalidation
