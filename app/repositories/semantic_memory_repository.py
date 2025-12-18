@@ -70,6 +70,10 @@ class SemanticMemoryRepository:
     
     def _format_embedding(self, embedding: List[float]) -> str:
         """Format embedding list as pgvector string."""
+        if embedding is None or len(embedding) == 0:
+            # Return empty vector array - pgvector will handle as null or empty
+            logger.warning("Received None or empty embedding, using empty vector")
+            return "[]"
         return f"[{','.join(str(x) for x in embedding)}]"
     
     def save_memory(
@@ -826,21 +830,32 @@ class SemanticMemoryRepository:
         metadata: dict
     ) -> bool:
         """
-        Update existing fact content and embedding.
+        Full update of fact content, embedding, and metadata.
         
-        Preserves original ID and created_at, updates content, embedding, updated_at.
+        SOTA Pattern: Explicit API - requires all fields for full update.
+        For metadata-only updates (preserving embedding), use update_metadata_only().
         
         Args:
             fact_id: UUID of the fact to update
-            content: New content
-            embedding: New embedding vector
-            metadata: New metadata
+            content: New content (required)
+            embedding: New embedding vector (REQUIRED, must be non-empty)
+            metadata: New metadata (required)
             
         Returns:
             True if update successful
             
+        Raises:
+            ValueError: If embedding is None or empty
+            
         **Validates: Requirements 2.2, 2.4**
         """
+        # SOTA: Explicit validation - fail fast with clear error
+        if embedding is None or len(embedding) == 0:
+            raise ValueError(
+                "embedding is required for update_fact(). "
+                "Use update_metadata_only() for metadata-only updates."
+            )
+        
         self._ensure_initialized()
         
         try:
@@ -873,8 +888,63 @@ class SemanticMemoryRepository:
                     return True
                 return False
                 
+        except ValueError:
+            # Re-raise validation errors
+            raise
         except Exception as e:
             logger.error(f"Failed to update fact: {e}")
+            return False
+    
+    def update_metadata_only(
+        self,
+        fact_id: UUID,
+        metadata: dict
+    ) -> bool:
+        """
+        Update ONLY metadata, preserving content and embedding.
+        
+        SOTA Pattern: Explicit API for partial updates.
+        Use this when merging insights or updating confidence without
+        re-generating embeddings.
+        
+        Args:
+            fact_id: UUID of the fact to update
+            metadata: New metadata to set (will replace existing metadata)
+            
+        Returns:
+            True if update successful
+            
+        **Feature: SOTA-explicit-api**
+        """
+        self._ensure_initialized()
+        
+        try:
+            with self._session_factory() as session:
+                metadata_json = json.dumps(metadata)
+                
+                query = text(f"""
+                    UPDATE {self.TABLE_NAME}
+                    SET metadata = CAST(:metadata AS jsonb),
+                        updated_at = NOW()
+                    WHERE id = :fact_id
+                    RETURNING id
+                """)
+                
+                result = session.execute(query, {
+                    "fact_id": str(fact_id),
+                    "metadata": metadata_json
+                })
+                
+                row = result.fetchone()
+                session.commit()
+                
+                if row:
+                    logger.debug(f"Updated metadata for fact {fact_id}")
+                    return True
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to update metadata: {e}")
             return False
     
     def delete_oldest_facts(

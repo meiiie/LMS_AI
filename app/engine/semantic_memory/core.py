@@ -785,17 +785,21 @@ Return ONLY valid JSON:"""
             return False
     
     async def _merge_insight(self, new_insight: Insight, existing_insight: Insight) -> bool:
-        """Merge new insight with existing one."""
+        """
+        Merge new insight with existing one - metadata only, preserve embedding.
+        
+        SOTA Fix: Use explicit update_metadata_only() API instead of
+        passing embedding=None to update_fact().
+        """
         try:
             new_confidence = (existing_insight.confidence + new_insight.confidence) / 2
             
             evolution_notes = existing_insight.evolution_notes.copy() if existing_insight.evolution_notes else []
             evolution_notes.append(f"Merged with similar insight: {new_insight.content[:50]}...")
             
-            return self._repository.update_fact(
+            # SOTA FIX: Use correct API for metadata-only update
+            return self._repository.update_metadata_only(
                 fact_id=existing_insight.id,
-                content=existing_insight.content,
-                embedding=None,
                 metadata={
                     **existing_insight.to_metadata(),
                     "confidence": new_confidence,

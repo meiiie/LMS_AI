@@ -41,6 +41,13 @@ from app.engine.reasoning_tracer import (
 # Pattern: Use Gemini's native thinking directly (aligns with Claude/Qwen/Gemini 2025)
 from app.models.schemas import ReasoningTrace
 
+# =============================================================================
+# SEMANTIC CACHE (SOTA 2025 - RAG Latency Optimization)
+# =============================================================================
+from app.cache.cache_manager import CacheManager, get_cache_manager
+from app.cache.models import CacheConfig
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -132,6 +139,24 @@ class CorrectiveRAG:
         self._rewriter = get_query_rewriter()
         self._verifier = get_answer_verifier()
         
+        # ================================================================
+        # SEMANTIC CACHE (SOTA 2025 - RAG Latency Optimization)
+        # ================================================================
+        self._cache_enabled = settings.semantic_cache_enabled
+        if self._cache_enabled:
+            cache_config = CacheConfig(
+                similarity_threshold=settings.cache_similarity_threshold,
+                response_ttl=settings.cache_response_ttl,
+                max_response_entries=settings.cache_max_response_entries,
+                log_cache_operations=settings.cache_log_operations,
+                enabled=True
+            )
+            self._cache = get_cache_manager(cache_config)
+            logger.info(f"[CRAG] Semantic cache enabled (threshold={cache_config.similarity_threshold})")
+        else:
+            self._cache = None
+            logger.info("[CRAG] Semantic cache disabled")
+        
         logger.info(f"CorrectiveRAG initialized (max_iter={max_iterations}, threshold={grade_threshold})")
     
     async def process(
@@ -155,6 +180,44 @@ class CorrectiveRAG:
         
         # Initialize reasoning tracer (Feature: reasoning-trace)
         tracer = get_reasoning_tracer()
+        
+        # ================================================================
+        # SEMANTIC CACHE CHECK (SOTA 2025 - Cache-First Pattern)
+        # ================================================================
+        if self._cache_enabled and self._cache:
+            try:
+                # Get query embedding for semantic matching
+                from app.engine.gemini_embedding import get_gemini_embeddings
+                embeddings = get_gemini_embeddings()
+                query_embedding = embeddings.embed_query(query)
+                
+                # Check cache
+                cache_result = await self._cache.get(query, query_embedding)
+                
+                if cache_result.hit:
+                    logger.info(
+                        f"[CRAG] CACHE HIT! similarity={cache_result.similarity:.3f} "
+                        f"lookup_time={cache_result.lookup_time_ms:.1f}ms"
+                    )
+                    # Return cached result
+                    cached_data = cache_result.value
+                    return CorrectiveRAGResult(
+                        answer=cached_data.get("answer", ""),
+                        sources=cached_data.get("sources", []),
+                        iterations=0,
+                        confidence=cached_data.get("confidence", 0.9),
+                        reasoning_trace=None,  # No trace for cached responses
+                        thinking=cached_data.get("thinking"),
+                        thinking_content="[Cached response - no new reasoning]"
+                    )
+                else:
+                    logger.debug(f"[CRAG] Cache MISS, proceeding with full pipeline")
+                    
+            except Exception as e:
+                logger.warning(f"[CRAG] Cache lookup failed: {e}, proceeding without cache")
+                query_embedding = None  # Will regenerate if needed for storage
+        else:
+            query_embedding = None
         
         # Step 1: Analyze query
         tracer.start_step(StepNames.QUERY_ANALYSIS, "Phân tích độ phức tạp câu hỏi")
@@ -318,6 +381,39 @@ class CorrectiveRAG:
             logger.info("[CRAG] Native thinking unavailable, using structured summary")
         
         logger.info(f"[CRAG] Complete: iterations={iterations}, confidence={confidence:.0f}%")
+        
+        # ================================================================
+        # CACHE STORAGE (SOTA 2025 - Store for future hits)
+        # ================================================================
+        if self._cache_enabled and self._cache and confidence >= 0.7:
+            try:
+                # Get embedding if not already computed
+                if query_embedding is None:
+                    from app.engine.gemini_embedding import get_gemini_embeddings
+                    embeddings = get_gemini_embeddings()
+                    query_embedding = embeddings.embed_query(query)
+                
+                # Extract document IDs for cache invalidation
+                doc_ids = [s.get("document_id", "") for s in sources if s.get("document_id")]
+                
+                # Store in cache
+                cache_data = {
+                    "answer": answer,
+                    "sources": sources,
+                    "confidence": confidence,
+                    "thinking": thinking
+                }
+                await self._cache.set(
+                    query=query,
+                    embedding=query_embedding,
+                    response=cache_data,
+                    document_ids=doc_ids,
+                    metadata={"iterations": iterations, "was_rewritten": was_rewritten}
+                )
+                logger.info(f"[CRAG] Response cached (confidence={confidence:.0f}%, docs={len(doc_ids)})")
+                
+            except Exception as e:
+                logger.warning(f"[CRAG] Failed to cache response: {e}")
         
         return CorrectiveRAGResult(
             answer=answer,

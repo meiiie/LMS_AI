@@ -195,6 +195,20 @@ class Settings(BaseSettings):
     entity_extraction_enabled: bool = Field(default=True, description="Enable entity extraction during ingestion")
     entity_extraction_batch_size: int = Field(default=3, description="Chunks to process concurrently for extraction")
     
+    # =============================================================================
+    # SEMANTIC CACHE SETTINGS (SOTA 2025 - RAG Latency Optimization)
+    # =============================================================================
+    # Multi-tier caching: Response (L1), Retrieval (L2), Embedding (L3)
+    # Expert-recommended conservative thresholds
+    
+    semantic_cache_enabled: bool = Field(default=True, description="Enable semantic response caching")
+    cache_similarity_threshold: float = Field(default=0.95, description="Similarity threshold for cache hits (conservative)")
+    cache_response_ttl: int = Field(default=7200, description="Response cache TTL in seconds (2 hours)")
+    cache_retrieval_ttl: int = Field(default=1800, description="Retrieval cache TTL in seconds (30 min)")
+    cache_embedding_ttl: int = Field(default=3600, description="Embedding cache TTL in seconds (1 hour)")
+    cache_max_response_entries: int = Field(default=10000, description="Maximum response cache entries")
+    cache_log_operations: bool = Field(default=True, description="Log cache hit/miss operations")
+    
     # Semantic Chunking Settings (Feature: semantic-chunking)
     chunk_size: int = Field(default=800, description="Target chunk size in characters")
     chunk_overlap: int = Field(default=100, description="Overlap between consecutive chunks")
