@@ -97,6 +97,16 @@ Response includes `trace_id` and `trace_summary`.
 
 ## 📝 Changelog
 
+### 2025-12-19: SOTA Trace Architecture (CHỈ THỊ SỐ 31 v3)
+- **Research:** OpenAI o3, Anthropic Claude 3.7, DeepSeek R1, Google Gemini 3, LangGraph
+- **Pattern:** Single Build Point + Shared State + Unified CRAG Trace
+- **Changes:**
+  - `graph.py`: Removed build_trace from direct_response_node (Single Build Point)
+  - `graph.py`: Fixed synthesizer merge via `was_corrected` detection
+  - `rag_tools.py`: tool_maritime_search now uses CorrectiveRAG (8-step trace)  
+  - `tutor_node.py`: Propagates CRAG trace to state for merge
+- **Result:** ALL RAG paths produce 10+ step traces (routing + 8 CRAG + quality_check + synthesis)
+
 ### 2025-12-16: SOTA Vietnamese Thinking (CHỈ THỊ SỐ 29 v6)
 - **Feature:** Centralized thinking language config in `_shared.yaml`
 - **Integration:** `PromptLoader.build_thinking_instruction()` in `rag_agent.py`
@@ -117,6 +127,7 @@ Response includes `trace_id` and `trace_summary`.
 - **Bug:** `MemoryAgentNode._semantic_memory` was `None` → returned "Không có thông tin về user"
 - **Fix:** `graph.py:memory_node()` now injects `get_semantic_memory_engine()` singleton
 - **Result:** Test 5 Thread Continuity passes (`remembers_name: true`)
+
 
 ---
 

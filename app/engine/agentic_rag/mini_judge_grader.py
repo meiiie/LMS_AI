@@ -143,7 +143,24 @@ Answer:"""
                 timeout=self._config.timeout_seconds
             )
             
-            result_text = response.content.strip().lower()
+            # CHỈ THỊ SỐ 31 v4: Handle Gemini 3 response.content types
+            # Gemini 3 Flash can return content as list or string
+            # Following Google GenAI SDK patterns for safe content extraction
+            raw_content = response.content
+            if isinstance(raw_content, list):
+                # Extract text from list of content parts
+                text_parts = []
+                for part in raw_content:
+                    if isinstance(part, str):
+                        text_parts.append(part)
+                    elif hasattr(part, 'text'):
+                        text_parts.append(part.text)
+                    elif isinstance(part, dict) and 'text' in part:
+                        text_parts.append(part['text'])
+                result_text = ' '.join(text_parts).strip().lower()
+            else:
+                result_text = str(raw_content).strip().lower()
+                
             latency_ms = (time.time() - start_time) * 1000
             
             # Parse response
@@ -156,6 +173,7 @@ Answer:"""
                 confidence = "medium"
             else:
                 confidence = "low"
+
             
             return MiniJudgeResult(
                 document_id=doc_id,

@@ -61,7 +61,9 @@ graph TD
 
 | Tool | Category | Access | Description |
 |------|----------|--------|-------------|
-| `tool_maritime_search` | RAG | READ | Search COLREGs, SOLAS, MARPOL regulations |
+| `tool_maritime_search` | RAG | READ | Search COLREGs, SOLAS, MARPOL via **CorrectiveRAG** (8-step trace) |
+
+> **CHỈ THỊ SỐ 31 v3 (2025-12-19):** `tool_maritime_search` now uses `CorrectiveRAG.process()` instead of `RAGAgent.query()` to generate full 8-step reasoning trace for SOTA transparency.
 
 ### Memory Tools (6)
 
