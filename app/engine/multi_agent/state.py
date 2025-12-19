@@ -62,5 +62,9 @@ class AgentState(TypedDict, total=False):
     
     # CHỈ THỊ SỐ 29: Native thinking from Gemini (SOTA 2025)
     thinking: Optional[str]  # Native Gemini thinking (priority)
+    
+    # CHỈ THỊ SỐ 30: Internal tracer reference for graph-level universal tracing
+    # Enables consistent ReasoningTrace across ALL paths (direct, memory, tutor, rag)
+    _tracer: Optional[Any]  # ReasoningTracer instance inherited across nodes
 
 

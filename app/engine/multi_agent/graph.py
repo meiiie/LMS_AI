@@ -6,6 +6,8 @@ LangGraph workflow for multi-agent orchestration.
 Pattern: Supervisor with specialized worker agents
 
 **Integrated with agents/ framework for registry and tracing.**
+
+**CHỈ THỊ SỐ 30: Universal ReasoningTrace for ALL paths**
 """
 
 import logging
@@ -23,7 +25,31 @@ from app.engine.multi_agent.agents.grader_agent import GraderAgentNode, get_grad
 # Agent Registry integration
 from app.engine.agents import get_agent_registry, register_agent
 
+# CHỈ THỊ SỐ 30: Universal ReasoningTrace
+from app.engine.reasoning_tracer import get_reasoning_tracer, StepNames, ReasoningTracer
+
 logger = logging.getLogger(__name__)
+
+
+def _get_or_create_tracer(state: AgentState) -> ReasoningTracer:
+    """
+    Get existing tracer from state or create new one.
+    
+    CHỈ THỊ SỐ 30: Enables tracer inheritance across nodes for unified trace.
+    This ensures ALL paths (direct, memory, tutor, rag) contribute to
+    the same reasoning trace, matching SOTA patterns from OpenAI o1, Claude, etc.
+    
+    Args:
+        state: Current agent state
+        
+    Returns:
+        ReasoningTracer instance (either inherited or new)
+    """
+    tracer = state.get("_tracer")
+    if tracer is None:
+        tracer = get_reasoning_tracer()
+        state["_tracer"] = tracer
+    return tracer
 
 
 # =============================================================================
@@ -31,11 +57,33 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 async def supervisor_node(state: AgentState) -> AgentState:
-    """Supervisor node - routes to appropriate agent."""
+    """
+    Supervisor node - routes to appropriate agent.
+    
+    CHỈ THỊ SỐ 30: Adds ROUTING step to reasoning trace.
+    """
     registry = get_agent_registry()
+    
+    # CHỈ THỊ SỐ 30: Universal tracing - start routing step
+    tracer = _get_or_create_tracer(state)
+    tracer.start_step(StepNames.ROUTING, "Phân tích và định tuyến câu hỏi")
+    
     with registry.tracer.span("supervisor", "route"):
         supervisor = get_supervisor_agent()
-        return await supervisor.process(state)
+        result_state = await supervisor.process(state)
+        
+        # Record routing decision
+        next_agent = result_state.get("next_agent", "unknown")
+        tracer.end_step(
+            result=f"Định tuyến đến: {next_agent}",
+            confidence=0.9,
+            details={"routed_to": next_agent}
+        )
+        
+        # Propagate tracer to result state
+        result_state["_tracer"] = tracer
+        
+        return result_state
 
 
 async def rag_node(state: AgentState) -> AgentState:
@@ -55,32 +103,97 @@ async def tutor_node(state: AgentState) -> AgentState:
 
 
 async def memory_node(state: AgentState) -> AgentState:
-    """Memory agent node - context retrieval."""
+    """
+    Memory agent node - context retrieval.
+    
+    CHỈ THỊ SỐ 30: Adds MEMORY_LOOKUP step to reasoning trace.
+    """
     registry = get_agent_registry()
+    
+    # CHỈ THỊ SỐ 30: Universal tracing
+    tracer = _get_or_create_tracer(state)
+    tracer.start_step(StepNames.MEMORY_LOOKUP, "Truy xuất ngữ cảnh và bộ nhớ người dùng")
+    
     with registry.tracer.span("memory_agent", "process"):
         # SOTA FIX: Use singleton pattern (like ChatGPT/Claude) for memory engine
-        # Avoids creating new instances each call - resource efficient
         from app.engine.semantic_memory import get_semantic_memory_engine
         semantic_memory = get_semantic_memory_engine()
         memory_agent = get_memory_agent_node(semantic_memory=semantic_memory)
-        return await memory_agent.process(state)
+        result_state = await memory_agent.process(state)
+        
+        # End step with result
+        memory_output = result_state.get("memory_output", "")
+        tracer.end_step(
+            result=f"Truy xuất ngữ cảnh: {len(memory_output)} chars",
+            confidence=0.85,
+            details={"has_context": bool(memory_output)}
+        )
+        
+        # Propagate tracer
+        result_state["_tracer"] = tracer
+        
+        return result_state
 
 
 async def grader_node(state: AgentState) -> AgentState:
-    """Grader agent node - quality control."""
+    """
+    Grader agent node - quality control.
+    
+    CHỈ THỊ SỐ 30: Adds QUALITY_CHECK step to reasoning trace.
+    """
     registry = get_agent_registry()
+    
+    # CHỈ THỊ SỐ 30: Universal tracing
+    tracer = _get_or_create_tracer(state)
+    tracer.start_step(StepNames.QUALITY_CHECK, "Kiểm tra chất lượng câu trả lời")
+    
     with registry.tracer.span("grader_agent", "process"):
         grader_agent = get_grader_agent_node()
-        return await grader_agent.process(state)
+        result_state = await grader_agent.process(state)
+        
+        # End step with grader result
+        score = result_state.get("grader_score", 0)
+        tracer.end_step(
+            result=f"Điểm chất lượng: {score}/10",
+            confidence=score / 10,
+            details={"score": score, "passed": score >= 6}
+        )
+        
+        # Propagate tracer
+        result_state["_tracer"] = tracer
+        
+        return result_state
 
 
 async def synthesizer_node(state: AgentState) -> AgentState:
-    """Synthesizer node - combine outputs into final response."""
+    """
+    Synthesizer node - combine outputs into final response.
+    
+    CHỈ THỊ SỐ 30: Adds SYNTHESIS step and builds final reasoning_trace.
+    This is the final node where trace is compiled for non-direct paths.
+    """
+    # CHỈ THỊ SỐ 30: Universal tracing
+    tracer = _get_or_create_tracer(state)
+    tracer.start_step(StepNames.SYNTHESIS, "Tổng hợp câu trả lời cuối cùng")
+    
     supervisor = get_supervisor_agent()
     
     # Synthesize outputs
     final_response = await supervisor.synthesize(state)
     state["final_response"] = final_response
+    
+    # End synthesis step
+    tracer.end_step(
+        result=f"Tổng hợp hoàn tất: {len(final_response)} chars",
+        confidence=0.9,
+        details={"response_length": len(final_response)}
+    )
+    
+    # CHỈ THỊ SỐ 30: Build final reasoning_trace if not already built
+    # (direct path builds its own, other paths need synthesizer to build)
+    if state.get("reasoning_trace") is None:
+        state["reasoning_trace"] = tracer.build_trace()
+        logger.info(f"[SYNTHESIZER] Built trace: {state['reasoning_trace'].total_steps} steps")
     
     logger.info(f"[SYNTHESIZER] Final response generated, length={len(final_response)}")
     
@@ -88,8 +201,17 @@ async def synthesizer_node(state: AgentState) -> AgentState:
 
 
 async def direct_response_node(state: AgentState) -> AgentState:
-    """Direct response node - simple responses without RAG."""
+    """
+    Direct response node - simple responses without RAG.
+    
+    CHỈ THỊ SỐ 30: Adds DIRECT_RESPONSE step and builds reasoning_trace.
+    This ensures direct path has consistent trace like other paths.
+    """
     query = state.get("query", "")
+    
+    # CHỈ THỊ SỐ 30: Get inherited tracer from supervisor
+    tracer = _get_or_create_tracer(state)
+    tracer.start_step(StepNames.DIRECT_RESPONSE, "Tạo phản hồi trực tiếp")
     
     # Simple greeting responses
     greetings = {
@@ -103,8 +225,22 @@ async def direct_response_node(state: AgentState) -> AgentState:
     query_lower = query.lower().strip()
     response = greetings.get(query_lower, "Tôi có thể giúp gì cho bạn?")
     
+    # End step with result
+    tracer.end_step(
+        result=f"Phản hồi đơn giản: {response[:50]}...",
+        confidence=1.0,
+        details={"response_type": "greeting", "query": query_lower}
+    )
+    
     state["final_response"] = response
     state["agent_outputs"] = {"direct": response}
+    
+    # CHỈ THỊ SỐ 30: Build and store reasoning_trace for direct path
+    # This ensures direct path has trace just like rag/tutor paths
+    state["reasoning_trace"] = tracer.build_trace(final_confidence=0.95)
+    state["_tracer"] = tracer
+    
+    logger.info(f"[DIRECT] Response with trace: {state['reasoning_trace'].total_steps} steps")
     
     return state
 

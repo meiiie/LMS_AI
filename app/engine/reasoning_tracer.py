@@ -241,6 +241,7 @@ class ReasoningTracer:
 # Step name constants for consistency
 class StepNames:
     """Standard step names for reasoning trace"""
+    # Core CRAG steps
     QUERY_ANALYSIS = "query_analysis"
     RETRIEVAL = "retrieval"
     GRADING = "grading"
@@ -249,6 +250,13 @@ class StepNames:
     VERIFICATION = "verification"
     MEMORY_LOOKUP = "memory_lookup"
     TOOL_CALL = "tool_call"
+    
+    # CHỈ THỊ SỐ 30: Universal tracing step names
+    ROUTING = "routing"  # Supervisor routing decision
+    DIRECT_RESPONSE = "direct_response"  # Simple greetings
+    TEACHING = "teaching"  # Tutor agent
+    QUALITY_CHECK = "quality_check"  # Grader agent
+    SYNTHESIS = "synthesis"  # Final synthesizer
 
 
 def get_reasoning_tracer() -> ReasoningTracer:
