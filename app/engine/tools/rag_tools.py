@@ -28,6 +28,9 @@ _last_retrieved_sources: List[Dict[str, str]] = []
 _last_native_thinking: Optional[str] = None
 # CHỈ THỊ SỐ 31: Store reasoning_trace from CRAG for trace merge
 _last_reasoning_trace: Optional[Any] = None
+# SOTA 2025: Store last confidence for early termination in ReAct loop
+_last_confidence: float = 0.0
+_last_is_complete: bool = False
 
 
 def init_rag_tools(rag_agent):
@@ -68,12 +71,28 @@ def get_last_reasoning_trace():
     return _last_reasoning_trace
 
 
+def get_last_confidence() -> tuple[float, bool]:
+    """
+    Get the last confidence score and completion flag from RAG.
+    
+    SOTA 2025: Confidence-based early termination pattern.
+    This allows TutorAgent ReAct loop to decide when to stop iterating.
+    
+    Returns:
+        Tuple of (confidence: 0.0-1.0, is_complete: bool)
+        is_complete = True if confidence >= 0.85 (HIGH)
+    """
+    return _last_confidence, _last_is_complete
+
+
 def clear_retrieved_sources():
-    """Clear the retrieved sources, native thinking, and reasoning trace."""
-    global _last_retrieved_sources, _last_native_thinking, _last_reasoning_trace
+    """Clear the retrieved sources, native thinking, reasoning trace, and confidence."""
+    global _last_retrieved_sources, _last_native_thinking, _last_reasoning_trace, _last_confidence, _last_is_complete
     _last_retrieved_sources = []
     _last_native_thinking = None
     _last_reasoning_trace = None
+    _last_confidence = 0.0
+    _last_is_complete = False
 
 
 # =============================================================================
@@ -90,7 +109,7 @@ async def tool_maritime_search(query: str) -> str:
     CHỈ THỊ SỐ 31 v3 SOTA: Uses CorrectiveRAG for full 8-step trace.
     Following DeepSeek R1 pattern: consistent trace from all RAG calls.
     """
-    global _rag_agent, _last_retrieved_sources, _last_native_thinking, _last_reasoning_trace
+    global _rag_agent, _last_retrieved_sources, _last_native_thinking, _last_reasoning_trace, _last_confidence, _last_is_complete
     
     # Import CorrectiveRAG for SOTA trace generation
     from app.engine.agentic_rag.corrective_rag import get_corrective_rag
@@ -107,6 +126,12 @@ async def tool_maritime_search(query: str) -> str:
         crag_result = await crag.process(query, context={})
         
         result = crag_result.answer
+        
+        # SOTA 2025: Store confidence for early termination
+        # Normalize confidence from CRAG (0-100 to 0.0-1.0)
+        _last_confidence = crag_result.confidence / 100.0 if crag_result.confidence > 1 else crag_result.confidence
+        _last_is_complete = _last_confidence >= 0.85  # HIGH confidence threshold
+        logger.info(f"[TOOL] Confidence: {_last_confidence:.2f}, is_complete: {_last_is_complete}")
         
         # CHỈ THỊ SỐ 31 v3: Store CRAG trace for propagation
         _last_reasoning_trace = crag_result.reasoning_trace
@@ -145,13 +170,18 @@ async def tool_maritime_search(query: str) -> str:
         else:
             _last_retrieved_sources = []
         
-        return result
+        # SOTA 2025: Embed confidence signal in output for TutorAgent early termination
+        # This follows Anthropic's tool result pattern with structured metadata
+        confidence_signal = f"\n\n<!-- CONFIDENCE: {_last_confidence:.2f} | IS_COMPLETE: {_last_is_complete} -->"
+        return result + confidence_signal
         
     except Exception as e:
         logger.error(f"Maritime search error: {e}")
         _last_retrieved_sources = []
         _last_native_thinking = None
         _last_reasoning_trace = None
+        _last_confidence = 0.0
+        _last_is_complete = False
         return f"Lỗi khi tra cứu: {str(e)}"
 
 

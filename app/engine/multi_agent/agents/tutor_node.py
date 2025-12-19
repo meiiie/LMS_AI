@@ -27,6 +27,7 @@ from app.engine.tools.rag_tools import (
     get_last_retrieved_sources,
     get_last_native_thinking,  # CHỈ THỊ SỐ 29 v9: Option B+ thinking propagation
     get_last_reasoning_trace,  # CHỈ THỊ SỐ 31 v3: CRAG trace propagation
+    get_last_confidence,  # SOTA 2025: Confidence-based early termination
     clear_retrieved_sources
 )
 
@@ -255,6 +256,23 @@ class TutorAgentNode:
                         
                         logger.info(f"[TUTOR_AGENT] Tool result length: {len(str(result))}")
                         
+                        # ============================================================
+                        # SOTA 2025: Confidence-Based Early Termination
+                        # Pattern from Anthropic/OpenAI: Exit ReAct loop on HIGH confidence
+                        # This prevents redundant tool calls (root cause of 125s latency)
+                        # ============================================================
+                        confidence, is_complete = get_last_confidence()
+                        if is_complete and confidence >= 0.85:
+                            logger.info(f"[TUTOR_AGENT] HIGH confidence ({confidence:.2f}) - EARLY TERMINATION")
+                            logger.info(f"[TUTOR_AGENT] Skipping {max_iterations - iteration - 1} remaining iterations")
+                            # Force LLM to generate final response using available context
+                            # This is the key optimization: don't let LLM call tool again
+                            break
+                        elif confidence >= 0.60:
+                            logger.info(f"[TUTOR_AGENT] MEDIUM confidence ({confidence:.2f}) - continuing loop")
+                        else:
+                            logger.info(f"[TUTOR_AGENT] LOW confidence ({confidence:.2f}) - will retry")
+                        
                     except Exception as e:
                         logger.error(f"[TUTOR_AGENT] Tool error: {e}")
                         messages.append(AIMessage(content="", tool_calls=[tool_call]))
@@ -262,6 +280,12 @@ class TutorAgentNode:
                             content=f"Error: {str(e)}",
                             tool_call_id=tool_id
                         ))
+            
+            # SOTA 2025: Check if we should break outer loop on HIGH confidence
+            confidence, is_complete = get_last_confidence()
+            if is_complete and confidence >= 0.85:
+                logger.info(f"[TUTOR_AGENT] Breaking outer loop - HIGH confidence achieved")
+                break
         
         # If we exhausted iterations without final response, generate one
         if not final_response:
