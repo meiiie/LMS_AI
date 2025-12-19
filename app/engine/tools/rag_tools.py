@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 _rag_agent = None
 _last_retrieved_sources: List[Dict[str, str]] = []
+# CHỈ THỊ SỐ 29 v9: Store native thinking for SOTA reasoning transparency
+_last_native_thinking: Optional[str] = None
 
 
 def init_rag_tools(rag_agent):
@@ -38,10 +40,24 @@ def get_last_retrieved_sources() -> List[Dict[str, str]]:
     return _last_retrieved_sources
 
 
+def get_last_native_thinking() -> Optional[str]:
+    """
+    Get the last native thinking from RAG for SOTA reasoning transparency.
+    
+    CHỈ THỊ SỐ 29 v9: Option B+ - Tool-level thinking propagation.
+    This allows tutor_node to capture RAGAgent's thinking and propagate to state.
+    
+    Returns:
+        Native thinking string from Gemini, or None if not available
+    """
+    return _last_native_thinking
+
+
 def clear_retrieved_sources():
-    """Clear the retrieved sources."""
-    global _last_retrieved_sources
+    """Clear the retrieved sources and native thinking."""
+    global _last_retrieved_sources, _last_native_thinking
     _last_retrieved_sources = []
+    _last_native_thinking = None
 
 
 # =============================================================================
@@ -54,7 +70,7 @@ CHỈ gọi khi user hỏi về kiến thức chuyên môn hàng hải.
 """)
 async def tool_maritime_search(query: str) -> str:
     """Search maritime regulations and knowledge base."""
-    global _rag_agent, _last_retrieved_sources
+    global _rag_agent, _last_retrieved_sources, _last_native_thinking
     
     if not _rag_agent:
         return "Lỗi: RAG Agent không khả dụng. Không thể tra cứu kiến thức."
@@ -64,6 +80,12 @@ async def tool_maritime_search(query: str) -> str:
         response = await _rag_agent.query(query, user_role="student")
         
         result = response.content
+        
+        # CHỈ THỊ SỐ 29 v9: Capture native thinking for SOTA reasoning transparency
+        # This is Option B+ - Tool-level thinking propagation
+        _last_native_thinking = getattr(response, 'native_thinking', None)
+        if _last_native_thinking:
+            logger.info(f"[TOOL] Native thinking captured: {len(_last_native_thinking)} chars")
         
         # CHỈ THỊ KỸ THUẬT SỐ 16: Lưu sources để API trả về
         # CHỈ THỊ 26: Include image_url for evidence images
@@ -97,6 +119,7 @@ async def tool_maritime_search(query: str) -> str:
     except Exception as e:
         logger.error(f"Maritime search error: {e}")
         _last_retrieved_sources = []
+        _last_native_thinking = None
         return f"Lỗi khi tra cứu: {str(e)}"
 
 

@@ -25,6 +25,7 @@ from app.engine.agents import TUTOR_AGENT_CONFIG, AgentConfig
 from app.engine.tools.rag_tools import (
     tool_maritime_search,
     get_last_retrieved_sources,
+    get_last_native_thinking,  # CHỈ THỊ SỐ 29 v9: Option B+ thinking propagation
     clear_retrieved_sources
 )
 
@@ -107,19 +108,24 @@ class TutorAgentNode:
         
         SOTA Pattern: Think → Act → Observe → Repeat
         
+        CHỈ THỊ SỐ 29 v9: Option B+ - Propagates thinking to state for API transparency.
+        Combines thinking from:
+        1. RAG tool (via get_last_native_thinking)
+        2. Tutor LLM response (extracted in _react_loop)
+        
         Args:
             state: Current agent state
             
         Returns:
-            Updated state with tutor output, sources, and tools_used
+            Updated state with tutor output, sources, tools_used, and thinking
         """
         query = state.get("query", "")
         context = state.get("context", {})
         learning_context = state.get("learning_context", {})
         
         try:
-            # Execute ReAct loop
-            response, sources, tools_used = await self._react_loop(
+            # Execute ReAct loop - now returns thinking
+            response, sources, tools_used, thinking = await self._react_loop(
                 query=query,
                 context={**context, **learning_context}
             )
@@ -130,7 +136,14 @@ class TutorAgentNode:
             state["tools_used"] = tools_used
             state["agent_outputs"] = state.get("agent_outputs", {})
             state["agent_outputs"]["tutor"] = response
+            state["agent_outputs"]["tutor_tools_used"] = tools_used  # SOTA: Track tool usage
             state["current_agent"] = "tutor_agent"
+            
+            # CHỈ THỊ SỐ 29 v9: Set thinking in state for SOTA reasoning transparency
+            # This follows the same pattern as rag_node.py
+            if thinking:
+                state["thinking"] = thinking
+                logger.info(f"[TUTOR_AGENT] Thinking propagated to state: {len(thinking)} chars")
             
             logger.info(f"[TUTOR_AGENT] ReAct complete: {len(tools_used)} tool calls, {len(sources)} sources")
             
@@ -147,23 +160,28 @@ class TutorAgentNode:
         self, 
         query: str, 
         context: dict
-    ) -> tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]:
+    ) -> tuple[str, List[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
         Execute ReAct loop: Think → Act → Observe.
         
         SOTA Pattern from OpenAI Agents SDK / Anthropic Claude.
+        
+        CHỈ THỊ SỐ 29 v9: Now returns thinking for SOTA reasoning transparency.
+        Combines thinking from:
+        1. RAG tool (get_last_native_thinking) 
+        2. Tutor LLM final response (extract_thinking_from_response)
         
         Args:
             query: User query
             context: Additional context
             
         Returns:
-            Tuple of (response, sources, tools_used)
+            Tuple of (response, sources, tools_used, thinking)
         """
         if not self._llm_with_tools:
-            return self._fallback_response(query), [], []
+            return self._fallback_response(query), [], [], None
         
-        # Clear previous sources
+        # Clear previous sources (also clears thinking)
         clear_retrieved_sources()
         
         # Build context string
@@ -183,6 +201,7 @@ class TutorAgentNode:
         tools_used = []
         max_iterations = 3
         final_response = ""
+        llm_thinking = None  # Thinking from final LLM response
         
         # ReAct Loop
         for iteration in range(max_iterations):
@@ -193,8 +212,8 @@ class TutorAgentNode:
             
             # Check if LLM wants to call tools
             if not response.tool_calls:
-                # No tool calls = LLM is done, extract final response
-                final_response = self._extract_content(response.content)
+                # No tool calls = LLM is done, extract final response AND thinking
+                final_response, llm_thinking = self._extract_content_with_thinking(response.content)
                 logger.info(f"[TUTOR_AGENT] No more tool calls, generating final response")
                 break
             
@@ -215,6 +234,7 @@ class TutorAgentNode:
                         tools_used.append({
                             "name": tool_name,
                             "args": tool_args,
+                            "description": f"Tra cứu: {search_query[:60]}..." if len(search_query) > 60 else f"Tra cứu: {search_query}",
                             "iteration": iteration + 1
                         })
                         
@@ -239,7 +259,7 @@ class TutorAgentNode:
         if not final_response:
             try:
                 final_msg = await self._llm.ainvoke(messages)
-                final_response = self._extract_content(final_msg.content)
+                final_response, llm_thinking = self._extract_content_with_thinking(final_msg.content)
             except Exception as e:
                 logger.error(f"[TUTOR_AGENT] Final generation error: {e}")
                 final_response = "Đã xảy ra lỗi khi tạo câu trả lời."
@@ -247,7 +267,23 @@ class TutorAgentNode:
         # Get sources from tool calls
         sources = get_last_retrieved_sources()
         
-        return final_response, sources, tools_used
+        # CHỈ THỊ SỐ 29 v9: Get RAG thinking from tool (Option B+)
+        rag_thinking = get_last_native_thinking()
+        
+        # Combine thinking: prioritize RAG thinking (deeper analysis) 
+        # but include LLM thinking if RAG thinking unavailable
+        combined_thinking = None
+        if rag_thinking and llm_thinking:
+            combined_thinking = f"[RAG Analysis]\n{rag_thinking}\n\n[Teaching Process]\n{llm_thinking}"
+        elif rag_thinking:
+            combined_thinking = rag_thinking
+        elif llm_thinking:
+            combined_thinking = llm_thinking
+        
+        if combined_thinking:
+            logger.info(f"[TUTOR_AGENT] Combined thinking: {len(combined_thinking)} chars (rag={bool(rag_thinking)}, llm={bool(llm_thinking)})")
+        
+        return final_response, sources, tools_used, combined_thinking
     
     def _fallback_response(self, query: str) -> str:
         """Fallback when LLM unavailable."""
@@ -276,6 +312,27 @@ Bạn muốn tôi giải thích khái niệm nào cụ thể?"""
             logger.debug(f"[TUTOR] Thinking extracted: {len(thinking)} chars")
         
         return text.strip() if text else ""
+    
+    def _extract_content_with_thinking(self, content) -> tuple[str, Optional[str]]:
+        """
+        Extract text AND thinking from LLM response content.
+        
+        CHỈ THỊ SỐ 29 v9: Option B+ - Returns thinking for state propagation.
+        This is the SOTA pattern for reasoning transparency (Anthropic/OpenAI).
+        
+        Args:
+            content: Response content from LLM
+            
+        Returns:
+            Tuple of (text, thinking) where thinking may be None
+        """
+        text, thinking = extract_thinking_from_response(content)
+        
+        # Log thinking if extracted
+        if thinking:
+            logger.info(f"[TUTOR] Native thinking extracted: {len(thinking)} chars")
+        
+        return text.strip() if text else "", thinking
     
     def is_available(self) -> bool:
         """Check if LLM is available."""
