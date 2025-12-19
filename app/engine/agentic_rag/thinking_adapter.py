@@ -224,28 +224,46 @@ class ThinkingAdapter:
 
 Trả lời:"""
 
-    def _parse_response(self, content: str) -> tuple[str, str]:
-        """Parse thinking and answer from response."""
+    def _parse_response(self, content: Any) -> tuple[str, str]:
+        """
+        Parse thinking and answer from response.
+        
+        SOTA Fix (Dec 2025): Handle Gemini 3.0 Flash content format.
+        Gemini 3.0 returns list when thinking_enabled=True:
+        [{'type': 'thinking', 'thinking': '...'}, {'type': 'text', 'text': '...'}]
+        
+        Uses centralized ThinkingPostProcessor that handles all formats.
+        """
+        # Step 1: Use centralized processor to handle Gemini 3.0 list format
+        from app.services.output_processor import extract_thinking_from_response
+        text_content, native_thinking = extract_thinking_from_response(content)
+        
         thinking = ""
         answer = ""
         
-        # Extract thinking
-        if "<thinking>" in content and "</thinking>" in content:
-            start = content.find("<thinking>") + len("<thinking>")
-            end = content.find("</thinking>")
-            thinking = content[start:end].strip()
+        # Step 2: Check for <thinking> tags in cleaned text
+        if "<thinking>" in text_content and "</thinking>" in text_content:
+            start = text_content.find("<thinking>") + len("<thinking>")
+            end = text_content.find("</thinking>")
+            thinking = text_content[start:end].strip()
+            # Remove thinking tags from content
+            text_content = text_content[:text_content.find("<thinking>")] + text_content[end + len("</thinking>"):]
+            text_content = text_content.strip()
+        elif native_thinking:
+            # Use Gemini native thinking if no text tags
+            thinking = native_thinking
         
-        # Extract answer
-        if "<answer>" in content and "</answer>" in content:
-            start = content.find("<answer>") + len("<answer>")
-            end = content.find("</answer>")
-            answer = content[start:end].strip()
-        elif "</thinking>" in content:
+        # Step 3: Extract answer from remaining content
+        if "<answer>" in text_content and "</answer>" in text_content:
+            start = text_content.find("<answer>") + len("<answer>")
+            end = text_content.find("</answer>")
+            answer = text_content[start:end].strip()
+        elif "</thinking>" in text_content:
             # If no answer tags, use everything after thinking
-            answer = content[content.find("</thinking>") + len("</thinking>"):].strip()
+            answer = text_content[text_content.find("</thinking>") + len("</thinking>"):].strip()
         else:
             # No tags, use full content
-            answer = content.strip()
+            answer = text_content.strip()
         
         return thinking, answer
     

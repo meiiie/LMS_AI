@@ -148,6 +148,53 @@ class Settings(BaseSettings):
     enable_answer_verification: bool = Field(default=True, description="Enable hallucination checking")
     
     # =============================================================================
+    # SELF-REFLECTIVE AGENTIC RAG (SOTA 2025 - Self-RAG + Meta CRAG Pattern)
+    # =============================================================================
+    # Pattern: Confidence-based smart iteration, not hardcoded loops
+    # Reference: Self-RAG (Asai et al.), Meta CRAG (ICLR 2025), Anthropic, Qwen
+    # Quality-first approach for maritime domain (high-stakes accuracy)
+    
+    # Quality Mode: Controls accuracy vs speed trade-off
+    rag_quality_mode: str = Field(
+        default="balanced",
+        description="RAG quality mode: 'speed' (fast, less accurate), 'balanced' (default), 'quality' (slow, high accuracy)"
+    )
+    
+    # Confidence Thresholds (normalized 0-1 scale)
+    # HIGH: No iteration needed, generate immediately
+    # MEDIUM: Allow single correction if reflection detects issues
+    # Below MEDIUM: Fallback to web search or extended retrieval
+    rag_confidence_high: float = Field(
+        default=0.85,
+        description="HIGH confidence threshold: Skip iteration, generate immediately"
+    )
+    rag_confidence_medium: float = Field(
+        default=0.60,
+        description="MEDIUM confidence threshold: Allow single correction if needed"
+    )
+    
+    # Iteration Control (soft limits, not hard stops)
+    rag_max_iterations: int = Field(
+        default=2,
+        description="Soft limit on CRAG iterations (can early-exit on high confidence)"
+    )
+    rag_enable_reflection: bool = Field(
+        default=True,
+        description="Enable Self-RAG reflection tokens for quality assessment"
+    )
+    rag_early_exit_on_high_confidence: bool = Field(
+        default=True,
+        description="Exit iteration loop early if HIGH confidence achieved"
+    )
+    
+    # Gemini 3.0 Thinking Level (Dec 2025)
+    # Controls reasoning depth: minimal | low | medium | high
+    gemini_thinking_level: str = Field(
+        default="medium",
+        description="Gemini 3.0 thinking level: 'minimal', 'low', 'medium', 'high'"
+    )
+    
+    # =============================================================================
     # GEMINI THINKING CONFIGURATION (SOTA 2025 - CHỈ THỊ SỐ 28)
     # =============================================================================
     # 4-Tier Thinking Strategy based on Chain of Draft (CoD) pattern

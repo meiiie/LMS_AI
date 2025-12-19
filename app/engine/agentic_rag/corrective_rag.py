@@ -89,29 +89,32 @@ class CorrectiveRAG:
     def __init__(
         self,
         rag_agent=None,
-        max_iterations: int = 2,
-        grade_threshold: float = 7.0,
-        enable_verification: bool = True
+        max_iterations: int = None,
+        grade_threshold: float = None,
+        enable_verification: bool = None
     ):
         """
         Initialize Corrective RAG.
         
-        SOTA Pattern: Composition Pattern
-        - If rag_agent is provided, use it (backward compatibility)
-        - If not, auto-compose internal RAGAgent (self-contained node)
+        SOTA Pattern (Dec 2025): Self-Reflective Agentic RAG
+        - Confidence-based smart iteration, not hardcoded loops
+        - Uses configurable settings from settings.rag_* 
+        - Reference: Self-RAG (Asai et al.), Meta CRAG (ICLR 2025)
         
         This follows LangGraph CRAG architecture where nodes are self-contained
         and compose their own dependencies rather than relying on DI.
         
         Args:
             rag_agent: (Deprecated) External RAG agent. If None, auto-creates one.
-            max_iterations: Maximum rewrite iterations
-            grade_threshold: Minimum grade to accept retrieval (1-10 scale)
+            max_iterations: Maximum rewrite iterations (default from settings)
+            grade_threshold: Minimum grade to accept retrieval (default from settings)
             enable_verification: Whether to verify answers against sources
         """
-        self._max_iterations = max_iterations
-        self._grade_threshold = grade_threshold
-        self._enable_verification = enable_verification
+        # SOTA: Use configurable settings, not hardcoded values
+        self._max_iterations = max_iterations if max_iterations is not None else settings.rag_max_iterations
+        # Convert normalized confidence (0-1) to grade scale (0-10)
+        self._grade_threshold = grade_threshold if grade_threshold is not None else (settings.rag_confidence_high * 10)
+        self._enable_verification = enable_verification if enable_verification is not None else settings.enable_answer_verification
         
         # ================================================================
         # COMPOSITION PATTERN: Self-contained RAG capability
@@ -326,19 +329,38 @@ class CorrectiveRAG:
                 current_query, documents, query_embedding=query_embedding
             )
             
-            # Check if good enough
+            # SOTA: Normalize score to 0-1 confidence scale
+            normalized_confidence = grading_result.avg_score / 10.0
+            
+            # Check if good enough (use configurable threshold)
             if grading_result.avg_score >= self._grade_threshold:
-                logger.info(f"[CRAG] Grade passed: {grading_result.avg_score:.1f}")
+                logger.info(
+                    f"[CRAG] Grade passed: {grading_result.avg_score:.1f}/10 "
+                    f"(confidence={normalized_confidence:.2f} >= {settings.rag_confidence_high:.2f})"
+                )
                 tracer.end_step(
                     result=f"Điểm: {grading_result.avg_score:.1f}/10 - ĐẠT",
-                    confidence=grading_result.avg_score / 10,
-                    details={"score": grading_result.avg_score, "passed": True}
+                    confidence=normalized_confidence,
+                    details={"score": grading_result.avg_score, "passed": True, "confidence": normalized_confidence}
                 )
                 break
+            
+            # SOTA: Early exit if medium confidence and early_exit enabled
+            elif settings.rag_early_exit_on_high_confidence and normalized_confidence >= settings.rag_confidence_medium:
+                logger.info(
+                    f"[CRAG] MEDIUM confidence ({normalized_confidence:.2f}) - early exit enabled, proceeding to generation"
+                )
+                tracer.end_step(
+                    result=f"Điểm: {grading_result.avg_score:.1f}/10 - MEDIUM (early exit)",
+                    confidence=normalized_confidence,
+                    details={"score": grading_result.avg_score, "passed": False, "early_exit": True}
+                )
+                break
+            
             else:
                 tracer.end_step(
                     result=f"Điểm: {grading_result.avg_score:.1f}/10 - Cần cải thiện",
-                    confidence=grading_result.avg_score / 10,
+                    confidence=normalized_confidence,
                     details={"score": grading_result.avg_score, "passed": False}
                 )
             
@@ -377,6 +399,33 @@ class CorrectiveRAG:
             confidence=0.85,
             details={"source_count": len(sources)}
         )
+        
+        # ====================================================================
+        # PHASE 3: SELF-RAG REFLECTION ANALYSIS (SOTA 2025)
+        # ====================================================================
+        # Parse reflection signals from answer to determine quality
+        # Reference: Self-RAG (Asai et al.), Meta CRAG
+        # ====================================================================
+        reflection_result = None
+        if settings.rag_enable_reflection:
+            from app.engine.agentic_rag.reflection_parser import get_reflection_parser
+            
+            reflection_parser = get_reflection_parser()
+            reflection_result = reflection_parser.parse(answer)
+            
+            logger.info(
+                f"[CRAG] Reflection: supported={reflection_result.is_supported}, "
+                f"useful={reflection_result.is_useful}, "
+                f"needs_correction={reflection_result.needs_correction}, "
+                f"confidence={reflection_result.confidence.value}"
+            )
+            
+            # If correction needed and we haven't exceeded iterations, log it
+            if reflection_result.needs_correction and iterations < self._max_iterations:
+                logger.warning(
+                    f"[CRAG] Reflection suggests correction: {reflection_result.correction_reason}"
+                )
+                tracer.record_correction(f"Reflection: {reflection_result.correction_reason}")
         
         # Step 6: Verify (optional)
         verification_result = None

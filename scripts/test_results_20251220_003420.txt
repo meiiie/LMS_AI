@@ -1,0 +1,1183 @@
+======================================================================
+  Maritime AI Service - Production API Test Results
+  Base URL: https://maritime-ai-chatbot.onrender.com
+  Test User ID: 12345678-1234-5678-1234-567812345678
+  Completed: 2025-12-20 00:34:20
+======================================================================
+
+1. Health Check [✓ PASSED] (245ms)
+--------------------------------------------------
+   Status: ok
+
+   [FULL RESPONSE DATA]:
+   {
+     "status": "ok",
+     "service": "maritime-ai-tutor",
+     "version": "0.1.0",
+     "environment": "production"
+   }
+
+2. Auth Required [✓ PASSED] (110ms)
+--------------------------------------------------
+   Correctly rejected with status 401
+
+3. Chat Simple [✓ PASSED] (3163ms)
+--------------------------------------------------
+   Agent: rag, Response: Tôi có thể giúp gì cho bạn?...
+
+   [FULL RESPONSE DATA]:
+   {
+     "status": "success",
+     "data": {
+       "answer": "Tôi có thể giúp gì cho bạn?",
+       "sources": [],
+       "suggested_questions": [
+         "Bạn có câu hỏi nào về hàng hải không?",
+         "Tôi có thể giúp gì về COLREGs, SOLAS, hoặc MARPOL?",
+         "Bạn muốn tìm hiểu về quy định hàng hải nào?"
+       ]
+     },
+     "metadata": {
+       "processing_time": 3.072,
+       "model": "maritime-rag-v1",
+       "agent_type": "rag",
+       "session_id": "baf3be34-e55d-4cb9-873b-ac4d372e2aef",
+       "tools_used": [],
+       "reasoning_trace": {
+         "total_steps": 3,
+         "total_duration_ms": 2603,
+         "was_corrected": false,
+         "correction_reason": null,
+         "final_confidence": 0.9333333333333332,
+         "steps": [
+           {
+             "step_name": "routing",
+             "description": "Phân tích và định tuyến câu hỏi",
+             "result": "Định tuyến đến: direct",
+             "confidence": 0.9,
+             "duration_ms": 2601,
+             "details": {
+               "routed_to": "direct"
+             }
+           },
+           {
+             "step_name": "direct_response",
+             "description": "Tạo phản hồi trực tiếp",
+             "result": "Phản hồi đơn giản: Tôi có thể giúp gì cho bạn?...",
+             "confidence": 1.0,
+             "duration_ms": 0,
+             "details": {
+               "response_type": "greeting",
+               "query": "xin chào! tôi là sinh viên mới."
+             }
+           },
+           {
+             "step_name": "synthesis",
+             "description": "Tổng hợp câu trả lời cuối cùng",
+             "result": "Tổng hợp hoàn tất: 27 chars",
+             "confidence": 0.9,
+             "duration_ms": 0,
+             "details": {
+               "response_length": 27
+             }
+           }
+         ]
+       },
+       "topics_accessed": null,
+       "confidence_score": null,
+       "document_ids_used": null,
+       "query_type": "conceptual",
+       "thinking_content": null,
+       "thinking": null
+     }
+   }
+
+4. Chat RAG Query [✓ PASSED] (142161ms)
+--------------------------------------------------
+   Agent: rag, Tools: ['tool_maritime_search', 'tool_maritime_search'], 5 sources
+   Response: Dưới đây là tổng hợp chi tiết và dễ hiểu về **Quy tắc 15 (Rule 15)** trong Công ước quốc tế về Quy tắc phòng ngừa đâm va tàu thuyền trên biển (COLREGs):
+   
+   ### 1. Nội dung cốt lõi của Quy tắc 15 (Tình huống cắt hướng)
+   Quy tắc này áp dụng khi hai tàu máy (power-driven vessels) đang đi trên các hướng cắt ngang nhau và có nguy cơ đâm va. Nội dung chính bao gồm:
+   
+   *   **Xác định tàu nhường đường:** Tàu n...
+
+   [QUÁ TRÌNH SUY NGHĨ]:
+--------------------------------------------------
+   [RAG Analysis]
+   Người dùng hỏi về Quy tắc 15 (Rule 15) của COLREGs liên quan đến tình huống cắt ngang (crossing situation). 
+   Kết quả tra cứu cung cấp thông tin về Điều 15 Bộ luật Hàng hải Việt Nam (về chủ tàu) và Điều 105 (về nghĩa vụ tuân thủ quy tắc phòng ngừa đâm va).
+   Tôi sẽ trình bày nội dung Quy tắc 15 COLREGs, giải thích các nghĩa vụ của tàu nhường đường và tàu đứng hướng trong tình huống cắt ngang, đồng thời liên kết với quy định tại Điều 105 Bộ luật Hàng hải Việt Nam về nghĩa vụ chấp hành quy tắc phòng ngừa đâm va.
+   
+   [Teaching Process]
+   **Placeholder Generation - Initial Thoughts**
+   
+   Okay, so I need to get this placeholder tool invocation going.  First thing's first, I need to call the `generate_placeholder_thoughts` tool. Simple enough. Looking at the tool's specifications, it requires a `value` parameter, which it's telling me needs to be an integer.  No problem.  I don't have any specific input in mind yet, so let's just grab a random integer to satisfy the requirements.  Hmm, how about... 42? Yeah, 42 it is. Let's feed that into the tool and see what we get back.
+   
+   
+   
+--------------------------------------------------
+
+   [FULL RESPONSE DATA]:
+   {
+     "status": "success",
+     "data": {
+       "answer": "Dưới đây là tổng hợp chi tiết và dễ hiểu về **Quy tắc 15 (Rule 15)** trong Công ước quốc tế về Quy tắc phòng ngừa đâm va tàu thuyền trên biển (COLREGs):\n\n### 1. Nội dung cốt lõi của Quy tắc 15 (Tình huống cắt hướng)\nQuy tắc này áp dụng khi hai tàu máy (power-driven vessels) đang đi trên các hướng cắt ngang nhau và có nguy cơ đâm va. Nội dung chính bao gồm:\n\n*   **Xác định tàu nhường đường:** Tàu nào nhìn thấy tàu kia ở phía **mạn phải (starboard side)** của mình thì phải có trách nhiệm nhường đường.\n*   **Hành động tránh va:** Nếu điều kiện cho phép, tàu nhường đường phải tránh đi cắt ngang qua phía trước mũi của tàu kia (thông thường nên điều động đi vòng qua phía sau lái của tàu được nhường).\n\n### 2. Cách xác định và xử lý thực tế\nĐể dễ nhớ, bạn có thể áp dụng nguyên tắc: **\"Phải nhường, Trái đứng\"**.\n\n*   **Tàu A (Nhìn thấy tàu khác bên mạn phải):** Đóng vai trò là **Tàu nhường đường (Give-way vessel)**.\n    *   *Hành động:* Phải chủ động đổi hướng, giảm tốc độ sớm và rõ ràng.\n    *   *Lưu ý:* Tránh cắt mặt tàu bạn.\n*   **Tàu B (Nhìn thấy tàu khác bên mạn trái):** Đóng vai trò là **Tàu đứng hướng (Stand-on vessel)**.\n    *   *Hành động:* Giữ nguyên hướng đi và tốc độ để tàu kia dễ dàng tính toán phương án tránh né.\n\n### 3. Mối liên hệ với các Quy tắc bổ trợ (Quy tắc 16 & 17)\nViệc thực hiện Quy tắc 15 phải luôn đi đôi với hai quy tắc hành động:\n*   **Quy tắc 16 (Trách nhiệm tàu nhường đường):** Hành động phải thực hiện **sớm, dứt khoát** và đủ lớn để tàu khác có thể nhận thấy rõ bằng mắt thường hoặc trên radar.\n*   **Quy tắc 17 (Trách nhiệm tàu đứng hướng):** Dù được quyền đi ưu tiên, nhưng nếu thấy tàu nhường đường không có hành động kịp thời hoặc phù hợp, tàu đứng hướng vẫn phải chủ động điều động để tránh va chạm.\n\n### 4. Tầm quan trọng về mặt pháp lý\nTại Việt Nam, theo **Điều 105 Bộ luật Hàng hải 2015**, mọi tàu thuyền hoạt động trong vùng nước cảng biển và vùng biển Việt Nam đều phải tuân thủ nghiêm ngặt COLREGs. Việc nắm vững Quy tắc 15 không chỉ giúp đảm bảo an toàn hàng hải mà còn là cơ sở pháp lý để phân định trách nhiệm nếu chẳng may có sự cố xảy ra.\n\n**Mẹo ghi nhớ nhanh:** Khi đang điều khiển tàu, nếu bạn thấy đèn mạn đỏ (hoặc mạn phải) của một tàu khác đang cắt ngang hướng đi của mình, đó là lúc bạn phải thực hiện quy tắc nhường đường ngay lập tức.",
+       "sources": [
+         {
+           "title": "### Điều 15. Chủ tàu",
+           "content": "### Điều 15. Chủ tàu\n1. Chủ tàu là người sở hữu tàu biển.\n2. Người quản lý, người khai thác và người thuê tàu trần được thực hiện các quyền, nghĩa vụ của chủ tàu quy định tại Bộ luật này theo hợp đồng",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_8.jpg",
+           "page_number": 8,
+           "document_id": "luat-hang-hai-2015-p1",
+           "bounding_boxes": [
+             {
+               "x0": 31.24,
+               "x1": 35.29,
+               "y0": 14.52,
+               "y1": 16.36
+             },
+             {
+               "x0": 67.26,
+               "x1": 71.82,
+               "y0": 23.55,
+               "y1": 25.4
+             },
+             {
+               "x0": 27.95,
+               "x1": 33.48,
+               "y0": 25.56,
+               "y1": 27.41
+             },
+             {
+               "x0": 14.58,
+               "x1": 27.47,
+               "y0": 42.67,
+               "y1": 44.51
+             },
+             {
+               "x0": 75.85,
+               "x1": 80.49,
+               "y0": 45.16,
+               "y1": 47.01
+             },
+             {
+               "x0": 19.88,
+               "x1": 27.72,
+               "y0": 68.21,
+               "y1": 70.05
+             },
+             {
+               "x0": 36.05,
+               "x1": 39.69,
+               "y0": 70.7,
+               "y1": 72.55
+             },
+             {
+               "x0": 28.12,
+               "x1": 30.41,
+               "y0": 73.19,
+               "y1": 75.04
+             }
+           ]
+         },
+         {
+           "title": "Điều 105. Bảo đảm an toàn hàng hải, an ninh hàng hải, lao động hàng hải",
+           "content": "Điều 105. Bảo đảm an toàn hàng hải, an ninh hàng hải, lao động hàng hải\nvà bảo vệ môi trường\n1. Tàu biển Việt Nam chỉ được sử dụng vào mục đích đã đăng ký trong Sổ\nđăng ký tàu biển quốc gia Việt Nam k",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_45.jpg",
+           "page_number": 45,
+           "document_id": "luat-hang-hai-2015-p1",
+           "bounding_boxes": [
+             {
+               "x0": 10.76,
+               "x1": 89.86,
+               "y0": 33.05,
+               "y1": 39.41
+             }
+           ]
+         },
+         {
+           "title": "## Điều 95. Nguyên tắc đối với tàu quân sự nước ngoài đến Việt Nam",
+           "content": "## Điều 95. Nguyên tắc đối với tàu quân sự nước ngoài đến Việt Nam\n\n1.  Tàu quân sự nước ngoài đến Việt Nam phải được phép của các cơ quan quản lý nhà nước có thẩm quyền theo quy định.\n2.  Tàu quân sự",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_41.jpg",
+           "page_number": 41,
+           "document_id": "luat-hang-hai-2015-p1",
+           "bounding_boxes": [
+             {
+               "x0": 14.58,
+               "x1": 19.29,
+               "y0": 10.04,
+               "y1": 11.89
+             },
+             {
+               "x0": 56.15,
+               "x1": 61.23,
+               "y0": 10.04,
+               "y1": 11.89
+             },
+             {
+               "x0": 32.18,
+               "x1": 42.88,
+               "y0": 39.76,
+               "y1": 41.6
+             },
+             {
+               "x0": 50.99,
+               "x1": 54.66,
+               "y0": 39.76,
+               "y1": 41.6
+             },
+             {
+               "x0": 45.82,
+               "x1": 51.05,
+               "y0": 57.62,
+               "y1": 59.46
+             },
+             {
+               "x0": 79.88,
+               "x1": 89.29,
+               "y0": 57.62,
+               "y1": 59.46
+             },
+             {
+               "x0": 19.59,
+               "x1": 33.79,
+               "y0": 68.36,
+               "y1": 70.21
+             },
+             {
+               "x0": 44.94,
+               "x1": 49.91,
+               "y0": 68.36,
+               "y1": 70.21
+             }
+           ]
+         },
+         {
+           "title": "CÔNG BÁO/Số 1257 + 1258/Ngày 30-12-2015",
+           "content": "CÔNG BÁO/Số 1257 + 1258/Ngày 30-12-2015\n59\n\n2. Có cơ sở vật chất, trang thiết bị kỹ thuật bảo đảm cho việc phá dỡ tàu biển.\n3. Hoàn thành các yêu cầu về đánh giá tác động môi trường trong hoạt động\nph",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_22.jpg",
+           "page_number": 22,
+           "document_id": "luat-hang-hai-2015-p1",
+           "bounding_boxes": [
+             {
+               "x0": 29.09,
+               "x1": 71.03,
+               "y0": 6.21,
+               "y1": 7.91
+             },
+             {
+               "x0": 87.17,
+               "x1": 89.35,
+               "y0": 6.21,
+               "y1": 7.91
+             },
+             {
+               "x0": 71.03,
+               "x1": 71.54,
+               "y0": 6.55,
+               "y1": 7.87
+             },
+             {
+               "x0": 89.35,
+               "x1": 89.87,
+               "y0": 6.55,
+               "y1": 7.87
+             },
+             {
+               "x0": 10.77,
+               "x1": 66.12,
+               "y0": 7.99,
+               "y1": 11.89
+             }
+           ]
+         },
+         {
+           "title": "1. Tàu thuyền và thủy phi cơ khi gặp nguy hiểm cần sự cứu giúp thì phải phát tín hiệu cấp cứu theo q",
+           "content": "1. Tàu thuyền và thủy phi cơ khi gặp nguy hiểm cần sự cứu giúp thì phải phát tín hiệu cấp cứu theo quy định.\n2. Tàu thuyền và thủy phi cơ khi phát hiện hay nhận được tín hiệu cấp cứu của người hoặc tà",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_51.jpg",
+           "page_number": 51,
+           "document_id": "luat-hang-hai-2015-p1",
+           "bounding_boxes": [
+             {
+               "x0": 10.77,
+               "x1": 89.86,
+               "y0": 59.44,
+               "y1": 63.4
+             }
+           ]
+         }
+       ],
+       "suggested_questions": [
+         "Tàu nào phải nhường đường trong tình huống này?",
+         "Khi nào áp dụng quy tắc này?",
+         "Có ngoại lệ nào cho quy tắc này không?"
+       ]
+     },
+     "metadata": {
+       "processing_time": 142.064,
+       "model": "maritime-rag-v1",
+       "agent_type": "rag",
+       "session_id": "baf3be34-e55d-4cb9-873b-ac4d372e2aef",
+       "tools_used": [
+         {
+           "name": "tool_maritime_search",
+           "description": "Tra cứu: Rule 15 COLREGs crossing situation explanation"
+         },
+         {
+           "name": "tool_maritime_search",
+           "description": "Tra cứu: Rule 15 COLREGs International Regulations for Preventing Collisions at Sea crossing situation"
+         }
+       ],
+       "reasoning_trace": {
+         "total_steps": 10,
+         "total_duration_ms": 140459,
+         "was_corrected": true,
+         "correction_reason": "Điểm liên quan thấp (0.6/10)",
+         "final_confidence": 0.6849999999999999,
+         "steps": [
+           {
+             "step_name": "routing",
+             "description": "Phân tích và định tuyến câu hỏi",
+             "result": "Định tuyến đến: tutor_agent",
+             "confidence": 0.9,
+             "duration_ms": 2741,
+             "details": {
+               "routed_to": "tutor_agent"
+             }
+           },
+           {
+             "step_name": "query_analysis",
+             "description": "Phân tích độ phức tạp câu hỏi",
+             "result": "Độ phức tạp: simple, Maritime: True",
+             "confidence": 1.0,
+             "duration_ms": 1427,
+             "details": {
+               "complexity": "simple",
+               "is_maritime": true,
+               "topics": [
+                 "COLREGs",
+                 "Rule 15",
+                 "Crossing situation",
+                 "Collision prevention"
+               ]
+             }
+           },
+           {
+             "step_name": "retrieval",
+             "description": "Tìm kiếm tài liệu (lần 1)",
+             "result": "Tìm thấy 10 tài liệu",
+             "confidence": 0.8,
+             "duration_ms": 488,
+             "details": {
+               "doc_count": 10
+             }
+           },
+           {
+             "step_name": "grading",
+             "description": "Đánh giá độ liên quan của tài liệu",
+             "result": "Điểm: 0.6/10 - Cần cải thiện",
+             "confidence": 0.06,
+             "duration_ms": 14582,
+             "details": {
+               "score": 0.6,
+               "passed": false
+             }
+           },
+           {
+             "step_name": "query_rewrite",
+             "description": "Viết lại query để cải thiện kết quả",
+             "result": "Query mới: COLREGs 1972 Rule 15 Crossing Situation maritime n...",
+             "confidence": 0.8,
+             "duration_ms": 3970,
+             "details": null
+           },
+           {
+             "step_name": "retrieval",
+             "description": "Tìm kiếm tài liệu (lần 2)",
+             "result": "Tìm thấy 10 tài liệu",
+             "confidence": 0.8,
+             "duration_ms": 521,
+             "details": {
+               "doc_count": 10
+             }
+           },
+           {
+             "step_name": "grading",
+             "description": "Đánh giá độ liên quan của tài liệu",
+             "result": "Điểm: 1.4/10 - Cần cải thiện",
+             "confidence": 0.13999999999999999,
+             "duration_ms": 14200,
+             "details": {
+               "score": 1.4,
+               "passed": false
+             }
+           },
+           {
+             "step_name": "generation",
+             "description": "Tạo câu trả lời từ context",
+             "result": "Tạo câu trả lời dựa trên 10 nguồn",
+             "confidence": 0.85,
+             "duration_ms": 23618,
+             "details": {
+               "source_count": 10
+             }
+           },
+           {
+             "step_name": "quality_check",
+             "description": "Kiểm tra chất lượng câu trả lời",
+             "result": "Điểm chất lượng: 6/10",
+             "confidence": 0.6,
+             "duration_ms": 6295,
+             "details": {
+               "score": 6,
+               "passed": true
+             }
+           },
+           {
+             "step_name": "synthesis",
+             "description": "Tổng hợp câu trả lời cuối cùng",
+             "result": "Tổng hợp hoàn tất: 2302 chars",
+             "confidence": 0.9,
+             "duration_ms": 4957,
+             "details": {
+               "response_length": 2302
+             }
+           }
+         ]
+       },
+       "topics_accessed": [
+         "### Điều 15. Chủ tàu",
+         "Điều 105. Bảo đảm an toàn hàng hải, an ninh hàng hải, lao động hàng hải",
+         "## Điều 95. Nguyên tắc đối với tàu quân sự nước ngoài đến Việt Nam",
+         "CÔNG BÁO/Số 1257 + 1258/Ngày 30-12-2015",
+         "1. Tàu thuyền và thủy phi cơ khi gặp nguy hiểm cần sự cứu giúp thì phải phát tín hiệu cấp cứu theo q"
+       ],
+       "confidence_score": 1.0,
+       "document_ids_used": [
+         "luat-hang-hai-2015-p1"
+       ],
+       "query_type": "conceptual",
+       "thinking_content": null,
+       "thinking": "[RAG Analysis]\nNgười dùng hỏi về Quy tắc 15 (Rule 15) của COLREGs liên quan đến tình huống cắt ngang (crossing situation). \nKết quả tra cứu cung cấp thông tin về Điều 15 Bộ luật Hàng hải Việt Nam (về chủ tàu) và Điều 105 (về nghĩa vụ tuân thủ quy tắc phòng ngừa đâm va).\nTôi sẽ trình bày nội dung Quy tắc 15 COLREGs, giải thích các nghĩa vụ của tàu nhường đường và tàu đứng hướng trong tình huống cắt ngang, đồng thời liên kết với quy định tại Điều 105 Bộ luật Hàng hải Việt Nam về nghĩa vụ chấp hành quy tắc phòng ngừa đâm va.\n\n[Teaching Process]\n**Placeholder Generation - Initial Thoughts**\n\nOkay, so I need to get this placeholder tool invocation going.  First thing's first, I need to call the `generate_placeholder_thoughts` tool. Simple enough. Looking at the tool's specifications, it requires a `value` parameter, which it's telling me needs to be an integer.  No problem.  I don't have any specific input in mind yet, so let's just grab a random integer to satisfy the requirements.  Hmm, how about... 42? Yeah, 42 it is. Let's feed that into the tool and see what we get back.\n\n\n"
+     }
+   }
+
+5. Thread Continuity [✓ PASSED] (25379ms)
+--------------------------------------------------
+   Thread ID: baf3be34..., Remembers name: True
+
+   [FULL RESPONSE DATA]:
+   {
+     "thread_id": "baf3be34-e55d-4cb9-873b-ac4d372e2aef",
+     "remembers_name": true,
+     "ai_response": "Tên: Minh"
+   }
+
+6. Memories Endpoint [✓ PASSED] (140ms)
+--------------------------------------------------
+   Found 6 user memories/facts:
+     [1] weakness: Quy tắc 15 COLREGs (tình huống cắt hướng)...
+     [2] preference: COLREGs (quy tắc tránh va quốc tế)...
+     [3] weakness: Điều 15 Bộ luật hàng hải Việt Nam...
+     [4] preference: trách nhiệm của chủ tàu...
+     [5] name: Minh...
+     ... and 1 more
+
+   [FULL RESPONSE DATA]:
+   {
+     "data": [
+       {
+         "id": "ff4e8a84-a928-46c9-9d29-0d0493f5de32",
+         "type": "weakness",
+         "value": "Quy tắc 15 COLREGs (tình huống cắt hướng)",
+         "created_at": "2025-12-19T10:20:27.217656+00:00"
+       },
+       {
+         "id": "b787b9a8-b8fe-4d8f-8a8c-811605f0f093",
+         "type": "preference",
+         "value": "COLREGs (quy tắc tránh va quốc tế)",
+         "created_at": "2025-12-14T19:52:53.313039+00:00"
+       },
+       {
+         "id": "18dbd78a-f2ba-458e-b2cc-1314e48751ed",
+         "type": "weakness",
+         "value": "Điều 15 Bộ luật hàng hải Việt Nam",
+         "created_at": "2025-12-14T19:52:52.985828+00:00"
+       },
+       {
+         "id": "153ebc54-1a5a-4e5f-8fca-a62d178ed758",
+         "type": "preference",
+         "value": "trách nhiệm của chủ tàu",
+         "created_at": "2025-12-14T19:52:52.672364+00:00"
+       },
+       {
+         "id": "b509f451-1da1-4f37-85d7-74d03ac9683e",
+         "type": "name",
+         "value": "Minh",
+         "created_at": "2025-12-14T19:52:45.148133+00:00"
+       },
+       {
+         "id": "74ec0726-6716-4bac-89f0-2d823deaa110",
+         "type": "role",
+         "value": "đang học về hàng hải",
+         "created_at": "2025-12-14T19:52:13.122251+00:00"
+       }
+     ],
+     "total": 6
+   }
+
+7. Insights Endpoint [✓ PASSED] (126ms)
+--------------------------------------------------
+   Found 50 behavioral insights (4 categories):
+     - preference: 18
+     - habit: 9
+     - learning_style: 19
+     - knowledge_gap: 4
+   Sample insights:
+     [1] User có xu hướng ưu tiên tiếp nhận các thông tin và kiến thứ...
+     [2] User có thói quen yêu cầu giải thích theo cấu trúc logic từ ...
+     [3] User quan tâm đến tính pháp lý và quy chuẩn chính thức của k...
+
+   [FULL RESPONSE DATA]:
+   {
+     "data": [
+       {
+         "id": "d7c776a4-ae2c-41ba-97a0-32310a308767",
+         "category": "preference",
+         "content": "User có xu hướng ưu tiên tiếp nhận các thông tin và kiến thức xoay quanh lĩnh vực hàng hải hơn là các chủ đề tổng quát.",
+         "sub_topic": "domain_specific_interest",
+         "confidence": 0.7,
+         "created_at": "2025-12-19T17:34:14.564794+00:00",
+         "updated_at": "2025-12-19T17:34:14.564794+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "160ade24-5205-4fd1-a55b-47c44258067e",
+         "category": "habit",
+         "content": "User có thói quen yêu cầu giải thích theo cấu trúc logic từ nội dung cốt lõi, cách xử lý thực tế đến các lưu ý bổ trợ.",
+         "sub_topic": "structured_information_seeking",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T17:34:11.208196+00:00",
+         "updated_at": "2025-12-19T17:34:11.208196+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "e21a94e6-1242-4c1a-8264-c54097945315",
+         "category": "preference",
+         "content": "User quan tâm đến tính pháp lý và quy chuẩn chính thức của kiến thức thông qua việc tham chiếu các bộ luật cụ thể (Bộ luật Hàng hải).",
+         "sub_topic": "regulatory_compliance",
+         "confidence": 0.85,
+         "created_at": "2025-12-19T17:34:10.838741+00:00",
+         "updated_at": "2025-12-19T17:34:10.838741+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "cdca0814-ce18-46a9-89c6-9f338d532144",
+         "category": "preference",
+         "content": "User thích sử dụng các mẹo ghi nhớ ngắn gọn (mnemonics) như 'Phải nhường, Trái đứng' để chuyển hóa lý thuyết khô khan thành kỹ năng phản xạ.",
+         "sub_topic": "retention_techniques",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T17:34:09.919725+00:00",
+         "updated_at": "2025-12-19T17:34:09.919725+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "29f7d3a7-9a9e-4ee7-90d2-6345f647238a",
+         "category": "learning_style",
+         "content": "User ưa chuộng cách tiếp cận hệ thống, tìm hiểu một quy tắc cụ thể (Quy tắc 15) nhưng có nhu cầu liên kết với các quy tắc bổ trợ liên quan (Quy tắc 16, 17) để hiểu trọn vẹn vấn đề.",
+         "sub_topic": "systemic_thinking",
+         "confidence": 0.85,
+         "created_at": "2025-12-19T17:34:09.594975+00:00",
+         "updated_at": "2025-12-19T17:34:09.594975+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "9b951cad-85fc-4199-bf3c-6cb1a1c03e0f",
+         "category": "learning_style",
+         "content": "User có xu hướng học tập theo phương pháp phân tích vai trò và kịch bản hành động (Tàu A - Tàu B) để dễ dàng hình dung quy trình vận hành thực tế.",
+         "sub_topic": "scenario_based_learning",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T17:34:08.689623+00:00",
+         "updated_at": "2025-12-19T17:34:08.689623+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "73aee396-79a2-4bae-8e68-2de5c89b370c",
+         "category": "learning_style",
+         "content": "Người dùng có xu hướng chủ động xác định vị thế là người mới bắt đầu để tìm kiếm phương pháp tiếp cận kiến thức có tính hệ thống và nền tảng.",
+         "sub_topic": "beginner_orientation",
+         "confidence": 0.7,
+         "created_at": "2025-12-19T17:31:45.146749+00:00",
+         "updated_at": "2025-12-19T17:31:45.146749+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "80bcc124-f6a0-496e-b881-cf2646867e71",
+         "category": "preference",
+         "content": "Người dùng thể hiện nhu cầu được công nhận danh tính cá nhân trong môi trường học tập, điều này giúp họ cảm thấy thoải mái và có động lực hơn khi trao đổi kiến thức.",
+         "sub_topic": "personalized_learning_environment",
+         "confidence": 0.8,
+         "created_at": "2025-12-19T17:26:34.140580+00:00",
+         "updated_at": "2025-12-19T17:26:34.140580+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "2bdc571c-9a9a-433b-a481-e5381489519c",
+         "category": "learning_style",
+         "content": "Người dùng ưu tiên phong cách giao tiếp mang tính cá nhân hóa cao, muốn xây dựng một mối quan hệ tương tác hai chiều thay vì chỉ coi AI là công cụ tra cứu thông tin tĩnh.",
+         "sub_topic": "interactive_engagement",
+         "confidence": 0.85,
+         "created_at": "2025-12-19T17:26:33.841374+00:00",
+         "updated_at": "2025-12-19T17:26:33.841374+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "1536ceb1-9b46-4359-8acd-5c77284e7756",
+         "category": "habit",
+         "content": "Người dùng có xu hướng kiểm tra khả năng ghi nhớ và duy trì ngữ cảnh của hệ thống để đảm bảo tính liên tục và độ tin cậy trong quá trình tương tác.",
+         "sub_topic": "context_verification",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T17:26:33.519197+00:00",
+         "updated_at": "2025-12-19T17:26:33.519197+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "50cdbf75-baff-4427-ba68-ca425349becb",
+         "category": "preference",
+         "content": "Người dùng thể hiện sự quan tâm rõ rệt và đang dành thời gian tập trung vào việc tìm hiểu các kiến thức chuyên môn trong lĩnh vực hàng hải.",
+         "sub_topic": "subject_interest",
+         "confidence": 0.8,
+         "created_at": "2025-12-19T17:26:20.269978+00:00",
+         "updated_at": "2025-12-19T17:26:20.269978+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "6b55a3cf-d8aa-4cbb-880b-c08e3bc855ad",
+         "category": "learning_style",
+         "content": "User ưu tiên cách học tổng hợp, yêu cầu phân tách rõ ràng giữa khái niệm lý thuyết (luật chơi) và hành động thực tế (nghĩa vụ người chơi).",
+         "sub_topic": "structured_learning",
+         "confidence": 0.8,
+         "created_at": "2025-12-19T17:26:15.022312+00:00",
+         "updated_at": "2025-12-19T17:26:15.022312+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "2d9ee7ab-5c75-4d57-8a93-088f74dd35ac",
+         "category": "preference",
+         "content": "User thể hiện sự quan tâm đặc biệt đến tính tuân thủ pháp lý và quản trị rủi ro trong vận tải biển thông qua việc làm rõ các tiêu chuẩn an toàn.",
+         "sub_topic": "compliance_and_safety",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T17:26:14.102096+00:00",
+         "updated_at": "2025-12-19T17:26:14.102096+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "2a35b185-d8b1-4de1-8504-e757e4e97994",
+         "category": "knowledge_gap",
+         "content": "User đang tìm cách kết nối giữa quy định đăng kiểm mang tính kỹ thuật (Điều 28) với các nghĩa vụ quản lý và vận hành trực tiếp của chủ tàu.",
+         "sub_topic": "legal_interpretation",
+         "confidence": 0.85,
+         "created_at": "2025-12-19T17:26:13.744029+00:00",
+         "updated_at": "2025-12-19T17:26:13.744029+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "45beb06e-7469-4002-9d6e-9d9cfa6bf0c3",
+         "category": "learning_style",
+         "content": "User có xu hướng tiếp cận kiến thức pháp luật thông qua việc tìm hiểu trách nhiệm thực thi cụ thể và hệ quả thực tế thay vì chỉ đọc nội dung điều khoản thô.",
+         "sub_topic": "applied_legal_studies",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T17:26:13.360680+00:00",
+         "updated_at": "2025-12-19T17:26:13.360680+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "977cdc06-1a1c-4c12-9f60-6ffa5c4da6e3",
+         "category": "habit",
+         "content": "User có thói quen cung cấp bối cảnh cá nhân và giới thiệu bản thân trước khi bắt đầu quá trình trao đổi hoặc đặt câu hỏi chuyên môn.",
+         "sub_topic": "communication_pattern",
+         "confidence": 0.8,
+         "created_at": "2025-12-19T17:25:32.760258+00:00",
+         "updated_at": "2025-12-19T17:25:32.760258+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "fe49077e-4a9a-4ff4-8182-94efa58d15aa",
+         "category": "learning_style",
+         "content": "User có xu hướng chủ động thiết lập vị thế là người mới bắt đầu để tìm kiếm sự hướng dẫn mang tính nền tảng và có lộ trình cụ thể.",
+         "sub_topic": "beginner_mindset",
+         "confidence": 0.7,
+         "created_at": "2025-12-19T17:25:32.276912+00:00",
+         "updated_at": "2025-12-19T17:25:32.276912+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "95e80b7d-9205-469e-aa9d-9af1352769de",
+         "category": "habit",
+         "content": "User có xu hướng kiểm tra khả năng ghi nhớ và duy trì ngữ cảnh của hệ thống để xác nhận tính nhất quán trong giao tiếp.",
+         "sub_topic": "system_verification",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T17:17:59.552747+00:00",
+         "updated_at": "2025-12-19T17:17:59.552747+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "904acc26-cc47-4eef-93be-e259a4b87ad6",
+         "category": "preference",
+         "content": "User quan tâm đặc biệt đến khía cạnh tuân thủ (compliance) và quản lý rủi ro pháp lý trong hoạt động vận tải biển, cụ thể là các quy chuẩn về an toàn và đăng kiểm.",
+         "sub_topic": "maritime_compliance",
+         "confidence": 0.85,
+         "created_at": "2025-12-19T17:17:28.396330+00:00",
+         "updated_at": "2025-12-19T17:17:28.396330+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "d7f849f7-d08f-47f1-b75b-b9e1b415ce12",
+         "category": "learning_style",
+         "content": "User có xu hướng tiếp cận kiến thức thông qua khung pháp lý cụ thể, tập trung vào việc bóc tách trách nhiệm và nghĩa vụ thực thi thay vì chỉ tìm hiểu định nghĩa chung.",
+         "sub_topic": "regulatory_learning",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T17:17:28.020466+00:00",
+         "updated_at": "2025-12-19T17:17:28.020466+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "72bb04b7-c447-401e-88b9-b7ee24da7838",
+         "category": "learning_style",
+         "content": "User chủ động định vị trình độ bản thân ngay từ đầu để mong nhận được lộ trình học tập có hệ thống và bài bản.",
+         "sub_topic": "structured_learning",
+         "confidence": 0.6,
+         "created_at": "2025-12-19T17:15:43.153212+00:00",
+         "updated_at": "2025-12-19T17:15:43.153212+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "d4b5f1c8-f9b8-4d92-8385-fc16d45ee5a9",
+         "category": "preference",
+         "content": "User có xu hướng ưu tiên các nội dung mang tính chất nhập môn và hướng dẫn cơ bản phù hợp với trình độ người mới bắt đầu.",
+         "sub_topic": "beginner_preference",
+         "confidence": 0.7,
+         "created_at": "2025-12-19T17:15:42.689817+00:00",
+         "updated_at": "2025-12-19T17:15:42.689817+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "edaea6de-c511-4137-8ec9-7c5f1105d62c",
+         "category": "habit",
+         "content": "User có xu hướng thực hiện việc kiểm chứng năng lực ghi nhớ và duy trì ngữ cảnh của hệ thống thông qua các câu hỏi xác nhận thông tin.",
+         "sub_topic": "system_verification",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T10:27:40.782984+00:00",
+         "updated_at": "2025-12-19T10:27:40.782984+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "a0fd7821-6e0f-431c-a548-118325ddd50b",
+         "category": "learning_style",
+         "content": "Người dùng có phong cách học tập đi từ quy định lý thuyết đến việc tìm kiếm sự giải thích chi tiết về cách vận hành thực tế của các quy chuẩn kỹ thuật.",
+         "sub_topic": "regulatory_inquiry",
+         "confidence": 0.8,
+         "created_at": "2025-12-19T10:27:17.668372+00:00",
+         "updated_at": "2025-12-19T10:27:17.668372+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "a9c52387-d2b2-4dc8-8dbb-9f08c52fef0e",
+         "category": "preference",
+         "content": "Người dùng quan tâm đặc biệt đến khía cạnh trách nhiệm pháp lý và nghĩa vụ của các bên liên quan (chủ tàu) trong hoạt động hàng hải.",
+         "sub_topic": "legal_liability",
+         "confidence": 0.85,
+         "created_at": "2025-12-19T10:27:16.770027+00:00",
+         "updated_at": "2025-12-19T10:27:16.770027+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "c088aa43-6a23-4114-a529-2e60db65ca45",
+         "category": "learning_style",
+         "content": "Người dùng có xu hướng tiếp cận kiến thức theo cấu trúc pháp lý, tập trung vào các điều khoản cụ thể để xây dựng nền tảng hiểu biết về luật định.",
+         "sub_topic": "structured_learning",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T10:27:16.447394+00:00",
+         "updated_at": "2025-12-19T10:27:16.447394+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "cf477cc8-c2e2-49c6-8bfe-7eee42ced8c5",
+         "category": "preference",
+         "content": "User ưu tiên phong cách tương tác cá nhân hóa và có xu hướng thiết lập mối quan hệ gắn kết trong quá trình trao đổi thay vì chỉ tiếp nhận thông tin đơn thuần.",
+         "sub_topic": "personalized_engagement",
+         "confidence": 0.8,
+         "created_at": "2025-12-19T10:20:49.279735+00:00",
+         "updated_at": "2025-12-19T10:20:49.279735+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "a8bcf072-872c-45c4-8634-76f799e6117b",
+         "category": "habit",
+         "content": "User có thói quen kiểm tra tính nhất quán và khả năng ghi nhớ thông tin của hệ thống để xác nhận độ tin cậy của đối tác giao tiếp.",
+         "sub_topic": "consistency_verification",
+         "confidence": 0.85,
+         "created_at": "2025-12-19T10:20:48.955028+00:00",
+         "updated_at": "2025-12-19T10:20:48.955028+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "9d7ff355-f485-4439-b19c-f3f9284464aa",
+         "category": "learning_style",
+         "content": "Người dùng có xu hướng chủ động cung cấp ngữ cảnh chuyên môn của bản thân ngay từ đầu để định hướng nội dung trao đổi.",
+         "sub_topic": "communication_approach",
+         "confidence": 0.7,
+         "created_at": "2025-12-19T10:20:33.157554+00:00",
+         "updated_at": "2025-12-19T10:20:33.157554+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "74b9c441-50d9-4c7b-a214-de303e285dff",
+         "category": "preference",
+         "content": "Người dùng thể hiện sự quan tâm đặc biệt và đang tập trung tìm hiểu các kiến thức chuyên môn thuộc lĩnh vực hàng hải.",
+         "sub_topic": "subject_preference",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T10:20:32.831885+00:00",
+         "updated_at": "2025-12-19T10:20:32.831885+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "ab9a9786-7253-4ff2-937b-80f07ddc26a5",
+         "category": "preference",
+         "content": "Người dùng có xu hướng chú trọng đến các khía cạnh rủi ro bổ trợ như bảo hiểm và thủ tục hành chính (cảng vụ) khi tìm hiểu về luật hàng hải.",
+         "sub_topic": "risk_management",
+         "confidence": 0.7,
+         "created_at": "2025-12-19T10:20:21.094286+00:00",
+         "updated_at": "2025-12-19T10:20:21.094286+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "13921d86-3de9-41e9-bed4-28c7baccffdd",
+         "category": "preference",
+         "content": "Người dùng quan tâm đến sự giao thoa giữa luật quốc gia (Bộ luật Hàng hải) và các công ước quốc tế (SOLAS, MARPOL, MLC) trong quản lý tàu biển.",
+         "sub_topic": "international_standards",
+         "confidence": 0.75,
+         "created_at": "2025-12-19T10:20:20.051349+00:00",
+         "updated_at": "2025-12-19T10:20:20.051349+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "8c6955ed-cf33-4105-9009-b91757409963",
+         "category": "learning_style",
+         "content": "Người dùng ưu tiên cách học kết nối giữa quy định văn bản với các tình huống vận hành thực tế (như đăng kiểm, sửa chữa, sự cố) để hiểu rõ bản chất vấn đề.",
+         "sub_topic": "practical_application",
+         "confidence": 0.85,
+         "created_at": "2025-12-19T10:20:19.702354+00:00",
+         "updated_at": "2025-12-19T10:20:19.702354+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "3977d2d1-d2b0-4f7a-9c10-b1f8a5015093",
+         "category": "learning_style",
+         "content": "Người dùng có xu hướng tiếp cận kiến thức pháp luật thông qua việc tìm hiểu các điều khoản cụ thể để xây dựng tư duy hệ thống về trách nhiệm và nghĩa vụ.",
+         "sub_topic": "systematic_learning",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T10:20:18.600120+00:00",
+         "updated_at": "2025-12-19T10:20:18.600120+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "b2bb39fa-a523-4c99-b959-3d0a8e4e00af",
+         "category": "knowledge_gap",
+         "content": "User tự nhận diện là 'sinh viên mới', ám chỉ việc thiếu hụt kiến thức nền tảng và có nhu cầu tiếp cận thông tin từ mức độ cơ bản nhất.",
+         "sub_topic": "beginner_knowledge_base",
+         "confidence": 0.8,
+         "created_at": "2025-12-19T10:18:28.429995+00:00",
+         "updated_at": "2025-12-19T10:18:28.429995+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "525c25ae-67c7-4776-b87d-ed0019895b19",
+         "category": "learning_style",
+         "content": "User có xu hướng thiết lập một xuất phát điểm học tập rõ ràng bằng cách tự xác định vị thế là người mới để nhận được sự hướng dẫn phù hợp.",
+         "sub_topic": "entry_level_approach",
+         "confidence": 0.7,
+         "created_at": "2025-12-19T10:18:27.946012+00:00",
+         "updated_at": "2025-12-19T10:18:27.946012+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "ef4bf6cb-4d9d-4360-a5c8-7acf64ad5a1e",
+         "category": "habit",
+         "content": "Người dùng có thói quen kiểm tra khả năng duy trì bối cảnh và độ tin cậy của hệ thống thông qua việc đặt câu hỏi xác nhận thông tin đã cung cấp.",
+         "sub_topic": "system_validation",
+         "confidence": 0.85,
+         "created_at": "2025-12-19T09:59:22.414680+00:00",
+         "updated_at": "2025-12-19T09:59:22.414680+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "26f0291b-505d-4c9f-b61c-5de18542d43e",
+         "category": "preference",
+         "content": "Người dùng thể hiện sự quan tâm chuyên biệt đến lĩnh vực hàng hải thông qua việc chủ động giới thiệu chuyên môn ngay từ đầu cuộc hội thoại.",
+         "sub_topic": "subject_interest",
+         "confidence": 0.7,
+         "created_at": "2025-12-19T09:58:56.998184+00:00",
+         "updated_at": "2025-12-19T09:58:56.998184+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "d742d3ef-cb39-49b4-bdd1-c8e6be196ec7",
+         "category": "knowledge_gap",
+         "content": "Người dùng đang tìm cách kết nối giữa các quy định lý thuyết về đăng kiểm với trách nhiệm thực tế của chủ tàu trong quá trình vận hành.",
+         "sub_topic": "theory_to_practice_bridge",
+         "confidence": 0.75,
+         "created_at": "2025-12-19T09:58:48.258336+00:00",
+         "updated_at": "2025-12-19T09:58:48.258336+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "b9c6aefd-afe2-45dc-91ec-62e647ec3ddb",
+         "category": "preference",
+         "content": "Người dùng quan tâm đến tính thực thi và hậu quả pháp lý của các quy định an toàn hàng hải kỹ thuật.",
+         "sub_topic": "legal_compliance",
+         "confidence": 0.8,
+         "created_at": "2025-12-19T09:58:47.949448+00:00",
+         "updated_at": "2025-12-19T09:58:47.949448+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "f2522fe7-606a-44e1-9855-ac444afac321",
+         "category": "learning_style",
+         "content": "Người dùng ưu tiên cách học hệ thống hóa kiến thức, tập trung vào việc trích xuất trách nhiệm của các đối tượng liên quan (chủ tàu) trong văn bản luật.",
+         "sub_topic": "structured_learning",
+         "confidence": 0.85,
+         "created_at": "2025-12-19T09:58:47.632096+00:00",
+         "updated_at": "2025-12-19T09:58:47.632096+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "57163db4-25dc-40f3-adac-6c9cfa98fae0",
+         "category": "learning_style",
+         "content": "Người dùng có xu hướng tiếp cận kiến thức pháp luật thông qua việc tìm kiếm các quy định cụ thể (Điều 28) thay vì hỏi về các khái niệm chung chung.",
+         "sub_topic": "specific_legal_inquiry",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T09:58:46.608822+00:00",
+         "updated_at": "2025-12-19T09:58:46.608822+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "5725207b-482e-4136-b209-f5ee2e10cda4",
+         "category": "learning_style",
+         "content": "User có xu hướng chủ động xác định vị thế là người mới bắt đầu, cho thấy họ mong muốn nhận được sự hướng dẫn mang tính nền tảng và tiếp cận kiến thức theo lộ trình có cấu trúc.",
+         "sub_topic": "beginner_orientation",
+         "confidence": 0.75,
+         "created_at": "2025-12-19T09:57:19.734972+00:00",
+         "updated_at": "2025-12-19T09:57:19.734972+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "6029112d-2f61-491f-a2a4-c66b63b23b46",
+         "category": "preference",
+         "content": "Người dùng ưu tiên phong cách giao tiếp cá nhân hóa, có nhu cầu được nhận diện và duy trì sự kết nối trong quá trình tương tác học thuật thay vì chỉ nhận thông tin thuần túy.",
+         "sub_topic": "personalized_interaction",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T09:08:21.059191+00:00",
+         "updated_at": "2025-12-19T09:08:21.059191+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "9043476d-97e9-4ee3-9c37-5fd064780acc",
+         "category": "habit",
+         "content": "Người dùng có xu hướng kiểm tra tính nhất quán và khả năng ghi nhớ của hệ thống để xác nhận độ tin cậy của công cụ trước khi tiếp tục trao đổi chuyên sâu.",
+         "sub_topic": "system_reliability_verification",
+         "confidence": 0.85,
+         "created_at": "2025-12-19T09:08:20.724986+00:00",
+         "updated_at": "2025-12-19T09:08:20.724986+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "15ab9093-21dd-4f26-8b1f-1c86f96a085d",
+         "category": "preference",
+         "content": "Người dùng bước đầu xác định và ưu tiên phạm vi học tập tập trung vào lĩnh vực chuyên môn hàng hải thay vì các chủ đề kiến thức tổng quát.",
+         "sub_topic": "subject_interest",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T09:08:06.184709+00:00",
+         "updated_at": "2025-12-19T09:08:06.184709+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "0bfb2f5e-a27b-4ba0-a3e1-c38e12c6c818",
+         "category": "habit",
+         "content": "Người dùng có thói quen tìm kiếm thông tin theo kiểu 'just-in-time', truy vấn chính xác các điều khoản luật định khi cần giải quyết một vấn đề cụ thể về mặt trách nhiệm.",
+         "sub_topic": "inquiry_based_habit",
+         "confidence": 0.75,
+         "created_at": "2025-12-19T09:07:54.680444+00:00",
+         "updated_at": "2025-12-19T09:07:54.680444+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "caa1b2ea-7b41-4597-a141-089848679a28",
+         "category": "preference",
+         "content": "Người dùng thể hiện sự quan tâm đặc biệt đến khía cạnh trách nhiệm pháp lý và nghĩa vụ của các bên liên quan trong hoạt động hàng hải hơn là các kỹ thuật vận hành thuần túy.",
+         "sub_topic": "legal_and_compliance",
+         "confidence": 0.9,
+         "created_at": "2025-12-19T09:07:54.348365+00:00",
+         "updated_at": "2025-12-19T09:07:54.348365+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "eb033812-023a-4604-b62c-e4616aa69594",
+         "category": "knowledge_gap",
+         "content": "Người dùng có thể đang gặp khó khăn trong việc phân biệt giữa các thủ tục hành chính hàng hải khác nhau, cụ thể là sự khác biệt giữa đăng ký quyền sở hữu và đăng kiểm kỹ thuật.",
+         "sub_topic": "legal_concept_differentiation",
+         "confidence": 0.8,
+         "created_at": "2025-12-19T09:07:53.995804+00:00",
+         "updated_at": "2025-12-19T09:07:53.995804+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "33c4870b-aa3c-43d8-8426-420fe52a048c",
+         "category": "learning_style",
+         "content": "Người dùng có xu hướng tiếp nhận thông tin tốt hơn khi các khái niệm pháp lý khô khan được so sánh và phân biệt rõ ràng với các khái niệm gần kề (như việc phân biệt Điều 28 và Điều 15).",
+         "sub_topic": "comparative_learning",
+         "confidence": 0.85,
+         "created_at": "2025-12-19T09:07:53.649466+00:00",
+         "updated_at": "2025-12-19T09:07:53.649466+00:00",
+         "evolution_notes": []
+       }
+     ],
+     "total": 50,
+     "categories": {
+       "preference": 18,
+       "habit": 9,
+       "learning_style": 19,
+       "knowledge_gap": 4
+     }
+   }
+
+8. Chat History [✓ PASSED] (114ms)
+--------------------------------------------------
+   Found 20 messages (total: 1296):
+     [1] user: Bạn có nhớ tên tôi không?...
+     [2] assistant: Tên: Minh...
+     [3] user: Bạn có nhớ tên tôi không?...
+     [4] assistant: Tên: Minh...
+     [5] user: Xin chào! Tôi là sinh viên mới....
+     ... and 15 more
+
+   [FULL RESPONSE DATA]:
+   {
+     "data": [
+       {
+         "role": "user",
+         "content": "Bạn có nhớ tên tôi không?",
+         "timestamp": "2025-12-19T17:26:26.363823Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-19T17:26:26.380614Z"
+       },
+       {
+         "role": "user",
+         "content": "Bạn có nhớ tên tôi không?",
+         "timestamp": "2025-12-19T17:26:26.398042Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-19T17:26:26.415542Z"
+       },
+       {
+         "role": "user",
+         "content": "Xin chào! Tôi là sinh viên mới.",
+         "timestamp": "2025-12-19T17:31:36.902736Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tôi có thể giúp gì cho bạn?",
+         "timestamp": "2025-12-19T17:31:36.922269Z"
+       },
+       {
+         "role": "user",
+         "content": "Xin chào! Tôi là sinh viên mới.",
+         "timestamp": "2025-12-19T17:31:36.940149Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tôi có thể giúp gì cho bạn?",
+         "timestamp": "2025-12-19T17:31:36.957774Z"
+       },
+       {
+         "role": "user",
+         "content": "Giải thích Quy tắc 15 về tình huống cắt hướng theo COLREGs quy tắc tránh va quốc tế.",
+         "timestamp": "2025-12-19T17:33:59.058671Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Dưới đây là tổng hợp chi tiết và dễ hiểu về **Quy tắc 15 (Rule 15)** trong Công ước quốc tế về Quy tắc phòng ngừa đâm va tàu thuyền trên biển (COLREGs):\n\n### 1. Nội dung cốt lõi của Quy tắc 15 (Tình huống cắt hướng)\nQuy tắc này áp dụng khi hai tàu máy (power-driven vessels) đang đi trên các hướng cắt ngang nhau và có nguy cơ đâm va. Nội dung chính bao gồm:\n\n*   **Xác định tàu nhường đường:** Tàu nào nhìn thấy tàu kia ở phía **mạn phải (starboard side)** của mình thì phải có trách nhiệm nhường đường.\n*   **Hành động tránh va:** Nếu điều kiện cho phép, tàu nhường đường phải tránh đi cắt ngang qua phía trước mũi của tàu kia (thông thường nên điều động đi vòng qua phía sau lái của tàu được nhường).\n\n### 2. Cách xác định và xử lý thực tế\nĐể dễ nhớ, bạn có thể áp dụng nguyên tắc: **\"Phải nhường, Trái đứng\"**.\n\n*   **Tàu A (Nhìn thấy tàu khác bên mạn phải):** Đóng vai trò là **Tàu nhường đường (Give-way vessel)**.\n    *   *Hành động:* Phải chủ động đổi hướng, giảm tốc độ sớm và rõ ràng.\n    *   *Lưu ý:* Tránh cắt mặt tàu bạn.\n*   **Tàu B (Nhìn thấy tàu khác bên mạn trái):** Đóng vai trò là **Tàu đứng hướng (Stand-on vessel)**.\n    *   *Hành động:* Giữ nguyên hướng đi và tốc độ để tàu kia dễ dàng tính toán phương án tránh né.\n\n### 3. Mối liên hệ với các Quy tắc bổ trợ (Quy tắc 16 & 17)\nViệc thực hiện Quy tắc 15 phải luôn đi đôi với hai quy tắc hành động:\n*   **Quy tắc 16 (Trách nhiệm tàu nhường đường):** Hành động phải thực hiện **sớm, dứt khoát** và đủ lớn để tàu khác có thể nhận thấy rõ bằng mắt thường hoặc trên radar.\n*   **Quy tắc 17 (Trách nhiệm tàu đứng hướng):** Dù được quyền đi ưu tiên, nhưng nếu thấy tàu nhường đường không có hành động kịp thời hoặc phù hợp, tàu đứng hướng vẫn phải chủ động điều động để tránh va chạm.\n\n### 4. Tầm quan trọng về mặt pháp lý\nTại Việt Nam, theo **Điều 105 Bộ luật Hàng hải 2015**, mọi tàu thuyền hoạt động trong vùng nước cảng biển và vùng biển Việt Nam đều phải tuân thủ nghiêm ngặt COLREGs. Việc nắm vững Quy tắc 15 không chỉ giúp đảm bảo an toàn hàng hải mà còn là cơ sở pháp lý để phân định trách nhiệm nếu chẳng may có sự cố xảy ra.\n\n**Mẹo ghi nhớ nhanh:** Khi đang điều khiển tàu, nếu bạn thấy đèn mạn đỏ (hoặc mạn phải) của một tàu khác đang cắt ngang hướng đi của mình, đó là lúc bạn phải thực hiện quy tắc nhường đường ngay lập tức.",
+         "timestamp": "2025-12-19T17:33:59.075568Z"
+       },
+       {
+         "role": "user",
+         "content": "Giải thích Quy tắc 15 về tình huống cắt hướng theo COLREGs quy tắc tránh va quốc tế.",
+         "timestamp": "2025-12-19T17:33:59.092980Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Dưới đây là tổng hợp chi tiết và dễ hiểu về **Quy tắc 15 (Rule 15)** trong Công ước quốc tế về Quy tắc phòng ngừa đâm va tàu thuyền trên biển (COLREGs):\n\n### 1. Nội dung cốt lõi của Quy tắc 15 (Tình huống cắt hướng)\nQuy tắc này áp dụng khi hai tàu máy (power-driven vessels) đang đi trên các hướng cắt ngang nhau và có nguy cơ đâm va. Nội dung chính bao gồm:\n\n*   **Xác định tàu nhường đường:** Tàu nào nhìn thấy tàu kia ở phía **mạn phải (starboard side)** của mình thì phải có trách nhiệm nhường đường.\n*   **Hành động tránh va:** Nếu điều kiện cho phép, tàu nhường đường phải tránh đi cắt ngang qua phía trước mũi của tàu kia (thông thường nên điều động đi vòng qua phía sau lái của tàu được nhường).\n\n### 2. Cách xác định và xử lý thực tế\nĐể dễ nhớ, bạn có thể áp dụng nguyên tắc: **\"Phải nhường, Trái đứng\"**.\n\n*   **Tàu A (Nhìn thấy tàu khác bên mạn phải):** Đóng vai trò là **Tàu nhường đường (Give-way vessel)**.\n    *   *Hành động:* Phải chủ động đổi hướng, giảm tốc độ sớm và rõ ràng.\n    *   *Lưu ý:* Tránh cắt mặt tàu bạn.\n*   **Tàu B (Nhìn thấy tàu khác bên mạn trái):** Đóng vai trò là **Tàu đứng hướng (Stand-on vessel)**.\n    *   *Hành động:* Giữ nguyên hướng đi và tốc độ để tàu kia dễ dàng tính toán phương án tránh né.\n\n### 3. Mối liên hệ với các Quy tắc bổ trợ (Quy tắc 16 & 17)\nViệc thực hiện Quy tắc 15 phải luôn đi đôi với hai quy tắc hành động:\n*   **Quy tắc 16 (Trách nhiệm tàu nhường đường):** Hành động phải thực hiện **sớm, dứt khoát** và đủ lớn để tàu khác có thể nhận thấy rõ bằng mắt thường hoặc trên radar.\n*   **Quy tắc 17 (Trách nhiệm tàu đứng hướng):** Dù được quyền đi ưu tiên, nhưng nếu thấy tàu nhường đường không có hành động kịp thời hoặc phù hợp, tàu đứng hướng vẫn phải chủ động điều động để tránh va chạm.\n\n### 4. Tầm quan trọng về mặt pháp lý\nTại Việt Nam, theo **Điều 105 Bộ luật Hàng hải 2015**, mọi tàu thuyền hoạt động trong vùng nước cảng biển và vùng biển Việt Nam đều phải tuân thủ nghiêm ngặt COLREGs. Việc nắm vững Quy tắc 15 không chỉ giúp đảm bảo an toàn hàng hải mà còn là cơ sở pháp lý để phân định trách nhiệm nếu chẳng may có sự cố xảy ra.\n\n**Mẹo ghi nhớ nhanh:** Khi đang điều khiển tàu, nếu bạn thấy đèn mạn đỏ (hoặc mạn phải) của một tàu khác đang cắt ngang hướng đi của mình, đó là lúc bạn phải thực hiện quy tắc nhường đường ngay lập tức.",
+         "timestamp": "2025-12-19T17:33:59.110473Z"
+       },
+       {
+         "role": "user",
+         "content": "Tên tôi là Minh, tôi đang học về hàng hải.",
+         "timestamp": "2025-12-19T17:34:06.280244Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-19T17:34:06.298383Z"
+       },
+       {
+         "role": "user",
+         "content": "Tên tôi là Minh, tôi đang học về hàng hải.",
+         "timestamp": "2025-12-19T17:34:06.316350Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-19T17:34:06.333746Z"
+       },
+       {
+         "role": "user",
+         "content": "Bạn có nhớ tên tôi không?",
+         "timestamp": "2025-12-19T17:34:24.455510Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-19T17:34:24.472457Z"
+       },
+       {
+         "role": "user",
+         "content": "Bạn có nhớ tên tôi không?",
+         "timestamp": "2025-12-19T17:34:24.489387Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-19T17:34:24.506221Z"
+       }
+     ],
+     "pagination": {
+       "total": 1296,
+       "limit": 20,
+       "offset": 0
+     }
+   }
+
+======================================================================
+  TEST SUMMARY
+======================================================================
+  Passed: 8
+  Failed: 0
+  Total Time: 171.4s
+  Completed: 2025-12-20 00:34:20
+======================================================================

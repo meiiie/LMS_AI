@@ -51,24 +51,28 @@ class GradingResult:
         """
         Check if query needs rewriting based on grades.
         
-        CHỈ THỊ SỐ 32 - SOTA 2025 Pattern (OpenAI/Anthropic):
+        SOTA 2025 Pattern (Self-RAG + Meta CRAG):
         - Trust the retriever: modern hybrid search is good enough
         - Only rewrite when truly failed (zero relevant docs)
-        - Avoid unnecessary second iterations that add 20s+ latency
+        - Uses configurable confidence thresholds
         
         Reference:
-        - OpenAI: Single-pass retrieval with hybrid search
+        - Self-RAG (Asai et al.): Confidence-based iteration
+        - Meta CRAG: Lightweight retrieval evaluator
         - Anthropic: Plan-Do-Check-Refine (one loop, not multi-iteration)
-        - Meta CRAG: Acknowledges correction phase latency cost
         """
+        from app.core.config import settings
+        
         # SOTA Pattern: If we found ANY relevant doc, trust the retrieval
-        # Previously: avg_score < 7.0 triggered rewrite even with 2 relevant docs
         if self.relevant_count >= 1:
             return False
         
-        # Only rewrite if ZERO relevant docs AND consistently low scores
-        # This eliminates unnecessary second iterations
-        return self.avg_score < 4.0
+        # Normalize score to 0-1 confidence scale
+        normalized_confidence = self.avg_score / 10.0
+        
+        # Only rewrite if ZERO relevant docs AND below MEDIUM confidence threshold
+        # Uses configurable threshold instead of hardcoded 4.0
+        return normalized_confidence < settings.rag_confidence_medium
 
 
 
@@ -264,8 +268,44 @@ class RetrievalGrader:
             )
         
         # ====================================================================
+        # PHASE 2: HYBRID CONFIDENCE PRE-FILTER (SOTA 2025 - Self-RAG)
+        # ====================================================================
+        # Fast non-LLM evaluation: BM25 + embedding + maritime boosting
+        # Reference: Anthropic Contextual Retrieval, Self-RAG
+        # Latency: ~0.1s vs 14s for LLM-only grading
+        # ====================================================================
+        from app.engine.agentic_rag.confidence_evaluator import get_hybrid_confidence_evaluator
+        
+        hybrid_evaluator = get_hybrid_confidence_evaluator()
+        hybrid_results = hybrid_evaluator.evaluate_batch(query, documents, query_embedding)
+        
+        # Calculate aggregate confidence
+        aggregate_confidence = hybrid_evaluator.aggregate_confidence(hybrid_results)
+        
+        logger.info(
+            f"[GRADER] Hybrid pre-filter: aggregate={aggregate_confidence:.2f}, "
+            f"HIGH={sum(1 for r in hybrid_results if r.is_high_confidence)}, "
+            f"MEDIUM={sum(1 for r in hybrid_results if r.is_medium_confidence and not r.is_high_confidence)}"
+        )
+        
+        # Separate by hybrid confidence level
+        high_conf_docs = []
+        high_conf_results = []
+        needs_mini_judge_docs = []
+        
+        for doc, result in zip(documents, hybrid_results):
+            if result.is_high_confidence:
+                # HIGH confidence from hybrid → skip Mini-Judge
+                high_conf_docs.append(doc)
+                high_conf_results.append(result)
+            else:
+                # MEDIUM or LOW → needs Mini-Judge verification
+                needs_mini_judge_docs.append(doc)
+        
+        # ====================================================================
         # PHASE 3.5: LLM MINI-JUDGE PRE-GRADING (SOTA 2025)
         # ====================================================================
+        # Only called for documents not already HIGH confidence from hybrid
         # Root Cause Fix: Bi-encoder similarity ≠ Relevance (65-80% accuracy)
         # Solution: LLM Mini-Judge for binary relevance (85-95% accuracy)
         # ====================================================================
@@ -273,35 +313,46 @@ class RetrievalGrader:
         
         mini_judge = get_mini_judge_grader()
         
-        # Pre-grade all documents with binary relevance (parallel)
-        judge_results = await mini_judge.pre_grade_batch(query, documents)
+        # Build grades list
+        grades = []
         
-        # Separate relevant vs needs-full-grading
+        # Add HIGH confidence docs from hybrid (no LLM needed)
+        for doc, result in zip(high_conf_docs, high_conf_results):
+            doc_id = doc.get("id", doc.get("node_id", "unknown"))
+            content_preview = doc.get("content", doc.get("text", ""))[:100]
+            
+            grades.append(DocumentGrade(
+                document_id=doc_id,
+                content_preview=content_preview,
+                score=result.score * 10,  # Convert 0-1 to 0-10
+                is_relevant=True,
+                reason=f"[Hybrid HIGH] BM25={result.bm25_score:.2f}, Maritime={result.maritime_boost:.2f}"
+            ))
+        
+        # Mini-Judge only for non-HIGH confidence docs
         relevant_docs = []
         relevant_results = []
         uncertain_docs = []
         
-        for doc, result in zip(documents, judge_results):
-            if result.is_relevant and result.confidence in ("high", "medium"):
-                # Already confirmed relevant by Mini-Judge
-                relevant_docs.append(doc)
-                relevant_results.append(result)
-            else:
-                # Not relevant or low confidence → needs full grading
-                uncertain_docs.append(doc)
-        
-        # Build grades from Mini-Judge results
-        grades = []
-        
-        # Add relevant docs with high score
-        for doc, result in zip(relevant_docs, relevant_results):
-            grades.append(DocumentGrade(
-                document_id=result.document_id,
-                content_preview=result.content_preview,
-                score=8.5,  # High score for Mini-Judge approved
-                is_relevant=True,
-                reason=f"[Mini-Judge] {result.reason}"
-            ))
+        if needs_mini_judge_docs:
+            judge_results = await mini_judge.pre_grade_batch(query, needs_mini_judge_docs)
+            
+            for doc, result in zip(needs_mini_judge_docs, judge_results):
+                if result.is_relevant and result.confidence in ("high", "medium"):
+                    relevant_docs.append(doc)
+                    relevant_results.append(result)
+                else:
+                    uncertain_docs.append(doc)
+            
+            # Add Mini-Judge approved docs
+            for doc, result in zip(relevant_docs, relevant_results):
+                grades.append(DocumentGrade(
+                    document_id=result.document_id,
+                    content_preview=result.content_preview,
+                    score=8.5,  # High score for Mini-Judge approved
+                    is_relevant=True,
+                    reason=f"[Mini-Judge] {result.reason}"
+                ))
         
         # Full LLM grading only for uncertain docs (limit to 5)
         if uncertain_docs:
@@ -309,9 +360,10 @@ class RetrievalGrader:
             grades.extend(llm_grades)
         
         logger.info(
-            f"[GRADER] Mini-Judge: {len(documents)} docs → "
-            f"Relevant={len(relevant_docs)}, LLM called on {min(len(uncertain_docs), 5)} "
-            f"(saved {len(relevant_docs)} calls)"
+            f"[GRADER] Summary: {len(documents)} docs → "
+            f"Hybrid HIGH={len(high_conf_docs)}, Mini-Judge={len(relevant_docs)}, "
+            f"LLM Full={min(len(uncertain_docs), 5)} "
+            f"(saved {len(high_conf_docs) + len(relevant_docs)} LLM calls)"
         )
         
         result = GradingResult(query=query, grades=grades)
