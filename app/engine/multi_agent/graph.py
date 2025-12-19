@@ -191,10 +191,16 @@ async def synthesizer_node(state: AgentState) -> AgentState:
         details={"response_length": len(final_response)}
     )
     
-    # CHỈ THỊ SỐ 31: Priority Merge - merge CRAG trace if available
-    # CRAG trace comes from rag_node when using CorrectiveRAG path
+    # CHỈ THỊ SỐ 31 v3 SOTA: Priority Merge - ONLY merge CRAG trace (not graph trace)
+    # CRAG trace has was_corrected attribute, graph trace doesn't
     existing_trace = state.get("reasoning_trace")
-    if existing_trace and hasattr(existing_trace, 'steps') and existing_trace.steps:
+    is_crag_trace = (
+        existing_trace and 
+        hasattr(existing_trace, 'was_corrected') and  # CRAG-specific field
+        hasattr(existing_trace, 'steps') and 
+        len(existing_trace.steps) > 0
+    )
+    if is_crag_trace:
         # CRAG trace exists - merge graph steps AROUND it
         tracer.merge_trace(existing_trace, position="after_first")
         logger.info(f"[SYNTHESIZER] Merged CRAG trace ({len(existing_trace.steps)} steps) with graph trace")
@@ -243,12 +249,12 @@ async def direct_response_node(state: AgentState) -> AgentState:
     state["final_response"] = response
     state["agent_outputs"] = {"direct": response}
     
-    # CHỈ THỊ SỐ 30: Build and store reasoning_trace for direct path
-    # This ensures direct path has trace just like rag/tutor paths
-    state["reasoning_trace"] = tracer.build_trace(final_confidence=0.95)
-    state["_tracer"] = tracer
+    # CHỈ THỊ SỐ 31 v3 SOTA: Single Build Point Pattern
+    # DON'T build trace here - only synthesizer builds trace
+    # This follows DeepSeek R1 pattern: single accumulator, build at END
+    state["_tracer"] = tracer  # Pass tracer for synthesizer to build
     
-    logger.info(f"[DIRECT] Response with trace: {state['reasoning_trace'].total_steps} steps")
+    logger.info(f"[DIRECT] Response prepared, tracer passed to synthesizer")
     
     return state
 

@@ -85,39 +85,54 @@ Tra cứu các quy tắc, luật lệ hàng hải (COLREGs, SOLAS, MARPOL) hoặ
 CHỈ gọi khi user hỏi về kiến thức chuyên môn hàng hải.
 """)
 async def tool_maritime_search(query: str) -> str:
-    """Search maritime regulations and knowledge base."""
-    global _rag_agent, _last_retrieved_sources, _last_native_thinking
+    """Search maritime regulations and knowledge base.
+    
+    CHỈ THỊ SỐ 31 v3 SOTA: Uses CorrectiveRAG for full 8-step trace.
+    Following DeepSeek R1 pattern: consistent trace from all RAG calls.
+    """
+    global _rag_agent, _last_retrieved_sources, _last_native_thinking, _last_reasoning_trace
+    
+    # Import CorrectiveRAG for SOTA trace generation
+    from app.engine.agentic_rag.corrective_rag import get_corrective_rag
     
     if not _rag_agent:
         return "Lỗi: RAG Agent không khả dụng. Không thể tra cứu kiến thức."
     
     try:
-        logger.info(f"[TOOL] Maritime Search: {query}")
-        response = await _rag_agent.query(query, user_role="student")
+        logger.info(f"[TOOL] Maritime Search (CRAG): {query}")
         
-        result = response.content
+        # CHỈ THỊ SỐ 31 v3 SOTA: Use CorrectiveRAG for full trace
+        # This follows DeepSeek R1 pattern: ALL RAG calls produce consistent traces
+        crag = get_corrective_rag(_rag_agent)
+        crag_result = await crag.process(query, context={})
+        
+        result = crag_result.answer
+        
+        # CHỈ THỊ SỐ 31 v3: Store CRAG trace for propagation
+        _last_reasoning_trace = crag_result.reasoning_trace
+        if _last_reasoning_trace:
+            logger.info(f"[TOOL] CRAG trace captured: {_last_reasoning_trace.total_steps} steps")
         
         # CHỈ THỊ SỐ 29 v9: Capture native thinking for SOTA reasoning transparency
-        # This is Option B+ - Tool-level thinking propagation
-        _last_native_thinking = getattr(response, 'native_thinking', None)
+        _last_native_thinking = crag_result.thinking
         if _last_native_thinking:
             logger.info(f"[TOOL] Native thinking captured: {len(_last_native_thinking)} chars")
         
-        # CHỈ THỊ KỸ THUẬT SỐ 16: Lưu sources để API trả về
+        # CHỈ THỊ KỸ THUẬT SỐ 16: Store sources for API response
         # CHỈ THỊ 26: Include image_url for evidence images
         # Feature: source-highlight-citation - Include bounding_boxes
-        if response.citations:
+        if crag_result.sources:
             _last_retrieved_sources = [
                 {
-                    "node_id": c.node_id,
-                    "title": c.title,
-                    "content": c.source[:500] if c.source else "",  # Truncate for API
-                    "image_url": getattr(c, 'image_url', None),  # CHỈ THỊ 26
-                    "page_number": getattr(c, 'page_number', None),
-                    "document_id": getattr(c, 'document_id', None),
-                    "bounding_boxes": getattr(c, 'bounding_boxes', None)
+                    "node_id": src.get("node_id", ""),
+                    "title": src.get("title", ""),
+                    "content": src.get("content", "")[:500] if src.get("content") else "",
+                    "image_url": src.get("image_url"),
+                    "page_number": src.get("page_number"),
+                    "document_id": src.get("document_id"),
+                    "bounding_boxes": src.get("bounding_boxes")
                 }
-                for c in response.citations[:5]  # Top 5 sources
+                for src in crag_result.sources[:5]  # Top 5 sources
             ]
             # Debug: Log source details for troubleshooting
             for i, src in enumerate(_last_retrieved_sources[:2]):
@@ -125,7 +140,7 @@ async def tool_maritime_search(query: str) -> str:
             logger.info(f"[TOOL] Saved {len(_last_retrieved_sources)} sources for API response")
             
             # Also append to text for LLM context
-            sources_text = [f"- {c.title}" for c in response.citations[:3]]
+            sources_text = [f"- {src.get('title', 'Unknown')}" for src in crag_result.sources[:3]]
             result += "\n\n**Nguồn tham khảo:**\n" + "\n".join(sources_text)
         else:
             _last_retrieved_sources = []
@@ -136,6 +151,7 @@ async def tool_maritime_search(query: str) -> str:
         logger.error(f"Maritime search error: {e}")
         _last_retrieved_sources = []
         _last_native_thinking = None
+        _last_reasoning_trace = None
         return f"Lỗi khi tra cứu: {str(e)}"
 
 

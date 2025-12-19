@@ -26,6 +26,7 @@ from app.engine.tools.rag_tools import (
     tool_maritime_search,
     get_last_retrieved_sources,
     get_last_native_thinking,  # CHỈ THỊ SỐ 29 v9: Option B+ thinking propagation
+    get_last_reasoning_trace,  # CHỈ THỊ SỐ 31 v3: CRAG trace propagation
     clear_retrieved_sources
 )
 
@@ -144,6 +145,13 @@ class TutorAgentNode:
             if thinking:
                 state["thinking"] = thinking
                 logger.info(f"[TUTOR_AGENT] Thinking propagated to state: {len(thinking)} chars")
+            
+            # CHỈ THỊ SỐ 31 v3 SOTA: Propagate CRAG trace for synthesizer merge
+            # This follows LangGraph shared state pattern
+            crag_trace = get_last_reasoning_trace()
+            if crag_trace:
+                state["reasoning_trace"] = crag_trace
+                logger.info(f"[TUTOR_AGENT] CRAG trace propagated: {crag_trace.total_steps} steps")
             
             logger.info(f"[TUTOR_AGENT] ReAct complete: {len(tools_used)} tool calls, {len(sources)} sources")
             
