@@ -48,8 +48,28 @@ class GradingResult:
     
     @property
     def needs_rewrite(self) -> bool:
-        """Check if query needs rewriting based on grades."""
-        return self.avg_score < 7.0 or self.relevant_count == 0
+        """
+        Check if query needs rewriting based on grades.
+        
+        CHỈ THỊ SỐ 32 - SOTA 2025 Pattern (OpenAI/Anthropic):
+        - Trust the retriever: modern hybrid search is good enough
+        - Only rewrite when truly failed (zero relevant docs)
+        - Avoid unnecessary second iterations that add 20s+ latency
+        
+        Reference:
+        - OpenAI: Single-pass retrieval with hybrid search
+        - Anthropic: Plan-Do-Check-Refine (one loop, not multi-iteration)
+        - Meta CRAG: Acknowledges correction phase latency cost
+        """
+        # SOTA Pattern: If we found ANY relevant doc, trust the retrieval
+        # Previously: avg_score < 7.0 triggered rewrite even with 2 relevant docs
+        if self.relevant_count >= 1:
+            return False
+        
+        # Only rewrite if ZERO relevant docs AND consistently low scores
+        # This eliminates unnecessary second iterations
+        return self.avg_score < 4.0
+
 
 
 GRADING_PROMPT = """Bạn là Retrieval Grader cho hệ thống Maritime AI.
