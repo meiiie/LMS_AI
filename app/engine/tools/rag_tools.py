@@ -7,7 +7,7 @@ Access: READ (safe, no mutations)
 
 import logging
 import re
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 from langchain_core.tools import tool
 
