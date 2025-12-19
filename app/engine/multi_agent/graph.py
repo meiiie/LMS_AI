@@ -170,6 +170,8 @@ async def synthesizer_node(state: AgentState) -> AgentState:
     Synthesizer node - combine outputs into final response.
     
     CHỈ THỊ SỐ 30: Adds SYNTHESIS step and builds final reasoning_trace.
+    CHỈ THỊ SỐ 31: Merges CRAG trace with graph trace for complete picture.
+    
     This is the final node where trace is compiled for non-direct paths.
     """
     # CHỈ THỊ SỐ 30: Universal tracing
@@ -189,11 +191,17 @@ async def synthesizer_node(state: AgentState) -> AgentState:
         details={"response_length": len(final_response)}
     )
     
-    # CHỈ THỊ SỐ 30: Build final reasoning_trace if not already built
-    # (direct path builds its own, other paths need synthesizer to build)
-    if state.get("reasoning_trace") is None:
-        state["reasoning_trace"] = tracer.build_trace()
-        logger.info(f"[SYNTHESIZER] Built trace: {state['reasoning_trace'].total_steps} steps")
+    # CHỈ THỊ SỐ 31: Priority Merge - merge CRAG trace if available
+    # CRAG trace comes from rag_node when using CorrectiveRAG path
+    existing_trace = state.get("reasoning_trace")
+    if existing_trace and hasattr(existing_trace, 'steps') and existing_trace.steps:
+        # CRAG trace exists - merge graph steps AROUND it
+        tracer.merge_trace(existing_trace, position="after_first")
+        logger.info(f"[SYNTHESIZER] Merged CRAG trace ({len(existing_trace.steps)} steps) with graph trace")
+    
+    # Build final merged trace
+    state["reasoning_trace"] = tracer.build_trace()
+    logger.info(f"[SYNTHESIZER] Final trace: {state['reasoning_trace'].total_steps} steps")
     
     logger.info(f"[SYNTHESIZER] Final response generated, length={len(final_response)}")
     

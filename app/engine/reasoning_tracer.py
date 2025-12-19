@@ -229,6 +229,55 @@ class ReasoningTracer:
         
         return summary
     
+    def merge_trace(
+        self,
+        other_trace: ReasoningTrace,
+        position: str = "after_first"
+    ) -> None:
+        """
+        Merge steps from another trace into this tracer.
+        
+        CHỈ THỊ SỐ 31: Option C - Priority merge pattern.
+        SOTA Pattern: Hierarchical trace merging (OpenAI o1, Claude, DeepSeek R1)
+        
+        Args:
+            other_trace: ReasoningTrace to merge (e.g., from CorrectiveRAG)
+            position: Where to insert other steps:
+                - "after_first": Insert after first step (routing), before rest
+                - "prepend": Insert at beginning
+                - "append": Insert at end
+        
+        Example:
+            Graph trace: [routing, quality_check, synthesis]
+            CRAG trace: [query_analysis, retrieval, grading, generation, verification]
+            
+            After merge (position="after_first"):
+            [routing, query_analysis, retrieval, grading, generation, verification, 
+             quality_check, synthesis]
+        """
+        if other_trace is None or not other_trace.steps:
+            return
+        
+        if position == "after_first" and len(self._steps) >= 1:
+            # Insert CRAG steps after first step (routing)
+            first_step = self._steps[0]
+            remaining_steps = self._steps[1:]
+            self._steps = [first_step] + list(other_trace.steps) + remaining_steps
+        elif position == "prepend":
+            self._steps = list(other_trace.steps) + self._steps
+        else:  # append
+            self._steps.extend(other_trace.steps)
+        
+        # Inherit correction info if present
+        if other_trace.was_corrected:
+            self._was_corrected = True
+            self._correction_reason = other_trace.correction_reason
+        
+        logger.info(
+            f"[Tracer] Merged {len(other_trace.steps)} steps from other trace, "
+            f"total now: {len(self._steps)}"
+        )
+    
     def reset(self) -> None:
         """Reset tracer for reuse"""
         self._steps = []

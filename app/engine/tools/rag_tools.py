@@ -26,6 +26,8 @@ _rag_agent = None
 _last_retrieved_sources: List[Dict[str, str]] = []
 # CHỈ THỊ SỐ 29 v9: Store native thinking for SOTA reasoning transparency
 _last_native_thinking: Optional[str] = None
+# CHỈ THỊ SỐ 31: Store reasoning_trace from CRAG for trace merge
+_last_reasoning_trace: Optional[Any] = None
 
 
 def init_rag_tools(rag_agent):
@@ -53,11 +55,25 @@ def get_last_native_thinking() -> Optional[str]:
     return _last_native_thinking
 
 
+def get_last_reasoning_trace():
+    """
+    Get the last reasoning_trace from RAG for SOTA trace merge.
+    
+    CHỈ THỊ SỐ 31: Option C - Priority merge pattern.
+    This allows tutor_node/synthesizer to merge CRAG's rich trace with graph trace.
+    
+    Returns:
+        ReasoningTrace object from CorrectiveRAG, or None if not available
+    """
+    return _last_reasoning_trace
+
+
 def clear_retrieved_sources():
-    """Clear the retrieved sources and native thinking."""
-    global _last_retrieved_sources, _last_native_thinking
+    """Clear the retrieved sources, native thinking, and reasoning trace."""
+    global _last_retrieved_sources, _last_native_thinking, _last_reasoning_trace
     _last_retrieved_sources = []
     _last_native_thinking = None
+    _last_reasoning_trace = None
 
 
 # =============================================================================
