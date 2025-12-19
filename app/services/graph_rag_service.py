@@ -31,6 +31,7 @@ class GraphEnhancedResult:
     page_number: Optional[int] = None
     document_id: Optional[str] = None
     image_url: Optional[str] = None
+    bounding_boxes: Optional[List[Dict[str, Any]]] = None  # Feature: source-highlight-citation
     category: str = "Knowledge"  # From source HybridSearchResult
     
     # Graph-enhanced context
@@ -127,6 +128,7 @@ class GraphRAGService:
                 page_number=result.page_number,
                 document_id=result.document_id,
                 image_url=result.image_url,
+                bounding_boxes=result.bounding_boxes,  # Feature: source-highlight-citation
                 category=result.category,  # Pass category from HybridSearchResult
                 search_method="graph_enhanced" if self._neo4j_available else result.search_method,
                 dense_score=result.dense_score or 0.0,

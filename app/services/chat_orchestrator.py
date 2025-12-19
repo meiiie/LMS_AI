@@ -345,7 +345,11 @@ class ChatOrchestrator:
                 title=s.get("title", ""),
                 source_type="knowledge_graph",
                 content_snippet=s.get("content", "")[:200],
-                image_url=s.get("image_url")
+                image_url=s.get("image_url"),
+                # Feature: source-highlight-citation - Copy metadata for PDF highlighting
+                page_number=s.get("page_number"),
+                document_id=s.get("document_id"),
+                bounding_boxes=s.get("bounding_boxes")
             ))
         
         # Extract tools_used from Multi-Agent result (SOTA: API transparency)
