@@ -967,10 +967,20 @@ class CorrectiveRAG:
         }
         
         # Emit metadata with reasoning_trace
+        # FIX: ReasoningTrace is Pydantic BaseModel, use model_dump() (v2) or dict() (v1)
+        reasoning_dict = None
+        if reasoning_trace:
+            try:
+                # Pydantic v2: model_dump()
+                reasoning_dict = reasoning_trace.model_dump()
+            except AttributeError:
+                # Pydantic v1 fallback: dict()
+                reasoning_dict = reasoning_trace.dict()
+        
         yield {
             "type": "metadata", 
             "content": {
-                "reasoning_trace": reasoning_trace.to_dict() if hasattr(reasoning_trace, 'to_dict') else None,
+                "reasoning_trace": reasoning_dict,
                 "processing_time": total_time,
                 "confidence": confidence,
                 "model": "maritime-rag-v3",
