@@ -901,17 +901,21 @@ class CorrectiveRAG:
             user_role = user_context.get("user_role", "student")
             history = user_context.get("conversation_history", "")
             
-            # FIXED: Create KnowledgeNode list from documents for RAGAgent
+            # SOTA PATTERN: Defensive defaults for data quality issues
+            # Following OpenAI/Anthropic pattern - graceful degradation, never crash
             from app.models.knowledge_graph import KnowledgeNode, NodeType
             
             knowledge_nodes = []
             for i, doc in enumerate(documents):
+                # CRITICAL: Use 'or' operator to handle empty strings
+                # doc.get("title", "X") returns '' if title is empty string
+                # doc.get("title") or "X" returns "X" if title is empty/None
                 node = KnowledgeNode(
-                    id=doc.get("node_id", f"doc_{i}"),  # id, not node_id
-                    node_type=NodeType.REGULATION,  # Required field
-                    content=doc.get("content", ""),
-                    title=doc.get("title", "Unknown"),
-                    source=doc.get("document_id", "")  # Used by _generate_response_streaming
+                    id=doc.get("node_id") or f"doc_{i}",
+                    node_type=NodeType.REGULATION,
+                    content=doc.get("content") or "No content",
+                    title=doc.get("title") or f"Document {i+1}",
+                    source=doc.get("document_id") or ""
                 )
                 knowledge_nodes.append(node)
             
