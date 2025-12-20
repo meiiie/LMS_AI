@@ -46,7 +46,7 @@ class MiniJudgeConfig:
     
     # Parallel processing settings
     max_parallel: int = 10  # Max concurrent LLM calls
-    timeout_seconds: float = 5.0  # Timeout per document
+    timeout_seconds: float = 2.0  # SOTA 2025: Faster timeout, fallback to uncertain → batch grading
     
     # Content limits
     max_doc_chars: int = 300  # Truncate doc content for speed

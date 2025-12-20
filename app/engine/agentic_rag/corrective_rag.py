@@ -364,10 +364,24 @@ class CorrectiveRAG:
                     details={"score": grading_result.avg_score, "passed": False}
                 )
             
-            # Step 4: Rewrite if needed
+            # ================================================================
+            # SOTA 2025: Early exit on relevant docs (LangGraph short-circuit)
+            # ================================================================
+            # Pattern: Trust the retriever. If we have ANY relevant doc, proceed
+            # Log showed: "avg_score=4.6 relevant=2/7" → 2 docs were enough!
+            # This saves ~40s by avoiding unnecessary rewrite + second iteration
+            # ================================================================
+            if grading_result.relevant_count >= 1:
+                logger.info(
+                    f"[CRAG] SOTA: Found {grading_result.relevant_count} relevant docs, "
+                    f"skipping rewrite (trust retriever pattern)"
+                )
+                break
+            
+            # Step 4: Rewrite ONLY if ZERO relevant docs found
             if iteration < self._max_iterations - 1:
                 tracer.start_step(StepNames.QUERY_REWRITE, "Viết lại query để cải thiện kết quả")
-                logger.info(f"[CRAG] Step 4.{iterations}: Rewriting query (score={grading_result.avg_score:.1f})")
+                logger.info(f"[CRAG] Step 4.{iterations}: Rewriting query (score={grading_result.avg_score:.1f}, 0 relevant docs)")
                 
                 if analysis.complexity == QueryComplexity.COMPLEX:
                     # Decompose complex queries
@@ -387,7 +401,7 @@ class CorrectiveRAG:
                     result=f"Query mới: {current_query[:50]}...",
                     confidence=0.8
                 )
-                tracer.record_correction(f"Điểm liên quan thấp ({grading_result.avg_score:.1f}/10)")
+                tracer.record_correction(f"Không tìm thấy doc liên quan (score={grading_result.avg_score:.1f}/10)")
         
         # Step 5: Generate answer
         tracer.start_step(StepNames.GENERATION, "Tạo câu trả lời từ context")
@@ -428,10 +442,20 @@ class CorrectiveRAG:
                 tracer.record_correction(f"Reflection: {reflection_result.correction_reason}")
         
         # Step 6: Verify (optional)
+        # SOTA 2025: Skip verification for MEDIUM+ confidence (saves ~19s)
+        # Pattern: Anthropic Plan-Do-Check-Refine - only verify LOW confidence
         verification_result = None
-        if self._enable_verification and analysis.requires_verification:
+        grading_confidence = grading_result.avg_score / 10.0 if grading_result else 0.5
+        
+        should_verify = (
+            self._enable_verification and 
+            analysis.requires_verification and
+            grading_confidence < settings.rag_confidence_medium  # Only verify LOW confidence
+        )
+        
+        if should_verify:
             tracer.start_step(StepNames.VERIFICATION, "Kiểm tra độ chính xác và hallucination")
-            logger.info(f"[CRAG] Step 6: Verifying answer")
+            logger.info(f"[CRAG] Step 6: Verifying answer (low confidence={grading_confidence:.2f})")
             verification_result = await self._verifier.verify(answer, sources)
             
             if verification_result.warning:
@@ -445,6 +469,8 @@ class CorrectiveRAG:
                     result="Đã xác minh - Không phát hiện vấn đề",
                     confidence=verification_result.confidence / 100 if verification_result.confidence else 0.9
                 )
+        elif self._enable_verification and grading_confidence >= settings.rag_confidence_medium:
+            logger.info(f"[CRAG] Skipping verification (confidence={grading_confidence:.2f} >= MEDIUM)")
         
         # Calculate overall confidence
         confidence = self._calculate_confidence(

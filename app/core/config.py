@@ -165,7 +165,7 @@ class Settings(BaseSettings):
     # MEDIUM: Allow single correction if reflection detects issues
     # Below MEDIUM: Fallback to web search or extended retrieval
     rag_confidence_high: float = Field(
-        default=0.85,
+        default=0.70,  # SOTA 2025: 0.85 → 0.70. Maritime domain score 7/10 is often sufficient
         description="HIGH confidence threshold: Skip iteration, generate immediately"
     )
     rag_confidence_medium: float = Field(
