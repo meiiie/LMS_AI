@@ -1,6 +1,6 @@
 # 🗺️ Maritime AI System Flow Diagram
 
-**Version:** 3.0 (SOTA 2025 - Post Phase 2.4a)  
+**Version:** 3.1 (SOTA 2025 - P1 Early Exit + Phase 2.4a)  
 **Updated:** 2025-12-20  
 **Team Board:** Complete system flow for developers
 
@@ -106,10 +106,14 @@ sequenceDiagram
     end
     
     rect rgb(230, 255, 230)
-        Note over G,Syn: STAGE 4: Quality & Synthesis (~8-15s)
-        T-->>G: response
-        G->>G: Score quality
-        G-->>Syn: approved
+        Note over G,Syn: STAGE 4: Quality & Synthesis (P1 Early Exit)
+        alt confidence ≥ 0.85 [P1 EARLY EXIT]
+            T-->>Syn: SKIP Grader (save 7.8s)
+        else confidence < 0.85
+            T-->>G: response
+            G->>G: Score quality
+            G-->>Syn: approved
+        end
         Syn->>Syn: Format final response
     end
     
@@ -188,7 +192,7 @@ flowchart TB
 
 ---
 
-## 🏗️ Multi-Agent Graph (LangGraph)
+## 🏗️ Multi-Agent Graph (LangGraph + P1 Early Exit)
 
 ```mermaid
 stateDiagram-v2
@@ -201,11 +205,19 @@ stateDiagram-v2
     
     DirectResponse --> Synthesizer
     
-    MemoryAgent --> GraderAgent
-    TutorAgent --> GraderAgent
-    RAGAgent --> GraderAgent
+    state RAGAgent_Check <<choice>>
+    RAGAgent --> RAGAgent_Check
+    RAGAgent_Check --> Synthesizer: confidence ≥ 0.85 [P1 EARLY EXIT]
+    RAGAgent_Check --> GraderAgent: confidence < 0.85
     
-    GraderAgent --> Synthesizer: passed
+    state TutorAgent_Check <<choice>>
+    TutorAgent --> TutorAgent_Check
+    TutorAgent_Check --> Synthesizer: confidence ≥ 0.85 [P1 EARLY EXIT]
+    TutorAgent_Check --> GraderAgent: confidence < 0.85
+    
+    MemoryAgent --> GraderAgent
+    
+    GraderAgent --> Synthesizer: passed (score ≥ 6)
     GraderAgent --> TutorAgent: retry (if failed)
     
     Synthesizer --> [*]
@@ -217,15 +229,15 @@ stateDiagram-v2
         - "Giải thích Điều X" → Tutor
     end note
     
-    note right of TutorAgent
-        ReAct Loop:
-        1. Think → Act → Observe
-        2. Call tool_maritime_search
-        3. Early exit on high confidence
+    note right of RAGAgent_Check
+        P1 SOTA Early Exit (Dec 2025):
+        - Skip quality_check if confidence ≥ 85%
+        - Saves ~7.8s per request
+        - Safe: CRAG already validates
     end note
     
     note right of GraderAgent
-        Quality Control:
+        Quality Control (when needed):
         - Score 1-10
         - Pass threshold: 6+
         - Vietnamese quality check
@@ -352,13 +364,15 @@ flowchart TB
 
 | Scenario | Cold Path | Warm Cache | Target |
 |----------|-----------|------------|--------|
-| RAG Query | 85-90s | 45s | 60-65s |
-| Simple Chat | 4-5s | 4-5s | <5s |
-| Memory Query | 6-8s | 6-8s | <10s |
+| RAG Query | **62s** (P1) | 45s | 60-65s ✅ |
+| Simple Chat | 4-5s | 4-5s | <5s ✅ |
+| Memory Query | 6-8s | 6-8s | <10s ✅ |
 
 **Key Optimizations Applied:**
+- ✅ P1 Early Exit: Skip quality_check at ≥85% (saves 7.8s)
 - ✅ Phase 2.4a: Early Exit saves 19s (60%+ queries)
 - ✅ Semantic Cache: 2hr TTL, 0.1ms lookup
 - ✅ ThinkingAdapter: 5s for cache hits
 - ✅ Parallel MiniJudge: 10 docs in 3-4s
 - ✅ Confidence-based iteration: Skip unnecessary loops
+- ✅ Contextual RAG: 100% coverage (Neon DB)

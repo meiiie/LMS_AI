@@ -1,0 +1,1060 @@
+======================================================================
+  Maritime AI Service - Production API Test Results
+  Base URL: https://maritime-ai-chatbot.onrender.com
+  Test User ID: 12345678-1234-5678-1234-567812345678
+  Completed: 2025-12-20 22:32:10
+======================================================================
+
+1. Health Check [✓ PASSED] (346ms)
+--------------------------------------------------
+   Status: ok
+
+   [FULL RESPONSE DATA]:
+   {
+     "status": "ok",
+     "service": "maritime-ai-tutor",
+     "version": "0.1.0",
+     "environment": "production"
+   }
+
+2. Auth Required [✓ PASSED] (107ms)
+--------------------------------------------------
+   Correctly rejected with status 401
+
+3. Chat Simple [✓ PASSED] (2359ms)
+--------------------------------------------------
+   Agent: rag, Response: Tôi có thể giúp gì cho bạn?...
+
+   [FULL RESPONSE DATA]:
+   {
+     "status": "success",
+     "data": {
+       "answer": "Tôi có thể giúp gì cho bạn?",
+       "sources": [],
+       "suggested_questions": [
+         "Bạn có câu hỏi nào về hàng hải không?",
+         "Tôi có thể giúp gì về COLREGs, SOLAS, hoặc MARPOL?",
+         "Bạn muốn tìm hiểu về quy định hàng hải nào?"
+       ]
+     },
+     "metadata": {
+       "processing_time": 2.252,
+       "model": "maritime-rag-v1",
+       "agent_type": "rag",
+       "session_id": "baf3be34-e55d-4cb9-873b-ac4d372e2aef",
+       "tools_used": [],
+       "reasoning_trace": {
+         "total_steps": 3,
+         "total_duration_ms": 1802,
+         "was_corrected": false,
+         "correction_reason": null,
+         "final_confidence": 0.9333333333333332,
+         "steps": [
+           {
+             "step_name": "routing",
+             "description": "Phân tích và định tuyến câu hỏi",
+             "result": "Định tuyến đến: direct",
+             "confidence": 0.9,
+             "duration_ms": 1800,
+             "details": {
+               "routed_to": "direct"
+             }
+           },
+           {
+             "step_name": "direct_response",
+             "description": "Tạo phản hồi trực tiếp",
+             "result": "Phản hồi đơn giản: Tôi có thể giúp gì cho bạn?...",
+             "confidence": 1.0,
+             "duration_ms": 0,
+             "details": {
+               "response_type": "greeting",
+               "query": "xin chào! tôi là sinh viên mới."
+             }
+           },
+           {
+             "step_name": "synthesis",
+             "description": "Tổng hợp câu trả lời cuối cùng",
+             "result": "Tổng hợp hoàn tất: 27 chars",
+             "confidence": 0.9,
+             "duration_ms": 0,
+             "details": {
+               "response_length": 27
+             }
+           }
+         ]
+       },
+       "topics_accessed": null,
+       "confidence_score": null,
+       "document_ids_used": null,
+       "query_type": "conceptual",
+       "thinking_content": null,
+       "thinking": null
+     }
+   }
+
+4. Chat RAG Query [✓ PASSED] (53371ms)
+--------------------------------------------------
+   Agent: rag, Tools: ['tool_maritime_search'], 5 sources
+   Response: Dưới đây là tổng hợp giải thích chi tiết về quyền hạn của thuyền trưởng theo Bộ luật Hàng hải Việt Nam 2015, dựa trên sự kết nối giữa Điều 50 và các điều luật liên quan:
+   
+   ### 1. Sự làm rõ về Điều 50 và các quyền hạn
+   Trong Bộ luật Hàng hải Việt Nam 2015, **Điều 50** đóng vai trò là "nền móng" khi quy định về **Thuyền bộ** (thành phần nhân sự trên tàu). Theo điều này, thuyền trưởng là người chỉ huy ...
+
+   [QUÁ TRÌNH SUY NGHĨ]:
+--------------------------------------------------
+   [RAG Analysis]
+   Người dùng đang tiếp tục tìm hiểu về Điều 50 và Quyền hạn của Thuyền trưởng trong Bộ luật Hàng hải Việt Nam 2015. 
+   Dựa trên kiến thức đã có, tôi cần:
+   1. Xác nhận lại sự khác biệt giữa Điều 50 (Thành phần thuyền bộ) và các Điều quy định về quyền hạn (Điều 52, 54).
+   2. Hệ thống lại kiến thức một cách logic để người dùng không bị nhầm lẫn giữa "Ai có mặt trên tàu" (Điều 50) và "Thuyền trưởng được làm gì" (Điều 54).
+   3. Bổ sung thêm các quyền hạn quan trọng khác của Thuyền trưởng tại Điều 54 mà lần trước có thể chưa nói hết (như quyền về hộ tịch, quyền nhân danh chủ tàu).
+   
+   [Teaching Process]
+   **Clarifying Article 50 & The Captain's Authority**
+   
+   Alright Minh, let's get you sorted out with this maritime matter. Seems like we're navigating a slight course deviation here. You mentioned Article 50 and the captain's powers, but **Article 50** of the Vietnam Maritime Code 2015 actually defines "Thuyền bộ" - the **ship's crew** or complement. Think of it as the engine room team, not the captain's steering wheel!
+   
+   What you're truly after, the captain's actual *powers*, are found further along the chart. You'll find them detailed in **Articles 52 and 54**. Specifically, Article 52 deals with the general authority of the captain, while Article 54 might cover more specific powers related to managing crew and ensuring the ship's safety. Consider these the captain's navigational tools to command the ship and crew.
+   
+   Let's keep things ship-shape and secure you the information you're looking for, Minh!
+   
+   
+   
+--------------------------------------------------
+
+   [FULL RESPONSE DATA]:
+   {
+     "status": "success",
+     "data": {
+       "answer": "Dưới đây là tổng hợp giải thích chi tiết về quyền hạn của thuyền trưởng theo Bộ luật Hàng hải Việt Nam 2015, dựa trên sự kết nối giữa Điều 50 và các điều luật liên quan:\n\n### 1. Sự làm rõ về Điều 50 và các quyền hạn\nTrong Bộ luật Hàng hải Việt Nam 2015, **Điều 50** đóng vai trò là \"nền móng\" khi quy định về **Thuyền bộ** (thành phần nhân sự trên tàu). Theo điều này, thuyền trưởng là người chỉ huy cao nhất trên tàu, lãnh đạo thuyền bộ gồm các sĩ quan và thuyền viên.\n\nTuy nhiên, để nắm trọn vẹn các **quyền hạn thực thụ** của thuyền trưởng, chúng ta cần xem xét Điều 50 kết hợp với **Điều 52 và Điều 54**. Cụ thể như sau:\n\n### 2. Quyền chỉ huy và quản lý (Điều 52)\nThuyền trưởng có quyền chỉ huy tuyệt đối đối với mọi người có mặt trên tàu:\n*   **Đối tượng áp dụng:** Không chỉ thuyền viên mà tất cả hành khách, đại diện chủ tàu hay bất kỳ ai có mặt trên boong đều phải tuân thủ mệnh lệnh của thuyền trưởng.\n*   **Mục đích:** Đảm bảo an toàn cho con người, tàu biển và hàng hóa, cũng như duy trì trật tự trên tàu.\n\n### 3. Các đặc quyền quyết định an toàn và cưỡng chế (Điều 54)\nĐây là những quyền hạn quan trọng nhất giúp thuyền trưởng điều hành \"thành phố thu nhỏ\" giữa đại dương:\n\n*   **Quyền từ chối chuyến đi:** Thuyền trưởng có quyền không cho tàu rời cảng nếu xét thấy tàu chưa đủ điều kiện an toàn (hỏng hóc thiết bị, định biên thuyền viên không đủ, hoặc dự báo thời tiết nguy hiểm). Đây là quyền bảo vệ tính mạng tối cao cho cả con tàu.\n*   **Quyền cưỡng chế:** Thuyền trưởng có quyền tạm giữ người hoặc áp dụng các biện pháp ngăn chặn cần thiết đối với những đối tượng có hành vi phạm tội hoặc gây nguy hiểm trên tàu để duy trì trật tự và an ninh.\n*   **Quyền hộ tịch đặc biệt:** Khi tàu đang ở ngoài khơi xa, thuyền trưởng đóng vai trò như một đại diện pháp luật. Bạn có quyền xác nhận việc sinh, tử, chứng thực di chúc và các sự kiện pháp lý phát sinh ngay trên tàu.\n*   **Quyền đại diện pháp lý:** Thuyền trưởng là đại diện hợp pháp của chủ tàu và những người có lợi ích liên quan đến hàng hóa. Trong trường hợp khẩn cấp mà không thể chờ lệnh từ bờ, thuyền trưởng có quyền thực hiện các giao dịch như mua nhu yếu phẩm hoặc sửa chữa tàu để duy trì hành trình.\n\n### 4. Tổng kết\nNhư vậy, theo tinh thần của Bộ luật Hàng hải 2015:\n*   **Điều 50** xác lập vị thế của thuyền trưởng là **người đứng đầu** thuyền bộ.\n*   **Điều 52 và 54** cụ thể hóa quyền lực đó thành các **công cụ pháp lý** để thuyền trưởng điều hành, bảo vệ an toàn và thực hiện các trách nhiệm dân sự khi tàu hành trình trên biển.\n\nViệc nắm vững các quy định này không chỉ giúp người đi biển thực thi đúng pháp luật mà còn đảm bảo quyền lợi và sự an toàn cao nhất cho mọi hành trình hàng hải.",
+       "sources": [
+         {
+           "title": "Điều 50. Thuyền bộ",
+           "content": "Điều 50. Thuyền bộ\nThuyền bộ là những thuyền viên thuộc định biên của tàu biển, bao gồm thuyền\ntrưởng, các sĩ quan và các chức danh khác được bố trí làm việc trên tàu biển.\nĐiều 51. Trách nhiệm của ch",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_22.jpg",
+           "page_number": 22,
+           "document_id": "luat-hang-hai-2015-p1",
+           "bounding_boxes": [
+             {
+               "x0": 10.77,
+               "x1": 89.86,
+               "y0": 37.69,
+               "y1": 44.13
+             }
+           ]
+         },
+         {
+           "title": "Chào bạn, với vai trò chuyên gia số hóa dữ liệu Hàng hải, tôi đã xem xét bức ảnh và mô tả toàn bộ nộ",
+           "content": "Chào bạn, với vai trò chuyên gia số hóa dữ liệu Hàng hải, tôi đã xem xét bức ảnh và mô tả toàn bộ nội dung thành văn bản định dạng Markdown như sau:\n\nCÔNG BÁO/SỐ 1257 + 1258/Ngày 30-12-2015\n61\n\n12. Tổ",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_24.jpg",
+           "page_number": 24,
+           "document_id": "luat-hang-hai-2015-p1",
+           "bounding_boxes": [
+             {
+               "x0": 76.89,
+               "x1": 85.56,
+               "y0": 23.71,
+               "y1": 25.56
+             },
+             {
+               "x0": 31.12,
+               "x1": 34.01,
+               "y0": 34.4,
+               "y1": 36.25
+             },
+             {
+               "x0": 51.31,
+               "x1": 54.13,
+               "y0": 41.0,
+               "y1": 42.84
+             },
+             {
+               "x0": 10.77,
+               "x1": 14.14,
+               "y0": 43.05,
+               "y1": 44.9
+             },
+             {
+               "x0": 79.05,
+               "x1": 82.15,
+               "y0": 45.56,
+               "y1": 47.41
+             },
+             {
+               "x0": 46.83,
+               "x1": 53.6,
+               "y0": 49.65,
+               "y1": 51.5
+             }
+           ]
+         },
+         {
+           "title": "CÔNG BÁO/Số 1257 + 1258/Ngày 30-12-2015",
+           "content": "CÔNG BÁO/Số 1257 + 1258/Ngày 30-12-2015\n63\n\n2. Thuyền trưởng có trách nhiệm xuất trình các giấy chứng nhận, tài liệu của\ntàu biển nếu cơ quan đại diện của Việt Nam tại nước đó yêu cầu.\nĐiều 58. Trách ",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_26.jpg",
+           "page_number": 26,
+           "document_id": "luat-hang-hai-2015-p1",
+           "bounding_boxes": [
+             {
+               "x0": 29.09,
+               "x1": 71.03,
+               "y0": 6.21,
+               "y1": 7.91
+             },
+             {
+               "x0": 87.17,
+               "x1": 89.35,
+               "y0": 6.21,
+               "y1": 7.91
+             },
+             {
+               "x0": 71.03,
+               "x1": 71.54,
+               "y0": 6.55,
+               "y1": 7.87
+             },
+             {
+               "x0": 89.35,
+               "x1": 89.87,
+               "y0": 6.55,
+               "y1": 7.87
+             },
+             {
+               "x0": 10.77,
+               "x1": 70.71,
+               "y0": 7.99,
+               "y1": 11.86
+             }
+           ]
+         },
+         {
+           "title": "trên tàu biển theo quy định của pháp luật.",
+           "content": "trên tàu biển theo quy định của pháp luật.\nĐiều 52. Địa vị pháp lý của thuyền trưởng\n1. Thuyền trưởng là người có quyền chỉ huy cao nhất ở trên tàu biển, chỉ huy\ntàu theo chế độ thủ trưởng. Mọi người ",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_22.jpg",
+           "page_number": 22,
+           "document_id": "luat-hang-hai-2015-p1",
+           "bounding_boxes": [
+             {
+               "x0": 10.77,
+               "x1": 57.3,
+               "y0": 65.33,
+               "y1": 72.26
+             }
+           ]
+         },
+         {
+           "title": "giữ người trong trường hợp khẩn cấp;",
+           "content": "giữ người trong trường hợp khẩn cấp;\nb) Áp dụng các biện pháp ngăn chặn cần thiết, lập hồ sơ theo quy định của\npháp luật;\nc) Bảo vệ chứng cứ và tùy theo điều kiện cụ thể, chuyển giao người bị bắt, giữ",
+           "image_url": "https://kpjqhiqjkfaqorpehsgc.supabase.co/storage/v1/object/public/maritime-docs/luat-hang-hai-2015-p1/page_25.jpg",
+           "page_number": 25,
+           "document_id": "luat-hang-hai-2015-p1",
+           "bounding_boxes": [
+             {
+               "x0": 10.76,
+               "x1": 78.92,
+               "y0": 56.39,
+               "y1": 60.67
+             }
+           ]
+         }
+       ],
+       "suggested_questions": [
+         "Bạn muốn tìm hiểu thêm về quy định nào?",
+         "Có câu hỏi nào khác về hàng hải không?",
+         "Bạn cần giải thích chi tiết hơn không?"
+       ]
+     },
+     "metadata": {
+       "processing_time": 53.243,
+       "model": "maritime-rag-v1",
+       "agent_type": "rag",
+       "session_id": "baf3be34-e55d-4cb9-873b-ac4d372e2aef",
+       "tools_used": [
+         {
+           "name": "tool_maritime_search",
+           "description": "Tra cứu: Điều 50 và quyền hạn của thuyền trưởng Bộ luật hàng hải Việt Nam 2015"
+         }
+       ],
+       "reasoning_trace": {
+         "total_steps": 3,
+         "total_duration_ms": 52816,
+         "was_corrected": false,
+         "correction_reason": null,
+         "final_confidence": 0.7999999999999999,
+         "steps": [
+           {
+             "step_name": "routing",
+             "description": "Phân tích và định tuyến câu hỏi",
+             "result": "Định tuyến đến: tutor_agent",
+             "confidence": 0.9,
+             "duration_ms": 5373,
+             "details": {
+               "routed_to": "tutor_agent"
+             }
+           },
+           {
+             "step_name": "quality_check",
+             "description": "Kiểm tra chất lượng câu trả lời",
+             "result": "Điểm chất lượng: 6/10",
+             "confidence": 0.6,
+             "duration_ms": 8400,
+             "details": {
+               "score": 6,
+               "passed": true
+             }
+           },
+           {
+             "step_name": "synthesis",
+             "description": "Tổng hợp câu trả lời cuối cùng",
+             "result": "Tổng hợp hoàn tất: 2670 chars",
+             "confidence": 0.9,
+             "duration_ms": 8594,
+             "details": {
+               "response_length": 2670
+             }
+           }
+         ]
+       },
+       "topics_accessed": [
+         "Điều 50. Thuyền bộ",
+         "Chào bạn, với vai trò chuyên gia số hóa dữ liệu Hàng hải, tôi đã xem xét bức ảnh và mô tả toàn bộ nộ",
+         "CÔNG BÁO/Số 1257 + 1258/Ngày 30-12-2015",
+         "trên tàu biển theo quy định của pháp luật.",
+         "giữ người trong trường hợp khẩn cấp;"
+       ],
+       "confidence_score": 1.0,
+       "document_ids_used": [
+         "luat-hang-hai-2015-p1"
+       ],
+       "query_type": "factual",
+       "thinking_content": null,
+       "thinking": "[RAG Analysis]\nNgười dùng đang tiếp tục tìm hiểu về Điều 50 và Quyền hạn của Thuyền trưởng trong Bộ luật Hàng hải Việt Nam 2015. \nDựa trên kiến thức đã có, tôi cần:\n1. Xác nhận lại sự khác biệt giữa Điều 50 (Thành phần thuyền bộ) và các Điều quy định về quyền hạn (Điều 52, 54).\n2. Hệ thống lại kiến thức một cách logic để người dùng không bị nhầm lẫn giữa \"Ai có mặt trên tàu\" (Điều 50) và \"Thuyền trưởng được làm gì\" (Điều 54).\n3. Bổ sung thêm các quyền hạn quan trọng khác của Thuyền trưởng tại Điều 54 mà lần trước có thể chưa nói hết (như quyền về hộ tịch, quyền nhân danh chủ tàu).\n\n[Teaching Process]\n**Clarifying Article 50 & The Captain's Authority**\n\nAlright Minh, let's get you sorted out with this maritime matter. Seems like we're navigating a slight course deviation here. You mentioned Article 50 and the captain's powers, but **Article 50** of the Vietnam Maritime Code 2015 actually defines \"Thuyền bộ\" - the **ship's crew** or complement. Think of it as the engine room team, not the captain's steering wheel!\n\nWhat you're truly after, the captain's actual *powers*, are found further along the chart. You'll find them detailed in **Articles 52 and 54**. Specifically, Article 52 deals with the general authority of the captain, while Article 54 might cover more specific powers related to managing crew and ensuring the ship's safety. Consider these the captain's navigational tools to command the ship and crew.\n\nLet's keep things ship-shape and secure you the information you're looking for, Minh!\n\n\n"
+     }
+   }
+
+5. Thread Continuity [✓ PASSED] (18478ms)
+--------------------------------------------------
+   Thread ID: baf3be34..., Remembers name: True
+
+   [FULL RESPONSE DATA]:
+   {
+     "thread_id": "baf3be34-e55d-4cb9-873b-ac4d372e2aef",
+     "remembers_name": true,
+     "ai_response": "Tên: Minh"
+   }
+
+6. Memories Endpoint [✓ PASSED] (119ms)
+--------------------------------------------------
+   Found 7 user memories/facts:
+     [1] goal: tìm hiểu về Điều 50 Bộ luật hàng hải Việt Nam 2015...
+     [2] weakness: Quy tắc 15 COLREGs (tình huống cắt hướng)...
+     [3] preference: Bộ luật hàng hải Việt Nam 2015...
+     [4] weakness: Điều 15 Bộ luật hàng hải Việt Nam...
+     [5] preference: trách nhiệm đăng kiểm tàu biển...
+     ... and 2 more
+
+   [FULL RESPONSE DATA]:
+   {
+     "data": [
+       {
+         "id": "534db999-fce2-49de-88e2-c08ac586a2b7",
+         "type": "goal",
+         "value": "tìm hiểu về Điều 50 Bộ luật hàng hải Việt Nam 2015 về quyền hạn của thuyền trưởng",
+         "created_at": "2025-12-19T17:44:16.746689+00:00"
+       },
+       {
+         "id": "ff4e8a84-a928-46c9-9d29-0d0493f5de32",
+         "type": "weakness",
+         "value": "Quy tắc 15 COLREGs (tình huống cắt hướng)",
+         "created_at": "2025-12-19T10:20:27.217656+00:00"
+       },
+       {
+         "id": "b787b9a8-b8fe-4d8f-8a8c-811605f0f093",
+         "type": "preference",
+         "value": "Bộ luật hàng hải Việt Nam 2015",
+         "created_at": "2025-12-14T19:52:53.313039+00:00"
+       },
+       {
+         "id": "18dbd78a-f2ba-458e-b2cc-1314e48751ed",
+         "type": "weakness",
+         "value": "Điều 15 Bộ luật hàng hải Việt Nam",
+         "created_at": "2025-12-14T19:52:52.985828+00:00"
+       },
+       {
+         "id": "153ebc54-1a5a-4e5f-8fca-a62d178ed758",
+         "type": "preference",
+         "value": "trách nhiệm đăng kiểm tàu biển",
+         "created_at": "2025-12-14T19:52:52.672364+00:00"
+       },
+       {
+         "id": "b509f451-1da1-4f37-85d7-74d03ac9683e",
+         "type": "name",
+         "value": "Minh",
+         "created_at": "2025-12-14T19:52:45.148133+00:00"
+       },
+       {
+         "id": "74ec0726-6716-4bac-89f0-2d823deaa110",
+         "type": "role",
+         "value": "đang học về hàng hải",
+         "created_at": "2025-12-14T19:52:13.122251+00:00"
+       }
+     ],
+     "total": 7
+   }
+
+7. Insights Endpoint [✓ PASSED] (121ms)
+--------------------------------------------------
+   Found 50 behavioral insights (5 categories):
+     - preference: 19
+     - habit: 9
+     - knowledge_gap: 6
+     - learning_style: 14
+     - goal_evolution: 2
+   Sample insights:
+     [1] Người dùng thể hiện sự quan tâm tập trung vào lĩnh vực chuyê...
+     [2] Người dùng có thói quen yêu cầu giải thích chi tiết và phân ...
+     [3] Người dùng quan tâm đặc biệt đến khía cạnh quản lý nhân sự v...
+
+   [FULL RESPONSE DATA]:
+   {
+     "data": [
+       {
+         "id": "33b1c414-1a92-4eea-a1ee-e197c116da2e",
+         "category": "preference",
+         "content": "Người dùng thể hiện sự quan tâm tập trung vào lĩnh vực chuyên môn hàng hải thay vì các chủ đề đại cương.",
+         "sub_topic": "subject_interest",
+         "confidence": 0.7,
+         "created_at": "2025-12-20T15:32:06.548436+00:00",
+         "updated_at": "2025-12-20T15:32:06.548436+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "85fea2aa-eef4-4cf3-80a0-a6afc66a9a3f",
+         "category": "habit",
+         "content": "Người dùng có thói quen yêu cầu giải thích chi tiết và phân loại rõ ràng các nhóm quyền hạn để dễ dàng nắm bắt cấu trúc luật.",
+         "sub_topic": "structured_information_seeking",
+         "confidence": 0.75,
+         "created_at": "2025-12-20T15:32:03.900358+00:00",
+         "updated_at": "2025-12-20T15:32:03.900358+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "e0e0255b-7588-45a9-bbec-7821c2d34114",
+         "category": "preference",
+         "content": "Người dùng quan tâm đặc biệt đến khía cạnh quản lý nhân sự và trách nhiệm pháp lý cao nhất của người chỉ huy trên tàu.",
+         "sub_topic": "leadership_and_legal_responsibility",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T15:32:03.580936+00:00",
+         "updated_at": "2025-12-20T15:32:03.580936+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "2f18de86-1a37-4d23-a383-593215e74730",
+         "category": "knowledge_gap",
+         "content": "Người dùng có xu hướng tập trung vào các điều luật mang tính định nghĩa (Điều 50) và cần sự hỗ trợ để kết nối sang các điều luật mang tính hành động (Điều 52, 54).",
+         "sub_topic": "legal_structure_understanding",
+         "confidence": 0.8,
+         "created_at": "2025-12-20T15:32:03.258078+00:00",
+         "updated_at": "2025-12-20T15:32:03.258078+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "fff323f4-cc12-427a-b4ec-6a0a80babdf8",
+         "category": "learning_style",
+         "content": "Người dùng tiếp cận kiến thức pháp luật theo hướng thực dụng, tập trung vào quyền hạn thực thi và vai trò quản lý thực tế.",
+         "sub_topic": "practical_application",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T15:32:02.966556+00:00",
+         "updated_at": "2025-12-20T15:32:02.966556+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "e380f19d-8ffd-4691-bee6-88bc6c3286b3",
+         "category": "learning_style",
+         "content": "Người dùng có tư duy hệ thống, không chỉ tìm hiểu một điều luật đơn lẻ mà muốn kết nối các quy định liên quan để hiểu bản chất vấn đề.",
+         "sub_topic": "systematic_thinking",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T15:32:02.007377+00:00",
+         "updated_at": "2025-12-20T15:32:02.007377+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "091c0020-571a-4057-b9b0-1b2be2a7fed8",
+         "category": "preference",
+         "content": "User ưu tiên các nội dung mang tính chất giới thiệu tổng quan và giải thích khái niệm cơ bản phù hợp với trình độ nhập môn.",
+         "sub_topic": "beginner_preference",
+         "confidence": 0.7,
+         "created_at": "2025-12-20T15:31:14.076121+00:00",
+         "updated_at": "2025-12-20T15:31:14.076121+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "b7930d07-f7ac-4a8b-8dda-393188fd1c83",
+         "category": "learning_style",
+         "content": "User có xu hướng chủ động xác định vị thế là người mới bắt đầu để tìm kiếm sự hướng dẫn mang tính nền tảng và lộ trình học tập có cấu trúc.",
+         "sub_topic": "foundational_learning",
+         "confidence": 0.7,
+         "created_at": "2025-12-20T15:31:13.753775+00:00",
+         "updated_at": "2025-12-20T15:31:13.753775+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "33c5f277-1afc-4d1c-a679-b43f4eb6ecf0",
+         "category": "learning_style",
+         "content": "Người dùng có cách tiếp cận tương tác dựa trên sự tin tưởng vào khả năng lưu trữ thông tin của hệ thống trước khi đi sâu vào nội dung chuyên môn.",
+         "sub_topic": "relational_learning",
+         "confidence": 0.75,
+         "created_at": "2025-12-20T15:29:48.825241+00:00",
+         "updated_at": "2025-12-20T15:29:48.825241+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "099ca336-514f-4c8d-b0bc-35ccf3a6c6bb",
+         "category": "preference",
+         "content": "Người dùng ưu tiên phong cách tương tác cá nhân hóa và có nhu cầu thiết lập mối quan hệ cộng tác liên tục với trợ lý học tập.",
+         "sub_topic": "personalized_interaction",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T15:29:48.504272+00:00",
+         "updated_at": "2025-12-20T15:29:48.504272+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "48e3e353-81b3-43fc-a931-c7403281d16f",
+         "category": "habit",
+         "content": "Người dùng có xu hướng kiểm tra khả năng ghi nhớ và duy trì ngữ cảnh của hệ thống để xác nhận tính ổn định trong tương tác.",
+         "sub_topic": "context_verification",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T15:29:48.218872+00:00",
+         "updated_at": "2025-12-20T15:29:48.218872+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "43590717-03a0-4af7-9edb-6699c203ffd4",
+         "category": "habit",
+         "content": "User có thói quen tìm kiếm thông tin dựa trên các cột mốc pháp lý hiện hành (Bộ luật 2015), cho thấy xu hướng cập nhật kiến thức theo các quy định mới nhất của Nhà nước.",
+         "sub_topic": "regulatory_compliance_habit",
+         "confidence": 0.8,
+         "created_at": "2025-12-20T15:29:32.252568+00:00",
+         "updated_at": "2025-12-20T15:29:32.252568+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "e21594d0-840c-441e-8e5f-31c9d8527da5",
+         "category": "preference",
+         "content": "User quan tâm đặc biệt đến các khía cạnh quyền hạn, vị thế pháp lý và trách nhiệm quản lý của các chức danh chủ chốt trong ngành hàng hải.",
+         "sub_topic": "maritime_leadership_regulations",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T15:29:31.922421+00:00",
+         "updated_at": "2025-12-20T15:29:31.922421+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "f9dc0dcd-f723-4529-987b-e7284a1e7238",
+         "category": "learning_style",
+         "content": "User có phong cách học tập tập trung vào văn bản pháp quy, tiếp cận vấn đề thông qua việc tra cứu trực tiếp các điều khoản và số hiệu luật cụ thể.",
+         "sub_topic": "structured_legal_learning",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T15:29:31.598568+00:00",
+         "updated_at": "2025-12-20T15:29:31.598568+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "8d2b2f98-de49-4037-b3f4-1022aacc970c",
+         "category": "knowledge_gap",
+         "content": "User đang gặp sự nhầm lẫn cụ thể về số hiệu điều luật trong Bộ luật Hàng hải Việt Nam 2015 khi gán nội dung về quyền hạn thuyền trưởng vào Điều 50 thay vì Điều 52.",
+         "sub_topic": "legal_provision_misidentification",
+         "confidence": 0.95,
+         "created_at": "2025-12-20T15:29:31.284406+00:00",
+         "updated_at": "2025-12-20T15:29:31.284406+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "1516452e-f33c-43ef-af3c-1b4cb906d220",
+         "category": "preference",
+         "content": "User thể hiện sự quan tâm tập trung vào lĩnh vực chuyên môn hẹp là ngành hàng hải ngay từ đầu cuộc hội thoại",
+         "sub_topic": "maritime_interest",
+         "confidence": 0.7,
+         "created_at": "2025-12-20T15:29:28.632610+00:00",
+         "updated_at": "2025-12-20T15:29:28.632610+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "ee2d2b3b-f2a5-4e0f-9e7d-975bfb29c569",
+         "category": "knowledge_gap",
+         "content": "User gián tiếp thừa nhận sự thiếu hụt kiến thức chuyên môn và kinh nghiệm thực tế trong lĩnh vực đang học thông qua việc nhấn mạnh mình là 'sinh viên mới'.",
+         "sub_topic": "initial_knowledge_level",
+         "confidence": 0.8,
+         "created_at": "2025-12-20T15:28:17.342651+00:00",
+         "updated_at": "2025-12-20T15:28:17.342651+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "bbc92f11-1f93-4f76-b552-7dbc1de52fc1",
+         "category": "learning_style",
+         "content": "User chủ động tự xác định vị thế là người mới bắt đầu, cho thấy nhu cầu về một phương pháp tiếp cận có hệ thống và lộ trình học tập từ những khái niệm nền tảng nhất.",
+         "sub_topic": "foundational_learning",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T15:28:17.017477+00:00",
+         "updated_at": "2025-12-20T15:28:17.017477+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "9e65bbdd-5ca0-48f6-8184-e022553cbafb",
+         "category": "preference",
+         "content": "User ưu tiên trải nghiệm giao tiếp mang tính cá nhân hóa và mong muốn được ghi nhận các thông tin định danh cá nhân thay vì chỉ trao đổi thông tin thuần túy.",
+         "sub_topic": "personalized_interaction",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T15:27:24.489694+00:00",
+         "updated_at": "2025-12-20T15:27:24.489694+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "1dbdb05c-7a4a-415c-8866-5785c4deaa7a",
+         "category": "habit",
+         "content": "User có thói quen kiểm tra tính nhất quán và khả năng duy trì ngữ cảnh của hệ thống để đảm bảo sự tin cậy trong quá trình tương tác lâu dài.",
+         "sub_topic": "consistency_verification",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T15:27:24.176872+00:00",
+         "updated_at": "2025-12-20T15:27:24.176872+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "0a2fe8f0-4832-4599-af3f-03b4bf71cb40",
+         "category": "learning_style",
+         "content": "Người dùng có xu hướng giới thiệu bối cảnh chuyên môn trước khi bắt đầu thảo luận, cho thấy phong cách giao tiếp đi thẳng vào mục tiêu học tập.",
+         "sub_topic": "contextual_learning",
+         "confidence": 0.7,
+         "created_at": "2025-12-20T15:27:01.763009+00:00",
+         "updated_at": "2025-12-20T15:27:01.763009+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "6f752e16-319a-4f46-98d3-b1c23c00c1ea",
+         "category": "preference",
+         "content": "Người dùng thể hiện sự quan tâm tập trung vào lĩnh vực hàng hải, xác định rõ phạm vi chuyên môn đang theo đuổi.",
+         "sub_topic": "subject_interest",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T15:27:01.413439+00:00",
+         "updated_at": "2025-12-20T15:27:01.413439+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "3b271b97-6177-4544-8712-aa2178a1449e",
+         "category": "goal_evolution",
+         "content": "Người dùng đang chuyển đổi từ việc tìm hiểu khái quát sang việc nắm bắt chi tiết các quy định pháp luật để phục vụ cho mục tiêu nghề nghiệp hoặc học tập chuyên sâu trong ngành hàng hải.",
+         "sub_topic": "academic_to_professional_transition",
+         "confidence": 0.75,
+         "created_at": "2025-12-20T15:26:57.088758+00:00",
+         "updated_at": "2025-12-20T15:26:57.088758+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "1bf72c66-6885-4ef1-b329-801bbd53cd4c",
+         "category": "preference",
+         "content": "Người dùng thể hiện sự quan tâm đặc biệt đến các khía cạnh quyền lực và trách nhiệm pháp lý của các vị trí chỉ huy cao nhất trong ngành hàng hải.",
+         "sub_topic": "leadership_roles_and_responsibilities",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T15:26:56.747275+00:00",
+         "updated_at": "2025-12-20T15:26:56.747275+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "02fb4447-eab9-4f21-8274-67c455aea081",
+         "category": "learning_style",
+         "content": "Người dùng có xu hướng tiếp cận kiến thức theo hướng tra cứu văn bản quy phạm pháp luật cụ thể thay vì đặt câu hỏi mở về khái niệm chung.",
+         "sub_topic": "structured_learning",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T15:26:56.399135+00:00",
+         "updated_at": "2025-12-20T15:26:56.399135+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "ea1e7a07-da6d-4da8-bd99-1bd0978e30f8",
+         "category": "knowledge_gap",
+         "content": "Người dùng đang gặp sự nhầm lẫn cụ thể giữa các điều khoản pháp lý, cụ thể là gán nhầm quyền hạn của thuyền trưởng (Điều 54) vào định nghĩa về thành phần thuyền bộ (Điều 50).",
+         "sub_topic": "legal_article_misattribution",
+         "confidence": 0.95,
+         "created_at": "2025-12-20T15:26:55.943409+00:00",
+         "updated_at": "2025-12-20T15:26:55.943409+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "e7373cbc-9001-4b75-bdc4-9ce875710bc4",
+         "category": "preference",
+         "content": "User có xu hướng tìm kiếm các nội dung mang tính định hướng và kiến thức nền tảng do đang ở giai đoạn mới bắt đầu lộ trình học tập.",
+         "sub_topic": "foundational_learning",
+         "confidence": 0.8,
+         "created_at": "2025-12-20T15:25:55.335741+00:00",
+         "updated_at": "2025-12-20T15:25:55.335741+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "7d8df9b4-9beb-4d1b-a42b-1eacf6f21939",
+         "category": "preference",
+         "content": "User ưu tiên tính cá nhân hóa và sự kết nối trong giao tiếp, mong muốn một trải nghiệm học tập có sự nhận diện đối tượng cụ thể thay vì ẩn danh.",
+         "sub_topic": "personalization_preference",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T13:26:36.341000+00:00",
+         "updated_at": "2025-12-20T13:26:36.341000+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "fbc5d56a-91a0-4c26-9825-d07a8e7b2638",
+         "category": "habit",
+         "content": "User có xu hướng kiểm tra tính nhất quán và khả năng ghi nhớ thông tin của hệ thống để xác thực độ tin cậy trong tương tác.",
+         "sub_topic": "system_verification",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T13:26:36.035821+00:00",
+         "updated_at": "2025-12-20T13:26:36.035821+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "09455849-0980-4f88-a59d-357ac178b95f",
+         "category": "knowledge_gap",
+         "content": "User đang tìm kiếm sự liên kết giữa văn bản luật (Điều 50) và các tình huống thực tế trên biển để hiểu rõ phạm vi quyền hạn trong các trường hợp khẩn cấp.",
+         "sub_topic": "legal_interpretation",
+         "confidence": 0.8,
+         "created_at": "2025-12-20T13:26:20.791391+00:00",
+         "updated_at": "2025-12-20T13:26:20.791391+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "9aa4b2e9-77a6-4c96-88ec-f3a3e7e82185",
+         "category": "preference",
+         "content": "User quan tâm đặc biệt đến khía cạnh quyền hạn, trách nhiệm đạo đức và vai trò quản lý cao nhất (thuyền trưởng) thay vì các kỹ thuật vận hành tàu thông thường.",
+         "sub_topic": "leadership_and_legal_authority",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T13:26:20.477919+00:00",
+         "updated_at": "2025-12-20T13:26:20.477919+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "7a1a63e9-e390-4c75-b1e8-233d4ca9e744",
+         "category": "learning_style",
+         "content": "User thể hiện nhu cầu phân tích và diễn giải các văn bản luật khô khan thành các nhóm chức năng thực tế (như nhân sự, an toàn, đại diện pháp lý) để dễ dàng nắm bắt và áp dụng.",
+         "sub_topic": "analytical_learning",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T13:26:20.147091+00:00",
+         "updated_at": "2025-12-20T13:26:20.147091+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "f91f4ee1-0e41-4444-8ac0-aff74e0b1496",
+         "category": "learning_style",
+         "content": "User có xu hướng học tập dựa trên cấu trúc khung pháp lý chính thống, ưu tiên việc tìm hiểu chi tiết các điều khoản luật cụ thể để xây dựng nền tảng kiến thức chuyên môn.",
+         "sub_topic": "structured_learning",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T13:26:19.223374+00:00",
+         "updated_at": "2025-12-20T13:26:19.223374+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "9544b8ea-ecee-464c-83d4-8523e2e0027e",
+         "category": "preference",
+         "content": "Người dùng thể hiện sự quan tâm định hướng chuyên biệt vào lĩnh vực hàng hải ngay từ đầu quá trình tương tác.",
+         "sub_topic": "subject_interest",
+         "confidence": 0.7,
+         "created_at": "2025-12-20T13:26:16.911913+00:00",
+         "updated_at": "2025-12-20T13:26:16.911913+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "0c635585-08e6-4df4-aa4e-c8b1093d18a1",
+         "category": "preference",
+         "content": "Người dùng có xu hướng tìm kiếm sự hướng dẫn mang tính nền tảng và lộ trình cơ bản khi chủ động xác định vị thế là người mới bắt đầu ngay từ lời chào.",
+         "sub_topic": "entry_level_preference",
+         "confidence": 0.7,
+         "created_at": "2025-12-20T13:25:24.937165+00:00",
+         "updated_at": "2025-12-20T13:25:24.937165+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "ff33b5be-2eff-4c52-a9e8-597f2dd96862",
+         "category": "preference",
+         "content": "Người dùng ưu tiên phong cách giao tiếp mang tính cá nhân hóa và kỳ vọng trợ lý duy trì được ngữ cảnh thông tin xuyên suốt buổi học.",
+         "sub_topic": "personalized_interaction",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T13:24:17.283950+00:00",
+         "updated_at": "2025-12-20T13:24:17.283950+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "0736b240-4c8b-4b61-8949-52a1c15f019a",
+         "category": "habit",
+         "content": "Người dùng có xu hướng kiểm tra khả năng ghi nhớ và tính nhất quán của hệ thống để xác lập sự tin cậy trong quá trình tương tác dài hạn.",
+         "sub_topic": "system_verification",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T13:24:16.966453+00:00",
+         "updated_at": "2025-12-20T13:24:16.966453+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "ec84bf24-6c73-4121-aea8-0a0eeab98a51",
+         "category": "preference",
+         "content": "Người dùng xác định hàng hải là lĩnh vực quan tâm chính và là trọng tâm cho các hoạt động tiếp nhận thông tin hiện tại.",
+         "sub_topic": "subject_interest",
+         "confidence": 0.7,
+         "created_at": "2025-12-20T13:24:04.810450+00:00",
+         "updated_at": "2025-12-20T13:24:04.810450+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "ad409fd9-3dad-4a9c-853c-0f382702f156",
+         "category": "learning_style",
+         "content": "User ưu tiên lối tư duy diễn dịch, đi từ các quy định tổng quát của pháp luật đến việc tìm hiểu các tình huống thực tế như cứu nạn, hộ tịch hay cưỡng chế trên tàu.",
+         "sub_topic": "deductive_reasoning",
+         "confidence": 0.75,
+         "created_at": "2025-12-20T13:23:59.356755+00:00",
+         "updated_at": "2025-12-20T13:23:59.356755+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "38671493-c4fe-467e-99e7-d9e2604d1adf",
+         "category": "knowledge_gap",
+         "content": "User đang tìm kiếm sự chuyển đổi từ văn bản luật khô khan sang cách hiểu có tính ứng dụng về trách nhiệm và quyền hạn thực tế của thuyền trưởng trên tàu.",
+         "sub_topic": "legal_interpretation",
+         "confidence": 0.8,
+         "created_at": "2025-12-20T13:23:58.380592+00:00",
+         "updated_at": "2025-12-20T13:23:58.380592+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "2e666529-83f7-4ff8-a316-fdf2624f44e0",
+         "category": "habit",
+         "content": "User có thói quen học tập dựa trên việc truy xuất và phân tích trực tiếp các văn bản quy phạm pháp luật chính thống (Bộ luật Hàng hải) để xây dựng nền tảng kiến thức chuẩn xác.",
+         "sub_topic": "reference_based_learning",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T13:23:58.079032+00:00",
+         "updated_at": "2025-12-20T13:23:58.079032+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "2220439e-cdec-4a1f-9247-5db545017628",
+         "category": "preference",
+         "content": "User thể hiện sự quan tâm đặc biệt đến khía cạnh quản trị và quyền hạn pháp lý trong ngành hàng hải, cụ thể là phạm vi quyền lực của các chức danh chỉ huy.",
+         "sub_topic": "maritime_management_law",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T13:23:57.792988+00:00",
+         "updated_at": "2025-12-20T13:23:57.792988+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "df937b7d-dbcc-4ca5-ab9a-75cacc26c9ee",
+         "category": "learning_style",
+         "content": "User có xu hướng tiếp cận kiến thức theo phương pháp hệ thống hóa, thích phân loại thông tin thành các nhóm chức năng cụ thể để dễ nắm bắt bản chất vấn đề pháp lý.",
+         "sub_topic": "structured_learning",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T13:23:57.473457+00:00",
+         "updated_at": "2025-12-20T13:23:57.473457+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "c6f93c1c-5a77-4abc-8170-52aa4e84a81b",
+         "category": "goal_evolution",
+         "content": "Mục tiêu của người dùng đang bắt đầu từ việc định hướng và làm quen với môi trường học tập mới (sinh viên mới) trước khi xác định lộ trình học tập cụ thể.",
+         "sub_topic": "onboarding_phase",
+         "confidence": 0.8,
+         "created_at": "2025-12-20T13:22:20.824094+00:00",
+         "updated_at": "2025-12-20T13:22:20.824094+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "d9871893-fa91-44c6-ba2a-b8b3bf877e3b",
+         "category": "learning_style",
+         "content": "Người dùng đang ở giai đoạn tiếp cận thông tin sơ khởi, có xu hướng tìm kiếm sự hướng dẫn tổng quan thay vì đi sâu vào chuyên môn ngay lập tức do vị thế là người mới.",
+         "sub_topic": "introductory_learning",
+         "confidence": 0.7,
+         "created_at": "2025-12-20T13:22:20.503096+00:00",
+         "updated_at": "2025-12-20T13:22:20.503096+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "251955fe-506f-475e-9d23-f7a0490f97ec",
+         "category": "preference",
+         "content": "Người dùng ưu tiên sự cá nhân hóa trong giao tiếp và muốn thiết lập một mối quan hệ hội thoại có tính liên kết thay vì chỉ truy vấn thông tin rời rạc.",
+         "sub_topic": "personalized_interaction",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T13:19:50.958664+00:00",
+         "updated_at": "2025-12-20T13:19:50.958664+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "26268692-5986-4b41-9d4e-2f59822133cb",
+         "category": "habit",
+         "content": "Người dùng có xu hướng thực hiện các bài kiểm tra nhỏ về khả năng ghi nhớ của hệ thống để xác thực độ tin cậy và tính nhất quán của AI.",
+         "sub_topic": "verification_behavior",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T13:19:50.608107+00:00",
+         "updated_at": "2025-12-20T13:19:50.608107+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "4f1cbdc5-e2be-43de-a018-b6fa6c2477cc",
+         "category": "preference",
+         "content": "User thể hiện sự quan tâm và định hướng học tập tập trung chuyên sâu vào lĩnh vực hàng hải.",
+         "sub_topic": "subject_interest",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T13:19:33.282452+00:00",
+         "updated_at": "2025-12-20T13:19:33.282452+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "8d839317-a781-49d3-a381-404f734c4134",
+         "category": "habit",
+         "content": "User có thói quen sử dụng các bộ luật chính thức (Bộ luật hàng hải 2015) làm nền tảng để đặt câu hỏi, thể hiện tư duy làm việc chuyên nghiệp và có hệ thống.",
+         "sub_topic": "authoritative_referencing",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T13:19:31.348610+00:00",
+         "updated_at": "2025-12-20T13:19:31.348610+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "251961dd-38ab-4989-b877-929d1f5be6e1",
+         "category": "learning_style",
+         "content": "User có phong cách học tập phân tích, muốn bóc tách trách nhiệm của từng chủ thể riêng biệt (chủ tàu và tổ chức đăng kiểm) để hiểu rõ cơ chế vận hành của luật.",
+         "sub_topic": "analytical_thinking",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T13:19:31.006667+00:00",
+         "updated_at": "2025-12-20T13:19:31.006667+00:00",
+         "evolution_notes": []
+       }
+     ],
+     "total": 50,
+     "categories": {
+       "preference": 19,
+       "habit": 9,
+       "knowledge_gap": 6,
+       "learning_style": 14,
+       "goal_evolution": 2
+     }
+   }
+
+8. Chat History [✓ PASSED] (119ms)
+--------------------------------------------------
+   Found 20 messages (total: 1668):
+     [1] user: Bạn có nhớ tên tôi không?...
+     [2] assistant: Tên: Minh...
+     [3] user: Bạn có nhớ tên tôi không?...
+     [4] assistant: Tên: Minh...
+     [5] user: Xin chào! Tôi là sinh viên mới....
+     ... and 15 more
+
+   [FULL RESPONSE DATA]:
+   {
+     "data": [
+       {
+         "role": "user",
+         "content": "Bạn có nhớ tên tôi không?",
+         "timestamp": "2025-12-20T15:29:41.919495Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-20T15:29:41.933298Z"
+       },
+       {
+         "role": "user",
+         "content": "Bạn có nhớ tên tôi không?",
+         "timestamp": "2025-12-20T15:29:41.946896Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-20T15:29:41.959545Z"
+       },
+       {
+         "role": "user",
+         "content": "Xin chào! Tôi là sinh viên mới.",
+         "timestamp": "2025-12-20T15:31:05.185253Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tôi có thể giúp gì cho bạn?",
+         "timestamp": "2025-12-20T15:31:05.199005Z"
+       },
+       {
+         "role": "user",
+         "content": "Xin chào! Tôi là sinh viên mới.",
+         "timestamp": "2025-12-20T15:31:05.212324Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tôi có thể giúp gì cho bạn?",
+         "timestamp": "2025-12-20T15:31:05.242027Z"
+       },
+       {
+         "role": "user",
+         "content": "Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu biển theo Bộ luật hàng hải Việt Nam 2015.",
+         "timestamp": "2025-12-20T15:31:58.549428Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Dưới đây là tổng hợp giải thích chi tiết về quyền hạn của thuyền trưởng theo Bộ luật Hàng hải Việt Nam 2015, dựa trên sự kết nối giữa Điều 50 và các điều luật liên quan:\n\n### 1. Sự làm rõ về Điều 50 và các quyền hạn\nTrong Bộ luật Hàng hải Việt Nam 2015, **Điều 50** đóng vai trò là \"nền móng\" khi quy định về **Thuyền bộ** (thành phần nhân sự trên tàu). Theo điều này, thuyền trưởng là người chỉ huy cao nhất trên tàu, lãnh đạo thuyền bộ gồm các sĩ quan và thuyền viên.\n\nTuy nhiên, để nắm trọn vẹn các **quyền hạn thực thụ** của thuyền trưởng, chúng ta cần xem xét Điều 50 kết hợp với **Điều 52 và Điều 54**. Cụ thể như sau:\n\n### 2. Quyền chỉ huy và quản lý (Điều 52)\nThuyền trưởng có quyền chỉ huy tuyệt đối đối với mọi người có mặt trên tàu:\n*   **Đối tượng áp dụng:** Không chỉ thuyền viên mà tất cả hành khách, đại diện chủ tàu hay bất kỳ ai có mặt trên boong đều phải tuân thủ mệnh lệnh của thuyền trưởng.\n*   **Mục đích:** Đảm bảo an toàn cho con người, tàu biển và hàng hóa, cũng như duy trì trật tự trên tàu.\n\n### 3. Các đặc quyền quyết định an toàn và cưỡng chế (Điều 54)\nĐây là những quyền hạn quan trọng nhất giúp thuyền trưởng điều hành \"thành phố thu nhỏ\" giữa đại dương:\n\n*   **Quyền từ chối chuyến đi:** Thuyền trưởng có quyền không cho tàu rời cảng nếu xét thấy tàu chưa đủ điều kiện an toàn (hỏng hóc thiết bị, định biên thuyền viên không đủ, hoặc dự báo thời tiết nguy hiểm). Đây là quyền bảo vệ tính mạng tối cao cho cả con tàu.\n*   **Quyền cưỡng chế:** Thuyền trưởng có quyền tạm giữ người hoặc áp dụng các biện pháp ngăn chặn cần thiết đối với những đối tượng có hành vi phạm tội hoặc gây nguy hiểm trên tàu để duy trì trật tự và an ninh.\n*   **Quyền hộ tịch đặc biệt:** Khi tàu đang ở ngoài khơi xa, thuyền trưởng đóng vai trò như một đại diện pháp luật. Bạn có quyền xác nhận việc sinh, tử, chứng thực di chúc và các sự kiện pháp lý phát sinh ngay trên tàu.\n*   **Quyền đại diện pháp lý:** Thuyền trưởng là đại diện hợp pháp của chủ tàu và những người có lợi ích liên quan đến hàng hóa. Trong trường hợp khẩn cấp mà không thể chờ lệnh từ bờ, thuyền trưởng có quyền thực hiện các giao dịch như mua nhu yếu phẩm hoặc sửa chữa tàu để duy trì hành trình.\n\n### 4. Tổng kết\nNhư vậy, theo tinh thần của Bộ luật Hàng hải 2015:\n*   **Điều 50** xác lập vị thế của thuyền trưởng là **người đứng đầu** thuyền bộ.\n*   **Điều 52 và 54** cụ thể hóa quyền lực đó thành các **công cụ pháp lý** để thuyền trưởng điều hành, bảo vệ an toàn và thực hiện các trách nhiệm dân sự khi tàu hành trình trên biển.\n\nViệc nắm vững các quy định này không chỉ giúp người đi biển thực thi đúng pháp luật mà còn đảm bảo quyền lợi và sự an toàn cao nhất cho mọi hành trình hàng hải.",
+         "timestamp": "2025-12-20T15:31:58.563682Z"
+       },
+       {
+         "role": "user",
+         "content": "Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu biển theo Bộ luật hàng hải Việt Nam 2015.",
+         "timestamp": "2025-12-20T15:31:58.577792Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Dưới đây là tổng hợp giải thích chi tiết về quyền hạn của thuyền trưởng theo Bộ luật Hàng hải Việt Nam 2015, dựa trên sự kết nối giữa Điều 50 và các điều luật liên quan:\n\n### 1. Sự làm rõ về Điều 50 và các quyền hạn\nTrong Bộ luật Hàng hải Việt Nam 2015, **Điều 50** đóng vai trò là \"nền móng\" khi quy định về **Thuyền bộ** (thành phần nhân sự trên tàu). Theo điều này, thuyền trưởng là người chỉ huy cao nhất trên tàu, lãnh đạo thuyền bộ gồm các sĩ quan và thuyền viên.\n\nTuy nhiên, để nắm trọn vẹn các **quyền hạn thực thụ** của thuyền trưởng, chúng ta cần xem xét Điều 50 kết hợp với **Điều 52 và Điều 54**. Cụ thể như sau:\n\n### 2. Quyền chỉ huy và quản lý (Điều 52)\nThuyền trưởng có quyền chỉ huy tuyệt đối đối với mọi người có mặt trên tàu:\n*   **Đối tượng áp dụng:** Không chỉ thuyền viên mà tất cả hành khách, đại diện chủ tàu hay bất kỳ ai có mặt trên boong đều phải tuân thủ mệnh lệnh của thuyền trưởng.\n*   **Mục đích:** Đảm bảo an toàn cho con người, tàu biển và hàng hóa, cũng như duy trì trật tự trên tàu.\n\n### 3. Các đặc quyền quyết định an toàn và cưỡng chế (Điều 54)\nĐây là những quyền hạn quan trọng nhất giúp thuyền trưởng điều hành \"thành phố thu nhỏ\" giữa đại dương:\n\n*   **Quyền từ chối chuyến đi:** Thuyền trưởng có quyền không cho tàu rời cảng nếu xét thấy tàu chưa đủ điều kiện an toàn (hỏng hóc thiết bị, định biên thuyền viên không đủ, hoặc dự báo thời tiết nguy hiểm). Đây là quyền bảo vệ tính mạng tối cao cho cả con tàu.\n*   **Quyền cưỡng chế:** Thuyền trưởng có quyền tạm giữ người hoặc áp dụng các biện pháp ngăn chặn cần thiết đối với những đối tượng có hành vi phạm tội hoặc gây nguy hiểm trên tàu để duy trì trật tự và an ninh.\n*   **Quyền hộ tịch đặc biệt:** Khi tàu đang ở ngoài khơi xa, thuyền trưởng đóng vai trò như một đại diện pháp luật. Bạn có quyền xác nhận việc sinh, tử, chứng thực di chúc và các sự kiện pháp lý phát sinh ngay trên tàu.\n*   **Quyền đại diện pháp lý:** Thuyền trưởng là đại diện hợp pháp của chủ tàu và những người có lợi ích liên quan đến hàng hóa. Trong trường hợp khẩn cấp mà không thể chờ lệnh từ bờ, thuyền trưởng có quyền thực hiện các giao dịch như mua nhu yếu phẩm hoặc sửa chữa tàu để duy trì hành trình.\n\n### 4. Tổng kết\nNhư vậy, theo tinh thần của Bộ luật Hàng hải 2015:\n*   **Điều 50** xác lập vị thế của thuyền trưởng là **người đứng đầu** thuyền bộ.\n*   **Điều 52 và 54** cụ thể hóa quyền lực đó thành các **công cụ pháp lý** để thuyền trưởng điều hành, bảo vệ an toàn và thực hiện các trách nhiệm dân sự khi tàu hành trình trên biển.\n\nViệc nắm vững các quy định này không chỉ giúp người đi biển thực thi đúng pháp luật mà còn đảm bảo quyền lợi và sự an toàn cao nhất cho mọi hành trình hàng hải.",
+         "timestamp": "2025-12-20T15:31:58.590207Z"
+       },
+       {
+         "role": "user",
+         "content": "Tên tôi là Minh, tôi đang học về hàng hải.",
+         "timestamp": "2025-12-20T15:32:04.626001Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tôi có thể giúp gì cho bạn?",
+         "timestamp": "2025-12-20T15:32:04.640049Z"
+       },
+       {
+         "role": "user",
+         "content": "Tên tôi là Minh, tôi đang học về hàng hải.",
+         "timestamp": "2025-12-20T15:32:04.653651Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tôi có thể giúp gì cho bạn?",
+         "timestamp": "2025-12-20T15:32:04.665645Z"
+       },
+       {
+         "role": "user",
+         "content": "Bạn có nhớ tên tôi không?",
+         "timestamp": "2025-12-20T15:32:17.035807Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-20T15:32:17.049308Z"
+       },
+       {
+         "role": "user",
+         "content": "Bạn có nhớ tên tôi không?",
+         "timestamp": "2025-12-20T15:32:17.063014Z"
+       },
+       {
+         "role": "assistant",
+         "content": "Tên: Minh",
+         "timestamp": "2025-12-20T15:32:17.075666Z"
+       }
+     ],
+     "pagination": {
+       "total": 1668,
+       "limit": 20,
+       "offset": 0
+     }
+   }
+
+======================================================================
+  TEST SUMMARY
+======================================================================
+  Passed: 8
+  Failed: 0
+  Total Time: 75.0s
+  Completed: 2025-12-20 22:32:10
+======================================================================

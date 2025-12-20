@@ -45,6 +45,7 @@ uvicorn app.main:app --reload
 |---------|-------------|
 | **Agentic RAG** | Self-correcting RAG with grading & verification |
 | **Multi-Agent System** | Supervisor + RAG/Tutor/Memory/Grader agents |
+| **P1 Early Exit** | Skip quality_check at ≥85% confidence (saves 7.8s) |
 | **Semantic Cache** | 2hr TTL, ~45s response for cache hits |
 | **Phase 2.4a SOTA** | Early exit grading saves 19s per query |
 | **Hybrid Search** | Dense (pgvector) + Sparse (tsvector) + RRF |
