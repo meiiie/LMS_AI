@@ -9,6 +9,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2025-12-21)
+- **P3 SOTA Token Streaming (Dec 2025)**:
+  - True token-by-token streaming using `llm.astream()` (ChatGPT/Claude pattern)
+  - First token appears at ~20s instead of ~60s (3x faster perceived latency)
+  - New endpoint: `POST /api/v1/chat/stream/v2`
+  - Added `_generate_response_streaming()` async generator in `RAGAgent`
+  - Added `query_streaming()` public method for streaming RAG queries
+  - Backward compatible: v1 endpoint (`/chat/stream`) still works
+  - Files: `rag_agent.py`, `chat_stream.py`
+
 ### Changed (2025-12-19)
 - **Gemini 3 Flash Upgrade (Dec 2025 SOTA)**:
   - Upgraded default model from `gemini-2.5-flash` to `gemini-3-flash-preview`

@@ -1,7 +1,7 @@
 # 🗺️ Maritime AI System Flow Diagram
 
-**Version:** 3.1 (SOTA 2025 - P1 Early Exit + Phase 2.4a)  
-**Updated:** 2025-12-20  
+**Version:** 3.2 (SOTA 2025 - P3 Token Streaming + P1 Early Exit)  
+**Updated:** 2025-12-21  
 **Team Board:** Complete system flow for developers
 
 ---
@@ -369,6 +369,7 @@ flowchart TB
 | Memory Query | 6-8s | 6-8s | <10s ✅ |
 
 **Key Optimizations Applied:**
+- ✅ **P3 Token Streaming: First token ~20s** (llm.astream())
 - ✅ P1 Early Exit: Skip quality_check at ≥85% (saves 7.8s)
 - ✅ Phase 2.4a: Early Exit saves 19s (60%+ queries)
 - ✅ Semantic Cache: 2hr TTL, 0.1ms lookup

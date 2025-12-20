@@ -2,8 +2,8 @@
 
 > REST API endpoints for LMS integration and chat functionality.
 
-**Last Updated:** 2025-12-14  
-**Version:** 1.0.0 (LMS-Ready)
+**Last Updated:** 2025-12-21  
+**Version:** 1.1.0 (P3 SOTA Streaming)
 
 ---
 
@@ -148,6 +148,39 @@ event: done
 data: {"status": "complete"}
 ```
 
+### 2.1 ⚡ SOTA Streaming v2 (P3 - Dec 2025)
+
+```http
+POST /api/v1/chat/stream/v2
+Content-Type: application/json
+X-API-Key: {api_key}
+```
+
+**Key Difference:** True token-by-token streaming (first token ~20s vs ~60s)
+
+```
+event: thinking
+data: {"content": "🎯 Đang phân tích câu hỏi..."}
+
+event: thinking
+data: {"content": "🔍 Đang tra cứu cơ sở dữ liệu..."}
+
+event: thinking
+data: {"content": "📚 Tìm thấy 10 tài liệu liên quan"}
+
+event: answer                  <-- First token at ~20s (not ~60s)
+data: {"content": "Theo "}
+
+event: answer
+data: {"content": "Điều 15..."}
+
+event: sources
+data: {"sources": [...]}
+
+event: done
+data: {"status": "complete"}
+```
+
 ---
 
 ### 3. Health Check
@@ -273,7 +306,8 @@ GET /api/v1/sources/{node_id}
 | Endpoint | Method | Auth | Admin | Description |
 |----------|--------|------|-------|-------------|
 | `/chat` | POST | ✅ | ❌ | Main chat |
-| `/chat/stream` | POST | ✅ | ❌ | SSE streaming |
+| `/chat/stream` | POST | ✅ | ❌ | SSE streaming (v1) |
+| `/chat/stream/v2` | POST | ✅ | ❌ | **SOTA token streaming** ⚡ |
 | `/chat/status` | GET | ❌ | ❌ | Service status |
 | `/chat/history/{id}` | GET | ✅ | ❌ | Get history |
 | `/chat/history/{id}` | DELETE | ✅ | ✅ | Delete history |

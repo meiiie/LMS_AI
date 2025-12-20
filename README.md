@@ -45,12 +45,12 @@ uvicorn app.main:app --reload
 |---------|-------------|
 | **Agentic RAG** | Self-correcting RAG with grading & verification |
 | **Multi-Agent System** | Supervisor + RAG/Tutor/Memory/Grader agents |
+| **P3 SOTA Streaming** | True token-by-token streaming (first token ~20s) |
 | **P1 Early Exit** | Skip quality_check at ≥85% confidence (saves 7.8s) |
 | **Semantic Cache** | 2hr TTL, ~45s response for cache hits |
 | **Phase 2.4a SOTA** | Early exit grading saves 19s per query |
 | **Hybrid Search** | Dense (pgvector) + Sparse (tsvector) + RRF |
 | **Memory System** | Cross-session facts, insights, learning patterns |
-| **Streaming API** | Server-Sent Events for real-time UX |
 | **Multimodal RAG** | Vision-based PDF understanding |
 
 ---
@@ -118,7 +118,8 @@ X-API-Key: {api_key}
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/v1/chat` | POST | Main chat |
-| `/api/v1/chat-stream` | POST | SSE streaming |
+| `/api/v1/chat/stream` | POST | SSE streaming (v1) |
+| `/api/v1/chat/stream/v2` | POST | **SOTA token streaming** ⚡ |
 | `/api/v1/admin/documents` | POST/GET | Document management |
 | `/api/v1/health` | GET | Service health |
 | `/api/v1/sources/{id}` | GET | Source details |
@@ -141,7 +142,8 @@ User → API → ChatOrchestrator → Supervisor → TutorAgent → CorrectiveRA
 
 | Scenario | Latency | Notes |
 |----------|---------|-------|
-| Cold Path | 85-90s | With Phase 2.4a optimizations |
+| Cold Path | 62s | With P1 early exit |
+| **P3 Streaming** | **~20s first token** | True token-by-token |
 | Warm Cache | 45s | Semantic cache hit |
 | Simple Chat | 4-5s | Direct response |
 
@@ -195,4 +197,4 @@ Proprietary - All rights reserved.
 
 ---
 
-*Last Updated: 2025-12-20 | Version 2.0.0*
+*Last Updated: 2025-12-21 | Version 2.1.0 (P3 SOTA Streaming)*

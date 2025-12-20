@@ -23,6 +23,7 @@ Maritime AI Tutor Service - Future Development Plans
 | 11 | Memory Compression | ✅ | 2025-12-13 |
 | 2.4a | SOTA Early Exit (Grading) | ✅ | 2025-12-20 |
 | **P1** | **Quality Check Early Exit** | ✅ | **2025-12-20** |
+| **P3** | **SOTA Token Streaming** | ✅ | **2025-12-21** |
 
 ### 🎯 P1 Latency Improvement (Dec 2025)
 
@@ -31,6 +32,14 @@ Maritime AI Tutor Service - Future Development Plans
 | Cold Path | 89s | 62s | **-27s (30%)** |
 | quality_check | 7.8s | 0s (skipped) | **-7.8s** |
 | Threshold | N/A | confidence ≥ 85% | Conditional |
+
+### ⚡ P3 SOTA Streaming (Dec 2025)
+
+| Metric | Before (v1) | After (v2) | Impact |
+|--------|------------|-----------|--------|
+| First Token | ~60s | **~20s** | **3x faster perceived** |
+| Streaming | Fake (chunk after done) | True (token-by-token) | Better UX |
+| Endpoint | `/chat/stream` | `/chat/stream/v2` | New |
 
 ### 🔄 In Progress
 

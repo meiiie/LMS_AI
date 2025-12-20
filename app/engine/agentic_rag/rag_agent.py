@@ -442,7 +442,7 @@ class RAGAgent:
         # After generation, yield sources
         citations = self._generate_hybrid_citations(hybrid_results)
         sources_data = [
-            {"title": c.title, "content": c.content_snippet or "", "document_id": c.source}
+            {"title": c.title, "content": c.source or "", "document_id": c.document_id or ""}
             for c in citations
         ]
         yield {"type": "sources", "content": sources_data}

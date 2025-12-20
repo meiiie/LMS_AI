@@ -2,9 +2,9 @@
 
 > Master architecture document following **C4 Model + arc42** best practices.
 
-**Last Updated:** 2025-12-19  
+**Last Updated:** 2025-12-21  
 **Status:** ✅ Complete  
-**Version:** 3.1 (CHỈ THỊ SỐ 31 v3 SOTA Trace Architecture)
+**Version:** 3.2 (P3 SOTA Streaming + Optimizations)
 
 
 ---
