@@ -422,8 +422,13 @@ async def main():
         logger.log(f"\n{'='*70}")
         logger.log("V3 TEST RESULTS")
         logger.log(f"{'='*70}")
-        logger.log(f"   First event time:   {result['first_event_time']:.2f}s")
-        logger.log(f"   First token time:   {result['first_token_time']:.2f}s")
+        
+        # Safe formatting with None handling
+        first_event = result.get('first_event_time')
+        first_token = result.get('first_token_time')
+        
+        logger.log(f"   First event time:   {first_event:.2f}s" if first_event else "   First event time:   N/A")
+        logger.log(f"   First token time:   {first_token:.2f}s" if first_token else "   First token time:   N/A (error before tokens)")
         logger.log(f"   Total time:         {result['total_time']:.2f}s")
         logger.log(f"   Total tokens:       {result['token_count']}")
         logger.log(f"   Thinking events:    {result['thinking_events']}")
@@ -433,14 +438,14 @@ async def main():
         logger.log(f"   Reasoning steps:    {result['reasoning_steps']}")
         
         # Show thinking events
-        if result['thinking_events_data']:
+        if result.get('thinking_events_data'):
             logger.log(f"\n   🧠 THINKING EVENTS:")
             logger.log("-" * 70)
             for i, event in enumerate(result['thinking_events_data'][:10], 1):
                 logger.log(f"   [{event.get('step', '')}] {event.get('content', '')[:60]}...")
         
         # Show answer preview
-        if result['clean_answer']:
+        if result.get('clean_answer'):
             logger.log(f"\n   📝 ANSWER PREVIEW (first 400 chars):")
             logger.log("-" * 70)
             for line in result['clean_answer'][:400].split('\n')[:8]:
@@ -455,10 +460,15 @@ async def main():
     logger.log("FINAL SUMMARY")
     logger.log(f"{'='*70}")
     
-    if result and result['success']:
-        logger.log(f"   V3 First event:     {result['first_event_time']:.2f}s (target: <1s)")
-        logger.log(f"   V3 First token:     {result['first_token_time']:.2f}s (target: <40s)")
-        logger.log(f"   V3 Has CRAG:        ✅ (grading + reasoning_trace)")
+    if result and result.get('success'):
+        first_event = result.get('first_event_time')
+        first_token = result.get('first_token_time')
+        
+        if first_event:
+            logger.log(f"   V3 First event:     {first_event:.2f}s (target: <1s)")
+        if first_token:
+            logger.log(f"   V3 First token:     {first_token:.2f}s (target: <40s)")
+        logger.log(f"   V3 Has CRAG:        {'✅' if result.get('has_reasoning_trace') else '❌'} (grading + reasoning_trace)")
         logger.log(f"   V3 Has streaming:   ✅ (true token streaming)")
         logger.log(f"\n✅ V3 COMBINES BEST OF BOTH WORLDS!")
     else:
@@ -469,7 +479,7 @@ async def main():
     # Save results
     logger.save()
     
-    return 0 if (result and result['success']) else 1
+    return 0 if (result and result.get('success')) else 1
 
 
 if __name__ == "__main__":

@@ -344,7 +344,6 @@ async def chat_stream_v3(
         try:
             # Import CRAG for full pipeline with streaming
             from app.engine.agentic_rag.corrective_rag import get_corrective_rag
-            from app.services.memory_service import get_user_memory
             
             # Get CRAG singleton
             crag = get_corrective_rag()
@@ -356,13 +355,8 @@ async def chat_stream_v3(
                 "conversation_history": ""
             }
             
-            # Optionally fetch memory for personalization
-            try:
-                memory = await get_user_memory(chat_request.user_id)
-                if memory and memory.get("name"):
-                    context["user_name"] = memory.get("name")
-            except Exception as e:
-                logger.debug(f"[STREAM-V3] Memory fetch skipped: {e}")
+            # Memory fetching is optional - skip if service unavailable
+            # This keeps V3 lightweight and avoids import errors
             
             # Stream events from CRAG pipeline
             async for event in crag.process_streaming(
