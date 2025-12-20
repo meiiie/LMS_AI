@@ -183,3 +183,113 @@ async def chat_stream(
             "X-Accel-Buffering": "no"  # Disable nginx buffering
         }
     )
+
+
+# =============================================================================
+# P3 SOTA: True Token Streaming (Dec 2025)
+# Pattern: ChatGPT Progressive Response + Claude Interleaved Thinking
+# First token: ~20s instead of ~60s
+# =============================================================================
+
+@router.post("/chat/stream/v2")
+async def chat_stream_v2(
+    request: Request,
+    chat_request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    auth: RequireAuth
+):
+    """
+    P3 SOTA Streaming API - True Token-by-Token Streaming
+    
+    Difference from /chat/stream (v1):
+    - v1: Waits for full response (~60s), then chunks it (fake streaming)
+    - v2: Streams tokens as they arrive from LLM (~20s first token)
+    
+    Event Types:
+    - thinking: Progress updates (retrieval, grading)
+    - answer: Real-time token chunks
+    - sources: Document sources after completion
+    - done: Stream completed
+    - error: Error occurred
+    
+    **Feature: p3-sota-streaming**
+    """
+    start_time = time.time()
+    
+    logger.info(
+        f"[STREAM-V2] Request from {chat_request.user_id}: {chat_request.message[:50]}..."
+    )
+    
+    async def generate_events_v2() -> AsyncGenerator[str, None]:
+        try:
+            # Import RAG Agent for direct streaming
+            from app.engine.agentic_rag.rag_agent import RAGAgent
+            from app.services.hybrid_search_service import get_hybrid_search_service
+            
+            # Initialize RAG Agent
+            hybrid_search = get_hybrid_search_service()
+            rag_agent = RAGAgent(hybrid_search_service=hybrid_search)
+            
+            # Initial thinking event
+            yield format_sse("thinking", {
+                "content": "🎯 Đang phân tích câu hỏi..."
+            })
+            await asyncio.sleep(0.05)
+            
+            # P3 SOTA: Use streaming query
+            async for event in rag_agent.query_streaming(
+                question=chat_request.message,
+                limit=10,
+                conversation_history="",
+                user_role=chat_request.role.value
+            ):
+                event_type = event.get("type", "answer")
+                content = event.get("content", "")
+                
+                if event_type == "thinking":
+                    yield format_sse("thinking", {"content": content})
+                elif event_type == "answer":
+                    yield format_sse("answer", {"content": content})
+                elif event_type == "sources":
+                    yield format_sse("sources", {"sources": content})
+                elif event_type == "done":
+                    pass  # Will send done at the end
+                elif event_type == "error":
+                    yield format_sse("error", {"message": content})
+                    return
+                
+                await asyncio.sleep(0.01)  # Micro delay for flush
+            
+            # Processing time
+            processing_time = time.time() - start_time
+            
+            # Send metadata
+            metadata = {
+                "processing_time": round(processing_time, 3),
+                "model": "maritime-rag-v1",
+                "agent_type": "rag",
+                "streaming_version": "v2",
+                "first_token_time": "progressive"
+            }
+            yield format_sse("metadata", metadata)
+            
+            # Done signal
+            yield format_sse("done", {"status": "complete"})
+            
+            logger.info(f"[STREAM-V2] Completed in {processing_time:.3f}s")
+            
+        except Exception as e:
+            logger.exception(f"[STREAM-V2] Error: {e}")
+            yield format_sse("error", {
+                "message": f"Lỗi xử lý: {str(e)}"
+            })
+    
+    return StreamingResponse(
+        generate_events_v2(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
