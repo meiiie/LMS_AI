@@ -2,10 +2,10 @@
   Maritime AI Service - Production API Test Results
   Base URL: https://maritime-ai-chatbot.onrender.com
   Test User ID: 12345678-1234-5678-1234-567812345678
-  Completed: 2025-12-20 14:14:48
+  Completed: 2025-12-20 14:54:28
 ======================================================================
 
-1. Health Check [✓ PASSED] (586ms)
+1. Health Check [✓ PASSED] (357ms)
 --------------------------------------------------
    Status: ok
 
@@ -17,11 +17,11 @@
      "environment": "production"
    }
 
-2. Auth Required [✓ PASSED] (290ms)
+2. Auth Required [✓ PASSED] (80ms)
 --------------------------------------------------
    Correctly rejected with status 401
 
-3. Chat Simple [✓ PASSED] (3978ms)
+3. Chat Simple [✓ PASSED] (3025ms)
 --------------------------------------------------
    Agent: rag, Response: Tôi có thể giúp gì cho bạn?...
 
@@ -38,14 +38,14 @@
        ]
      },
      "metadata": {
-       "processing_time": 3.786,
+       "processing_time": 2.915,
        "model": "maritime-rag-v1",
        "agent_type": "rag",
        "session_id": "baf3be34-e55d-4cb9-873b-ac4d372e2aef",
        "tools_used": [],
        "reasoning_trace": {
          "total_steps": 3,
-         "total_duration_ms": 3309,
+         "total_duration_ms": 2426,
          "was_corrected": false,
          "correction_reason": null,
          "final_confidence": 0.9333333333333332,
@@ -55,7 +55,7 @@
              "description": "Phân tích và định tuyến câu hỏi",
              "result": "Định tuyến đến: direct",
              "confidence": 0.9,
-             "duration_ms": 3308,
+             "duration_ms": 2424,
              "details": {
                "routed_to": "direct"
              }
@@ -92,44 +92,24 @@
      }
    }
 
-4. Chat RAG Query [✓ PASSED] (47966ms)
+4. Chat RAG Query [✓ PASSED] (43162ms)
 --------------------------------------------------
    Agent: rag, Tools: ['tool_maritime_search'], 5 sources
-   Response: Dưới đây là tổng hợp giải thích chi tiết về **Điều 31 Bộ luật Hàng hải Việt Nam 2015** về trách nhiệm đăng kiểm tàu biển, được trình bày một cách mạch lạc và dễ hiểu:
+   Response: Dựa trên các thông tin từ hệ thống, dưới đây là tổng hợp giải thích chi tiết và mạch lạc về **Điều 31 Bộ luật Hàng hải Việt Nam 2015** liên quan đến trách nhiệm đăng kiểm tàu biển:
    
-   ### Tổng quan về Điều 31
-   Điều 31 quy định cụ thể về trách nhiệm của các bên liên quan trong việc kiểm định kỹ thuật tàu biển. Mục tiêu cốt lõi của điều luật này là thiết lập một hệ thống giám sát chặt chẽ nhằm đảm bảo an toàn sinh m...
+   ### 1. Ý nghĩa của Điều 31
+   Điều 31 đóng vai trò là "chốt chặn" pháp lý quan trọng nhằm đảm bảo an toàn cho con người, hàng hóa và bảo vệ môi trường biển. Điều luật này phân định rõ quyền hạn và nghĩa vụ của hai nhóm đố...
 
    [QUÁ TRÌNH SUY NGHĨ]:
 --------------------------------------------------
-   [RAG Analysis]
-   Người dùng hỏi về Điều 31 Bộ luật Hàng hải Việt Nam 2015. Đây là thông tin tôi đã nắm rõ từ các dữ liệu trước đó. Tôi sẽ trình bày một cách hệ thống, tập trung vào 3 nhóm đối tượng chính chịu trách nhiệm: Chủ tàu/Người khai thác tàu, Tổ chức đăng kiểm và Bộ trưởng Bộ Giao thông vận tải.
-   
-   [Teaching Process]
-   **Navigating Điều 31 - The Ship Registry Responsibility**
-   
-   Alright, Minh, so you're diving into **Điều 31** of the **Vietnam Maritime Code 2015**, the one about ship registry responsibility. Good choice! I've been giving this a thought, and here's what's clicking for me.
-   
-   Essentially, we've got a three-pronged approach here. Think of it like a triangle of responsibility: you've got the shipowner or charterer, the registration organizations and surveyors, and then the Ministry of Transport, the grand overseer.
-   
-   First, **the shipowner/charterer** - that's your responsibility to keep your vessel ship-shape (pun intended!) and up to snuff with safety standards. You've gotta make sure inspections are smooth sailing and report any unfortunate incidents. It's like, you're the student responsible for the homework, and you want to be a diligent one!
-   
-   Then, **the registration organizations/surveyors** step in. They are the quality controllers, the ones who make sure the inspections are accurate and the certificates are legit. Think of them as the teachers who grade your homework, ensuring you are following the rules! They are also responsible for all legal liabilities if any discrepancies happen.
-   
-   And finally, the **Minister of Transport** keeps an eye on the whole shebang. They're the ones issuing the rules and regulations, the general manager who makes sure everyone is playing by the same maritime rulebook. They’re like the principal who sets the academic and technical standards.
-   
-   So, Minh, remember: it's a team effort in keeping our seas safe and sound. *Đừng quên, an obedient ship is a safe ship*.
-   
-   This is all courtesy of **Article 31, Vietnam Maritime Code 2015**. I hope that helps you in your studies!
-   
-   ... [2 more lines]
+   Người dùng hỏi về Điều 31 Bộ luật Hàng hải Việt Nam 2015. Tôi đã có sẵn kiến thức cốt lõi về trách nhiệm của Chủ tàu và Tổ chức đăng kiểm. Tôi sẽ trình bày lại một cách hệ thống, rõ ràng và bổ sung thêm góc nhìn thực tế để người dùng dễ nắm bắt hơn.
 --------------------------------------------------
 
    [FULL RESPONSE DATA]:
    {
      "status": "success",
      "data": {
-       "answer": "Dưới đây là tổng hợp giải thích chi tiết về **Điều 31 Bộ luật Hàng hải Việt Nam 2015** về trách nhiệm đăng kiểm tàu biển, được trình bày một cách mạch lạc và dễ hiểu:\n\n### Tổng quan về Điều 31\nĐiều 31 quy định cụ thể về trách nhiệm của các bên liên quan trong việc kiểm định kỹ thuật tàu biển. Mục tiêu cốt lõi của điều luật này là thiết lập một hệ thống giám sát chặt chẽ nhằm đảm bảo an toàn sinh mạng, an ninh hàng hải và phòng ngừa ô nhiễm môi trường.\n\nTrách nhiệm này được phân chia cụ thể cho 3 nhóm đối tượng chính:\n\n#### 1. Trách nhiệm của Chủ tàu, Người quản lý và Người khai thác tàu\nĐây là nhóm đối tượng trực tiếp vận hành con tàu, đóng vai trò chủ động trong việc duy trì an toàn:\n*   **Duy trì trạng thái an toàn:** Phải đảm bảo tàu luôn trong tình trạng kỹ thuật an toàn theo các quy chuẩn quy định giữa hai kỳ kiểm định định kỳ.\n*   **Báo cáo sự cố:** Khi tàu xảy ra tai nạn, hư hỏng hoặc có những thay đổi ảnh hưởng đến khả năng đi biển (như thủng vỏ tàu, hỏng máy chính, thay đổi kết cấu...), chủ tàu phải thông báo ngay cho tổ chức đăng kiểm để tiến hành kiểm tra bất thường.\n\n#### 2. Trách nhiệm của Tổ chức đăng kiểm và Đăng kiểm viên\nĐây là những người đóng vai trò \"giám định\", đưa ra các chứng nhận pháp lý cho con tàu:\n*   **Tính xác thực:** Phải chịu trách nhiệm hoàn toàn về kết quả kiểm tra và tính chính xác của các giấy chứng nhận đã cấp cho tàu.\n*   **Tuân thủ quy trình:** Phải thực hiện việc đăng kiểm theo đúng quy chuẩn kỹ thuật quốc gia và các điều ước quốc tế mà Việt Nam là thành viên. Nếu có sai sót trong quá trình kiểm định dẫn đến mất an toàn, đăng kiểm viên và tổ chức đăng kiểm sẽ phải chịu trách nhiệm pháp lý nghiêm khắc.\n\n#### 3. Trách nhiệm của Bộ trưởng Bộ Giao thông vận tải\nỞ tầm quản lý vĩ mô, Bộ trưởng Bộ GTVT đóng vai trò \"người cầm lái\" hệ thống:\n*   **Ban hành quy chuẩn:** Quy định các tiêu chuẩn, quy chuẩn kỹ thuật quốc gia về đăng kiểm tàu biển (ví dụ các bộ QCVN về đóng tàu, thiết bị an toàn...).\n*   **Quản lý hệ thống:** Thiết lập và chỉ đạo hoạt động của hệ thống đăng kiểm trên toàn quốc để đảm bảo sự thống nhất và đạt chuẩn quốc tế.\n\n### Ý nghĩa của Điều 31\nĐiều luật này tạo ra một vòng khép kín về trách nhiệm:\n*   **Chủ tàu** thực thi và duy trì.\n*   **Đăng kiểm viên** kiểm tra và xác nhận.\n*   **Nhà nước** ban hành luật và giám sát.\n\nSự phối hợp chặt chẽ giữa ba bên theo Điều 31 giúp đảm bảo rằng mọi con tàu khi vươn khơi đều đáp ứng đầy đủ các tiêu chuẩn an toàn, giúp giảm thiểu rủi ro tai nạn hàng hải và bảo vệ quyền lợi kinh tế cho các bên liên quan.",
+       "answer": "Dựa trên các thông tin từ hệ thống, dưới đây là tổng hợp giải thích chi tiết và mạch lạc về **Điều 31 Bộ luật Hàng hải Việt Nam 2015** liên quan đến trách nhiệm đăng kiểm tàu biển:\n\n### 1. Ý nghĩa của Điều 31\nĐiều 31 đóng vai trò là \"chốt chặn\" pháp lý quan trọng nhằm đảm bảo an toàn cho con người, hàng hóa và bảo vệ môi trường biển. Điều luật này phân định rõ quyền hạn và nghĩa vụ của hai nhóm đối tượng chính: **Chủ tàu** và **Tổ chức đăng kiểm**.\n\n### 2. Trách nhiệm của Chủ tàu (Người thực thi và duy trì)\nChủ tàu là người sở hữu và vận hành tài sản, do đó họ có trách nhiệm xuyên suốt đối với tình trạng kỹ thuật của con tàu:\n*   **Đăng kiểm bắt buộc:** Chủ tàu phải đưa tàu đi đăng kiểm trong các trường hợp then chốt như: khi đóng mới, nhập khẩu, hoán cải, sửa chữa phục hồi hoặc khi đến hạn kiểm định định kỳ theo quy định.\n*   **Duy trì trạng thái an toàn liên tục:** Đây là điểm quan trọng nhất. Giấy chứng nhận đăng kiểm chỉ xác nhận tình trạng tàu tại một thời điểm nhất định. Do đó, giữa hai kỳ đăng kiểm, chủ tàu có nghĩa vụ tự bảo dưỡng, sửa chữa để tàu luôn đáp ứng các tiêu chuẩn về:\n    *   An toàn kỹ thuật và an ninh hàng hải.\n    *   Điều kiện lao động của thuyền viên.\n    *   Phòng ngừa ô nhiễm môi trường.\n\n### 3. Trách nhiệm của Tổ chức đăng kiểm (Người kiểm chứng và xác nhận)\nCác đơn vị đăng kiểm (ví dụ: Cục Đăng kiểm Việt Nam - VR) đóng vai trò là cơ quan giám định độc lập với các trách nhiệm:\n*   **Tuân thủ tiêu chuẩn:** Việc kiểm định phải dựa trên hệ thống pháp luật Việt Nam và các **Công ước quốc tế** mà Việt Nam là thành viên (như Công ước SOLAS về an toàn sinh mạng trên biển hay MARPOL về chống ô nhiễm).\n*   **Tính pháp lý và khách quan:** Tổ chức đăng kiểm phải chịu trách nhiệm hoàn toàn về tính chính xác, trung thực và khách quan của kết quả kiểm định. \n*   **Trách nhiệm giải trình:** Nếu cấp giấy chứng nhận cho một con tàu không đủ điều kiện kỹ thuật dẫn đến sự cố, tổ chức đăng kiểm sẽ phải đối mặt với các hình phạt pháp lý nghiêm trọng.\n\n### Tóm tắt cốt lõi (Ghi nhớ nhanh)\nĐể dễ nhớ nội dung Điều 31, bạn có thể áp dụng công thức:\n*   **Chủ tàu:** Phải **Chủ động** (đăng kiểm đúng hạn) và **Duy trì** (giữ tàu an toàn liên tục).\n*   **Tổ chức đăng kiểm:** Phải **Khách quan** (làm việc theo chuẩn mực) và **Chính xác** (chịu trách nhiệm về con dấu/kết quả cấp ra).\n\nViệc hiểu rõ Điều 31 giúp các bên liên quan phối hợp chặt chẽ, đảm bảo mọi chuyến hành trình trên biển đều diễn ra an toàn và tuân thủ đúng quy định của pháp luật quốc gia cũng như quốc tế.",
        "sources": [
          {
            "title": "2. Việc đăng kiểm các loại tàu biển không thuộc trường hợp quy định tại khoản 1",
@@ -214,29 +194,29 @@
        ]
      },
      "metadata": {
-       "processing_time": 47.868,
+       "processing_time": 43.081,
        "model": "maritime-rag-v1",
        "agent_type": "rag",
        "session_id": "baf3be34-e55d-4cb9-873b-ac4d372e2aef",
        "tools_used": [
          {
            "name": "tool_maritime_search",
-           "description": "Tra cứu: Điều 31 Bộ luật Hàng hải Việt Nam 2015 trách nhiệm đăng kiểm tàu biển"
+           "description": "Tra cứu: Điều 31 Bộ luật hàng hải Việt Nam 2015 trách nhiệm đăng kiểm tàu biển"
          }
        ],
        "reasoning_trace": {
          "total_steps": 3,
-         "total_duration_ms": 47444,
+         "total_duration_ms": 42647,
          "was_corrected": false,
          "correction_reason": null,
-         "final_confidence": 0.7999999999999999,
+         "final_confidence": 0.7333333333333334,
          "steps": [
            {
              "step_name": "routing",
              "description": "Phân tích và định tuyến câu hỏi",
              "result": "Định tuyến đến: tutor_agent",
              "confidence": 0.9,
-             "duration_ms": 6432,
+             "duration_ms": 961,
              "details": {
                "routed_to": "tutor_agent"
              }
@@ -244,22 +224,22 @@
            {
              "step_name": "quality_check",
              "description": "Kiểm tra chất lượng câu trả lời",
-             "result": "Điểm chất lượng: 6/10",
-             "confidence": 0.6,
-             "duration_ms": 8609,
+             "result": "Điểm chất lượng: 4/10",
+             "confidence": 0.4,
+             "duration_ms": 12233,
              "details": {
-               "score": 6,
-               "passed": true
+               "score": 4,
+               "passed": false
              }
            },
            {
              "step_name": "synthesis",
              "description": "Tổng hợp câu trả lời cuối cùng",
-             "result": "Tổng hợp hoàn tất: 2532 chars",
+             "result": "Tổng hợp hoàn tất: 2511 chars",
              "confidence": 0.9,
-             "duration_ms": 7516,
+             "duration_ms": 7650,
              "details": {
-               "response_length": 2532
+               "response_length": 2511
              }
            }
          ]
@@ -277,11 +257,11 @@
        ],
        "query_type": "factual",
        "thinking_content": null,
-       "thinking": "[RAG Analysis]\nNgười dùng hỏi về Điều 31 Bộ luật Hàng hải Việt Nam 2015. Đây là thông tin tôi đã nắm rõ từ các dữ liệu trước đó. Tôi sẽ trình bày một cách hệ thống, tập trung vào 3 nhóm đối tượng chính chịu trách nhiệm: Chủ tàu/Người khai thác tàu, Tổ chức đăng kiểm và Bộ trưởng Bộ Giao thông vận tải.\n\n[Teaching Process]\n**Navigating Điều 31 - The Ship Registry Responsibility**\n\nAlright, Minh, so you're diving into **Điều 31** of the **Vietnam Maritime Code 2015**, the one about ship registry responsibility. Good choice! I've been giving this a thought, and here's what's clicking for me.\n\nEssentially, we've got a three-pronged approach here. Think of it like a triangle of responsibility: you've got the shipowner or charterer, the registration organizations and surveyors, and then the Ministry of Transport, the grand overseer.\n\nFirst, **the shipowner/charterer** - that's your responsibility to keep your vessel ship-shape (pun intended!) and up to snuff with safety standards. You've gotta make sure inspections are smooth sailing and report any unfortunate incidents. It's like, you're the student responsible for the homework, and you want to be a diligent one!\n\nThen, **the registration organizations/surveyors** step in. They are the quality controllers, the ones who make sure the inspections are accurate and the certificates are legit. Think of them as the teachers who grade your homework, ensuring you are following the rules! They are also responsible for all legal liabilities if any discrepancies happen.\n\nAnd finally, the **Minister of Transport** keeps an eye on the whole shebang. They're the ones issuing the rules and regulations, the general manager who makes sure everyone is playing by the same maritime rulebook. They’re like the principal who sets the academic and technical standards.\n\nSo, Minh, remember: it's a team effort in keeping our seas safe and sound. *Đừng quên, an obedient ship is a safe ship*.\n\nThis is all courtesy of **Article 31, Vietnam Maritime Code 2015**. I hope that helps you in your studies!\n\n\n"
+       "thinking": "Người dùng hỏi về Điều 31 Bộ luật Hàng hải Việt Nam 2015. Tôi đã có sẵn kiến thức cốt lõi về trách nhiệm của Chủ tàu và Tổ chức đăng kiểm. Tôi sẽ trình bày lại một cách hệ thống, rõ ràng và bổ sung thêm góc nhìn thực tế để người dùng dễ nắm bắt hơn."
      }
    }
 
-5. Thread Continuity [✓ PASSED] (16741ms)
+5. Thread Continuity [✓ PASSED] (20604ms)
 --------------------------------------------------
    Thread ID: baf3be34..., Remembers name: True
 
@@ -292,10 +272,10 @@
      "ai_response": "Tên: Minh"
    }
 
-6. Memories Endpoint [✓ PASSED] (127ms)
+6. Memories Endpoint [✓ PASSED] (109ms)
 --------------------------------------------------
    Found 7 user memories/facts:
-     [1] goal: tìm hiểu Điều 31 Bộ luật hàng hải Việt Nam 2015...
+     [1] goal: Tìm hiểu về trách nhiệm đăng kiểm tàu biển theo Đi...
      [2] weakness: Quy tắc 15 COLREGs (tình huống cắt hướng)...
      [3] preference: Bộ luật hàng hải Việt Nam 2015...
      [4] weakness: Điều 15 Bộ luật hàng hải Việt Nam...
@@ -308,7 +288,7 @@
        {
          "id": "534db999-fce2-49de-88e2-c08ac586a2b7",
          "type": "goal",
-         "value": "tìm hiểu Điều 31 Bộ luật hàng hải Việt Nam 2015",
+         "value": "Tìm hiểu về trách nhiệm đăng kiểm tàu biển theo Điều 31 Bộ luật hàng hải Việt Nam 2015",
          "created_at": "2025-12-19T17:44:16.746689+00:00"
        },
        {
@@ -351,21 +331,191 @@
      "total": 7
    }
 
-7. Insights Endpoint [✓ PASSED] (112ms)
+7. Insights Endpoint [✓ PASSED] (106ms)
 --------------------------------------------------
    Found 50 behavioral insights (4 categories):
-     - preference: 14
-     - habit: 13
-     - learning_style: 22
+     - learning_style: 19
+     - preference: 16
+     - habit: 14
      - knowledge_gap: 1
    Sample insights:
-     [1] User thể hiện sự quan tâm chuyên biệt đến lĩnh vực hàng hải,...
-     [2] Người dùng có thói quen yêu cầu giải thích các điều khoản lu...
-     [3] Người dùng quan tâm đến tính thực thi pháp lý và trách nhiệm...
+     [1] User có phong cách học tập tập trung vào mục đích thực tế củ...
+     [2] Người dùng quan tâm đến tính pháp lý và trách nhiệm giải trì...
+     [3] Người dùng có thói quen tìm kiếm sự liên kết giữa luật quốc ...
 
    [FULL RESPONSE DATA]:
    {
      "data": [
+       {
+         "id": "a5fe227b-c97d-464f-9026-e3659aecd7de",
+         "category": "learning_style",
+         "content": "User có phong cách học tập tập trung vào mục đích thực tế của điều luật (tại sao điều luật tồn tại) hơn là chỉ liệt kê các con số hay điều khoản đơn lẻ.",
+         "sub_topic": "purpose_driven_learning",
+         "confidence": 0.8,
+         "created_at": "2025-12-20T07:54:19.433244+00:00",
+         "updated_at": "2025-12-20T07:54:19.433244+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "53f815fb-5fac-4cde-90ac-ae0e152c34c3",
+         "category": "preference",
+         "content": "Người dùng quan tâm đến tính pháp lý và trách nhiệm giải trình của các bên trong hoạt động hàng hải, đặc biệt là các khía cạnh về an toàn và bảo vệ môi trường.",
+         "sub_topic": "legal_accountability",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T07:54:18.757937+00:00",
+         "updated_at": "2025-12-20T07:54:18.757937+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "ebe17a6b-87a5-4d77-9f01-f116ece66c0e",
+         "category": "habit",
+         "content": "Người dùng có thói quen tìm kiếm sự liên kết giữa luật quốc gia và các công ước quốc tế để hiểu rõ tính đồng bộ trong thực thi pháp luật hàng hải.",
+         "sub_topic": "comparative_analysis",
+         "confidence": 0.8,
+         "created_at": "2025-12-20T07:54:18.412075+00:00",
+         "updated_at": "2025-12-20T07:54:18.412075+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "8967221d-d346-4754-b2b6-b18994f10097",
+         "category": "learning_style",
+         "content": "Người dùng ưu tiên việc tóm tắt kiến thức thành các quy tắc cốt lõi hoặc công thức ghi nhớ nhanh thay vì chỉ đọc văn bản luật thuần túy.",
+         "sub_topic": "summarization_preference",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T07:54:18.075651+00:00",
+         "updated_at": "2025-12-20T07:54:18.075651+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "49cf483b-5976-4252-9ddc-25612e11ef07",
+         "category": "learning_style",
+         "content": "Người dùng có xu hướng tiếp cận kiến thức pháp luật theo hướng cấu trúc hóa, phân định rõ vai trò và trách nhiệm của các bên liên quan để dễ dàng nắm bắt hệ thống.",
+         "sub_topic": "structured_learning",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T07:54:17.156938+00:00",
+         "updated_at": "2025-12-20T07:54:17.156938+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "2b2dd0b5-458d-4255-975e-418f355040c9",
+         "category": "preference",
+         "content": "User có xu hướng chủ động xác định vị thế là người mới bắt đầu để định hướng các phản hồi theo hướng tiếp cận kiến thức từ nền tảng.",
+         "sub_topic": "entry_level_preference",
+         "confidence": 0.7,
+         "created_at": "2025-12-20T07:53:38.212711+00:00",
+         "updated_at": "2025-12-20T07:53:38.212711+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "8a772b09-827c-4879-b14b-7af61548e43c",
+         "category": "preference",
+         "content": "Người dùng ưu tiên phong cách giao tiếp cá nhân hóa và mong muốn duy trì sự kết nối liên tục trong ngữ cảnh hội thoại thay vì chỉ truy vấn thông tin rời rạc.",
+         "sub_topic": "personalized_interaction",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T07:52:47.106342+00:00",
+         "updated_at": "2025-12-20T07:52:47.106342+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "22b100f5-6c14-46ad-aee2-8815713ddddc",
+         "category": "habit",
+         "content": "Người dùng có xu hướng kiểm tra khả năng ghi nhớ và tính nhất quán của hệ thống thông qua việc đặt các câu hỏi xác nhận thông tin đã cung cấp trước đó.",
+         "sub_topic": "verification_behavior",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T07:52:46.769932+00:00",
+         "updated_at": "2025-12-20T07:52:46.769932+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "4f30f777-1d84-4cbc-ac47-26638a6935ad",
+         "category": "preference",
+         "content": "User quan tâm sâu sắc đến khía cạnh tuân thủ (compliance) và tính pháp lý trong hoạt động kỹ thuật tàu biển.",
+         "sub_topic": "regulatory_compliance",
+         "confidence": 0.8,
+         "created_at": "2025-12-20T07:52:18.986131+00:00",
+         "updated_at": "2025-12-20T07:52:18.986131+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "16a49ae6-fc11-4781-a5e8-22fc032f1578",
+         "category": "habit",
+         "content": "User có thói quen truy xuất thông tin dựa trên các điều khoản cụ thể của bộ luật (Điều 31, Bộ luật Hàng hải 2015) thay vì đặt câu hỏi chung chung.",
+         "sub_topic": "reference_based_learning",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T07:52:18.659956+00:00",
+         "updated_at": "2025-12-20T07:52:18.659956+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "9786751c-5811-40c5-84b9-010fbac927c4",
+         "category": "knowledge_gap",
+         "content": "User đang tìm cách phân định rõ ranh giới trách nhiệm pháp lý giữa chủ thể vận hành (chủ tàu) và cơ quan quản lý (đăng kiểm) trong lĩnh vực hàng hải.",
+         "sub_topic": "legal_responsibility_differentiation",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T07:52:18.277959+00:00",
+         "updated_at": "2025-12-20T07:52:18.277959+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "2f5c5c92-efbd-4572-b0f6-660ecd352600",
+         "category": "learning_style",
+         "content": "User có phong cách học tập hệ thống, tập trung vào việc tìm hiểu các quy định pháp luật cụ thể và cấu trúc trách nhiệm giữa các bên liên quan.",
+         "sub_topic": "structured_learning",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T07:52:17.851576+00:00",
+         "updated_at": "2025-12-20T07:52:17.851576+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "9c386499-5cb6-4a13-866e-8b7568bc5a6a",
+         "category": "habit",
+         "content": "Người dùng có thói quen thiết lập bối cảnh và giới thiệu vị thế bản thân trước khi tương tác sâu, nhằm đảm bảo thông tin phản hồi được điều chỉnh phù hợp với năng lực hiện tại.",
+         "sub_topic": "context_setting",
+         "confidence": 0.75,
+         "created_at": "2025-12-20T07:51:04.436340+00:00",
+         "updated_at": "2025-12-20T07:51:04.436340+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "c6d5bdac-0a9d-4610-8678-d29b3ea4ee8b",
+         "category": "preference",
+         "content": "Người dùng có xu hướng ưu tiên những nội dung mang tính định hướng, giới thiệu tổng quan và các khái niệm sơ khởi để làm quen với môi trường học tập mới.",
+         "sub_topic": "introductory_content",
+         "confidence": 0.7,
+         "created_at": "2025-12-20T07:51:04.088979+00:00",
+         "updated_at": "2025-12-20T07:51:04.088979+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "702612c6-183c-46c8-a661-eb9ab8657a7b",
+         "category": "learning_style",
+         "content": "Người dùng thể hiện tư duy tiếp cận học tập theo lộ trình từ cơ bản đến nâng cao (foundational learning) thông qua việc chủ động xác định trình độ cá nhân là người mới bắt đầu.",
+         "sub_topic": "beginner_mindset",
+         "confidence": 0.8,
+         "created_at": "2025-12-20T07:51:03.628756+00:00",
+         "updated_at": "2025-12-20T07:51:03.628756+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "43202418-ba9e-4071-9d68-cdafa58c8738",
+         "category": "preference",
+         "content": "User thể hiện sự ưu tiên đối với phong cách tương tác mang tính cá nhân hóa và mong muốn một môi trường học tập có tính nhận diện cao.",
+         "sub_topic": "personalized_interaction",
+         "confidence": 0.85,
+         "created_at": "2025-12-20T07:14:59.201896+00:00",
+         "updated_at": "2025-12-20T07:14:59.201896+00:00",
+         "evolution_notes": []
+       },
+       {
+         "id": "a6a6b0b8-26a5-453b-8f63-43049ae42387",
+         "category": "habit",
+         "content": "User có thói quen kiểm tra khả năng duy trì bối cảnh và trí nhớ dài hạn của hệ thống để xác nhận sự liên kết trong giao tiếp.",
+         "sub_topic": "context_verification",
+         "confidence": 0.9,
+         "created_at": "2025-12-20T07:14:58.903375+00:00",
+         "updated_at": "2025-12-20T07:14:58.903375+00:00",
+         "evolution_notes": []
+       },
        {
          "id": "c9f28de6-ba44-4755-b621-7ca829b6e6b9",
          "category": "preference",
@@ -695,190 +845,20 @@
          "created_at": "2025-12-19T20:05:21.209611+00:00",
          "updated_at": "2025-12-19T20:05:21.209611+00:00",
          "evolution_notes": []
-       },
-       {
-         "id": "c49bffd4-f24c-48a5-ae1c-0cf0578db755",
-         "category": "learning_style",
-         "content": "User ưu tiên việc tóm tắt kiến thức thành các 'công thức ghi nhớ' và liên hệ trực tiếp với ý nghĩa thực tiễn để nắm bắt vấn đề nhanh chóng.",
-         "sub_topic": "associative_learning",
-         "confidence": 0.85,
-         "created_at": "2025-12-19T20:05:20.902922+00:00",
-         "updated_at": "2025-12-19T20:05:20.902922+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "aa27f3eb-d105-4aec-a3c3-535900d309e6",
-         "category": "learning_style",
-         "content": "User có xu hướng tiếp cận kiến thức pháp luật thông qua việc phân tích cấu trúc và phân loại đối tượng chịu trách nhiệm thay vì chỉ đọc văn bản gốc.",
-         "sub_topic": "structured_learning",
-         "confidence": 0.9,
-         "created_at": "2025-12-19T20:05:19.811112+00:00",
-         "updated_at": "2025-12-19T20:05:19.811112+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "2130e48e-4951-4e89-b72f-dce1d371856f",
-         "category": "preference",
-         "content": "User ưu tiên cách tiếp cận thông tin có hệ thống và đơn giản hóa, phù hợp với vai trò của một sinh viên mới bắt đầu tiếp cận chuyên ngành.",
-         "sub_topic": "beginner_friendly_content",
-         "confidence": 0.7,
-         "created_at": "2025-12-19T20:04:37.135806+00:00",
-         "updated_at": "2025-12-19T20:04:37.135806+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "a8522b48-1031-4b84-9da8-0f83ec0e81ed",
-         "category": "learning_style",
-         "content": "User có xu hướng chủ động xác định trình độ bản thân là người mới để nhận được sự hướng dẫn từ những kiến thức nền tảng nhất.",
-         "sub_topic": "foundational_learning",
-         "confidence": 0.8,
-         "created_at": "2025-12-19T20:04:36.815760+00:00",
-         "updated_at": "2025-12-19T20:04:36.815760+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "b42a13a7-85b1-4e7c-bad9-e16ff06fcf39",
-         "category": "preference",
-         "content": "User thể hiện nhu cầu cao về sự cá nhân hóa trong giao tiếp và mong muốn môi trường học tập duy trì được tính liên tục về thông tin cá nhân.",
-         "sub_topic": "personalized_interaction",
-         "confidence": 0.85,
-         "created_at": "2025-12-19T20:01:57.439571+00:00",
-         "updated_at": "2025-12-19T20:01:57.439571+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "d1379626-a914-45ae-9b77-c3d83bf9cbd9",
-         "category": "habit",
-         "content": "User có thói quen kiểm tra và xác nhận khả năng ghi nhớ ngữ cảnh của hệ thống nhằm đảm bảo tính nhất quán và tin cậy trong quá trình tương tác.",
-         "sub_topic": "system_verification",
-         "confidence": 0.9,
-         "created_at": "2025-12-19T20:01:56.876720+00:00",
-         "updated_at": "2025-12-19T20:01:56.876720+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "acf9c949-d188-4df6-bb14-b3459b1058cd",
-         "category": "preference",
-         "content": "Người dùng quan tâm đến việc phân định trách nhiệm rõ ràng giữa các bên liên quan (chủ tàu vs tổ chức đăng kiểm) trong hoạt động hàng hải.",
-         "sub_topic": "responsibility_allocation",
-         "confidence": 0.8,
-         "created_at": "2025-12-19T20:01:25.734925+00:00",
-         "updated_at": "2025-12-19T20:01:25.734925+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "407b6e2c-c893-444f-99cf-5776aa5b2ee6",
-         "category": "habit",
-         "content": "Người dùng có thói quen tìm hiểu sâu vào các căn cứ pháp lý chính thống (Bộ luật hàng hải) để thiết lập nền tảng kiến thức vững chắc.",
-         "sub_topic": "legal_research",
-         "confidence": 0.9,
-         "created_at": "2025-12-19T20:01:25.168650+00:00",
-         "updated_at": "2025-12-19T20:01:25.168650+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "0da1ae87-4957-401d-bfd2-541c8a959208",
-         "category": "learning_style",
-         "content": "Người dùng ưu tiên phương pháp ghi nhớ thông qua các công thức tóm tắt (như quy tắc '2 bên - 3 giai đoạn') để hệ thống hóa thông tin phức tạp.",
-         "sub_topic": "mnemonic_techniques",
-         "confidence": 0.85,
-         "created_at": "2025-12-19T20:01:24.805550+00:00",
-         "updated_at": "2025-12-19T20:01:24.805550+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "c20e1648-13d8-42fc-94ae-9efe785bfaec",
-         "category": "learning_style",
-         "content": "Người dùng có xu hướng tiếp cận kiến thức pháp luật theo hướng cấu trúc hóa và logic (phân loại theo nhóm đối tượng và trách nhiệm cụ thể).",
-         "sub_topic": "structured_learning",
-         "confidence": 0.9,
-         "created_at": "2025-12-19T20:01:23.782548+00:00",
-         "updated_at": "2025-12-19T20:01:23.782548+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "e58cd439-5fb1-4d2b-b464-c78205ccf57c",
-         "category": "habit",
-         "content": "Người dùng có thói quen thiết lập sự kết nối cá nhân và kiểm tra độ tin cậy của đối tượng giao tiếp trước khi đi sâu vào nội dung chuyên môn.",
-         "sub_topic": "interaction_pattern",
-         "confidence": 0.7,
-         "created_at": "2025-12-19T19:38:50.312278+00:00",
-         "updated_at": "2025-12-19T19:38:50.312278+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "c67794fd-231f-4c9d-b5ca-ca36eb8cffd6",
-         "category": "learning_style",
-         "content": "Người dùng có xu hướng kiểm chứng khả năng ghi nhớ và tính nhất quán của hệ thống thông qua các câu hỏi truy vấn dữ liệu cá nhân.",
-         "sub_topic": "verification_behavior",
-         "confidence": 0.8,
-         "created_at": "2025-12-19T19:38:49.976454+00:00",
-         "updated_at": "2025-12-19T19:38:49.976454+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "4b3a175f-c180-4d6d-b75d-b9f28bd40251",
-         "category": "knowledge_gap",
-         "content": "Người dùng đang tìm cách làm rõ sự khác biệt giữa hành động mang tính thủ tục (đăng kiểm) và trách nhiệm duy trì trạng thái liên tục của phương tiện.",
-         "sub_topic": "regulatory_compliance",
-         "confidence": 0.75,
-         "created_at": "2025-12-19T19:38:32.248872+00:00",
-         "updated_at": "2025-12-19T19:38:32.248872+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "647f5720-0f64-4017-88be-8d169054b543",
-         "category": "preference",
-         "content": "Người dùng quan tâm đến tính ứng dụng thực tiễn của luật pháp hàng hải, đặc biệt là các khía cạnh liên quan đến rủi ro pháp lý và an toàn vận hành.",
-         "sub_topic": "practical_application",
-         "confidence": 0.85,
-         "created_at": "2025-12-19T19:38:31.925095+00:00",
-         "updated_at": "2025-12-19T19:38:31.925095+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "3975df76-f2ff-4a07-af6b-127f4d0a0aeb",
-         "category": "habit",
-         "content": "Người dùng có thói quen tìm kiếm các mẹo ghi nhớ nhanh hoặc công thức hóa kiến thức phức tạp để tối ưu hóa việc học tập và áp dụng thực tế.",
-         "sub_topic": "mnemonic_usage",
-         "confidence": 0.8,
-         "created_at": "2025-12-19T19:38:31.561595+00:00",
-         "updated_at": "2025-12-19T19:38:31.561595+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "3cb2b2ab-180a-4d92-816e-3febfd721061",
-         "category": "learning_style",
-         "content": "Người dùng có xu hướng tiếp cận kiến thức pháp luật thông qua việc phân tích trách nhiệm của các bên liên quan để hiểu bản chất vấn đề thay vì chỉ đọc văn bản luật đơn thuần.",
-         "sub_topic": "structural_analysis",
-         "confidence": 0.9,
-         "created_at": "2025-12-19T19:38:30.853694+00:00",
-         "updated_at": "2025-12-19T19:38:30.853694+00:00",
-         "evolution_notes": []
-       },
-       {
-         "id": "9bbaf2bd-e5ab-416e-9ed5-0055ca8d373b",
-         "category": "learning_style",
-         "content": "User có xu hướng tiếp cận kiến thức từ mức độ cơ bản và cần một lộ trình học tập có hệ thống do đang ở giai đoạn làm quen ban đầu.",
-         "sub_topic": "beginner_orientation",
-         "confidence": 0.7,
-         "created_at": "2025-12-19T19:38:03.828874+00:00",
-         "updated_at": "2025-12-19T19:38:03.828874+00:00",
-         "evolution_notes": []
        }
      ],
      "total": 50,
      "categories": {
-       "preference": 14,
-       "habit": 13,
-       "learning_style": 22,
+       "learning_style": 19,
+       "preference": 16,
+       "habit": 14,
        "knowledge_gap": 1
      }
    }
 
-8. Chat History [✓ PASSED] (97ms)
+8. Chat History [✓ PASSED] (99ms)
 --------------------------------------------------
-   Found 20 messages (total: 1440):
+   Found 20 messages (total: 1472):
      [1] user: Bạn có nhớ tên tôi không?...
      [2] assistant: Tên: Minh...
      [3] user: Bạn có nhớ tên tôi không?...
@@ -892,106 +872,106 @@
        {
          "role": "user",
          "content": "Bạn có nhớ tên tôi không?",
-         "timestamp": "2025-12-20T07:12:20.404262Z"
+         "timestamp": "2025-12-20T07:52:41.061092Z"
        },
        {
          "role": "assistant",
          "content": "Tên: Minh",
-         "timestamp": "2025-12-20T07:12:20.427012Z"
+         "timestamp": "2025-12-20T07:52:41.082531Z"
        },
        {
          "role": "user",
          "content": "Bạn có nhớ tên tôi không?",
-         "timestamp": "2025-12-20T07:12:20.445482Z"
+         "timestamp": "2025-12-20T07:52:41.103233Z"
        },
        {
          "role": "assistant",
          "content": "Tên: Minh",
-         "timestamp": "2025-12-20T07:12:20.461746Z"
+         "timestamp": "2025-12-20T07:52:41.124359Z"
        },
        {
          "role": "user",
          "content": "Xin chào! Tôi là sinh viên mới.",
-         "timestamp": "2025-12-20T07:13:48.446290Z"
+         "timestamp": "2025-12-20T07:53:29.370188Z"
        },
        {
          "role": "assistant",
          "content": "Tôi có thể giúp gì cho bạn?",
-         "timestamp": "2025-12-20T07:13:48.464976Z"
+         "timestamp": "2025-12-20T07:53:29.389714Z"
        },
        {
          "role": "user",
          "content": "Xin chào! Tôi là sinh viên mới.",
-         "timestamp": "2025-12-20T07:13:48.484983Z"
+         "timestamp": "2025-12-20T07:53:29.410065Z"
        },
        {
          "role": "assistant",
          "content": "Tôi có thể giúp gì cho bạn?",
-         "timestamp": "2025-12-20T07:13:48.504402Z"
+         "timestamp": "2025-12-20T07:53:29.429379Z"
        },
        {
          "role": "user",
          "content": "Giải thích Điều 31 về trách nhiệm đăng kiểm tàu biển theo Bộ luật hàng hải Việt Nam 2015.",
-         "timestamp": "2025-12-20T07:14:36.501057Z"
+         "timestamp": "2025-12-20T07:54:12.549809Z"
        },
        {
          "role": "assistant",
-         "content": "Dưới đây là tổng hợp giải thích chi tiết về **Điều 31 Bộ luật Hàng hải Việt Nam 2015** về trách nhiệm đăng kiểm tàu biển, được trình bày một cách mạch lạc và dễ hiểu:\n\n### Tổng quan về Điều 31\nĐiều 31 quy định cụ thể về trách nhiệm của các bên liên quan trong việc kiểm định kỹ thuật tàu biển. Mục tiêu cốt lõi của điều luật này là thiết lập một hệ thống giám sát chặt chẽ nhằm đảm bảo an toàn sinh mạng, an ninh hàng hải và phòng ngừa ô nhiễm môi trường.\n\nTrách nhiệm này được phân chia cụ thể cho 3 nhóm đối tượng chính:\n\n#### 1. Trách nhiệm của Chủ tàu, Người quản lý và Người khai thác tàu\nĐây là nhóm đối tượng trực tiếp vận hành con tàu, đóng vai trò chủ động trong việc duy trì an toàn:\n*   **Duy trì trạng thái an toàn:** Phải đảm bảo tàu luôn trong tình trạng kỹ thuật an toàn theo các quy chuẩn quy định giữa hai kỳ kiểm định định kỳ.\n*   **Báo cáo sự cố:** Khi tàu xảy ra tai nạn, hư hỏng hoặc có những thay đổi ảnh hưởng đến khả năng đi biển (như thủng vỏ tàu, hỏng máy chính, thay đổi kết cấu...), chủ tàu phải thông báo ngay cho tổ chức đăng kiểm để tiến hành kiểm tra bất thường.\n\n#### 2. Trách nhiệm của Tổ chức đăng kiểm và Đăng kiểm viên\nĐây là những người đóng vai trò \"giám định\", đưa ra các chứng nhận pháp lý cho con tàu:\n*   **Tính xác thực:** Phải chịu trách nhiệm hoàn toàn về kết quả kiểm tra và tính chính xác của các giấy chứng nhận đã cấp cho tàu.\n*   **Tuân thủ quy trình:** Phải thực hiện việc đăng kiểm theo đúng quy chuẩn kỹ thuật quốc gia và các điều ước quốc tế mà Việt Nam là thành viên. Nếu có sai sót trong quá trình kiểm định dẫn đến mất an toàn, đăng kiểm viên và tổ chức đăng kiểm sẽ phải chịu trách nhiệm pháp lý nghiêm khắc.\n\n#### 3. Trách nhiệm của Bộ trưởng Bộ Giao thông vận tải\nỞ tầm quản lý vĩ mô, Bộ trưởng Bộ GTVT đóng vai trò \"người cầm lái\" hệ thống:\n*   **Ban hành quy chuẩn:** Quy định các tiêu chuẩn, quy chuẩn kỹ thuật quốc gia về đăng kiểm tàu biển (ví dụ các bộ QCVN về đóng tàu, thiết bị an toàn...).\n*   **Quản lý hệ thống:** Thiết lập và chỉ đạo hoạt động của hệ thống đăng kiểm trên toàn quốc để đảm bảo sự thống nhất và đạt chuẩn quốc tế.\n\n### Ý nghĩa của Điều 31\nĐiều luật này tạo ra một vòng khép kín về trách nhiệm:\n*   **Chủ tàu** thực thi và duy trì.\n*   **Đăng kiểm viên** kiểm tra và xác nhận.\n*   **Nhà nước** ban hành luật và giám sát.\n\nSự phối hợp chặt chẽ giữa ba bên theo Điều 31 giúp đảm bảo rằng mọi con tàu khi vươn khơi đều đáp ứng đầy đủ các tiêu chuẩn an toàn, giúp giảm thiểu rủi ro tai nạn hàng hải và bảo vệ quyền lợi kinh tế cho các bên liên quan.",
-         "timestamp": "2025-12-20T07:14:36.519453Z"
+         "content": "Dựa trên các thông tin từ hệ thống, dưới đây là tổng hợp giải thích chi tiết và mạch lạc về **Điều 31 Bộ luật Hàng hải Việt Nam 2015** liên quan đến trách nhiệm đăng kiểm tàu biển:\n\n### 1. Ý nghĩa của Điều 31\nĐiều 31 đóng vai trò là \"chốt chặn\" pháp lý quan trọng nhằm đảm bảo an toàn cho con người, hàng hóa và bảo vệ môi trường biển. Điều luật này phân định rõ quyền hạn và nghĩa vụ của hai nhóm đối tượng chính: **Chủ tàu** và **Tổ chức đăng kiểm**.\n\n### 2. Trách nhiệm của Chủ tàu (Người thực thi và duy trì)\nChủ tàu là người sở hữu và vận hành tài sản, do đó họ có trách nhiệm xuyên suốt đối với tình trạng kỹ thuật của con tàu:\n*   **Đăng kiểm bắt buộc:** Chủ tàu phải đưa tàu đi đăng kiểm trong các trường hợp then chốt như: khi đóng mới, nhập khẩu, hoán cải, sửa chữa phục hồi hoặc khi đến hạn kiểm định định kỳ theo quy định.\n*   **Duy trì trạng thái an toàn liên tục:** Đây là điểm quan trọng nhất. Giấy chứng nhận đăng kiểm chỉ xác nhận tình trạng tàu tại một thời điểm nhất định. Do đó, giữa hai kỳ đăng kiểm, chủ tàu có nghĩa vụ tự bảo dưỡng, sửa chữa để tàu luôn đáp ứng các tiêu chuẩn về:\n    *   An toàn kỹ thuật và an ninh hàng hải.\n    *   Điều kiện lao động của thuyền viên.\n    *   Phòng ngừa ô nhiễm môi trường.\n\n### 3. Trách nhiệm của Tổ chức đăng kiểm (Người kiểm chứng và xác nhận)\nCác đơn vị đăng kiểm (ví dụ: Cục Đăng kiểm Việt Nam - VR) đóng vai trò là cơ quan giám định độc lập với các trách nhiệm:\n*   **Tuân thủ tiêu chuẩn:** Việc kiểm định phải dựa trên hệ thống pháp luật Việt Nam và các **Công ước quốc tế** mà Việt Nam là thành viên (như Công ước SOLAS về an toàn sinh mạng trên biển hay MARPOL về chống ô nhiễm).\n*   **Tính pháp lý và khách quan:** Tổ chức đăng kiểm phải chịu trách nhiệm hoàn toàn về tính chính xác, trung thực và khách quan của kết quả kiểm định. \n*   **Trách nhiệm giải trình:** Nếu cấp giấy chứng nhận cho một con tàu không đủ điều kiện kỹ thuật dẫn đến sự cố, tổ chức đăng kiểm sẽ phải đối mặt với các hình phạt pháp lý nghiêm trọng.\n\n### Tóm tắt cốt lõi (Ghi nhớ nhanh)\nĐể dễ nhớ nội dung Điều 31, bạn có thể áp dụng công thức:\n*   **Chủ tàu:** Phải **Chủ động** (đăng kiểm đúng hạn) và **Duy trì** (giữ tàu an toàn liên tục).\n*   **Tổ chức đăng kiểm:** Phải **Khách quan** (làm việc theo chuẩn mực) và **Chính xác** (chịu trách nhiệm về con dấu/kết quả cấp ra).\n\nViệc hiểu rõ Điều 31 giúp các bên liên quan phối hợp chặt chẽ, đảm bảo mọi chuyến hành trình trên biển đều diễn ra an toàn và tuân thủ đúng quy định của pháp luật quốc gia cũng như quốc tế.",
+         "timestamp": "2025-12-20T07:54:12.571102Z"
        },
        {
          "role": "user",
          "content": "Giải thích Điều 31 về trách nhiệm đăng kiểm tàu biển theo Bộ luật hàng hải Việt Nam 2015.",
-         "timestamp": "2025-12-20T07:14:36.538582Z"
+         "timestamp": "2025-12-20T07:54:12.591186Z"
        },
        {
          "role": "assistant",
-         "content": "Dưới đây là tổng hợp giải thích chi tiết về **Điều 31 Bộ luật Hàng hải Việt Nam 2015** về trách nhiệm đăng kiểm tàu biển, được trình bày một cách mạch lạc và dễ hiểu:\n\n### Tổng quan về Điều 31\nĐiều 31 quy định cụ thể về trách nhiệm của các bên liên quan trong việc kiểm định kỹ thuật tàu biển. Mục tiêu cốt lõi của điều luật này là thiết lập một hệ thống giám sát chặt chẽ nhằm đảm bảo an toàn sinh mạng, an ninh hàng hải và phòng ngừa ô nhiễm môi trường.\n\nTrách nhiệm này được phân chia cụ thể cho 3 nhóm đối tượng chính:\n\n#### 1. Trách nhiệm của Chủ tàu, Người quản lý và Người khai thác tàu\nĐây là nhóm đối tượng trực tiếp vận hành con tàu, đóng vai trò chủ động trong việc duy trì an toàn:\n*   **Duy trì trạng thái an toàn:** Phải đảm bảo tàu luôn trong tình trạng kỹ thuật an toàn theo các quy chuẩn quy định giữa hai kỳ kiểm định định kỳ.\n*   **Báo cáo sự cố:** Khi tàu xảy ra tai nạn, hư hỏng hoặc có những thay đổi ảnh hưởng đến khả năng đi biển (như thủng vỏ tàu, hỏng máy chính, thay đổi kết cấu...), chủ tàu phải thông báo ngay cho tổ chức đăng kiểm để tiến hành kiểm tra bất thường.\n\n#### 2. Trách nhiệm của Tổ chức đăng kiểm và Đăng kiểm viên\nĐây là những người đóng vai trò \"giám định\", đưa ra các chứng nhận pháp lý cho con tàu:\n*   **Tính xác thực:** Phải chịu trách nhiệm hoàn toàn về kết quả kiểm tra và tính chính xác của các giấy chứng nhận đã cấp cho tàu.\n*   **Tuân thủ quy trình:** Phải thực hiện việc đăng kiểm theo đúng quy chuẩn kỹ thuật quốc gia và các điều ước quốc tế mà Việt Nam là thành viên. Nếu có sai sót trong quá trình kiểm định dẫn đến mất an toàn, đăng kiểm viên và tổ chức đăng kiểm sẽ phải chịu trách nhiệm pháp lý nghiêm khắc.\n\n#### 3. Trách nhiệm của Bộ trưởng Bộ Giao thông vận tải\nỞ tầm quản lý vĩ mô, Bộ trưởng Bộ GTVT đóng vai trò \"người cầm lái\" hệ thống:\n*   **Ban hành quy chuẩn:** Quy định các tiêu chuẩn, quy chuẩn kỹ thuật quốc gia về đăng kiểm tàu biển (ví dụ các bộ QCVN về đóng tàu, thiết bị an toàn...).\n*   **Quản lý hệ thống:** Thiết lập và chỉ đạo hoạt động của hệ thống đăng kiểm trên toàn quốc để đảm bảo sự thống nhất và đạt chuẩn quốc tế.\n\n### Ý nghĩa của Điều 31\nĐiều luật này tạo ra một vòng khép kín về trách nhiệm:\n*   **Chủ tàu** thực thi và duy trì.\n*   **Đăng kiểm viên** kiểm tra và xác nhận.\n*   **Nhà nước** ban hành luật và giám sát.\n\nSự phối hợp chặt chẽ giữa ba bên theo Điều 31 giúp đảm bảo rằng mọi con tàu khi vươn khơi đều đáp ứng đầy đủ các tiêu chuẩn an toàn, giúp giảm thiểu rủi ro tai nạn hàng hải và bảo vệ quyền lợi kinh tế cho các bên liên quan.",
-         "timestamp": "2025-12-20T07:14:36.558190Z"
+         "content": "Dựa trên các thông tin từ hệ thống, dưới đây là tổng hợp giải thích chi tiết và mạch lạc về **Điều 31 Bộ luật Hàng hải Việt Nam 2015** liên quan đến trách nhiệm đăng kiểm tàu biển:\n\n### 1. Ý nghĩa của Điều 31\nĐiều 31 đóng vai trò là \"chốt chặn\" pháp lý quan trọng nhằm đảm bảo an toàn cho con người, hàng hóa và bảo vệ môi trường biển. Điều luật này phân định rõ quyền hạn và nghĩa vụ của hai nhóm đối tượng chính: **Chủ tàu** và **Tổ chức đăng kiểm**.\n\n### 2. Trách nhiệm của Chủ tàu (Người thực thi và duy trì)\nChủ tàu là người sở hữu và vận hành tài sản, do đó họ có trách nhiệm xuyên suốt đối với tình trạng kỹ thuật của con tàu:\n*   **Đăng kiểm bắt buộc:** Chủ tàu phải đưa tàu đi đăng kiểm trong các trường hợp then chốt như: khi đóng mới, nhập khẩu, hoán cải, sửa chữa phục hồi hoặc khi đến hạn kiểm định định kỳ theo quy định.\n*   **Duy trì trạng thái an toàn liên tục:** Đây là điểm quan trọng nhất. Giấy chứng nhận đăng kiểm chỉ xác nhận tình trạng tàu tại một thời điểm nhất định. Do đó, giữa hai kỳ đăng kiểm, chủ tàu có nghĩa vụ tự bảo dưỡng, sửa chữa để tàu luôn đáp ứng các tiêu chuẩn về:\n    *   An toàn kỹ thuật và an ninh hàng hải.\n    *   Điều kiện lao động của thuyền viên.\n    *   Phòng ngừa ô nhiễm môi trường.\n\n### 3. Trách nhiệm của Tổ chức đăng kiểm (Người kiểm chứng và xác nhận)\nCác đơn vị đăng kiểm (ví dụ: Cục Đăng kiểm Việt Nam - VR) đóng vai trò là cơ quan giám định độc lập với các trách nhiệm:\n*   **Tuân thủ tiêu chuẩn:** Việc kiểm định phải dựa trên hệ thống pháp luật Việt Nam và các **Công ước quốc tế** mà Việt Nam là thành viên (như Công ước SOLAS về an toàn sinh mạng trên biển hay MARPOL về chống ô nhiễm).\n*   **Tính pháp lý và khách quan:** Tổ chức đăng kiểm phải chịu trách nhiệm hoàn toàn về tính chính xác, trung thực và khách quan của kết quả kiểm định. \n*   **Trách nhiệm giải trình:** Nếu cấp giấy chứng nhận cho một con tàu không đủ điều kiện kỹ thuật dẫn đến sự cố, tổ chức đăng kiểm sẽ phải đối mặt với các hình phạt pháp lý nghiêm trọng.\n\n### Tóm tắt cốt lõi (Ghi nhớ nhanh)\nĐể dễ nhớ nội dung Điều 31, bạn có thể áp dụng công thức:\n*   **Chủ tàu:** Phải **Chủ động** (đăng kiểm đúng hạn) và **Duy trì** (giữ tàu an toàn liên tục).\n*   **Tổ chức đăng kiểm:** Phải **Khách quan** (làm việc theo chuẩn mực) và **Chính xác** (chịu trách nhiệm về con dấu/kết quả cấp ra).\n\nViệc hiểu rõ Điều 31 giúp các bên liên quan phối hợp chặt chẽ, đảm bảo mọi chuyến hành trình trên biển đều diễn ra an toàn và tuân thủ đúng quy định của pháp luật quốc gia cũng như quốc tế.",
+         "timestamp": "2025-12-20T07:54:12.610587Z"
        },
        {
          "role": "user",
          "content": "Tên tôi là Minh, tôi đang học về hàng hải.",
-         "timestamp": "2025-12-20T07:14:42.713733Z"
+         "timestamp": "2025-12-20T07:54:20.161543Z"
        },
        {
          "role": "assistant",
          "content": "Tôi có thể giúp gì cho bạn?",
-         "timestamp": "2025-12-20T07:14:42.803656Z"
+         "timestamp": "2025-12-20T07:54:20.184418Z"
        },
        {
          "role": "user",
          "content": "Tên tôi là Minh, tôi đang học về hàng hải.",
-         "timestamp": "2025-12-20T07:14:42.824418Z"
+         "timestamp": "2025-12-20T07:54:20.207729Z"
        },
        {
          "role": "assistant",
          "content": "Tôi có thể giúp gì cho bạn?",
-         "timestamp": "2025-12-20T07:14:42.844163Z"
+         "timestamp": "2025-12-20T07:54:20.228371Z"
        },
        {
          "role": "user",
          "content": "Bạn có nhớ tên tôi không?",
-         "timestamp": "2025-12-20T07:14:53.243692Z"
+         "timestamp": "2025-12-20T07:54:33.158275Z"
        },
        {
          "role": "assistant",
          "content": "Tên: Minh",
-         "timestamp": "2025-12-20T07:14:53.261212Z"
+         "timestamp": "2025-12-20T07:54:33.177770Z"
        },
        {
          "role": "user",
          "content": "Bạn có nhớ tên tôi không?",
-         "timestamp": "2025-12-20T07:14:53.277739Z"
+         "timestamp": "2025-12-20T07:54:33.197458Z"
        },
        {
          "role": "assistant",
          "content": "Tên: Minh",
-         "timestamp": "2025-12-20T07:14:53.294143Z"
+         "timestamp": "2025-12-20T07:54:33.216415Z"
        }
      ],
      "pagination": {
-       "total": 1440,
+       "total": 1472,
        "limit": 20,
        "offset": 0
      }
@@ -1002,6 +982,6 @@
 ======================================================================
   Passed: 8
   Failed: 0
-  Total Time: 69.9s
-  Completed: 2025-12-20 14:14:48
+  Total Time: 67.5s
+  Completed: 2025-12-20 14:54:28
 ======================================================================

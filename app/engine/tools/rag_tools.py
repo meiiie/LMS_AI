@@ -129,9 +129,12 @@ async def tool_maritime_search(query: str) -> str:
         
         # SOTA 2025: Store confidence for early termination
         # Normalize confidence from CRAG (0-100 to 0.0-1.0)
+        from app.core.config import settings
         _last_confidence = crag_result.confidence / 100.0 if crag_result.confidence > 1 else crag_result.confidence
-        _last_is_complete = _last_confidence >= 0.85  # HIGH confidence threshold
-        logger.info(f"[TOOL] Confidence: {_last_confidence:.2f}, is_complete: {_last_is_complete}")
+        # CRITICAL FIX: Use config threshold, not hardcoded 0.85
+        # This syncs with Tutor's early termination threshold (0.70)
+        _last_is_complete = _last_confidence >= settings.rag_confidence_high
+        logger.info(f"[TOOL] Confidence: {_last_confidence:.2f}, is_complete: {_last_is_complete} (threshold={settings.rag_confidence_high})")
         
         # CHỈ THỊ SỐ 31 v3: Store CRAG trace for propagation
         _last_reasoning_trace = crag_result.reasoning_trace
