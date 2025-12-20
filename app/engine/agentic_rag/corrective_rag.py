@@ -444,13 +444,23 @@ class CorrectiveRAG:
         # Step 6: Verify (optional)
         # SOTA 2025: Skip verification for MEDIUM+ confidence (saves ~19s)
         # Pattern: Anthropic Plan-Do-Check-Refine - only verify LOW confidence
+        # Phase 2.3b: Also skip if reflection.confidence == HIGH
         verification_result = None
         grading_confidence = grading_result.avg_score / 10.0 if grading_result else 0.5
+        
+        # Phase 2.3b: Skip verification if reflection says confidence=high
+        reflection_is_high = (
+            reflection_result and 
+            reflection_result.confidence.value == "high" and
+            reflection_result.is_supported and
+            not reflection_result.needs_correction
+        )
         
         should_verify = (
             self._enable_verification and 
             analysis.requires_verification and
-            grading_confidence < settings.rag_confidence_medium  # Only verify LOW confidence
+            grading_confidence < settings.rag_confidence_medium and  # Only verify LOW confidence
+            not reflection_is_high  # Phase 2.3b: Trust high reflection confidence
         )
         
         if should_verify:
@@ -469,6 +479,8 @@ class CorrectiveRAG:
                     result="Đã xác minh - Không phát hiện vấn đề",
                     confidence=verification_result.confidence / 100 if verification_result.confidence else 0.9
                 )
+        elif reflection_is_high:
+            logger.info(f"[CRAG] Skipping verification (reflection.confidence=HIGH, supported=True)")
         elif self._enable_verification and grading_confidence >= settings.rag_confidence_medium:
             logger.info(f"[CRAG] Skipping verification (confidence={grading_confidence:.2f} >= MEDIUM)")
         

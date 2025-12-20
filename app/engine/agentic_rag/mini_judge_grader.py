@@ -46,7 +46,7 @@ class MiniJudgeConfig:
     
     # Parallel processing settings
     max_parallel: int = 10  # Max concurrent LLM calls
-    timeout_seconds: float = 3.0  # Phase 2.2a: Increased from 2.0 to reduce timeout failures
+    timeout_seconds: float = 4.0  # Phase 2.3a: Increased from 3.0 to further reduce timeout failures
     
     # Content limits
     max_doc_chars: int = 300  # Truncate doc content for speed
