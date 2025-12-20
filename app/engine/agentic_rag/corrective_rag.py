@@ -805,16 +805,18 @@ class CorrectiveRAG:
         logger.info("[CRAG-V3] Phase 3: Grading documents")
         
         try:
-            grading_result = await self._grader.grade_batch(query, documents)
+            # FIXED: Use grade_documents (not grade_batch)
+            grading_result = await self._grader.grade_documents(query, documents)
             passed = grading_result.avg_score >= self._grade_threshold
+            grading_confidence = grading_result.relevant_count / len(documents) if documents else 0.5
             
             tracer.end_step(
                 result=f"Điểm: {grading_result.avg_score:.1f}/10 - {'ĐẠT' if passed else 'CHƯA ĐẠT'}",
-                confidence=grading_result.confidence,
+                confidence=grading_confidence,
                 details={
                     "score": grading_result.avg_score,
                     "passed": passed,
-                    "confidence": grading_result.confidence
+                    "relevant_count": grading_result.relevant_count
                 }
             )
             
@@ -894,16 +896,30 @@ class CorrectiveRAG:
             
             context_str = "\n\n".join(context_parts)
             
-            # Get streaming generator from RAGAgent
-            user_role = context.get("user_role", "student")
-            history = context.get("conversation_history", "")
+            # Get user context
+            user_context = context  # The dict passed to process_streaming
+            user_role = user_context.get("user_role", "student")
+            history = user_context.get("conversation_history", "")
+            
+            # FIXED: Create KnowledgeNode list from documents for RAGAgent
+            from app.models.schemas import KnowledgeNode
+            
+            knowledge_nodes = []
+            for doc in documents:
+                node = KnowledgeNode(
+                    node_id=doc.get("node_id", ""),
+                    content=doc.get("content", ""),
+                    title=doc.get("title", ""),
+                    relevance_score=doc.get("score", 0.5)
+                )
+                knowledge_nodes.append(node)
             
             # Stream tokens from RAGAgent
+            # FIXED: Removed invalid 'context' param, pass nodes correctly
             token_count = 0
             async for chunk in self._rag._generate_response_streaming(
                 question=rewritten_query or query,
-                context=context_str,
-                nodes=[],  # Already have context
+                nodes=knowledge_nodes,
                 conversation_history=history,
                 user_role=user_role,
                 entity_context=""
