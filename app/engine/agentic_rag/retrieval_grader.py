@@ -354,15 +354,31 @@ class RetrievalGrader:
                     reason=f"[Mini-Judge] {result.reason}"
                 ))
         
-        # Full LLM grading only for uncertain docs (limit to 5)
-        if uncertain_docs:
+        # ====================================================================
+        # SOTA 2025 Phase 2.4a: Early Exit on Sufficient Relevant Docs
+        # ====================================================================
+        # Pattern: Self-RAG (Asai et al. 2023) - Skip grading when confident
+        # Reference: Anthropic Contextual Retrieval, Cohere Re-ranking
+        # Key insight: Major labs use re-ranking (~200ms), not LLM grading (19s)
+        # This early exit saves 19s when fast evaluators find 2+ relevant docs
+        # ====================================================================
+        fast_path_relevant_count = len(high_conf_docs) + len(relevant_docs)
+        
+        if fast_path_relevant_count >= 2:
+            # SOTA: Sufficient relevant docs from fast-path - skip LLM batch
+            logger.info(
+                f"[GRADER] SOTA Early Exit: {fast_path_relevant_count} relevant docs "
+                f"from Hybrid+MiniJudge - skipping LLM batch grading (save ~19s)"
+            )
+        elif uncertain_docs:
+            # Only grade when truly uncertain (0-1 relevant from fast-path)
             llm_grades = await self.batch_grade_documents(query, uncertain_docs[:5])
             grades.extend(llm_grades)
         
         logger.info(
             f"[GRADER] Summary: {len(documents)} docs → "
             f"Hybrid HIGH={len(high_conf_docs)}, Mini-Judge={len(relevant_docs)}, "
-            f"LLM Full={min(len(uncertain_docs), 5)} "
+            f"LLM Full={0 if fast_path_relevant_count >= 2 else min(len(uncertain_docs), 5)} "
             f"(saved {len(high_conf_docs) + len(relevant_docs)} LLM calls)"
         )
         
