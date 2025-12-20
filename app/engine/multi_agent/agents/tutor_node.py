@@ -30,21 +30,22 @@ from app.engine.tools.rag_tools import (
     get_last_confidence,  # SOTA 2025: Confidence-based early termination
     clear_retrieved_sources
 )
+# SOTA 2025: PromptLoader for YAML-driven persona (CrewAI pattern)
+from app.prompts.prompt_loader import get_prompt_loader
 
 logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# SOTA SYSTEM PROMPT - Force RAG-First Pattern
+# TOOL INSTRUCTION (Appended to YAML-driven prompt)
 # =============================================================================
 
-TUTOR_SYSTEM_PROMPT = """Bạn là Maritime Tutor - chuyên gia giảng dạy hàng hải.
-
-## QUY TẮC BẮT BUỘC (CRITICAL):
+TOOL_INSTRUCTION = """
+## QUY TẮC TOOL (CRITICAL - RAG-First Pattern):
 
 1. **LUÔN LUÔN** sử dụng tool `tool_maritime_search` để tìm kiếm kiến thức **TRƯỚC KHI** trả lời bất kỳ câu hỏi nào về:
    - Quy tắc hàng hải (COLREGs, SOLAS, MARPOL, ISM Code)
-   - Thuật ngữ chuyên môn hàng hải
+   - Thuật ngữ chuyên môn hàng hải  
    - Quy trình, thủ tục an toàn
    - Bất kỳ kiến thức maritime nào
 
@@ -53,19 +54,6 @@ TUTOR_SYSTEM_PROMPT = """Bạn là Maritime Tutor - chuyên gia giảng dạy h�
 3. Sau khi tìm kiếm, giảng dạy **DỰA TRÊN** kết quả tìm được
 
 4. **TRÍCH DẪN nguồn** trong câu trả lời (ví dụ: "Theo Rule 15 COLREGs...")
-
-## Phong cách giảng dạy:
-- Giải thích từ đơn giản đến phức tạp
-- Dùng ví dụ thực tế từ tình huống hàng hải
-- Khuyến khích và động viên học viên
-- Dịch thuật ngữ tiếng Anh sang tiếng Việt khi cần
-- Sử dụng markdown formatting cho dễ đọc
-
-## Ngữ cảnh học viên:
-{context}
-
-## Yêu cầu:
-{query}
 """
 
 
@@ -83,13 +71,14 @@ class TutorAgentNode:
     """
     
     def __init__(self):
-        """Initialize Tutor Agent with tools."""
+        """Initialize Tutor Agent with YAML-driven persona (SOTA 2025)."""
+        self._prompt_loader = get_prompt_loader()  # SOTA: YAML persona
         self._llm = None
         self._llm_with_tools = None
         self._config = TUTOR_AGENT_CONFIG
         self._tools = [tool_maritime_search]
         self._init_llm()
-        logger.info(f"TutorAgentNode initialized with config: {self._config.id}, tools: {len(self._tools)}")
+        logger.info(f"TutorAgentNode initialized with YAML persona, tools: {len(self._tools)}")
     
     def _init_llm(self):
         """Initialize teaching LLM with tools and native thinking."""
@@ -103,6 +92,59 @@ class TutorAgentNode:
             logger.error(f"Failed to initialize Tutor LLM: {e}")
             self._llm = None
             self._llm_with_tools = None
+    
+    def _build_system_prompt(self, context: dict, query: str) -> str:
+        """
+        Build dynamic system prompt from YAML persona (SOTA 2025).
+        
+        Pattern: CrewAI YAML → Runtime injection with PromptLoader
+        
+        Default pronouns: AI xưng "tôi", gọi user là "bạn"
+        (Changes only if user requests via Insights/Memory)
+        
+        Args:
+            context: Dict with user_name, user_role, etc.
+            query: User query
+            
+        Returns:
+            Complete system prompt string
+        """
+        user_name = context.get("user_name")
+        user_role = context.get("user_role", "student")
+        is_follow_up = context.get("is_follow_up", False)
+        recent_phrases = context.get("recent_phrases", [])
+        pronoun_style = context.get("pronoun_style")  # From SessionState
+        user_facts = context.get("user_facts", [])
+        
+        # Build base prompt from YAML
+        base_prompt = self._prompt_loader.build_system_prompt(
+            role=user_role,
+            user_name=user_name,
+            user_facts=user_facts,
+            is_follow_up=is_follow_up,
+            recent_phrases=recent_phrases,
+            pronoun_style=pronoun_style
+        )
+        
+        # Build context string for query
+        context_str = "\n".join([
+            f"- {k}: {v}" for k, v in context.items() if v and k not in ["user_facts", "pronoun_style", "recent_phrases"]
+        ]) or "Không có thông tin bổ sung"
+        
+        # Append tool instruction and context
+        full_prompt = f"""{base_prompt}
+
+{TOOL_INSTRUCTION}
+
+## Ngữ cảnh học viên:
+{context_str}
+
+## Yêu cầu:
+{query}
+"""
+        
+        logger.debug(f"[TUTOR_AGENT] Built dynamic prompt from YAML ({len(full_prompt)} chars)")
+        return full_prompt
     
     async def process(self, state: AgentState) -> AgentState:
         """
@@ -198,12 +240,12 @@ class TutorAgentNode:
             f"- {k}: {v}" for k, v in context.items() if v
         ]) or "Không có thông tin bổ sung"
         
+        # SOTA 2025: Build dynamic prompt from YAML
+        system_prompt = self._build_system_prompt(context, query)
+        
         # Initialize messages
         messages = [
-            SystemMessage(content=TUTOR_SYSTEM_PROMPT.format(
-                query=query,
-                context=context_str
-            )),
+            SystemMessage(content=system_prompt),
             HumanMessage(content=query)
         ]
         

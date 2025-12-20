@@ -1,6 +1,19 @@
 """
 Unified Agent - LLM-driven Orchestration (ReAct Pattern)
 
+⚠️ DEPRECATED (2025-12-20)
+==========================
+This module is DEPRECATED. Use Multi-Agent System instead:
+- TutorAgentNode (app/engine/multi_agent/agents/tutor_node.py)
+- RAGAgent (app/engine/agentic_rag/rag_agent.py)
+
+Settings:
+- use_multi_agent = True  (RECOMMENDED)
+- use_unified_agent = False
+
+This file will be removed after 2025-01-03 (2 weeks).
+===========================
+
 CHỈ THỊ KỸ THUẬT SỐ 13: KIẾN TRÚC UNIFIED AGENT (TOOL-USE ARCHITECTURE)
 CHỈ THỊ KỸ THUẬT SỐ 15: NÂNG CẤP DEPENDENCIES (SOTA STACK)
 
@@ -24,6 +37,15 @@ Tools (via ToolRegistry):
 **Feature: maritime-ai-tutor**
 **Spec: CHỈ THỊ KỸ THUẬT SỐ 13, 15**
 """
+
+import warnings
+warnings.warn(
+    "UnifiedAgent is DEPRECATED (2025-12-20). "
+    "Use Multi-Agent System instead (set use_multi_agent=True in .env). "
+    "This module will be removed after 2025-01-03.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 import logging
 import re

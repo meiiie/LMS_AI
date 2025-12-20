@@ -632,31 +632,22 @@ class RAGAgent:
                 response += "\n\n**Nguồn tham khảo:**\n" + "\n".join(sources)
             return response, None  # No native thinking when no LLM
         
-        # CHỈ THỊ SỐ 29 v8: Vietnamese thinking instruction removed from YAML
-        # Now using direct <thinking> tag instruction (like unified_agent.py)
+        # CHỈ THỊ SỐ 29 v9: Vietnamese thinking instruction from YAML
+        # SOTA 2025: Use PromptLoader for persona and thinking rules
         
-        # CHỈ THỊ KỸ THUẬT SỐ 12: System Prompt tối ưu cho RAG v2
+        # Get base prompt from YAML (includes persona, style, thinking instruction)
+        base_prompt = self._prompt_loader.build_system_prompt(
+            role=user_role,
+            user_name=None,  # Will be injected by caller if available
+            is_follow_up=bool(conversation_history)
+        )
+        
+        # Get thinking instruction from YAML
+        thinking_instruction = self._prompt_loader.get_thinking_instruction()
+        
+        # Role-specific additional rules
         if user_role == "student":
-            base_prompt = """BẠN LÀ: Maritime AI Tutor - Chuyên gia tra cứu luật hàng hải.
-
-⚠️ QUY TẮC BẮT BUỘC VỀ SUY LUẬN (<thinking>) - CHỈ THỊ SỐ 29:
-
-LUÔN bắt đầu response bằng <thinking> (BẰNG TIẾNG VIỆT):
-- Trong <thinking>, giải thích:
-  + User đang hỏi về gì? (phân tích câu hỏi)
-  + Kết quả tra cứu cho thấy điều gì? (tóm tắt thông tin từ sources)
-  + Cách tổng hợp thông tin để trả lời (reasoning)
-- Sau </thinking>, mới đưa ra câu trả lời chính thức
-
-VÍ DỤ:
-<thinking>
-Người dùng hỏi về Điều 15 của Bộ luật Hàng hải.
-Kết quả tra cứu cho thấy Điều 15 quy định về định nghĩa chủ tàu.
-Tôi sẽ giải thích rõ ràng và trích dẫn nguồn.
-</thinking>
-
-Theo Điều 15 Bộ luật Hàng hải Việt Nam...
-
+            role_rules = """
 QUY TẮC GỌI TÊN (RẤT QUAN TRỌNG):
 - KHÔNG gọi tên ở đầu mỗi câu trả lời
 - KHÔNG bắt đầu bằng "Chào [tên]" - đây là lỗi phổ biến cần tránh
@@ -675,14 +666,7 @@ NHIỆM VỤ:
 - Dịch thuật ngữ: starboard = mạn phải, port = mạn trái, give-way = nhường đường
 - Trả lời bằng tiếng Việt"""
         else:
-            base_prompt = """BẠN LÀ: Maritime AI Assistant - Trợ lý tra cứu luật hàng hải.
-
-⚠️ QUY TẮC BẮT BUỘC VỀ SUY LUẬN (<thinking>) - CHỈ THỊ SỐ 29:
-
-LUÔN bắt đầu response bằng <thinking> (BẰNG TIẾNG VIỆT):
-- Phân tích ngắn gọn câu hỏi và sources
-- Sau </thinking>, đưa ra câu trả lời
-
+            role_rules = """
 QUY TẮC:
 - Đi thẳng vào vấn đề, KHÔNG greeting
 - Trích dẫn chính xác số hiệu quy định
@@ -693,8 +677,8 @@ NHIỆM VỤ:
 - Nếu có NGỮ CẢNH THỰC THỂ, tham chiếu các điều luật liên quan
 - Trả lời bằng tiếng Việt"""
         
-        # Use base_prompt directly (thinking instruction now embedded)
-        system_prompt = base_prompt
+        # Combine: base (from YAML) + thinking + role rules
+        system_prompt = f"{base_prompt}\n\n{thinking_instruction}\n{role_rules}"
 
 
         # Build user prompt with history and entity context

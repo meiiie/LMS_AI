@@ -628,6 +628,46 @@ class PromptLoader:
     # Spec: ai-response-quality, Requirements 1.2, 7.1
     # =========================================================================
     
+    def get_thinking_instruction(self) -> str:
+        """
+        Get Vietnamese thinking instruction from _shared.yaml.
+        
+        SOTA 2025: CHỈ THỊ SỐ 29 v9 - Re-enabled for multi-agent path.
+        Pattern: Anthropic Claude - integrate thinking into core behavior.
+        
+        Returns:
+            Thinking instruction string, or default if not found.
+        """
+        # Load shared config from _shared.yaml
+        shared_config = self._load_shared_config()
+        
+        if shared_config and 'thinking' in shared_config:
+            thinking_cfg = shared_config['thinking']
+            instruction = thinking_cfg.get('instruction', '')
+            if instruction:
+                return instruction.strip()
+        
+        # Default fallback
+        return """## ⚠️ QUY TẮC SUY LUẬN (BẮT BUỘC):
+1. LUÔN bắt đầu bằng <thinking> BẰNG TIẾNG VIỆT
+2. Trong <thinking>: Phân tích câu hỏi, tóm tắt nguồn, lập kế hoạch
+3. Sau </thinking>: Đưa ra câu trả lời chính thức"""
+    
+    def get_empathy_instruction(self) -> str:
+        """
+        Get empathy instruction from _shared.yaml (Anthropic pattern).
+        
+        Returns:
+            Empathy instruction string, or empty if not found.
+        """
+        shared_config = self._load_shared_config()
+        
+        if shared_config and 'empathy' in shared_config:
+            empathy_cfg = shared_config['empathy']
+            if empathy_cfg.get('integrated', False):
+                return empathy_cfg.get('instruction', '').strip()
+        return ""
+    
     def detect_empathy_needed(self, message: str, role: str = "student") -> bool:
         """
         Detect if user message requires empathy-first response.
