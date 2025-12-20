@@ -299,19 +299,19 @@ class TutorAgentNode:
                         logger.info(f"[TUTOR_AGENT] Tool result length: {len(str(result))}")
                         
                         # ============================================================
-                        # SOTA 2025: Confidence-Based Early Termination
-                        # Pattern from Anthropic/OpenAI: Exit ReAct loop on HIGH confidence
-                        # This prevents redundant tool calls (root cause of 125s latency)
+                        # SOTA 2025 Phase 2: Confidence-Based Early Termination
+                        # Pattern: Focused ReAct (arXiv Oct 2024) - exit on first success
+                        # Lowered threshold from 0.85 to 0.70 to match CRAG confidence
                         # ============================================================
                         confidence, is_complete = get_last_confidence()
-                        if is_complete and confidence >= 0.85:
-                            logger.info(f"[TUTOR_AGENT] HIGH confidence ({confidence:.2f}) - EARLY TERMINATION")
-                            logger.info(f"[TUTOR_AGENT] Skipping {max_iterations - iteration - 1} remaining iterations")
+                        if is_complete and confidence >= 0.70:  # PHASE 2: 0.85 → 0.70
+                            logger.info(f"[TUTOR_AGENT] MEDIUM+ confidence ({confidence:.2f}) - EARLY TERMINATION")
+                            logger.info(f"[TUTOR_AGENT] Skipping {max_iterations - iteration - 1} remaining iterations (Focused ReAct)")
                             # Force LLM to generate final response using available context
                             # This is the key optimization: don't let LLM call tool again
                             break
-                        elif confidence >= 0.60:
-                            logger.info(f"[TUTOR_AGENT] MEDIUM confidence ({confidence:.2f}) - continuing loop")
+                        elif confidence >= 0.50:
+                            logger.info(f"[TUTOR_AGENT] LOW-MEDIUM confidence ({confidence:.2f}) - one more try")
                         else:
                             logger.info(f"[TUTOR_AGENT] LOW confidence ({confidence:.2f}) - will retry")
                         
@@ -323,10 +323,10 @@ class TutorAgentNode:
                             tool_call_id=tool_id
                         ))
             
-            # SOTA 2025: Check if we should break outer loop on HIGH confidence
+            # SOTA 2025 Phase 2: Check if we should break outer loop
             confidence, is_complete = get_last_confidence()
-            if is_complete and confidence >= 0.85:
-                logger.info(f"[TUTOR_AGENT] Breaking outer loop - HIGH confidence achieved")
+            if is_complete and confidence >= 0.70:  # PHASE 2: Match inner loop threshold
+                logger.info(f"[TUTOR_AGENT] Breaking outer loop - MEDIUM+ confidence achieved")
                 break
         
         # If we exhausted iterations without final response, generate one
