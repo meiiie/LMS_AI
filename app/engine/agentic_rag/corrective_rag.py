@@ -20,7 +20,7 @@ Features:
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, AsyncGenerator
 
 from app.engine.agentic_rag.query_analyzer import (
     QueryAnalyzer, QueryAnalysis, QueryComplexity, get_query_analyzer
@@ -699,6 +699,268 @@ class CorrectiveRAG:
         except Exception as e:
             logger.error(f"[CRAG] Generation failed: {e}")
             return f"Lỗi khi tạo câu trả lời: {e}", documents, None
+    
+    # =========================================================================
+    # V3 SOTA: Full CRAG Pipeline + True Token Streaming
+    # Pattern: OpenAI Responses API + Claude Extended Thinking + Gemini astream
+    # Reference: P3+ Implementation Plan (Dec 2025)
+    # =========================================================================
+    async def process_streaming(
+        self,
+        query: str,
+        context: Optional[Dict[str, Any]] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        SOTA 2025: Full CRAG pipeline with progressive SSE events.
+        
+        Yields SSE events at each pipeline stage:
+        - status: Processing stage updates (shown as typing indicator)
+        - thinking: AI reasoning steps (shown in collapsible section)  
+        - answer: Response tokens (streamed real-time via LLM.astream())
+        - sources: Citation list with image_url for PDF highlighting
+        - metadata: reasoning_trace, confidence, timing
+        - done: Stream complete
+        
+        Pattern:
+        - OpenAI Responses API (event types: reasoning, output, completion)
+        - Claude Interleaved Thinking (thinking blocks between steps)
+        - LangChain LCEL RunnableParallel (parallel execution)
+        
+        **Feature: p3-v3-full-crag-streaming**
+        """
+        import time
+        import asyncio
+        from app.engine.agentic_rag.reasoning_tracer import get_reasoning_tracer, StepNames
+        
+        context = context or {}
+        start_time = time.time()
+        tracer = get_reasoning_tracer()
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 1: Query Understanding (emit events immediately)
+        # ═══════════════════════════════════════════════════════════════════
+        yield {"type": "status", "content": "🎯 Đang phân tích câu hỏi..."}
+        
+        tracer.start_step(StepNames.QUERY_ANALYSIS, "Phân tích độ phức tạp câu hỏi")
+        logger.info(f"[CRAG-V3] Phase 1: Analyzing query: '{query[:50]}...'")
+        
+        try:
+            analysis = await self._analyzer.analyze(query)
+            tracer.end_step(
+                result=f"Độ phức tạp: {analysis.complexity.value}, Maritime: {analysis.is_maritime_related}",
+                confidence=analysis.confidence,
+                details={"complexity": analysis.complexity.value, "is_maritime": analysis.is_maritime_related}
+            )
+            
+            yield {
+                "type": "thinking", 
+                "content": f"📊 Độ phức tạp: {analysis.complexity.value}",
+                "step": "analysis",
+                "details": {"topics": analysis.detected_topics, "is_maritime": analysis.is_maritime_related}
+            }
+        except Exception as e:
+            logger.error(f"[CRAG-V3] Analysis failed: {e}")
+            yield {"type": "error", "content": f"Lỗi phân tích: {e}"}
+            return
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 2: Retrieval (hybrid search + optional graphrag)
+        # ═══════════════════════════════════════════════════════════════════
+        yield {"type": "status", "content": "🔍 Đang tìm kiếm tài liệu..."}
+        
+        tracer.start_step(StepNames.RETRIEVAL, "Tìm kiếm tài liệu")
+        logger.info("[CRAG-V3] Phase 2: Retrieving documents")
+        
+        try:
+            documents = await self._retrieve(query, context)
+            tracer.end_step(
+                result=f"Tìm thấy {len(documents)} tài liệu",
+                confidence=0.8 if documents else 0.3,
+                details={"doc_count": len(documents)}
+            )
+            
+            yield {
+                "type": "thinking",
+                "content": f"📚 Tìm thấy {len(documents)} tài liệu liên quan",
+                "step": "retrieval",
+                "details": {"doc_count": len(documents)}
+            }
+            
+            if not documents:
+                yield {"type": "answer", "content": "Không tìm thấy thông tin phù hợp trong cơ sở dữ liệu."}
+                yield {"type": "done", "content": ""}
+                return
+                
+        except Exception as e:
+            logger.error(f"[CRAG-V3] Retrieval failed: {e}")
+            yield {"type": "error", "content": f"Lỗi tìm kiếm: {e}"}
+            return
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 3: Grading (CRAG core - quality control!)  
+        # ═══════════════════════════════════════════════════════════════════
+        yield {"type": "status", "content": "⚖️ Đang đánh giá chất lượng tài liệu..."}
+        
+        tracer.start_step(StepNames.GRADING, "Đánh giá độ liên quan của tài liệu")
+        logger.info("[CRAG-V3] Phase 3: Grading documents")
+        
+        try:
+            grading_result = await self._grader.grade_batch(query, documents)
+            passed = grading_result.avg_score >= self._grade_threshold
+            
+            tracer.end_step(
+                result=f"Điểm: {grading_result.avg_score:.1f}/10 - {'ĐẠT' if passed else 'CHƯA ĐẠT'}",
+                confidence=grading_result.confidence,
+                details={
+                    "score": grading_result.avg_score,
+                    "passed": passed,
+                    "confidence": grading_result.confidence
+                }
+            )
+            
+            yield {
+                "type": "thinking",
+                "content": f"{'✅' if passed else '⚠️'} Điểm: {grading_result.avg_score:.1f}/10 - {'ĐẠT' if passed else 'CHƯA ĐẠT'}",
+                "step": "grading",
+                "details": {"score": grading_result.avg_score, "passed": passed}
+            }
+            
+        except Exception as e:
+            logger.error(f"[CRAG-V3] Grading failed: {e}")
+            yield {"type": "thinking", "content": f"⚠️ Bỏ qua đánh giá: {e}", "step": "grading"}
+            grading_result = None
+            passed = True  # Continue without grading
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 4: Query Rewrite (if grading failed)
+        # ═══════════════════════════════════════════════════════════════════
+        rewritten_query = None
+        if grading_result and not passed and self._rewriter:
+            yield {"type": "status", "content": "✍️ Tinh chỉnh câu hỏi..."}
+            
+            try:
+                rewrite_result = await self._rewriter.rewrite(query)
+                if rewrite_result.rewritten_query != query:
+                    rewritten_query = rewrite_result.rewritten_query
+                    logger.info(f"[CRAG-V3] Query rewritten: {rewritten_query[:50]}...")
+                    
+                    yield {
+                        "type": "thinking",
+                        "content": f"✍️ Đã tinh chỉnh câu hỏi",
+                        "step": "rewrite"
+                    }
+                    
+                    # Re-retrieve with rewritten query
+                    documents = await self._retrieve(rewritten_query, context)
+                    
+            except Exception as e:
+                logger.warning(f"[CRAG-V3] Rewrite failed: {e}")
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 5: Generation (TRUE streaming via astream!)
+        # ═══════════════════════════════════════════════════════════════════
+        yield {"type": "status", "content": "✍️ Đang tạo câu trả lời..."}
+        
+        tracer.start_step(StepNames.GENERATION, "Tạo câu trả lời từ context")
+        logger.info("[CRAG-V3] Phase 5: Generating response with streaming")
+        
+        gen_start_time = time.time()
+        
+        if not self._rag:
+            yield {"type": "answer", "content": "Không thể tạo câu trả lời do thiếu cấu hình."}
+            yield {"type": "done", "content": ""}
+            return
+        
+        try:
+            # Build context from documents
+            context_parts = []
+            sources_data = []
+            
+            for doc in documents:
+                content = doc.get("content", "")
+                title = doc.get("title", "Unknown")
+                if content:
+                    context_parts.append(f"[{title}]: {content}")
+                
+                # Prepare source data for later
+                sources_data.append({
+                    "title": title,
+                    "content": content[:200] if content else "",
+                    "page_number": doc.get("page_number"),
+                    "image_url": doc.get("image_url"),
+                    "document_id": doc.get("document_id"),
+                    "bounding_boxes": doc.get("bounding_boxes")
+                })
+            
+            context_str = "\n\n".join(context_parts)
+            
+            # Get streaming generator from RAGAgent
+            user_role = context.get("user_role", "student")
+            history = context.get("conversation_history", "")
+            
+            # Stream tokens from RAGAgent
+            token_count = 0
+            async for chunk in self._rag._generate_response_streaming(
+                question=rewritten_query or query,
+                context=context_str,
+                nodes=[],  # Already have context
+                conversation_history=history,
+                user_role=user_role,
+                entity_context=""
+            ):
+                token_count += 1
+                yield {"type": "answer", "content": chunk}
+            
+            gen_duration = (time.time() - gen_start_time) * 1000
+            tracer.end_step(
+                result=f"Tạo câu trả lời: {token_count} tokens",
+                confidence=0.85,
+                details={"token_count": token_count, "duration_ms": gen_duration}
+            )
+            
+            logger.info(f"[CRAG-V3] Generation complete: {token_count} tokens in {gen_duration:.0f}ms")
+            
+        except Exception as e:
+            logger.error(f"[CRAG-V3] Generation failed: {e}")
+            yield {"type": "answer", "content": f"Lỗi khi tạo câu trả lời: {e}"}
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 6: Finalize (sources + metadata)
+        # ═══════════════════════════════════════════════════════════════════
+        total_time = time.time() - start_time
+        
+        # Calculate confidence
+        confidence = self._calculate_confidence(
+            analysis, 
+            grading_result, 
+            None  # No verification in streaming mode
+        )
+        
+        # Build reasoning trace
+        reasoning_trace = tracer.build_trace(final_confidence=confidence / 100)
+        
+        # Emit sources
+        yield {
+            "type": "sources",
+            "content": sources_data
+        }
+        
+        # Emit metadata with reasoning_trace
+        yield {
+            "type": "metadata", 
+            "content": {
+                "reasoning_trace": reasoning_trace.to_dict() if hasattr(reasoning_trace, 'to_dict') else None,
+                "processing_time": total_time,
+                "confidence": confidence,
+                "model": "maritime-rag-v3",
+                "was_rewritten": rewritten_query is not None,
+                "doc_count": len(documents)
+            }
+        }
+        
+        yield {"type": "done", "content": ""}
+        
+        logger.info(f"[CRAG-V3] Complete: {total_time:.2f}s, confidence={confidence:.0f}%")
     
     def _calculate_confidence(
         self,

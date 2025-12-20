@@ -1,0 +1,117 @@
+======================================================================
+P3 SOTA STREAMING VERIFICATION
+Date: 2025-12-21 03:03:24
+Target: https://maritime-ai-chatbot.onrender.com
+======================================================================
+
+⚠️  Using SAME test questions as test_production_api.py for fair comparison
+⚠️  Answer length comparison excludes <thinking> block content
+======================================================================
+P3 SOTA STREAMING TEST - /api/v1/chat/stream/v2
+======================================================================
+
+======================================================================
+TEST 1/1: Điều 50 - Quyền hạn thuyền trưởng (same as production_api.py)
+======================================================================
+
+📤 Request: Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu biển theo Bộ luật hàng hải Việt Nam 2015.
+----------------------------------------------------------------------
+Status: 200
+Content-Type: text/event-stream; charset=utf-8
+----------------------------------------------------------------------
+
+📨 Events received:
+
+   🔄 thinking: {"content": "🎯 Đang phân tích câu hỏi..."}...
+   🔄 thinking: {"content": "🔍 Đang tra cứu cơ sở dữ liệu..."}...
+   🔄 thinking: {"content": "📚 Tìm thấy 10 tài liệu liên quan"}...
+   🔄 thinking: {"content": "✍️ Đang tạo câu trả lời..."}...
+
+   ⚡ FIRST TOKEN TIME: 33.11s
+----------------------------------------------------------------------
+   📝 token #1: {"content": "<thinking>\nNgười dùng muốn giải thích về **Điều 50** của Bộ luật Hàng hải Việt Nam 2015 liên quan đến"}...
+   📝 token #2: {"content": " quyền hạn của thuyền trưởng.\nDựa trên kiến thức tra cứu (RAG):\n- **Điều 50"}...
+   📝 token #3: {"content": "** quy định về **Thuyền bộ**: Xác định thuyền bộ gồm thuyền trưởng, sĩ quan và các chức danh khác. Th"}...
+   📝 ... (streaming 4+ tokens)
+   📚 sources: 10 sources received
+   📊 metadata: processing_time=37.391s, model=maritime-rag-v1
+   ✅ done
+
+======================================================================
+TEST RESULTS
+======================================================================
+   Question:        Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu b...
+   Total tokens:    34
+   Raw answer:      3233 chars
+   Clean answer:    2175 chars (excluding <thinking>)
+   Thinking length: 1033 chars
+   Thinking events: 4
+   First token:     33.11s
+   Total time:      38.02s
+   Processing time: 37.391s
+   Sources:         10
+   Error:           None
+
+   🧠 THINKING CONTENT PREVIEW (first 300 chars):
+----------------------------------------------------------------------
+   Người dùng muốn giải thích về **Điều 50** của Bộ luật Hàng hải Việt Nam 2015 liên quan đến quyền hạn của thuyền trưởng.
+   Dựa trên kiến thức tra cứu (RAG):
+   - **Điều 50** quy định về **Thuyền bộ**: Xác định thuyền bộ gồm thuyền trưởng, sĩ quan và các chức danh khác. Thuyền trưởng là người đứng đầu thuy
+   ... (733 more chars)
+
+   📝 CLEAN ANSWER PREVIEW (first 500 chars):
+----------------------------------------------------------------------
+   **Điều 50** của Bộ luật hàng hải Việt Nam 2015 là "điểm neo" đầu tiên xác định vị thế của người chỉ huy trên một con tàu biển. Thay vì liệt kê chi tiết từng quyền hạn cụ thể, điều này tập trung vào việc định nghĩa **Thuyền bộ** và khẳng định vai trò trung tâm của **Thuyền trưởng**.
+   
+   Theo quy định này, **Thuyền trưởng** không chỉ là một chức danh làm việc mà là người đứng đầu thuyền bộ, có quyền chỉ huy cao nhất đối với tất cả mọi người trên tàu, từ các sĩ quan dày dạn kinh nghiệm đến những thủy 
+   ... (1675 more chars)
+
+
+
+
+======================================================================
+V1 (production /chat) vs V2 (streaming) COMPARISON
+======================================================================
+
+📡 Testing V1 (/api/v1/chat - non-streaming, full CRAG pipeline)...
+   ✅ V1 Success: 3627 chars, 5 sources in 57.36s
+
+📡 Testing V2 (/api/v1/chat/stream/v2 - true streaming)...
+   ✅ V2 Success: 2652 chars (clean), 10 sources
+      First token: 17.00s, Total: 21.32s
+
+======================================================================
+COMPARISON RESULTS
+======================================================================
+| Metric          | V1 (/chat)      | V2 (/stream/v2)   | Improvement    |
+|-----------------|-----------------|-------------------|----------------|
+| First visible   | 57.36s (all)    | 17.00s (token)   | 3.4x faster    |
+| Total time      | 57.36s          | 21.32s             | -              |
+| Answer (clean)  |  3627 chars    |  2652 chars       | Different      |
+| Sources         |     5           |    10             | Different      |
+
+--- V1 Answer Preview (first 300 chars) ---
+   Dựa trên nội dung từ các hệ thống hỗ trợ, dưới đây là bản tổng hợp giải thích chi tiết và mạch lạc về **Điều 50 Bộ luật Hàng hải Việt Nam 2015** liên quan đến quyền hạn của thuyền trưởng:
+   
+   ---
+   
+   ### Giải thích Điều 50: Quyền hạn của Thuyền trưởng trên tàu biển
+
+--- V2 Answer Preview (first 300 chars, cleaned) ---
+   **Điều 50** của Bộ luật Hàng hải Việt Nam 2015 thực chất là "bản danh sách" định nghĩa về **Thuyền bộ** – những người cùng sinh tử có nhau trên một con tàu. 
+   
+   Dựa trên nội dung này và các quy định liên quan, tôi xin chia sẻ với bạn như sau:
+   
+   Trước hết, bạn cần lưu ý rằng **Điều 50** xác lập vị trí c
+
+======================================================================
+FINAL SUMMARY
+======================================================================
+   Tests passed:       1/1
+   Avg first token:    33.11s (target: <40s)
+   Avg clean answer:   2175 chars
+   Latency improvement: 3.4x faster first token
+
+✅ ALL TESTS PASSED - P3 STREAMING WORKING!
+
+======================================================================

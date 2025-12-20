@@ -1,0 +1,150 @@
+======================================================================
+P3 SOTA STREAMING VERIFICATION
+Date: 2025-12-21 02:48:25
+Target: https://maritime-ai-chatbot.onrender.com
+======================================================================
+
+⚠️  Using SAME test questions as test_production_api.py for fair comparison
+======================================================================
+P3 SOTA STREAMING TEST - /api/v1/chat/stream/v2
+======================================================================
+
+======================================================================
+TEST 1/2: Điều 50 - Quyền hạn thuyền trưởng (same as production_api.py)
+======================================================================
+
+📤 Request: Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu biển theo Bộ luật hàng hải Việt Nam 2015.
+----------------------------------------------------------------------
+Status: 200
+Content-Type: text/event-stream; charset=utf-8
+----------------------------------------------------------------------
+
+📨 Events received:
+
+   🔄 thinking: {"content": "🎯 Đang phân tích câu hỏi..."}...
+   🔄 thinking: {"content": "🔍 Đang tra cứu cơ sở dữ liệu..."}...
+   🔄 thinking: {"content": "📚 Tìm thấy 10 tài liệu liên quan"}...
+   🔄 thinking: {"content": "✍️ Đang tạo câu trả lời..."}...
+
+   ⚡ FIRST TOKEN TIME: 23.85s
+----------------------------------------------------------------------
+   📝 answer token #1: {"content": "<thinking>\nNgười dùng muốn giải thích về Điều 50 của Bộ luật Hàng ...
+   📝 answer token #2: {"content": " tra cứu (RAG):\n- **Điều 50** quy định về **Thuyền bộ** (đ"}...
+   📝 answer token #3: {"content": "ịnh nghĩa các thành phần trên tàu).\n- **Điều 52** nói về **Địa vị ...
+   📝 answer token #4: {"content": " thuyền trưởng**.\n- **Điều 54** mới là điều quy định về **Quyền củ...
+   📝 answer token #5: {"content": "ế hoạch:\n1. Đính chính nhẹ nhàng rằng Điều 50 tập trung vào định n...
+   📝 ... (streaming more tokens)
+   📚 sources: 10 sources received
+   📊 metadata: {"processing_time": 27.627, "model": "maritime-rag-v1", "agent_type": "rag", "streaming_version": "v...
+   ✅ done
+
+======================================================================
+TEST RESULTS
+======================================================================
+   Question:        Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu b...
+   Total tokens:    33
+   Answer length:   3166 chars
+   Thinking events: 4
+   First token:     23.85s
+   Total time:      28.39s
+   Sources:         10
+   Error:           None
+
+   📝 FULL ANSWER PREVIEW (first 500 chars):
+----------------------------------------------------------------------
+   <thinking>
+   Người dùng muốn giải thích về Điều 50 của Bộ luật Hàng hải Việt Nam 2015, nhưng lại gắn nó với nội dung "quyền hạn của thuyền trưởng". 
+   Qua kiểm tra nội dung tra cứu (RAG):
+   - **Điều 50** quy định về **Thuyền bộ** (định nghĩa các thành phần trên tàu).
+   - **Điều 52** nói về **Địa vị pháp lý của thuyền trưởng**.
+   - **Điều 54** mới là điều quy định về **Quyền của thuyền trưởng**.
+   
+   Kế hoạch:
+   1. Đính chính nhẹ nhàng rằng Điều 50 tập trung vào định nghĩa "Thuyền bộ", trong đó Thuyền trưởng là 
+   ... (2666 more chars)
+
+======================================================================
+TEST 2/2: Rule 15 COLREGs - Crossing situation
+======================================================================
+
+📤 Request: Quy tắc 15 COLREGs quy định thế nào về tình huống cắt mũi nhau?
+----------------------------------------------------------------------
+Status: 200
+Content-Type: text/event-stream; charset=utf-8
+----------------------------------------------------------------------
+
+📨 Events received:
+
+   🔄 thinking: {"content": "🎯 Đang phân tích câu hỏi..."}...
+   🔄 thinking: {"content": "🔍 Đang tra cứu cơ sở dữ liệu..."}...
+   🔄 thinking: {"content": "📚 Tìm thấy 10 tài liệu liên quan"}...
+   🔄 thinking: {"content": "✍️ Đang tạo câu trả lời..."}...
+
+   ⚡ FIRST TOKEN TIME: 22.47s
+----------------------------------------------------------------------
+   📝 answer token #1: {"content": "<thinking>\nNgười dùng hỏi về Quy tắc 15 của COLREGs (Công ước quốc...
+   📝 answer token #2: {"content": "ắt mũi nhau). \nTrong phần dữ liệu RAG cung cấp, \"Điều 15\" lại đa...
+   📝 answer token #3: {"content": " về \"Chủ tàu\" trong Bộ luật Hàng hải Việt Nam, không phải Quy tắc...
+   📝 answer token #4: {"content": " \nDo đó, tôi cần sử dụng công cụ tìm kiếm để lấy chính xác nội dun...
+   📝 answer token #5: {"content": "s nhằm cung cấp thông tin chuẩn xác nhất cho người dùng. \nBên cạnh...
+   📝 ... (streaming more tokens)
+   📚 sources: 10 sources received
+   📊 metadata: {"processing_time": 22.952, "model": "maritime-rag-v1", "agent_type": "rag", "streaming_version": "v...
+   ✅ done
+
+======================================================================
+TEST RESULTS
+======================================================================
+   Question:        Quy tắc 15 COLREGs quy định thế nào về tình huống cắt mũi nh...
+   Total tokens:    7
+   Answer length:   783 chars
+   Thinking events: 4
+   First token:     22.47s
+   Total time:      23.38s
+   Sources:         10
+   Error:           None
+
+   📝 FULL ANSWER PREVIEW (first 500 chars):
+----------------------------------------------------------------------
+   <thinking>
+   Người dùng hỏi về Quy tắc 15 của COLREGs (Công ước quốc tế về phòng ngừa đâm va trên biển) liên quan đến tình huống cắt hướng (cắt mũi nhau). 
+   Trong phần dữ liệu RAG cung cấp, "Điều 15" lại đang nói về "Chủ tàu" trong Bộ luật Hàng hải Việt Nam, không phải Quy tắc 15 của COLREGs. 
+   Do đó, tôi cần sử dụng công cụ tìm kiếm để lấy chính xác nội dung Quy tắc 15 COLREGs nhằm cung cấp thông tin chuẩn xác nhất cho người dùng. 
+   Bên cạnh đó, tôi sẽ kiểm tra thông tin người dùng để xưng hô thân m
+   ... (283 more chars)
+
+
+
+
+======================================================================
+V1 (production /chat) vs V2 (streaming) COMPARISON
+======================================================================
+
+📡 Testing V1 (/api/v1/chat - non-streaming)...
+   ✅ V1 Success: 2749 chars, 5 sources in 52.90s
+
+📡 Testing V2 (/api/v1/chat/stream/v2 - streaming)...
+   ✅ V2 Success: 3598 chars, 10 sources
+      First token: 16.21s, Total: 20.63s
+
+======================================================================
+COMPARISON RESULTS
+======================================================================
+| Metric        | V1 (/chat)    | V2 (/stream/v2) | Difference     |
+|---------------|---------------|-----------------|----------------|
+| First visible | 52.90s (all)   | 16.21s (token) | 3.3x faster    |
+| Total time    | 52.90s        | 20.63s          | Different        |
+| Answer length | 2749 chars   | 3598 chars      | DIFFERENT!        |
+| Sources       | 5            | 10              | Different            |
+
+======================================================================
+FINAL SUMMARY
+======================================================================
+   Tests passed:     2/2
+   Avg first token:  23.16s
+   Target:           <40s
+   Avg answer len:   1974 chars
+
+✅ ALL TESTS PASSED - P3 STREAMING WORKING!
+
+======================================================================

@@ -293,3 +293,146 @@ async def chat_stream_v2(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+# =============================================================================
+# P3+ SOTA: Full CRAG Pipeline + True Token Streaming (Dec 2025)
+# Pattern: OpenAI Responses API + Claude Extended Thinking + Gemini astream
+# Best of both worlds: V1 quality + V2 streaming UX
+# =============================================================================
+
+@router.post("/chat/stream/v3")
+async def chat_stream_v3(
+    request: Request,
+    chat_request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    auth: RequireAuth
+):
+    """
+    P3+ SOTA: Full CRAG Pipeline + True Token Streaming
+    
+    Best of both worlds:
+    - Quality: Full CRAG pipeline (grading, verification, reasoning_trace)
+    - UX: Progressive events at each step + true token streaming
+    
+    Event Types (following OpenAI Responses API pattern):
+    - status: Processing stage updates (shown as typing indicator)
+    - thinking: AI reasoning steps (shown in collapsible section)
+    - answer: Response tokens (streamed real-time via LLM.astream())
+    - sources: Citation list with image_url for PDF highlighting
+    - metadata: reasoning_trace, confidence, timing
+    - done: Stream complete
+    - error: Error occurred
+    
+    Timeline:
+    - 0s: First status event (user sees progress immediately)
+    - 4s: Analysis complete
+    - 7s: Retrieval complete  
+    - 11s: Grading complete
+    - 25s: First answer token
+    - 55s: Complete with reasoning_trace
+    
+    **Feature: p3-v3-full-crag-streaming**
+    """
+    start_time = time.time()
+    
+    logger.info(
+        f"[STREAM-V3] Request from {chat_request.user_id}: {chat_request.message[:50]}..."
+    )
+    
+    async def generate_events_v3() -> AsyncGenerator[str, None]:
+        try:
+            # Import CRAG for full pipeline with streaming
+            from app.engine.agentic_rag.corrective_rag import get_corrective_rag
+            from app.services.memory_service import get_user_memory
+            
+            # Get CRAG singleton
+            crag = get_corrective_rag()
+            
+            # Build context
+            context = {
+                "user_id": chat_request.user_id,
+                "user_role": chat_request.role.value,
+                "conversation_history": ""
+            }
+            
+            # Optionally fetch memory for personalization
+            try:
+                memory = await get_user_memory(chat_request.user_id)
+                if memory and memory.get("name"):
+                    context["user_name"] = memory.get("name")
+            except Exception as e:
+                logger.debug(f"[STREAM-V3] Memory fetch skipped: {e}")
+            
+            # Stream events from CRAG pipeline
+            async for event in crag.process_streaming(
+                query=chat_request.message,
+                context=context
+            ):
+                event_type = event.get("type", "answer")
+                content = event.get("content", "")
+                
+                if event_type == "status":
+                    # Status events are shown as typing indicator
+                    yield format_sse("thinking", {"content": content})
+                    
+                elif event_type == "thinking":
+                    # Thinking events show AI reasoning
+                    yield format_sse("thinking", {
+                        "content": content,
+                        "step": event.get("step"),
+                        "details": event.get("details")
+                    })
+                    
+                elif event_type == "answer":
+                    # Answer tokens streamed real-time
+                    yield format_sse("answer", {"content": content})
+                    
+                elif event_type == "sources":
+                    # Sources with image_url for PDF highlighting
+                    yield format_sse("sources", {"sources": content})
+                    
+                elif event_type == "metadata":
+                    # Metadata includes reasoning_trace
+                    metadata = content
+                    metadata["streaming_version"] = "v3"
+                    yield format_sse("metadata", metadata)
+                    
+                elif event_type == "done":
+                    # Will send done at the end
+                    pass
+                    
+                elif event_type == "error":
+                    yield format_sse("error", {"message": content})
+                    return
+                
+                # Micro delay for flush
+                await asyncio.sleep(0.01)
+            
+            # Processing time
+            processing_time = time.time() - start_time
+            
+            # Done signal
+            yield format_sse("done", {
+                "status": "complete",
+                "total_time": round(processing_time, 3)
+            })
+            
+            logger.info(f"[STREAM-V3] Completed in {processing_time:.3f}s")
+            
+        except Exception as e:
+            logger.exception(f"[STREAM-V3] Error: {e}")
+            yield format_sse("error", {
+                "message": f"Lỗi xử lý: {str(e)}"
+            })
+    
+    return StreamingResponse(
+        generate_events_v3(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+

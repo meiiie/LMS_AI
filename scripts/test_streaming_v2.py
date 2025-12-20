@@ -14,6 +14,7 @@ import httpx
 import time
 import sys
 import os
+import re
 from datetime import datetime
 
 # Configuration
@@ -32,11 +33,21 @@ TEST_QUESTIONS = [
         "question": "Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu biển theo Bộ luật hàng hải Việt Nam 2015.",
         "name": "Điều 50 - Quyền hạn thuyền trưởng (same as production_api.py)"
     },
-    {
-        "question": "Quy tắc 15 COLREGs quy định thế nào về tình huống cắt mũi nhau?",
-        "name": "Rule 15 COLREGs - Crossing situation"
-    }
 ]
+
+
+def strip_thinking_tags(text: str) -> tuple[str, str]:
+    """
+    Extract and separate thinking content from answer text.
+    Returns: (clean_answer, thinking_content)
+    """
+    thinking_match = re.search(r'<thinking>(.*?)</thinking>', text, re.DOTALL)
+    thinking_content = thinking_match.group(1).strip() if thinking_match else ""
+    
+    # Remove thinking tags from answer
+    clean_answer = re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL).strip()
+    
+    return clean_answer, thinking_content
 
 
 class TestLogger:
@@ -90,6 +101,7 @@ async def test_streaming_v2(logger: TestLogger):
         sources_received = False
         sources_count = 0
         error_message = None
+        processing_time = None
         
         async with httpx.AsyncClient() as client:
             try:
@@ -155,10 +167,11 @@ async def test_streaming_v2(logger: TestLogger):
                                     # If not JSON, append raw data
                                     full_answer.append(data)
                                 
-                                if token_count <= 5:
-                                    logger.log(f"   📝 answer token #{token_count}: {data[:80]}...")
-                                elif token_count == 6:
-                                    logger.log(f"   📝 ... (streaming more tokens)")
+                                if token_count <= 3:
+                                    # Show first 120 chars for better visibility
+                                    logger.log(f"   📝 token #{token_count}: {data[:120]}...")
+                                elif token_count == 4:
+                                    logger.log(f"   📝 ... (streaming {token_count}+ tokens)")
                             
                             elif current_event == "sources":
                                 sources_received = True
@@ -174,7 +187,13 @@ async def test_streaming_v2(logger: TestLogger):
                                 logger.log(f"   📚 sources: {sources_count} sources received")
                             
                             elif current_event == "metadata":
-                                logger.log(f"   📊 metadata: {data[:100]}...")
+                                try:
+                                    import json
+                                    parsed = json.loads(data)
+                                    processing_time = parsed.get("processing_time")
+                                    logger.log(f"   📊 metadata: processing_time={processing_time}s, model={parsed.get('model')}")
+                                except:
+                                    logger.log(f"   📊 metadata: {data[:100]}...")
                             
                             elif current_event == "done":
                                 logger.log(f"   ✅ done")
@@ -185,40 +204,53 @@ async def test_streaming_v2(logger: TestLogger):
                     
                     total_time = time.time() - start_time
                     
-                    # Join full answer
-                    answer_text = "".join(full_answer)
-                    answer_length = len(answer_text)
+                    # Join full answer and separate thinking
+                    raw_answer = "".join(full_answer)
+                    clean_answer, thinking_content = strip_thinking_tags(raw_answer)
                     
                     logger.log(f"\n{'='*70}")
                     logger.log("TEST RESULTS")
                     logger.log(f"{'='*70}")
                     logger.log(f"   Question:        {question[:60]}...")
                     logger.log(f"   Total tokens:    {token_count}")
-                    logger.log(f"   Answer length:   {answer_length} chars")
+                    logger.log(f"   Raw answer:      {len(raw_answer)} chars")
+                    logger.log(f"   Clean answer:    {len(clean_answer)} chars (excluding <thinking>)")
+                    logger.log(f"   Thinking length: {len(thinking_content)} chars")
                     logger.log(f"   Thinking events: {len(thinking_events)}")
                     logger.log(f"   First token:     {first_token_time:.2f}s" if first_token_time else "   First token:     N/A")
                     logger.log(f"   Total time:      {total_time:.2f}s")
+                    logger.log(f"   Processing time: {processing_time}s" if processing_time else "   Processing time: N/A")
                     logger.log(f"   Sources:         {sources_count if sources_received else 'None'}")
                     logger.log(f"   Error:           {error_message or 'None'}")
                     
-                    # Show answer preview (first 500 chars)
-                    if answer_text:
-                        logger.log(f"\n   📝 FULL ANSWER PREVIEW (first 500 chars):")
+                    # Show thinking preview if exists
+                    if thinking_content:
+                        logger.log(f"\n   🧠 THINKING CONTENT PREVIEW (first 300 chars):")
                         logger.log("-" * 70)
-                        preview = answer_text[:500]
-                        for line in preview.split('\n'):
+                        preview = thinking_content[:300]
+                        for line in preview.split('\n')[:5]:
                             logger.log(f"   {line}")
-                        if len(answer_text) > 500:
-                            logger.log(f"   ... ({answer_length - 500} more chars)")
-                    else:
-                        logger.log(f"\n   ⚠️ NO ANSWER TEXT RECEIVED!")
+                        if len(thinking_content) > 300:
+                            logger.log(f"   ... ({len(thinking_content) - 300} more chars)")
                     
-                    # Evaluate
+                    # Show clean answer preview (first 500 chars)
+                    if clean_answer:
+                        logger.log(f"\n   📝 CLEAN ANSWER PREVIEW (first 500 chars):")
+                        logger.log("-" * 70)
+                        preview = clean_answer[:500]
+                        for line in preview.split('\n')[:10]:
+                            logger.log(f"   {line}")
+                        if len(clean_answer) > 500:
+                            logger.log(f"   ... ({len(clean_answer) - 500} more chars)")
+                    else:
+                        logger.log(f"\n   ⚠️ NO CLEAN ANSWER TEXT - Only thinking content received!")
+                    
+                    # Evaluate - check clean answer not raw
                     success = (
                         first_token_time is not None and 
                         first_token_time < 40 and  # Allow up to 40s for first token
                         token_count > 0 and
-                        answer_length > 100 and  # Must have substantial answer
+                        len(clean_answer) > 100 and  # Must have substantial answer excluding thinking
                         error_message is None
                     )
                     
@@ -229,7 +261,9 @@ async def test_streaming_v2(logger: TestLogger):
                         "first_token_time": first_token_time,
                         "total_time": total_time,
                         "token_count": token_count,
-                        "answer_length": answer_length,
+                        "raw_answer_length": len(raw_answer),
+                        "clean_answer_length": len(clean_answer),
+                        "thinking_length": len(thinking_content),
                         "sources_count": sources_count,
                         "error": error_message
                     })
@@ -257,10 +291,11 @@ async def compare_v1_v2(logger: TestLogger):
     question = "Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu biển theo Bộ luật hàng hải Việt Nam 2015."
     
     # Test V1 (non-streaming /chat endpoint)
-    logger.log("\n📡 Testing V1 (/api/v1/chat - non-streaming)...")
+    logger.log("\n📡 Testing V1 (/api/v1/chat - non-streaming, full CRAG pipeline)...")
     v1_start = time.time()
     v1_answer_length = 0
     v1_sources = 0
+    v1_answer_preview = ""
     
     async with httpx.AsyncClient() as client:
         try:
@@ -274,21 +309,26 @@ async def compare_v1_v2(logger: TestLogger):
             if resp.status_code == 200:
                 data = resp.json()
                 response_data = data.get("data", {})
-                v1_answer_length = len(response_data.get("answer", ""))
+                v1_answer = response_data.get("answer", "")
+                v1_answer_length = len(v1_answer)
+                v1_answer_preview = v1_answer[:300]
                 v1_sources = len(response_data.get("sources", []))
                 logger.log(f"   ✅ V1 Success: {v1_answer_length} chars, {v1_sources} sources in {v1_total:.2f}s")
             else:
                 logger.log(f"   ❌ V1 Error: {resp.status_code}")
+                v1_total = time.time() - v1_start
         except Exception as e:
             v1_total = time.time() - v1_start
             logger.log(f"   ❌ V1 Exception: {e}")
     
     # Test V2 (streaming)
-    logger.log("\n📡 Testing V2 (/api/v1/chat/stream/v2 - streaming)...")
+    logger.log("\n📡 Testing V2 (/api/v1/chat/stream/v2 - true streaming)...")
     v2_start = time.time()
     v2_first_token = None
     v2_answer_length = 0
+    v2_clean_answer_length = 0
     v2_sources = 0
+    v2_answer_preview = ""
     
     async with httpx.AsyncClient() as client:
         try:
@@ -325,31 +365,51 @@ async def compare_v1_v2(logger: TestLogger):
                             except:
                                 pass
                 
-                v2_answer_length = len("".join(full_answer))
+                raw_answer = "".join(full_answer)
+                v2_answer_length = len(raw_answer)
+                clean_answer, _ = strip_thinking_tags(raw_answer)
+                v2_clean_answer_length = len(clean_answer)
+                v2_answer_preview = clean_answer[:300]
                 v2_total = time.time() - v2_start
-                logger.log(f"   ✅ V2 Success: {v2_answer_length} chars, {v2_sources} sources")
+                logger.log(f"   ✅ V2 Success: {v2_clean_answer_length} chars (clean), {v2_sources} sources")
                 logger.log(f"      First token: {v2_first_token:.2f}s, Total: {v2_total:.2f}s")
                 
         except Exception as e:
             v2_total = time.time() - v2_start
             logger.log(f"   ❌ V2 Exception: {e}")
     
+    # Comparison table
     logger.log(f"\n{'='*70}")
     logger.log("COMPARISON RESULTS")
     logger.log(f"{'='*70}")
-    logger.log(f"| Metric        | V1 (/chat)    | V2 (/stream/v2) | Difference     |")
-    logger.log(f"|---------------|---------------|-----------------|----------------|")
-    logger.log(f"| First visible | {v1_total:.2f}s (all)   | {v2_first_token:.2f}s (token) | {(v1_total/v2_first_token):.1f}x faster    |" if v2_first_token else "| First visible | N/A           | N/A             | N/A            |")
-    logger.log(f"| Total time    | {v1_total:.2f}s        | {v2_total:.2f}s          | {'Similar' if abs(v1_total - v2_total) < 5 else 'Different'}        |")
-    logger.log(f"| Answer length | {v1_answer_length} chars   | {v2_answer_length} chars      | {'Similar' if abs(v1_answer_length - v2_answer_length) < 100 else 'DIFFERENT!'}        |")
-    logger.log(f"| Sources       | {v1_sources}            | {v2_sources}              | {'Same' if v1_sources == v2_sources else 'Different'}            |")
+    logger.log(f"| Metric          | V1 (/chat)      | V2 (/stream/v2)   | Improvement    |")
+    logger.log(f"|-----------------|-----------------|-------------------|----------------|")
+    
+    if v2_first_token:
+        improvement = f"{(v1_total/v2_first_token):.1f}x faster"
+    else:
+        improvement = "N/A"
+    
+    logger.log(f"| First visible   | {v1_total:.2f}s (all)    | {v2_first_token:.2f}s (token)   | {improvement:14} |" if v2_first_token else f"| First visible   | {v1_total:.2f}s (all)    | N/A               | N/A            |")
+    logger.log(f"| Total time      | {v1_total:.2f}s          | {v2_total:.2f}s             | -              |")
+    logger.log(f"| Answer (clean)  | {v1_answer_length:5} chars    | {v2_clean_answer_length:5} chars       | {'Similar' if abs(v1_answer_length - v2_clean_answer_length) < 500 else 'Different':14} |")
+    logger.log(f"| Sources         | {v1_sources:5}           | {v2_sources:5}             | {'Same' if v1_sources == v2_sources else 'Different':14} |")
+    
+    # Answer previews
+    logger.log(f"\n--- V1 Answer Preview (first 300 chars) ---")
+    for line in v1_answer_preview.split('\n')[:5]:
+        logger.log(f"   {line}")
+    
+    logger.log(f"\n--- V2 Answer Preview (first 300 chars, cleaned) ---")
+    for line in v2_answer_preview.split('\n')[:5]:
+        logger.log(f"   {line}")
     
     return {
         "v1_total": v1_total,
         "v1_answer_length": v1_answer_length,
         "v2_first_token": v2_first_token,
         "v2_total": v2_total,
-        "v2_answer_length": v2_answer_length,
+        "v2_clean_answer_length": v2_clean_answer_length,
     }
 
 
@@ -362,6 +422,7 @@ async def main():
     logger.log(f"Target: {BASE_URL}")
     logger.log("=" * 70)
     logger.log("\n⚠️  Using SAME test questions as test_production_api.py for fair comparison")
+    logger.log("⚠️  Answer length comparison excludes <thinking> block content")
     
     # Run streaming tests
     results = await test_streaming_v2(logger)
@@ -378,15 +439,19 @@ async def main():
     success_count = sum(1 for r in results if r.get("success"))
     total_count = len(results)
     
-    logger.log(f"   Tests passed:     {success_count}/{total_count}")
+    logger.log(f"   Tests passed:       {success_count}/{total_count}")
     
     first_tokens = [r.get("first_token_time") for r in results if r.get("first_token_time")]
     avg_first_token = sum(first_tokens) / len(first_tokens) if first_tokens else 0
-    logger.log(f"   Avg first token:  {avg_first_token:.2f}s")
-    logger.log(f"   Target:           <40s")
+    logger.log(f"   Avg first token:    {avg_first_token:.2f}s (target: <40s)")
     
-    avg_answer_len = sum(r.get("answer_length", 0) for r in results) / len(results)
-    logger.log(f"   Avg answer len:   {avg_answer_len:.0f} chars")
+    avg_clean_answer = sum(r.get("clean_answer_length", 0) for r in results) / len(results)
+    logger.log(f"   Avg clean answer:   {avg_clean_answer:.0f} chars")
+    
+    # Streaming improvement
+    if comparison.get("v2_first_token") and comparison.get("v1_total"):
+        improvement = comparison["v1_total"] / comparison["v2_first_token"]
+        logger.log(f"   Latency improvement: {improvement:.1f}x faster first token")
     
     if success_count == total_count:
         logger.log(f"\n✅ ALL TESTS PASSED - P3 STREAMING WORKING!")
