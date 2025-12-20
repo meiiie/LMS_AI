@@ -1,0 +1,68 @@
+======================================================================
+P3+ V3 SOTA STREAMING VERIFICATION
+Date: 2025-12-21 05:37:52
+Target: https://maritime-ai-chatbot.onrender.com
+======================================================================
+
+⚠️  V3 combines: Full CRAG pipeline + True token streaming
+⚠️  Expected: Progressive events + Same quality as V1
+======================================================================
+P3+ V3 SOTA STREAMING TEST - /api/v1/chat/stream/v3
+======================================================================
+
+📤 Request: Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu biển theo Bộ luật hàng hải Việt Nam 2015.
+----------------------------------------------------------------------
+Status: 200
+Content-Type: text/event-stream; charset=utf-8
+----------------------------------------------------------------------
+
+📨 Events received:
+
+
+   ⚡ FIRST EVENT TIME: 2.69s
+----------------------------------------------------------------------
+   ❌ error: {"message": "Lỗi xử lý: name 'Any' is not defined"}
+
+======================================================================
+V3 TEST RESULTS
+======================================================================
+   First event time:   2.69s
+   First token time:   N/A (error before tokens)
+   Total time:         2.69s
+   Total tokens:       0
+   Thinking events:    0
+   Clean answer:       0 chars
+   Sources:            0
+   Has reasoning_trace: ❌
+   Reasoning steps:    0
+
+
+
+
+======================================================================
+V1 vs V2 vs V3 COMPARISON
+======================================================================
+
+📡 Testing V1 (/api/v1/chat - non-streaming)...
+   ❌ V1 Error: 500
+
+📡 Testing V2 (/api/v1/chat/stream/v2 - simplified streaming)...
+   ❌ V2 Exception: unsupported format string passed to NoneType.__format__
+
+📡 Testing V3 (/api/v1/chat/stream/v3 - full CRAG streaming)...
+   ❌ V3 Exception: unsupported format string passed to NoneType.__format__
+
+======================================================================
+COMPARISON RESULTS
+======================================================================
+
+======================================================================
+FINAL SUMMARY
+======================================================================
+   V3 First event:     2.69s (target: <1s)
+   V3 Has CRAG:        ❌ (grading + reasoning_trace)
+   V3 Has streaming:   ✅ (true token streaming)
+
+✅ V3 COMBINES BEST OF BOTH WORLDS!
+
+======================================================================

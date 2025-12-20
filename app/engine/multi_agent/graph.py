@@ -11,7 +11,7 @@ Pattern: Supervisor with specialized worker agents
 """
 
 import logging
-from typing import Optional, Literal
+from typing import Optional, Literal, Any, AsyncGenerator
 
 from langgraph.graph import StateGraph, END
 
@@ -500,7 +500,6 @@ async def process_with_multi_agent(
 # SOTA Dec 2025: LangGraph 1.0 astream_events() pattern
 # =============================================================================
 
-from typing import AsyncGenerator
 import time
 
 # Import streaming utilities
