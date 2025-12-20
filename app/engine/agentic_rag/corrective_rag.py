@@ -902,15 +902,16 @@ class CorrectiveRAG:
             history = user_context.get("conversation_history", "")
             
             # FIXED: Create KnowledgeNode list from documents for RAGAgent
-            from app.models.schemas import KnowledgeNode
+            from app.models.knowledge_graph import KnowledgeNode, NodeType
             
             knowledge_nodes = []
-            for doc in documents:
+            for i, doc in enumerate(documents):
                 node = KnowledgeNode(
-                    node_id=doc.get("node_id", ""),
+                    id=doc.get("node_id", f"doc_{i}"),  # id, not node_id
+                    node_type=NodeType.REGULATION,  # Required field
                     content=doc.get("content", ""),
-                    title=doc.get("title", ""),
-                    relevance_score=doc.get("score", 0.5)
+                    title=doc.get("title", "Unknown"),
+                    source=doc.get("document_id", "")  # Used by _generate_response_streaming
                 )
                 knowledge_nodes.append(node)
             
