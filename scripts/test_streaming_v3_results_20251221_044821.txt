@@ -1,0 +1,107 @@
+======================================================================
+P3+ V3 SOTA STREAMING VERIFICATION
+Date: 2025-12-21 04:48:21
+Target: https://maritime-ai-chatbot.onrender.com
+======================================================================
+
+⚠️  V3 combines: Full CRAG pipeline + True token streaming
+⚠️  Expected: Progressive events + Same quality as V1
+======================================================================
+P3+ V3 SOTA STREAMING TEST - /api/v1/chat/stream/v3
+======================================================================
+
+📤 Request: Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu biển theo Bộ luật hàng hải Việt Nam 2015.
+----------------------------------------------------------------------
+Status: 200
+Content-Type: text/event-stream; charset=utf-8
+----------------------------------------------------------------------
+
+📨 Events received:
+
+
+   ⚡ FIRST EVENT TIME: 0.85s
+----------------------------------------------------------------------
+   🔄 thinking []: 🎯 Đang phân tích câu hỏi......
+   🔄 thinking [analysis]: 📊 Độ phức tạp: simple...
+   🔄 thinking []: 🔍 Đang tìm kiếm tài liệu......
+   🔄 thinking [retrieval]: 📚 Tìm thấy 10 tài liệu liên quan...
+   🔄 thinking []: ⚖️ Đang đánh giá chất lượng tài liệu......
+   🔄 thinking [grading]: ✅ Điểm: 8.5/10 - ĐẠT...
+   🔄 thinking []: ✍️ Đang tạo câu trả lời......
+
+   ⚡ FIRST TOKEN TIME: 7.78s
+----------------------------------------------------------------------
+   📝 token #1: {"content": "Lỗi khi tạo câu trả lời: 1 validation error for KnowledgeNode\ntitle\n  String should h...
+   📚 sources: 10 sources received
+   📊 metadata: processing_time=6.9384894371032715s
+   ✅ done
+
+======================================================================
+V3 TEST RESULTS
+======================================================================
+   First event time:   0.85s
+   First token time:   7.78s
+   Total time:         7.82s
+   Total tokens:       1
+   Thinking events:    7
+   Clean answer:       251 chars
+   Sources:            10
+   Has reasoning_trace: ❌
+   Reasoning steps:    0
+
+   🧠 THINKING EVENTS:
+----------------------------------------------------------------------
+   [] 🎯 Đang phân tích câu hỏi......
+   [analysis] 📊 Độ phức tạp: simple...
+   [] 🔍 Đang tìm kiếm tài liệu......
+   [retrieval] 📚 Tìm thấy 10 tài liệu liên quan...
+   [] ⚖️ Đang đánh giá chất lượng tài liệu......
+   [grading] ✅ Điểm: 8.5/10 - ĐẠT...
+   [] ✍️ Đang tạo câu trả lời......
+
+   📝 ANSWER PREVIEW (first 400 chars):
+----------------------------------------------------------------------
+   Lỗi khi tạo câu trả lời: 1 validation error for KnowledgeNode
+   title
+     String should have at least 1 character [type=string_too_short, input_value='', input_type=str]
+       For further information visit https://errors.pydantic.dev/2.12/v/string_too_short
+
+
+
+
+======================================================================
+V1 vs V2 vs V3 COMPARISON
+======================================================================
+
+📡 Testing V1 (/api/v1/chat - non-streaming)...
+   ✅ V1 Success: 2870 chars, 5 sources in 76.07s
+
+📡 Testing V2 (/api/v1/chat/stream/v2 - simplified streaming)...
+   ✅ V2 Success: 2631 chars, first token 26.39s
+
+📡 Testing V3 (/api/v1/chat/stream/v3 - full CRAG streaming)...
+   ✅ V3 Success: 251 chars, first event 0.50s, first token 9.54s
+
+======================================================================
+COMPARISON RESULTS
+======================================================================
+| Metric           | V1 (/chat)     | V2 (/stream)   | V3 (CRAG+stream) |
+|------------------|----------------|----------------|------------------|
+| First event      | 76.1s (all)    | 26.4s (token) | 0.5s (status)   |
+| First token      | 76.1s (all)    | 26.4s          | 9.5s           |
+| Total time       | 76.1s           | 30.0s          | 9.6s           |
+| Answer (clean)   |  2870 chars  |  2631 chars  |   251 chars    |
+| Sources          |     5        |    10        |    10          |
+| reasoning_trace  | ✅            | ❌            | ❌              |
+
+======================================================================
+FINAL SUMMARY
+======================================================================
+   V3 First event:     0.85s (target: <1s)
+   V3 First token:     7.78s (target: <40s)
+   V3 Has CRAG:        ❌ (grading + reasoning_trace)
+   V3 Has streaming:   ✅ (true token streaming)
+
+✅ V3 COMBINES BEST OF BOTH WORLDS!
+
+======================================================================

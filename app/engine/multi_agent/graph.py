@@ -493,3 +493,300 @@ async def process_with_multi_agent(
         "trace_id": trace_id,
         "trace_summary": trace_summary
     }
+
+
+# =============================================================================
+# V3 STREAMING: Full Graph with Interleaved Events
+# SOTA Dec 2025: LangGraph 1.0 astream_events() pattern
+# =============================================================================
+
+from typing import AsyncGenerator
+import time
+
+# Import streaming utilities
+from app.engine.multi_agent.stream_utils import (
+    StreamEvent,
+    StreamEventType,
+    NODE_DESCRIPTIONS,
+    NODE_STEPS,
+    create_status_event,
+    create_thinking_event,
+    create_answer_event,
+    create_sources_event,
+    create_metadata_event,
+    create_done_event,
+    create_error_event,
+    transform_langgraph_event
+)
+
+
+async def process_with_multi_agent_streaming(
+    query: str,
+    user_id: str,
+    session_id: str = "",
+    context: dict = None
+) -> AsyncGenerator[StreamEvent, None]:
+    """
+    Process with Multi-Agent graph with interleaved streaming.
+    
+    SOTA Dec 2025: Full Multi-Agent pipeline + progressive SSE events
+    Pattern: OpenAI Responses API + Claude Extended Thinking + LangGraph 1.0
+    
+    Yields StreamEvents at each graph node:
+    - Supervisor: routing decision (thinking event)
+    - TutorAgent: tool calls + reasoning (thinking events)
+    - GraderAgent: quality score (thinking event) 
+    - Synthesizer: answer tokens (answer events)
+    
+    Timeline:
+    - 0s: First status event (user sees progress)
+    - 4-6s: Supervisor routing complete
+    - 40-50s: TutorAgent + CRAG complete
+    - 55-60s: GraderAgent complete (or skipped if high confidence)
+    - 65-75s: Synthesizer + answer tokens
+    
+    **Feature: v3-full-graph-streaming**
+    
+    Args:
+        query: User query
+        user_id: User identifier
+        session_id: Session identifier (optional)
+        context: Additional context (optional)
+        
+    Yields:
+        StreamEvent objects ready for SSE serialization
+    """
+    start_time = time.time()
+    graph = get_multi_agent_graph()
+    registry = get_agent_registry()
+    
+    # Start trace
+    trace_id = registry.start_request_trace()
+    logger.info(f"[MULTI_AGENT_STREAM] Started streaming trace: {trace_id}")
+    
+    try:
+        # Yield initial status
+        yield await create_status_event("🚀 Bắt đầu xử lý câu hỏi...", None)
+        
+        # Create initial state
+        initial_state: AgentState = {
+            "query": query,
+            "user_id": user_id,
+            "session_id": session_id,
+            "context": context or {},
+            "messages": [],
+            "current_agent": "",
+            "next_agent": "",
+            "agent_outputs": {},
+            "grader_score": 0.0,
+            "grader_feedback": "",
+            "final_response": "",
+            "sources": [],
+            "iteration": 0,
+            "max_iterations": 3,
+            "error": None,
+            # V3 Streaming: Signal that we want streaming
+            "_streaming_mode": True
+        }
+        
+        # Track current node for event deduplication
+        last_node = None
+        final_state = None
+        
+        # LangGraph streaming execution
+        # Note: astream_events requires langgraph >= 0.2.x
+        try:
+            async for event in graph.astream_events(initial_state, version="v2"):
+                event_type = event.get("event", "")
+                event_name = event.get("name", "")
+                event_data = event.get("data", {})
+                
+                # Extract node name from event
+                node_name = _extract_node_from_event(event_name, event_data)
+                
+                # Handle node start events
+                if event_type == "on_chain_start" and node_name and node_name != last_node:
+                    last_node = node_name
+                    if node_name in NODE_DESCRIPTIONS:
+                        yield await create_status_event(
+                            NODE_DESCRIPTIONS[node_name],
+                            node_name
+                        )
+                
+                # Handle node end events with results
+                elif event_type == "on_chain_end" and node_name:
+                    output = event_data.get("output", {})
+                    
+                    # Supervisor routing decision
+                    if node_name == "supervisor":
+                        next_agent = output.get("next_agent", "")
+                        if next_agent:
+                            yield await create_thinking_event(
+                                f"Định tuyến đến: {next_agent}",
+                                "routing",
+                                confidence=0.9,
+                                details={"routed_to": next_agent}
+                            )
+                    
+                    # Grader quality check result
+                    elif node_name == "grader":
+                        score = output.get("grader_score", 0)
+                        yield await create_thinking_event(
+                            f"Điểm chất lượng: {score}/10 - {'ĐẠT' if score >= 6 else 'CHƯA ĐẠT'}",
+                            "quality_check",
+                            confidence=score / 10,
+                            details={"score": score, "passed": score >= 6}
+                        )
+                    
+                    # Synthesizer final response
+                    elif node_name == "synthesizer":
+                        final_response = output.get("final_response", "")
+                        if final_response:
+                            # Stream the final response in chunks for progressive display
+                            # This simulates token streaming for the synthesized response
+                            chunk_size = 100  # Characters per chunk
+                            for i in range(0, len(final_response), chunk_size):
+                                chunk = final_response[i:i+chunk_size]
+                                yield await create_answer_event(chunk)
+                        
+                        # Store final state for sources/metadata
+                        final_state = output
+                    
+                    # TutorAgent with tool usage
+                    elif node_name in ["tutor_agent", "rag_agent"]:
+                        # Check for tool calls
+                        tools_used = output.get("tools_used", [])
+                        if tools_used:
+                            for tool in tools_used:
+                                yield await create_thinking_event(
+                                    f"Tra cứu: {tool.get('description', tool.get('name', 'unknown'))}",
+                                    "tool_call",
+                                    details={"tool": tool.get("name")}
+                                )
+                        
+                        # Check for CRAG trace
+                        reasoning_trace = output.get("reasoning_trace")
+                        if reasoning_trace and hasattr(reasoning_trace, "steps"):
+                            for step in reasoning_trace.steps:
+                                yield await create_thinking_event(
+                                    f"{step.description}: {step.result}",
+                                    step.step_name,
+                                    confidence=step.confidence
+                                )
+                
+                # Handle LLM token streaming (if available)
+                elif event_type == "on_chat_model_stream":
+                    chunk = event_data.get("chunk", {})
+                    content = _extract_chunk_content(chunk)
+                    if content:
+                        yield await create_answer_event(content)
+        
+        except AttributeError:
+            # Fallback for LangGraph versions without astream_events
+            logger.warning("[MULTI_AGENT_STREAM] astream_events not available, using ainvoke")
+            
+            # Fall back to non-streaming execution with synthetic events
+            yield await create_status_event("⚠️ Streaming không khả dụng, đang xử lý...", None)
+            
+            result = await graph.ainvoke(initial_state)
+            final_state = result
+            
+            # Yield the final response as chunks
+            final_response = result.get("final_response", "")
+            chunk_size = 100
+            for i in range(0, len(final_response), chunk_size):
+                yield await create_answer_event(final_response[i:i+chunk_size])
+        
+        # Emit sources
+        if final_state:
+            sources = final_state.get("sources", [])
+            if sources:
+                # Format sources for SSE
+                formatted_sources = []
+                for s in sources:
+                    formatted_sources.append({
+                        "title": s.get("title", ""),
+                        "content": s.get("content", "")[:200] if s.get("content") else "",
+                        "image_url": s.get("image_url"),
+                        "page_number": s.get("page_number"),
+                        "document_id": s.get("document_id")
+                    })
+                yield await create_sources_event(formatted_sources)
+            
+            # Emit metadata with reasoning_trace
+            reasoning_trace = final_state.get("reasoning_trace")
+            reasoning_dict = None
+            if reasoning_trace:
+                try:
+                    reasoning_dict = reasoning_trace.model_dump()
+                except AttributeError:
+                    try:
+                        reasoning_dict = reasoning_trace.dict()
+                    except:
+                        reasoning_dict = None
+            
+            processing_time = time.time() - start_time
+            yield await create_metadata_event(
+                reasoning_trace=reasoning_dict,
+                processing_time=processing_time,
+                confidence=final_state.get("grader_score", 0) / 10,
+                model="maritime-rag-v3-streaming",
+                doc_count=len(sources),
+                thinking=final_state.get("thinking")
+            )
+        
+        # Done signal
+        total_time = time.time() - start_time
+        yield await create_done_event(total_time)
+        
+        # End trace
+        trace_summary = registry.end_request_trace(trace_id)
+        logger.info(
+            f"[MULTI_AGENT_STREAM] Completed in {total_time:.2f}s, "
+            f"{trace_summary.get('span_count', 0)} spans"
+        )
+        
+    except Exception as e:
+        logger.exception(f"[MULTI_AGENT_STREAM] Error: {e}")
+        yield await create_error_event(str(e))
+        registry.end_request_trace(trace_id)
+
+
+def _extract_node_from_event(event_name: str, event_data: dict) -> Optional[str]:
+    """Extract node name from LangGraph event."""
+    # Check event name
+    for node in NODE_DESCRIPTIONS.keys():
+        if node in event_name.lower():
+            return node
+    
+    # Check event data
+    if "name" in event_data:
+        data_name = event_data["name"]
+        for node in NODE_DESCRIPTIONS.keys():
+            if node in data_name.lower():
+                return node
+    
+    return None
+
+
+def _extract_chunk_content(chunk: Any) -> Optional[str]:
+    """Extract text content from LLM chunk."""
+    if isinstance(chunk, str):
+        return chunk
+    
+    if hasattr(chunk, "content"):
+        content = chunk.content
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            texts = []
+            for block in content:
+                if isinstance(block, dict) and "text" in block:
+                    texts.append(block["text"])
+            return "".join(texts) if texts else None
+    
+    if isinstance(chunk, dict) and "content" in chunk:
+        return chunk["content"] if isinstance(chunk["content"], str) else None
+    
+    return None
+

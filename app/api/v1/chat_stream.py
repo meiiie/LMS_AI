@@ -309,30 +309,35 @@ async def chat_stream_v3(
     auth: RequireAuth
 ):
     """
-    P3+ SOTA: Full CRAG Pipeline + True Token Streaming
+    V3 SOTA: Full Multi-Agent Graph + Interleaved Streaming
     
-    Best of both worlds:
-    - Quality: Full CRAG pipeline (grading, verification, reasoning_trace)
-    - UX: Progressive events at each step + true token streaming
+    ==================================================================
+    REFACTORED (2025-12-21): Now uses SAME pipeline as V1 (/chat)
+    but with progressive streaming at each graph node.
+    ==================================================================
     
-    Event Types (following OpenAI Responses API pattern):
-    - status: Processing stage updates (shown as typing indicator)
-    - thinking: AI reasoning steps (shown in collapsible section)
-    - answer: Response tokens (streamed real-time via LLM.astream())
+    Architecture:
+    - Quality: Full Multi-Agent Graph (Supervisor → TutorAgent → GraderAgent → Synthesizer)
+    - UX: Progressive events at each step + token streaming from Synthesizer
+    - Result: V1 quality + streaming transparency
+    
+    Event Types (OpenAI Responses API pattern):
+    - status: Processing stage updates (typing indicator, shows current node)
+    - thinking: AI reasoning steps (routing, tool calls, quality check)
+    - answer: Response tokens (streamed from Synthesizer)
     - sources: Citation list with image_url for PDF highlighting
     - metadata: reasoning_trace, confidence, timing
     - done: Stream complete
     - error: Error occurred
     
-    Timeline:
+    Timeline (expected):
     - 0s: First status event (user sees progress immediately)
-    - 4s: Analysis complete
-    - 7s: Retrieval complete  
-    - 11s: Grading complete
-    - 25s: First answer token
-    - 55s: Complete with reasoning_trace
+    - 4-6s: Supervisor routing complete
+    - 40-50s: TutorAgent + CRAG complete
+    - 55-60s: GraderAgent quality check (or skipped if high confidence)
+    - 65-75s: Synthesizer + answer tokens + done
     
-    **Feature: p3-v3-full-crag-streaming**
+    **Feature: v3-full-graph-streaming**
     """
     start_time = time.time()
     
@@ -342,77 +347,89 @@ async def chat_stream_v3(
     
     async def generate_events_v3() -> AsyncGenerator[str, None]:
         try:
-            # Import CRAG for full pipeline with streaming
-            from app.engine.agentic_rag.corrective_rag import get_corrective_rag
+            # Import Multi-Agent streaming function
+            from app.engine.multi_agent.graph import process_with_multi_agent_streaming
             
-            # Get CRAG singleton
-            crag = get_corrective_rag()
-            
-            # Build context
+            # Build context for multi-agent graph
+            # This matches the context structure used in V1 through ChatOrchestrator
             context = {
                 "user_id": chat_request.user_id,
                 "user_role": chat_request.role.value,
-                "conversation_history": ""
+                "user_name": None,  # Will be fetched by graph if needed
+                "conversation_history": "",
+                "lms_course": None,
+                "lms_module": None
             }
             
-            # Memory fetching is optional - skip if service unavailable
-            # This keeps V3 lightweight and avoids import errors
+            # Optional: Fetch memory context for better personalization
+            try:
+                from app.engine.semantic_memory import get_semantic_memory_engine
+                semantic_memory = get_semantic_memory_engine()
+                memory_context = await semantic_memory.get_memory_context(
+                    user_id=chat_request.user_id
+                )
+                if memory_context:
+                    context["user_name"] = memory_context.get("user_name")
+                    context["semantic_context"] = memory_context.get("context", "")
+            except Exception as mem_err:
+                logger.debug(f"[STREAM-V3] Memory fetch optional, skipping: {mem_err}")
             
-            # Stream events from CRAG pipeline
-            async for event in crag.process_streaming(
+            # Stream events from Multi-Agent Graph
+            # This runs the full pipeline: Supervisor → TutorAgent → GraderAgent → Synthesizer
+            async for event in process_with_multi_agent_streaming(
                 query=chat_request.message,
+                user_id=chat_request.user_id,
+                session_id=chat_request.session_id or "",
                 context=context
             ):
-                event_type = event.get("type", "answer")
-                content = event.get("content", "")
+                # Convert StreamEvent to SSE format
+                event_type = event.type
                 
                 if event_type == "status":
-                    # Status events are shown as typing indicator
-                    yield format_sse("thinking", {"content": content})
+                    # Status events shown as typing indicator
+                    yield format_sse("thinking", {
+                        "content": event.content,
+                        "step": event.step,
+                        "node": event.node
+                    })
                     
                 elif event_type == "thinking":
-                    # Thinking events show AI reasoning
+                    # Thinking events show AI reasoning steps
                     yield format_sse("thinking", {
-                        "content": content,
-                        "step": event.get("step"),
-                        "details": event.get("details")
+                        "content": event.content,
+                        "step": event.step,
+                        "confidence": event.confidence,
+                        "details": event.details
                     })
                     
                 elif event_type == "answer":
                     # Answer tokens streamed real-time
-                    yield format_sse("answer", {"content": content})
+                    yield format_sse("answer", {"content": event.content})
                     
                 elif event_type == "sources":
                     # Sources with image_url for PDF highlighting
-                    yield format_sse("sources", {"sources": content})
+                    yield format_sse("sources", {"sources": event.content})
                     
                 elif event_type == "metadata":
-                    # Metadata includes reasoning_trace
-                    metadata = content
-                    metadata["streaming_version"] = "v3"
+                    # Metadata includes full reasoning_trace
+                    metadata = event.content
+                    metadata["streaming_version"] = "v3-graph"
                     yield format_sse("metadata", metadata)
                     
                 elif event_type == "done":
-                    # Will send done at the end
-                    pass
+                    # Done signal - send immediately
+                    yield format_sse("done", event.content)
                     
                 elif event_type == "error":
-                    yield format_sse("error", {"message": content})
+                    yield format_sse("error", {"message": event.content.get("message", str(event.content))})
                     return
                 
-                # Micro delay for flush
+                # Micro delay for flush (important for SSE)
                 await asyncio.sleep(0.01)
             
-            # Processing time
+            # Final processing time log
             processing_time = time.time() - start_time
-            
-            # Done signal
-            yield format_sse("done", {
-                "status": "complete",
-                "total_time": round(processing_time, 3)
-            })
-            
-            logger.info(f"[STREAM-V3] Completed in {processing_time:.3f}s")
+            logger.info(f"[STREAM-V3] Completed in {processing_time:.3f}s (full graph)")
             
         except Exception as e:
             logger.exception(f"[STREAM-V3] Error: {e}")
