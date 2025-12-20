@@ -730,7 +730,7 @@ class CorrectiveRAG:
         """
         import time
         import asyncio
-        from app.engine.agentic_rag.reasoning_tracer import get_reasoning_tracer, StepNames
+        # Note: get_reasoning_tracer and StepNames already imported at module level (line 37-39)
         
         context = context or {}
         start_time = time.time()
