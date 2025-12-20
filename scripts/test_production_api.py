@@ -202,8 +202,8 @@ async def test_chat_rag_query(client: httpx.AsyncClient) -> TestResult:
             "POST",
             f"{API_PREFIX}/chat",
             json={
-                # Updated to match Vietnamese Maritime Law (Bộ luật hàng hải Việt Nam)
-                "message": "Giải thích Điều 31 về trách nhiệm đăng kiểm tàu biển theo Bộ luật hàng hải Việt Nam 2015.",
+                # Cold path test: Use Điều 50 to avoid semantic cache hits from previous Điều 31 queries
+                "message": "Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu biển theo Bộ luật hàng hải Việt Nam 2015.",
                 "user_id": TEST_USER_ID,
                 "role": TEST_ROLE
             },

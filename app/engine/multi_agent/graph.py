@@ -282,6 +282,51 @@ def route_decision(state: AgentState) -> Literal["rag_agent", "tutor_agent", "me
 
 
 # =============================================================================
+# P1 SOTA Early Exit: Skip Quality Check at High Confidence
+# Saves ~7.8s when CRAG confidence is high
+# =============================================================================
+
+QUALITY_SKIP_THRESHOLD = 0.85  # Skip grader when confidence >= 85%
+
+
+def should_skip_grader(state: AgentState) -> Literal["grader", "synthesizer"]:
+    """
+    Determine if quality check can be skipped based on confidence.
+    
+    SOTA 2025 Pattern: Self-RAG Early Exit
+    - If CRAG pipeline returned high confidence, skip expensive grader LLM call
+    - Saves ~7.8s per request
+    
+    Args:
+        state: Current agent state with potential CRAG trace
+        
+    Returns:
+        "synthesizer" if skip, "grader" if quality check needed
+    """
+    # Check for CRAG trace with confidence
+    reasoning_trace = state.get("reasoning_trace")
+    
+    if reasoning_trace and hasattr(reasoning_trace, 'final_confidence'):
+        confidence = reasoning_trace.final_confidence
+        if confidence >= QUALITY_SKIP_THRESHOLD:
+            logger.info(
+                f"[P1 EARLY EXIT] Skipping quality_check: confidence={confidence:.2f} >= {QUALITY_SKIP_THRESHOLD}"
+            )
+            return "synthesizer"
+    
+    # Also check state-level confidence from CRAG
+    crag_confidence = state.get("crag_confidence", 0)
+    if crag_confidence >= QUALITY_SKIP_THRESHOLD:
+        logger.info(
+            f"[P1 EARLY EXIT] Skipping quality_check: crag_confidence={crag_confidence:.2f} >= {QUALITY_SKIP_THRESHOLD}"
+        )
+        return "synthesizer"
+    
+    # Default: run quality check
+    return "grader"
+
+
+# =============================================================================
 # Graph Builder
 # =============================================================================
 
@@ -328,9 +373,25 @@ def build_multi_agent_graph():
         }
     )
     
-    # All agents → Grader
-    workflow.add_edge("rag_agent", "grader")
-    workflow.add_edge("tutor_agent", "grader")
+    # All agents → Grader (with conditional skip)
+    # P1 SOTA: Use conditional edges for tutor and rag - skip grader at high confidence
+    workflow.add_conditional_edges(
+        "rag_agent",
+        should_skip_grader,
+        {
+            "grader": "grader",
+            "synthesizer": "synthesizer"
+        }
+    )
+    workflow.add_conditional_edges(
+        "tutor_agent",
+        should_skip_grader,
+        {
+            "grader": "grader",
+            "synthesizer": "synthesizer"
+        }
+    )
+    # Memory agent always goes through grader (low traffic)
     workflow.add_edge("memory_agent", "grader")
     
     # Direct → Synthesizer (skip grader)

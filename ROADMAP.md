@@ -30,10 +30,36 @@ None currently.
 
 | Phase | Feature | Priority | Effort | Dependencies |
 |-------|---------|----------|--------|--------------|
+| 3 | RAG Accuracy Optimization | HIGH | 3-5 days | HyDE, Neural Reranker ready |
 | 9 | Proactive Learning | MEDIUM | 5-7 days | LMS frontend webhook |
 | 12 | Scheduled Tasks | LOW | 5-7 days | APScheduler, Push notifications |
 
 ---
+
+## Phase 3: RAG Accuracy Optimization (SOTA 2025)
+
+**Goal:** Tăng retrieval accuracy +35-45% với HyDE và Neural Reranking
+
+### Features
+- [ ] **HyDE Integration** - Hypothetical Document Embeddings (+20-30% accuracy)
+- [ ] **Neural Reranker** - BGE-Reranker-v2-m3 cross-encoder (+15-25% accuracy)
+- [ ] Config flags for enable/disable
+- [ ] A/B testing framework for accuracy measurement
+
+### Components Ready
+| Component | File | Status | Latency Cost |
+|-----------|------|--------|--------------|
+| HyDE Service | `app/services/hyde_service.py` | ✅ Ready | +2-3s |
+| Neural Reranker | `app/services/neural_reranker.py` | ✅ Ready | +0.5-1s |
+
+### Technical Details
+- **HyDE**: Generate hypothetical answer → embed → search (Google/MIT research)
+- **Neural Reranker**: Cross-encoder reranking with 70% rerank + 30% original scoring
+- **Fallback**: Graceful degradation if model unavailable
+
+### Estimated Effort
+- Integration: 2-3 days
+- Testing & Tuning: 1-2 days
 
 ## Phase 9: Proactive Learning
 
@@ -128,4 +154,4 @@ None currently.
 
 ---
 
-*Last Updated: 2025-12-13*
+*Last Updated: 2025-12-20*

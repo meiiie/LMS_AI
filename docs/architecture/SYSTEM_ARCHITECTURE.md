@@ -1,8 +1,8 @@
 # Maritime AI Service - System Architecture
 
-**Version:** 3.0 (2025-12-14)  
+**Version:** 3.1 (2025-12-20)  
 **Purpose:** LMS Integration Preparation  
-**Status:** Production Ready
+**Status:** Production Ready - Phase 2.4a SOTA Optimizations Applied
 
 ---
 
@@ -63,7 +63,7 @@ graph TB
     end
     
     subgraph "External Services"
-        Gemini[Google Gemini<br>2.5 Flash + Embedding]
+        Gemini[Google Gemini<br>3.0 Flash + Embedding]
     end
     
     LMS --> API
@@ -404,7 +404,7 @@ sequenceDiagram
 | Layer | Technology | Version |
 |-------|------------|---------|
 | **Framework** | FastAPI | 0.115.4 |
-| **LLM** | Google Gemini | 2.5 Flash |
+| **LLM** | Google Gemini | 3.0 Flash Preview |
 | **Embeddings** | Gemini | gemini-embedding-001 |
 | **Orchestration** | LangGraph | 0.2.x |
 | **Vector DB** | Neon PostgreSQL + pgvector | 0.7.x |
