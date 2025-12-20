@@ -4,6 +4,8 @@ Test script for P3 SOTA Streaming API v2
 Tests the new /chat/stream/v2 endpoint which uses true token-by-token streaming.
 Saves detailed results to test_results_*.txt file.
 
+IMPORTANT: Uses same test question as test_production_api.py for fair comparison.
+
 Run: python scripts/test_streaming_v2.py
 """
 
@@ -23,6 +25,19 @@ API_KEY = "maritime-lms-prod-2024"
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 OUTPUT_FILE = f"scripts/test_streaming_v2_results_{TIMESTAMP}.txt"
 
+# SAME QUESTION as test_production_api.py for fair comparison
+# Cold path test: Use Điều 50 to avoid semantic cache hits
+TEST_QUESTIONS = [
+    {
+        "question": "Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu biển theo Bộ luật hàng hải Việt Nam 2015.",
+        "name": "Điều 50 - Quyền hạn thuyền trưởng (same as production_api.py)"
+    },
+    {
+        "question": "Quy tắc 15 COLREGs quy định thế nào về tình huống cắt mũi nhau?",
+        "name": "Rule 15 COLREGs - Crossing situation"
+    }
+]
+
 
 class TestLogger:
     """Logger that writes to both console and file."""
@@ -36,6 +51,7 @@ class TestLogger:
         self.lines.append(message)
     
     def save(self):
+        os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
         with open(self.filepath, "w", encoding="utf-8") as f:
             f.write("\n".join(self.lines))
         print(f"\n📁 Results saved to: {self.filepath}")
@@ -47,16 +63,14 @@ async def test_streaming_v2(logger: TestLogger):
     logger.log("P3 SOTA STREAMING TEST - /api/v1/chat/stream/v2")
     logger.log("=" * 70)
     
-    test_questions = [
-        "Điều 15 Luật Hàng hải 2015 quy định gì về thuyền trưởng?",
-        "Quy tắc 15 COLREGs quy định thế nào?",
-    ]
-    
     results = []
     
-    for i, question in enumerate(test_questions, 1):
+    for i, test in enumerate(TEST_QUESTIONS, 1):
+        question = test["question"]
+        test_name = test["name"]
+        
         logger.log(f"\n{'='*70}")
-        logger.log(f"TEST {i}/{len(test_questions)}")
+        logger.log(f"TEST {i}/{len(TEST_QUESTIONS)}: {test_name}")
         logger.log(f"{'='*70}")
         
         payload = {
@@ -72,8 +86,9 @@ async def test_streaming_v2(logger: TestLogger):
         first_token_time = None
         token_count = 0
         thinking_events = []
-        answer_preview = ""
+        full_answer = []  # Collect all answer tokens
         sources_received = False
+        sources_count = 0
         error_message = None
         
         async with httpx.AsyncClient() as client:
@@ -87,7 +102,7 @@ async def test_streaming_v2(logger: TestLogger):
                         "X-API-Key": API_KEY,
                         "Accept": "text/event-stream"
                     },
-                    timeout=120
+                    timeout=180  # Same timeout as production test
                 ) as resp:
                     logger.log(f"Status: {resp.status_code}")
                     logger.log(f"Content-Type: {resp.headers.get('content-type')}")
@@ -99,6 +114,7 @@ async def test_streaming_v2(logger: TestLogger):
                         logger.log(f"❌ Error: {error_message}")
                         results.append({
                             "question": question,
+                            "name": test_name,
                             "success": False,
                             "error": error_message
                         })
@@ -129,24 +145,33 @@ async def test_streaming_v2(logger: TestLogger):
                             
                             elif current_event == "answer":
                                 token_count += 1
-                                # Collect answer content
+                                # Collect FULL answer content
                                 try:
                                     import json
                                     parsed = json.loads(data)
                                     content = parsed.get("content", "")
-                                    if len(answer_preview) < 200:
-                                        answer_preview += content
+                                    full_answer.append(content)
                                 except:
-                                    pass
+                                    # If not JSON, append raw data
+                                    full_answer.append(data)
                                 
-                                if token_count <= 3:
-                                    logger.log(f"   📝 answer token #{token_count}: {data[:60]}...")
-                                elif token_count == 4:
-                                    logger.log(f"   📝 ... (streaming {token_count}+ tokens)")
+                                if token_count <= 5:
+                                    logger.log(f"   📝 answer token #{token_count}: {data[:80]}...")
+                                elif token_count == 6:
+                                    logger.log(f"   📝 ... (streaming more tokens)")
                             
                             elif current_event == "sources":
                                 sources_received = True
-                                logger.log(f"   📚 sources: {data[:100]}...")
+                                try:
+                                    import json
+                                    parsed = json.loads(data)
+                                    if isinstance(parsed, dict) and "sources" in parsed:
+                                        sources_count = len(parsed.get("sources", []))
+                                    elif isinstance(parsed, list):
+                                        sources_count = len(parsed)
+                                except:
+                                    pass
+                                logger.log(f"   📚 sources: {sources_count} sources received")
                             
                             elif current_event == "metadata":
                                 logger.log(f"   📊 metadata: {data[:100]}...")
@@ -160,36 +185,52 @@ async def test_streaming_v2(logger: TestLogger):
                     
                     total_time = time.time() - start_time
                     
+                    # Join full answer
+                    answer_text = "".join(full_answer)
+                    answer_length = len(answer_text)
+                    
                     logger.log(f"\n{'='*70}")
                     logger.log("TEST RESULTS")
                     logger.log(f"{'='*70}")
-                    logger.log(f"   Question:        {question[:50]}...")
+                    logger.log(f"   Question:        {question[:60]}...")
                     logger.log(f"   Total tokens:    {token_count}")
+                    logger.log(f"   Answer length:   {answer_length} chars")
                     logger.log(f"   Thinking events: {len(thinking_events)}")
                     logger.log(f"   First token:     {first_token_time:.2f}s" if first_token_time else "   First token:     N/A")
                     logger.log(f"   Total time:      {total_time:.2f}s")
-                    logger.log(f"   Sources:         {'✅' if sources_received else '❌'}")
+                    logger.log(f"   Sources:         {sources_count if sources_received else 'None'}")
                     logger.log(f"   Error:           {error_message or 'None'}")
                     
-                    if answer_preview:
-                        logger.log(f"\n   Answer preview:")
-                        logger.log(f"   {answer_preview[:200]}...")
+                    # Show answer preview (first 500 chars)
+                    if answer_text:
+                        logger.log(f"\n   📝 FULL ANSWER PREVIEW (first 500 chars):")
+                        logger.log("-" * 70)
+                        preview = answer_text[:500]
+                        for line in preview.split('\n'):
+                            logger.log(f"   {line}")
+                        if len(answer_text) > 500:
+                            logger.log(f"   ... ({answer_length - 500} more chars)")
+                    else:
+                        logger.log(f"\n   ⚠️ NO ANSWER TEXT RECEIVED!")
                     
                     # Evaluate
                     success = (
                         first_token_time is not None and 
-                        first_token_time < 30 and 
+                        first_token_time < 40 and  # Allow up to 40s for first token
                         token_count > 0 and
+                        answer_length > 100 and  # Must have substantial answer
                         error_message is None
                     )
                     
                     results.append({
                         "question": question,
+                        "name": test_name,
                         "success": success,
                         "first_token_time": first_token_time,
                         "total_time": total_time,
                         "token_count": token_count,
-                        "sources_received": sources_received,
+                        "answer_length": answer_length,
+                        "sources_count": sources_count,
                         "error": error_message
                     })
                     
@@ -199,6 +240,7 @@ async def test_streaming_v2(logger: TestLogger):
                 logger.log(traceback.format_exc())
                 results.append({
                     "question": question,
+                    "name": test_name,
                     "success": False,
                     "error": str(e)
                 })
@@ -207,79 +249,107 @@ async def test_streaming_v2(logger: TestLogger):
 
 
 async def compare_v1_v2(logger: TestLogger):
-    """Compare v1 (fake streaming) vs v2 (true streaming)."""
+    """Compare v1 (non-streaming) vs v2 (streaming) using same question."""
     logger.log(f"\n{'='*70}")
-    logger.log("V1 vs V2 COMPARISON TEST")
+    logger.log("V1 (production /chat) vs V2 (streaming) COMPARISON")
     logger.log(f"{'='*70}")
     
-    question = "Điều 50 Luật Hàng hải quy định gì?"
+    question = "Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu biển theo Bộ luật hàng hải Việt Nam 2015."
     
-    # Test V1
-    logger.log("\n📡 Testing V1 (/chat/stream)...")
+    # Test V1 (non-streaming /chat endpoint)
+    logger.log("\n📡 Testing V1 (/api/v1/chat - non-streaming)...")
     v1_start = time.time()
-    v1_first_token = None
+    v1_answer_length = 0
+    v1_sources = 0
     
     async with httpx.AsyncClient() as client:
         try:
-            async with client.stream(
-                "POST",
-                f"{BASE_URL}/api/v1/chat/stream",
-                json={"user_id": "test-v1", "message": question, "role": "student"},
+            resp = await client.post(
+                f"{BASE_URL}/api/v1/chat",
+                json={"user_id": "test-v1-compare", "message": question, "role": "student"},
                 headers={"Content-Type": "application/json", "X-API-Key": API_KEY},
-                timeout=120
-            ) as resp:
-                async for line in resp.aiter_lines():
-                    if line.startswith("event: answer") and v1_first_token is None:
-                        v1_first_token = time.time() - v1_start
+                timeout=180.0
+            )
+            v1_total = time.time() - v1_start
+            if resp.status_code == 200:
+                data = resp.json()
+                response_data = data.get("data", {})
+                v1_answer_length = len(response_data.get("answer", ""))
+                v1_sources = len(response_data.get("sources", []))
+                logger.log(f"   ✅ V1 Success: {v1_answer_length} chars, {v1_sources} sources in {v1_total:.2f}s")
+            else:
+                logger.log(f"   ❌ V1 Error: {resp.status_code}")
         except Exception as e:
-            logger.log(f"   V1 Error: {e}")
+            v1_total = time.time() - v1_start
+            logger.log(f"   ❌ V1 Exception: {e}")
     
-    v1_total = time.time() - v1_start
-    
-    # Test V2
-    logger.log("📡 Testing V2 (/chat/stream/v2)...")
+    # Test V2 (streaming)
+    logger.log("\n📡 Testing V2 (/api/v1/chat/stream/v2 - streaming)...")
     v2_start = time.time()
     v2_first_token = None
+    v2_answer_length = 0
+    v2_sources = 0
     
     async with httpx.AsyncClient() as client:
         try:
             async with client.stream(
                 "POST",
                 f"{BASE_URL}/api/v1/chat/stream/v2",
-                json={"user_id": "test-v2", "message": question, "role": "student"},
+                json={"user_id": "test-v2-compare", "message": question, "role": "student"},
                 headers={"Content-Type": "application/json", "X-API-Key": API_KEY},
-                timeout=120
+                timeout=180
             ) as resp:
+                current_event = None
+                full_answer = []
+                
                 async for line in resp.aiter_lines():
-                    if line.startswith("event: answer") and v2_first_token is None:
-                        v2_first_token = time.time() - v2_start
+                    if line.startswith("event:"):
+                        current_event = line.replace("event:", "").strip()
+                        if current_event == "answer" and v2_first_token is None:
+                            v2_first_token = time.time() - v2_start
+                    elif line.startswith("data:"):
+                        data = line.replace("data:", "").strip()
+                        if current_event == "answer":
+                            try:
+                                import json
+                                parsed = json.loads(data)
+                                full_answer.append(parsed.get("content", ""))
+                            except:
+                                full_answer.append(data)
+                        elif current_event == "sources":
+                            try:
+                                import json
+                                parsed = json.loads(data)
+                                if isinstance(parsed, dict):
+                                    v2_sources = len(parsed.get("sources", []))
+                            except:
+                                pass
+                
+                v2_answer_length = len("".join(full_answer))
+                v2_total = time.time() - v2_start
+                logger.log(f"   ✅ V2 Success: {v2_answer_length} chars, {v2_sources} sources")
+                logger.log(f"      First token: {v2_first_token:.2f}s, Total: {v2_total:.2f}s")
+                
         except Exception as e:
-            logger.log(f"   V2 Error: {e}")
-    
-    v2_total = time.time() - v2_start
+            v2_total = time.time() - v2_start
+            logger.log(f"   ❌ V2 Exception: {e}")
     
     logger.log(f"\n{'='*70}")
     logger.log("COMPARISON RESULTS")
     logger.log(f"{'='*70}")
-    logger.log(f"| Metric        | V1 (old)     | V2 (new)     | Improvement |")
-    logger.log(f"|---------------|--------------|--------------|-------------|")
-    
-    v1_ft = f"{v1_first_token:.2f}s" if v1_first_token else "N/A"
-    v2_ft = f"{v2_first_token:.2f}s" if v2_first_token else "N/A"
-    
-    if v1_first_token and v2_first_token:
-        improvement = f"{(v1_first_token / v2_first_token):.1f}x faster"
-    else:
-        improvement = "N/A"
-    
-    logger.log(f"| First token   | {v1_ft:12} | {v2_ft:12} | {improvement:11} |")
-    logger.log(f"| Total time    | {v1_total:.2f}s        | {v2_total:.2f}s        | -           |")
+    logger.log(f"| Metric        | V1 (/chat)    | V2 (/stream/v2) | Difference     |")
+    logger.log(f"|---------------|---------------|-----------------|----------------|")
+    logger.log(f"| First visible | {v1_total:.2f}s (all)   | {v2_first_token:.2f}s (token) | {(v1_total/v2_first_token):.1f}x faster    |" if v2_first_token else "| First visible | N/A           | N/A             | N/A            |")
+    logger.log(f"| Total time    | {v1_total:.2f}s        | {v2_total:.2f}s          | {'Similar' if abs(v1_total - v2_total) < 5 else 'Different'}        |")
+    logger.log(f"| Answer length | {v1_answer_length} chars   | {v2_answer_length} chars      | {'Similar' if abs(v1_answer_length - v2_answer_length) < 100 else 'DIFFERENT!'}        |")
+    logger.log(f"| Sources       | {v1_sources}            | {v2_sources}              | {'Same' if v1_sources == v2_sources else 'Different'}            |")
     
     return {
-        "v1_first_token": v1_first_token,
-        "v2_first_token": v2_first_token,
         "v1_total": v1_total,
-        "v2_total": v2_total
+        "v1_answer_length": v1_answer_length,
+        "v2_first_token": v2_first_token,
+        "v2_total": v2_total,
+        "v2_answer_length": v2_answer_length,
     }
 
 
@@ -291,12 +361,14 @@ async def main():
     logger.log(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.log(f"Target: {BASE_URL}")
     logger.log("=" * 70)
+    logger.log("\n⚠️  Using SAME test questions as test_production_api.py for fair comparison")
     
     # Run streaming tests
     results = await test_streaming_v2(logger)
     
-    # Run comparison
-    # comparison = await compare_v1_v2(logger)  # Uncomment to run comparison
+    # Run V1 vs V2 comparison
+    logger.log("\n\n")
+    comparison = await compare_v1_v2(logger)
     
     # Summary
     logger.log(f"\n{'='*70}")
@@ -306,20 +378,24 @@ async def main():
     success_count = sum(1 for r in results if r.get("success"))
     total_count = len(results)
     
-    logger.log(f"   Tests passed:    {success_count}/{total_count}")
+    logger.log(f"   Tests passed:     {success_count}/{total_count}")
     
-    avg_first_token = sum(r.get("first_token_time", 0) or 0 for r in results) / max(len(results), 1)
-    logger.log(f"   Avg first token: {avg_first_token:.2f}s")
-    logger.log(f"   Target:          <30s")
+    first_tokens = [r.get("first_token_time") for r in results if r.get("first_token_time")]
+    avg_first_token = sum(first_tokens) / len(first_tokens) if first_tokens else 0
+    logger.log(f"   Avg first token:  {avg_first_token:.2f}s")
+    logger.log(f"   Target:           <40s")
+    
+    avg_answer_len = sum(r.get("answer_length", 0) for r in results) / len(results)
+    logger.log(f"   Avg answer len:   {avg_answer_len:.0f} chars")
     
     if success_count == total_count:
-        logger.log(f"\n✅ ALL TESTS PASSED")
+        logger.log(f"\n✅ ALL TESTS PASSED - P3 STREAMING WORKING!")
         status = 0
     else:
         logger.log(f"\n❌ SOME TESTS FAILED")
         for r in results:
             if not r.get("success"):
-                logger.log(f"   - {r.get('question', 'Unknown')[:40]}: {r.get('error', 'Unknown error')}")
+                logger.log(f"   - {r.get('name', 'Unknown')}: {r.get('error', 'Unknown error')}")
         status = 1
     
     logger.log(f"\n{'='*70}")

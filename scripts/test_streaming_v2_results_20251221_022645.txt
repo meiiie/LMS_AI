@@ -1,0 +1,118 @@
+======================================================================
+P3 SOTA STREAMING VERIFICATION
+Date: 2025-12-21 02:26:45
+Target: https://maritime-ai-chatbot.onrender.com
+======================================================================
+======================================================================
+P3 SOTA STREAMING TEST - /api/v1/chat/stream/v2
+======================================================================
+
+======================================================================
+TEST 1/2
+======================================================================
+
+📤 Request: Điều 15 Luật Hàng hải 2015 quy định gì về thuyền trưởng?
+----------------------------------------------------------------------
+Status: 200
+Content-Type: text/event-stream; charset=utf-8
+----------------------------------------------------------------------
+
+📨 Events received:
+
+   🔄 thinking: {"content": "🎯 Đang phân tích câu hỏi..."}...
+   🔄 thinking: {"content": "🔍 Đang tra cứu cơ sở dữ liệu..."}...
+   🔄 thinking: {"content": "📚 Tìm thấy 10 tài liệu liên quan"}...
+   🔄 thinking: {"content": "✍️ Đang tạo câu trả lời..."}...
+
+   ⚡ FIRST TOKEN TIME: 15.72s
+----------------------------------------------------------------------
+   📝 answer token #1: {"content": [{"type": "thinking", "thinking": "**Exploring M...
+   📝 answer token #2: {"content": [{"type": "thinking", "thinking": "**Clarifying ...
+   📝 answer token #3: {"content": [{"type": "thinking", "thinking": "**Revising Le...
+   📝 ... (streaming 4+ tokens)
+   📚 sources: {"sources": [{"title": "Chào bạn, với vai trò chuyên gia số hóa dữ liệu Hà...", "content": "luat-han...
+   📊 metadata: {"processing_time": 20.672, "model": "maritime-rag-v1", "agent_type": "rag", "streaming_version": "v...
+   ✅ done
+
+======================================================================
+TEST RESULTS
+======================================================================
+   Question:        Điều 15 Luật Hàng hải 2015 quy định gì về thuyền t...
+   Total tokens:    35
+   Thinking events: 4
+   First token:     15.72s
+   Total time:      21.28s
+   Sources:         ✅
+   Error:           None
+
+   Answer preview:
+   
+
+**Nguồn tham khảo:**
+- Chào bạn, với vai trò chuyên gia số hóa dữ liệu Hà... (luat-hang-hai-2015-p1)
+- CÔNG BÁO/Số 1257 + 1258/Ngày 30-12-2015
+63
+
+2. Thu... (luat-hang-hai-2015-p1)
+- trên tàu biển t...
+
+======================================================================
+TEST 2/2
+======================================================================
+
+📤 Request: Quy tắc 15 COLREGs quy định thế nào?
+----------------------------------------------------------------------
+Status: 200
+Content-Type: text/event-stream; charset=utf-8
+----------------------------------------------------------------------
+
+📨 Events received:
+
+   🔄 thinking: {"content": "🎯 Đang phân tích câu hỏi..."}...
+   🔄 thinking: {"content": "🔍 Đang tra cứu cơ sở dữ liệu..."}...
+   🔄 thinking: {"content": "📚 Tìm thấy 10 tài liệu liên quan"}...
+   🔄 thinking: {"content": "✍️ Đang tạo câu trả lời..."}...
+
+   ⚡ FIRST TOKEN TIME: 11.26s
+----------------------------------------------------------------------
+   📝 answer token #1: {"content": [{"type": "thinking", "thinking": "**Investigati...
+   📝 answer token #2: {"content": [{"type": "thinking", "thinking": "**Addressing ...
+   📝 answer token #3: {"content": [{"type": "thinking", "thinking": "**Pinpointing...
+   📝 ... (streaming 4+ tokens)
+   📚 sources: {"sources": [{"title": "### Điều 15. Chủ tàu\n1. Chủ tàu là người sở hữu tà...", "content": "luat-ha...
+   📊 metadata: {"processing_time": 27.354, "model": "maritime-rag-v1", "agent_type": "rag", "streaming_version": "v...
+   ✅ done
+
+======================================================================
+TEST RESULTS
+======================================================================
+   Question:        Quy tắc 15 COLREGs quy định thế nào?...
+   Total tokens:    42
+   Thinking events: 4
+   First token:     11.26s
+   Total time:      27.77s
+   Sources:         ✅
+   Error:           None
+
+   Answer preview:
+   
+
+**Nguồn tham khảo:**
+- ### Điều 15. Chủ tàu
+1. Chủ tàu là người sở hữu tà... (luat-hang-hai-2015-p1)
+- CÔNG BÁO/Số 1257 + 1258/Ngày 30-12-2015
+59
+
+2. Có ... (luat-hang-hai-2015-p1)
+- 13. Khu neo đậu...
+
+======================================================================
+FINAL SUMMARY
+======================================================================
+   Tests passed:    2/2
+   Avg first token: 13.49s
+   Target:          <30s
+
+✅ ALL TESTS PASSED
+
+======================================================================

@@ -978,12 +978,10 @@ Hãy trả lời câu hỏi dựa trên thông tin trên."""
             # P3 SOTA: Use astream() for true streaming
             async for chunk in self._llm.astream(messages):
                 # Extract text content from chunk
-                if hasattr(chunk, 'content'):
-                    content = chunk.content
-                    if content:
-                        yield content
-                elif isinstance(chunk, str):
-                    yield chunk
+                # Handle Gemini 3 Flash thinking blocks (list of content blocks)
+                content = self._extract_content_from_chunk(chunk)
+                if content:
+                    yield content
             
             # After streaming completes, yield sources
             if sources:
@@ -994,6 +992,43 @@ Hãy trả lời câu hỏi dựa trên thông tin trên."""
         except Exception as e:
             logger.error(f"[STREAMING] LLM synthesis failed: {e}")
             yield f"Lỗi xử lý: {str(e)}"
+    
+    def _extract_content_from_chunk(self, chunk) -> str:
+        """
+        Extract text content from LLM streaming chunk.
+        
+        Handles both:
+        - String content (simple case)
+        - List of content blocks (Gemini with thinking_enabled=True)
+        
+        **Feature: p3-sota-streaming, gemini-3-flash-thinking**
+        """
+        if isinstance(chunk, str):
+            return chunk
+        
+        if not hasattr(chunk, 'content'):
+            return ""
+        
+        content = chunk.content
+        
+        # Simple string case
+        if isinstance(content, str):
+            return content
+        
+        # List of content blocks (Gemini thinking mode)
+        if isinstance(content, list):
+            text_parts = []
+            for block in content:
+                if isinstance(block, dict):
+                    # Text block
+                    if block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                    # Skip thinking blocks - only return text
+                elif isinstance(block, str):
+                    text_parts.append(block)
+            return "".join(text_parts)
+        
+        return ""
 
 
 class MaritimeDocumentParser:
