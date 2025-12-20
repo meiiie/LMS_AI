@@ -7,9 +7,12 @@ for Microsoft-style GraphRAG retrieval.
 **Feature: graph-rag**
 **CHỈ THỊ KỸ THUẬT SỐ 29: Automated Knowledge Graph Construction**
 **SOTA 2025: Hybrid Agentic-GraphRAG Architecture**
+**Phase 2.2b+c: Parallel execution + Entity caching**
 """
+import asyncio
 import logging
-from typing import List, Optional, Dict, Any
+import time
+from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass, field
 
 from app.services.hybrid_search_service import HybridSearchService, get_hybrid_search_service
@@ -19,6 +22,14 @@ from app.engine.multi_agent.agents.kg_builder_agent import KGBuilderAgentNode, g
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# Phase 2.2c: Entity Extraction Cache (TTL 5 minutes)
+# Caches expensive LLM entity extraction to avoid redundant calls
+# ============================================================
+_entity_cache: Dict[str, Tuple[List[str], float]] = {}
+_ENTITY_CACHE_TTL = 300  # 5 minutes
 
 
 @dataclass
@@ -84,9 +95,12 @@ class GraphRAGService:
         """
         Perform graph-enhanced search.
         
+        Phase 2.2b: PARALLEL execution (entity extraction + hybrid search)
+        Phase 2.2c: Entity cache with 5min TTL
+        
         Flow:
-        1. Extract entities from query (optional)
-        2. HybridSearch for relevant chunks
+        1. Extract entities from query (PARALLEL with search)
+        2. HybridSearch for relevant chunks (PARALLEL with extraction)
         3. Enrich with entity context from Neo4j
         
         Args:
@@ -99,19 +113,16 @@ class GraphRAGService:
         """
         logger.info(f"[GraphRAG] Search: {query[:50]}...")
         
-        # Step 1: Extract entities from query (for context)
-        query_entities = []
-        if self._kg_builder.is_available():
-            try:
-                extraction = await self._kg_builder.extract(query, "user_query")
-                query_entities = [e.id for e in extraction.entities]
-                if query_entities:
-                    logger.info(f"[GraphRAG] Query entities: {query_entities}")
-            except Exception as e:
-                logger.warning(f"Query entity extraction failed: {e}")
+        # ============================================================
+        # Phase 2.2b: PARALLEL execution - save ~10s
+        # Run entity extraction and hybrid search concurrently
+        # ============================================================
+        entity_task = self._extract_entities_cached(query)
+        search_task = self._hybrid.search(query, limit=limit)
         
-        # Step 2: Hybrid search for relevant chunks
-        hybrid_results = await self._hybrid.search(query, limit=limit)
+        query_entities, hybrid_results = await asyncio.gather(
+            entity_task, search_task
+        )
         
         if not hybrid_results:
             logger.warning("[GraphRAG] No hybrid results found")
@@ -152,6 +163,50 @@ class GraphRAGService:
         
         logger.info(f"[GraphRAG] Returned {len(enhanced_results)} enhanced results")
         return enhanced_results
+    
+    async def _extract_entities_cached(self, query: str) -> List[str]:
+        """
+        Extract entities from query with caching.
+        
+        Phase 2.2c: Entity cache with 5min TTL
+        Avoids redundant LLM calls for similar/same queries.
+        
+        Args:
+            query: User query string
+            
+        Returns:
+            List of entity IDs
+        """
+        global _entity_cache
+        
+        # Create cache key (first 100 chars, lowercased, stripped)
+        cache_key = query[:100].lower().strip()
+        
+        # Check cache
+        if cache_key in _entity_cache:
+            entities, timestamp = _entity_cache[cache_key]
+            if time.time() - timestamp < _ENTITY_CACHE_TTL:
+                logger.info(f"[GraphRAG] Entity cache HIT: {len(entities)} entities")
+                return entities
+            else:
+                # Expired - remove from cache
+                del _entity_cache[cache_key]
+        
+        # Cache miss - extract entities
+        query_entities = []
+        if self._kg_builder.is_available():
+            try:
+                extraction = await self._kg_builder.extract(query, "user_query")
+                query_entities = [e.id for e in extraction.entities]
+                if query_entities:
+                    logger.info(f"[GraphRAG] Query entities: {query_entities}")
+                    # Cache the result
+                    _entity_cache[cache_key] = (query_entities, time.time())
+                    logger.info(f"[GraphRAG] Entity cache SET: {len(query_entities)} entities (TTL={_ENTITY_CACHE_TTL}s)")
+            except Exception as e:
+                logger.warning(f"Query entity extraction failed: {e}")
+        
+        return query_entities
     
     async def _get_entity_context(
         self,
