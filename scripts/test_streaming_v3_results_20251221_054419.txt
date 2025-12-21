@@ -1,0 +1,113 @@
+======================================================================
+P3+ V3 SOTA STREAMING VERIFICATION
+Date: 2025-12-21 05:44:19
+Target: https://maritime-ai-chatbot.onrender.com
+======================================================================
+
+⚠️  V3 combines: Full CRAG pipeline + True token streaming
+⚠️  Expected: Progressive events + Same quality as V1
+======================================================================
+P3+ V3 SOTA STREAMING TEST - /api/v1/chat/stream/v3
+======================================================================
+
+📤 Request: Giải thích Điều 50 về quyền hạn của thuyền trưởng trên tàu biển theo Bộ luật hàng hải Việt Nam 2015.
+----------------------------------------------------------------------
+Status: 200
+Content-Type: text/event-stream; charset=utf-8
+----------------------------------------------------------------------
+
+📨 Events received:
+
+
+   ⚡ FIRST EVENT TIME: 1.00s
+----------------------------------------------------------------------
+   🔄 thinking [None]: 🚀 Bắt đầu xử lý câu hỏi......
+   🔄 thinking [routing]: 🎯 Phân tích và định tuyến câu hỏi...
+
+   ⚡ FIRST TOKEN TIME: 1.84s
+----------------------------------------------------------------------
+   📝 token #1: {"content": "RAG_AGENT"}...
+   🔄 thinking [routing]: Định tuyến đến: rag_agent...
+   🔄 thinking [retrieval]: 📚 Tra cứu cơ sở tri thức...
+   📝 token #2: {"content": "{\n    \"complexity\": \"simple\",\n    \"requires_multi_step"}...
+   📝 token #3: {"content": "\": false,\n    \"requires_verification\": false,\n    \"is_maritime_related\": true,\n...
+   📝 ... (streaming tokens)
+   🔄 thinking [quality_check]: ✅ Kiểm tra chất lượng...
+   🔄 thinking [None]: ⚠️ Streaming không khả dụng, đang xử lý......
+   📚 sources: 10 sources received
+   📊 metadata: processing_time=49.70595908164978s
+   📊 reasoning_trace: 3 steps
+   ✅ done
+
+======================================================================
+V3 TEST RESULTS
+======================================================================
+   First event time:   1.00s
+   First token time:   1.84s
+   Total time:         50.61s
+   Total tokens:       108
+   Thinking events:    6
+   Clean answer:       7830 chars
+   Sources:            10
+   Has reasoning_trace: ✅
+   Reasoning steps:    3
+
+   🧠 THINKING EVENTS:
+----------------------------------------------------------------------
+   [None] 🚀 Bắt đầu xử lý câu hỏi......
+   [routing] 🎯 Phân tích và định tuyến câu hỏi...
+   [routing] Định tuyến đến: rag_agent...
+   [retrieval] 📚 Tra cứu cơ sở tri thức...
+   [quality_check] ✅ Kiểm tra chất lượng...
+   [None] ⚠️ Streaming không khả dụng, đang xử lý......
+
+   📝 ANSWER PREVIEW (first 400 chars):
+----------------------------------------------------------------------
+   RAG_AGENT{
+       "complexity": "simple",
+       "requires_multi_step": false,
+       "requires_verification": false,
+       "is_maritime_related": true,
+       "detected_topics": [
+           "Bộ luật hàng hải Việt Nam 2015",
+           "Quyền hạn của thuyền trưởng",
+
+
+
+
+======================================================================
+V1 vs V2 vs V3 COMPARISON
+======================================================================
+
+📡 Testing V1 (/api/v1/chat - non-streaming)...
+   ✅ V1 Success: 3045 chars, 5 sources in 57.75s
+
+📡 Testing V2 (/api/v1/chat/stream/v2 - simplified streaming)...
+   ✅ V2 Success: 2188 chars, first token 14.85s
+
+📡 Testing V3 (/api/v1/chat/stream/v3 - full CRAG streaming)...
+   ✅ V3 Success: 4929 chars, first event 0.46s, first token 9.25s
+
+======================================================================
+COMPARISON RESULTS
+======================================================================
+| Metric           | V1 (/chat)     | V2 (/stream)   | V3 (CRAG+stream) |
+|------------------|----------------|----------------|------------------|
+| First event      | 57.7s (all)    | 14.9s (token) | 0.5s (status)   |
+| First token      | 57.7s (all)    | 14.9s          | 9.3s           |
+| Total time       | 57.7s           | 18.3s          | 79.5s           |
+| Answer (clean)   |  3045 chars  |  2188 chars  |  4929 chars    |
+| Sources          |     5        |    10        |     5          |
+| reasoning_trace  | ✅            | ❌            | ✅              |
+
+======================================================================
+FINAL SUMMARY
+======================================================================
+   V3 First event:     1.00s (target: <1s)
+   V3 First token:     1.84s (target: <40s)
+   V3 Has CRAG:        ✅ (grading + reasoning_trace)
+   V3 Has streaming:   ✅ (true token streaming)
+
+✅ V3 COMBINES BEST OF BOTH WORLDS!
+
+======================================================================

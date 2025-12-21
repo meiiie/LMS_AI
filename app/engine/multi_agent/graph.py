@@ -529,20 +529,17 @@ async def process_with_multi_agent_streaming(
     Process with Multi-Agent graph with interleaved streaming.
     
     SOTA Dec 2025: Full Multi-Agent pipeline + progressive SSE events
-    Pattern: OpenAI Responses API + Claude Extended Thinking + LangGraph 1.0
+    
+    ===================================================================
+    REFACTORED v2 (2025-12-21): Uses astream() with 'updates' mode
+    instead of astream_events() for better compatibility.
+    ===================================================================
     
     Yields StreamEvents at each graph node:
     - Supervisor: routing decision (thinking event)
     - TutorAgent: tool calls + reasoning (thinking events)
     - GraderAgent: quality score (thinking event) 
-    - Synthesizer: answer tokens (answer events)
-    
-    Timeline:
-    - 0s: First status event (user sees progress)
-    - 4-6s: Supervisor routing complete
-    - 40-50s: TutorAgent + CRAG complete
-    - 55-60s: GraderAgent complete (or skipped if high confidence)
-    - 65-75s: Synthesizer + answer tokens
+    - Synthesizer: ONLY final_response (answer events)
     
     **Feature: v3-full-graph-streaming**
     
@@ -583,134 +580,137 @@ async def process_with_multi_agent_streaming(
             "sources": [],
             "iteration": 0,
             "max_iterations": 3,
-            "error": None,
-            # V3 Streaming: Signal that we want streaming
-            "_streaming_mode": True
+            "error": None
         }
         
-        # Track current node for event deduplication
-        last_node = None
         final_state = None
         
-        # LangGraph streaming execution
-        # Note: astream_events requires langgraph >= 0.2.x
-        try:
-            async for event in graph.astream_events(initial_state, version="v2"):
-                event_type = event.get("event", "")
-                event_name = event.get("name", "")
-                event_data = event.get("data", {})
+        # Use astream() with 'updates' mode - more compatible than astream_events
+        # This yields state updates after each node completes
+        async for state_update in graph.astream(initial_state, stream_mode="updates"):
+            # state_update is a dict: {node_name: node_output}
+            for node_name, node_output in state_update.items():
+                logger.debug(f"[STREAM] Node completed: {node_name}")
                 
-                # Extract node name from event
-                node_name = _extract_node_from_event(event_name, event_data)
-                
-                # Handle node start events
-                if event_type == "on_chain_start" and node_name and node_name != last_node:
-                    last_node = node_name
-                    if node_name in NODE_DESCRIPTIONS:
-                        yield await create_status_event(
-                            NODE_DESCRIPTIONS[node_name],
-                            node_name
+                # ---- SUPERVISOR NODE ----
+                if node_name == "supervisor":
+                    next_agent = node_output.get("next_agent", "")
+                    yield await create_status_event(
+                        NODE_DESCRIPTIONS.get("supervisor", "🎯 Phân tích câu hỏi"),
+                        "supervisor"
+                    )
+                    if next_agent:
+                        yield await create_thinking_event(
+                            f"Định tuyến đến: {next_agent}",
+                            "routing",
+                            confidence=0.9,
+                            details={"routed_to": next_agent}
                         )
                 
-                # Handle node end events with results
-                elif event_type == "on_chain_end" and node_name:
-                    output = event_data.get("output", {})
-                    
-                    # Supervisor routing decision
-                    if node_name == "supervisor":
-                        next_agent = output.get("next_agent", "")
-                        if next_agent:
-                            yield await create_thinking_event(
-                                f"Định tuyến đến: {next_agent}",
-                                "routing",
-                                confidence=0.9,
-                                details={"routed_to": next_agent}
-                            )
-                    
-                    # Grader quality check result
-                    elif node_name == "grader":
-                        score = output.get("grader_score", 0)
+                # ---- RAG AGENT NODE ----
+                elif node_name == "rag_agent":
+                    yield await create_status_event(
+                        NODE_DESCRIPTIONS.get("rag_agent", "📚 Tra cứu tri thức"),
+                        "rag_agent"
+                    )
+                    # Check for tool usage
+                    tools_used = node_output.get("tools_used", [])
+                    for tool in tools_used:
+                        yield await create_thinking_event(
+                            f"Tra cứu: {tool.get('name', 'knowledge_base')}",
+                            "tool_call"
+                        )
+                
+                # ---- TUTOR AGENT NODE ----
+                elif node_name == "tutor_agent":
+                    yield await create_status_event(
+                        NODE_DESCRIPTIONS.get("tutor_agent", "👨‍🏫 Tạo bài giảng"),
+                        "tutor_agent"
+                    )
+                    # Check for tool usage
+                    tools_used = node_output.get("tools_used", [])
+                    for tool in tools_used:
+                        yield await create_thinking_event(
+                            f"Tra cứu: {tool.get('name', 'knowledge_base')}",
+                            "tool_call"
+                        )
+                    # Emit thinking if available
+                    thinking = node_output.get("thinking", "")
+                    if thinking and len(thinking) > 50:
+                        # Summarize thinking, don't emit raw
+                        yield await create_thinking_event(
+                            f"Đã phân tích và tổng hợp thông tin từ {len(tools_used)} nguồn",
+                            "analysis",
+                            confidence=0.85
+                        )
+                
+                # ---- GRADER NODE ----
+                elif node_name == "grader":
+                    yield await create_status_event(
+                        NODE_DESCRIPTIONS.get("grader", "✅ Kiểm tra chất lượng"),
+                        "grader"
+                    )
+                    score = node_output.get("grader_score", 0)
+                    if score > 0:
                         yield await create_thinking_event(
                             f"Điểm chất lượng: {score}/10 - {'ĐẠT' if score >= 6 else 'CHƯA ĐẠT'}",
                             "quality_check",
                             confidence=score / 10,
                             details={"score": score, "passed": score >= 6}
                         )
-                    
-                    # Synthesizer final response
-                    elif node_name == "synthesizer":
-                        final_response = output.get("final_response", "")
-                        if final_response:
-                            # Stream the final response in chunks for progressive display
-                            # This simulates token streaming for the synthesized response
-                            chunk_size = 100  # Characters per chunk
-                            for i in range(0, len(final_response), chunk_size):
-                                chunk = final_response[i:i+chunk_size]
-                                yield await create_answer_event(chunk)
-                        
-                        # Store final state for sources/metadata
-                        final_state = output
-                    
-                    # TutorAgent with tool usage
-                    elif node_name in ["tutor_agent", "rag_agent"]:
-                        # Check for tool calls
-                        tools_used = output.get("tools_used", [])
-                        if tools_used:
-                            for tool in tools_used:
-                                yield await create_thinking_event(
-                                    f"Tra cứu: {tool.get('description', tool.get('name', 'unknown'))}",
-                                    "tool_call",
-                                    details={"tool": tool.get("name")}
-                                )
-                        
-                        # Check for CRAG trace
-                        reasoning_trace = output.get("reasoning_trace")
-                        if reasoning_trace and hasattr(reasoning_trace, "steps"):
-                            for step in reasoning_trace.steps:
-                                yield await create_thinking_event(
-                                    f"{step.description}: {step.result}",
-                                    step.step_name,
-                                    confidence=step.confidence
-                                )
                 
-                # Handle LLM token streaming (if available)
-                elif event_type == "on_chat_model_stream":
-                    chunk = event_data.get("chunk", {})
-                    content = _extract_chunk_content(chunk)
-                    if content:
-                        yield await create_answer_event(content)
+                # ---- SYNTHESIZER NODE (FINAL) ----
+                elif node_name == "synthesizer":
+                    yield await create_status_event(
+                        NODE_DESCRIPTIONS.get("synthesizer", "📝 Tổng hợp câu trả lời"),
+                        "synthesizer"
+                    )
+                    
+                    # This is the FINAL response - stream it in chunks
+                    final_response = node_output.get("final_response", "")
+                    if final_response:
+                        # Stream in readable chunks (not too small, not too large)
+                        chunk_size = 150  # Characters per chunk
+                        for i in range(0, len(final_response), chunk_size):
+                            chunk = final_response[i:i+chunk_size]
+                            yield await create_answer_event(chunk)
+                    
+                    # Store for sources/metadata
+                    final_state = node_output
+                
+                # ---- MEMORY NODE ----
+                elif node_name == "memory_agent":
+                    yield await create_status_event(
+                        NODE_DESCRIPTIONS.get("memory_agent", "🧠 Truy xuất bộ nhớ"),
+                        "memory_agent"
+                    )
+                
+                # ---- DIRECT NODE ----  
+                elif node_name == "direct":
+                    # Direct response - stream it
+                    final_response = node_output.get("final_response", "")
+                    if final_response:
+                        chunk_size = 150
+                        for i in range(0, len(final_response), chunk_size):
+                            yield await create_answer_event(final_response[i:i+chunk_size])
+                    final_state = node_output
         
-        except AttributeError:
-            # Fallback for LangGraph versions without astream_events
-            logger.warning("[MULTI_AGENT_STREAM] astream_events not available, using ainvoke")
-            
-            # Fall back to non-streaming execution with synthetic events
-            yield await create_status_event("⚠️ Streaming không khả dụng, đang xử lý...", None)
-            
-            result = await graph.ainvoke(initial_state)
-            final_state = result
-            
-            # Yield the final response as chunks
-            final_response = result.get("final_response", "")
-            chunk_size = 100
-            for i in range(0, len(final_response), chunk_size):
-                yield await create_answer_event(final_response[i:i+chunk_size])
-        
-        # Emit sources
+        # Emit sources if available
         if final_state:
             sources = final_state.get("sources", [])
             if sources:
-                # Format sources for SSE
                 formatted_sources = []
                 for s in sources:
-                    formatted_sources.append({
-                        "title": s.get("title", ""),
-                        "content": s.get("content", "")[:200] if s.get("content") else "",
-                        "image_url": s.get("image_url"),
-                        "page_number": s.get("page_number"),
-                        "document_id": s.get("document_id")
-                    })
-                yield await create_sources_event(formatted_sources)
+                    if isinstance(s, dict):
+                        formatted_sources.append({
+                            "title": s.get("title", ""),
+                            "content": s.get("content", "")[:200] if s.get("content") else "",
+                            "image_url": s.get("image_url"),
+                            "page_number": s.get("page_number"),
+                            "document_id": s.get("document_id")
+                        })
+                if formatted_sources:
+                    yield await create_sources_event(formatted_sources)
             
             # Emit metadata with reasoning_trace
             reasoning_trace = final_state.get("reasoning_trace")
@@ -749,6 +749,7 @@ async def process_with_multi_agent_streaming(
         logger.exception(f"[MULTI_AGENT_STREAM] Error: {e}")
         yield await create_error_event(str(e))
         registry.end_request_trace(trace_id)
+
 
 
 def _extract_node_from_event(event_name: str, event_data: dict) -> Optional[str]:
