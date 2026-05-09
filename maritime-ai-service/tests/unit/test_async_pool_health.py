@@ -140,6 +140,14 @@ class TestAsyncPoolIntegration:
         assert "async_pool" in source
         assert "check_async_pool_health" in source
 
+    def test_deep_health_includes_llm_model_health(self):
+        """Deep health check source code references llm_model_health."""
+        import inspect
+        from app.api.v1.health import health_check_deep
+        source = inspect.getsource(health_check_deep)
+        assert "llm_model_health" in source
+        assert "check_llm_model_health" in source
+
 
 class TestAsyncPoolComponentHealth:
     """Test ComponentHealth response format."""

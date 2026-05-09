@@ -153,6 +153,15 @@ class TestProductionSmokeTestDocs:
         assert "event: visual_commit" in script
         assert "```widget" in script
 
+    def test_smoke_test_script_checks_llm_model_health_visibility(self):
+        """Production smoke should expose redacted model health telemetry."""
+        import pathlib
+
+        script = pathlib.Path("scripts/deploy/smoke-test.sh").read_text(encoding="utf-8")
+        assert "/api/v1/health/llm-models" in script
+        assert "LLM model health visible" in script
+        assert "last_error_detail" in script
+
     def test_launch_checklist_examples_match_api_key_contract(self):
         """Launch checklist should document service-client auth for API key examples."""
         import pathlib
