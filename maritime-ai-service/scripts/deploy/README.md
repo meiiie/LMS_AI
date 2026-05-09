@@ -241,9 +241,9 @@ Validation completed so far:
 - GHCR `main` tags resolve for both app and nginx images
 - local production-like deployment validation passed, including `/embed/` smoke checks
 
-Design note:
+Current release controls:
 
-- `docs/plans/2026-03-06-dist-embed-deploy-redesign.md`
+- `docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md`
 
 Local `npm run build:embed` remains useful for developer verification, but it is no longer part of the production deployment contract.
 

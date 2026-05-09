@@ -7,3 +7,4 @@ Rules:
 - Group assets by type or feature under subfolders.
 - Use `screenshots/` for image captures used by docs and implementation notes.
 - Use `avatar-source/` for source PNG references or concept art that inform the avatar, but are not loaded directly by the app runtime.
+- Remove generated, broken, or unreferenced assets unless a nearby README explains why they are retained as source material.

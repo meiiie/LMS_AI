@@ -110,9 +110,9 @@ Operational consequence:
 - rollback is image-tag based rather than “rebuild on host” based
 - `/embed/` verification belongs in post-deploy smoke testing
 
-Design note:
+Current release controls:
 
-- `docs/plans/2026-03-06-dist-embed-deploy-redesign.md`
+- `docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md`
 
 ## Documentation Map
 
