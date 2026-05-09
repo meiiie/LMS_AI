@@ -38,6 +38,27 @@ On 2026-05-09, a public probe showed:
 
 Treat public API health timeout as a release blocker until the deploy script, Caddy routing, nginx health, and app health all agree.
 
+## Current GCP Rebuild Target
+
+The old documented GCP project `valued-range-443614-j4` is no longer accessible from the active deployment account. As of 2026-05-09, the active account has project `the-wiii-lab`.
+
+Important guardrail:
+
+- `lms-production` in `the-wiii-lab` is the LMS VM and must not be used for Wiii containers.
+- Wiii should be deployed to a separate VM, default name `wiii-production`.
+- The default VM profile is `e2-standard-2` in `asia-southeast1-c` with an `80GB` `pd-balanced` boot disk.
+- Docker defaults are tuned for single-node production: `APP_REPLICAS=1`, `GUNICORN_WORKERS=2`, `ASYNC_POOL_MAX_SIZE=20`.
+
+Provision the new VM:
+
+```bash
+PROJECT_ID=the-wiii-lab \
+ZONE=asia-southeast1-c \
+  bash maritime-ai-service/scripts/deploy/provision-gcp-vm.sh
+```
+
+After provisioning, update DNS or Cloudflare so `wiii.holilihu.online` points to the new static IP. Do not route Wiii traffic to the LMS VM IP.
+
 ## Preflight Gate
 
 Before deploying, confirm the target commit is suitable for product:

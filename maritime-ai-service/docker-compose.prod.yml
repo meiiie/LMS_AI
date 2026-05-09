@@ -40,11 +40,13 @@ services:
     networks:
       - wiii-network
     restart: unless-stopped
+    cpus: "${NGINX_CPU_LIMIT:-0.25}"
+    mem_limit: "${NGINX_MEM_LIMIT:-192M}"
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: "256M"
+          cpus: "${NGINX_CPU_LIMIT:-0.25}"
+          memory: "${NGINX_MEM_LIMIT:-192M}"
         reservations:
           cpus: "0.1"
           memory: "64M"
@@ -93,6 +95,7 @@ services:
       - SUBDOMAIN_BASE_DOMAIN=${SUBDOMAIN_BASE_DOMAIN:-}
       - CORS_ORIGIN_REGEX=${CORS_ORIGIN_REGEX:-}
       - ENABLE_MULTI_TENANT=${ENABLE_MULTI_TENANT:-false}
+      - ASYNC_POOL_MAX_SIZE=${ASYNC_POOL_MAX_SIZE:-20}
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,13 +117,16 @@ services:
     networks:
       - wiii-network
     restart: unless-stopped
+    cpus: "${APP_CPU_LIMIT:-1.5}"
+    mem_limit: "${APP_MEM_LIMIT:-2G}"
     deploy:
-      # Sprint 232: Scale to multiple instances for 1000+ concurrent users
+      # Single-node default: keep replicas/workers conservative. Increase only
+      # after moving database/cache/object storage off this VM.
       replicas: ${APP_REPLICAS:-1}
       resources:
         limits:
-          cpus: "${APP_CPU_LIMIT:-2.0}"
-          memory: "${APP_MEM_LIMIT:-4G}"
+          cpus: "${APP_CPU_LIMIT:-1.5}"
+          memory: "${APP_MEM_LIMIT:-2G}"
         reservations:
           cpus: "0.5"
           memory: "512M"
@@ -160,11 +166,13 @@ services:
     networks:
       - wiii-network
     restart: unless-stopped
+    cpus: "${POSTGRES_CPU_LIMIT:-1.0}"
+    mem_limit: "${POSTGRES_MEM_LIMIT:-1536M}"
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: "2G"
+          cpus: "${POSTGRES_CPU_LIMIT:-1.0}"
+          memory: "${POSTGRES_MEM_LIMIT:-1536M}"
         reservations:
           cpus: "0.25"
           memory: "512M"
@@ -224,10 +232,13 @@ services:
     networks:
       - wiii-network
     restart: unless-stopped
+    cpus: "${BACKUP_CPU_LIMIT:-0.25}"
+    mem_limit: "${BACKUP_MEM_LIMIT:-192M}"
     deploy:
       resources:
         limits:
-          memory: 256M
+          cpus: "${BACKUP_CPU_LIMIT:-0.25}"
+          memory: "${BACKUP_MEM_LIMIT:-192M}"
 
   # =============================================================================
   # NEO4J — Optional Graph Database (opt-in via --profile neo4j)
@@ -295,11 +306,13 @@ services:
       - wiii-network
     command: server /data --console-address ":9001"
     restart: unless-stopped
+    cpus: "${MINIO_CPU_LIMIT:-0.35}"
+    mem_limit: "${MINIO_MEM_LIMIT:-384M}"
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: "512M"
+          cpus: "${MINIO_CPU_LIMIT:-0.35}"
+          memory: "${MINIO_MEM_LIMIT:-384M}"
         reservations:
           cpus: "0.1"
           memory: "128M"
@@ -351,11 +364,13 @@ services:
     networks:
       - wiii-network
     restart: unless-stopped
+    cpus: "${VALKEY_CPU_LIMIT:-0.25}"
+    mem_limit: "${VALKEY_MEM_LIMIT:-192M}"
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: "256M"
+          cpus: "${VALKEY_CPU_LIMIT:-0.25}"
+          memory: "${VALKEY_MEM_LIMIT:-192M}"
         reservations:
           cpus: "0.1"
           memory: "64M"

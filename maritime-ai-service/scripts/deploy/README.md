@@ -18,6 +18,16 @@ docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md
 
 That runbook is the canonical checklist for pinned-SHA deploys, GHCR image verification, smoke tests, rollback, and parallel-team safety. The short version is: deploy from a clean `main` checkout, use matching `sha-...` tags for app and nginx, and probe the app through local nginx (`http://localhost:8080`) because the app container is not exposed on the host.
 
+Current GCP rebuild helper:
+
+```bash
+PROJECT_ID=the-wiii-lab \
+ZONE=asia-southeast1-c \
+  bash maritime-ai-service/scripts/deploy/provision-gcp-vm.sh
+```
+
+This creates a separate `wiii-production` VM. Do not deploy Wiii containers onto the existing `lms-production` VM.
+
 ---
 
 ## Architecture

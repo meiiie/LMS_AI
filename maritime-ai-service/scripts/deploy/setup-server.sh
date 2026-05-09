@@ -21,6 +21,8 @@
 
 set -euo pipefail
 
+SWAP_SIZE="${SWAP_SIZE:-4G}"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -82,8 +84,8 @@ if command -v caddy &> /dev/null; then
 else
     info "Step 4/10: Installing Caddy..."
     sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
-    curl -1sLf 'https://dl.cloudflare.com/caddy/apt/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudflare.com/caddy/apt/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
     sudo apt update && sudo apt install -y caddy
     info "Caddy installed. Will auto-obtain SSL certificates."
 fi
@@ -104,13 +106,13 @@ sudo mkdir -p /var/log/caddy
 sudo chown caddy:caddy /var/log/caddy
 
 # ─────────────────────────────────────────────────
-# 6. Configure 2GB Swap (critical for 4GB RAM)
+# 6. Configure swap (critical for single-node Docker production)
 # ─────────────────────────────────────────────────
 if [ -f /swapfile ]; then
     info "Step 6/10: Swap already configured."
 else
-    info "Step 6/10: Creating 2GB swap..."
-    sudo fallocate -l 2G /swapfile
+    info "Step 6/10: Creating ${SWAP_SIZE} swap..."
+    sudo fallocate -l "$SWAP_SIZE" /swapfile
     sudo chmod 600 /swapfile
     sudo mkswap /swapfile
     sudo swapon /swapfile
@@ -118,7 +120,7 @@ else
     # Low swappiness — keep app in RAM, only swap under pressure
     echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf > /dev/null
     sudo sysctl vm.swappiness=10
-    info "2GB swap created (swappiness=10)."
+    info "${SWAP_SIZE} swap created (swappiness=10)."
 fi
 
 # ─────────────────────────────────────────────────
@@ -191,7 +193,7 @@ if [ -f ~/.ssh/authorized_keys ] && [ -s ~/.ssh/authorized_keys ]; then
     sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
     sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
     sudo sed -i 's/^#\?MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
-    sudo systemctl restart sshd
+    sudo systemctl restart sshd 2>/dev/null || sudo systemctl restart ssh
     info "SSH hardened: password auth disabled, root login disabled."
 else
     warn "No SSH keys found — skipping SSH hardening (add keys first!)."
