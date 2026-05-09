@@ -571,7 +571,7 @@ class TestDirectNodeHelpfulBehavior:
     @pytest.mark.asyncio
     async def test_direct_node_system_prompt_is_helpful(self):
         """DIRECT node system prompt should NOT contain refusal language."""
-        from app.engine.multi_agent.graph import direct_response_node
+        from app.engine.multi_agent.direct_prompts import _build_direct_system_messages
 
         # Build state with off-topic routing metadata
         state = {
@@ -582,16 +582,15 @@ class TestDirectNodeHelpfulBehavior:
             "routing_metadata": {"intent": "off_topic", "confidence": 0.9},
         }
 
-        captured_messages = []
-
-        with patched_direct_node_runtime(
-            "Khi đói trên tàu, bạn có thể...",
-            captured_messages=captured_messages,
-        ):
-            result = await direct_response_node(state)
+        messages = _build_direct_system_messages(
+            state,
+            state["query"],
+            "Hàng hải",
+            role_name="direct_agent",
+        )
 
         # System prompt should be helpful, not refusing
-        system_content = captured_messages[0]["content"] if isinstance(captured_messages[0], dict) else captured_messages[0].content
+        system_content = messages[0]["content"] if isinstance(messages[0], dict) else messages[0].content
         assert "đa lĩnh vực" in system_content, "Sprint 99: multi-domain prompt"
         assert "từ chối" not in system_content, "System prompt should NOT contain refusal"
         assert "nằm ngoài chuyên môn" not in system_content, "System prompt should NOT refuse off-topic"

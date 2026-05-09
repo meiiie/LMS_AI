@@ -101,10 +101,11 @@ class TestAnswerGeneratorStreamingTimeout:
         ):
             chunks.append(chunk)
 
-        # Should contain generic error, NOT the actual exception message
+        # Should contain a safe fallback, NOT the actual exception message.
         error_text = " ".join(chunks)
         assert "SECRET_API_KEY_LEAKED" not in error_text
-        assert "Internal processing error" in error_text
+        assert "Test: Content" in error_text
+        assert "Nguồn tham khảo" in error_text
 
     def test_source_has_timeout_constants(self):
         """answer_generator streaming method defines timeout constants."""

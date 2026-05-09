@@ -204,11 +204,11 @@ class TestCleanVietnameseLabels:
 # ============================================================================
 
 class TestIntermediateResponse:
-    """Sprint 144: process_streaming should emit intermediate response before generation."""
+    """Sprint 144: process_streaming should show retrieval progress before generation."""
 
     @pytest.mark.asyncio
     async def test_intermediate_response_before_generation(self):
-        """An intermediate 'answer' event with doc count should precede LLM answer tokens."""
+        """A doc-count status event should precede LLM answer tokens."""
         from app.engine.agentic_rag.corrective_rag import CorrectiveRAG
 
         crag = CorrectiveRAG.__new__(CorrectiveRAG)
@@ -232,11 +232,24 @@ class TestIntermediateResponse:
         events = await _collect_events(crag.process_streaming("query", {}))
 
         answer_events = [e for e in events if e.get("type") == "answer"]
-        assert len(answer_events) >= 2, "Expected intermediate + at least 1 LLM token"
+        assert answer_events, "Expected at least 1 LLM token"
 
-        # First answer event should be intermediate message with doc count
-        first_answer = answer_events[0]["content"]
-        assert "2 tài liệu" in first_answer, f"Expected doc count in: {first_answer}"
+        doc_status_index = next(
+            (
+                index
+                for index, event in enumerate(events)
+                if event.get("type") == "status"
+                and "2 tài liệu" in str(event.get("content", ""))
+            ),
+            None,
+        )
+        first_answer_index = next(
+            index for index, event in enumerate(events) if event.get("type") == "answer"
+        )
+
+        assert doc_status_index is not None, "Expected doc-count status before generation"
+        assert doc_status_index < first_answer_index
+        assert answer_events[0]["content"] == "Token1"
 
 
 # ============================================================================

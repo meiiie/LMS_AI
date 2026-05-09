@@ -18,9 +18,11 @@ def test_collect_direct_tools_strips_visual_tools_for_analytical_text_turn(monke
         mapping = {
             "tool_current_datetime": _FakeTool("tool_current_datetime"),
             "tool_web_search": _FakeTool("tool_web_search"),
+            "tool_fetch_url": _FakeTool("tool_fetch_url"),
             "tool_search_news": _FakeTool("tool_search_news"),
             "tool_search_legal": _FakeTool("tool_search_legal"),
             "tool_search_maritime": _FakeTool("tool_search_maritime"),
+            "RAG_KNOWLEDGE_TOOL": _FakeTool("tool_rag_knowledge"),
             "get_chart_tools": lambda: [_FakeTool("tool_generate_interactive_chart")],
             "get_visual_tools": lambda: [
                 _FakeTool("tool_generate_visual"),

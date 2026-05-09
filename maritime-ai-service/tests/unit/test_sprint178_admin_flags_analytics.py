@@ -942,7 +942,8 @@ class TestLLMUsageAnalytics:
         fetchrow_call = mock_conn.fetchrow.call_args
         # Date params are positional args after the SQL string
         call_params = fetchrow_call[0][1:]
-        assert "2026-02-01" in call_params or "2026-02-28" in call_params
+        assert datetime(2026, 2, 1, tzinfo=timezone.utc) in call_params
+        assert datetime(2026, 2, 28, 23, 59, 59, 999999, tzinfo=timezone.utc) in call_params
 
 
 # =============================================================================

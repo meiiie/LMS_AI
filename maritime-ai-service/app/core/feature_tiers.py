@@ -105,6 +105,7 @@ FEATURE_TIER_GROUPS: Final[dict[FeatureTier, frozenset[str]]] = {
             "enable_multi_tenant",
             "enable_org_admin",
             "enable_org_knowledge",
+            "enable_pointy_voice",
             "enable_real_code_streaming",
             "enable_site_playbooks",
             "enable_structured_visuals",

@@ -452,6 +452,10 @@ class TestCodeStudioTerminalFailures:
             "Tool unavailable",
         ) is True
         assert _is_terminal_code_studio_tool_error(
+            "tool_create_visual_code",
+            "Tool unavailable",
+        ) is True
+        assert _is_terminal_code_studio_tool_error(
             "tool_web_search",
             "OpenSandbox execution failed: Network connectivity error",
         ) is False

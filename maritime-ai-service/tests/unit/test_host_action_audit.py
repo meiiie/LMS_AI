@@ -55,7 +55,7 @@ async def test_log_host_action_event_hashes_preview_token(monkeypatch):
 async def test_submit_host_action_audit_logs_success(monkeypatch):
     from app.api.v1.host_actions import submit_host_action_audit
     from app.core.security import AuthenticatedUser
-    from app.models.schemas import HostActionAuditRequest
+    from app.models.host_context_schemas import HostActionAuditRequest
 
     captured = {}
 

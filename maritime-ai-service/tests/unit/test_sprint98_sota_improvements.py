@@ -414,17 +414,25 @@ class TestImportanceThreshold:
 class TestExperienceCleanup:
     """Test cleanup_old_experiences in CharacterRepository."""
 
-    def test_deletes_old_experiences(self):
-        """Should delete old experiences beyond retention period."""
+    def _make_repo(self):
+        from app.core.database import clear_shared_database_unavailable
         from app.engine.character.character_repository import CharacterRepository
+
+        # Cleanup tests provide a mocked healthy session; isolate them from
+        # earlier tests that intentionally mark the shared DB as unavailable.
+        clear_shared_database_unavailable()
 
         repo = CharacterRepository()
         repo._initialized = True
         repo._session_factory = MagicMock()
-
         mock_session = MagicMock()
         repo._session_factory.return_value.__enter__ = MagicMock(return_value=mock_session)
         repo._session_factory.return_value.__exit__ = MagicMock(return_value=False)
+        return repo, mock_session
+
+    def test_deletes_old_experiences(self):
+        """Should delete old experiences beyond retention period."""
+        repo, mock_session = self._make_repo()
 
         # Total = 200, above keep_min=100
         mock_session.execute.return_value.scalar.return_value = 200
@@ -443,15 +451,7 @@ class TestExperienceCleanup:
 
     def test_keeps_minimum_experiences(self):
         """Should skip cleanup when total <= keep_min."""
-        from app.engine.character.character_repository import CharacterRepository
-
-        repo = CharacterRepository()
-        repo._initialized = True
-        repo._session_factory = MagicMock()
-
-        mock_session = MagicMock()
-        repo._session_factory.return_value.__enter__ = MagicMock(return_value=mock_session)
-        repo._session_factory.return_value.__exit__ = MagicMock(return_value=False)
+        repo, mock_session = self._make_repo()
 
         # Total = 50, below keep_min=100
         mock_session.execute.return_value.scalar.return_value = 50
@@ -461,15 +461,7 @@ class TestExperienceCleanup:
 
     def test_returns_count_on_success(self):
         """Should return the number of deleted rows."""
-        from app.engine.character.character_repository import CharacterRepository
-
-        repo = CharacterRepository()
-        repo._initialized = True
-        repo._session_factory = MagicMock()
-
-        mock_session = MagicMock()
-        repo._session_factory.return_value.__enter__ = MagicMock(return_value=mock_session)
-        repo._session_factory.return_value.__exit__ = MagicMock(return_value=False)
+        repo, mock_session = self._make_repo()
 
         count_result = MagicMock()
         count_result.scalar.return_value = 300
