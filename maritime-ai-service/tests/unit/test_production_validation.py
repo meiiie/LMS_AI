@@ -233,3 +233,21 @@ class TestProductionOperationalScripts:
             "docs/deploy/KNOWLEDGE_INGESTION.md"
         ).read_text(encoding="utf-8")
         assert 'curl localhost:8000/api/v1/health/live' in doc
+
+
+class TestProductionOrganizationSeed:
+    """Verify production org bootstrap stays compatible with subdomain routing."""
+
+    def test_wiii_org_seed_is_idempotent_and_non_destructive(self):
+        """The primary production org seed should upsert and preserve data."""
+        import pathlib
+
+        migration = pathlib.Path(
+            "alembic/versions/048_seed_primary_wiii_organization.py"
+        ).read_text(encoding="utf-8")
+
+        assert "INSERT INTO organizations" in migration
+        assert "'wiii'" in migration
+        assert "ON CONFLICT (id) DO UPDATE" in migration
+        assert "wiii.holilihu.online" in migration
+        assert "DELETE FROM organizations" not in migration
