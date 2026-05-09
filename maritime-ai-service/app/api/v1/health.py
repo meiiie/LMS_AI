@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.core.config import settings
 from app.core.constants import HEALTH_CHECK_TIMEOUT
 from app.engine.agentic_rag.rag_agent import get_knowledge_repository
+from app.engine.llm_model_health import get_model_health_snapshot
 from app.models.schemas import ComponentHealth, ComponentStatus, HealthResponse
 from app.repositories.chat_history_repository import get_chat_history_repository
 from app.repositories.semantic_memory_repository import get_semantic_memory_repository
@@ -318,6 +319,70 @@ async def check_async_pool_health() -> ComponentHealth:
         )
 
 
+def _build_llm_model_health_report() -> dict:
+    """Return a redacted operator-facing model health snapshot."""
+    snapshot = get_model_health_snapshot()
+    models = []
+    for provider, provider_models in sorted(snapshot.items()):
+        for model, record in sorted(provider_models.items()):
+            models.append(
+                {
+                    "provider": provider,
+                    "model": model,
+                    "state": record.get("state"),
+                    "last_reason_code": record.get("last_reason_code"),
+                    "last_timeout_seconds": record.get("last_timeout_seconds"),
+                    "last_failure_at": record.get("last_failure_at"),
+                    "last_success_at": record.get("last_success_at"),
+                    "degraded_until": record.get("degraded_until"),
+                }
+            )
+
+    degraded_count = sum(1 for item in models if item.get("state") == "degraded")
+    return {
+        "status": "degraded" if degraded_count else "healthy",
+        "model_count": len(models),
+        "degraded_count": degraded_count,
+        "models": models,
+    }
+
+
+async def check_llm_model_health() -> ComponentHealth:
+    """Summarize process-local model health without exposing raw provider errors."""
+    start = time.time()
+    try:
+        report = _build_llm_model_health_report()
+        latency = (time.time() - start) * 1000
+        model_count = report["model_count"]
+        degraded_count = report["degraded_count"]
+
+        if model_count == 0:
+            status = ComponentStatus.HEALTHY
+            message = "No model health records yet"
+        elif degraded_count:
+            status = ComponentStatus.DEGRADED
+            message = f"{degraded_count}/{model_count} model(s) degraded"
+        else:
+            status = ComponentStatus.HEALTHY
+            message = f"{model_count} model health record(s), all healthy"
+
+        return ComponentHealth(
+            name="LLM Model Health",
+            status=status,
+            latency_ms=round(latency, 2),
+            message=message,
+        )
+    except Exception as e:
+        latency = (time.time() - start) * 1000
+        logger.warning("LLM model health check failed: %s", e)
+        return ComponentHealth(
+            name="LLM Model Health",
+            status=ComponentStatus.UNAVAILABLE,
+            latency_ms=round(latency, 2),
+            message="Model health snapshot unavailable",
+        )
+
+
 def determine_overall_status(components: dict[str, ComponentHealth]) -> str:
     """
     Determine overall system status based on component health.
@@ -434,6 +499,7 @@ async def health_check_deep() -> HealthResponse:
     kg_health = await check_with_timeout(check_knowledge_graph_health, "Neo4j Knowledge Graph")
     storage_health = await check_with_timeout(check_object_storage_health, "Object Storage")
     async_pool_health = await check_with_timeout(check_async_pool_health, "Async Pool")
+    llm_model_health = await check_with_timeout(check_llm_model_health, "LLM Model Health")
 
     components = {
         "api": api_health,
@@ -442,6 +508,7 @@ async def health_check_deep() -> HealthResponse:
         "knowledge_graph": kg_health,  # Optional for RAG, reserved for Learning Graph
         "object_storage": storage_health,  # MinIO / S3-compatible storage
         "async_pool": async_pool_health,  # SOTA 2026: Async connection pool
+        "llm_model_health": llm_model_health,
     }
     
     overall_status = determine_overall_status(components)
@@ -456,6 +523,16 @@ async def health_check_deep() -> HealthResponse:
     logger.info("Deep health check: %s", overall_status)
     
     return response
+
+
+@router.get(
+    "/llm-models",
+    summary="LLM Model Health Snapshot",
+    description="Return redacted per-provider/per-model health for runtime operators.",
+)
+async def llm_model_health_snapshot():
+    """Expose model health state without API keys or raw provider error bodies."""
+    return _build_llm_model_health_report()
 
 
 @router.get(

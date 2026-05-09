@@ -39,6 +39,10 @@ check "Liveness probe (GET /health/live)" "$([ "$HTTP" = "200" ] && echo true ||
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/api/v1/health/db" 2>/dev/null || echo "000")
 check "Deep health — DB (GET /health/db)" "$([ "$HTTP" = "200" ] && echo true || echo false)"
 
+LLM_MODEL_HEALTH=$(curl -s "${BASE_URL}/api/v1/health/llm-models" 2>/dev/null || true)
+check "LLM model health visible" "$(echo "$LLM_MODEL_HEALTH" | grep -q '"model_count"' && echo true || echo false)"
+check "LLM model health redacts raw errors" "$([ -n "$LLM_MODEL_HEALTH" ] && ! echo "$LLM_MODEL_HEALTH" | grep -q 'last_error_detail' && echo true || echo false)"
+
 # 2. Security Headers
 echo ""
 echo "2. Security Headers"
