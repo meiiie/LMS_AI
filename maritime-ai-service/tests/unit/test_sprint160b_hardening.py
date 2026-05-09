@@ -575,7 +575,7 @@ class TestConfigSecurity:
                 environment="production",
                 enable_google_oauth=True,
                 google_oauth_client_id="test-id",
-                google_oauth_client_secret="test-secret",
+                google_oauth_client_secret="real-google-client-secret-for-session-test",
                 session_secret_key="change-session-secret-in-production",
                 jwt_secret_key="real-secret-key-with-32-chars",
                 api_key="real-api-key-with-32-chars",

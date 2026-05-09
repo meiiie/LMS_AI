@@ -83,6 +83,38 @@ class TestEmailService:
             result = await send_magic_link_email("test@example.com", "https://wiii.app/verify/abc")
             assert result is False
 
+    @pytest.mark.asyncio
+    async def test_send_magic_link_email_fails_closed_in_production_without_resend(self):
+        from app.auth.email_service import send_magic_link_email
+
+        mock_settings = MagicMock()
+        mock_settings.environment = "production"
+        mock_settings.resend_api_key = ""
+
+        with patch("app.auth.email_service.settings", mock_settings):
+            result = await send_magic_link_email(
+                "test@example.com",
+                "https://wiii.app/verify/abc",
+            )
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_send_magic_link_email_keeps_dev_fallback_outside_production(self):
+        from app.auth.email_service import send_magic_link_email
+
+        mock_settings = MagicMock()
+        mock_settings.environment = "development"
+        mock_settings.resend_api_key = ""
+
+        with patch("app.auth.email_service.settings", mock_settings):
+            result = await send_magic_link_email(
+                "test@example.com",
+                "https://wiii.app/verify/abc",
+            )
+
+        assert result is True
+
 
 class TestMagicLinkTokenGeneration:
     """Token generation and hashing."""
@@ -264,6 +296,52 @@ class TestMagicLinkRequest:
             # token_hash is the first positional param ($1)
             stored_hash = call_args[0][1]
             assert len(stored_hash) == 64  # SHA256 hex digest
+
+    @pytest.mark.asyncio
+    async def test_create_magic_link_does_not_surface_dev_verify_url_in_production(self):
+        """Production responses must not expose raw verification URLs."""
+        from app.auth.magic_link_router import _create_magic_link
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value=0)
+        mock_conn.execute = AsyncMock()
+
+        with patch("app.auth.magic_link_router.send_magic_link_email", new_callable=AsyncMock, return_value=True), \
+             patch("app.auth.magic_link_router.settings") as mock_settings:
+            mock_settings.environment = "production"
+            mock_settings.resend_api_key = ""
+            mock_settings.magic_link_expires_seconds = 600
+            mock_settings.magic_link_base_url = "https://wiii.holilihu.online"
+            mock_settings.magic_link_max_per_hour = 5
+            mock_settings.api_v1_prefix = "/api/v1"
+
+            result = await _create_magic_link("test@example.com", mock_conn)
+
+        assert "dev_verify_url" not in result
+
+    @pytest.mark.asyncio
+    async def test_create_magic_link_surfaces_dev_verify_url_outside_production(self):
+        """Local/dev keeps the convenience URL for manual login testing."""
+        from app.auth.magic_link_router import _create_magic_link
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value=0)
+        mock_conn.execute = AsyncMock()
+
+        with patch("app.auth.magic_link_router.send_magic_link_email", new_callable=AsyncMock, return_value=True), \
+             patch("app.auth.magic_link_router.settings") as mock_settings:
+            mock_settings.environment = "development"
+            mock_settings.resend_api_key = ""
+            mock_settings.magic_link_expires_seconds = 600
+            mock_settings.magic_link_base_url = "http://localhost:8000"
+            mock_settings.magic_link_max_per_hour = 5
+            mock_settings.api_v1_prefix = "/api/v1"
+
+            result = await _create_magic_link("test@example.com", mock_conn)
+
+        assert result["dev_verify_url"].startswith(
+            "http://localhost:8000/api/v1/auth/magic-link/verify/"
+        )
 
     @pytest.mark.asyncio
     async def test_create_magic_link_at_rate_limit_boundary(self):
