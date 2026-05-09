@@ -253,6 +253,17 @@ server {
         try_files $uri =404;
     }
 
+    # Pointy host bridge bundle. This must never fall through to the SPA shell:
+    # LMS hosts load it as JavaScript from /pointy/wiii-pointy.umd.js.
+    location /pointy/ {
+        alias /usr/share/nginx/pointy/;
+        default_type application/javascript;
+        expires 5m;
+        add_header Cache-Control "public, max-age=300, must-revalidate";
+        add_header X-Content-Type-Options "nosniff" always;
+        try_files $uri =404;
+    }
+
     # ─────────────────────────────────────────────
     # Embed: Wiii Chat iframe (Sprint 176)
     # ─────────────────────────────────────────────

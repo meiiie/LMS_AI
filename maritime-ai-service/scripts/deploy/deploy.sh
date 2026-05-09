@@ -320,6 +320,13 @@ run_final_smoke() {
     curl -fsS --max-time 15 "${NGINX_LOCAL_URL}/health" >/dev/null
     curl -fsS --max-time 15 "${NGINX_LOCAL_URL}/embed/" >/dev/null
 
+    local pointy_body
+    pointy_body="$(curl -fsS --max-time 15 "${NGINX_LOCAL_URL}/pointy/wiii-pointy.umd.js")"
+    if [ -z "$pointy_body" ] || printf '%s' "$pointy_body" | grep -qiE '<!doctype html|<html'; then
+        error "Pointy bundle route returned empty content or SPA HTML: ${NGINX_LOCAL_URL}/pointy/wiii-pointy.umd.js"
+        exit 1
+    fi
+
     info "Local nginx smoke passed: ${NGINX_LOCAL_URL}"
 
     if [ "$RUN_EXTERNAL_SMOKE" = "true" ]; then
