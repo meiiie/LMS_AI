@@ -144,6 +144,15 @@ class TestProductionSmokeTestDocs:
         assert '"user_id": "api-client"' in script
         assert '-H "X-User-ID:' not in script
 
+    def test_smoke_test_script_matches_sse_v3_visual_lifecycle(self):
+        """Production visual smoke test should assert current SSE V3 lifecycle events."""
+        import pathlib
+
+        script = pathlib.Path("scripts/deploy/smoke-test.sh").read_text(encoding="utf-8")
+        assert "event: visual_open" in script
+        assert "event: visual_commit" in script
+        assert "```widget" in script
+
     def test_launch_checklist_examples_match_api_key_contract(self):
         """Launch checklist should document service-client auth for API key examples."""
         import pathlib

@@ -82,9 +82,10 @@ if [ -n "$API_KEY" ]; then
         -H "X-API-Key: ${API_KEY}" \
         -H "X-Session-ID: smoke-test-visual" \
         -d '{"user_id":"api-client","message":"So sánh attention mềm và linear attention bằng visual inline","role":"student","session_id":"smoke-test-visual","domain_id":"maritime"}' \
-        --max-time 45 \
+        --max-time 90 \
         2>/dev/null || true)
-    check "Structured visual SSE contract emits event: visual" "$(echo "$STREAM_BODY" | grep -q 'event: visual' && echo true || echo false)"
+    check "Structured visual SSE opens visual lifecycle" "$(echo "$STREAM_BODY" | grep -q '^event: visual_open$' && echo true || echo false)"
+    check "Structured visual SSE commits visual lifecycle" "$(echo "$STREAM_BODY" | grep -q '^event: visual_commit$' && echo true || echo false)"
     check "Structured visual stream hides raw widget fences" "$([ -n "$STREAM_BODY" ] && ! echo "$STREAM_BODY" | grep -q '```widget' && echo true || echo false)"
 else
     echo "  [SKIP] Chat API — set API_KEY to test"
