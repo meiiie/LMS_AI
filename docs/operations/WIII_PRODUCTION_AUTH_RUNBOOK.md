@@ -24,12 +24,12 @@ Production auth must be boring, explicit, and reversible:
 ## Current Production State
 
 As of 2026-05-10, Magic Link is provisioned on production with a verified
-Resend domain. Google OAuth remains disabled until the Wiii callback is added to
-Google Cloud Console.
+Resend domain, and Google OAuth is enabled through the shared `LMS Maritime`
+web client in project `the-wiii-lab`.
 
 ```env
 ENABLE_MAGIC_LINK_AUTH=true
-ENABLE_GOOGLE_OAUTH=false
+ENABLE_GOOGLE_OAUTH=true
 MAGIC_LINK_BASE_URL=https://wiii.holilihu.online
 MAGIC_LINK_FROM_EMAIL=Wiii <noreply@holilihu.online>
 ENABLE_DISTRIBUTED_MAGIC_LINK_SESSIONS=true
@@ -41,6 +41,10 @@ OAUTH_ALLOWED_REDIRECT_ORIGINS=https://wiii.holilihu.online
 The Resend API key lives only in the VM runtime `.env.production`. It must not
 appear in Git, GitHub, docs, PR comments, or shell output. Rotate any key that
 was pasted into chat before using it for a higher-stakes production launch.
+
+The Google OAuth client secret also lives only in the VM runtime
+`.env.production`. The downloaded OAuth JSON must not be committed or left on
+the production host after enablement.
 
 ## Fail-Closed Contract
 
@@ -139,22 +143,17 @@ Yes, but only if the same Google Cloud OAuth web client is intentionally shared
 inside the same project/trust boundary and has every required origin or redirect
 URI configured.
 
-For the current LMS repo, local `.env` contains a valid-shaped Google client and
-secret, but the redirect URI is local:
+The current production setup reuses the existing `LMS Maritime` web client. That
+client must keep all LMS redirect URIs and the Wiii callback URI:
 
 ```text
 http://localhost:8088/api/v3/auth/google/callback
-```
-
-That local value is not enough for Wiii production. Before enabling Wiii Google
-OAuth, Google Cloud Console must include:
-
-```text
+https://holilihu.online/api/v3/auth/google/callback
 https://wiii.holilihu.online/api/v1/auth/google/callback
 ```
 
-If Wiii is pointed at a client that lacks this exact redirect URI, Google will
-fail with `redirect_uri_mismatch`. Fix Google Cloud Console, not Wiii code.
+If Wiii is pointed at a client that lacks the exact Wiii redirect URI, Google
+will fail with `redirect_uri_mismatch`. Fix Google Cloud Console, not Wiii code.
 
 Recommended production setup:
 
@@ -177,6 +176,13 @@ Expected result:
 - endpoint returns a redirect toward Google Accounts
 - browser login returns to Wiii without `redirect_uri_mismatch`
 - callback delivers tokens to the expected Wiii web or desktop redirect flow
+
+Production smoke evidence from 2026-05-10:
+
+- `GET /api/v1/auth/google/login` returned `302`
+- `Location` pointed to `https://accounts.google.com/o/oauth2/v2/auth`
+- the redirect URI in the Google URL was
+  `https://wiii.holilihu.online/api/v1/auth/google/callback`
 
 ### Rollback
 

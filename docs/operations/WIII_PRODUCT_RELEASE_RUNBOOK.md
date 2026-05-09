@@ -40,8 +40,8 @@ On 2026-05-10, production was verified on `wiii-production` in project
   timeout; routing should keep normal chat on the healthy primary model
 - `ENABLE_MAGIC_LINK_AUTH=true` was enabled after Resend API validation and
   verified `holilihu.online` sender domain smoke
-- `ENABLE_GOOGLE_OAUTH=false` remained the safe default until the Wiii callback
-  is registered in Google Cloud Console
+- `ENABLE_GOOGLE_OAUTH=true` was enabled after the shared `LMS Maritime` Google
+  OAuth web client included the Wiii callback URI
 
 Treat any future public API health timeout as a release blocker until the deploy
 script, Caddy routing, nginx health, and app health all agree.
@@ -95,9 +95,9 @@ BACKUP_MEM_LIMIT=192M
 
 Optional production login methods are governed by
 [`WIII_PRODUCTION_AUTH_RUNBOOK.md`](./WIII_PRODUCTION_AUTH_RUNBOOK.md). Keep
-Magic Link enabled only while Resend smoke stays healthy. Keep
-`ENABLE_GOOGLE_OAUTH=false` unless the matching Google OAuth callback setup has
-been completed and smoke tested.
+Magic Link enabled only while Resend smoke stays healthy. Keep Google OAuth
+enabled only while the Google Cloud Console client keeps the exact Wiii callback
+URI and login smoke returns a redirect to Google Accounts.
 
 Provision the new VM:
 
