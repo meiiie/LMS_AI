@@ -8,6 +8,18 @@
 
 ---
 
+## Product Release Lane
+
+For product launches and release-candidate deploys, use the repository-level runbook:
+
+```text
+docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md
+```
+
+That runbook is the canonical checklist for pinned-SHA deploys, GHCR image verification, smoke tests, rollback, and parallel-team safety. The short version is: deploy from a clean `main` checkout, use matching `sha-...` tags for app and nginx, and probe the app through local nginx (`http://localhost:8080`) because the app container is not exposed on the host.
+
+---
+
 ## Architecture
 
 ```

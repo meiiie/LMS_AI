@@ -194,9 +194,15 @@ class TestProductionOperationalScripts:
             in script
         )
         assert (
-            'docker compose -f "$COMPOSE_FILE" ps --services --status running'
+            'docker compose --env-file "$ENV_ARG" -f "$COMPOSE_FILE" "$@"'
             in script
         )
+        assert (
+            'compose ps --services --status running'
+            in script
+        )
+        assert '${NGINX_LOCAL_URL}/api/v1/health/live' in script
+        assert 'http://localhost:8000/api/v1/health/live' not in script
         assert 'Missing required services:' in script
 
     def test_ingest_script_uses_explicit_live_health_endpoint(self):
