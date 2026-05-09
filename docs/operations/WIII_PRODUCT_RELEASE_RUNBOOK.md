@@ -87,6 +87,8 @@ ZONE=asia-southeast1-c \
 
 After provisioning, update DNS or Cloudflare so `wiii.holilihu.online` points to the new static IP. Do not route Wiii traffic to the LMS VM IP.
 
+For the current Caddy origin configuration, set Cloudflare SSL/TLS mode to `Full` while the record is proxied. Caddy uses an internal origin certificate (`tls internal`), so `Full (strict)` should wait until a Cloudflare Origin Certificate or a public certificate is installed on the VM.
+
 Verify DNS and edge routing before deploying:
 
 ```bash

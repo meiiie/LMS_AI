@@ -101,9 +101,11 @@ sudo chown "$USER":"$USER" /opt/wiii
 sudo mkdir -p /opt/wiii/backups
 sudo chown "$USER":"$USER" /opt/wiii/backups
 
-# Caddy log directory
-sudo mkdir -p /var/log/caddy
-sudo chown caddy:caddy /var/log/caddy
+# Caddy log directory. Install with explicit ownership so Caddy can create and
+# rotate access logs after config reloads.
+sudo install -d -o caddy -g caddy -m 0755 /var/log/caddy
+sudo touch /var/log/caddy/wiii-access.log
+sudo chown caddy:caddy /var/log/caddy/wiii-access.log
 
 # ─────────────────────────────────────────────────
 # 6. Configure swap (critical for single-node Docker production)
