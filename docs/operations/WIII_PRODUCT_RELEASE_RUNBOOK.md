@@ -30,13 +30,21 @@ Cloudflare/DNS -> Caddy on host -> local nginx on :8080 -> app on Docker network
 
 Important implication: the app container is private. Health probes on the VM must use nginx-local URLs such as `http://localhost:8080/api/v1/health/live`, not `http://localhost:8000`.
 
-On 2026-05-09, a public probe showed:
+On 2026-05-10, production was verified on `wiii-production` in project
+`the-wiii-lab`:
 
-- `https://holilihu.online/embed/` returned `200`
-- `https://wiii.holilihu.online/api/v1/health/live` timed out
-- `https://wiii.holilihu.online/api/v1/health` timed out
+- `https://wiii.holilihu.online/api/v1/health/llm-models` was reachable
+- the active model pool contained primary `qwen/qwen3-next-80b-a3b-instruct`
+  and advanced fallback `deepseek-ai/deepseek-v4-pro`
+- model-level health may temporarily mark the advanced model degraded after a
+  timeout; routing should keep normal chat on the healthy primary model
+- `ENABLE_MAGIC_LINK_AUTH=true` was enabled after Resend API validation and
+  verified `holilihu.online` sender domain smoke
+- `ENABLE_GOOGLE_OAUTH=false` remained the safe default until the Wiii callback
+  is registered in Google Cloud Console
 
-Treat public API health timeout as a release blocker until the deploy script, Caddy routing, nginx health, and app health all agree.
+Treat any future public API health timeout as a release blocker until the deploy
+script, Caddy routing, nginx health, and app health all agree.
 
 ## Current GCP Rebuild Target
 
@@ -54,9 +62,17 @@ Production `.env.production` is secret-bearing and must stay on the VM. For the 
 ```bash
 LLM_PROVIDER=nvidia
 NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
-NVIDIA_MODEL=deepseek-ai/deepseek-v4-flash
+NVIDIA_MODEL=qwen/qwen3-next-80b-a3b-instruct
 NVIDIA_MODEL_ADVANCED=deepseek-ai/deepseek-v4-pro
+ENABLE_LLM_MODEL_HEALTH_PROBES=true
+LLM_MODEL_HEALTH_PROBE_TIMEOUT_SECONDS=45
 AGENT_PROVIDER_CONFIGS={"code_studio_agent":{"tier":"deep","provider":"nvidia","model":"deepseek-ai/deepseek-v4-pro"}}
+
+# Required while production embeddings use models/gemini-embedding-001.
+# Use only the minimum Gemini/API permissions needed for embeddings, track its
+# rotation independently from NVIDIA_API_KEY, and document any provider-specific
+# rotation procedure in the release or auth runbook.
+GOOGLE_API_KEY=<google-gemini-api-key>
 
 APP_REPLICAS=1
 GUNICORN_WORKERS=2
@@ -76,6 +92,12 @@ BACKUP_MEM_LIMIT=192M
 ```
 
 `NVIDIA_API_KEY` and all database/auth/object-storage secrets must be copied through the operator's secure channel only; never paste them into issues, PR comments, docs, or shell logs.
+
+Optional production login methods are governed by
+[`WIII_PRODUCTION_AUTH_RUNBOOK.md`](./WIII_PRODUCTION_AUTH_RUNBOOK.md). Keep
+Magic Link enabled only while Resend smoke stays healthy. Keep
+`ENABLE_GOOGLE_OAUTH=false` unless the matching Google OAuth callback setup has
+been completed and smoke tested.
 
 Provision the new VM:
 
@@ -124,6 +146,8 @@ Required release evidence:
 - app and nginx images exist in GHCR
 - no unresolved P0/P1 issue blocks the release
 - production secrets are present on the VM and contain no `CHANGE_ME` placeholders
+- optional auth flags are either disabled or backed by real provider secrets and
+  exact callback/origin configuration
 
 Image existence check:
 
@@ -155,7 +179,7 @@ WIII_NGINX_IMAGE=ghcr.io/meiiie/wiii-nginx:sha-${SHA} \
 REQUIRE_PINNED_IMAGES=true \
 RUN_EXTERNAL_SMOKE=true \
 BASE_URL=https://wiii.holilihu.online \
-  ./maritime-ai-service/scripts/deploy/deploy.sh
+  bash ./maritime-ai-service/scripts/deploy/deploy.sh
 ```
 
 The deploy script will:
@@ -194,6 +218,8 @@ Minimum product smoke criteria:
 - SSE V3 smoke reaches metadata and done events
 - a normal short chat returns without a long silent period
 - LMS iframe loads Wiii without cross-origin console errors beyond known sandbox limitations
+- optional Magic Link or Google OAuth smoke passes if that login method was
+  changed during the release
 
 ## Rollback
 
@@ -209,7 +235,7 @@ WIII_NGINX_IMAGE=ghcr.io/meiiie/wiii-nginx:sha-${PREV_SHA} \
 REQUIRE_PINNED_IMAGES=true \
 RUN_EXTERNAL_SMOKE=true \
 BASE_URL=https://wiii.holilihu.online \
-  ./maritime-ai-service/scripts/deploy/deploy.sh
+  bash ./maritime-ai-service/scripts/deploy/deploy.sh
 ```
 
 If rollback follows a migration, check whether the migration is backward-compatible before restarting the previous app image. If not, restore the predeploy dump created in `maritime-ai-service/backups/` and document the recovery in the release issue.
