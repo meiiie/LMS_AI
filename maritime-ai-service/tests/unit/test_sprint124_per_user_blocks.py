@@ -34,7 +34,13 @@ class TestCharacterRepositoryUserIsolation:
     """Verify repository methods accept and use user_id parameter."""
 
     def _make_repo(self):
+        from app.core.database import clear_shared_database_unavailable
         from app.engine.character.character_repository import CharacterRepository
+
+        # These tests provide their own healthy session factory; keep them
+        # isolated from earlier outage simulations in the shared DB module.
+        clear_shared_database_unavailable()
+
         repo = CharacterRepository()
         repo._initialized = True
         repo._session_factory = MagicMock()
