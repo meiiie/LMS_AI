@@ -4,7 +4,7 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-04-26
+Last updated: 2026-05-10
 
 Applies to: issues, pull requests, branch protection, reviews, CodeRabbit, labels, merge readiness, release hygiene
 
@@ -81,6 +81,7 @@ Minimum review expectations:
 
 - One approving review for normal changes.
 - Owner review for auth, identity, memory, migration, tenant isolation, provider runtime, deployment, or GitHub governance changes.
+- Reviewability gate passing for normal PRs. The default limit is 150 changed files and 20,000 total changed lines.
 - CodeRabbit review/check resolved or explicitly documented as not applicable.
 - Codex Review requested for high-risk changes once enabled, or explicitly documented as not required.
 - Screenshot or recording evidence for frontend-visible changes.
@@ -96,6 +97,25 @@ High-risk PRs require extra scrutiny:
 - Provider selection/failover behavior.
 - MCP/tool exposure.
 - Release/deployment configuration.
+
+## Reviewability Gate
+
+Wiii uses `.github/workflows/merge-gate.yml` to fail PRs that are too large for reliable human or automated review.
+
+Default limits:
+
+- Maximum changed files: 150.
+- Maximum total changed lines: 20,000 additions plus deletions.
+
+If a PR exceeds either limit, split it by subsystem before review. Good split boundaries include backend runtime, desktop UI, deployment, docs/governance, tests, or one feature flag at a time.
+
+Maintainer bypass is allowed only for exceptional repository-wide work such as generated lockfile refreshes, mechanical renames, or emergency repair. The PR body must include:
+
+- Why the change cannot be split safely.
+- Which maintainer approved the bypass.
+- Extra verification evidence that compensates for reduced reviewability.
+
+Do not treat a green CodeRabbit status as sufficient when CodeRabbit states that review was skipped because the PR is too large.
 
 ## Current Branch Protection Baseline
 

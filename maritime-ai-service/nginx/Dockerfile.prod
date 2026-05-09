@@ -3,3 +3,4 @@ FROM nginx:1-alpine
 COPY maritime-ai-service/nginx/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY wiii-desktop/dist-web/ /usr/share/nginx/html/
 COPY wiii-desktop/dist-embed/ /usr/share/nginx/embed/
+COPY wiii-desktop/dist-pointy/ /usr/share/nginx/pointy/

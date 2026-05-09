@@ -61,6 +61,14 @@ check "Embed page loads (GET /embed/)" "$([ "$HTTP" = "200" ] && echo true || ec
 EMBED_HTML=$(curl -s "${BASE_URL}/embed/" 2>/dev/null || true)
 check "Embed HTML includes built asset references" "$(echo "$EMBED_HTML" | grep -Eq '/assets/|<script[^>]+type="module"' && echo true || echo false)"
 
+POINTY_HEADERS="$(mktemp)"
+POINTY_BODY="$(mktemp)"
+HTTP=$(curl -s -D "$POINTY_HEADERS" -o "$POINTY_BODY" -w "%{http_code}" "${BASE_URL}/pointy/wiii-pointy.umd.js" 2>/dev/null || echo "000")
+check "Pointy bundle loads (GET /pointy/wiii-pointy.umd.js)" "$([ "$HTTP" = "200" ] && echo true || echo false)"
+check "Pointy bundle returns JavaScript content type" "$(grep -qiE 'content-type:.*(javascript|ecmascript)' "$POINTY_HEADERS" && echo true || echo false)"
+check "Pointy bundle is not SPA HTML" "$([ -s "$POINTY_BODY" ] && ! grep -qiE '<!doctype html|<html' "$POINTY_BODY" && echo true || echo false)"
+rm -f "$POINTY_HEADERS" "$POINTY_BODY"
+
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/" 2>/dev/null || echo "000")
 check "SPA loads (GET /)" "$([ "$HTTP" = "200" ] && echo true || echo false)"
 

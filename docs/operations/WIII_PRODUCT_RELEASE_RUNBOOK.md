@@ -144,6 +144,7 @@ Required release evidence:
 - `Gate Summary` is green on the PR that reached `main`
 - the latest `Build Production Images` run for the target SHA succeeded
 - app and nginx images exist in GHCR
+- the nginx image contains the Pointy host bundle and serves `/pointy/wiii-pointy.umd.js` as JavaScript, not SPA HTML
 - no unresolved P0/P1 issue blocks the release
 - production secrets are present on the VM and contain no `CHANGE_ME` placeholders
 - optional auth flags are either disabled or backed by real provider secrets and
@@ -191,7 +192,7 @@ The deploy script will:
 - create a pre-migration database backup when Postgres is already running
 - run migrations
 - start app and nginx
-- probe `http://localhost:8080/api/v1/health/live`, `/health`, and `/embed/`
+- probe `http://localhost:8080/api/v1/health/live`, `/health`, `/embed/`, and `/pointy/wiii-pointy.umd.js`
 - optionally run external smoke through `scripts/deploy/smoke-test.sh`
 
 ## Post-Deploy Smoke
@@ -209,12 +210,14 @@ Run these from a local machine:
 ```bash
 curl -fsS https://wiii.holilihu.online/api/v1/health/live
 curl -fsSI https://wiii.holilihu.online/embed/
+curl -fsSI https://wiii.holilihu.online/pointy/wiii-pointy.umd.js
 ```
 
 Minimum product smoke criteria:
 
 - public health returns `200`
 - `/embed/` returns `200` and has the expected frame policy
+- `/pointy/wiii-pointy.umd.js` returns JavaScript content and never falls through to the SPA shell
 - SSE V3 smoke reaches metadata and done events
 - a normal short chat returns without a long silent period
 - LMS iframe loads Wiii without cross-origin console errors beyond known sandbox limitations

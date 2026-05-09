@@ -36,6 +36,7 @@ Refs #
 
 - [ ] No unrelated dirty worktree changes were staged.
 - [ ] No secrets, tokens, private data, or local-only files are committed.
+- [ ] PR is within the reviewability gate, or a maintainer-approved bypass rationale is documented.
 - [ ] Multi-agent file ownership was declared when more than one agent contributed.
 - [ ] CodeRabbit findings are resolved, deferred with rationale, or explicitly not applicable.
 - [ ] Codex Review was requested for high-risk changes, or explicitly marked not required with rationale.

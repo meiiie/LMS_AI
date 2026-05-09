@@ -42,12 +42,18 @@ jobs:
           cache: npm
           cache-dependency-path: wiii-desktop/package-lock.json
 
-      - name: Build web + embed bundles
+      - name: Build web, embed, and Pointy bundles
         working-directory: wiii-desktop
         run: |
           npm ci
           npm run build:web
           npm run build:embed
+          npm run build:pointy
+          test -s dist-pointy/wiii-pointy.umd.js
+          if grep -qiE '<!doctype html|<html' dist-pointy/wiii-pointy.umd.js; then
+            echo "Pointy bundle looks like HTML, not JavaScript." >&2
+            exit 1
+          fi
 
       - name: Set lowercase owner
         id: owner
@@ -97,12 +103,18 @@ jobs:
           cache: npm
           cache-dependency-path: wiii-desktop/package-lock.json
 
-      - name: Build web + embed bundles
+      - name: Build web, embed, and Pointy bundles
         working-directory: wiii-desktop
         run: |
           npm ci
           npm run build:web
           npm run build:embed
+          npm run build:pointy
+          test -s dist-pointy/wiii-pointy.umd.js
+          if grep -qiE '<!doctype html|<html' dist-pointy/wiii-pointy.umd.js; then
+            echo "Pointy bundle looks like HTML, not JavaScript." >&2
+            exit 1
+          fi
 
       - name: Set lowercase owner
         id: owner

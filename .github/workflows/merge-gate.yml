@@ -125,6 +125,62 @@ jobs:
             fi
           done < <(grep -E "$env_example" /tmp/changed-files.txt || true)
 
+  reviewability-gate:
+    name: Reviewability Gate
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Enforce reviewable PR size
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${{ github.base_ref }}" ]]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            base="FETCH_HEAD"
+            if git merge-base "$base" HEAD >/dev/null 2>&1; then
+              range="$base...HEAD"
+            else
+              echo "No merge-base found for $base; falling back to the latest commit range." >&2
+              range="HEAD~1..HEAD"
+            fi
+          elif [[ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
+            range="${{ github.event.before }}..${{ github.sha }}"
+          else
+            range="HEAD~1..HEAD"
+          fi
+
+          file_count="$(git diff --name-only "$range" | sed '/^$/d' | wc -l | tr -d ' ')"
+          read -r added deleted < <(
+            git diff --numstat "$range" |
+              awk '{ add += ($1 == "-" ? 0 : $1); del += ($2 == "-" ? 0 : $2) } END { print add+0, del+0 }'
+          )
+          total_delta=$((added + deleted))
+
+          echo "Changed files: ${file_count}"
+          echo "Line delta: +${added} -${deleted} (${total_delta} total)"
+
+          max_files=150
+          max_delta=20000
+
+          if [[ "$file_count" -gt "$max_files" || "$total_delta" -gt "$max_delta" ]]; then
+            {
+              echo "This PR is too large for reliable review."
+              echo ""
+              echo "Limits:"
+              echo "- files: ${file_count}/${max_files}"
+              echo "- total line delta: ${total_delta}/${max_delta}"
+              echo ""
+              echo "Split the work into smaller PRs by subsystem, or use an explicit"
+              echo "maintainer/admin bypass with a written rationale in the PR body."
+            } >&2
+            exit 1
+          fi
+
   github-governance:
     name: GitHub Governance Gate
     runs-on: ubuntu-latest
@@ -259,12 +315,23 @@ jobs:
         working-directory: wiii-desktop
         run: npm run build:embed
 
+      - name: Build Pointy bundle
+        working-directory: wiii-desktop
+        run: |
+          npm run build:pointy
+          test -s dist-pointy/wiii-pointy.umd.js
+          if grep -qiE '<!doctype html|<html' dist-pointy/wiii-pointy.umd.js; then
+            echo "Pointy bundle looks like HTML, not JavaScript." >&2
+            exit 1
+          fi
+
   gate-summary:
     name: Gate Summary
     runs-on: ubuntu-latest
     needs:
       - detect-changes
       - repository-hygiene
+      - reviewability-gate
       - github-governance
       - backend-unit-gate
       - desktop-gate
