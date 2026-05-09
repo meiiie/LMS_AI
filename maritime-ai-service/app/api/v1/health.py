@@ -257,12 +257,17 @@ async def check_knowledge_graph_health() -> ComponentHealth:
 _shared_async_engine = None
 
 
+def _get_sqlalchemy_async_engine_url() -> str:
+    """Return a SQLAlchemy async URL without asyncpg-incompatible options."""
+    return settings._remove_connect_timeout(settings.postgres_url)
+
+
 async def _get_shared_async_engine():
     """Get or create a module-level singleton async engine for health checks."""
     global _shared_async_engine
     if _shared_async_engine is None:
         _shared_async_engine = create_async_engine(
-            settings.postgres_url,
+            _get_sqlalchemy_async_engine_url(),
             pool_pre_ping=True,
             pool_size=1,
             max_overflow=0,
