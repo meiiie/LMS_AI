@@ -581,6 +581,7 @@ async def execute_code_studio_tool_rounds_impl(
 
         messages.append(llm_response)
         terminal_failure_detected = False
+        terminal_failure_tool_name: str | None = None
         visual_session_ids: list[str] = []
         active_visual_session_ids = collect_active_visual_session_ids(state)
         logger.info(
@@ -703,6 +704,7 @@ async def execute_code_studio_tool_rounds_impl(
             messages.append(_TM(content=str(result), tool_call_id=tc_id))
             if is_terminal_code_studio_tool_error(tc_name, result):
                 terminal_failure_detected = True
+                terminal_failure_tool_name = str(tc_name)
 
         await emit_visual_commit_events(
             push_event=push_event,
@@ -712,7 +714,16 @@ async def execute_code_studio_tool_rounds_impl(
         )
         await push_event({"type": "thinking_end", "content": "", "node": "code_studio_agent"})
         if terminal_failure_detected:
-            llm_response = _AM(content=build_code_studio_terminal_failure_response(query, tool_call_events))
+            if str(terminal_failure_tool_name or "").strip() == "tool_create_visual_code":
+                llm_response = _AM(
+                    content=build_code_studio_missing_tool_response(
+                        query,
+                        state,
+                        timed_out=True,
+                    )
+                )
+            else:
+                llm_response = _AM(content=build_code_studio_terminal_failure_response(query, tool_call_events))
             break
         try:
             llm_response = await asyncio.wait_for(

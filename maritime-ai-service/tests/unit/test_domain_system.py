@@ -212,35 +212,35 @@ class TestDomainRouter:
 
     def test_explicit_domain_id(self, router):
         """Priority 1: Explicit domain_id should be used directly."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             router.resolve("anything", explicit_domain_id="maritime")
         )
         assert result == "maritime"
 
     def test_session_sticky(self, router):
         """Priority 2: Session domain should be used when no explicit."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             router.resolve("anything", session_domain="maritime")
         )
         assert result == "maritime"
 
     def test_keyword_match(self, router):
         """Priority 3: Should match domain by keyword in query."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             router.resolve("colregs rule 15")
         )
         assert result == "maritime"
 
     def test_default_fallback(self, router):
         """Priority 4: Should fall back to default domain."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             router.resolve("hello world")
         )
         assert result == "maritime"  # Default
 
     def test_explicit_overrides_keyword(self, router):
         """Explicit domain_id should override keyword match."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             router.resolve("colregs rule 15", explicit_domain_id="maritime")
         )
         assert result == "maritime"
@@ -560,56 +560,56 @@ class TestMultiDomainRouting:
 
     def test_maritime_keyword_routing(self, multi_router):
         """Maritime keywords should route to maritime."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             multi_router.resolve("COLREGs rule 15 crossing")
         )
         assert result == "maritime"
 
     def test_traffic_law_keyword_routing(self, multi_router):
         """Traffic law keywords (with diacritics) should route to traffic_law."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             multi_router.resolve("biển báo giao thông đường bộ")
         )
         assert result == "traffic_law"
 
     def test_traffic_law_no_diacritics(self, multi_router):
         """Traffic law keywords WITHOUT diacritics should still route correctly."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             multi_router.resolve("bien bao giao thong duong bo")
         )
         assert result == "traffic_law"
 
     def test_penalty_routes_to_traffic(self, multi_router):
         """Penalty/fine queries should route to traffic_law."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             multi_router.resolve("muc phat vuot den do")
         )
         assert result == "traffic_law"
 
     def test_solas_routes_to_maritime(self, multi_router):
         """SOLAS queries should route to maritime."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             multi_router.resolve("SOLAS chapter II fire safety")
         )
         assert result == "maritime"
 
     def test_driving_license_routes_to_traffic(self, multi_router):
         """Driving license queries should route to traffic_law."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             multi_router.resolve("bang lai xe B2 oto")
         )
         assert result == "traffic_law"
 
     def test_default_fallback_to_maritime(self, multi_router):
         """Unknown queries should fallback to maritime (default)."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             multi_router.resolve("hello world good morning")
         )
         assert result == "maritime"
 
     def test_explicit_overrides_keywords(self, multi_router):
         """Explicit domain_id should override keyword matching."""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             multi_router.resolve("COLREGs rule 15", explicit_domain_id="traffic_law")
         )
         assert result == "traffic_law"

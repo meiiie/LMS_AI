@@ -156,7 +156,10 @@ class TestSupervisorRoute:
         mock_route.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_route_greeting_learning_request_does_not_use_fast_path(self, mock_llm):
+    async def test_route_greeting_learning_request_does_not_use_fast_path(self, mock_llm, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_conservative_fast_routing", False, raising=False)
         sup = _make_supervisor(mock_llm)
         state = {
             "query": "hello explain COLREG Rule 15",
@@ -328,7 +331,10 @@ class TestSupervisorRoute:
         assert result == "rag_agent"
 
     @pytest.mark.asyncio
-    async def test_route_to_tutor(self, mock_llm, base_state):
+    async def test_route_to_tutor(self, mock_llm, base_state, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_conservative_fast_routing", False, raising=False)
         sup = _make_supervisor(mock_llm)
 
         with _mock_structured_route("TUTOR_AGENT", intent="learning"):
@@ -336,7 +342,10 @@ class TestSupervisorRoute:
         assert result == "tutor_agent"
 
     @pytest.mark.asyncio
-    async def test_route_to_memory(self, mock_llm, base_state):
+    async def test_route_to_memory(self, mock_llm, base_state, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_conservative_fast_routing", False, raising=False)
         sup = _make_supervisor(mock_llm)
 
         with _mock_structured_route("MEMORY_AGENT", intent="personal"):
@@ -344,7 +353,10 @@ class TestSupervisorRoute:
         assert result == "memory_agent"
 
     @pytest.mark.asyncio
-    async def test_route_to_direct(self, mock_llm, base_state):
+    async def test_route_to_direct(self, mock_llm, base_state, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_conservative_fast_routing", False, raising=False)
         sup = _make_supervisor(mock_llm)
 
         with _mock_structured_route("DIRECT", intent="off_topic"):
@@ -356,7 +368,12 @@ class TestSupervisorRoute:
         self,
         mock_llm,
         base_state,
+        monkeypatch,
     ):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_conservative_fast_routing", False, raising=False)
+        base_state["query"] = "hello there"
         sup = _make_supervisor(mock_llm)
 
         with patch.object(
@@ -381,9 +398,13 @@ class TestSupervisorRoute:
         self,
         mock_llm,
         base_state,
+        monkeypatch,
     ):
         from app.engine.structured_schemas import RoutingDecision
+        from app.core.config import settings
 
+        monkeypatch.setattr(settings, "enable_conservative_fast_routing", False, raising=False)
+        base_state["query"] = "hello there"
         sup = _make_supervisor(mock_llm)
         base_state["provider"] = "auto"
         base_state["_house_routing_provider"] = "google"
@@ -875,8 +896,11 @@ class TestSupervisorProcess:
         assert result["current_agent"] == "supervisor"
 
     @pytest.mark.asyncio
-    async def test_process_does_not_push_supervisor_thinking_events(self, mock_llm, base_state):
+    async def test_process_does_not_push_supervisor_thinking_events(self, mock_llm, base_state, monkeypatch):
         """Supervisor does NOT push thinking bus events — thinking comes from agent nodes."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_conservative_fast_routing", False, raising=False)
         sup = _make_supervisor(mock_llm)
 
         from app.engine.multi_agent import graph_streaming

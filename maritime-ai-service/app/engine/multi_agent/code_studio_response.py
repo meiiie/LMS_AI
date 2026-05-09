@@ -220,12 +220,18 @@ def _is_terminal_code_studio_tool_error(tool_name: str, result: object) -> bool:
     """Detect tool failures that should stop the code-studio loop immediately."""
     normalized_name = str(tool_name or "").strip().lower()
 
+    normalized_result = _normalize_for_intent(str(result or ""))
+    if not normalized_result:
+        return False
+
+    if "tool unavailable" in normalized_result and normalized_name in {
+        "tool_execute_python",
+        "tool_browser_snapshot_url",
+        "tool_create_visual_code",
+    }:
+        return True
+
     if normalized_name in {"tool_execute_python", "tool_browser_snapshot_url"}:
-        normalized_result = _normalize_for_intent(str(result or ""))
-        if not normalized_result:
-            return False
-        if "tool unavailable" in normalized_result:
-            return True
         return (
             "opensandbox execution failed" in normalized_result
             and "network connectivity error" in normalized_result

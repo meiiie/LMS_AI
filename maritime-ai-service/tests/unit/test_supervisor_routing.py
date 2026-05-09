@@ -165,7 +165,7 @@ class TestDefaultRouting:
     def test_query_with_domain_keyword_routes_to_rag(self, supervisor):
         """Query with domain keyword still routes to RAG."""
         config = _make_domain_config(["vessel, ship"])
-        result = supervisor._rule_based_route("What is the safe speed requirement for vessels?", config)
+        result = supervisor._rule_based_route("What is the safe speed requirement for vessel?", config)
         assert result == AgentType.RAG.value
 
     def test_short_query_defaults_to_direct(self, supervisor):

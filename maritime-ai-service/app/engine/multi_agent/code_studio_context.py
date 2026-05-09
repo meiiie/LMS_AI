@@ -276,12 +276,12 @@ def _build_code_studio_missing_tool_response(
         last_title = _last_inline_visual_title(state)
         if timed_out and last_title:
             return (
-                f"Mình đã vào đúng lane mô phỏng rồi, nhưng lượt này model chưa dựng kịp app thật. "
+                f"Mình đã mở đúng lane mô phỏng rồi, nhưng lượt này model chưa dựng kịp app thật. "
                 f"Để mình vào lại gọn hơn, bạn hãy nói rõ hơn một chút, ví dụ `Mô phỏng {last_title}`."
             )
         if timed_out:
             return (
-                "Mình đã vào đúng lane mô phỏng rồi, nhưng lượt này model chưa dựng kịp app thật. "
+                "Mình đã mở đúng lane mô phỏng rồi, nhưng lượt này model chưa dựng kịp app thật. "
                 "Bạn hãy nói rõ hiện tượng cần mô phỏng hơn một chút, mình sẽ mở canvas theo đúng chủ đề đó."
             )
         return (

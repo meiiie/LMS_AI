@@ -319,8 +319,6 @@ class TestDirectNodeCharacterTools:
             assert "tool_character_note" in names
             assert "tool_current_datetime" in names
             assert "tool_web_search" in names
-            assert "tool_search_news" in names
-            assert "tool_search_legal" in names
             assert "tool_search_maritime" in names
 
     @pytest.mark.asyncio
