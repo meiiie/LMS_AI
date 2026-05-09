@@ -80,6 +80,8 @@ git status --short
 - Prefer narrow, actionable review comments with file and line references. Avoid broad style commentary unless it creates correctness, security, maintainability, accessibility, or operational risk.
 
 <!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+For Wiii Spec Kit workflow context, read `.specify/memory/constitution.md`
+and `docs/operations/WIII_SPEC_KIT_WORKFLOW.md`. When a Spec Kit feature is
+active, also read that feature's `specs/<feature>/plan.md` and
+`specs/<feature>/tasks.md`.
 <!-- SPECKIT END -->

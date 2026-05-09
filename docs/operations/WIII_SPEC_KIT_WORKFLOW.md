@@ -2,9 +2,37 @@
 
 Status: Active
 
-Owner: Project leadership
+Owner: Wiii Maintainers
+
+Escalation: repository owner or delegated maintainer listed in GitHub PR review requirements
 
 Last updated: 2026-05-09
+
+## Scope
+
+This workflow covers Spec Kit usage for Wiii repository work that changes architecture, runtime contracts, memory behavior, RAG/CRAG behavior, provider routing, host-control contracts, streaming UX, auth, tenant isolation, or multi-agent execution plans.
+
+In scope:
+
+- Constitution, specification, plan, task, and implementation artifacts under `.specify/` and `specs/`.
+- Codex Spec Kit skills under `.agents/skills/speckit-*`.
+- Operational evidence for Spec Kit PRs, including issue links, PR body verification, CI checks, review comments, and follow-up tasks.
+
+Out of scope:
+
+- Replacing normal issue-to-PR flow for small isolated fixes.
+- Runtime implementation details that belong in feature-specific `specs/<feature>/plan.md` files.
+- Local untracked agent scratch files, temporary logs, screenshots, build outputs, caches, and secrets.
+
+## Evidence
+
+Auditable evidence for Spec Kit-governed work must live in these locations:
+
+- GitHub issue: requirement summary, scope, non-goals, and acceptance criteria.
+- GitHub PR body: linked issue, summary, exact verification commands, risk, rollback, and screenshots or visual-evidence rationale when relevant.
+- GitHub checks: `GitHub Governance Gate`, `Repository Hygiene`, `Gate Summary`, CodeQL checks, and any path-specific backend/desktop checks selected by Merge Gate.
+- Repository artifacts: `.specify/memory/constitution.md`, `docs/operations/WIII_SPEC_KIT_WORKFLOW.md`, and feature-specific `specs/<feature>/spec.md`, `specs/<feature>/plan.md`, `specs/<feature>/tasks.md` when created.
+- Follow-up tracking: unresolved work must be captured as GitHub issues or explicit PR comments with owner and rationale.
 
 ## Purpose
 
