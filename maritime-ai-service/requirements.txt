@@ -110,7 +110,7 @@ lxml>=6.1.0
 # Browser Scraping (Sprint 152: Playwright headless Chromium + LLM extraction)
 # Optional: only needed when enable_browser_scraping=True
 # Install browser: playwright install chromium
-playwright>=1.58.0
+playwright>=1.59.0
 
 # Phase 35 — Open-source SOTA web search stack (no paid API).
 # Crawl4AI installed separately in Dockerfile.prod (lxml resolver conflict).
