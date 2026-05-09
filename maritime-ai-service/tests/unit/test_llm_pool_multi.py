@@ -345,6 +345,44 @@ class TestTierResolution:
         moderate = LLMPool.get(ThinkingTier.MODERATE)
         assert default is moderate
 
+    @patch("app.engine.llm_pool.settings")
+    def test_get_drops_degraded_cached_model(self, mock_settings):
+        """LLMPool.get() should not keep returning a model probe marked degraded."""
+        from app.engine.llm_model_health import record_model_failure
+
+        mock_settings.enable_llm_failover = True
+        mock_settings.llm_failover_chain = ["nvidia"]
+        mock_settings.llm_provider = "nvidia"
+        mock_settings.thinking_enabled = True
+
+        degraded_llm = MagicMock(spec=WiiiChatModel)
+        degraded_llm._wiii_provider_name = "nvidia"
+        degraded_llm._wiii_model_name = "deepseek-ai/deepseek-v4-flash"
+        healthy_llm = MagicMock(spec=WiiiChatModel)
+        healthy_llm._wiii_model_name = "deepseek-ai/deepseek-v4-pro"
+
+        provider = _make_provider("nvidia")
+        provider.create_instance.return_value = healthy_llm
+        LLMPool._providers = {"nvidia": provider}
+        LLMPool._active_provider = "nvidia"
+        LLMPool._pool = {"moderate": degraded_llm}
+        LLMPool._provider_pools = {"nvidia": {"moderate": degraded_llm}}
+        LLMPool._initialized = True
+
+        record_model_failure(
+            "nvidia",
+            "deepseek-ai/deepseek-v4-flash",
+            reason_code="timeout",
+            timeout_seconds=0.01,
+        )
+
+        result = LLMPool.get(ThinkingTier.MODERATE)
+
+        assert result is healthy_llm
+        assert LLMPool._pool["moderate"] is healthy_llm
+        assert LLMPool._provider_pools["nvidia"]["moderate"] is healthy_llm
+        provider.create_instance.assert_called_once()
+
 
 # ============================================================================
 # _init_providers Tests
