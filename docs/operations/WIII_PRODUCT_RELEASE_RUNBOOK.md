@@ -38,6 +38,64 @@ On 2026-05-09, a public probe showed:
 
 Treat public API health timeout as a release blocker until the deploy script, Caddy routing, nginx health, and app health all agree.
 
+## Current GCP Rebuild Target
+
+The old documented GCP project `valued-range-443614-j4` is no longer accessible from the active deployment account. As of 2026-05-09, the active account has project `the-wiii-lab`.
+
+Important guardrail:
+
+- `lms-production` in `the-wiii-lab` is the LMS VM and must not be used for Wiii containers.
+- Wiii should be deployed to a separate VM, default name `wiii-production`.
+- The default VM profile is `e2-standard-2` in `asia-southeast1-c` with an `80GB` `pd-balanced` boot disk.
+- Docker defaults are tuned for single-node production: `APP_REPLICAS=1`, `GUNICORN_WORKERS=2`, `ASYNC_POOL_MAX_SIZE=20`.
+
+Production `.env.production` is secret-bearing and must stay on the VM. For the current NVIDIA-backed product lane, apply these non-secret shape requirements there rather than committing a changed `.env` template:
+
+```bash
+LLM_PROVIDER=nvidia
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_MODEL=deepseek-ai/deepseek-v4-flash
+NVIDIA_MODEL_ADVANCED=deepseek-ai/deepseek-v4-pro
+AGENT_PROVIDER_CONFIGS={"code_studio_agent":{"tier":"deep","provider":"nvidia","model":"deepseek-ai/deepseek-v4-pro"}}
+
+APP_REPLICAS=1
+GUNICORN_WORKERS=2
+ASYNC_POOL_MAX_SIZE=20
+APP_CPU_LIMIT=1.5
+APP_MEM_LIMIT=2G
+POSTGRES_CPU_LIMIT=1.0
+POSTGRES_MEM_LIMIT=1536M
+MINIO_CPU_LIMIT=0.35
+MINIO_MEM_LIMIT=384M
+VALKEY_CPU_LIMIT=0.25
+VALKEY_MEM_LIMIT=192M
+NGINX_CPU_LIMIT=0.25
+NGINX_MEM_LIMIT=192M
+BACKUP_CPU_LIMIT=0.25
+BACKUP_MEM_LIMIT=192M
+```
+
+`NVIDIA_API_KEY` and all database/auth/object-storage secrets must be copied through the operator's secure channel only; never paste them into issues, PR comments, docs, or shell logs.
+
+Provision the new VM:
+
+```bash
+PROJECT_ID=the-wiii-lab \
+ZONE=asia-southeast1-c \
+  bash maritime-ai-service/scripts/deploy/provision-gcp-vm.sh
+```
+
+After provisioning, update DNS or Cloudflare so `wiii.holilihu.online` points to the new static IP. Do not route Wiii traffic to the LMS VM IP.
+
+Verify DNS and edge routing before deploying:
+
+```bash
+dig wiii.holilihu.online +short
+curl -fsSI https://wiii.holilihu.online/embed/
+```
+
+If DNS still resolves to Cloudflare, confirm the Cloudflare origin points to the new static IP and that proxying is intentional. If DNS resolves to the old LMS VM IP, stop and fix DNS before running the deploy script.
+
 ## Preflight Gate
 
 Before deploying, confirm the target commit is suitable for product:
@@ -80,7 +138,7 @@ Use the same SHA tag for app and nginx. Floating `:main` is acceptable only for 
 SSH to the production VM:
 
 ```bash
-gcloud compute ssh wiii-production --zone=asia-southeast1-b --project=valued-range-443614-j4
+gcloud compute ssh wiii-production --zone=asia-southeast1-c --project=the-wiii-lab
 ```
 
 Run a pinned deploy:
