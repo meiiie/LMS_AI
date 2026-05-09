@@ -67,7 +67,7 @@ def test_split_visible_answer_chunks_preserves_markdown_urls_exactly():
 
 
 @pytest.mark.asyncio
-async def test_direct_wait_heartbeat_is_visible_progress():
+async def test_direct_wait_heartbeat_is_visible_progress_until_safety_cap():
     events = []
 
     async def _push_event(event):
@@ -81,7 +81,7 @@ async def test_direct_wait_heartbeat_is_visible_progress():
         interval_sec=0.001,
     )
 
-    assert len(events) == 2
+    assert len(events) == 8
     assert all(event["type"] == "status" for event in events)
     assert all(event["details"]["subtype"] == "visible_wait" for event in events)
     assert all(event["details"]["visibility"] == "progress" for event in events)
