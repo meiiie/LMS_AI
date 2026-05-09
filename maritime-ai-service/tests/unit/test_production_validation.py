@@ -250,4 +250,8 @@ class TestProductionOrganizationSeed:
         assert "'wiii'" in migration
         assert "ON CONFLICT (id) DO UPDATE" in migration
         assert "wiii.holilihu.online" in migration
+        assert "table_schema = current_schema()" in migration
+        assert "COALESCE(EXCLUDED.settings" in migration
+        assert "COALESCE(organizations.settings" in migration
+        assert "is_active = COALESCE(organizations.is_active" in migration
         assert "DELETE FROM organizations" not in migration
