@@ -10,7 +10,7 @@
 #   1. Updates system packages
 #   2. Installs Docker + Docker Compose v2
 #   3. Installs Caddy (auto-SSL reverse proxy)
-#   4. Creates /opt/wiii app directory + backup directory
+#   4. Creates /opt/wiii app directory
 #   5. Configures swap (default 4G, override via SWAP_SIZE)
 #   6. Kernel tuning for high-connection server
 #   7. Installs fail2ban (brute-force protection)
@@ -91,15 +91,11 @@ else
 fi
 
 # ─────────────────────────────────────────────────
-# 5. Create app + backup directories
+# 5. Create app directory
 # ─────────────────────────────────────────────────
 info "Step 5/10: Setting up directories..."
 sudo mkdir -p /opt/wiii
 sudo chown "$USER":"$USER" /opt/wiii
-
-# Backup directory (PostgreSQL dumps)
-sudo mkdir -p /opt/wiii/backups
-sudo chown "$USER":"$USER" /opt/wiii/backups
 
 # Caddy log directory. Install with explicit ownership so Caddy can create and
 # rotate access logs after config reloads.
