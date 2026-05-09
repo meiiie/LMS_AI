@@ -15,8 +15,8 @@ Use this folder for repository-level documentation that explains the product, th
 - `operations/WIII_SPEC_KIT_WORKFLOW.md`: Spec Kit constitution, specification, planning, and multi-agent workflow for Wiii
 - `operations/WIII_CODEX_REVIEW_SETUP.md`: Codex GitHub Review setup, rollout, operating policy, and rollback controls
 - `operations/WIII_MULTI_AGENT_MAINTAINER_PROTOCOL.md`: multi-agent ownership, maintainer review, CodeRabbit, conflict, and merge protocol
-- `operations/WIII_SYSTEM_CLEANUP_CHECKPOINT_2026-04-24.md`: current operational cleanup checkpoint and runtime truth snapshot
-- `operations/WIII_REPOSITORY_HYGIENE_AUDIT_2026-04-24.md`: final cleanup verification, retained local artifacts, and rebuild runbook
+- `operations/WIII_PRODUCT_RELEASE_RUNBOOK.md`: product release lane, pinned deploys, smoke gates, rollback, and parallel-team safety
+- `operations/WIII_PRODUCTION_AUTH_RUNBOOK.md`: production Magic Link and Google OAuth setup, smoke tests, and rollback
 - `../maritime-ai-service/docs/architecture/SYSTEM_ARCHITECTURE.md`: authoritative system architecture
 - `../maritime-ai-service/docs/architecture/SYSTEM_FLOW.md`: technical request and streaming flow
 - `../maritime-ai-service/docs/integration/WIII_LMS_INTEGRATION.md`: LMS contract and security model
@@ -25,9 +25,9 @@ Use this folder for repository-level documentation that explains the product, th
 
 ## Current Layout
 
-- `plans/`: committed design notes, implementation plans, and sprint writeups
-- `operations/`: reviewed operational checkpoints, cleanup governance, release controls, and runtime truth documents
-- `assets/`: committed screenshots, diagrams, and other documentation assets
+- `plans/`: reviewed design notes and active implementation plans
+- `operations/`: reviewed governance, release, auth, and runtime operation documents
+- `assets/`: committed documentation assets that are referenced by canonical docs
 
 ## Rules
 
@@ -37,3 +37,4 @@ Use this folder for repository-level documentation that explains the product, th
 - Put reviewed cleanup, release, and governance documents under `docs/operations/`.
 - Keep desktop-only docs under `wiii-desktop/docs/`.
 - Do not commit agent-generated working reports. Keep temporary reports in ignored local scratch paths and promote durable findings into canonical docs.
+- Delete superseded checkpoints, sprint reports, and unreferenced screenshots after their durable content is represented by the current runbooks or GitHub issues.

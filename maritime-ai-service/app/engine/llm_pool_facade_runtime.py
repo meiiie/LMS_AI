@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
+
+from app.engine.llm_model_health import is_model_degraded
+from app.engine.llm_same_provider_runtime import extract_runtime_model_name_impl
+
+
+def _cached_pool_llm_is_degraded(provider_name: str | None, llm: Any | None) -> bool:
+    if not provider_name:
+        return False
+    return is_model_degraded(provider_name, extract_runtime_model_name_impl(llm))
 
 
 def initialize_pool_impl(
@@ -72,6 +81,18 @@ def get_pool_llm_impl(*, cls_ref, tier=None, thinking_tier=None, logger_obj=None
     if tier_key not in cls_ref._pool:
         logger_obj.warning("[LLM_POOL] Tier %s not in pool, creating on-demand", tier_key)
         cls_ref._create_instance(tier_key)
+    else:
+        cached_llm = cls_ref._pool[tier_key]
+        cached_provider = getattr(cached_llm, "_wiii_provider_name", None) or cls_ref._active_provider
+        if _cached_pool_llm_is_degraded(cached_provider, cached_llm):
+            cls_ref._pool.pop(tier_key, None)
+            cls_ref._provider_pools.get(cached_provider, {}).pop(tier_key, None)
+            logger_obj.warning(
+                "[LLM_POOL] Dropped degraded cached LLM for %s/%s",
+                cached_provider,
+                tier_key,
+            )
+            cls_ref._create_instance(tier_key)
 
     return cls_ref._pool[tier_key]
 

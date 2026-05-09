@@ -6,6 +6,7 @@ Sends magic link emails using Resend API.
 import logging
 
 from app.core.config import settings
+from app.core.secret_validation import is_missing_or_placeholder_secret
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ def build_magic_link_html(verify_url: str) -> str:
 
 def _is_resend_configured() -> bool:
     key = getattr(settings, "resend_api_key", "") or ""
-    return bool(key) and not key.startswith("CHANGE_ME")
+    return not is_missing_or_placeholder_secret(key)
 
 
 async def send_magic_link_email(to_email: str, verify_url: str) -> bool:
@@ -59,10 +60,15 @@ async def send_magic_link_email(to_email: str, verify_url: str) -> bool:
     """
     resend_ready = _is_resend_configured() and resend is not None
 
+    if not resend_ready and getattr(settings, "environment", "") == "production":
+        logger.error(
+            "Magic Link email blocked in production because Resend is not configured."
+        )
+        return False
+
     if not resend_ready:
-        # Placeholder secret (CHANGE_ME_...) or missing package → dev fallback.
-        # A real production deployment would never ship a CHANGE_ME_ key, so
-        # this branch is safe to leave on even when environment=production.
+        # Development-only fallback for missing package or common placeholder
+        # secrets such as "your-", "placeholder", "example", and "dummy".
         logger.warning(
             "[DEV MAGIC LINK] Resend not configured. Open this URL to finish login for %s:\n  %s",
             to_email, verify_url,

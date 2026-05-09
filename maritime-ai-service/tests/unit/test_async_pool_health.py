@@ -105,6 +105,33 @@ class TestAsyncPoolIntegration:
         assert hasattr(health, "check_async_pool_health")
         assert callable(health.check_async_pool_health)
 
+    @pytest.mark.asyncio
+    async def test_shared_engine_strips_connect_timeout_from_sqlalchemy_url(self):
+        """Health checks should keep asyncpg driver but drop invalid timeout query."""
+        import app.api.v1.health as health_mod
+
+        health_mod._shared_async_engine = None
+        mock_settings = MagicMock()
+        mock_settings.postgres_url = (
+            "postgresql+asyncpg://wiii:secret@postgres:5432/wiii"
+            "?connect_timeout=5&ssl=require"
+        )
+        mock_settings._remove_connect_timeout.side_effect = (
+            lambda url: url.replace("?connect_timeout=5&ssl=require", "?ssl=require")
+        )
+
+        with patch("app.api.v1.health.settings", mock_settings), \
+             patch("app.api.v1.health.create_async_engine") as mock_create:
+            mock_engine = MagicMock()
+            mock_create.return_value = mock_engine
+
+            engine = await health_mod._get_shared_async_engine()
+
+        assert engine is mock_engine
+        created_url = mock_create.call_args.args[0]
+        assert created_url.startswith("postgresql+asyncpg://")
+        assert "connect_timeout" not in created_url
+
     def test_deep_health_includes_async_pool(self):
         """Deep health check source code references async_pool."""
         import inspect
@@ -112,6 +139,14 @@ class TestAsyncPoolIntegration:
         source = inspect.getsource(health_check_deep)
         assert "async_pool" in source
         assert "check_async_pool_health" in source
+
+    def test_deep_health_includes_llm_model_health(self):
+        """Deep health check source code references llm_model_health."""
+        import inspect
+        from app.api.v1.health import health_check_deep
+        source = inspect.getsource(health_check_deep)
+        assert "llm_model_health" in source
+        assert "check_llm_model_health" in source
 
 
 class TestAsyncPoolComponentHealth:

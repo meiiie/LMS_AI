@@ -18,9 +18,9 @@
 set -euo pipefail
 
 # Configuration
-APP_DIR="/opt/wiii"
-SERVICE_DIR="${APP_DIR}/maritime-ai-service"
-BACKUP_DIR="${APP_DIR}/backups"
+APP_DIR="${APP_DIR:-/opt/wiii}"
+SERVICE_DIR="${SERVICE_DIR:-${APP_DIR}/maritime-ai-service}"
+BACKUP_DIR="${BACKUP_DIR:-${SERVICE_DIR}/backups}"
 COMPOSE_FILE="docker-compose.prod.yml"
 RETENTION_DAYS=7
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)

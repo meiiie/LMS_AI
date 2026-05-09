@@ -1,34 +1,32 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
-# Wiii Production Deployment Script
-# by The Wiii Lab (Hong Linh Linh Hung)
+# Wiii production deployment script
 #
-# Domain: holilihu.online
+# Safe release lane:
+#   - deploy only from a clean server checkout
+#   - optionally pin the repository with DEPLOY_SHA
+#   - pull prebuilt GHCR images
+#   - validate compose topology before rollout
+#   - create a pre-migration database backup when Postgres is already running
+#   - probe the app through local nginx, matching production topology
 #
 # Usage:
-#   cd /opt/wiii && ./maritime-ai-service/scripts/deploy/deploy.sh
+#   cd /opt/wiii
+#   DEPLOY_SHA=<full-or-short-sha> \
+#   WIII_APP_IMAGE=ghcr.io/meiiie/wiii-app:sha-<full-sha> \
+#   WIII_NGINX_IMAGE=ghcr.io/meiiie/wiii-nginx:sha-<full-sha> \
+#     ./maritime-ai-service/scripts/deploy/deploy.sh
 #
-# What this does:
-#   1. Pulls latest code from git
-#   2. Pulls production images by tag
-#   3. Starts databases, waits for health
-#   4. Runs Alembic migrations
-#   5. Starts App, waits for health
-#   6. Starts Nginx reverse proxy
-#   7. Reloads Caddy (SSL) + final health check
-#
-# First-time setup:
-#   1. Run setup-server.sh first
-#   2. Clone repo: git clone <repo-url> /opt/wiii
-#   3. Create .env.production: cp scripts/deploy/.env.production.template maritime-ai-service/.env.production
-#   4. Edit .env.production with real secrets
-#   5. Copy Caddyfile: sudo cp scripts/deploy/Caddyfile /etc/caddy/Caddyfile
-#   6. Run this script
+# Useful overrides:
+#   APP_DIR=/opt/wiii
+#   BRANCH=main
+#   ENV_FILE=.env.production
+#   REQUIRE_PINNED_IMAGES=true
+#   RUN_EXTERNAL_SMOKE=true
 # =============================================================================
 
 set -euo pipefail
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -38,166 +36,363 @@ info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
-# Configuration
-APP_DIR="/opt/wiii"
-SERVICE_DIR="${APP_DIR}/maritime-ai-service"
-COMPOSE_FILE="docker-compose.prod.yml"
-DOMAIN="${DOMAIN:-wiii.holilihu.online}"
+APP_DIR="${APP_DIR:-/opt/wiii}"
+SERVICE_DIR="${SERVICE_DIR:-${APP_DIR}/maritime-ai-service}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+ENV_FILE="${ENV_FILE:-.env.production}"
+BRANCH="${BRANCH:-main}"
+DEPLOY_SHA="${DEPLOY_SHA:-}"
+ALLOW_PLACEHOLDERS="${ALLOW_PLACEHOLDERS:-false}"
+REQUIRE_PINNED_IMAGES="${REQUIRE_PINNED_IMAGES:-false}"
+SKIP_IMAGE_MANIFEST_CHECK="${SKIP_IMAGE_MANIFEST_CHECK:-false}"
+SKIP_PREDEPLOY_BACKUP="${SKIP_PREDEPLOY_BACKUP:-false}"
+RUN_EXTERNAL_SMOKE="${RUN_EXTERNAL_SMOKE:-false}"
 
-echo ""
-echo "============================================="
-echo "   Wiii Production Deploy"
-echo "   $(date '+%Y-%m-%d %H:%M:%S')"
-echo "============================================="
-echo ""
+case "$ENV_FILE" in
+    /*)
+        ENV_PATH="$ENV_FILE"
+        ENV_ARG="$ENV_FILE"
+        ;;
+    *)
+        ENV_PATH="${SERVICE_DIR}/${ENV_FILE}"
+        ENV_ARG="$ENV_FILE"
+        ;;
+esac
 
-# ─────────────────────────────────────────────────
-# Pre-checks
-# ─────────────────────────────────────────────────
-if [ ! -d "$SERVICE_DIR" ]; then
-    error "Service directory not found: $SERVICE_DIR"
-    error "Clone the repo first: git clone <repo-url> $APP_DIR"
-    exit 1
-fi
+env_value() {
+    local key="$1"
+    awk -v key="$key" '
+        BEGIN { FS = "="; found = 0 }
+        $0 !~ /^[[:space:]]*#/ && $1 == key {
+            sub(/^[^=]*=/, "")
+            print
+            found = 1
+        }
+        END { exit found ? 0 : 1 }
+    ' "$ENV_PATH" | tail -n 1
+}
 
-if [ ! -f "$SERVICE_DIR/.env.production" ]; then
-    error "Missing .env.production!"
-    error "Copy and edit the template:"
-    error "  cp $SERVICE_DIR/scripts/deploy/.env.production.template $SERVICE_DIR/.env.production"
-    exit 1
-fi
+clean_value() {
+    local value="${1:-}"
+    value="${value%$'\r'}"
+    value="${value#\"}"
+    value="${value%\"}"
+    value="${value#\'}"
+    value="${value%\'}"
+    printf '%s' "$value"
+}
 
-if ! grep -q "^WIII_APP_IMAGE=" "$SERVICE_DIR/.env.production"; then
-    error "Missing WIII_APP_IMAGE in .env.production"
-    exit 1
-fi
+compose() {
+    (cd "$SERVICE_DIR" && docker compose --env-file "$ENV_ARG" -f "$COMPOSE_FILE" "$@")
+}
 
-if ! grep -q "^WIII_NGINX_IMAGE=" "$SERVICE_DIR/.env.production"; then
-    error "Missing WIII_NGINX_IMAGE in .env.production"
-    exit 1
-fi
-
-# Check for CHANGE_ME placeholder values
-if grep -q "CHANGE_ME" "$SERVICE_DIR/.env.production"; then
-    warn "Found CHANGE_ME placeholders in .env.production!"
-    warn "Update ALL secrets before deploying to production."
-    echo ""
-    grep "CHANGE_ME" "$SERVICE_DIR/.env.production" | head -5
-    echo ""
-    read -p "Continue anyway? (y/N) " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+require_command() {
+    local name="$1"
+    if ! command -v "$name" >/dev/null 2>&1; then
+        error "Required command not found: $name"
         exit 1
     fi
-fi
+}
 
-# ─────────────────────────────────────────────────
-# Step 1: Pull latest code
-# ─────────────────────────────────────────────────
-info "Step 1/7: Pulling latest code..."
-cd "$APP_DIR"
-git pull origin main
-
-# ─────────────────────────────────────────────────
-# Step 2: Pull Docker images
-# ─────────────────────────────────────────────────
-info "Step 2/7: Pulling Docker images..."
-cd "$SERVICE_DIR"
-docker compose -f "$COMPOSE_FILE" pull app nginx
-
-# ─────────────────────────────────────────────────
-# Step 3: Start database services first
-# ─────────────────────────────────────────────────
-info "Step 3/7: Starting database services..."
-docker compose -f "$COMPOSE_FILE" up -d postgres minio minio-init valkey
-
-# Wait for databases to be healthy
-info "Waiting for databases to be ready..."
-TIMEOUT=60
-ELAPSED=0
-while ! docker compose -f "$COMPOSE_FILE" ps postgres | grep -q "healthy"; do
-    sleep 2
-    ELAPSED=$((ELAPSED + 2))
-    if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
-        error "PostgreSQL did not become healthy within ${TIMEOUT}s"
-        docker compose -f "$COMPOSE_FILE" logs postgres --tail 20
+require_clean_checkout() {
+    cd "$APP_DIR"
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        error "$APP_DIR is not a git checkout."
         exit 1
     fi
-done
-info "PostgreSQL is healthy."
 
-# ─────────────────────────────────────────────────
-# Step 4: Run database migrations
-# ─────────────────────────────────────────────────
-info "Step 4/7: Running Alembic migrations..."
-docker compose -f "$COMPOSE_FILE" run --rm app alembic upgrade head
-info "Migrations complete."
-
-# ─────────────────────────────────────────────────
-# Step 5: Start/restart app
-# ─────────────────────────────────────────────────
-info "Step 5/7: Starting application..."
-docker compose -f "$COMPOSE_FILE" up -d app
-
-# Wait for app to be healthy before starting Nginx
-info "Waiting for app health check..."
-TIMEOUT=90
-ELAPSED=0
-while ! docker compose -f "$COMPOSE_FILE" ps app | grep -q "healthy"; do
-    sleep 3
-    ELAPSED=$((ELAPSED + 3))
-    if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
-        error "App did not become healthy within ${TIMEOUT}s"
-        docker compose -f "$COMPOSE_FILE" logs app --tail 50
+    local dirty
+    dirty="$(git status --porcelain=v1)"
+    if [ -n "$dirty" ]; then
+        error "Server checkout has local changes. Refusing to deploy from a dirty tree."
+        echo "$dirty"
+        echo ""
+        error "Commit, stash, or move local work before deploying. Do not deploy parallel-agent WIP."
         exit 1
     fi
-    echo -n "."
-done
-echo ""
-info "App is healthy."
+}
 
-# ─────────────────────────────────────────────────
-# Step 6: Start/restart Nginx
-# ─────────────────────────────────────────────────
-info "Step 6/7: Starting Nginx reverse proxy..."
-docker compose -f "$COMPOSE_FILE" up -d nginx
+validate_environment() {
+    if [ ! -d "$SERVICE_DIR" ]; then
+        error "Service directory not found: $SERVICE_DIR"
+        exit 1
+    fi
 
-# ─────────────────────────────────────────────────
-# Step 7: Reload Caddy + final health check
-# ─────────────────────────────────────────────────
-info "Step 7/7: Reloading Caddy (SSL)..."
-sudo systemctl reload caddy 2>/dev/null || warn "Caddy reload failed (may not be configured yet)"
+    if [ ! -f "$ENV_PATH" ]; then
+        error "Missing production env file: $ENV_PATH"
+        error "Create it from scripts/deploy/.env.production.template and replace all secrets."
+        exit 1
+    fi
 
-# Final health check via localhost
-sleep 3
-if curl -sf "http://localhost:8000/api/v1/health/live" > /dev/null 2>&1; then
-    info "Health check passed! (localhost:8000)"
-else
-    warn "Direct health check failed — app may still be starting"
-fi
+    local required_keys=(
+        WIII_APP_IMAGE
+        WIII_NGINX_IMAGE
+        POSTGRES_PASSWORD
+        MINIO_SECRET_KEY
+        API_KEY
+        JWT_SECRET_KEY
+        SESSION_SECRET_KEY
+    )
 
-if curl -sf "http://localhost:${NGINX_HTTP_PORT:-8080}/embed/" > /dev/null 2>&1; then
-    info "Embed health check passed! (/embed/)"
-else
-    warn "Embed health check failed — check nginx logs if this was an embed-related deploy"
-fi
+    local key
+    for key in "${required_keys[@]}"; do
+        if ! grep -Eq "^${key}=.+" "$ENV_PATH"; then
+            error "Missing required production env value: $key"
+            exit 1
+        fi
+    done
 
-# ─────────────────────────────────────────────────
-# Summary
-# ─────────────────────────────────────────────────
-echo ""
-echo "============================================="
-info "Deployment successful!"
-echo "============================================="
-echo ""
-echo "  URL:      https://${DOMAIN}"
-echo "  API:      https://${DOMAIN}/api/v1/health/live"
-echo "  API Docs: https://${DOMAIN}/docs"
-echo ""
-echo "Useful commands:"
-echo "  docker compose -f $COMPOSE_FILE ps              # Service status"
-echo "  docker compose -f $COMPOSE_FILE logs -f app     # App logs"
-echo "  docker compose -f $COMPOSE_FILE logs -f nginx   # Nginx logs"
-echo "  docker compose -f $COMPOSE_FILE restart app     # Restart app"
-echo "  sudo journalctl -u caddy -f                     # Caddy SSL logs"
-echo ""
+    local placeholders
+    placeholders="$(grep -nE '^[A-Za-z0-9_]+=.*(CHANGE_ME|your_)' "$ENV_PATH" || true)"
+    if [ -n "$placeholders" ] && [ "$ALLOW_PLACEHOLDERS" != "true" ]; then
+        error "Production env still contains placeholder values."
+        echo "$placeholders" | head -20
+        echo ""
+        error "Set ALLOW_PLACEHOLDERS=true only for a non-production dry run."
+        exit 1
+    fi
+}
+
+sync_release_code() {
+    info "Step 1/9: Syncing release code..."
+    require_clean_checkout
+
+    cd "$APP_DIR"
+    git fetch --tags --prune origin "$BRANCH"
+
+    if [ -n "$DEPLOY_SHA" ]; then
+        git cat-file -e "${DEPLOY_SHA}^{commit}" 2>/dev/null || {
+            error "DEPLOY_SHA is not present after fetch: $DEPLOY_SHA"
+            exit 1
+        }
+        git checkout --detach "$DEPLOY_SHA"
+    else
+        if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+            git checkout "$BRANCH"
+        else
+            git checkout -b "$BRANCH" "origin/${BRANCH}"
+        fi
+        git pull --ff-only origin "$BRANCH"
+    fi
+
+    require_clean_checkout
+    DEPLOYED_SHA="$(git rev-parse --short=12 HEAD)"
+    info "Release checkout: ${DEPLOYED_SHA}"
+}
+
+validate_images() {
+    info "Step 2/9: Validating image tags..."
+
+    APP_IMAGE="$(clean_value "${WIII_APP_IMAGE:-$(env_value WIII_APP_IMAGE || true)}")"
+    NGINX_IMAGE="$(clean_value "${WIII_NGINX_IMAGE:-$(env_value WIII_NGINX_IMAGE || true)}")"
+
+    if [ -z "$APP_IMAGE" ] || [ -z "$NGINX_IMAGE" ]; then
+        error "WIII_APP_IMAGE and WIII_NGINX_IMAGE must be set."
+        exit 1
+    fi
+
+    if [[ "$APP_IMAGE" == *":main" || "$NGINX_IMAGE" == *":main" ]]; then
+        if [ "$REQUIRE_PINNED_IMAGES" = "true" ]; then
+            error "Floating :main image tags are blocked by REQUIRE_PINNED_IMAGES=true."
+            error "Use matching sha-<commit> tags for app and nginx."
+            exit 1
+        fi
+        warn "Using floating :main image tags. Prefer sha-<commit> tags for product releases."
+    fi
+
+    if [ "$SKIP_IMAGE_MANIFEST_CHECK" != "true" ]; then
+        docker manifest inspect "$APP_IMAGE" >/dev/null
+        docker manifest inspect "$NGINX_IMAGE" >/dev/null
+    else
+        warn "Skipping docker manifest validation."
+    fi
+
+    info "App image:   ${APP_IMAGE}"
+    info "Nginx image: ${NGINX_IMAGE}"
+}
+
+validate_compose_config() {
+    info "Step 3/9: Validating docker compose configuration..."
+    compose config --quiet
+}
+
+pull_images() {
+    info "Step 4/9: Pulling production images..."
+    compose pull app nginx
+}
+
+wait_for_health() {
+    local service="$1"
+    local timeout="$2"
+    local interval="${3:-3}"
+    local elapsed=0
+    local statuses=""
+
+    while true; do
+        statuses="$(compose ps --format '{{.Status}}' "$service" 2>/dev/null || true)"
+        if [ -n "$statuses" ] &&
+            printf '%s\n' "$statuses" | grep -qi "healthy" &&
+            ! printf '%s\n' "$statuses" | grep -Eiq "unhealthy|starting"; then
+            info "${service} is healthy."
+            return 0
+        fi
+
+        if [ "$elapsed" -ge "$timeout" ]; then
+            error "${service} did not become healthy within ${timeout}s"
+            compose logs "$service" --tail 80 || true
+            exit 1
+        fi
+
+        sleep "$interval"
+        elapsed=$((elapsed + interval))
+        echo -n "."
+    done
+}
+
+start_data_services() {
+    info "Step 5/9: Starting data services..."
+    compose up -d postgres minio minio-init valkey
+    info "Waiting for PostgreSQL..."
+    wait_for_health postgres 90 3
+}
+
+create_predeploy_backup() {
+    info "Step 6/9: Creating pre-deploy database backup..."
+
+    if [ "$SKIP_PREDEPLOY_BACKUP" = "true" ]; then
+        warn "Skipping pre-deploy backup because SKIP_PREDEPLOY_BACKUP=true."
+        return 0
+    fi
+
+    if ! compose ps --services --status running | grep -qx "postgres"; then
+        warn "PostgreSQL is not running yet; assuming first deploy and skipping backup."
+        return 0
+    fi
+
+    mkdir -p "${SERVICE_DIR}/backups"
+    local backup_name="predeploy_${DEPLOYED_SHA:-unknown}_$(date -u +%Y%m%d_%H%M%S).dump"
+    local backup_path="${SERVICE_DIR}/backups/${backup_name}"
+
+    compose exec -T postgres sh -c \
+        'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "${POSTGRES_USER:-wiii}" -d "${POSTGRES_DB:-wiii_ai}" --format=custom --compress=6 --no-owner' \
+        > "$backup_path"
+
+    if [ ! -s "$backup_path" ]; then
+        error "Pre-deploy backup was not created: $backup_path"
+        exit 1
+    fi
+
+    info "Backup created: ${backup_path}"
+}
+
+run_migrations() {
+    info "Step 7/9: Running Alembic migrations..."
+    compose run --rm app alembic upgrade head
+    info "Migrations complete."
+}
+
+start_runtime() {
+    info "Step 8/9: Starting application and nginx..."
+    compose up -d app
+    wait_for_health app 150 3
+
+    compose up -d nginx pg-backup
+    wait_for_health nginx 60 3
+}
+
+reload_caddy() {
+    if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl reload caddy 2>/dev/null || warn "Caddy reload failed or Caddy is not configured yet."
+    else
+        warn "systemctl is unavailable; skipping Caddy reload."
+    fi
+}
+
+run_final_smoke() {
+    info "Step 9/9: Running local release smoke checks..."
+
+    local nginx_port
+    nginx_port="$(clean_value "${NGINX_HTTP_PORT:-$(env_value NGINX_HTTP_PORT || true)}")"
+    nginx_port="${nginx_port:-8080}"
+    NGINX_LOCAL_URL="${NGINX_LOCAL_URL:-http://localhost:${nginx_port}}"
+
+    curl -fsS --max-time 15 "${NGINX_LOCAL_URL}/api/v1/health/live" >/dev/null
+    curl -fsS --max-time 15 "${NGINX_LOCAL_URL}/health" >/dev/null
+    curl -fsS --max-time 15 "${NGINX_LOCAL_URL}/embed/" >/dev/null
+
+    local pointy_body
+    pointy_body="$(curl -fsS --max-time 15 "${NGINX_LOCAL_URL}/pointy/wiii-pointy.umd.js")"
+    if [ -z "$pointy_body" ] || printf '%s' "$pointy_body" | grep -qiE '<!doctype html|<html'; then
+        error "Pointy bundle route returned empty content or SPA HTML: ${NGINX_LOCAL_URL}/pointy/wiii-pointy.umd.js"
+        exit 1
+    fi
+
+    info "Local nginx smoke passed: ${NGINX_LOCAL_URL}"
+
+    if [ "$RUN_EXTERNAL_SMOKE" = "true" ]; then
+        local domain
+        local base_url
+        local smoke_api_key
+        domain="$(clean_value "${DOMAIN:-$(env_value DOMAIN || true)}")"
+        domain="${domain:-wiii.holilihu.online}"
+        base_url="${BASE_URL:-https://${domain}}"
+        smoke_api_key="${EXTERNAL_SMOKE_API_KEY:-$(clean_value "$(env_value API_KEY || true)")}"
+
+        info "Running external smoke against ${base_url}"
+        API_KEY="$smoke_api_key" bash "${SERVICE_DIR}/scripts/deploy/smoke-test.sh" "$base_url"
+    else
+        info "External smoke skipped. Run with RUN_EXTERNAL_SMOKE=true after DNS/CDN is ready."
+    fi
+}
+
+print_summary() {
+    local domain
+    domain="$(clean_value "${DOMAIN:-$(env_value DOMAIN || true)}")"
+    domain="${domain:-wiii.holilihu.online}"
+
+    echo ""
+    echo "============================================="
+    info "Deployment completed"
+    echo "============================================="
+    echo ""
+    echo "  Commit:      ${DEPLOYED_SHA:-unknown}"
+    echo "  App image:   ${APP_IMAGE:-unknown}"
+    echo "  Nginx image: ${NGINX_IMAGE:-unknown}"
+    echo "  URL:         https://${domain}"
+    echo "  Health:      https://${domain}/api/v1/health/live"
+    echo ""
+    echo "Useful commands:"
+    echo "  cd ${SERVICE_DIR}"
+    echo "  docker compose --env-file ${ENV_ARG} -f ${COMPOSE_FILE} ps"
+    echo "  docker compose --env-file ${ENV_ARG} -f ${COMPOSE_FILE} logs -f app"
+    echo "  bash scripts/deploy/status.sh"
+    echo ""
+}
+
+main() {
+    echo ""
+    echo "============================================="
+    echo "   Wiii Production Deploy"
+    echo "   $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "============================================="
+    echo ""
+
+    require_command git
+    require_command docker
+    require_command curl
+
+    validate_environment
+    sync_release_code
+    validate_images
+    validate_compose_config
+    pull_images
+    start_data_services
+    create_predeploy_backup
+    run_migrations
+    start_runtime
+    reload_caddy
+    run_final_smoke
+    print_summary
+}
+
+main "$@"

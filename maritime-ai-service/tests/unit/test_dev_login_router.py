@@ -230,6 +230,9 @@ def test_production_validator_rejects_dev_login_enabled():
     settings_mock.api_key = "a-real-prod-key-with-enough-bytes"
     settings_mock.enable_magic_link_auth = False
     settings_mock.resend_api_key = ""
+    settings_mock.enable_google_oauth = False
+    settings_mock.google_oauth_client_id = ""
+    settings_mock.google_oauth_client_secret = ""
     settings_mock.enable_dev_login = True
 
     with pytest.raises(ValueError, match="enable_dev_login=True is forbidden"):
@@ -250,6 +253,9 @@ def test_production_validator_passes_when_dev_login_off():
     settings_mock.api_key = "a-real-prod-key-with-enough-bytes"
     settings_mock.enable_magic_link_auth = False
     settings_mock.resend_api_key = ""
+    settings_mock.enable_google_oauth = False
+    settings_mock.google_oauth_client_id = ""
+    settings_mock.google_oauth_client_secret = ""
     settings_mock.enable_dev_login = False
 
     # No raise = pass

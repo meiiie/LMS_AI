@@ -39,6 +39,10 @@ check "Liveness probe (GET /health/live)" "$([ "$HTTP" = "200" ] && echo true ||
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/api/v1/health/db" 2>/dev/null || echo "000")
 check "Deep health — DB (GET /health/db)" "$([ "$HTTP" = "200" ] && echo true || echo false)"
 
+LLM_MODEL_HEALTH=$(curl -s "${BASE_URL}/api/v1/health/llm-models" 2>/dev/null || true)
+check "LLM model health visible" "$(echo "$LLM_MODEL_HEALTH" | grep -q '"model_count"' && echo true || echo false)"
+check "LLM model health redacts raw errors" "$([ -n "$LLM_MODEL_HEALTH" ] && ! echo "$LLM_MODEL_HEALTH" | grep -q 'last_error_detail' && echo true || echo false)"
+
 # 2. Security Headers
 echo ""
 echo "2. Security Headers"
@@ -56,6 +60,14 @@ check "Embed page loads (GET /embed/)" "$([ "$HTTP" = "200" ] && echo true || ec
 
 EMBED_HTML=$(curl -s "${BASE_URL}/embed/" 2>/dev/null || true)
 check "Embed HTML includes built asset references" "$(echo "$EMBED_HTML" | grep -Eq '/assets/|<script[^>]+type="module"' && echo true || echo false)"
+
+POINTY_HEADERS="$(mktemp)"
+POINTY_BODY="$(mktemp)"
+HTTP=$(curl -s -D "$POINTY_HEADERS" -o "$POINTY_BODY" -w "%{http_code}" "${BASE_URL}/pointy/wiii-pointy.umd.js" 2>/dev/null || echo "000")
+check "Pointy bundle loads (GET /pointy/wiii-pointy.umd.js)" "$([ "$HTTP" = "200" ] && echo true || echo false)"
+check "Pointy bundle returns JavaScript content type" "$(grep -qiE 'content-type:.*(javascript|ecmascript)' "$POINTY_HEADERS" && echo true || echo false)"
+check "Pointy bundle is not SPA HTML" "$([ -s "$POINTY_BODY" ] && ! grep -qiE '<!doctype html|<html' "$POINTY_BODY" && echo true || echo false)"
+rm -f "$POINTY_HEADERS" "$POINTY_BODY"
 
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/" 2>/dev/null || echo "000")
 check "SPA loads (GET /)" "$([ "$HTTP" = "200" ] && echo true || echo false)"
@@ -82,9 +94,10 @@ if [ -n "$API_KEY" ]; then
         -H "X-API-Key: ${API_KEY}" \
         -H "X-Session-ID: smoke-test-visual" \
         -d '{"user_id":"api-client","message":"So sánh attention mềm và linear attention bằng visual inline","role":"student","session_id":"smoke-test-visual","domain_id":"maritime"}' \
-        --max-time 45 \
+        --max-time 90 \
         2>/dev/null || true)
-    check "Structured visual SSE contract emits event: visual" "$(echo "$STREAM_BODY" | grep -q 'event: visual' && echo true || echo false)"
+    check "Structured visual SSE opens visual lifecycle" "$(echo "$STREAM_BODY" | grep -q '^event: visual_open$' && echo true || echo false)"
+    check "Structured visual SSE commits visual lifecycle" "$(echo "$STREAM_BODY" | grep -q '^event: visual_commit$' && echo true || echo false)"
     check "Structured visual stream hides raw widget fences" "$([ -n "$STREAM_BODY" ] && ! echo "$STREAM_BODY" | grep -q '```widget' && echo true || echo false)"
 else
     echo "  [SKIP] Chat API — set API_KEY to test"

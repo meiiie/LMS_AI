@@ -28,6 +28,7 @@ from app.auth.magic_link_service import (
     validate_email,
 )
 from app.core.config import settings
+from app.core.secret_validation import is_missing_or_placeholder_secret
 
 logger = logging.getLogger(__name__)
 
@@ -159,11 +160,15 @@ async def _create_magic_link(email: str, conn) -> dict:
         "expires_in": settings.magic_link_expires_seconds,
     }
 
-    # Dev convenience: when Resend is a placeholder, Wiii cannot actually send
-    # email. Surface the verify URL so the UI can auto-open it. Real prod
-    # deployments will ship a proper Resend key and never hit this branch.
-    resend_key = getattr(settings, "resend_api_key", "") or ""
-    if not resend_key or resend_key.startswith("CHANGE_ME"):
+    # Development-only convenience: surface the verify URL when Resend is not
+    # usable locally. Production never exposes raw verification URLs.
+    resend_missing_or_placeholder = is_missing_or_placeholder_secret(
+        getattr(settings, "resend_api_key", "")
+    )
+    if (
+        settings.environment != "production"
+        and resend_missing_or_placeholder
+    ):
         response["dev_verify_url"] = verify_url
         response["message"] = (
             "Resend chưa cấu hình — Wiii sẽ tự mở tab xác minh giúp bạn."

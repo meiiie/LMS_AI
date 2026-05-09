@@ -1,6 +1,19 @@
 """Tests for production config validation."""
 import pytest
 
+PLACEHOLDER_SECRET_VALUES = (
+    "",
+    "change_me",
+    "change-me",
+    "changeme",
+    "placeholder",
+    "your_secret",
+    "your-secret",
+    "example",
+    "dummy",
+    "test-secret",
+)
+
 
 class TestProductionValidation:
     """Validate that production config blocks insecure defaults."""
@@ -36,6 +49,55 @@ class TestProductionValidation:
         fields = Settings.model_fields
         assert "resend_api_key" in fields
         assert "enable_magic_link_auth" in fields
+
+    @pytest.mark.parametrize("placeholder_secret", PLACEHOLDER_SECRET_VALUES)
+    def test_magic_link_requires_real_resend_key_when_enabled_in_production(
+        self, placeholder_secret
+    ):
+        """Production Magic Link must fail closed without a real email provider."""
+        from app.core.config import Settings
+
+        with pytest.raises(ValueError, match="RESEND_API_KEY"):
+            Settings(
+                environment="production",
+                api_key="a-real-prod-api-key-with-enough-bytes",
+                jwt_secret_key="jwt]secret]with]enough]entropy]for]prod",
+                session_secret_key="session]secret]with]enough]entropy]for]prod",
+                google_api_key="test",
+                enable_magic_link_auth=True,
+                resend_api_key=placeholder_secret,
+            )
+
+    @pytest.mark.parametrize("placeholder_secret", PLACEHOLDER_SECRET_VALUES)
+    def test_google_oauth_requires_real_client_secret_when_enabled_in_production(
+        self, placeholder_secret
+    ):
+        """Production Google OAuth must fail closed without real OAuth credentials."""
+        from app.core.config import Settings
+
+        with pytest.raises(ValueError, match="GOOGLE_OAUTH_CLIENT_ID"):
+            Settings(
+                environment="production",
+                api_key="a-real-prod-api-key-with-enough-bytes",
+                jwt_secret_key="jwt]secret]with]enough]entropy]for]prod",
+                session_secret_key="session]secret]with]enough]entropy]for]prod",
+                google_api_key="test",
+                enable_google_oauth=True,
+                google_oauth_client_id=placeholder_secret,
+                google_oauth_client_secret="real-google-oauth-client-secret",
+            )
+
+        with pytest.raises(ValueError, match="GOOGLE_OAUTH_CLIENT_ID"):
+            Settings(
+                environment="production",
+                api_key="a-real-prod-api-key-with-enough-bytes",
+                jwt_secret_key="jwt]secret]with]enough]entropy]for]prod",
+                session_secret_key="session]secret]with]enough]entropy]for]prod",
+                google_api_key="test",
+                enable_google_oauth=True,
+                google_oauth_client_id="real-google-oauth-client-id",
+                google_oauth_client_secret=placeholder_secret,
+            )
 
     def test_api_key_too_short_in_production(self):
         """API key under 16 chars should fail in production."""
@@ -144,6 +206,24 @@ class TestProductionSmokeTestDocs:
         assert '"user_id": "api-client"' in script
         assert '-H "X-User-ID:' not in script
 
+    def test_smoke_test_script_matches_sse_v3_visual_lifecycle(self):
+        """Production visual smoke test should assert current SSE V3 lifecycle events."""
+        import pathlib
+
+        script = pathlib.Path("scripts/deploy/smoke-test.sh").read_text(encoding="utf-8")
+        assert "event: visual_open" in script
+        assert "event: visual_commit" in script
+        assert "```widget" in script
+
+    def test_smoke_test_script_checks_llm_model_health_visibility(self):
+        """Production smoke should expose redacted model health telemetry."""
+        import pathlib
+
+        script = pathlib.Path("scripts/deploy/smoke-test.sh").read_text(encoding="utf-8")
+        assert "/api/v1/health/llm-models" in script
+        assert "LLM model health visible" in script
+        assert "last_error_detail" in script
+
     def test_launch_checklist_examples_match_api_key_contract(self):
         """Launch checklist should document service-client auth for API key examples."""
         import pathlib
@@ -194,9 +274,15 @@ class TestProductionOperationalScripts:
             in script
         )
         assert (
-            'docker compose -f "$COMPOSE_FILE" ps --services --status running'
+            'docker compose --env-file "$ENV_ARG" -f "$COMPOSE_FILE" "$@"'
             in script
         )
+        assert (
+            'compose ps --services --status running'
+            in script
+        )
+        assert '${NGINX_LOCAL_URL}/api/v1/health/live' in script
+        assert 'http://localhost:8000/api/v1/health/live' not in script
         assert 'Missing required services:' in script
 
     def test_ingest_script_uses_explicit_live_health_endpoint(self):
@@ -218,3 +304,25 @@ class TestProductionOperationalScripts:
             "docs/deploy/KNOWLEDGE_INGESTION.md"
         ).read_text(encoding="utf-8")
         assert 'curl localhost:8000/api/v1/health/live' in doc
+
+
+class TestProductionOrganizationSeed:
+    """Verify production org bootstrap stays compatible with subdomain routing."""
+
+    def test_wiii_org_seed_is_idempotent_and_non_destructive(self):
+        """The primary production org seed should upsert and preserve data."""
+        import pathlib
+
+        migration = pathlib.Path(
+            "alembic/versions/048_seed_primary_wiii_organization.py"
+        ).read_text(encoding="utf-8")
+
+        assert "INSERT INTO organizations" in migration
+        assert "'wiii'" in migration
+        assert "ON CONFLICT (id) DO UPDATE" in migration
+        assert "wiii.holilihu.online" in migration
+        assert "table_schema = current_schema()" in migration
+        assert "COALESCE(EXCLUDED.settings" in migration
+        assert "COALESCE(organizations.settings" in migration
+        assert "is_active = COALESCE(organizations.is_active" in migration
+        assert "DELETE FROM organizations" not in migration

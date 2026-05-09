@@ -4,7 +4,7 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-04-24
+Last updated: 2026-05-10
 
 Applies to: repository documentation, operational reports, architecture notes, cleanup artifacts, release checkpoints
 
@@ -21,7 +21,7 @@ The repository may contain exploratory reports, but only reviewed documents in c
 | `docs/README.md` | Repository documentation index | Canonical |
 | `docs/operations/` | Operational checkpoints, governance, cleanup plans, release controls | Canonical |
 | `docs/plans/` | Approved design and implementation plans | Canonical after review |
-| `docs/assets/` | Documentation assets referenced by canonical docs | Canonical when referenced |
+| `docs/assets/` | Documentation assets referenced by canonical docs | Canonical only when referenced or explicitly retained as source material |
 | `maritime-ai-service/docs/` | Backend architecture, integration, and deployment docs | Canonical for backend scope |
 | `wiii-desktop/docs/` and `wiii-desktop/README.md` | Desktop-specific documentation | Canonical for desktop scope |
 | `.Codex/reports/` | Retired local scratch report path | Non-canonical, ignored |
@@ -53,9 +53,10 @@ Working reports should not grow without bounds.
 - Keep active reports while they are attached to an open issue or PR.
 - Promote any report that becomes operational guidance.
 - Delete untracked scratch reports after their content is consolidated.
-- Archive tracked historical reports only through a separate retention PR.
+- Delete or archive tracked historical reports only through a separate retention PR with an explicit inventory.
 - Do not bulk-delete tracked reports, migrations, tests, data, or docs without a written inventory and review.
 - As of 2026-04-24, legacy tracked report trees were removed from source control. Do not re-add them; promote durable content into `docs/operations/` instead.
+- As of 2026-05-10, superseded checkpoint, audit, sprint-plan, and unreferenced screenshot artifacts were removed after current runbooks and issues became the source of truth.
 
 Recommended review cadence:
 
@@ -107,6 +108,7 @@ For Wiii, this means:
 - Record feature flags and provider status from the running environment when making release decisions.
 - Identify drift explicitly, especially around auth, memory, migration state, orchestration, and tool surfaces.
 - Keep old architecture names only as compatibility notes when the live runtime has moved.
+- Remove old architecture documents that still describe a superseded runtime as active.
 
 ## Review Gates
 

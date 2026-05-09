@@ -14,6 +14,7 @@ from app.core.config.memory import MemoryConfig
 from app.core.config.product_search import ProductSearchConfig
 from app.core.config.rag import RAGConfig
 from app.core.config.thinking import ThinkingConfig
+from app.core.secret_validation import is_missing_or_placeholder_secret
 from app.engine.llm_provider_registry import get_supported_provider_names
 from app.engine.llm_timeout_policy import loads_timeout_provider_overrides
 
@@ -162,10 +163,28 @@ def build_validate_production_security(config_logger):
                     "SECURITY: api_key must be at least 16 characters in production. "
                     "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
                 )
-            if self.enable_magic_link_auth and not self.resend_api_key:
-                config_logger.warning(
-                    "SECURITY: enable_magic_link_auth=True but RESEND_API_KEY is empty — "
-                    "magic link emails will fail silently"
+            if getattr(
+                self, "enable_magic_link_auth", False
+            ) and is_missing_or_placeholder_secret(
+                getattr(self, "resend_api_key", None)
+            ):
+                raise ValueError(
+                    "SECURITY: enable_magic_link_auth=True requires a real "
+                    "RESEND_API_KEY in production. Magic Link must fail closed "
+                    "instead of exposing dev verification URLs."
+                )
+            if getattr(self, "enable_google_oauth", False) and (
+                is_missing_or_placeholder_secret(
+                    getattr(self, "google_oauth_client_id", None)
+                )
+                or is_missing_or_placeholder_secret(
+                    getattr(self, "google_oauth_client_secret", None)
+                )
+            ):
+                raise ValueError(
+                    "SECURITY: enable_google_oauth=True requires real "
+                    "GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET "
+                    "in production."
                 )
             if (
                 getattr(self, "enable_distributed_magic_link_sessions", False)

@@ -2,15 +2,9 @@
 
 Store project screenshots used for docs, plans, and verification here instead of the repository root.
 
-Current folders:
-- `debug/`: debug captures and investigation screenshots
-- `deploy/`: deployment and Swagger screenshots
-- `desktop/`: full desktop UI screenshots
-- `embed/`: embed mode screenshots
-- `lms/`: LMS integration screenshots
-- `magic-link/`: email login and verification screenshots
-- `sidebar/`: sidebar/chat UI screenshots
-- `tmp/`: temporary captures that should not be committed long-term
+Create subfolders only when a screenshot is referenced by a canonical document
+or PR-ready evidence note. Historical debug/demo screenshots were removed once
+their docs stopped referencing them.
 
 Rules:
 - Do not place screenshots in the repository root.

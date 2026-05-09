@@ -1,5 +1,7 @@
 # Wiii
 
+![Wiii product platform overview](docs/assets/wiii-readme-hero.svg)
+
 Wiii is a monorepo for an AI platform that combines a FastAPI backend, a Tauri desktop client, iframe/embed delivery, multi-agent orchestration, retrieval and memory pipelines, LMS integrations, and multi-tenant organization support.
 
 This repository is optimized for ongoing product engineering, not as a minimal sample. Start here for the repository shape, the current deployment model, the main architecture documents, and the fastest local entry points.
@@ -110,9 +112,9 @@ Operational consequence:
 - rollback is image-tag based rather than “rebuild on host” based
 - `/embed/` verification belongs in post-deploy smoke testing
 
-Design note:
+Current release controls:
 
-- `docs/plans/2026-03-06-dist-embed-deploy-redesign.md`
+- `docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md`
 
 ## Documentation Map
 

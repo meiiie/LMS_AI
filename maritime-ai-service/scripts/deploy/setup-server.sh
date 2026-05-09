@@ -10,8 +10,8 @@
 #   1. Updates system packages
 #   2. Installs Docker + Docker Compose v2
 #   3. Installs Caddy (auto-SSL reverse proxy)
-#   4. Creates /opt/wiii app directory + backup directory
-#   5. Configures 2GB swap (critical for 4GB RAM server)
+#   4. Creates /opt/wiii app directory
+#   5. Configures swap (default 4G, override via SWAP_SIZE)
 #   6. Kernel tuning for high-connection server
 #   7. Installs fail2ban (brute-force protection)
 #   8. Configures UFW firewall (SSH + HTTP + HTTPS only)
@@ -20,6 +20,8 @@
 # =============================================================================
 
 set -euo pipefail
+
+SWAP_SIZE="${SWAP_SIZE:-4G}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -82,35 +84,33 @@ if command -v caddy &> /dev/null; then
 else
     info "Step 4/10: Installing Caddy..."
     sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
-    curl -1sLf 'https://dl.cloudflare.com/caddy/apt/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudflare.com/caddy/apt/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
     sudo apt update && sudo apt install -y caddy
     info "Caddy installed. Will auto-obtain SSL certificates."
 fi
 
 # ─────────────────────────────────────────────────
-# 5. Create app + backup directories
+# 5. Create app directory
 # ─────────────────────────────────────────────────
 info "Step 5/10: Setting up directories..."
 sudo mkdir -p /opt/wiii
 sudo chown "$USER":"$USER" /opt/wiii
 
-# Backup directory (PostgreSQL dumps)
-sudo mkdir -p /opt/wiii/backups
-sudo chown "$USER":"$USER" /opt/wiii/backups
-
-# Caddy log directory
-sudo mkdir -p /var/log/caddy
-sudo chown caddy:caddy /var/log/caddy
+# Caddy log directory. Install with explicit ownership so Caddy can create and
+# rotate access logs after config reloads.
+sudo install -d -o caddy -g caddy -m 0755 /var/log/caddy
+sudo touch /var/log/caddy/wiii-access.log
+sudo chown caddy:caddy /var/log/caddy/wiii-access.log
 
 # ─────────────────────────────────────────────────
-# 6. Configure 2GB Swap (critical for 4GB RAM)
+# 6. Configure swap (critical for single-node Docker production)
 # ─────────────────────────────────────────────────
 if [ -f /swapfile ]; then
     info "Step 6/10: Swap already configured."
 else
-    info "Step 6/10: Creating 2GB swap..."
-    sudo fallocate -l 2G /swapfile
+    info "Step 6/10: Creating ${SWAP_SIZE} swap..."
+    sudo fallocate -l "$SWAP_SIZE" /swapfile
     sudo chmod 600 /swapfile
     sudo mkswap /swapfile
     sudo swapon /swapfile
@@ -118,7 +118,7 @@ else
     # Low swappiness — keep app in RAM, only swap under pressure
     echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf > /dev/null
     sudo sysctl vm.swappiness=10
-    info "2GB swap created (swappiness=10)."
+    info "${SWAP_SIZE} swap created (swappiness=10)."
 fi
 
 # ─────────────────────────────────────────────────
@@ -191,7 +191,7 @@ if [ -f ~/.ssh/authorized_keys ] && [ -s ~/.ssh/authorized_keys ]; then
     sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
     sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
     sudo sed -i 's/^#\?MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
-    sudo systemctl restart sshd
+    sudo systemctl restart sshd 2>/dev/null || sudo systemctl restart ssh
     info "SSH hardened: password auth disabled, root login disabled."
 else
     warn "No SSH keys found — skipping SSH hardening (add keys first!)."

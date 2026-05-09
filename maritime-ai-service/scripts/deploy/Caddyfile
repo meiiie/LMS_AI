@@ -38,6 +38,11 @@
 # Either way, Cloudflare "Full" SSL mode works.
 # ─────────────────────────────────────────────────
 wiii.holilihu.online {
+    # Cloudflare should use SSL/TLS mode "Full" for this origin. Caddy uses
+    # an internal origin cert so rebuilds do not depend on public ACME while
+    # the DNS record is proxied through Cloudflare.
+    tls internal
+
     reverse_proxy localhost:8080 {
         # Flush immediately for SSE streaming (critical!)
         flush_interval -1

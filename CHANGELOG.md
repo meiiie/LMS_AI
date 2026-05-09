@@ -39,7 +39,7 @@ Release lines:
 ### Infrastructure & Governance
 
 - Classified the remaining 18 unclassified feature flags into tiers (FOUNDATIONAL / PRODUCTION_SUPPORTED / EXPERIMENTAL / DORMANT), unblocking `test_feature_tiers`.
-- Consolidated operational governance under `docs/operations/` (GitHub governance, multi-agent maintainer protocol, documentation governance, hygiene audit, cleanup checkpoint).
+- Consolidated operational governance under `docs/operations/` (GitHub governance, branch protection, multi-agent maintainer protocol, documentation governance, product release, and production auth runbooks).
 - `.coderabbit.yaml` shipped with path-specific review instructions for auth, RAG, multi-agent, living agent, MCP, Alembic, GitHub automation, and operations docs.
 - Removed legacy `.claude/reports/` and `.Codex/reports/` tracked trees from git; durable findings were promoted into `docs/operations/`.
 
@@ -47,4 +47,4 @@ Release lines:
 
 ## Seed Entry — Before 2026-04-24
 
-Prior changes are recorded in commit history and `docs/operations/WIII_SYSTEM_CLEANUP_CHECKPOINT_2026-04-24.md`. Starting from the 2026-04-24 governance checkpoint, every user-visible change lands here before it can be merged to `main`.
+Prior changes are recorded in commit history. Starting from the 2026-04-24 governance checkpoint, every user-visible change lands here before it can be merged to `main`; current operational truth lives in `docs/operations/`.
