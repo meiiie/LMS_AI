@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PreviewPanel } from "@/components/layout/PreviewPanel";
 import { useChatStore } from "@/stores/chat-store";
@@ -108,7 +114,8 @@ describe("PreviewPanel host action operator flow", () => {
       preview_type: "host_action",
       preview_id: "host-preview-lesson-1",
       title: "Preview cap nhat bai hoc: Bai hoc goc",
-      snippet: "Lesson patch preview ready. Confirm explicitly when you want me to apply it.",
+      snippet:
+        "Lesson patch preview ready. Confirm explicitly when you want me to apply it.",
       metadata: {
         preview_kind: "lesson_patch",
         preview_token: "preview-lesson-1",
@@ -128,7 +135,12 @@ describe("PreviewPanel host action operator flow", () => {
           description: "Mo ta cu",
           content_excerpt: "Noi dung moi",
           blocks: [
-            { id: "b1", type: "text", label: "Doan 1", excerpt: "Noi dung moi" },
+            {
+              id: "b1",
+              type: "text",
+              label: "Doan 1",
+              excerpt: "Noi dung moi",
+            },
           ],
         },
         block_diff: {
@@ -153,8 +165,8 @@ describe("PreviewPanel host action operator flow", () => {
 
     render(<PreviewPanel inline />);
 
-    expect(screen.getByText("Teacher confirmation")).toBeTruthy();
-    const blockDiffHeading = screen.getByText("Block diff");
+    expect(screen.getByText("Xác nhận của giáo viên")).toBeTruthy();
+    const blockDiffHeading = screen.getByText("Diff theo block");
     expect(blockDiffHeading).toBeTruthy();
     const blockDiffSection = blockDiffHeading.closest("section");
     expect(blockDiffSection).toBeTruthy();
@@ -162,7 +174,9 @@ describe("PreviewPanel host action operator flow", () => {
     expect(diffQueries.getByText("Noi dung cu")).toBeTruthy();
     expect(diffQueries.getByText("Noi dung moi")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Xac nhan ap dung vao bai hoc" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Xác nhận áp dụng vào bài học" }),
+    );
 
     await waitFor(() => {
       expect(useHostContextStore.getState().requestAction).toHaveBeenCalledWith(
@@ -174,15 +188,19 @@ describe("PreviewPanel host action operator flow", () => {
 
     const { submitHostActionAudit } = await import("@/api/host-actions");
     await waitFor(() => {
-      expect(submitHostActionAudit).toHaveBeenCalledWith(expect.objectContaining({
-        event_type: "apply_confirmed",
-        action: "authoring.apply_lesson_patch",
-        preview_kind: "lesson_patch",
-        preview_token: "preview-lesson-1",
-        surface: "preview_panel",
-      }));
+      expect(submitHostActionAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event_type: "apply_confirmed",
+          action: "authoring.apply_lesson_patch",
+          preview_kind: "lesson_patch",
+          preview_token: "preview-lesson-1",
+          surface: "preview_panel",
+        }),
+      );
     });
 
-    expect(await screen.findByText("Applied lesson patch to lesson lesson-1.")).toBeTruthy();
+    expect(
+      await screen.findByText("Applied lesson patch to lesson lesson-1."),
+    ).toBeTruthy();
   });
 });

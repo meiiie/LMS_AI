@@ -1,10 +1,29 @@
 """Presentation helpers for the LMS chat JSON response."""
 
+import re
+
 from app.core.constants import (
     CONFIDENCE_BASE,
     CONFIDENCE_MAX,
     CONFIDENCE_PER_SOURCE,
 )
+
+# ── Soul Emotion Tag Stripper (Sprint 35e follow-up) ───────────────────────
+# DeepSeek + other LLMs occasionally emit ``<!-- WIII_SOUL:{...} -->`` HTML
+# comments at the start of the synthesizer prose. Those are an internal
+# directive for the mascot/avatar emotion engine — they must NEVER reach the
+# user-facing JSON ``answer`` field. The SSE presenter has its own stripper
+# (``chat_stream_presenter._strip_soul_tags``); this is the matching guard
+# for the sync ``/api/v1/chat`` JSON path so the leak cannot bypass either
+# transport.
+_SOUL_TAG_RE = re.compile(r"<!--\s*WIII_SOUL:.*?-->", re.DOTALL)
+
+
+def _strip_soul_tags(text: str | None) -> str:
+    """Remove ``<!--WIII_SOUL:{...}-->`` comments + leading whitespace."""
+    if not text or "WIII_SOUL" not in text:
+        return text or ""
+    return _SOUL_TAG_RE.sub("", text).lstrip()
 from app.models.schemas import (
     ChatRequest,
     ChatResponse,
@@ -150,14 +169,15 @@ def build_chat_response(
             CONFIDENCE_MAX,
         )
 
+    cleaned_message = _strip_soul_tags(internal_response.message)
     return ChatResponse(
         status="success",
         data=ChatResponseData(
-            answer=internal_response.message,
+            answer=cleaned_message,
             sources=sources,
             suggested_questions=generate_suggested_questions(
                 chat_request.message,
-                internal_response.message,
+                cleaned_message,
             ),
             domain_notice=metadata.get("domain_notice"),
         ),

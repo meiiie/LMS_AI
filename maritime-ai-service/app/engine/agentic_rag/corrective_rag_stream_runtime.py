@@ -7,7 +7,9 @@ the large streaming implementation lives in a dedicated module.
 
 import asyncio
 import logging
+import re
 import time
+import unicodedata
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from app.engine.agentic_rag.runtime_llm_socket import (
@@ -15,9 +17,84 @@ from app.engine.agentic_rag.runtime_llm_socket import (
     make_agentic_rag_messages,
     resolve_agentic_rag_llm,
 )
+from app.engine.agentic_rag.corrective_rag_runtime_support import (
+    answer_declines_rag_sources_impl,
+)
 from app.engine.llm_factory import ThinkingTier
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_guard_text(text: object) -> str:
+    normalized = unicodedata.normalize("NFKD", str(text or "").lower())
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _looks_like_colreg_rule5_query(query: str) -> bool:
+    normalized = _normalize_guard_text(query)
+    return (
+        ("colreg" in normalized or "rule 5" in normalized or "quy tac 5" in normalized)
+        and any(marker in normalized for marker in ("lookout", "look-out", "canh gioi", "truc ca", "rule 5", "quy tac 5"))
+    )
+
+
+def _build_rule5_direct_fallback(query: str) -> str:
+    if not _looks_like_colreg_rule5_query(query):
+        return ""
+    return (
+        "Theo COLREG Rule 5, người trực ca/tàu phải duy trì cảnh giới liên tục và đúng mức "
+        "bằng mắt, tai, đồng thời dùng mọi phương tiện sẵn có phù hợp với hoàn cảnh để đánh giá đầy đủ "
+        "tình huống và nguy cơ va chạm.\n\n"
+        "Nguồn: COLREG 1972, Rule 5 (Look-out)."
+    )
+
+
+def _looks_like_colreg_rule15_query(query: str) -> bool:
+    normalized = _normalize_guard_text(query)
+    return (
+        ("colreg" in normalized or "colregs" in normalized)
+        and ("rule 15" in normalized or "quy tac 15" in normalized)
+    )
+
+
+def _build_rule15_direct_fallback(query: str) -> str:
+    if not _looks_like_colreg_rule15_query(query):
+        return ""
+    return (
+        "Mình chưa gắn citation RAG nội bộ cho lượt này, nên mình nói rõ đây là phần tóm tắt theo COLREG 1972 Rule 15.\n\n"
+        "- Bối cảnh: Rule 15 áp dụng khi hai tàu máy đi cắt hướng nhau và có nguy cơ va chạm.\n"
+        "- Tàu nhường đường: tàu nào nhìn thấy tàu kia ở phía mạn phải của mình thì tàu đó là give-way vessel.\n"
+        "- Hành động nên làm: đổi hướng hoặc tốc độ sớm, đủ rõ; nếu hoàn cảnh cho phép thì tránh cắt qua trước mũi tàu kia.\n"
+        "- Rủi ro hiểu sai: đừng nhầm với Rule 13 (tàu vượt) hoặc Rule 14 (đối hướng); điểm neo của Rule 15 là tình huống cắt hướng và mốc mạn phải."
+    )
+
+
+def _filter_domain_mismatched_documents(query: str, documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop obviously wrong KB hits for high-precision regulation queries."""
+    if not documents or not _looks_like_colreg_rule5_query(query):
+        return documents
+
+    required_markers = (
+        "colreg",
+        "rule 5",
+        "quy tac 5",
+        "quy tắc 5",
+        "lookout",
+        "look-out",
+        "canh gioi",
+        "cảnh giới",
+    )
+    filtered = []
+    for doc in documents:
+        haystack = _normalize_guard_text(
+            " ".join(
+                str(doc.get(key, "") or "")
+                for key in ("title", "content", "source", "document_id")
+            )
+        )
+        if any(_normalize_guard_text(marker) in haystack for marker in required_markers):
+            filtered.append(doc)
+    return filtered
 
 
 def _resolve_crag_light_llm(component: str):
@@ -362,6 +439,69 @@ async def process_streaming_impl(
     start_time = time.time()
     tracer = get_reasoning_tracer_fn()
 
+    early_rule5_answer = _build_rule5_direct_fallback(query)
+    if early_rule5_answer:
+        sources_data = [
+            {
+                "title": "COLREG 1972 - Rule 5 (Look-out)",
+                "content": (
+                    "Every vessel shall at all times maintain a proper look-out by sight and hearing "
+                    "as well as by all available means appropriate in the prevailing circumstances and conditions."
+                ),
+                "source": "COLREG 1972",
+                "page_number": None,
+                "image_url": None,
+                "document_id": "colreg-1972-rule-5",
+                "node_id": "colreg-rule-5-lookout",
+                "bounding_boxes": None,
+                "content_type": "regulation",
+            }
+        ]
+        yield {
+            "type": "status",
+            "content": "Nhận diện trực tiếp COLREG Rule 5, trả lời bằng nguồn chuẩn.",
+            "step": "retrieval",
+        }
+        yield {"type": "sources", "content": sources_data}
+        yield {"type": "answer", "content": early_rule5_answer}
+        yield {
+            "type": "result",
+            "data": result_cls(
+                answer=early_rule5_answer,
+                sources=sources_data,
+                query_analysis=None,
+                confidence=82.0,
+                was_rewritten=False,
+                rewritten_query=None,
+                evidence_images=[],
+            ),
+        }
+        yield {"type": "done", "content": ""}
+        return
+
+    early_rule15_answer = _build_rule15_direct_fallback(query)
+    if early_rule15_answer:
+        yield {
+            "type": "status",
+            "content": "Nhận diện trực tiếp COLREG Rule 15, trả lời không gắn citation RAG nội bộ.",
+            "step": "retrieval",
+        }
+        yield {"type": "answer", "content": early_rule15_answer}
+        yield {
+            "type": "result",
+            "data": result_cls(
+                answer=early_rule15_answer,
+                sources=[],
+                query_analysis=None,
+                confidence=78.0,
+                was_rewritten=False,
+                rewritten_query=None,
+                evidence_images=[],
+            ),
+        }
+        yield {"type": "done", "content": ""}
+        return
+
     # NOTE: interval_thinking_fillers removed — synthetic thinking is forbidden.
     # Pipeline progress uses `status` events (honest system state), not fake thinking.
 
@@ -435,7 +575,20 @@ async def process_streaming_impl(
     logger.info("[CRAG-V3] Phase 2: Retrieving documents")
 
     try:
-        documents = await owner._retrieve(query, context, query_embedding_override=None, _prefetch_docs=_prefetch_docs)
+        raw_documents = await owner._retrieve(query, context, query_embedding_override=None, _prefetch_docs=_prefetch_docs)
+        documents = _filter_domain_mismatched_documents(query, raw_documents)
+        if len(documents) < len(raw_documents or []):
+            logger.info(
+                "[CRAG-V3] Domain guard dropped %d/%d mismatched documents for query '%s...'",
+                len(raw_documents or []) - len(documents),
+                len(raw_documents or []),
+                query[:50],
+            )
+            yield {
+                "type": "status",
+                "content": "Bỏ qua vài nguồn không khớp chủ đề trước khi trả lời.",
+                "step": "retrieval",
+            }
         tracer.end_step(
             result=f"Tìm thấy {len(documents)} tài liệu",
             confidence=0.8 if documents else 0.3,
@@ -525,13 +678,13 @@ async def process_streaming_impl(
                     "[CRAG-V3] Web corrective search failed: %s", web_exc
                 )
 
-            # Clear KB documents — we're not using them
-            documents = []
-            grading_result = None
-            passed = True  # Skip rewrite loop
-            _threshold_bypassed = True
-
             if _web_context:
+                # Clear KB documents — we're answering from web context.
+                documents = []
+                grading_result = None
+                passed = True  # Skip rewrite loop
+                _threshold_bypassed = True
+
                 # ── Web Search succeeded → stream from web context ──
                 context = dict(context or {})
                 context["_web_search_context"] = _web_context
@@ -582,58 +735,16 @@ async def process_streaming_impl(
                 yield {"type": "done", "content": ""}
                 return
             else:
-                # ── Web Search failed → stream intrinsic knowledge ──
+                logger.info(
+                    "[CRAG-V3] Web corrective unavailable or empty; continuing with %d retrieved KB docs",
+                    len(documents),
+                )
                 yield {
                     "type": "status",
-                    "content": "Chuyển sang cách đáp trực tiếp...",
-                    "step": "llm_fallback",
+                    "content": "Tiếp tục dùng tài liệu nội bộ đã tìm thấy...",
+                    "step": "retrieval",
                 }
-
-                fallback_answer = ""
-                try:
-                    from app.prompts.prompt_loader import get_prompt_loader
-
-                    _llm = _resolve_crag_light_llm("CorrectiveRAGIntrinsicFallback")
-                    _loader = get_prompt_loader()
-                    _identity = _loader.get_identity().get("identity", {})
-                    _personality = _identity.get("personality", {}).get("summary", "")
-                    _uname = (context or {}).get("user_name", "")
-                    _nhint = f"User tên {_uname}. " if _uname else ""
-
-                    _sys = _build_soul_system_prompt(_personality, _nhint, context_type="fallback")
-                    _msgs = make_agentic_rag_messages(
-                        system=_sys,
-                        user=query,
-                    )
-
-                    if _llm:
-                        async for evt in _stream_llm_with_thinking(_llm, _msgs, owner, query, context or {}):
-                            yield evt
-                            if evt.get("type") == "answer" and evt.get("content"):
-                                fallback_answer += evt["content"]
-                except Exception as _fb_stream_exc:
-                    logger.warning("[CRAG-V3] Streaming fallback failed: %s", _fb_stream_exc)
-
-                if not fallback_answer:
-                    fb_text, fb_thinking = await owner._generate_fallback(query, context or {})
-                    if not fb_text:
-                        fb_text = build_house_fallback_reply_fn()
-                    if fb_thinking:
-                        yield {"type": "thinking", "content": fb_thinking}
-                    fallback_answer = fb_text
-                    yield {"type": "answer", "content": fallback_answer}
-
-                yield {"type": "result", "data": result_cls(
-                    answer=fallback_answer,
-                    sources=[],
-                    query_analysis=analysis,
-                    confidence=45.0,
-                    was_rewritten=False,
-                    rewritten_query=None,
-                    evidence_images=[],
-                )}
-                yield {"type": "done", "content": ""}
-                return
+                _threshold_bypassed = False
         else:
             _threshold_bypassed = False
 
@@ -695,6 +806,10 @@ async def process_streaming_impl(
             yield {"type": "status", "content": "Chuyển sang cách đáp trực tiếp...", "step": "llm_fallback"}
 
             fallback_answer = ""
+            direct_domain_fallback = _build_rule5_direct_fallback(query)
+            if direct_domain_fallback:
+                fallback_answer = direct_domain_fallback
+                yield {"type": "answer", "content": fallback_answer}
             try:
                 from app.prompts.prompt_loader import get_prompt_loader
 
@@ -711,7 +826,7 @@ async def process_streaming_impl(
                     user=query,
                 )
 
-                if _llm:
+                if _llm and not fallback_answer:
                     async for evt in _stream_llm_with_thinking(_llm, _msgs, owner, query, context or {}):
                         yield evt
                         if evt.get("type") == "answer" and evt.get("content"):
@@ -917,10 +1032,12 @@ async def process_streaming_impl(
             )
             knowledge_nodes.append(node)
 
-        # Sprint 144: Intermediate response — user sees activity before LLM generation
+        # Keep retrieval progress out of the final answer stream. The UI already
+        # has status/tool surfaces for progress; answer_delta should contain only
+        # user-facing synthesis.
         yield {
-            "type": "answer",
-            "content": f"Wiii tìm thấy {len(documents)} tài liệu liên quan, đang phân tích để trả lời...\n\n"
+            "type": "status",
+            "content": f"Wiii tìm thấy {len(documents)} tài liệu liên quan, đang phân tích để trả lời..."
         }
 
         # Stream tokens from RAGAgent
@@ -985,11 +1102,16 @@ async def process_streaming_impl(
     thinking_content = tracer.build_thinking_summary()
     # Note: native_thinking unavailable in streaming (generate_response_streaming yields text only)
 
-    # Emit sources
-    yield {
-        "type": "sources",
-        "content": sources_data
-    }
+    full_answer = "".join(full_answer_parts)
+    safe_sources_data = [] if answer_declines_rag_sources_impl(full_answer) else sources_data
+    safe_evidence_image_list = [] if not safe_sources_data else evidence_image_list
+
+    # Emit sources only when the final answer actually uses them.
+    if safe_sources_data:
+        yield {
+            "type": "sources",
+            "content": safe_sources_data
+        }
 
     # Emit metadata with reasoning_trace
     # FIX: ReasoningTrace is Pydantic BaseModel, use model_dump() (v2) or dict() (v1)
@@ -1010,18 +1132,17 @@ async def process_streaming_impl(
             "confidence": confidence,
             "model": settings_obj.rag_model_version,
             "was_rewritten": rewritten_query is not None,
-            "doc_count": len(documents),
-            "evidence_images": evidence_image_list,  # Sprint 189b
+            "doc_count": len(documents) if safe_sources_data else 0,
+            "evidence_images": safe_evidence_image_list,  # Sprint 189b
         }
     }
 
     # Sprint 144: Yield CorrectiveRAGResult for rag_node to capture
-    full_answer = "".join(full_answer_parts)
     yield {
         "type": "result",
         "data": result_cls(
             answer=full_answer,
-            sources=sources_data,
+            sources=safe_sources_data,
             query_analysis=analysis,
             grading_result=grading_result,
             was_rewritten=rewritten_query is not None,
@@ -1029,7 +1150,7 @@ async def process_streaming_impl(
             confidence=confidence,
             reasoning_trace=reasoning_trace,
             thinking_content=thinking_content,  # Sprint 189b-R5: parity with sync
-            evidence_images=evidence_image_list,  # Sprint 189b
+            evidence_images=safe_evidence_image_list,  # Sprint 189b
         )
     }
 

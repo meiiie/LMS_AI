@@ -103,6 +103,24 @@ export function PreviewGroup({ block, onPreviewClick }: PreviewGroupProps) {
     [],
   );
 
+  // Phase 35 — filter out polluted preview items: missing URL, missing title,
+  // or error-string artifacts ("Unknown tool", "Tool unavailable", "Lỗi: ...").
+  // These are produced when LLM hallucinates tool names; they shouldn't
+  // appear in the user-facing source list.
+  if (block.items) {
+    const _BAD_TITLE_PREFIXES = [
+      "Unknown tool", "Tool unavailable", "Lỗi:", "Error:",
+    ];
+    block = {
+      ...block,
+      items: block.items.filter((item) => {
+        if (!item.url || !item.title) return false;
+        const title = String(item.title).trim();
+        if (_BAD_TITLE_PREFIXES.some((p) => title.startsWith(p))) return false;
+        return true;
+      }),
+    };
+  }
   if (!block.items || block.items.length === 0) return null;
 
   // Web search widget layout — collapsed by default, answer first

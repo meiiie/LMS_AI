@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { AlertTriangle, CheckCircle2, RefreshCw, Server, Sparkles } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  RefreshCw,
+  Server,
+  Sparkles,
+} from "lucide-react";
 import {
   getLlmRuntimeConfig,
   getModelCatalog,
@@ -62,7 +68,9 @@ type BoolChoice = "inherit" | "true" | "false";
 type RuntimeProvider = NonNullable<LlmRuntimeConfig["provider"]>;
 type VisionProvider = NonNullable<LlmRuntimeConfig["vision_provider"]>;
 type EmbeddingProvider = NonNullable<LlmRuntimeConfig["embedding_provider"]>;
-type EmbeddingMigrationPreviewItem = NonNullable<LlmRuntimeConfig["embedding_migration_previews"]>[number];
+type EmbeddingMigrationPreviewItem = NonNullable<
+  LlmRuntimeConfig["embedding_migration_previews"]
+>[number];
 type TimeoutProfileField = keyof Pick<
   LlmTimeoutProfilesConfig,
   | "light_seconds"
@@ -71,7 +79,9 @@ type TimeoutProfileField = keyof Pick<
   | "structured_seconds"
   | "background_seconds"
 >;
-type TimeoutProviderOverrideDraft = Partial<Record<TimeoutProfileField, string>>;
+type TimeoutProviderOverrideDraft = Partial<
+  Record<TimeoutProfileField, string>
+>;
 
 type RuntimeDraft = {
   provider: RuntimeProvider;
@@ -124,7 +134,10 @@ type RuntimeDraft = {
   embedding_model: string;
   agent_profiles: Record<string, AgentRuntimeProfileConfig>;
   timeout_profiles: LlmTimeoutProfilesConfig;
-  timeout_provider_overrides: Record<RuntimeProvider, TimeoutProviderOverrideDraft>;
+  timeout_provider_overrides: Record<
+    RuntimeProvider,
+    TimeoutProviderOverrideDraft
+  >;
 };
 
 interface Props {
@@ -132,9 +145,29 @@ interface Props {
   onToast?: (message: string, tone: ToastTone) => void;
 }
 
-const PROVIDERS: RuntimeProvider[] = ["google", "zhipu", "openai", "openrouter", "ollama"];
-const VISION_PROVIDERS: VisionProvider[] = ["auto", "google", "openai", "openrouter", "ollama", "zhipu"];
-const EMBEDDING_PROVIDERS: EmbeddingProvider[] = ["auto", "google", "openai", "openrouter", "ollama", "zhipu"];
+const PROVIDERS: RuntimeProvider[] = [
+  "google",
+  "zhipu",
+  "openai",
+  "openrouter",
+  "ollama",
+];
+const VISION_PROVIDERS: VisionProvider[] = [
+  "auto",
+  "google",
+  "openai",
+  "openrouter",
+  "ollama",
+  "zhipu",
+];
+const EMBEDDING_PROVIDERS: EmbeddingProvider[] = [
+  "auto",
+  "google",
+  "openai",
+  "openrouter",
+  "ollama",
+  "zhipu",
+];
 const AGENT_PROFILE_GROUPS = [
   "routing",
   "safety",
@@ -143,7 +176,10 @@ const AGENT_PROFILE_GROUPS = [
   "evaluation",
   "creative",
 ] as const;
-const AGENT_PROFILE_LABELS: Record<(typeof AGENT_PROFILE_GROUPS)[number], string> = {
+const AGENT_PROFILE_LABELS: Record<
+  (typeof AGENT_PROFILE_GROUPS)[number],
+  string
+> = {
   routing: "Routing",
   safety: "Safety",
   knowledge: "Knowledge",
@@ -151,32 +187,83 @@ const AGENT_PROFILE_LABELS: Record<(typeof AGENT_PROFILE_GROUPS)[number], string
   evaluation: "Evaluation",
   creative: "Creative",
 };
-const AGENT_PROFILE_DESCRIPTIONS: Record<(typeof AGENT_PROFILE_GROUPS)[number], string> = {
-  routing: "Supervisor va luong dieu phoi huong xu ly.",
-  safety: "Guardian va cac luong an toan noi dung.",
-  knowledge: "RAG, tutor, synthesizer va phan ung dung tri thuc.",
-  utility: "Direct response, memory va cac luong nhe.",
+const AGENT_PROFILE_DESCRIPTIONS: Record<
+  (typeof AGENT_PROFILE_GROUPS)[number],
+  string
+> = {
+  routing: "Supervisor và luồng điều phối hướng xử lý.",
+  safety: "Guardian và các luồng an toàn nội dung.",
+  knowledge: "RAG, tutor, synthesizer và phần ứng dụng tri thức.",
+  utility: "Direct response, memory và các luồng nhẹ.",
   evaluation: "Grader, planner, curation, aggregation, KG, sentiment.",
-  creative: "Code Studio, course generation va cac tac vu sang tao/co cau.",
+  creative: "Code Studio, course generation và các tác vụ sáng tạo/cơ cấu.",
 };
-const AGENT_PROFILE_PROVIDER_OPTIONS: RuntimeProvider[] = ["google", "zhipu", "openai", "openrouter", "ollama"];
-const TIMEOUT_OVERRIDE_PROVIDERS: RuntimeProvider[] = ["google", "zhipu", "openai", "openrouter", "ollama"];
-const TIMEOUT_PROFILE_FIELDS: Array<{ key: TimeoutProfileField; label: string; hint: string }> = [
-  { key: "light_seconds", label: "Light", hint: "Chat nhanh, first-response timeout." },
-  { key: "moderate_seconds", label: "Moderate", hint: "Chat thong thuong va task can bang." },
-  { key: "deep_seconds", label: "Deep", hint: "Reasoning/code interactive nang hon." },
-  { key: "structured_seconds", label: "Structured", hint: "Structured output va planner/coordinator." },
-  { key: "background_seconds", label: "Background", hint: "Workflow dai hoi; 0 = khong cat som." },
+const AGENT_PROFILE_PROVIDER_OPTIONS: RuntimeProvider[] = [
+  "google",
+  "zhipu",
+  "openai",
+  "openrouter",
+  "ollama",
+];
+const TIMEOUT_OVERRIDE_PROVIDERS: RuntimeProvider[] = [
+  "google",
+  "zhipu",
+  "openai",
+  "openrouter",
+  "ollama",
+];
+const TIMEOUT_PROFILE_FIELDS: Array<{
+  key: TimeoutProfileField;
+  label: string;
+  hint: string;
+}> = [
+  {
+    key: "light_seconds",
+    label: "Light",
+    hint: "Chat nhanh, first-response timeout.",
+  },
+  {
+    key: "moderate_seconds",
+    label: "Moderate",
+    hint: "Chat thông thường và task cân bằng.",
+  },
+  {
+    key: "deep_seconds",
+    label: "Deep",
+    hint: "Reasoning/code interactive nặng hơn.",
+  },
+  {
+    key: "structured_seconds",
+    label: "Structured",
+    hint: "Structured output và planner/coordinator.",
+  },
+  {
+    key: "background_seconds",
+    label: "Background",
+    hint: "Workflow dài hơi; 0 = không cắt sớm.",
+  },
 ];
 
 function defaultAgentProfiles(): Record<string, AgentRuntimeProfileConfig> {
   return {
     routing: { default_provider: "google", tier: "light", provider_models: {} },
     safety: { default_provider: "google", tier: "light", provider_models: {} },
-    knowledge: { default_provider: "google", tier: "moderate", provider_models: {} },
+    knowledge: {
+      default_provider: "google",
+      tier: "moderate",
+      provider_models: {},
+    },
     utility: { default_provider: "google", tier: "light", provider_models: {} },
-    evaluation: { default_provider: "google", tier: "moderate", provider_models: {} },
-    creative: { default_provider: "google", tier: "deep", provider_models: { google: "gemini-3.1-pro-preview" } },
+    evaluation: {
+      default_provider: "google",
+      tier: "moderate",
+      provider_models: {},
+    },
+    creative: {
+      default_provider: "google",
+      tier: "deep",
+      provider_models: { google: "gemini-3.1-pro-preview" },
+    },
   };
 }
 
@@ -192,7 +279,10 @@ function defaultTimeoutProfiles(): LlmTimeoutProfilesConfig {
   };
 }
 
-function defaultTimeoutProviderOverrides(): Record<RuntimeProvider, TimeoutProviderOverrideDraft> {
+function defaultTimeoutProviderOverrides(): Record<
+  RuntimeProvider,
+  TimeoutProviderOverrideDraft
+> {
   return {
     google: {},
     zhipu: {},
@@ -304,8 +394,14 @@ function timeoutOverrideToDraft(
   if (!value) return {};
   return Object.fromEntries(
     Object.entries(value)
-      .filter(([, timeoutValue]) => timeoutValue !== null && timeoutValue !== undefined)
-      .map(([key, timeoutValue]) => [key, timeoutNumberToInput(timeoutValue as number)]),
+      .filter(
+        ([, timeoutValue]) =>
+          timeoutValue !== null && timeoutValue !== undefined,
+      )
+      .map(([key, timeoutValue]) => [
+        key,
+        timeoutNumberToInput(timeoutValue as number),
+      ]),
   ) as TimeoutProviderOverrideDraft;
 }
 
@@ -322,14 +418,20 @@ function draftToTimeoutOverrides(
         );
         return [provider, normalized];
       })
-      .filter(([, overrides]) => Object.keys(overrides as Record<string, number>).length > 0),
+      .filter(
+        ([, overrides]) =>
+          Object.keys(overrides as Record<string, number>).length > 0,
+      ),
   ) as Record<RuntimeProvider, LlmTimeoutProviderOverride>;
 }
 
 function badgeClass(tone: "neutral" | "good" | "warn" | "accent"): string {
-  if (tone === "good") return "border-green-200 bg-green-50 text-green-700 dark:border-green-900/60 dark:bg-green-950/40 dark:text-green-300";
-  if (tone === "warn") return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300";
-  if (tone === "accent") return "border-[var(--accent)]/20 bg-[var(--accent)]/10 text-[var(--accent)]";
+  if (tone === "good")
+    return "border-green-200 bg-green-50 text-green-700 dark:border-green-900/60 dark:bg-green-950/40 dark:text-green-300";
+  if (tone === "warn")
+    return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300";
+  if (tone === "accent")
+    return "border-[var(--accent)]/20 bg-[var(--accent)]/10 text-[var(--accent)]";
   return "border-border bg-surface-tertiary text-text-secondary";
 }
 
@@ -339,25 +441,31 @@ function formatCapabilityLabel(value: boolean | null | undefined): string {
   return "unknown";
 }
 
-function capabilityTone(value: boolean | null | undefined): "good" | "warn" | "neutral" {
+function capabilityTone(
+  value: boolean | null | undefined,
+): "good" | "warn" | "neutral" {
   if (value === true) return "good";
   if (value === false) return "warn";
   return "neutral";
 }
 
 function formatDateTime(value: string | null | undefined): string {
-  if (!value) return "chua co";
+  if (!value) return "chưa có";
   return new Date(value).toLocaleString("vi-VN");
 }
 
-function visionLaneFitTone(value: string | null | undefined): "good" | "warn" | "accent" | "neutral" {
+function visionLaneFitTone(
+  value: string | null | undefined,
+): "good" | "warn" | "accent" | "neutral" {
   if (value === "specialist") return "accent";
   if (value === "fallback") return "warn";
   if (value === "general") return "neutral";
   return "neutral";
 }
 
-function embeddingPreviewTone(preview: EmbeddingMigrationPreviewItem): "good" | "warn" | "accent" | "neutral" {
+function embeddingPreviewTone(
+  preview: EmbeddingMigrationPreviewItem,
+): "good" | "warn" | "accent" | "neutral" {
   if (preview.same_space) return "accent";
   if (!preview.allowed || preview.requires_reembed) return "warn";
   if (preview.embedded_row_count > 0) return "neutral";
@@ -379,12 +487,24 @@ function uniqueStrings(values: string[]): string[] {
   return values.filter((value, index, all) => all.indexOf(value) === index);
 }
 
-function FieldGroup({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+function FieldGroup({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+}) {
   return (
     <label className="block space-y-1.5">
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-medium text-text">{label}</span>
-        {hint && <span className="text-[11px] text-text-tertiary text-right">{hint}</span>}
+        {hint && (
+          <span className="text-[11px] text-text-tertiary text-right">
+            {hint}
+          </span>
+        )}
       </div>
       {children}
     </label>
@@ -414,8 +534,12 @@ function ToggleRow({
         <div className="text-sm font-medium text-text">{label}</div>
         <div className="mt-1 text-xs text-text-tertiary">{description}</div>
       </div>
-      <span className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${checked ? "bg-[var(--accent)]" : "bg-gray-300 dark:bg-gray-700"}`}>
-        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${checked ? "translate-x-6" : "translate-x-1"}`} />
+      <span
+        className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${checked ? "bg-[var(--accent)]" : "bg-gray-300 dark:bg-gray-700"}`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${checked ? "translate-x-6" : "translate-x-1"}`}
+        />
       </span>
     </button>
   );
@@ -439,10 +563,10 @@ function SecretField({
   onToggleClear: () => void;
 }) {
   const help = clearRequested
-    ? "Se xoa khoi runtime khi luu."
+    ? "Sẽ xóa khỏi runtime khi lưu."
     : configured
-      ? "Backend da co key. De trong de giu nguyen."
-      : "Chua co key runtime.";
+      ? "Backend đã có key. Để trống để giữ nguyên."
+      : "Chưa có key runtime.";
   return (
     <FieldGroup label={label}>
       <>
@@ -460,7 +584,7 @@ function SecretField({
             onClick={onToggleClear}
             className={`shrink-0 rounded-full border px-2 py-1 transition-colors ${clearRequested ? "border-red-200 bg-red-50 text-red-600 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300" : "border-border bg-surface text-text-secondary hover:bg-surface-tertiary"}`}
           >
-            {clearRequested ? "Giu lai key" : "Xoa key"}
+            {clearRequested ? "Giữ lại key" : "Xóa key"}
           </button>
         </div>
       </>
@@ -485,10 +609,18 @@ function toDraft(runtime: LlmRuntimeConfig): RuntimeDraft {
     zhipu_model_advanced: runtime.zhipu_model_advanced,
     openrouter_model_fallbacks: listToCsv(runtime.openrouter_model_fallbacks),
     openrouter_provider_order: listToCsv(runtime.openrouter_provider_order),
-    openrouter_allowed_providers: listToCsv(runtime.openrouter_allowed_providers),
-    openrouter_ignored_providers: listToCsv(runtime.openrouter_ignored_providers),
-    openrouter_allow_fallbacks: boolToChoice(runtime.openrouter_allow_fallbacks),
-    openrouter_require_parameters: boolToChoice(runtime.openrouter_require_parameters),
+    openrouter_allowed_providers: listToCsv(
+      runtime.openrouter_allowed_providers,
+    ),
+    openrouter_ignored_providers: listToCsv(
+      runtime.openrouter_ignored_providers,
+    ),
+    openrouter_allow_fallbacks: boolToChoice(
+      runtime.openrouter_allow_fallbacks,
+    ),
+    openrouter_require_parameters: boolToChoice(
+      runtime.openrouter_require_parameters,
+    ),
     openrouter_data_collection: runtime.openrouter_data_collection ?? "",
     openrouter_zdr: boolToChoice(runtime.openrouter_zdr),
     openrouter_provider_sort: runtime.openrouter_provider_sort ?? "",
@@ -505,7 +637,9 @@ function toDraft(runtime: LlmRuntimeConfig): RuntimeDraft {
     vision_grounded_provider: runtime.vision_grounded_provider ?? "auto",
     vision_grounded_model: runtime.vision_grounded_model ?? "",
     vision_failover_chain: listToCsv(runtime.vision_failover_chain),
-    vision_timeout_seconds: timeoutNumberToInput(runtime.vision_timeout_seconds),
+    vision_timeout_seconds: timeoutNumberToInput(
+      runtime.vision_timeout_seconds,
+    ),
     embedding_provider: runtime.embedding_provider ?? "auto",
     embedding_failover_chain: listToCsv(runtime.embedding_failover_chain),
     embedding_model: runtime.embedding_model,
@@ -514,16 +648,21 @@ function toDraft(runtime: LlmRuntimeConfig): RuntimeDraft {
     timeout_provider_overrides: {
       ...defaultTimeoutProviderOverrides(),
       ...Object.fromEntries(
-        Object.entries(runtime.timeout_provider_overrides ?? {}).map(([provider, override]) => [
-          provider,
-          timeoutOverrideToDraft(override),
-        ]),
+        Object.entries(runtime.timeout_provider_overrides ?? {}).map(
+          ([provider, override]) => [
+            provider,
+            timeoutOverrideToDraft(override),
+          ],
+        ),
       ),
     } as Record<RuntimeProvider, TimeoutProviderOverrideDraft>,
   };
 }
 
-function mergeRuntimeIntoDraft(runtime: LlmRuntimeConfig, current: RuntimeDraft): RuntimeDraft {
+function mergeRuntimeIntoDraft(
+  runtime: LlmRuntimeConfig,
+  current: RuntimeDraft,
+): RuntimeDraft {
   return {
     ...toDraft(runtime),
     google_api_key: current.google_api_key,
@@ -534,7 +673,10 @@ function mergeRuntimeIntoDraft(runtime: LlmRuntimeConfig, current: RuntimeDraft)
   };
 }
 
-function applyProviderDefaults(current: RuntimeDraft, provider: RuntimeProvider): RuntimeDraft {
+function applyProviderDefaults(
+  current: RuntimeDraft,
+  provider: RuntimeProvider,
+): RuntimeDraft {
   const preset = applyLlmProviderPreset(
     {
       llm_provider: current.provider,
@@ -561,21 +703,36 @@ function applyProviderDefaults(current: RuntimeDraft, provider: RuntimeProvider)
     google_model: preset.google_model ?? current.google_model,
     openai_base_url: preset.openai_base_url ?? current.openai_base_url,
     openai_model: preset.openai_model ?? current.openai_model,
-    openai_model_advanced: preset.openai_model_advanced ?? current.openai_model_advanced,
-    openrouter_base_url: preset.openrouter_base_url ?? current.openrouter_base_url,
+    openai_model_advanced:
+      preset.openai_model_advanced ?? current.openai_model_advanced,
+    openrouter_base_url:
+      preset.openrouter_base_url ?? current.openrouter_base_url,
     openrouter_model: preset.openrouter_model ?? current.openrouter_model,
-    openrouter_model_advanced: preset.openrouter_model_advanced ?? current.openrouter_model_advanced,
+    openrouter_model_advanced:
+      preset.openrouter_model_advanced ?? current.openrouter_model_advanced,
     zhipu_base_url: preset.zhipu_base_url ?? current.zhipu_base_url,
     zhipu_model: preset.zhipu_model ?? current.zhipu_model,
-    zhipu_model_advanced: preset.zhipu_model_advanced ?? current.zhipu_model_advanced,
+    zhipu_model_advanced:
+      preset.zhipu_model_advanced ?? current.zhipu_model_advanced,
     ollama_base_url: preset.ollama_base_url ?? current.ollama_base_url,
     ollama_model: preset.ollama_model ?? current.ollama_model,
     ollama_keep_alive: preset.ollama_keep_alive ?? current.ollama_keep_alive,
-    llm_failover_chain: listToCsv((preset.llm_failover_chain as string[]) ?? csvToList(current.llm_failover_chain)),
+    llm_failover_chain: listToCsv(
+      (preset.llm_failover_chain as string[]) ??
+        csvToList(current.llm_failover_chain),
+    ),
   };
   if (provider === "openrouter") {
-    if (!next.openrouter_model || LEGACY_PAID_OPENAI_MODELS.has(next.openrouter_model)) next.openrouter_model = OPENROUTER_DEFAULT_MODEL;
-    if (!next.openrouter_model_advanced || LEGACY_PAID_OPENAI_MODELS.has(next.openrouter_model_advanced)) next.openrouter_model_advanced = OPENROUTER_DEFAULT_MODEL_ADVANCED;
+    if (
+      !next.openrouter_model ||
+      LEGACY_PAID_OPENAI_MODELS.has(next.openrouter_model)
+    )
+      next.openrouter_model = OPENROUTER_DEFAULT_MODEL;
+    if (
+      !next.openrouter_model_advanced ||
+      LEGACY_PAID_OPENAI_MODELS.has(next.openrouter_model_advanced)
+    )
+      next.openrouter_model_advanced = OPENROUTER_DEFAULT_MODEL_ADVANCED;
   }
   return next;
 }
@@ -585,34 +742,64 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
   const [runtime, setRuntime] = useState<LlmRuntimeConfig | null>(null);
   const [catalog, setCatalog] = useState<ModelCatalogResponse | null>(null);
   const [draft, setDraft] = useState<RuntimeDraft>(EMPTY_DRAFT);
-  const [state, setState] = useState<"idle" | "loading" | "saving" | "error">("loading");
+  const [state, setState] = useState<"idle" | "loading" | "saving" | "error">(
+    "loading",
+  );
   const [message, setMessage] = useState("");
   const [isProbing, setIsProbing] = useState(false);
-  const [isPlanningEmbeddingMigration, setIsPlanningEmbeddingMigration] = useState(false);
-  const [embeddingMigrationPlan, setEmbeddingMigrationPlan] = useState<EmbeddingSpaceMigrationPlanResponse | null>(null);
-  const [embeddingMigrationRun, setEmbeddingMigrationRun] = useState<EmbeddingSpaceMigrationRunResponse | null>(null);
+  const [isPlanningEmbeddingMigration, setIsPlanningEmbeddingMigration] =
+    useState(false);
+  const [embeddingMigrationPlan, setEmbeddingMigrationPlan] =
+    useState<EmbeddingSpaceMigrationPlanResponse | null>(null);
+  const [embeddingMigrationRun, setEmbeddingMigrationRun] =
+    useState<EmbeddingSpaceMigrationRunResponse | null>(null);
   const isAdmin = variant === "admin";
 
   const notify = (msg: string, tone: ToastTone) => onToast?.(msg, tone);
-  const googleModels = useMemo(() => modelNames(catalog?.providers.google), [catalog]);
-  const openaiModels = useMemo(() => modelNames(catalog?.providers.openai), [catalog]);
-  const openrouterModels = useMemo(() => modelNames(catalog?.providers.openrouter), [catalog]);
-  const zhipuModels = useMemo(() => modelNames(catalog?.providers.zhipu), [catalog]);
-  const ollamaModels = useMemo(() => modelNames(catalog?.providers.ollama), [catalog]);
+  const googleModels = useMemo(
+    () => modelNames(catalog?.providers.google),
+    [catalog],
+  );
+  const openaiModels = useMemo(
+    () => modelNames(catalog?.providers.openai),
+    [catalog],
+  );
+  const openrouterModels = useMemo(
+    () => modelNames(catalog?.providers.openrouter),
+    [catalog],
+  );
+  const zhipuModels = useMemo(
+    () => modelNames(catalog?.providers.zhipu),
+    [catalog],
+  );
+  const ollamaModels = useMemo(
+    () => modelNames(catalog?.providers.ollama),
+    [catalog],
+  );
   const providerCapabilities = useMemo(
     () => catalog?.provider_capabilities ?? {},
     [catalog],
   );
 
   const providerOptions = useMemo(() => {
-    const statusMap = new Map((runtime?.provider_status ?? []).map((item) => [item.provider, item]));
+    const statusMap = new Map(
+      (runtime?.provider_status ?? []).map((item) => [item.provider, item]),
+    );
     return PROVIDERS.filter((provider) => {
       const status = statusMap.get(provider);
       return status ? status.configurable_via_admin : true;
-    }).map((provider) => ({ provider, label: statusMap.get(provider)?.display_name ?? provider }));
+    }).map((provider) => ({
+      provider,
+      label: statusMap.get(provider)?.display_name ?? provider,
+    }));
   }, [runtime]);
   const embeddingProviderOptions = useMemo(() => {
-    const statusMap = new Map((runtime?.embedding_provider_status ?? []).map((item) => [item.provider, item]));
+    const statusMap = new Map(
+      (runtime?.embedding_provider_status ?? []).map((item) => [
+        item.provider,
+        item,
+      ]),
+    );
     const options = EMBEDDING_PROVIDERS.map((provider) => {
       if (provider === "auto") {
         return { provider, label: "Auto (theo chain)" };
@@ -625,7 +812,12 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
     return options;
   }, [runtime]);
   const visionProviderOptions = useMemo(() => {
-    const statusMap = new Map((runtime?.vision_provider_status ?? []).map((item) => [item.provider, item]));
+    const statusMap = new Map(
+      (runtime?.vision_provider_status ?? []).map((item) => [
+        item.provider,
+        item,
+      ]),
+    );
     return VISION_PROVIDERS.map((provider) => {
       if (provider === "auto") {
         return { provider, label: "Auto (theo chain)" };
@@ -663,30 +855,34 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
   const openrouterCapability = providerCapabilities.openrouter;
   const runtimePersistenceLabel = runtime?.runtime_policy_persisted
     ? runtime.runtime_policy_updated_at
-      ? `Da luu vao system DB luc ${new Date(runtime.runtime_policy_updated_at).toLocaleString("vi-VN")}.`
-      : "Da luu vao system DB."
-    : "Dang dung env defaults hoac runtime tam thoi chua persist.";
+      ? `Đã lưu vào system DB lúc ${new Date(runtime.runtime_policy_updated_at).toLocaleString("vi-VN")}.`
+      : "Đã lưu vào system DB."
+    : "Đang dùng env defaults hoặc runtime tạm thời chưa persist.";
   const degradedProviders = catalog?.degraded_providers ?? [];
   const auditWarnings = catalog?.audit_warnings ?? [];
   const embeddingSpaceStatus = runtime?.embedding_space_status ?? null;
-  const embeddingMigrationPreviews = runtime?.embedding_migration_previews ?? [];
-  const selectedEmbeddingPreview = embeddingMigrationPreviews.find(
-    (item) => item.target_model === draft.embedding_model,
-  ) ?? null;
+  const embeddingMigrationPreviews =
+    runtime?.embedding_migration_previews ?? [];
+  const selectedEmbeddingPreview =
+    embeddingMigrationPreviews.find(
+      (item) => item.target_model === draft.embedding_model,
+    ) ?? null;
   const auditSummaryLabel = catalog?.audit_updated_at
-    ? `Audit cap nhat luc ${formatDateTime(catalog.audit_updated_at)}`
-    : "Chua co audit snapshot";
+    ? `Audit cập nhật lúc ${formatDateTime(catalog.audit_updated_at)}`
+    : "Chưa có audit snapshot";
   const liveProbeSummaryLabel = catalog?.last_live_probe_at
-    ? `Live probe gan nhat luc ${formatDateTime(catalog.last_live_probe_at)}`
-    : "Chua chay live probe";
+    ? `Live probe gần nhất lúc ${formatDateTime(catalog.last_live_probe_at)}`
+    : "Chưa chạy live probe";
   const auditPersistenceLabel = catalog
     ? catalog.audit_persisted
-      ? "Da persist vao admin_runtime_settings."
-      : "Dang hien thi ket qua tam thoi trong request hien tai."
-    : "Dang tai audit state.";
-  const setAgentProfileField = <
-    K extends keyof AgentRuntimeProfileConfig,
-  >(group: string, field: K, value: AgentRuntimeProfileConfig[K]) => {
+      ? "Đã persist vào admin_runtime_settings."
+      : "Đang hiển thị kết quả tạm thời trong request hiện tại."
+    : "Đang tải audit state.";
+  const setAgentProfileField = <K extends keyof AgentRuntimeProfileConfig>(
+    group: string,
+    field: K,
+    value: AgentRuntimeProfileConfig[K],
+  ) => {
     setDraft((current) => ({
       ...current,
       agent_profiles: {
@@ -698,9 +894,14 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
       },
     }));
   };
-  const setAgentProfileProviderModel = (group: string, provider: RuntimeProvider, value: string) => {
+  const setAgentProfileProviderModel = (
+    group: string,
+    provider: RuntimeProvider,
+    value: string,
+  ) => {
     setDraft((current) => {
-      const currentProfile = current.agent_profiles[group] ?? defaultAgentProfiles()[group];
+      const currentProfile =
+        current.agent_profiles[group] ?? defaultAgentProfiles()[group];
       const nextProviderModels = { ...(currentProfile?.provider_models ?? {}) };
       if (value.trim()) nextProviderModels[provider] = value.trim();
       else delete nextProviderModels[provider];
@@ -747,13 +948,16 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
   const setEmbeddingProvider = (provider: EmbeddingProvider) => {
     setDraft((current) => {
       const suggestedModel =
-        runtime?.embedding_provider_status?.find((item) => item.provider === provider)?.selected_model ??
-        current.embedding_model;
+        runtime?.embedding_provider_status?.find(
+          (item) => item.provider === provider,
+        )?.selected_model ?? current.embedding_model;
       return {
         ...current,
         embedding_provider: provider,
         embedding_model:
-          provider === "auto" || !suggestedModel ? current.embedding_model : suggestedModel,
+          provider === "auto" || !suggestedModel
+            ? current.embedding_model
+            : suggestedModel,
       };
     });
   };
@@ -764,14 +968,19 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
     setEmbeddingMigrationPlan(null);
     setEmbeddingMigrationRun(null);
     try {
-      const [runtimeConfig, modelCatalog] = await Promise.all([getLlmRuntimeConfig(), getModelCatalog()]);
+      const [runtimeConfig, modelCatalog] = await Promise.all([
+        getLlmRuntimeConfig(),
+        getModelCatalog(),
+      ]);
       setRuntime(runtimeConfig);
       setCatalog(modelCatalog);
       setDraft((current) => mergeRuntimeIntoDraft(runtimeConfig, current));
       setState("idle");
     } catch (error) {
       setState("error");
-      setMessage("Khong doc duoc runtime policy hoac model catalog tu backend.");
+      setMessage(
+        "Không đọc được runtime policy hoặc model catalog từ backend.",
+      );
       notify(String(error), "error");
     }
   };
@@ -788,18 +997,32 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
   useEffect(() => {
     if (variant !== "settings") return;
     let cancelled = false;
-    Promise.all([loadGeminiApiKey(), loadOpenAiApiKey(), loadOpenRouterApiKey(), loadZhipuApiKey(), loadOllamaApiKey()])
-      .then(([geminiApiKey, openAiApiKey, openRouterApiKey, zhipuApiKey, ollamaApiKey]) => {
-        if (cancelled) return;
-        setDraft((current) => ({
-          ...current,
-          google_api_key: geminiApiKey ?? current.google_api_key,
-          openai_api_key: openAiApiKey ?? current.openai_api_key,
-          openrouter_api_key: openRouterApiKey ?? current.openrouter_api_key,
-          zhipu_api_key: zhipuApiKey ?? current.zhipu_api_key,
-          ollama_api_key: ollamaApiKey ?? current.ollama_api_key,
-        }));
-      })
+    Promise.all([
+      loadGeminiApiKey(),
+      loadOpenAiApiKey(),
+      loadOpenRouterApiKey(),
+      loadZhipuApiKey(),
+      loadOllamaApiKey(),
+    ])
+      .then(
+        ([
+          geminiApiKey,
+          openAiApiKey,
+          openRouterApiKey,
+          zhipuApiKey,
+          ollamaApiKey,
+        ]) => {
+          if (cancelled) return;
+          setDraft((current) => ({
+            ...current,
+            google_api_key: geminiApiKey ?? current.google_api_key,
+            openai_api_key: openAiApiKey ?? current.openai_api_key,
+            openrouter_api_key: openRouterApiKey ?? current.openrouter_api_key,
+            zhipu_api_key: zhipuApiKey ?? current.zhipu_api_key,
+            ollama_api_key: ollamaApiKey ?? current.ollama_api_key,
+          }));
+        },
+      )
       .catch(() => undefined);
     return () => {
       cancelled = true;
@@ -833,10 +1056,18 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
         zhipu_model_advanced: draft.zhipu_model_advanced,
         openrouter_model_fallbacks: csvToList(draft.openrouter_model_fallbacks),
         openrouter_provider_order: csvToList(draft.openrouter_provider_order),
-        openrouter_allowed_providers: csvToList(draft.openrouter_allowed_providers),
-        openrouter_ignored_providers: csvToList(draft.openrouter_ignored_providers),
-        openrouter_allow_fallbacks: choiceToBool(draft.openrouter_allow_fallbacks),
-        openrouter_require_parameters: choiceToBool(draft.openrouter_require_parameters),
+        openrouter_allowed_providers: csvToList(
+          draft.openrouter_allowed_providers,
+        ),
+        openrouter_ignored_providers: csvToList(
+          draft.openrouter_ignored_providers,
+        ),
+        openrouter_allow_fallbacks: choiceToBool(
+          draft.openrouter_allow_fallbacks,
+        ),
+        openrouter_require_parameters: choiceToBool(
+          draft.openrouter_require_parameters,
+        ),
         openrouter_data_collection: draft.openrouter_data_collection,
         openrouter_zdr: choiceToBool(draft.openrouter_zdr),
         openrouter_provider_sort: draft.openrouter_provider_sort,
@@ -854,15 +1085,23 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
         vision_ocr_model: draft.vision_ocr_model.trim() || undefined,
         vision_grounded_provider: draft.vision_grounded_provider,
         vision_grounded_model: draft.vision_grounded_model.trim() || undefined,
-        vision_failover_chain: csvToList(draft.vision_failover_chain.toLowerCase()),
+        vision_failover_chain: csvToList(
+          draft.vision_failover_chain.toLowerCase(),
+        ),
         vision_timeout_seconds:
-          parseTimeoutInput(draft.vision_timeout_seconds) || runtime?.vision_timeout_seconds || 30,
+          parseTimeoutInput(draft.vision_timeout_seconds) ||
+          runtime?.vision_timeout_seconds ||
+          30,
         embedding_provider: draft.embedding_provider,
-        embedding_failover_chain: csvToList(draft.embedding_failover_chain.toLowerCase()),
+        embedding_failover_chain: csvToList(
+          draft.embedding_failover_chain.toLowerCase(),
+        ),
         embedding_model: draft.embedding_model.trim() || undefined,
         agent_profiles: draft.agent_profiles,
         timeout_profiles: draft.timeout_profiles,
-        timeout_provider_overrides: draftToTimeoutOverrides(draft.timeout_provider_overrides),
+        timeout_provider_overrides: draftToTimeoutOverrides(
+          draft.timeout_provider_overrides,
+        ),
       });
       let refreshedCatalog: ModelCatalogResponse | null = null;
       try {
@@ -906,7 +1145,8 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
           openai_base_url: updated.openai_base_url ?? "",
           openai_model: updated.openai_model,
           openai_model_advanced: updated.openai_model_advanced,
-          openrouter_base_url: updated.openrouter_base_url ?? OPENROUTER_BASE_URL,
+          openrouter_base_url:
+            updated.openrouter_base_url ?? OPENROUTER_BASE_URL,
           openrouter_model: updated.openrouter_model,
           openrouter_model_advanced: updated.openrouter_model_advanced,
           zhipu_base_url: updated.zhipu_base_url ?? ZHIPU_DEFAULT_BASE_URL,
@@ -914,7 +1154,8 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
           zhipu_model_advanced: updated.zhipu_model_advanced,
           ollama_base_url: updated.ollama_base_url ?? OLLAMA_DEFAULT_BASE_URL,
           ollama_model: updated.ollama_model,
-          ollama_keep_alive: updated.ollama_keep_alive ?? OLLAMA_DEFAULT_KEEP_ALIVE,
+          ollama_keep_alive:
+            updated.ollama_keep_alive ?? OLLAMA_DEFAULT_KEEP_ALIVE,
           llm_failover_enabled: updated.enable_llm_failover,
           llm_failover_chain: updated.llm_failover_chain,
         });
@@ -924,11 +1165,16 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
       if (refreshedCatalog) setCatalog(refreshedCatalog);
       setDraft(toDraft(updated));
       setState("idle");
-      setMessage(isAdmin ? "Da cap nhat runtime policy." : "Da dong bo LLM gateway.");
-      notify(isAdmin ? "Da cap nhat runtime policy" : "Da cap nhat LLM gateway", "success");
+      setMessage(
+        isAdmin ? "Đã cập nhật runtime policy." : "Đã đồng bộ LLM gateway.",
+      );
+      notify(
+        isAdmin ? "Đã cập nhật runtime policy" : "Đã cập nhật LLM gateway",
+        "success",
+      );
     } catch (error) {
       setState("error");
-      setMessage("Khong the cap nhat runtime policy.");
+      setMessage("Không thể cập nhật runtime policy.");
       notify(String(error), "error");
     }
   };
@@ -944,10 +1190,12 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
       });
       setEmbeddingMigrationPlan(plan);
       setEmbeddingMigrationRun(null);
-      notify("Da tao migration plan cho embedding model dang chon.", "success");
+      notify("Đã tạo migration plan cho embedding model đang chọn.", "success");
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      setMessage("Khong tao duoc migration plan cho embedding model dang chon.");
+      setMessage(
+        "Không tạo được migration plan cho embedding model đang chọn.",
+      );
       notify(detail, "error");
     } finally {
       setIsPlanningEmbeddingMigration(false);
@@ -973,10 +1221,15 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
         });
         setEmbeddingMigrationPlan(plan);
       }
-      notify("Da chay dry-run migration cho embedding model dang chon.", "success");
+      notify(
+        "Đã chạy dry-run migration cho embedding model đang chọn.",
+        "success",
+      );
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      setMessage("Khong chay duoc dry-run migration cho embedding model dang chon.");
+      setMessage(
+        "Không chạy được dry-run migration cho embedding model đang chọn.",
+      );
       notify(detail, "error");
     } finally {
       setIsPlanningEmbeddingMigration(false);
@@ -995,11 +1248,16 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
         acknowledge_maintenance_window: true,
       });
       setEmbeddingMigrationRun(result);
-      notify("Da prepare/backfill shadow migration cho embedding model dang chon.", "success");
+      notify(
+        "Đã prepare/backfill shadow migration cho embedding model đang chọn.",
+        "success",
+      );
       await loadRuntime();
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      setMessage("Khong apply duoc shadow migration cho embedding model dang chon.");
+      setMessage(
+        "Không apply được shadow migration cho embedding model đang chọn.",
+      );
       notify(detail, "error");
     } finally {
       setIsPlanningEmbeddingMigration(false);
@@ -1017,11 +1275,11 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
         acknowledge_maintenance_window: true,
       });
       setEmbeddingMigrationRun(result);
-      notify("Da promote target embedding space thanh active.", "success");
+      notify("Đã promote target embedding space thành active.", "success");
       await loadRuntime();
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      setMessage("Khong promote duoc target embedding space.");
+      setMessage("Không promote được target embedding space.");
       notify(detail, "error");
     } finally {
       setIsPlanningEmbeddingMigration(false);
@@ -1043,17 +1301,17 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
       const visionPersisted = refreshedRuntime.vision_audit_persisted;
       const probeMessage =
         llmPersisted && visionPersisted
-          ? "Da refresh LLM + vision capability audit va live probe."
-          : "Da refresh capability audit, nhung mot phan audit DB chua san sang nen ket qua dang la tam thoi.";
+          ? "Đã refresh LLM + vision capability audit và live probe."
+          : "Đã refresh capability audit, nhưng một phần audit DB chưa sẵn sàng nên kết quả đang là tạm thời.";
       setMessage(probeMessage);
       notify(
         llmPersisted && visionPersisted
-          ? "Da refresh capability audit"
-          : "Da refresh capability audit (tam thoi)",
+          ? "Đã refresh capability audit"
+          : "Đã refresh capability audit (tạm thời)",
         "success",
       );
     } catch (error) {
-      setMessage("Khong the chay live capability probe.");
+      setMessage("Không thể chạy live capability probe.");
       notify(String(error), "error");
     } finally {
       setIsProbing(false);
@@ -1066,12 +1324,12 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
         <div>
           <div className="flex items-center gap-2 text-sm font-medium text-text">
             <Server size={16} className="text-[var(--accent)]" />
-            {isAdmin ? "Runtime va Model Policy" : "LLM Gateway"}
+            {isAdmin ? "Runtime và Model Policy" : "LLM Gateway"}
           </div>
           <div className="mt-1 max-w-3xl text-xs text-text-tertiary">
             {isAdmin
-              ? "Quan ly provider mac dinh, model, failover chain va runtime truth cua he thong."
-              : "Dong bo provider, model, failover va secret runtime de desktop va backend khop nhau hon."}
+              ? "Quản lý provider mặc định, model, failover chain và runtime truth của hệ thống."
+              : "Đồng bộ provider, model, failover và secret runtime để desktop và backend khớp nhau hơn."}
           </div>
         </div>
         <div className="flex gap-2">
@@ -1083,7 +1341,7 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
               className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-secondary hover:bg-surface-tertiary disabled:opacity-50"
             >
               <Sparkles size={14} className={isProbing ? "animate-spin" : ""} />
-              {isProbing ? "Dang probe..." : "Probe capability"}
+              {isProbing ? "Đang probe..." : "Probe capability"}
             </button>
           )}
           <button
@@ -1092,8 +1350,11 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
             disabled={state === "loading" || state === "saving" || isProbing}
             className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-secondary hover:bg-surface-tertiary disabled:opacity-50"
           >
-            <RefreshCw size={14} className={state === "loading" ? "animate-spin" : ""} />
-            Lam moi
+            <RefreshCw
+              size={14}
+              className={state === "loading" ? "animate-spin" : ""}
+            />
+            Làm mới
           </button>
           <button
             type="button"
@@ -1101,17 +1362,24 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
             disabled={state === "loading" || state === "saving" || isProbing}
             className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-hover)] disabled:opacity-50"
           >
-            {state === "saving" ? "Dang luu..." : "Luu policy"}
+            {state === "saving" ? "Đang lưu..." : "Lưu policy"}
           </button>
         </div>
       </div>
 
       {(message || (runtime?.warnings?.length ?? 0) > 0) && (
-        <div className="rounded-xl border border-border bg-surface-secondary p-4 text-sm text-text-secondary" role="status" aria-live="polite">
+        <div
+          className="rounded-xl border border-border bg-surface-secondary p-4 text-sm text-text-secondary"
+          role="status"
+          aria-live="polite"
+        >
           {message && <div>{message}</div>}
           {runtime?.warnings.map((warning) => (
             <div key={warning} className="mt-2 flex items-start gap-2">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-500" />
+              <AlertTriangle
+                size={14}
+                className="mt-0.5 shrink-0 text-amber-500"
+              />
               <span>{warning}</span>
             </div>
           ))}
@@ -1120,21 +1388,36 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
 
       {runtime && (
         <div className="rounded-xl border border-border bg-surface-secondary px-4 py-3 text-xs text-text-tertiary">
-          <span className="font-medium text-text">Persistence:</span> {runtimePersistenceLabel}
+          <span className="font-medium text-text">Persistence:</span>{" "}
+          {runtimePersistenceLabel}
         </div>
       )}
 
       {isAdmin && catalog && (
         <div className="rounded-xl border border-border bg-surface-secondary px-4 py-3 text-xs text-text-tertiary">
-          <div><span className="font-medium text-text">Audit:</span> {auditSummaryLabel}</div>
-          <div className="mt-1"><span className="font-medium text-text">Live probe:</span> {liveProbeSummaryLabel}</div>
-          <div className="mt-1"><span className="font-medium text-text">Audit storage:</span> {auditPersistenceLabel}</div>
+          <div>
+            <span className="font-medium text-text">Audit:</span>{" "}
+            {auditSummaryLabel}
+          </div>
+          <div className="mt-1">
+            <span className="font-medium text-text">Live probe:</span>{" "}
+            {liveProbeSummaryLabel}
+          </div>
+          <div className="mt-1">
+            <span className="font-medium text-text">Audit storage:</span>{" "}
+            {auditPersistenceLabel}
+          </div>
           <div className="mt-1">
             <span className="font-medium text-text">Degraded providers:</span>{" "}
-            {degradedProviders.length ? degradedProviders.join(", ") : "khong co"}
+            {degradedProviders.length
+              ? degradedProviders.join(", ")
+              : "không có"}
           </div>
           {auditWarnings.map((warning) => (
-            <div key={warning} className="mt-2 flex items-start gap-2 text-amber-600 dark:text-amber-300">
+            <div
+              key={warning}
+              className="mt-2 flex items-start gap-2 text-amber-600 dark:text-amber-300"
+            >
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
               <span>{warning}</span>
             </div>
@@ -1145,30 +1428,63 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
       {isAdmin ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-xl border border-border bg-surface-secondary p-4">
-            <div className="text-xs text-text-tertiary">Provider mac dinh</div>
-            <div className="mt-1 text-lg font-semibold text-text">{runtime?.provider ?? "..."}</div>
+            <div className="text-xs text-text-tertiary">Provider mặc định</div>
+            <div className="mt-1 text-lg font-semibold text-text">
+              {runtime?.provider ?? "..."}
+            </div>
           </div>
           <div className="rounded-xl border border-border bg-surface-secondary p-4">
-            <div className="text-xs text-text-tertiary">Provider dang active</div>
-            <div className="mt-1 text-lg font-semibold text-text">{runtime?.active_provider ?? "chua khoi tao"}</div>
+            <div className="text-xs text-text-tertiary">
+              Provider đang active
+            </div>
+            <div className="mt-1 text-lg font-semibold text-text">
+              {runtime?.active_provider ?? "chưa khởi tạo"}
+            </div>
           </div>
           <div className="rounded-xl border border-border bg-surface-secondary p-4">
-            <div className="text-xs text-text-tertiary">Request-level switcher</div>
-            <div className="mt-1 text-sm font-medium text-text">{requestSelectable.length ? requestSelectable.join(", ") : "Khong co provider nao kha dung"}</div>
+            <div className="text-xs text-text-tertiary">
+              Request-level switcher
+            </div>
+            <div className="mt-1 text-sm font-medium text-text">
+              {requestSelectable.length
+                ? requestSelectable.join(", ")
+                : "Không có provider nào khả dụng"}
+            </div>
           </div>
           <div className="rounded-xl border border-border bg-surface-secondary p-4">
-            <div className="text-xs text-text-tertiary">Embedding hien tai</div>
-            <div className="mt-1 text-sm font-medium text-text">{runtime?.embedding_model ?? "..."}</div>
-            <div className="mt-1 text-xs text-text-tertiary">{runtime ? `${runtime.embedding_dimensions} dims - ${runtime.embedding_status}` : "Dang tai"}</div>
+            <div className="text-xs text-text-tertiary">Embedding hiện tại</div>
+            <div className="mt-1 text-sm font-medium text-text">
+              {runtime?.embedding_model ?? "..."}
+            </div>
+            <div className="mt-1 text-xs text-text-tertiary">
+              {runtime
+                ? `${runtime.embedding_dimensions} dims - ${runtime.embedding_status}`
+                : "Đang tải"}
+            </div>
           </div>
         </div>
       ) : (
         <div className="rounded-2xl border border-border bg-surface-secondary p-4 text-sm text-text-secondary">
           <div className="font-medium text-text">Runtime summary</div>
           <div className="mt-2 space-y-1 text-xs">
-            <div>Provider mac dinh: <span className="font-medium text-text">{runtime?.provider ?? draft.provider}</span></div>
-            <div>Active provider: <span className="font-medium text-text">{runtime?.active_provider ?? "chua khoi tao"}</span></div>
-            <div>Request switcher: <span className="font-medium text-text">{requestSelectable.join(", ") || "khong co"}</span></div>
+            <div>
+              Provider mặc định:{" "}
+              <span className="font-medium text-text">
+                {runtime?.provider ?? draft.provider}
+              </span>
+            </div>
+            <div>
+              Active provider:{" "}
+              <span className="font-medium text-text">
+                {runtime?.active_provider ?? "chưa khởi tạo"}
+              </span>
+            </div>
+            <div>
+              Request switcher:{" "}
+              <span className="font-medium text-text">
+                {requestSelectable.join(", ") || "không có"}
+              </span>
+            </div>
           </div>
         </div>
       )}
@@ -1178,57 +1494,147 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
           <div className="flex items-center gap-2">
             <Sparkles size={16} className="text-[var(--accent)]" />
             <div>
-              <div className="text-sm font-medium text-text">Trang thai provider</div>
-              <div className="text-xs text-text-tertiary">Provider nao da cau hinh, cho phep request switch, va nam trong failover chain.</div>
+              <div className="text-sm font-medium text-text">
+                Trạng thái provider
+              </div>
+              <div className="text-xs text-text-tertiary">
+                Provider nào đã cấu hình, cho phép request switch và nằm trong
+                failover chain.
+              </div>
             </div>
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {(runtime?.provider_status ?? []).map((provider) => (
-              <div key={provider.provider} className="rounded-xl border border-border bg-surface-secondary p-4">
+              <div
+                key={provider.provider}
+                className="rounded-xl border border-border bg-surface-secondary p-4"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-sm font-medium text-text">{provider.display_name}</div>
-                    <div className="text-[11px] font-mono text-text-tertiary">{provider.provider}</div>
+                    <div className="text-sm font-medium text-text">
+                      {provider.display_name}
+                    </div>
+                    <div className="text-[11px] font-mono text-text-tertiary">
+                      {provider.provider}
+                    </div>
                   </div>
                   {provider.available ? (
-                    <CheckCircle2 size={16} className="shrink-0 text-green-500" />
+                    <CheckCircle2
+                      size={16}
+                      className="shrink-0 text-green-500"
+                    />
                   ) : (
-                    <AlertTriangle size={16} className="shrink-0 text-amber-500" />
+                    <AlertTriangle
+                      size={16}
+                      className="shrink-0 text-amber-500"
+                    />
                   )}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.configured ? "good" : "warn")}`}>{provider.configured ? "configured" : "missing config"}</span>
-                  <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.request_selectable ? "accent" : "neutral")}`}>{provider.request_selectable ? "request switch" : "hidden from switcher"}</span>
-                  <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.in_failover_chain ? "good" : "neutral")}`}>{provider.in_failover_chain ? "in failover chain" : "outside chain"}</span>
-                  <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(providerCapabilities[provider.provider]?.degraded ? "warn" : "good")}`}>
-                    {providerCapabilities[provider.provider]?.degraded ? "degraded" : "healthy"}
+                  <span
+                    className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.configured ? "good" : "warn")}`}
+                  >
+                    {provider.configured ? "configured" : "missing config"}
+                  </span>
+                  <span
+                    className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.request_selectable ? "accent" : "neutral")}`}
+                  >
+                    {provider.request_selectable
+                      ? "request switch"
+                      : "hidden from switcher"}
+                  </span>
+                  <span
+                    className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.in_failover_chain ? "good" : "neutral")}`}
+                  >
+                    {provider.in_failover_chain
+                      ? "in failover chain"
+                      : "outside chain"}
+                  </span>
+                  <span
+                    className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(providerCapabilities[provider.provider]?.degraded ? "warn" : "good")}`}
+                  >
+                    {providerCapabilities[provider.provider]?.degraded
+                      ? "degraded"
+                      : "healthy"}
                   </span>
                   {providerCapabilities[provider.provider]?.recovered ? (
-                    <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("good")}`}>recovered</span>
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("good")}`}
+                    >
+                      recovered
+                    </span>
                   ) : null}
-                  {provider.is_default && <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("accent")}`}>default</span>}
-                  {provider.is_active && <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("good")}`}>active</span>}
+                  {provider.is_default && (
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("accent")}`}
+                    >
+                      default
+                    </span>
+                  )}
+                  {provider.is_active && (
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("good")}`}
+                    >
+                      active
+                    </span>
+                  )}
                 </div>
                 <div className="mt-3 space-y-1 text-[11px] text-text-tertiary">
-                  <div>Discovery success: {formatDateTime(providerCapabilities[provider.provider]?.last_discovery_success_at)}</div>
-                  <div>Live probe success: {formatDateTime(providerCapabilities[provider.provider]?.last_live_probe_success_at)}</div>
-                  {providerCapabilities[provider.provider]?.last_runtime_success_at ? (
-                    <div>Runtime success: {formatDateTime(providerCapabilities[provider.provider]?.last_runtime_success_at)}</div>
-                  ) : null}
-                  {providerCapabilities[provider.provider]?.live_probe_note ? (
-                    <div>{providerCapabilities[provider.provider]?.live_probe_note}</div>
-                  ) : null}
-                  {providerCapabilities[provider.provider]?.last_runtime_note ? (
-                    <div>{providerCapabilities[provider.provider]?.last_runtime_note}</div>
-                  ) : null}
-                  {providerCapabilities[provider.provider]?.last_runtime_error ? (
-                    <div className="text-amber-700 dark:text-amber-300">
-                      Runtime error: {providerCapabilities[provider.provider]?.last_runtime_error}
+                  <div>
+                    Discovery success:{" "}
+                    {formatDateTime(
+                      providerCapabilities[provider.provider]
+                        ?.last_discovery_success_at,
+                    )}
+                  </div>
+                  <div>
+                    Live probe success:{" "}
+                    {formatDateTime(
+                      providerCapabilities[provider.provider]
+                        ?.last_live_probe_success_at,
+                    )}
+                  </div>
+                  {providerCapabilities[provider.provider]
+                    ?.last_runtime_success_at ? (
+                    <div>
+                      Runtime success:{" "}
+                      {formatDateTime(
+                        providerCapabilities[provider.provider]
+                          ?.last_runtime_success_at,
+                      )}
                     </div>
                   ) : null}
-                  {(providerCapabilities[provider.provider]?.recovered_reasons?.length ?? 0) > 0 ? (
+                  {providerCapabilities[provider.provider]?.live_probe_note ? (
+                    <div>
+                      {providerCapabilities[provider.provider]?.live_probe_note}
+                    </div>
+                  ) : null}
+                  {providerCapabilities[provider.provider]
+                    ?.last_runtime_note ? (
+                    <div>
+                      {
+                        providerCapabilities[provider.provider]
+                          ?.last_runtime_note
+                      }
+                    </div>
+                  ) : null}
+                  {providerCapabilities[provider.provider]
+                    ?.last_runtime_error ? (
+                    <div className="text-amber-700 dark:text-amber-300">
+                      Runtime error:{" "}
+                      {
+                        providerCapabilities[provider.provider]
+                          ?.last_runtime_error
+                      }
+                    </div>
+                  ) : null}
+                  {(providerCapabilities[provider.provider]?.recovered_reasons
+                    ?.length ?? 0) > 0 ? (
                     <div className="text-green-700 dark:text-green-300">
-                      Runtime recovered: {providerCapabilities[provider.provider]?.recovered_reasons.join(", ")}
+                      Runtime recovered:{" "}
+                      {providerCapabilities[
+                        provider.provider
+                      ]?.recovered_reasons.join(", ")}
                     </div>
                   ) : null}
                 </div>
@@ -1238,21 +1644,35 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
         </div>
       )}
 
-      <div className={`grid gap-5 ${isAdmin ? "xl:grid-cols-[1.35fr_0.9fr]" : ""}`}>
+      <div
+        className={`grid gap-5 ${isAdmin ? "xl:grid-cols-[1.35fr_0.9fr]" : ""}`}
+      >
         <div className="space-y-5 rounded-2xl border border-border bg-surface p-5">
           <div>
             <div className="text-sm font-medium text-text">Policy editor</div>
-            <div className="mt-1 text-xs text-text-tertiary">Chinh default provider, model, API key, routing policy va failover chain ma khong can sua code backend.</div>
+            <div className="mt-1 text-xs text-text-tertiary">
+              Chỉnh default provider, model, API key, routing policy và failover
+              chain mà không cần sửa code backend.
+            </div>
           </div>
 
-          <FieldGroup label="Provider mac dinh">
+          <FieldGroup label="Provider mặc định">
             <select
               value={draft.provider}
-              onChange={(event) => setDraft((current) => applyProviderDefaults(current, event.target.value as RuntimeProvider))}
+              onChange={(event) =>
+                setDraft((current) =>
+                  applyProviderDefaults(
+                    current,
+                    event.target.value as RuntimeProvider,
+                  ),
+                )
+              }
               className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
             >
               {providerOptions.map((provider) => (
-                <option key={provider.provider} value={provider.provider}>{provider.label}</option>
+                <option key={provider.provider} value={provider.provider}>
+                  {provider.label}
+                </option>
               ))}
             </select>
           </FieldGroup>
@@ -1264,8 +1684,20 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
               value={draft.google_api_key}
               configured={runtime?.google_api_key_configured ?? false}
               clearRequested={draft.clear_google_api_key}
-              onChange={(value) => setDraft((current) => ({ ...current, google_api_key: value, clear_google_api_key: false }))}
-              onToggleClear={() => setDraft((current) => ({ ...current, google_api_key: "", clear_google_api_key: !current.clear_google_api_key }))}
+              onChange={(value) =>
+                setDraft((current) => ({
+                  ...current,
+                  google_api_key: value,
+                  clear_google_api_key: false,
+                }))
+              }
+              onToggleClear={() =>
+                setDraft((current) => ({
+                  ...current,
+                  google_api_key: "",
+                  clear_google_api_key: !current.clear_google_api_key,
+                }))
+              }
             />
             <SecretField
               label="OpenAI API Key"
@@ -1273,8 +1705,20 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
               value={draft.openai_api_key}
               configured={runtime?.openai_api_key_configured ?? false}
               clearRequested={draft.clear_openai_api_key}
-              onChange={(value) => setDraft((current) => ({ ...current, openai_api_key: value, clear_openai_api_key: false }))}
-              onToggleClear={() => setDraft((current) => ({ ...current, openai_api_key: "", clear_openai_api_key: !current.clear_openai_api_key }))}
+              onChange={(value) =>
+                setDraft((current) => ({
+                  ...current,
+                  openai_api_key: value,
+                  clear_openai_api_key: false,
+                }))
+              }
+              onToggleClear={() =>
+                setDraft((current) => ({
+                  ...current,
+                  openai_api_key: "",
+                  clear_openai_api_key: !current.clear_openai_api_key,
+                }))
+              }
             />
             <SecretField
               label="OpenRouter API Key"
@@ -1282,8 +1726,20 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
               value={draft.openrouter_api_key}
               configured={runtime?.openrouter_api_key_configured ?? false}
               clearRequested={draft.clear_openrouter_api_key}
-              onChange={(value) => setDraft((current) => ({ ...current, openrouter_api_key: value, clear_openrouter_api_key: false }))}
-              onToggleClear={() => setDraft((current) => ({ ...current, openrouter_api_key: "", clear_openrouter_api_key: !current.clear_openrouter_api_key }))}
+              onChange={(value) =>
+                setDraft((current) => ({
+                  ...current,
+                  openrouter_api_key: value,
+                  clear_openrouter_api_key: false,
+                }))
+              }
+              onToggleClear={() =>
+                setDraft((current) => ({
+                  ...current,
+                  openrouter_api_key: "",
+                  clear_openrouter_api_key: !current.clear_openrouter_api_key,
+                }))
+              }
             />
             <SecretField
               label="Zhipu API Key"
@@ -1291,8 +1747,20 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
               value={draft.zhipu_api_key}
               configured={runtime?.zhipu_api_key_configured ?? false}
               clearRequested={draft.clear_zhipu_api_key}
-              onChange={(value) => setDraft((current) => ({ ...current, zhipu_api_key: value, clear_zhipu_api_key: false }))}
-              onToggleClear={() => setDraft((current) => ({ ...current, zhipu_api_key: "", clear_zhipu_api_key: !current.clear_zhipu_api_key }))}
+              onChange={(value) =>
+                setDraft((current) => ({
+                  ...current,
+                  zhipu_api_key: value,
+                  clear_zhipu_api_key: false,
+                }))
+              }
+              onToggleClear={() =>
+                setDraft((current) => ({
+                  ...current,
+                  zhipu_api_key: "",
+                  clear_zhipu_api_key: !current.clear_zhipu_api_key,
+                }))
+              }
             />
             <SecretField
               label="Ollama API Key"
@@ -1300,51 +1768,91 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
               value={draft.ollama_api_key}
               configured={runtime?.ollama_api_key_configured ?? false}
               clearRequested={draft.clear_ollama_api_key}
-              onChange={(value) => setDraft((current) => ({ ...current, ollama_api_key: value, clear_ollama_api_key: false }))}
-              onToggleClear={() => setDraft((current) => ({ ...current, ollama_api_key: "", clear_ollama_api_key: !current.clear_ollama_api_key }))}
+              onChange={(value) =>
+                setDraft((current) => ({
+                  ...current,
+                  ollama_api_key: value,
+                  clear_ollama_api_key: false,
+                }))
+              }
+              onToggleClear={() =>
+                setDraft((current) => ({
+                  ...current,
+                  ollama_api_key: "",
+                  clear_ollama_api_key: !current.clear_ollama_api_key,
+                }))
+              }
             />
           </div>
 
-          <FieldGroup label="Gemini model" hint="Default cloud path cho Wiii hien tai.">
+          <FieldGroup
+            label="Gemini model"
+            hint="Default cloud path cho Wiii hiện tại."
+          >
             <>
               <input
                 list="runtime-google-models"
                 value={draft.google_model}
-                onChange={(event) => setDraft((current) => ({ ...current, google_model: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    google_model: event.target.value,
+                  }))
+                }
                 className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
               />
               <datalist id="runtime-google-models">
-                {googleModels.map((model) => <option key={model} value={model} />)}
+                {googleModels.map((model) => (
+                  <option key={model} value={model} />
+                ))}
               </datalist>
             </>
           </FieldGroup>
 
           <div className="rounded-2xl border border-border bg-surface-secondary p-4 text-xs text-text-tertiary">
-            OpenAI va OpenRouter gio la hai plug rieng. Moi ben co key, base URL va model rieng, nhung runtime van doc duoc legacy shared slot cu de tranh vo cau hinh dang song.
+            OpenAI và OpenRouter giờ là hai plug riêng. Mỗi bên có key, base URL
+            và model riêng, nhưng runtime vẫn đọc được legacy shared slot cũ để
+            tránh vỡ cấu hình đang sống.
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <FieldGroup label="OpenAI base URL">
               <input
                 value={draft.openai_base_url}
-                onChange={(event) => setDraft((current) => ({ ...current, openai_base_url: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    openai_base_url: event.target.value,
+                  }))
+                }
                 placeholder="https://api.openai.com/v1"
                 className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
               />
             </FieldGroup>
             <FieldGroup
               label="OpenAI model"
-              hint={openaiCapability ? `${openaiCapability.model_count} goi y` : "openai"}
+              hint={
+                openaiCapability
+                  ? `${openaiCapability.model_count} gợi ý`
+                  : "openai"
+              }
             >
               <>
                 <input
                   list="runtime-openai-models"
                   value={draft.openai_model}
-                  onChange={(event) => setDraft((current) => ({ ...current, openai_model: event.target.value }))}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      openai_model: event.target.value,
+                    }))
+                  }
                   className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                 />
                 <datalist id="runtime-openai-models">
-                  {openaiModels.map((model) => <option key={model} value={model} />)}
+                  {openaiModels.map((model) => (
+                    <option key={model} value={model} />
+                  ))}
                 </datalist>
               </>
             </FieldGroup>
@@ -1353,11 +1861,20 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
           <div className="grid gap-4 md:grid-cols-2">
             <FieldGroup
               label="OpenAI advanced model"
-              hint={openaiCapability?.selected_model_advanced_in_catalog === false ? "dang dung custom id" : undefined}
+              hint={
+                openaiCapability?.selected_model_advanced_in_catalog === false
+                  ? "đang dùng custom id"
+                  : undefined
+              }
             >
               <input
                 value={draft.openai_model_advanced}
-                onChange={(event) => setDraft((current) => ({ ...current, openai_model_advanced: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    openai_model_advanced: event.target.value,
+                  }))
+                }
                 list="runtime-openai-models"
                 className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
               />
@@ -1365,7 +1882,12 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
             <FieldGroup label="OpenRouter base URL">
               <input
                 value={draft.openrouter_base_url}
-                onChange={(event) => setDraft((current) => ({ ...current, openrouter_base_url: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    openrouter_base_url: event.target.value,
+                  }))
+                }
                 placeholder={OPENROUTER_BASE_URL}
                 className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
               />
@@ -1375,27 +1897,48 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
           <div className="grid gap-4 md:grid-cols-2">
             <FieldGroup
               label="OpenRouter model"
-              hint={openrouterCapability ? `${openrouterCapability.model_count} goi y` : "openrouter"}
+              hint={
+                openrouterCapability
+                  ? `${openrouterCapability.model_count} gợi ý`
+                  : "openrouter"
+              }
             >
               <>
                 <input
                   list="runtime-openrouter-models"
                   value={draft.openrouter_model}
-                  onChange={(event) => setDraft((current) => ({ ...current, openrouter_model: event.target.value }))}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      openrouter_model: event.target.value,
+                    }))
+                  }
                   className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                 />
                 <datalist id="runtime-openrouter-models">
-                  {openrouterModels.map((model) => <option key={model} value={model} />)}
+                  {openrouterModels.map((model) => (
+                    <option key={model} value={model} />
+                  ))}
                 </datalist>
               </>
             </FieldGroup>
             <FieldGroup
               label="OpenRouter advanced model"
-              hint={openrouterCapability?.selected_model_advanced_in_catalog === false ? "dang dung custom id" : undefined}
+              hint={
+                openrouterCapability?.selected_model_advanced_in_catalog ===
+                false
+                  ? "đang dùng custom id"
+                  : undefined
+              }
             >
               <input
                 value={draft.openrouter_model_advanced}
-                onChange={(event) => setDraft((current) => ({ ...current, openrouter_model_advanced: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    openrouter_model_advanced: event.target.value,
+                  }))
+                }
                 list="runtime-openrouter-models"
                 className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
               />
@@ -1406,7 +1949,12 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
             <FieldGroup label="Zhipu base URL">
               <input
                 value={draft.zhipu_base_url}
-                onChange={(event) => setDraft((current) => ({ ...current, zhipu_base_url: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    zhipu_base_url: event.target.value,
+                  }))
+                }
                 placeholder={ZHIPU_DEFAULT_BASE_URL}
                 className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
               />
@@ -1419,18 +1967,30 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                 <input
                   list="runtime-zhipu-models"
                   value={draft.zhipu_model}
-                  onChange={(event) => setDraft((current) => ({ ...current, zhipu_model: event.target.value }))}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      zhipu_model: event.target.value,
+                    }))
+                  }
                   className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                 />
                 <datalist id="runtime-zhipu-models">
-                  {zhipuModels.map((model) => <option key={model} value={model} />)}
+                  {zhipuModels.map((model) => (
+                    <option key={model} value={model} />
+                  ))}
                 </datalist>
               </>
             </FieldGroup>
             <FieldGroup label="Zhipu advanced model">
               <input
                 value={draft.zhipu_model_advanced}
-                onChange={(event) => setDraft((current) => ({ ...current, zhipu_model_advanced: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    zhipu_model_advanced: event.target.value,
+                  }))
+                }
                 className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
               />
             </FieldGroup>
@@ -1440,7 +2000,12 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
             <FieldGroup label="Ollama base URL">
               <input
                 value={draft.ollama_base_url}
-                onChange={(event) => setDraft((current) => ({ ...current, ollama_base_url: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    ollama_base_url: event.target.value,
+                  }))
+                }
                 placeholder={OLLAMA_DEFAULT_BASE_URL}
                 className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
               />
@@ -1450,68 +2015,238 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                 <input
                   list="runtime-ollama-models"
                   value={draft.ollama_model}
-                  onChange={(event) => setDraft((current) => ({ ...current, ollama_model: event.target.value }))}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      ollama_model: event.target.value,
+                    }))
+                  }
                   className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                 />
                 <datalist id="runtime-ollama-models">
-                  {ollamaModels.map((model) => <option key={model} value={model} />)}
+                  {ollamaModels.map((model) => (
+                    <option key={model} value={model} />
+                  ))}
                 </datalist>
               </>
             </FieldGroup>
             <FieldGroup label="Ollama keep-alive">
               <input
                 value={draft.ollama_keep_alive}
-                onChange={(event) => setDraft((current) => ({ ...current, ollama_keep_alive: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    ollama_keep_alive: event.target.value,
+                  }))
+                }
                 className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
               />
             </FieldGroup>
           </div>
 
           <div className="rounded-2xl border border-border bg-surface-secondary p-4">
-            <div className="text-sm font-medium text-text">OpenRouter routing policy</div>
-            <div className="mt-1 text-xs text-text-tertiary">Cac truong nay chi co tac dung khi request di qua OpenRouter.</div>
+            <div className="text-sm font-medium text-text">
+              OpenRouter routing policy
+            </div>
+            <div className="mt-1 text-xs text-text-tertiary">
+              Các trường này chỉ có tác dụng khi request đi qua OpenRouter.
+            </div>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <FieldGroup label="Model fallbacks"><input value={draft.openrouter_model_fallbacks} onChange={(event) => setDraft((current) => ({ ...current, openrouter_model_fallbacks: event.target.value }))} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent" /></FieldGroup>
-              <FieldGroup label="Provider order"><input value={draft.openrouter_provider_order} onChange={(event) => setDraft((current) => ({ ...current, openrouter_provider_order: event.target.value }))} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent" /></FieldGroup>
-              <FieldGroup label="Allowed providers"><input value={draft.openrouter_allowed_providers} onChange={(event) => setDraft((current) => ({ ...current, openrouter_allowed_providers: event.target.value }))} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent" /></FieldGroup>
-              <FieldGroup label="Ignored providers"><input value={draft.openrouter_ignored_providers} onChange={(event) => setDraft((current) => ({ ...current, openrouter_ignored_providers: event.target.value }))} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent" /></FieldGroup>
-              <FieldGroup label="Allow fallbacks"><select value={draft.openrouter_allow_fallbacks} onChange={(event) => setDraft((current) => ({ ...current, openrouter_allow_fallbacks: event.target.value as BoolChoice }))} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"><option value="inherit">Inherit</option><option value="true">On</option><option value="false">Off</option></select></FieldGroup>
-              <FieldGroup label="Require parameters"><select value={draft.openrouter_require_parameters} onChange={(event) => setDraft((current) => ({ ...current, openrouter_require_parameters: event.target.value as BoolChoice }))} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"><option value="inherit">Inherit</option><option value="true">On</option><option value="false">Off</option></select></FieldGroup>
-              <FieldGroup label="Data collection"><select value={draft.openrouter_data_collection} onChange={(event) => setDraft((current) => ({ ...current, openrouter_data_collection: event.target.value as "" | "allow" | "deny" }))} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"><option value="">Inherit</option><option value="allow">Allow</option><option value="deny">Deny</option></select></FieldGroup>
-              <FieldGroup label="Zero data retention"><select value={draft.openrouter_zdr} onChange={(event) => setDraft((current) => ({ ...current, openrouter_zdr: event.target.value as BoolChoice }))} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"><option value="inherit">Inherit</option><option value="true">On</option><option value="false">Off</option></select></FieldGroup>
-              <FieldGroup label="Provider sort"><select value={draft.openrouter_provider_sort} onChange={(event) => setDraft((current) => ({ ...current, openrouter_provider_sort: event.target.value as "" | "price" | "latency" | "throughput" }))} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"><option value="">Inherit</option><option value="price">Price</option><option value="latency">Latency</option><option value="throughput">Throughput</option></select></FieldGroup>
+              <FieldGroup label="Model fallbacks">
+                <input
+                  value={draft.openrouter_model_fallbacks}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      openrouter_model_fallbacks: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                />
+              </FieldGroup>
+              <FieldGroup label="Provider order">
+                <input
+                  value={draft.openrouter_provider_order}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      openrouter_provider_order: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                />
+              </FieldGroup>
+              <FieldGroup label="Allowed providers">
+                <input
+                  value={draft.openrouter_allowed_providers}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      openrouter_allowed_providers: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                />
+              </FieldGroup>
+              <FieldGroup label="Ignored providers">
+                <input
+                  value={draft.openrouter_ignored_providers}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      openrouter_ignored_providers: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                />
+              </FieldGroup>
+              <FieldGroup label="Allow fallbacks">
+                <select
+                  value={draft.openrouter_allow_fallbacks}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      openrouter_allow_fallbacks: event.target
+                        .value as BoolChoice,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                >
+                  <option value="inherit">Inherit</option>
+                  <option value="true">On</option>
+                  <option value="false">Off</option>
+                </select>
+              </FieldGroup>
+              <FieldGroup label="Require parameters">
+                <select
+                  value={draft.openrouter_require_parameters}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      openrouter_require_parameters: event.target
+                        .value as BoolChoice,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                >
+                  <option value="inherit">Inherit</option>
+                  <option value="true">On</option>
+                  <option value="false">Off</option>
+                </select>
+              </FieldGroup>
+              <FieldGroup label="Data collection">
+                <select
+                  value={draft.openrouter_data_collection}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      openrouter_data_collection: event.target.value as
+                        | ""
+                        | "allow"
+                        | "deny",
+                    }))
+                  }
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                >
+                  <option value="">Inherit</option>
+                  <option value="allow">Allow</option>
+                  <option value="deny">Deny</option>
+                </select>
+              </FieldGroup>
+              <FieldGroup label="Zero data retention">
+                <select
+                  value={draft.openrouter_zdr}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      openrouter_zdr: event.target.value as BoolChoice,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                >
+                  <option value="inherit">Inherit</option>
+                  <option value="true">On</option>
+                  <option value="false">Off</option>
+                </select>
+              </FieldGroup>
+              <FieldGroup label="Provider sort">
+                <select
+                  value={draft.openrouter_provider_sort}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      openrouter_provider_sort: event.target.value as
+                        | ""
+                        | "price"
+                        | "latency"
+                        | "throughput",
+                    }))
+                  }
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                >
+                  <option value="">Inherit</option>
+                  <option value="price">Price</option>
+                  <option value="latency">Latency</option>
+                  <option value="throughput">Throughput</option>
+                </select>
+              </FieldGroup>
             </div>
           </div>
 
           <div className="rounded-2xl border border-border bg-surface-secondary p-4">
-            <div className="text-sm font-medium text-text">Grouped agent profiles</div>
+            <div className="text-sm font-medium text-text">
+              Grouped agent profiles
+            </div>
             <div className="mt-1 text-xs text-text-tertiary">
-              Admin quan ly provider/tier/model theo nhom workload. End-user chi chon provider,
-              khong chon raw model ID.
+              Admin quan ly provider/tier/model theo nhom workload. End-user chi
+              chon provider, không chọn raw model ID.
             </div>
             <div className="mt-4 grid gap-4 xl:grid-cols-2">
               {AGENT_PROFILE_GROUPS.map((group) => {
-                const profile = draft.agent_profiles[group] ?? defaultAgentProfiles()[group];
+                const profile =
+                  draft.agent_profiles[group] ?? defaultAgentProfiles()[group];
                 return (
-                  <div key={group} className="rounded-xl border border-border bg-surface p-4">
-                    <div className="text-sm font-medium text-text">{AGENT_PROFILE_LABELS[group]}</div>
-                    <div className="mt-1 text-xs text-text-tertiary">{AGENT_PROFILE_DESCRIPTIONS[group]}</div>
+                  <div
+                    key={group}
+                    className="rounded-xl border border-border bg-surface p-4"
+                  >
+                    <div className="text-sm font-medium text-text">
+                      {AGENT_PROFILE_LABELS[group]}
+                    </div>
+                    <div className="mt-1 text-xs text-text-tertiary">
+                      {AGENT_PROFILE_DESCRIPTIONS[group]}
+                    </div>
                     <div className="mt-4 grid gap-3 md:grid-cols-2">
                       <FieldGroup label="Default provider">
                         <select
                           value={profile.default_provider}
-                          onChange={(event) => setAgentProfileField(group, "default_provider", event.target.value as RuntimeProvider)}
+                          onChange={(event) =>
+                            setAgentProfileField(
+                              group,
+                              "default_provider",
+                              event.target.value as RuntimeProvider,
+                            )
+                          }
                           className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                         >
                           {AGENT_PROFILE_PROVIDER_OPTIONS.map((provider) => (
-                            <option key={provider} value={provider}>{provider}</option>
+                            <option key={provider} value={provider}>
+                              {provider}
+                            </option>
                           ))}
                         </select>
                       </FieldGroup>
                       <FieldGroup label="Tier">
                         <select
                           value={profile.tier}
-                          onChange={(event) => setAgentProfileField(group, "tier", event.target.value as AgentRuntimeProfileConfig["tier"])}
+                          onChange={(event) =>
+                            setAgentProfileField(
+                              group,
+                              "tier",
+                              event.target
+                                .value as AgentRuntimeProfileConfig["tier"],
+                            )
+                          }
                           className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                         >
                           <option value="light">light</option>
@@ -1525,11 +2260,17 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                         <FieldGroup
                           key={`${group}-${provider}`}
                           label={`${provider} model`}
-                          hint="De trong de dung model mac dinh cua provider"
+                          hint="Để trống để dùng model mặc định của provider"
                         >
                           <input
                             value={profile.provider_models?.[provider] ?? ""}
-                            onChange={(event) => setAgentProfileProviderModel(group, provider, event.target.value)}
+                            onChange={(event) =>
+                              setAgentProfileProviderModel(
+                                group,
+                                provider,
+                                event.target.value,
+                              )
+                            }
                             className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                           />
                         </FieldGroup>
@@ -1542,76 +2283,128 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
           </div>
 
           <div className="rounded-2xl border border-border bg-surface-secondary p-4">
-            <div className="text-sm font-medium text-text">Timeout profiles</div>
+            <div className="text-sm font-medium text-text">
+              Timeout profiles
+            </div>
             <div className="mt-1 text-xs text-text-tertiary">
-              Timeout o day la first-response timeout va stream stall policy. Tac vu dai hoi
-              nhu course generation hoac code workflow nen di qua background/session workflow,
-              khong nen ep mot request sync chay vo han.
+              Timeout ở đây là first-response timeout và stream stall policy.
+              Tác vụ dài hơi như course generation hoặc code workflow nên đi qua
+              background/session workflow, không nên ép một request sync chạy vô
+              hạn.
             </div>
             <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {TIMEOUT_PROFILE_FIELDS.map((field) => (
-                <FieldGroup key={field.key} label={`${field.label} (giay)`} hint={field.hint}>
+                <FieldGroup
+                  key={field.key}
+                  label={`${field.label} (giây)`}
+                  hint={field.hint}
+                >
                   <input
                     type="number"
                     min="0"
                     step="1"
-                    value={timeoutNumberToInput(draft.timeout_profiles[field.key])}
-                    onChange={(event) => setTimeoutProfileField(field.key, event.target.value)}
+                    value={timeoutNumberToInput(
+                      draft.timeout_profiles[field.key],
+                    )}
+                    onChange={(event) =>
+                      setTimeoutProfileField(field.key, event.target.value)
+                    }
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                   />
                 </FieldGroup>
               ))}
-              <FieldGroup label="Stream keepalive (giay)" hint="Heartbeat giu SSE song.">
+              <FieldGroup
+                label="Stream keepalive (giây)"
+                hint="Heartbeat giữ SSE sống."
+              >
                 <input
                   type="number"
                   min="1"
                   step="1"
-                  value={timeoutNumberToInput(draft.timeout_profiles.stream_keepalive_interval_seconds)}
-                  onChange={(event) => setTimeoutProfileField("stream_keepalive_interval_seconds", event.target.value)}
+                  value={timeoutNumberToInput(
+                    draft.timeout_profiles.stream_keepalive_interval_seconds,
+                  )}
+                  onChange={(event) =>
+                    setTimeoutProfileField(
+                      "stream_keepalive_interval_seconds",
+                      event.target.value,
+                    )
+                  }
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                 />
               </FieldGroup>
-              <FieldGroup label="Stream idle timeout (giay)" hint="0 = khong cat stream dang im lang.">
+              <FieldGroup
+                label="Stream idle timeout (giây)"
+                hint="0 = không cắt stream đang im lặng."
+              >
                 <input
                   type="number"
                   min="0"
                   step="1"
-                  value={timeoutNumberToInput(draft.timeout_profiles.stream_idle_timeout_seconds)}
-                  onChange={(event) => setTimeoutProfileField("stream_idle_timeout_seconds", event.target.value)}
+                  value={timeoutNumberToInput(
+                    draft.timeout_profiles.stream_idle_timeout_seconds,
+                  )}
+                  onChange={(event) =>
+                    setTimeoutProfileField(
+                      "stream_idle_timeout_seconds",
+                      event.target.value,
+                    )
+                  }
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                 />
               </FieldGroup>
             </div>
             <div className="mt-4 rounded-xl border border-border bg-surface p-3 text-[11px] text-text-tertiary">
-              Goi y van hanh: `light/moderate/deep` danh cho interactive chat, `structured` danh cho
-              planner/router/schema-heavy calls, con `background` danh cho workflow dai co checkpoint.
+              Gợi ý vận hành: `light/moderate/deep` dành cho interactive chat,
+              `structured` dành cho planner/router/schema-heavy calls, còn
+              `background` dành cho workflow dài có checkpoint.
             </div>
           </div>
 
           <div className="rounded-2xl border border-border bg-surface-secondary p-4">
-            <div className="text-sm font-medium text-text">Provider-specific timeout overrides</div>
+            <div className="text-sm font-medium text-text">
+              Provider-specific timeout overrides
+            </div>
             <div className="mt-1 text-xs text-text-tertiary">
-              Neu de trong, provider se inherit timeout global ben tren. Dung khi mot provider co
-              latency/throttle khac biet nhung ban chua muon doi policy chung cua he thong.
+              Nếu để trống, provider sẽ inherit timeout global bên trên. Dùng
+              khi một provider có latency/throttle khác biệt nhưng bạn chưa muốn
+              đổi policy chung của hệ thống.
             </div>
             <div className="mt-4 grid gap-4 xl:grid-cols-2">
               {TIMEOUT_OVERRIDE_PROVIDERS.map((provider) => {
-                const overrides = draft.timeout_provider_overrides[provider] ?? {};
+                const overrides =
+                  draft.timeout_provider_overrides[provider] ?? {};
                 return (
-                  <div key={`timeout-${provider}`} className="rounded-xl border border-border bg-surface p-4">
-                    <div className="text-sm font-medium text-text">{provider}</div>
+                  <div
+                    key={`timeout-${provider}`}
+                    className="rounded-xl border border-border bg-surface p-4"
+                  >
+                    <div className="text-sm font-medium text-text">
+                      {provider}
+                    </div>
                     <div className="mt-1 text-xs text-text-tertiary">
-                      Override theo provider cho first-response timeout. Bo trong = inherit.
+                      Override theo provider cho first-response timeout. Bỏ
+                      trống = inherit.
                     </div>
                     <div className="mt-4 grid gap-3 md:grid-cols-2">
                       {TIMEOUT_PROFILE_FIELDS.map((field) => (
-                        <FieldGroup key={`${provider}-${field.key}`} label={`${field.label} (giay)`} hint="De trong de inherit">
+                        <FieldGroup
+                          key={`${provider}-${field.key}`}
+                          label={`${field.label} (giây)`}
+                          hint="Để trống để inherit"
+                        >
                           <input
                             type="number"
                             min="0"
                             step="1"
                             value={overrides[field.key] ?? ""}
-                            onChange={(event) => setTimeoutProviderOverride(provider, field.key, event.target.value)}
+                            onChange={(event) =>
+                              setTimeoutProviderOverride(
+                                provider,
+                                field.key,
+                                event.target.value,
+                              )
+                            }
                             className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                           />
                         </FieldGroup>
@@ -1623,29 +2416,61 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
             </div>
           </div>
 
-          <FieldGroup label="Failover chain" hint="Vi du: google, zhipu, ollama">
+          <FieldGroup
+            label="Failover chain"
+            hint="Ví dụ: google, zhipu, ollama"
+          >
             <input
               value={draft.llm_failover_chain}
-              onChange={(event) => setDraft((current) => ({ ...current, llm_failover_chain: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  llm_failover_chain: event.target.value,
+                }))
+              }
               className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
             />
           </FieldGroup>
 
           <div className="space-y-3">
-            <ToggleRow label="Bat failover runtime" description="Cho phep chuyen sang provider tiep theo trong chain khi provider hien tai loi." checked={draft.enable_llm_failover} onChange={(value) => setDraft((current) => ({ ...current, enable_llm_failover: value }))} />
-            <ToggleRow label="Bat Multi-Agent Graph" description="Tat khi can direct path gon hon; bat khi muon dung orchestration day du." checked={draft.use_multi_agent} onChange={(value) => setDraft((current) => ({ ...current, use_multi_agent: value }))} />
+            <ToggleRow
+              label="Bật failover runtime"
+              description="Cho phép chuyển sang provider tiếp theo trong chain khi provider hiện tại lỗi."
+              checked={draft.enable_llm_failover}
+              onChange={(value) =>
+                setDraft((current) => ({
+                  ...current,
+                  enable_llm_failover: value,
+                }))
+              }
+            />
+            <ToggleRow
+              label="Bật Multi-Agent Graph"
+              description="Tắt khi cần direct path gọn hơn; bật khi muốn dùng orchestration đầy đủ."
+              checked={draft.use_multi_agent}
+              onChange={(value) =>
+                setDraft((current) => ({ ...current, use_multi_agent: value }))
+              }
+            />
           </div>
         </div>
 
         {isAdmin && (
           <div className="space-y-5">
             <div className="rounded-2xl border border-border bg-surface p-5">
-              <div className="text-sm font-medium text-text">Vision runtime</div>
+              <div className="text-sm font-medium text-text">
+                Vision runtime
+              </div>
               <div className="mt-1 text-xs text-text-tertiary">
-                Authority chung cho mo ta anh, OCR va grounded visual answer. Ban co the doi provider mode, chain va timeout ma khong phai sua tung lane rieng.
+                Authority chung cho mô tả ảnh, OCR và grounded visual answer.
+                Bạn có thể đổi provider mode, chain và timeout mà không phải sửa
+                từng lane riêng.
               </div>
               <div className="mt-4 grid gap-4 md:grid-cols-3">
-                <FieldGroup label="Provider mode" hint="`auto` = theo failover chain">
+                <FieldGroup
+                  label="Provider mode"
+                  hint="`auto` = theo failover chain"
+                >
                   <select
                     aria-label="Vision provider mode"
                     data-testid="runtime-vision-provider"
@@ -1659,24 +2484,36 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                     className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                   >
                     {visionProviderOptions.map((option) => (
-                      <option key={`vision-provider-${option.provider}`} value={option.provider}>
+                      <option
+                        key={`vision-provider-${option.provider}`}
+                        value={option.provider}
+                      >
                         {option.label}
                       </option>
                     ))}
                   </select>
                 </FieldGroup>
-                <FieldGroup label="Vision failover chain" hint="Vi du: google, openai, ollama">
+                <FieldGroup
+                  label="Vision failover chain"
+                  hint="Vi du: google, openai, ollama"
+                >
                   <input
                     aria-label="Vision failover chain"
                     data-testid="runtime-vision-failover-chain"
                     value={draft.vision_failover_chain}
                     onChange={(event) =>
-                      setDraft((current) => ({ ...current, vision_failover_chain: event.target.value }))
+                      setDraft((current) => ({
+                        ...current,
+                        vision_failover_chain: event.target.value,
+                      }))
                     }
                     className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                   />
                 </FieldGroup>
-                <FieldGroup label="Vision timeout (giay)" hint="Cho mot request vision da gom failover">
+                <FieldGroup
+                  label="Vision timeout (giây)"
+                  hint="Cho một request vision đã gồm failover"
+                >
                   <input
                     aria-label="Vision timeout"
                     data-testid="runtime-vision-timeout"
@@ -1686,14 +2523,20 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                     step="1"
                     value={draft.vision_timeout_seconds}
                     onChange={(event) =>
-                      setDraft((current) => ({ ...current, vision_timeout_seconds: event.target.value }))
+                      setDraft((current) => ({
+                        ...current,
+                        vision_timeout_seconds: event.target.value,
+                      }))
                     }
                     className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                   />
                 </FieldGroup>
               </div>
               <div className="mt-4 grid gap-4 md:grid-cols-3">
-                <FieldGroup label="Visual describe lane" hint="Captioning / memory / Visual RAG">
+                <FieldGroup
+                  label="Visual describe lane"
+                  hint="Captioning / memory / Visual RAG"
+                >
                   <div className="space-y-2">
                     <select
                       aria-label="Vision describe provider"
@@ -1702,13 +2545,17 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                       onChange={(event) =>
                         setDraft((current) => ({
                           ...current,
-                          vision_describe_provider: event.target.value as VisionProvider,
+                          vision_describe_provider: event.target
+                            .value as VisionProvider,
                         }))
                       }
                       className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                     >
                       {visionProviderOptions.map((option) => (
-                        <option key={`vision-describe-provider-${option.provider}`} value={option.provider}>
+                        <option
+                          key={`vision-describe-provider-${option.provider}`}
+                          value={option.provider}
+                        >
                           {option.label}
                         </option>
                       ))}
@@ -1718,14 +2565,20 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                       data-testid="runtime-vision-describe-model"
                       value={draft.vision_describe_model}
                       onChange={(event) =>
-                        setDraft((current) => ({ ...current, vision_describe_model: event.target.value }))
+                        setDraft((current) => ({
+                          ...current,
+                          vision_describe_model: event.target.value,
+                        }))
                       }
                       placeholder="Vi du: qwen/qwen2.5-vl-7b-instruct"
                       className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                     />
                   </div>
                 </FieldGroup>
-                <FieldGroup label="OCR lane" hint="Document parsing / formulas / tables">
+                <FieldGroup
+                  label="OCR lane"
+                  hint="Document parsing / formulas / tables"
+                >
                   <div className="space-y-2">
                     <select
                       aria-label="Vision OCR provider"
@@ -1734,13 +2587,17 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                       onChange={(event) =>
                         setDraft((current) => ({
                           ...current,
-                          vision_ocr_provider: event.target.value as VisionProvider,
+                          vision_ocr_provider: event.target
+                            .value as VisionProvider,
                         }))
                       }
                       className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                     >
                       {visionProviderOptions.map((option) => (
-                        <option key={`vision-ocr-provider-${option.provider}`} value={option.provider}>
+                        <option
+                          key={`vision-ocr-provider-${option.provider}`}
+                          value={option.provider}
+                        >
                           {option.label}
                         </option>
                       ))}
@@ -1750,14 +2607,20 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                       data-testid="runtime-vision-ocr-model"
                       value={draft.vision_ocr_model}
                       onChange={(event) =>
-                        setDraft((current) => ({ ...current, vision_ocr_model: event.target.value }))
+                        setDraft((current) => ({
+                          ...current,
+                          vision_ocr_model: event.target.value,
+                        }))
                       }
                       placeholder="Vi du: glm-ocr"
                       className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                     />
                   </div>
                 </FieldGroup>
-                <FieldGroup label="Grounded answer lane" hint="Visual QA / chart reasoning">
+                <FieldGroup
+                  label="Grounded answer lane"
+                  hint="Visual QA / chart reasoning"
+                >
                   <div className="space-y-2">
                     <select
                       aria-label="Vision grounded provider"
@@ -1766,13 +2629,17 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                       onChange={(event) =>
                         setDraft((current) => ({
                           ...current,
-                          vision_grounded_provider: event.target.value as VisionProvider,
+                          vision_grounded_provider: event.target
+                            .value as VisionProvider,
                         }))
                       }
                       className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                     >
                       {visionProviderOptions.map((option) => (
-                        <option key={`vision-grounded-provider-${option.provider}`} value={option.provider}>
+                        <option
+                          key={`vision-grounded-provider-${option.provider}`}
+                          value={option.provider}
+                        >
                           {option.label}
                         </option>
                       ))}
@@ -1782,7 +2649,10 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                       data-testid="runtime-vision-grounded-model"
                       value={draft.vision_grounded_model}
                       onChange={(event) =>
-                        setDraft((current) => ({ ...current, vision_grounded_model: event.target.value }))
+                        setDraft((current) => ({
+                          ...current,
+                          vision_grounded_model: event.target.value,
+                        }))
                       }
                       placeholder="Vi du: qwen/qwen2.5-vl-32b-instruct"
                       className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
@@ -1791,36 +2661,66 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                 </FieldGroup>
               </div>
               <div className="mt-3 rounded-xl border border-border bg-surface-secondary p-3 text-xs text-text-tertiary">
-                Provider mode: <span className="font-medium text-text">{runtime?.vision_provider ?? "auto"}</span>
-                {(runtime?.vision_failover_chain?.length ?? 0) > 0 ? ` • chain ${runtime?.vision_failover_chain?.join(", ")}` : ""}
-                {runtime?.vision_timeout_seconds ? ` • timeout ${runtime.vision_timeout_seconds}s` : ""}
+                Provider mode:{" "}
+                <span className="font-medium text-text">
+                  {runtime?.vision_provider ?? "auto"}
+                </span>
+                {(runtime?.vision_failover_chain?.length ?? 0) > 0
+                  ? ` • chain ${runtime?.vision_failover_chain?.join(", ")}`
+                  : ""}
+                {runtime?.vision_timeout_seconds
+                  ? ` • timeout ${runtime.vision_timeout_seconds}s`
+                  : ""}
               </div>
               <div className="mt-3 rounded-xl border border-border bg-surface-secondary p-3 text-xs text-text-tertiary">
                 <div>
-                  Describe lane: <span className="font-medium text-text">{runtime?.vision_describe_provider ?? "auto"}</span>
-                  {runtime?.vision_describe_model ? ` / ${runtime.vision_describe_model}` : ""}
+                  Describe lane:{" "}
+                  <span className="font-medium text-text">
+                    {runtime?.vision_describe_provider ?? "auto"}
+                  </span>
+                  {runtime?.vision_describe_model
+                    ? ` / ${runtime.vision_describe_model}`
+                    : ""}
                 </div>
                 <div className="mt-1">
-                  OCR lane: <span className="font-medium text-text">{runtime?.vision_ocr_provider ?? "auto"}</span>
-                  {runtime?.vision_ocr_model ? ` / ${runtime.vision_ocr_model}` : ""}
+                  OCR lane:{" "}
+                  <span className="font-medium text-text">
+                    {runtime?.vision_ocr_provider ?? "auto"}
+                  </span>
+                  {runtime?.vision_ocr_model
+                    ? ` / ${runtime.vision_ocr_model}`
+                    : ""}
                 </div>
                 <div className="mt-1">
-                  Grounded lane: <span className="font-medium text-text">{runtime?.vision_grounded_provider ?? "auto"}</span>
-                  {runtime?.vision_grounded_model ? ` / ${runtime.vision_grounded_model}` : ""}
+                  Grounded lane:{" "}
+                  <span className="font-medium text-text">
+                    {runtime?.vision_grounded_provider ?? "auto"}
+                  </span>
+                  {runtime?.vision_grounded_model
+                    ? ` / ${runtime.vision_grounded_model}`
+                    : ""}
                 </div>
               </div>
               <div className="mt-3 rounded-xl border border-border bg-surface-secondary p-3 text-xs text-text-tertiary">
                 <div>
                   Audit DB:{" "}
                   <span className="font-medium text-text">
-                    {runtime?.vision_audit_persisted ? "Da luu vao system DB" : "Dang hien thi ket qua tam thoi"}
+                    {runtime?.vision_audit_persisted
+                      ? "Đã lưu vào system DB"
+                      : "Đang hiển thị kết quả tạm thời"}
                   </span>
                 </div>
                 <div className="mt-1">
-                  Live probe gan nhat: <span className="font-medium text-text">{formatDateTime(runtime?.vision_last_live_probe_at)}</span>
+                  Live probe gần nhất:{" "}
+                  <span className="font-medium text-text">
+                    {formatDateTime(runtime?.vision_last_live_probe_at)}
+                  </span>
                 </div>
                 <div className="mt-1">
-                  Audit update: <span className="font-medium text-text">{formatDateTime(runtime?.vision_audit_updated_at)}</span>
+                  Audit update:{" "}
+                  <span className="font-medium text-text">
+                    {formatDateTime(runtime?.vision_audit_updated_at)}
+                  </span>
                 </div>
                 {(runtime?.vision_audit_warnings?.length ?? 0) > 0 ? (
                   <div className="mt-2 space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
@@ -1833,52 +2733,117 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
               {(runtime?.vision_provider_status?.length ?? 0) > 0 ? (
                 <div className="mt-4 space-y-3">
                   {runtime?.vision_provider_status?.map((provider) => (
-                    <div key={`vision-${provider.provider}`} className="rounded-xl border border-border bg-surface-secondary p-3">
+                    <div
+                      key={`vision-${provider.provider}`}
+                      className="rounded-xl border border-border bg-surface-secondary p-3"
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-sm font-medium text-text">{provider.display_name}</div>
-                          <div className="text-[11px] font-mono text-text-tertiary">{provider.provider}</div>
+                          <div className="text-sm font-medium text-text">
+                            {provider.display_name}
+                          </div>
+                          <div className="text-[11px] font-mono text-text-tertiary">
+                            {provider.provider}
+                          </div>
                         </div>
                         {provider.available ? (
-                          <CheckCircle2 size={16} className="shrink-0 text-green-500" />
+                          <CheckCircle2
+                            size={16}
+                            className="shrink-0 text-green-500"
+                          />
                         ) : (
-                          <AlertTriangle size={16} className="shrink-0 text-amber-500" />
+                          <AlertTriangle
+                            size={16}
+                            className="shrink-0 text-amber-500"
+                          />
                         )}
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.configured ? "good" : "warn")}`}>
-                          {provider.configured ? "configured" : "missing config"}
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.configured ? "good" : "warn")}`}
+                        >
+                          {provider.configured
+                            ? "configured"
+                            : "missing config"}
                         </span>
-                        <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.in_failover_chain ? "good" : "neutral")}`}>
-                          {provider.in_failover_chain ? "in chain" : "outside chain"}
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.in_failover_chain ? "good" : "neutral")}`}
+                        >
+                          {provider.in_failover_chain
+                            ? "in chain"
+                            : "outside chain"}
                         </span>
                         {provider.is_default ? (
-                          <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("accent")}`}>default</span>
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("accent")}`}
+                          >
+                            default
+                          </span>
                         ) : null}
                         {provider.is_active ? (
-                          <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("good")}`}>active</span>
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("good")}`}
+                          >
+                            active
+                          </span>
                         ) : null}
                         {provider.degraded ? (
-                          <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("warn")}`}>degraded</span>
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("warn")}`}
+                          >
+                            degraded
+                          </span>
                         ) : null}
                         {provider.recovered ? (
-                          <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("good")}`}>recovered</span>
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("good")}`}
+                          >
+                            recovered
+                          </span>
                         ) : null}
                       </div>
                       <div className="mt-3 space-y-1 text-[11px] text-text-tertiary">
                         <div>
-                          model: <span className="font-mono text-text">{provider.selected_model ?? "n/a"}</span>
+                          model:{" "}
+                          <span className="font-mono text-text">
+                            {provider.selected_model ?? "n/a"}
+                          </span>
                         </div>
-                        <div>probe success: <span className="font-medium text-text">{formatDateTime(provider.last_probe_success_at)}</span></div>
+                        <div>
+                          probe success:{" "}
+                          <span className="font-medium text-text">
+                            {formatDateTime(provider.last_probe_success_at)}
+                          </span>
+                        </div>
                         {provider.last_runtime_success_at ? (
-                          <div>runtime success: <span className="font-medium text-text">{formatDateTime(provider.last_runtime_success_at)}</span></div>
+                          <div>
+                            runtime success:{" "}
+                            <span className="font-medium text-text">
+                              {formatDateTime(provider.last_runtime_success_at)}
+                            </span>
+                          </div>
                         ) : null}
-                        {provider.reason_label ? <div>{provider.reason_label}</div> : null}
-                        {provider.last_probe_error ? <div>live probe error: {provider.last_probe_error}</div> : null}
-                        {provider.last_runtime_error ? <div>runtime error: {provider.last_runtime_error}</div> : null}
-                        {provider.last_runtime_note ? <div>runtime note: {provider.last_runtime_note}</div> : null}
+                        {provider.reason_label ? (
+                          <div>{provider.reason_label}</div>
+                        ) : null}
+                        {provider.last_probe_error ? (
+                          <div>
+                            live probe error: {provider.last_probe_error}
+                          </div>
+                        ) : null}
+                        {provider.last_runtime_error ? (
+                          <div>
+                            runtime error: {provider.last_runtime_error}
+                          </div>
+                        ) : null}
+                        {provider.last_runtime_note ? (
+                          <div>runtime note: {provider.last_runtime_note}</div>
+                        ) : null}
                         {(provider.recovered_reasons?.length ?? 0) > 0 ? (
-                          <div>runtime recovered on: {provider.recovered_reasons?.join(", ")}</div>
+                          <div>
+                            runtime recovered on:{" "}
+                            {provider.recovered_reasons?.join(", ")}
+                          </div>
                         ) : null}
                         {(provider.degraded_reasons?.length ?? 0) > 0 ? (
                           <div>{provider.degraded_reasons?.join(" ")}</div>
@@ -1892,44 +2857,75 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                               className="rounded-lg border border-border bg-surface px-3 py-2 text-[11px] text-text-tertiary"
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="font-medium text-text">{capability.display_name}</div>
+                                <div className="font-medium text-text">
+                                  {capability.display_name}
+                                </div>
                                 {capability.lane_fit_label ? (
-                                  <span className={`rounded-full border px-2 py-0.5 text-[10px] ${badgeClass(visionLaneFitTone(capability.lane_fit))}`}>
+                                  <span
+                                    className={`rounded-full border px-2 py-0.5 text-[10px] ${badgeClass(visionLaneFitTone(capability.lane_fit))}`}
+                                  >
                                     {capability.lane_fit_label}
                                   </span>
                                 ) : null}
                                 {capability.recovered ? (
-                                  <span className={`rounded-full border px-2 py-0.5 text-[10px] ${badgeClass("good")}`}>
+                                  <span
+                                    className={`rounded-full border px-2 py-0.5 text-[10px] ${badgeClass("good")}`}
+                                  >
                                     recovered
                                   </span>
                                 ) : null}
                               </div>
                               <div className="mt-1">
-                                {capability.available ? "usable" : capability.reason_label ?? "not available"}
+                                {capability.available
+                                  ? "usable"
+                                  : (capability.reason_label ??
+                                    "not available")}
                               </div>
                               {capability.selected_model ? (
-                                <div className="mt-1 break-all font-mono">{capability.selected_model}</div>
+                                <div className="mt-1 break-all font-mono">
+                                  {capability.selected_model}
+                                </div>
                               ) : null}
                               {capability.last_probe_success_at ? (
-                                <div className="mt-1">probe ok: {formatDateTime(capability.last_probe_success_at)}</div>
+                                <div className="mt-1">
+                                  probe ok:{" "}
+                                  {formatDateTime(
+                                    capability.last_probe_success_at,
+                                  )}
+                                </div>
                               ) : null}
                               {capability.last_runtime_success_at ? (
-                                <div className="mt-1">runtime ok: {formatDateTime(capability.last_runtime_success_at)}</div>
+                                <div className="mt-1">
+                                  runtime ok:{" "}
+                                  {formatDateTime(
+                                    capability.last_runtime_success_at,
+                                  )}
+                                </div>
                               ) : null}
                               {capability.live_probe_note ? (
-                                <div className="mt-1">{capability.live_probe_note}</div>
+                                <div className="mt-1">
+                                  {capability.live_probe_note}
+                                </div>
                               ) : null}
                               {capability.last_runtime_note ? (
-                                <div className="mt-1 text-text-secondary">{capability.last_runtime_note}</div>
+                                <div className="mt-1 text-text-secondary">
+                                  {capability.last_runtime_note}
+                                </div>
                               ) : null}
                               {capability.recovered_label ? (
-                                <div className="mt-1 text-green-700 dark:text-green-300">{capability.recovered_label}</div>
+                                <div className="mt-1 text-green-700 dark:text-green-300">
+                                  {capability.recovered_label}
+                                </div>
                               ) : null}
                               {capability.last_probe_error ? (
-                                <div className="mt-1 text-amber-700 dark:text-amber-300">{capability.last_probe_error}</div>
+                                <div className="mt-1 text-amber-700 dark:text-amber-300">
+                                  {capability.last_probe_error}
+                                </div>
                               ) : null}
                               {capability.last_runtime_error ? (
-                                <div className="mt-1 text-amber-700 dark:text-amber-300">runtime: {capability.last_runtime_error}</div>
+                                <div className="mt-1 text-amber-700 dark:text-amber-300">
+                                  runtime: {capability.last_runtime_error}
+                                </div>
                               ) : null}
                             </div>
                           ))}
@@ -1940,138 +2936,229 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                 </div>
               ) : null}
               <div className="mt-3 rounded-xl border border-border bg-surface-secondary p-3 text-xs text-text-tertiary">
-                Vision audit giup thay provider nao dang dung duoc cho mo ta anh, OCR va grounded answer, thay vi de tung lane goi vision rieng roi chet ngam.
+                Vision audit giúp thấy provider nào đang dùng được cho mô tả
+                ảnh, OCR và grounded answer, thay vì để từng lane gọi vision
+                riêng rồi chết ngầm.
               </div>
             </div>
 
             <div className="rounded-2xl border border-border bg-surface p-5">
-              <div className="text-sm font-medium text-text">Embedding policy</div>
+              <div className="text-sm font-medium text-text">
+                Embedding policy
+              </div>
               <div className="mt-4 grid gap-4 md:grid-cols-3">
-                <FieldGroup label="Provider mode" hint="`auto` = theo failover chain">
+                <FieldGroup
+                  label="Provider mode"
+                  hint="`auto` = theo failover chain"
+                >
                   <select
                     aria-label="Embedding provider mode"
                     data-testid="runtime-embedding-provider"
                     value={draft.embedding_provider}
-                    onChange={(event) => setEmbeddingProvider(event.target.value as EmbeddingProvider)}
+                    onChange={(event) =>
+                      setEmbeddingProvider(
+                        event.target.value as EmbeddingProvider,
+                      )
+                    }
                     className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                   >
                     {embeddingProviderOptions.map((option) => (
-                      <option key={`embedding-provider-${option.provider}`} value={option.provider}>
+                      <option
+                        key={`embedding-provider-${option.provider}`}
+                        value={option.provider}
+                      >
                         {option.label}
                       </option>
                     ))}
                   </select>
                 </FieldGroup>
-                <FieldGroup label="Embedding model" hint="Chi mo cac model co contract da biet">
+                <FieldGroup
+                  label="Embedding model"
+                  hint="Chỉ mở các model có contract đã biết"
+                >
                   <input
                     aria-label="Embedding model"
                     data-testid="runtime-embedding-model"
                     list="embedding-model-options"
                     value={draft.embedding_model}
-                    onChange={(event) => setDraft((current) => ({ ...current, embedding_model: event.target.value }))}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        embedding_model: event.target.value,
+                      }))
+                    }
                     className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                   />
                   <datalist id="embedding-model-options">
                     {embeddingModelOptions.map((modelName) => (
-                      <option key={`embedding-model-${modelName}`} value={modelName} />
+                      <option
+                        key={`embedding-model-${modelName}`}
+                        value={modelName}
+                      />
                     ))}
                   </datalist>
                 </FieldGroup>
-                <FieldGroup label="Embedding failover chain" hint="Vi du: ollama, google, openai">
+                <FieldGroup
+                  label="Embedding failover chain"
+                  hint="Ví dụ: ollama, google, openai"
+                >
                   <input
                     aria-label="Embedding failover chain"
                     data-testid="runtime-embedding-failover-chain"
                     value={draft.embedding_failover_chain}
-                    onChange={(event) => setDraft((current) => ({ ...current, embedding_failover_chain: event.target.value }))}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        embedding_failover_chain: event.target.value,
+                      }))
+                    }
                     className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
                   />
                 </FieldGroup>
               </div>
               <div className="mt-2 text-sm text-text">
-                <div className="font-medium">{runtime?.embedding_model ?? "..."}</div>
-                <div className="mt-1 text-xs text-text-tertiary">{runtime ? `${runtime.embedding_dimensions} dimensions` : "Dang tai"}</div>
-                <div className="mt-1 text-xs text-text-tertiary">Status: {runtime?.embedding_status ?? "unknown"}</div>
+                <div className="font-medium">
+                  {runtime?.embedding_model ?? "..."}
+                </div>
                 <div className="mt-1 text-xs text-text-tertiary">
-                  Provider mode: <span className="font-medium text-text">{runtime?.embedding_provider ?? "auto"}</span>
-                  {(runtime?.embedding_failover_chain?.length ?? 0) > 0 ? ` • chain ${runtime?.embedding_failover_chain?.join(", ")}` : ""}
+                  {runtime
+                    ? `${runtime.embedding_dimensions} dimensions`
+                    : "Đang tải"}
+                </div>
+                <div className="mt-1 text-xs text-text-tertiary">
+                  Status: {runtime?.embedding_status ?? "unknown"}
+                </div>
+                <div className="mt-1 text-xs text-text-tertiary">
+                  Provider mode:{" "}
+                  <span className="font-medium text-text">
+                    {runtime?.embedding_provider ?? "auto"}
+                  </span>
+                  {(runtime?.embedding_failover_chain?.length ?? 0) > 0
+                    ? ` • chain ${runtime?.embedding_failover_chain?.join(", ")}`
+                    : ""}
                 </div>
               </div>
               {embeddingSpaceStatus ? (
                 <div className="mt-4 rounded-xl border border-border bg-surface-secondary p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <div className="text-sm font-medium text-text">Embedding space health</div>
+                      <div className="text-sm font-medium text-text">
+                        Embedding space health
+                      </div>
                       <div className="mt-1 text-xs text-text-tertiary">
-                        Day la tinh trang that cua vector-space dang song trong DB va backend active.
+                        Đây là tình trạng thật của vector-space đang sống trong
+                        DB và backend active.
                       </div>
                     </div>
-                    <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(embeddingSpaceStatus.audit_available ? "good" : "warn")}`}>
-                      {embeddingSpaceStatus.audit_available ? "audit ok" : "audit unavailable"}
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(embeddingSpaceStatus.audit_available ? "good" : "warn")}`}
+                    >
+                      {embeddingSpaceStatus.audit_available
+                        ? "audit ok"
+                        : "audit unavailable"}
                     </span>
                   </div>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
                     <div className="rounded-xl border border-border bg-surface p-3">
-                      <div className="text-[11px] uppercase tracking-wide text-text-tertiary">Policy contract</div>
-                      <div className="mt-1 text-sm font-medium text-text">{embeddingSpaceStatus.policy_contract?.label ?? "chua co"}</div>
+                      <div className="text-[11px] uppercase tracking-wide text-text-tertiary">
+                        Policy contract
+                      </div>
+                      <div className="mt-1 text-sm font-medium text-text">
+                        {embeddingSpaceStatus.policy_contract?.label ??
+                          "chưa có"}
+                      </div>
                       <div className="mt-1 break-all text-[11px] font-mono text-text-tertiary">
-                        {embeddingSpaceStatus.policy_contract?.fingerprint ?? "n/a"}
+                        {embeddingSpaceStatus.policy_contract?.fingerprint ??
+                          "n/a"}
                       </div>
                     </div>
                     <div className="rounded-xl border border-border bg-surface p-3">
-                      <div className="text-[11px] uppercase tracking-wide text-text-tertiary">Active contract</div>
-                      <div className="mt-1 text-sm font-medium text-text">{embeddingSpaceStatus.active_contract?.label ?? "chua co"}</div>
+                      <div className="text-[11px] uppercase tracking-wide text-text-tertiary">
+                        Active contract
+                      </div>
+                      <div className="mt-1 text-sm font-medium text-text">
+                        {embeddingSpaceStatus.active_contract?.label ??
+                          "chưa có"}
+                      </div>
                       <div className="mt-1 break-all text-[11px] font-mono text-text-tertiary">
-                        {embeddingSpaceStatus.active_contract?.fingerprint ?? "n/a"}
+                        {embeddingSpaceStatus.active_contract?.fingerprint ??
+                          "n/a"}
                       </div>
                       <div className="mt-2">
-                        <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(
-                          embeddingSpaceStatus.active_matches_policy === false
-                            ? "warn"
-                            : embeddingSpaceStatus.active_matches_policy === true
-                              ? "good"
-                              : "neutral",
-                        )}`}>
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(
+                            embeddingSpaceStatus.active_matches_policy === false
+                              ? "warn"
+                              : embeddingSpaceStatus.active_matches_policy ===
+                                  true
+                                ? "good"
+                                : "neutral",
+                          )}`}
+                        >
                           {embeddingSpaceStatus.active_matches_policy === false
                             ? "active != policy"
-                            : embeddingSpaceStatus.active_matches_policy === true
+                            : embeddingSpaceStatus.active_matches_policy ===
+                                true
                               ? "active = policy"
-                              : "chua xac dinh"}
+                              : "chưa xác định"}
                         </span>
                       </div>
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("accent")}`}>
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("accent")}`}
+                    >
                       {embeddingSpaceStatus.total_embedded_rows} embedded rows
                     </span>
-                    <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(
-                      embeddingSpaceStatus.total_untracked_rows > 0 ? "warn" : "good",
-                    )}`}>
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(
+                        embeddingSpaceStatus.total_untracked_rows > 0
+                          ? "warn"
+                          : "good",
+                      )}`}
+                    >
                       {embeddingSpaceStatus.total_tracked_rows} tracked
                     </span>
-                    <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(
-                      embeddingSpaceStatus.total_untracked_rows > 0 ? "warn" : "neutral",
-                    )}`}>
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(
+                        embeddingSpaceStatus.total_untracked_rows > 0
+                          ? "warn"
+                          : "neutral",
+                      )}`}
+                    >
                       {embeddingSpaceStatus.total_untracked_rows} untracked
                     </span>
                   </div>
                   {(embeddingSpaceStatus.tables?.length ?? 0) > 0 ? (
                     <div className="mt-3 space-y-2">
                       {embeddingSpaceStatus.tables.map((table) => (
-                        <div key={`embedding-space-${table.table_name}`} className="rounded-xl border border-border bg-surface p-3">
+                        <div
+                          key={`embedding-space-${table.table_name}`}
+                          className="rounded-xl border border-border bg-surface p-3"
+                        >
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-sm font-medium text-text">{table.table_name}</div>
+                            <div className="text-sm font-medium text-text">
+                              {table.table_name}
+                            </div>
                             <div className="text-[11px] text-text-tertiary">
-                              {table.embedded_row_count} embedded • {table.tracked_row_count} tracked • {table.untracked_row_count} untracked
+                              {table.embedded_row_count} embedded •{" "}
+                              {table.tracked_row_count} tracked •{" "}
+                              {table.untracked_row_count} untracked
                             </div>
                           </div>
                           {Object.keys(table.fingerprints ?? {}).length > 0 ? (
                             <div className="mt-2 space-y-1 text-[11px] text-text-tertiary">
-                              {Object.entries(table.fingerprints).map(([fingerprint, count]) => (
-                                <div key={`${table.table_name}-${fingerprint}`} className="break-all font-mono">
-                                  {fingerprint} • {count}
-                                </div>
-                              ))}
+                              {Object.entries(table.fingerprints).map(
+                                ([fingerprint, count]) => (
+                                  <div
+                                    key={`${table.table_name}-${fingerprint}`}
+                                    className="break-all font-mono"
+                                  >
+                                    {fingerprint} • {count}
+                                  </div>
+                                ),
+                              )}
                             </div>
                           ) : null}
                         </div>
@@ -2081,7 +3168,10 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                   {(embeddingSpaceStatus.warnings?.length ?? 0) > 0 ? (
                     <div className="mt-3 space-y-2">
                       {embeddingSpaceStatus.warnings.map((warning) => (
-                        <div key={warning} className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+                        <div
+                          key={warning}
+                          className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+                        >
                           {warning}
                         </div>
                       ))}
@@ -2098,42 +3188,88 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                 <div className="mt-4 rounded-xl border border-border bg-surface-secondary p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <div className="text-sm font-medium text-text">Preview cho model dang chon</div>
+                      <div className="text-sm font-medium text-text">
+                        Preview cho model đang chọn
+                      </div>
                       <div className="mt-1 text-xs text-text-tertiary">
-                        {selectedEmbeddingPreview.target_label} • {selectedEmbeddingPreview.target_provider} • {selectedEmbeddingPreview.target_dimensions}d
+                        {selectedEmbeddingPreview.target_label} •{" "}
+                        {selectedEmbeddingPreview.target_provider} •{" "}
+                        {selectedEmbeddingPreview.target_dimensions}d
                       </div>
                     </div>
-                    <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(embeddingPreviewTone(selectedEmbeddingPreview))}`}>
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(embeddingPreviewTone(selectedEmbeddingPreview))}`}
+                    >
                       {embeddingPreviewLabel(selectedEmbeddingPreview)}
                     </span>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(selectedEmbeddingPreview.same_space ? "accent" : "neutral")}`}>
-                      {selectedEmbeddingPreview.same_space ? "same vector-space" : "space change"}
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(selectedEmbeddingPreview.same_space ? "accent" : "neutral")}`}
+                    >
+                      {selectedEmbeddingPreview.same_space
+                        ? "same vector-space"
+                        : "space change"}
                     </span>
-                    <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(selectedEmbeddingPreview.allowed ? "good" : "warn")}`}>
-                      {selectedEmbeddingPreview.allowed ? "transition allowed" : "transition blocked"}
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(selectedEmbeddingPreview.allowed ? "good" : "warn")}`}
+                    >
+                      {selectedEmbeddingPreview.allowed
+                        ? "transition allowed"
+                        : "transition blocked"}
                     </span>
-                    <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(selectedEmbeddingPreview.requires_reembed ? "warn" : "neutral")}`}>
-                      {selectedEmbeddingPreview.requires_reembed ? "re-embed truoc" : "khong can re-embed"}
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(selectedEmbeddingPreview.requires_reembed ? "warn" : "neutral")}`}
+                    >
+                      {selectedEmbeddingPreview.requires_reembed
+                        ? "re-embed trước"
+                        : "không cần re-embed"}
                     </span>
-                    <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(selectedEmbeddingPreview.target_backend_constructible ? "good" : "warn")}`}>
-                      {selectedEmbeddingPreview.target_backend_constructible ? "target backend ok" : "target backend chua san sang"}
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(selectedEmbeddingPreview.target_backend_constructible ? "good" : "warn")}`}
+                    >
+                      {selectedEmbeddingPreview.target_backend_constructible
+                        ? "target backend ok"
+                        : "target backend chưa sẵn sàng"}
                     </span>
-                    <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(selectedEmbeddingPreview.maintenance_required ? "warn" : "neutral")}`}>
-                      {selectedEmbeddingPreview.maintenance_required ? "maintenance only" : "khong can drain traffic"}
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(selectedEmbeddingPreview.maintenance_required ? "warn" : "neutral")}`}
+                    >
+                      {selectedEmbeddingPreview.maintenance_required
+                        ? "maintenance only"
+                        : "không cần drain traffic"}
                     </span>
                   </div>
                   <div className="mt-3 space-y-1 text-[11px] text-text-tertiary">
-                    <div>Target model: <span className="font-mono text-text">{selectedEmbeddingPreview.target_model}</span></div>
-                    <div>Status: <span className="font-medium text-text">{selectedEmbeddingPreview.target_status}</span></div>
-                    <div>Embedded rows hien tai: <span className="font-medium text-text">{selectedEmbeddingPreview.embedded_row_count}</span></div>
-                    {selectedEmbeddingPreview.detail ? <div>{selectedEmbeddingPreview.detail}</div> : null}
-                    {(selectedEmbeddingPreview.recommended_steps?.length ?? 0) > 0 ? (
+                    <div>
+                      Target model:{" "}
+                      <span className="font-mono text-text">
+                        {selectedEmbeddingPreview.target_model}
+                      </span>
+                    </div>
+                    <div>
+                      Status:{" "}
+                      <span className="font-medium text-text">
+                        {selectedEmbeddingPreview.target_status}
+                      </span>
+                    </div>
+                    <div>
+                      Embedded rows hiện tại:{" "}
+                      <span className="font-medium text-text">
+                        {selectedEmbeddingPreview.embedded_row_count}
+                      </span>
+                    </div>
+                    {selectedEmbeddingPreview.detail ? (
+                      <div>{selectedEmbeddingPreview.detail}</div>
+                    ) : null}
+                    {(selectedEmbeddingPreview.recommended_steps?.length ?? 0) >
+                    0 ? (
                       <div className="space-y-1 pt-1">
-                        {selectedEmbeddingPreview.recommended_steps.slice(0, 3).map((step) => (
-                          <div key={step}>• {step}</div>
-                        ))}
+                        {selectedEmbeddingPreview.recommended_steps
+                          .slice(0, 3)
+                          .map((step) => (
+                            <div key={step}>• {step}</div>
+                          ))}
                       </div>
                     ) : null}
                   </div>
@@ -2144,7 +3280,9 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                       disabled={isPlanningEmbeddingMigration}
                       className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium text-text hover:bg-surface-tertiary disabled:opacity-50"
                     >
-                      {isPlanningEmbeddingMigration ? "Dang xu ly..." : "Plan migration"}
+                      {isPlanningEmbeddingMigration
+                        ? "Đang xử lý..."
+                        : "Plan migration"}
                     </button>
                     <button
                       type="button"
@@ -2152,7 +3290,9 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                       disabled={isPlanningEmbeddingMigration}
                       className="rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-3 py-2 text-xs font-medium text-[var(--accent)] hover:bg-[var(--accent)]/15 disabled:opacity-50"
                     >
-                      {isPlanningEmbeddingMigration ? "Dang xu ly..." : "Dry-run migration"}
+                      {isPlanningEmbeddingMigration
+                        ? "Đang xử lý..."
+                        : "Dry-run migration"}
                     </button>
                     <button
                       type="button"
@@ -2160,7 +3300,9 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                       disabled={isPlanningEmbeddingMigration}
                       className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-600 hover:bg-emerald-500/15 disabled:opacity-50"
                     >
-                      {isPlanningEmbeddingMigration ? "Dang xu ly..." : "Apply shadow"}
+                      {isPlanningEmbeddingMigration
+                        ? "Đang xử lý..."
+                        : "Apply shadow"}
                     </button>
                     <button
                       type="button"
@@ -2168,37 +3310,70 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                       disabled={isPlanningEmbeddingMigration}
                       className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 hover:bg-amber-500/15 disabled:opacity-50"
                     >
-                      {isPlanningEmbeddingMigration ? "Dang xu ly..." : "Promote target"}
+                      {isPlanningEmbeddingMigration
+                        ? "Đang xử lý..."
+                        : "Promote target"}
                     </button>
                   </div>
                   {embeddingMigrationPlan ? (
                     <div className="mt-4 rounded-xl border border-border bg-surface p-3 text-[11px] text-text-tertiary">
-                      <div className="text-sm font-medium text-text">Migration plan snapshot</div>
+                      <div className="text-sm font-medium text-text">
+                        Migration plan snapshot
+                      </div>
                       <div className="mt-2 flex flex-wrap gap-2">
-                        <span className={`rounded-full border px-2 py-1 ${badgeClass(embeddingMigrationPlan.same_space ? "accent" : "neutral")}`}>
-                          {embeddingMigrationPlan.same_space ? "same space" : "new space"}
+                        <span
+                          className={`rounded-full border px-2 py-1 ${badgeClass(embeddingMigrationPlan.same_space ? "accent" : "neutral")}`}
+                        >
+                          {embeddingMigrationPlan.same_space
+                            ? "same space"
+                            : "new space"}
                         </span>
-                        <span className={`rounded-full border px-2 py-1 ${badgeClass(embeddingMigrationPlan.transition_allowed ? "good" : "warn")}`}>
-                          {embeddingMigrationPlan.transition_allowed ? "transition allowed" : "transition blocked"}
+                        <span
+                          className={`rounded-full border px-2 py-1 ${badgeClass(embeddingMigrationPlan.transition_allowed ? "good" : "warn")}`}
+                        >
+                          {embeddingMigrationPlan.transition_allowed
+                            ? "transition allowed"
+                            : "transition blocked"}
                         </span>
-                        <span className={`rounded-full border px-2 py-1 ${badgeClass(embeddingMigrationPlan.target_backend_constructible ? "good" : "warn")}`}>
-                          {embeddingMigrationPlan.target_backend_constructible ? "backend ok" : "backend missing"}
+                        <span
+                          className={`rounded-full border px-2 py-1 ${badgeClass(embeddingMigrationPlan.target_backend_constructible ? "good" : "warn")}`}
+                        >
+                          {embeddingMigrationPlan.target_backend_constructible
+                            ? "backend ok"
+                            : "backend missing"}
                         </span>
                         {embeddingMigrationPlan.maintenance_required ? (
-                          <span className={`rounded-full border px-2 py-1 ${badgeClass("warn")}`}>maintenance only</span>
+                          <span
+                            className={`rounded-full border px-2 py-1 ${badgeClass("warn")}`}
+                          >
+                            maintenance only
+                          </span>
                         ) : null}
                       </div>
                       <div className="mt-2">
-                        Candidate rows: <span className="font-medium text-text">{embeddingMigrationPlan.total_candidate_rows}</span>
+                        Candidate rows:{" "}
+                        <span className="font-medium text-text">
+                          {embeddingMigrationPlan.total_candidate_rows}
+                        </span>
                         {" • "}
-                        Embedded rows: <span className="font-medium text-text">{embeddingMigrationPlan.total_embedded_rows}</span>
+                        Embedded rows:{" "}
+                        <span className="font-medium text-text">
+                          {embeddingMigrationPlan.total_embedded_rows}
+                        </span>
                       </div>
-                      {embeddingMigrationPlan.detail ? <div className="mt-2">{embeddingMigrationPlan.detail}</div> : null}
-                      {(embeddingMigrationPlan.recommended_steps?.length ?? 0) > 0 ? (
+                      {embeddingMigrationPlan.detail ? (
+                        <div className="mt-2">
+                          {embeddingMigrationPlan.detail}
+                        </div>
+                      ) : null}
+                      {(embeddingMigrationPlan.recommended_steps?.length ?? 0) >
+                      0 ? (
                         <div className="mt-2 space-y-1">
-                          {embeddingMigrationPlan.recommended_steps.slice(0, 3).map((step) => (
-                            <div key={step}>• {step}</div>
-                          ))}
+                          {embeddingMigrationPlan.recommended_steps
+                            .slice(0, 3)
+                            .map((step) => (
+                              <div key={step}>• {step}</div>
+                            ))}
                         </div>
                       ) : null}
                     </div>
@@ -2206,21 +3381,33 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                   {embeddingMigrationRun ? (
                     <div className="mt-3 rounded-xl border border-border bg-surface p-3 text-[11px] text-text-tertiary">
                       <div className="text-sm font-medium text-text">
-                        {embeddingMigrationRun.dry_run ? "Dry-run result" : "Migration action result"}
+                        {embeddingMigrationRun.dry_run
+                          ? "Dry-run result"
+                          : "Migration action result"}
                       </div>
                       <div className="mt-2">
-                        Target contract: <span className="font-mono text-text">{embeddingMigrationRun.target_contract_fingerprint ?? "n/a"}</span>
+                        Target contract:{" "}
+                        <span className="font-mono text-text">
+                          {embeddingMigrationRun.target_contract_fingerprint ??
+                            "n/a"}
+                        </span>
                       </div>
                       {(embeddingMigrationRun.tables?.length ?? 0) > 0 ? (
                         <div className="mt-2 space-y-1">
                           {embeddingMigrationRun.tables.map((table) => (
                             <div key={table.table_name}>
-                              {table.table_name}: candidate {table.candidate_rows}, skipped {table.skipped_rows}, failed {table.failed_rows}
+                              {table.table_name}: candidate{" "}
+                              {table.candidate_rows}, skipped{" "}
+                              {table.skipped_rows}, failed {table.failed_rows}
                             </div>
                           ))}
                         </div>
                       ) : null}
-                      {embeddingMigrationRun.detail ? <div className="mt-2">{embeddingMigrationRun.detail}</div> : null}
+                      {embeddingMigrationRun.detail ? (
+                        <div className="mt-2">
+                          {embeddingMigrationRun.detail}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -2228,41 +3415,81 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
               {(runtime?.embedding_provider_status?.length ?? 0) > 0 ? (
                 <div className="mt-4 space-y-3">
                   {runtime?.embedding_provider_status?.map((provider) => (
-                    <div key={`embedding-${provider.provider}`} className="rounded-xl border border-border bg-surface-secondary p-3">
+                    <div
+                      key={`embedding-${provider.provider}`}
+                      className="rounded-xl border border-border bg-surface-secondary p-3"
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-sm font-medium text-text">{provider.display_name}</div>
-                          <div className="text-[11px] font-mono text-text-tertiary">{provider.provider}</div>
+                          <div className="text-sm font-medium text-text">
+                            {provider.display_name}
+                          </div>
+                          <div className="text-[11px] font-mono text-text-tertiary">
+                            {provider.provider}
+                          </div>
                         </div>
                         {provider.available ? (
-                          <CheckCircle2 size={16} className="shrink-0 text-green-500" />
+                          <CheckCircle2
+                            size={16}
+                            className="shrink-0 text-green-500"
+                          />
                         ) : (
-                          <AlertTriangle size={16} className="shrink-0 text-amber-500" />
+                          <AlertTriangle
+                            size={16}
+                            className="shrink-0 text-amber-500"
+                          />
                         )}
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.configured ? "good" : "warn")}`}>
-                          {provider.configured ? "configured" : "missing config"}
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.configured ? "good" : "warn")}`}
+                        >
+                          {provider.configured
+                            ? "configured"
+                            : "missing config"}
                         </span>
-                        <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.in_failover_chain ? "good" : "neutral")}`}>
-                          {provider.in_failover_chain ? "in chain" : "outside chain"}
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.in_failover_chain ? "good" : "neutral")}`}
+                        >
+                          {provider.in_failover_chain
+                            ? "in chain"
+                            : "outside chain"}
                         </span>
-                        <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.supports_dimension_override ? "accent" : "neutral")}`}>
-                          {provider.supports_dimension_override ? "dims override" : "fixed dims"}
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(provider.supports_dimension_override ? "accent" : "neutral")}`}
+                        >
+                          {provider.supports_dimension_override
+                            ? "dims override"
+                            : "fixed dims"}
                         </span>
                         {provider.is_default ? (
-                          <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("accent")}`}>default</span>
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("accent")}`}
+                          >
+                            default
+                          </span>
                         ) : null}
                         {provider.is_active ? (
-                          <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("good")}`}>active</span>
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("good")}`}
+                          >
+                            active
+                          </span>
                         ) : null}
                       </div>
                       <div className="mt-3 space-y-1 text-[11px] text-text-tertiary">
                         <div>
-                          model: <span className="font-mono text-text">{provider.selected_model ?? "n/a"}</span>
-                          {provider.selected_dimensions ? ` • ${provider.selected_dimensions}d` : ""}
+                          model:{" "}
+                          <span className="font-mono text-text">
+                            {provider.selected_model ?? "n/a"}
+                          </span>
+                          {provider.selected_dimensions
+                            ? ` • ${provider.selected_dimensions}d`
+                            : ""}
                         </div>
-                        {provider.reason_label ? <div>{provider.reason_label}</div> : null}
+                        {provider.reason_label ? (
+                          <div>{provider.reason_label}</div>
+                        ) : null}
                       </div>
                     </div>
                   ))}
@@ -2270,9 +3497,12 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
               ) : null}
               {(embeddingMigrationPreviews.length ?? 0) > 0 ? (
                 <div className="mt-4">
-                  <div className="text-sm font-medium text-text">Migration matrix</div>
+                  <div className="text-sm font-medium text-text">
+                    Migration matrix
+                  </div>
                   <div className="mt-1 text-xs text-text-tertiary">
-                    Cho biet neu doi sang model khac thi co the save in-place hay phai re-embed truoc.
+                    Cho biết nếu đổi sang model khác thì có thể save in-place
+                    hay phải re-embed trước.
                   </div>
                   <div className="mt-3 space-y-2">
                     {embeddingMigrationPreviews.map((preview) => (
@@ -2282,139 +3512,280 @@ export function LlmRuntimePolicyEditor({ variant, onToast }: Props) {
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <div className="text-sm font-medium text-text">{preview.target_label}</div>
-                            <div className="text-[11px] font-mono text-text-tertiary">{preview.target_model}</div>
+                            <div className="text-sm font-medium text-text">
+                              {preview.target_label}
+                            </div>
+                            <div className="text-[11px] font-mono text-text-tertiary">
+                              {preview.target_model}
+                            </div>
                           </div>
-                          <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(embeddingPreviewTone(preview))}`}>
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(embeddingPreviewTone(preview))}`}
+                          >
                             {embeddingPreviewLabel(preview)}
                           </span>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("neutral")}`}>{preview.target_provider}</span>
-                          <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("neutral")}`}>{preview.target_dimensions}d</span>
-                          <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(preview.same_space ? "accent" : "neutral")}`}>
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("neutral")}`}
+                          >
+                            {preview.target_provider}
+                          </span>
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("neutral")}`}
+                          >
+                            {preview.target_dimensions}d
+                          </span>
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(preview.same_space ? "accent" : "neutral")}`}
+                          >
                             {preview.same_space ? "same space" : "new space"}
                           </span>
-                          <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(preview.target_backend_constructible ? "good" : "warn")}`}>
-                            {preview.target_backend_constructible ? "backend ok" : "backend missing"}
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(preview.target_backend_constructible ? "good" : "warn")}`}
+                          >
+                            {preview.target_backend_constructible
+                              ? "backend ok"
+                              : "backend missing"}
                           </span>
                           {preview.maintenance_required ? (
-                            <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("warn")}`}>maintenance</span>
+                            <span
+                              className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("warn")}`}
+                            >
+                              maintenance
+                            </span>
                           ) : null}
                         </div>
-                        {preview.detail ? <div className="mt-2 text-[11px] text-text-tertiary">{preview.detail}</div> : null}
+                        {preview.detail ? (
+                          <div className="mt-2 text-[11px] text-text-tertiary">
+                            {preview.detail}
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>
                 </div>
               ) : null}
               <div className="mt-3 rounded-xl border border-border bg-surface-secondary p-3 text-xs text-text-tertiary">
-                Embedding runtime audit nay giup nhin ro backend nao kha dung, backend nao dang bi chan, va ly do co lien quan den key, local model hay khong gian vector.
+                Embedding runtime audit này giúp nhìn rõ backend nào khả dụng,
+                backend nào đang bị chặn, và lý do có liên quan đến key, local
+                model hay không gian vector.
               </div>
               <div className="mt-3 rounded-xl border border-border bg-surface-secondary p-3 text-xs text-text-tertiary">
-                Luu y: dimensions hien chua mo cho edit trong UI de tranh lam lech schema pgvector va khong gian vector dang song.
+                Lưu ý: dimensions hiện chưa mở cho edit trong UI để tránh làm
+                lệch schema pgvector và không gian vector đang sống.
               </div>
             </div>
             <div className="rounded-2xl border border-border bg-surface p-5">
               <div className="text-sm font-medium text-text">Model catalog</div>
-              <div className="mt-1 text-xs text-text-tertiary">Catalog backend cho biet model nao current, legacy, preset hoac duoc discover runtime.</div>
+              <div className="mt-1 text-xs text-text-tertiary">
+                Catalog backend cho biết model nào current, legacy, preset hoặc
+                được discover runtime.
+              </div>
               <div className="mt-4 space-y-4">
-                {Object.entries(catalog?.providers ?? {}).map(([provider, entries]) => (
-                  <div key={provider}>
-                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-text-tertiary">{provider}</div>
-                      {providerCapabilities[provider]?.configured ? (
-                        <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("good")}`}>configured</span>
-                      ) : (
-                        <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("warn")}`}>missing config</span>
-                      )}
-                      {providerCapabilities[provider]?.request_selectable ? (
-                        <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("accent")}`}>request switch</span>
-                      ) : null}
-                      <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("neutral")}`}>
-                        catalog {providerCapabilities[provider]?.catalog_source ?? "static"}
-                      </span>
-                      <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("neutral")}`}>
-                        {providerCapabilities[provider]?.model_count ?? entries.length} models
-                      </span>
-                      {providerCapabilities[provider]?.runtime_discovery_enabled ? (
-                        <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(providerCapabilities[provider]?.runtime_discovery_succeeded ? "good" : "warn")}`}>
-                          {providerCapabilities[provider]?.runtime_discovery_succeeded ? "runtime discovery ok" : "runtime discovery fail"}
+                {Object.entries(catalog?.providers ?? {}).map(
+                  ([provider, entries]) => (
+                    <div key={provider}>
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-text-tertiary">
+                          {provider}
+                        </div>
+                        {providerCapabilities[provider]?.configured ? (
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("good")}`}
+                          >
+                            configured
+                          </span>
+                        ) : (
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("warn")}`}
+                          >
+                            missing config
+                          </span>
+                        )}
+                        {providerCapabilities[provider]?.request_selectable ? (
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("accent")}`}
+                          >
+                            request switch
+                          </span>
+                        ) : null}
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("neutral")}`}
+                        >
+                          catalog{" "}
+                          {providerCapabilities[provider]?.catalog_source ??
+                            "static"}
                         </span>
-                      ) : null}
-                    </div>
-                    <div className="mb-2 text-[11px] text-text-tertiary">
-                      selected: <span className="font-mono text-text">{providerCapabilities[provider]?.selected_model ?? "n/a"}</span>
-                      {providerCapabilities[provider]?.selected_model_in_catalog === false ? " (custom/off-catalog)" : ""}
-                      {providerCapabilities[provider]?.selected_model_advanced ? (
-                        <>
-                          {" • "}advanced: <span className="font-mono text-text">{providerCapabilities[provider]?.selected_model_advanced}</span>
-                          {providerCapabilities[provider]?.selected_model_advanced_in_catalog === false ? " (custom/off-catalog)" : ""}
-                        </>
-                      ) : null}
-                    </div>
-                    <div className="mb-3 flex flex-wrap gap-2">
-                      <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(capabilityTone(providerCapabilities[provider]?.tool_calling_supported))}`}>
-                        tools {formatCapabilityLabel(providerCapabilities[provider]?.tool_calling_supported)}
-                      </span>
-                      <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(capabilityTone(providerCapabilities[provider]?.structured_output_supported))}`}>
-                        structured {formatCapabilityLabel(providerCapabilities[provider]?.structured_output_supported)}
-                      </span>
-                      <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(capabilityTone(providerCapabilities[provider]?.streaming_supported))}`}>
-                        streaming {formatCapabilityLabel(providerCapabilities[provider]?.streaming_supported)}
-                      </span>
-                    </div>
-                    <div className="mb-3 space-y-1 text-[11px] text-text-tertiary">
-                      <div>
-                        context window:{" "}
-                        <span className="font-medium text-text">
-                          {providerCapabilities[provider]?.context_window_tokens
-                            ? `${providerCapabilities[provider]?.context_window_tokens?.toLocaleString("vi-VN")} tokens`
-                            : "unknown"}
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("neutral")}`}
+                        >
+                          {providerCapabilities[provider]?.model_count ??
+                            entries.length}{" "}
+                          models
                         </span>
-                        {providerCapabilities[provider]?.context_window_source ? ` • ${providerCapabilities[provider]?.context_window_source}` : ""}
+                        {providerCapabilities[provider]
+                          ?.runtime_discovery_enabled ? (
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(providerCapabilities[provider]?.runtime_discovery_succeeded ? "good" : "warn")}`}
+                          >
+                            {providerCapabilities[provider]
+                              ?.runtime_discovery_succeeded
+                              ? "runtime discovery ok"
+                              : "runtime discovery fail"}
+                          </span>
+                        ) : null}
                       </div>
-                      <div>
-                        max output:{" "}
-                        <span className="font-medium text-text">
-                          {providerCapabilities[provider]?.max_output_tokens
-                            ? `${providerCapabilities[provider]?.max_output_tokens?.toLocaleString("vi-VN")} tokens`
-                            : "unknown"}
+                      <div className="mb-2 text-[11px] text-text-tertiary">
+                        selected:{" "}
+                        <span className="font-mono text-text">
+                          {providerCapabilities[provider]?.selected_model ??
+                            "n/a"}
                         </span>
-                        {providerCapabilities[provider]?.max_output_source ? ` • ${providerCapabilities[provider]?.max_output_source}` : ""}
+                        {providerCapabilities[provider]
+                          ?.selected_model_in_catalog === false
+                          ? " (custom/off-catalog)"
+                          : ""}
+                        {providerCapabilities[provider]
+                          ?.selected_model_advanced ? (
+                          <>
+                            {" • "}advanced:{" "}
+                            <span className="font-mono text-text">
+                              {
+                                providerCapabilities[provider]
+                                  ?.selected_model_advanced
+                              }
+                            </span>
+                            {providerCapabilities[provider]
+                              ?.selected_model_advanced_in_catalog === false
+                              ? " (custom/off-catalog)"
+                              : ""}
+                          </>
+                        ) : null}
                       </div>
-                      <div>discovery success: {formatDateTime(providerCapabilities[provider]?.last_discovery_success_at)}</div>
-                      <div>live probe success: {formatDateTime(providerCapabilities[provider]?.last_live_probe_success_at)}</div>
-                    </div>
-                    {providerCapabilities[provider]?.last_live_probe_error ? (
-                      <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
-                        Live probe error: {providerCapabilities[provider]?.last_live_probe_error}
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(capabilityTone(providerCapabilities[provider]?.tool_calling_supported))}`}
+                        >
+                          tools{" "}
+                          {formatCapabilityLabel(
+                            providerCapabilities[provider]
+                              ?.tool_calling_supported,
+                          )}
+                        </span>
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(capabilityTone(providerCapabilities[provider]?.structured_output_supported))}`}
+                        >
+                          structured{" "}
+                          {formatCapabilityLabel(
+                            providerCapabilities[provider]
+                              ?.structured_output_supported,
+                          )}
+                        </span>
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(capabilityTone(providerCapabilities[provider]?.streaming_supported))}`}
+                        >
+                          streaming{" "}
+                          {formatCapabilityLabel(
+                            providerCapabilities[provider]?.streaming_supported,
+                          )}
+                        </span>
                       </div>
-                    ) : null}
-                    {providerCapabilities[provider]?.degraded_reasons?.length ? (
-                      <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
-                        {providerCapabilities[provider]?.degraded_reasons.join(" ")}
+                      <div className="mb-3 space-y-1 text-[11px] text-text-tertiary">
+                        <div>
+                          context window:{" "}
+                          <span className="font-medium text-text">
+                            {providerCapabilities[provider]
+                              ?.context_window_tokens
+                              ? `${providerCapabilities[provider]?.context_window_tokens?.toLocaleString("vi-VN")} tokens`
+                              : "unknown"}
+                          </span>
+                          {providerCapabilities[provider]?.context_window_source
+                            ? ` • ${providerCapabilities[provider]?.context_window_source}`
+                            : ""}
+                        </div>
+                        <div>
+                          max output:{" "}
+                          <span className="font-medium text-text">
+                            {providerCapabilities[provider]?.max_output_tokens
+                              ? `${providerCapabilities[provider]?.max_output_tokens?.toLocaleString("vi-VN")} tokens`
+                              : "unknown"}
+                          </span>
+                          {providerCapabilities[provider]?.max_output_source
+                            ? ` • ${providerCapabilities[provider]?.max_output_source}`
+                            : ""}
+                        </div>
+                        <div>
+                          discovery success:{" "}
+                          {formatDateTime(
+                            providerCapabilities[provider]
+                              ?.last_discovery_success_at,
+                          )}
+                        </div>
+                        <div>
+                          live probe success:{" "}
+                          {formatDateTime(
+                            providerCapabilities[provider]
+                              ?.last_live_probe_success_at,
+                          )}
+                        </div>
                       </div>
-                    ) : null}
-                    <div className="space-y-2">
-                      {entries.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-border bg-surface-secondary px-3 py-3 text-xs text-text-tertiary">
-                          Chua co goi y model tu catalog nay. Ban van co the nhap custom model id, hoac bo sung key/base URL de backend thu discovery runtime.
+                      {providerCapabilities[provider]?.last_live_probe_error ? (
+                        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
+                          Live probe error:{" "}
+                          {
+                            providerCapabilities[provider]
+                              ?.last_live_probe_error
+                          }
                         </div>
                       ) : null}
-                      {entries.slice(0, 4).map((entry) => (
-                        <div key={`${provider}:${entry.model_name}`} className="rounded-xl border border-border bg-surface-secondary px-3 py-2">
-                          <div className="text-sm font-medium text-text">{entry.display_name}</div>
-                          <div className="mt-1 text-[11px] font-mono text-text-tertiary">{entry.model_name}</div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(entry.status === "current" || entry.status === "available" ? "good" : entry.status === "legacy" ? "warn" : "neutral")}`}>{entry.status}</span>
-                            {entry.is_default && <span className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("accent")}`}>selected</span>}
+                      {providerCapabilities[provider]?.degraded_reasons
+                        ?.length ? (
+                        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
+                          {providerCapabilities[
+                            provider
+                          ]?.degraded_reasons.join(" ")}
+                        </div>
+                      ) : null}
+                      <div className="space-y-2">
+                        {entries.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-border bg-surface-secondary px-3 py-3 text-xs text-text-tertiary">
+                            Chưa có gợi ý model từ catalog này. Bạn vẫn có thể
+                            nhập custom model id, hoặc bổ sung key/base URL để
+                            backend thử discovery runtime.
                           </div>
-                        </div>
-                      ))}
+                        ) : null}
+                        {entries.slice(0, 4).map((entry) => (
+                          <div
+                            key={`${provider}:${entry.model_name}`}
+                            className="rounded-xl border border-border bg-surface-secondary px-3 py-2"
+                          >
+                            <div className="text-sm font-medium text-text">
+                              {entry.display_name}
+                            </div>
+                            <div className="mt-1 text-[11px] font-mono text-text-tertiary">
+                              {entry.model_name}
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <span
+                                className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass(entry.status === "current" || entry.status === "available" ? "good" : entry.status === "legacy" ? "warn" : "neutral")}`}
+                              >
+                                {entry.status}
+                              </span>
+                              {entry.is_default && (
+                                <span
+                                  className={`rounded-full border px-2 py-1 text-[11px] ${badgeClass("accent")}`}
+                                >
+                                  selected
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ),
+                )}
               </div>
             </div>
           </div>

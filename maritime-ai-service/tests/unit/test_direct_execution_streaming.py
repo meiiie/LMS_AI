@@ -4,6 +4,7 @@ import pytest
 
 from app.engine.multi_agent.direct_execution import (
     _normalize_direct_visible_thinking,
+    _split_visible_answer_chunks,
     _stream_answer_with_fallback,
     _stream_direct_wait_heartbeats,
 )
@@ -48,6 +49,21 @@ class _FakeLLM:
                 {"type": "text", "text": "Minh la Wiii."},
             ]
         )
+
+
+def test_split_visible_answer_chunks_preserves_markdown_urls_exactly():
+    text = (
+        "Endpoint tạo response: `POST https://api.openai.com/v1/responses` "
+        "([OpenAI Responses API reference](https://platform.openai.com/docs/api-reference/responses)). "
+        "Nếu cần đọc lại: `GET https://api.openai.com/v1/responses/{response_id}`."
+    )
+
+    chunks = _split_visible_answer_chunks(text, target_size=60)
+    joined = "".join(chunks)
+
+    assert joined == text
+    assert "https: //" not in joined
+    assert "openai. com" not in joined
 
 
 @pytest.mark.asyncio

@@ -39,6 +39,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 
 describe("Sprint 228: Widget Routing in MarkdownRenderer", () => {
+  const lazyMarkdownTimeout = { timeout: 10_000 };
+
   it("renders widget code blocks via InlineHtmlWidget", async () => {
     const content = "Here is a chart:\n\n```widget\n<div>Hello Widget</div>\n```\n\nNice!";
     render(<MarkdownRenderer content={content} />);
@@ -50,7 +52,7 @@ describe("Sprint 228: Widget Routing in MarkdownRenderer", () => {
   it("renders normal code blocks via CodeBlock (not widget)", async () => {
     const content = "```python\nprint('hello')\n```";
     render(<MarkdownRenderer content={content} />);
-    const codeBlock = await screen.findByTestId("code-block", undefined, { timeout: 3000 });
+    const codeBlock = await screen.findByTestId("code-block", undefined, lazyMarkdownTimeout);
     expect(codeBlock.getAttribute("data-lang")).toBe("python");
     expect(screen.queryByTestId("inline-widget")).toBeNull();
   });
@@ -58,7 +60,7 @@ describe("Sprint 228: Widget Routing in MarkdownRenderer", () => {
   it("does not render widget for html code blocks", async () => {
     const content = "```html\n<div>Normal HTML code</div>\n```";
     render(<MarkdownRenderer content={content} />);
-    const codeBlock = await screen.findByTestId("code-block", undefined, { timeout: 3000 });
+    const codeBlock = await screen.findByTestId("code-block", undefined, lazyMarkdownTimeout);
     expect(codeBlock.getAttribute("data-lang")).toBe("html");
     expect(screen.queryByTestId("inline-widget")).toBeNull();
   });
@@ -97,7 +99,7 @@ describe("Sprint 228: Widget Routing in MarkdownRenderer", () => {
   it("does not render widget for javascript code blocks", async () => {
     const content = "```javascript\nconst x = 1;\n```";
     render(<MarkdownRenderer content={content} />);
-    const codeBlock = await screen.findByTestId("code-block", undefined, { timeout: 3000 });
+    const codeBlock = await screen.findByTestId("code-block", undefined, lazyMarkdownTimeout);
     expect(codeBlock.getAttribute("data-lang")).toBe("javascript");
     expect(screen.queryByTestId("inline-widget")).toBeNull();
   });

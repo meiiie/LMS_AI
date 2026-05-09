@@ -84,13 +84,19 @@ class CharacterStateManager:
         try:
             repo = self._get_repo()
             existing = repo.get_all_blocks(user_id=user_id)
+            if hasattr(repo, "is_available") and not repo.is_available():
+                logger.debug(
+                    "Skipping default character block seed for user '%s': repository unavailable",
+                    user_id,
+                )
+                return
             existing_labels = {b.label for b in existing}
 
             for label_enum in BlockLabel:
                 label = label_enum.value
                 if label not in existing_labels:
                     char_limit = BLOCK_CHAR_LIMITS.get(label, 1000)
-                    repo.create_block(
+                    created = repo.create_block(
                         CharacterBlockCreate(
                             label=label,
                             content="",
@@ -98,7 +104,10 @@ class CharacterStateManager:
                         ),
                         user_id=user_id,
                     )
-                    logger.info("Created default character block '%s' for user '%s'", label, user_id)
+                    if created:
+                        logger.info("Created default character block '%s' for user '%s'", label, user_id)
+                    elif hasattr(repo, "is_available") and not repo.is_available():
+                        return
 
             self._initialized_defaults.add(user_id)
         except Exception as e:

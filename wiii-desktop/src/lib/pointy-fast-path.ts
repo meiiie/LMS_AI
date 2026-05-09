@@ -5,10 +5,15 @@ export const POINTY_FAST_PATH_SOURCE = "pointy_fast_path";
 const LOCATE_TERMS = [
   "o dau",
   "where",
-  "chi",
   "chi cho",
-  "tim",
-  "tro",
+  "chi vao",
+  "chi lai",
+  "chi den",
+  "chi toi",
+  "chi giup",
+  "tro vao",
+  "tro toi",
+  "tro den",
   "highlight",
   "nut",
   "button",
@@ -19,7 +24,10 @@ const CLICK_TERMS = [
   "bam",
   "click",
   "nhan vao",
-  "vao",
+  "vao khoa hoc",
+  "vao trang",
+  "vao muc",
+  "vao tab",
   "di toi",
   "chuyen toi",
   "open",
@@ -53,6 +61,10 @@ interface ScoredPointyTarget {
 }
 
 const TARGET_ALIASES: PointyTargetAlias[] = [
+  {
+    ids: ["chat-send-button", "send-message", "send-button", "gui-tin-nhan"],
+    terms: ["gui tin nhan", "nut gui tin nhan", "nut gui", "send message", "send button"],
+  },
   {
     ids: ["browse-courses", "browse-courses-link", "browse-courses-button"],
     terms: ["kham pha khoa hoc", "kham pha", "browse courses", "browse"],
@@ -106,8 +118,48 @@ export function normalizePointyText(value: string): string {
     .replace(/\s+/g, " ");
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasTerm(prompt: string, term: string): boolean {
+  const normalizedTerm = normalizePointyText(term);
+  if (!normalizedTerm) return false;
+  return new RegExp(`(?:^|\\s)${escapeRegExp(normalizedTerm)}(?:\\s|$)`).test(prompt);
+}
+
 function hasAnyTerm(prompt: string, terms: string[]): boolean {
-  return terms.some((term) => prompt.includes(term));
+  return terms.some((term) => hasTerm(prompt, term));
+}
+
+const POINTY_EXPLICIT_DISPATCH_TERMS = [
+  "wiii pointy",
+  "chi vao",
+  "chi lai",
+  "chi cho",
+  "chi giup",
+  "tro vao",
+  "tro toi",
+  "tro den",
+  "highlight",
+  "point to",
+  "where is",
+  "o dau",
+  "vi tri nut",
+  "nut gui tin nhan",
+  "nut gui",
+  "nut dinh kem",
+];
+
+export function looksExplicitPointyTurn(prompt: string, forceSkills?: string[]): boolean {
+  const forced = (forceSkills || []).some((skill) => (
+    normalizePointyText(skill) === "wiii pointy"
+    || normalizePointyText(skill) === "pointy"
+  ));
+  if (forced) return true;
+  const normalizedPrompt = normalizePointyText(prompt);
+  if (!normalizedPrompt) return false;
+  return hasAnyTerm(normalizedPrompt, POINTY_EXPLICIT_DISPATCH_TERMS);
 }
 
 function coerceTarget(value: unknown): PointyFastPathTarget | null {
@@ -134,7 +186,7 @@ export function getPointyTargetsFromContext(ctx: HostContext | null): PointyFast
 function aliasScore(prompt: string, target: PointyFastPathTarget): number {
   const idText = normalizePointyText(target.id);
   for (const alias of TARGET_ALIASES) {
-    const aliasMatchesPrompt = alias.terms.some((term) => prompt.includes(term));
+    const aliasMatchesPrompt = alias.terms.some((term) => hasTerm(prompt, term));
     if (!aliasMatchesPrompt) continue;
     if (alias.ids.some((id) => idText.includes(normalizePointyText(id)))) {
       return 40;
@@ -150,11 +202,11 @@ function targetScore(prompt: string, target: PointyFastPathTarget): number {
   const labelWords = labelText.split(" ").filter((word) => word.length >= 3);
   let score = aliasScore(prompt, target);
 
-  if (labelText && prompt.includes(labelText)) score += 35;
-  if (idText && prompt.includes(idText)) score += 24;
-  if (selectorText && prompt.includes(selectorText)) score += 12;
+  if (labelText && hasTerm(prompt, labelText)) score += 35;
+  if (idText && hasTerm(prompt, idText)) score += 24;
+  if (selectorText && hasTerm(prompt, selectorText)) score += 12;
   if (labelWords.length > 0) {
-    const matchedWords = labelWords.filter((word) => prompt.includes(word)).length;
+    const matchedWords = labelWords.filter((word) => hasTerm(prompt, word)).length;
     score += matchedWords * 6;
     if (matchedWords === labelWords.length) score += 12;
   }
@@ -173,6 +225,33 @@ function selectTarget(prompt: string, targets: PointyFastPathTarget[]): PointyFa
     }
   }
   return best && best.score >= 12 ? best.target : null;
+}
+
+function withKnownWiiiTargets(
+  prompt: string,
+  ctx: HostContext | null,
+  targets: PointyFastPathTarget[],
+): PointyFastPathTarget[] {
+  const hostType = normalizePointyText(ctx?.host_type || "");
+  if (hostType !== "wiii desktop" && hostType !== "wiii web") return targets;
+  const wantsSendButton =
+    prompt.includes("gui tin nhan") ||
+    prompt.includes("nut gui tin nhan") ||
+    prompt.includes("nut gui") ||
+    prompt.includes("send message") ||
+    prompt.includes("send button");
+  if (!wantsSendButton) return targets;
+  if (targets.some((target) => target.id === "chat-send-button")) return targets;
+  return [
+    ...targets,
+    {
+      id: "chat-send-button",
+      selector: "[data-wiii-id=\"chat-send-button\"]",
+      label: "Gửi tin nhắn",
+      click_safe: false,
+      click_kind: "chat_send",
+    },
+  ];
 }
 
 function isUnsafeClickTarget(prompt: string, target: PointyFastPathTarget): boolean {
@@ -200,7 +279,10 @@ export function buildPointyFastPathAction(
   const wantsClick = hasAnyTerm(normalizedPrompt, CLICK_TERMS);
   if (!wantsLocate && !wantsClick) return null;
 
-  const target = selectTarget(normalizedPrompt, getPointyTargetsFromContext(ctx));
+  const target = selectTarget(
+    normalizedPrompt,
+    withKnownWiiiTargets(normalizedPrompt, ctx, getPointyTargetsFromContext(ctx)),
+  );
   if (!target) return null;
 
   const label = target.label || target.id;

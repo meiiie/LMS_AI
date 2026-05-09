@@ -53,7 +53,7 @@ export async function getAdminDashboard(): Promise<AdminDashboard> {
 
 /** Search users with filters and pagination */
 export async function searchAdminUsers(
-  params?: AdminUserSearchParams
+  params?: AdminUserSearchParams,
 ): Promise<AdminUserSearchResponse> {
   const client = getClient();
   const query = new URLSearchParams();
@@ -68,25 +68,31 @@ export async function searchAdminUsers(
   if (params?.offset !== undefined) query.set("offset", String(params.offset));
   const qs = query.toString();
   return client.get<AdminUserSearchResponse>(
-    `${PREFIX}/users${qs ? `?${qs}` : ""}`
+    `${PREFIX}/users${qs ? `?${qs}` : ""}`,
   );
 }
 
 /** Get all feature flags (optionally filtered by org) */
-export async function getFeatureFlags(orgId?: string): Promise<AdminFeatureFlag[]> {
+export async function getFeatureFlags(
+  orgId?: string,
+): Promise<AdminFeatureFlag[]> {
   const client = getClient();
   const query = orgId ? `?org_id=${orgId}` : "";
   return client.get<AdminFeatureFlag[]>(`${PREFIX}/feature-flags${query}`);
 }
 
 /** Get organization detail */
-export async function getAdminOrgDetail(orgId: string): Promise<AdminOrgDetail> {
+export async function getAdminOrgDetail(
+  orgId: string,
+): Promise<AdminOrgDetail> {
   const client = getClient();
   return client.get<AdminOrgDetail>(`/api/v1/organizations/${orgId}`);
 }
 
 /** Get organization members */
-export async function getAdminOrgMembers(orgId: string): Promise<AdminOrgMember[]> {
+export async function getAdminOrgMembers(
+  orgId: string,
+): Promise<AdminOrgMember[]> {
   const client = getClient();
   return client.get<AdminOrgMember[]>(`/api/v1/organizations/${orgId}/members`);
 }
@@ -94,7 +100,7 @@ export async function getAdminOrgMembers(orgId: string): Promise<AdminOrgMember[
 /** Toggle a feature flag */
 export async function toggleFeatureFlag(
   key: string,
-  body: AdminFlagUpdateBody
+  body: AdminFlagUpdateBody,
 ): Promise<AdminFeatureFlag> {
   const client = getClient();
   return client.patch<AdminFeatureFlag>(`${PREFIX}/feature-flags/${key}`, body);
@@ -103,12 +109,12 @@ export async function toggleFeatureFlag(
 /** Delete a feature flag override */
 export async function deleteFeatureFlagOverride(
   key: string,
-  organizationId?: string
+  organizationId?: string,
 ): Promise<{ deleted: boolean; key: string }> {
   const client = getClient();
   const query = organizationId ? `?organization_id=${organizationId}` : "";
   return client.delete<{ deleted: boolean; key: string }>(
-    `${PREFIX}/feature-flags/${key}${query}`
+    `${PREFIX}/feature-flags/${key}${query}`,
   );
 }
 
@@ -125,7 +131,7 @@ export async function getAnalyticsOverview(params?: {
   if (params?.org_id) query.set("org_id", params.org_id);
   const qs = query.toString();
   return client.get<AnalyticsOverview>(
-    `${PREFIX}/analytics/overview${qs ? `?${qs}` : ""}`
+    `${PREFIX}/analytics/overview${qs ? `?${qs}` : ""}`,
   );
 }
 
@@ -146,7 +152,7 @@ export async function getLlmUsageAnalytics(params?: {
   if (params?.group_by) query.set("group_by", params.group_by);
   const qs = query.toString();
   return client.get<LlmUsageAnalytics>(
-    `${PREFIX}/analytics/llm-usage${qs ? `?${qs}` : ""}`
+    `${PREFIX}/analytics/llm-usage${qs ? `?${qs}` : ""}`,
   );
 }
 
@@ -156,7 +162,7 @@ export async function getLlmRuntimeConfig(): Promise<LlmRuntimeConfig> {
 }
 
 export async function updateLlmRuntimeConfig(
-  body: LlmRuntimeUpdateBody
+  body: LlmRuntimeUpdateBody,
 ): Promise<LlmRuntimeConfig> {
   const client = getClient();
   return client.patch<LlmRuntimeConfig>(`${PREFIX}/llm-runtime`, body);
@@ -168,21 +174,24 @@ export async function getModelCatalog(): Promise<ModelCatalogResponse> {
 }
 
 export async function refreshLlmRuntimeAudit(
-  body: LlmRuntimeAuditRefreshBody = {}
+  body: LlmRuntimeAuditRefreshBody = {},
 ): Promise<ModelCatalogResponse> {
   const client = getClient();
   return client.post<ModelCatalogResponse>(`${PREFIX}/llm-runtime/audit`, body);
 }
 
 export async function refreshVisionRuntimeAudit(
-  body: LlmRuntimeAuditRefreshBody = {}
+  body: LlmRuntimeAuditRefreshBody = {},
 ): Promise<LlmRuntimeConfig> {
   const client = getClient();
-  return client.post<LlmRuntimeConfig>(`${PREFIX}/llm-runtime/vision-audit`, body);
+  return client.post<LlmRuntimeConfig>(
+    `${PREFIX}/llm-runtime/vision-audit`,
+    body,
+  );
 }
 
 export async function planEmbeddingSpaceMigration(
-  body: EmbeddingSpaceMigrationPlanRequest
+  body: EmbeddingSpaceMigrationPlanRequest,
 ): Promise<EmbeddingSpaceMigrationPlanResponse> {
   const client = getClient();
   return client.post<EmbeddingSpaceMigrationPlanResponse>(
@@ -192,7 +201,7 @@ export async function planEmbeddingSpaceMigration(
 }
 
 export async function runEmbeddingSpaceMigration(
-  body: EmbeddingSpaceMigrationRunRequest
+  body: EmbeddingSpaceMigrationRunRequest,
 ): Promise<EmbeddingSpaceMigrationRunResponse> {
   const client = getClient();
   return client.post<EmbeddingSpaceMigrationRunResponse>(
@@ -202,7 +211,7 @@ export async function runEmbeddingSpaceMigration(
 }
 
 export async function promoteEmbeddingSpaceMigration(
-  body: EmbeddingSpaceMigrationPromoteRequest
+  body: EmbeddingSpaceMigrationPromoteRequest,
 ): Promise<EmbeddingSpaceMigrationRunResponse> {
   const client = getClient();
   return client.post<EmbeddingSpaceMigrationRunResponse>(
@@ -224,7 +233,7 @@ export async function getUserAnalytics(params?: {
   if (params?.org_id) query.set("org_id", params.org_id);
   const qs = query.toString();
   return client.get<UserAnalytics>(
-    `${PREFIX}/analytics/users${qs ? `?${qs}` : ""}`
+    `${PREFIX}/analytics/users${qs ? `?${qs}` : ""}`,
   );
 }
 
@@ -253,7 +262,7 @@ export async function getAuditLogs(params?: {
   if (params?.offset !== undefined) query.set("offset", String(params.offset));
   const qs = query.toString();
   return client.get<AdminAuditLogsResponse>(
-    `${PREFIX}/audit-logs${qs ? `?${qs}` : ""}`
+    `${PREFIX}/audit-logs${qs ? `?${qs}` : ""}`,
   );
 }
 
@@ -280,30 +289,29 @@ export async function getAuthEvents(params?: {
   if (params?.offset !== undefined) query.set("offset", String(params.offset));
   const qs = query.toString();
   return client.get<AdminAuthEventsResponse>(
-    `${PREFIX}/auth-events${qs ? `?${qs}` : ""}`
+    `${PREFIX}/auth-events${qs ? `?${qs}` : ""}`,
   );
 }
 
 /** Export user data (GDPR) */
 export async function gdprExportUser(
-  userId: string
+  userId: string,
 ): Promise<GdprExportResponse> {
   const client = getClient();
   return client.post<GdprExportResponse>(
     `${PREFIX}/users/${userId}/export`,
-    {}
+    {},
   );
 }
 
 /** Forget user data (GDPR) */
 export async function gdprForgetUser(
-  userId: string
+  userId: string,
 ): Promise<GdprForgetResponse> {
   const client = getClient();
-  return client.post<GdprForgetResponse>(
-    `${PREFIX}/users/${userId}/forget`,
-    { confirm: true }
-  );
+  return client.post<GdprForgetResponse>(`${PREFIX}/users/${userId}/forget`, {
+    confirm: true,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -323,7 +331,10 @@ export async function reactivateUser(userId: string): Promise<AdminUser> {
 }
 
 /** Change user role (admin only) */
-export async function changeUserRole(userId: string, role: string): Promise<AdminUser> {
+export async function changeUserRole(
+  userId: string,
+  role: string,
+): Promise<AdminUser> {
   const client = getClient();
   return client.patch<AdminUser>(`/api/v1/users/${userId}/role`, { role });
 }
@@ -345,15 +356,27 @@ export async function changeUserPlatformRole(
 // ---------------------------------------------------------------------------
 
 /** Add member to organization */
-export async function addOrgMember(orgId: string, userId: string, role?: string): Promise<void> {
+export async function addOrgMember(
+  orgId: string,
+  userId: string,
+  role?: string,
+): Promise<void> {
   const client = getClient();
-  await client.post<unknown>(`/api/v1/organizations/${orgId}/members`, { user_id: userId, role: role ?? "member" });
+  await client.post<unknown>(`/api/v1/organizations/${orgId}/members`, {
+    user_id: userId,
+    role: role ?? "member",
+  });
 }
 
 /** Remove member from organization */
-export async function removeOrgMember(orgId: string, userId: string): Promise<void> {
+export async function removeOrgMember(
+  orgId: string,
+  userId: string,
+): Promise<void> {
   const client = getClient();
-  await client.delete<unknown>(`/api/v1/organizations/${orgId}/members/${userId}`);
+  await client.delete<unknown>(
+    `/api/v1/organizations/${orgId}/members/${userId}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -369,40 +392,63 @@ import type {
 } from "./types";
 
 /** Upload a PDF document to org knowledge base */
-export async function uploadOrgDocument(orgId: string, file: File): Promise<OrgDocument> {
+export async function uploadOrgDocument(
+  orgId: string,
+  file: File,
+): Promise<OrgDocument> {
   const client = getClient();
   const formData = new FormData();
   formData.append("file", file);
-  return client.postFormData<OrgDocument>(`/api/v1/organizations/${orgId}/knowledge/upload`, formData);
+  return client.postFormData<OrgDocument>(
+    `/api/v1/organizations/${orgId}/knowledge/upload`,
+    formData,
+  );
 }
 
 /** List documents in org knowledge base */
-export async function listOrgDocuments(orgId: string, docStatus?: string): Promise<OrgDocumentListResponse> {
+export async function listOrgDocuments(
+  orgId: string,
+  docStatus?: string,
+): Promise<OrgDocumentListResponse> {
   const client = getClient();
   const query = docStatus ? `?doc_status=${docStatus}` : "";
-  return client.get<OrgDocumentListResponse>(`/api/v1/organizations/${orgId}/knowledge/documents${query}`);
+  return client.get<OrgDocumentListResponse>(
+    `/api/v1/organizations/${orgId}/knowledge/documents${query}`,
+  );
 }
 
 /** Get a specific org document */
-export async function getOrgDocument(orgId: string, docId: string): Promise<OrgDocument> {
+export async function getOrgDocument(
+  orgId: string,
+  docId: string,
+): Promise<OrgDocument> {
   const client = getClient();
-  return client.get<OrgDocument>(`/api/v1/organizations/${orgId}/knowledge/documents/${docId}`);
+  return client.get<OrgDocument>(
+    `/api/v1/organizations/${orgId}/knowledge/documents/${docId}`,
+  );
 }
 
 /** Delete an org document (soft-delete + remove embeddings) */
-export async function deleteOrgDocument(orgId: string, docId: string): Promise<void> {
+export async function deleteOrgDocument(
+  orgId: string,
+  docId: string,
+): Promise<void> {
   const client = getClient();
-  await client.delete<unknown>(`/api/v1/organizations/${orgId}/knowledge/documents/${docId}`);
+  await client.delete<unknown>(
+    `/api/v1/organizations/${orgId}/knowledge/documents/${docId}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Sprint 191: Knowledge Visualization
 // ---------------------------------------------------------------------------
 
+const KNOWLEDGE_VISUALIZATION_TIMEOUT_MS = 15_000;
+
 /** Get PCA/t-SNE scatter data for org knowledge embeddings */
 export async function getKnowledgeScatter(
   orgId: string,
-  params?: { method?: "pca" | "tsne"; dimensions?: 2 | 3; limit?: number }
+  params?: { method?: "pca" | "tsne"; dimensions?: 2 | 3; limit?: number },
 ): Promise<ScatterResponse> {
   const client = getClient();
   const query = new URLSearchParams();
@@ -411,19 +457,23 @@ export async function getKnowledgeScatter(
   if (params?.limit) query.set("limit", String(params.limit));
   const qs = query.toString();
   return client.get<ScatterResponse>(
-    `/api/v1/organizations/${orgId}/knowledge/visualize/scatter${qs ? `?${qs}` : ""}`
+    `/api/v1/organizations/${orgId}/knowledge/visualize/scatter${qs ? `?${qs}` : ""}`,
+    undefined,
+    KNOWLEDGE_VISUALIZATION_TIMEOUT_MS,
   );
 }
 
 /** Get knowledge graph (document/chunk nodes + similarity edges + Mermaid code) */
 export async function getKnowledgeGraph(
   orgId: string,
-  params?: { max_nodes?: number }
+  params?: { max_nodes?: number },
 ): Promise<KnowledgeGraphResponse> {
   const client = getClient();
   const query = params?.max_nodes ? `?max_nodes=${params.max_nodes}` : "";
   return client.get<KnowledgeGraphResponse>(
-    `/api/v1/organizations/${orgId}/knowledge/visualize/graph${query}`
+    `/api/v1/organizations/${orgId}/knowledge/visualize/graph${query}`,
+    undefined,
+    KNOWLEDGE_VISUALIZATION_TIMEOUT_MS,
   );
 }
 
@@ -431,11 +481,11 @@ export async function getKnowledgeGraph(
 export async function simulateRagFlow(
   orgId: string,
   queryText: string,
-  topK?: number
+  topK?: number,
 ): Promise<RagFlowResponse> {
   const client = getClient();
   return client.post<RagFlowResponse>(
     `/api/v1/organizations/${orgId}/knowledge/visualize/rag-flow`,
-    { query: queryText, top_k: topK ?? 10 }
+    { query: queryText, top_k: topK ?? 10 },
   );
 }

@@ -245,6 +245,39 @@ class TestWiiiHouseTextSanitizer:
         assert "Wiii đây" in cleaned
         assert "Còn bạn nhỉ" in cleaned
 
+    def test_removes_broken_soul_emotion_prefix(self):
+        from app.engine.multi_agent.graph import _sanitize_wiii_house_text
+
+        value = (
+            'e": {"mouthCurve":0.6,"eyeShape":0.4,"blush":0.2,'
+            '"eyeOpenness":1.3}, "intensity":0.9}--> '
+            "Dạ đây nha cậu~ POST /v1/responses là endpoint chính."
+        )
+
+        cleaned = _sanitize_wiii_house_text(value, query="tim tren web OpenAI Responses API")
+
+        assert cleaned.startswith("Dạ đây nha cậu")
+        assert "mouthCurve" not in cleaned
+        assert "eyeShape" not in cleaned
+        assert "-->" not in cleaned
+
+    def test_preserves_markdown_urls_while_spacing_vietnamese_text(self):
+        from app.engine.multi_agent.graph import _sanitize_wiii_house_text
+
+        value = (
+            "Endpoint tạo response: POST https://api.openai.com/v1/responses "
+            "([OpenAI Responses API reference](https://platform.openai.com/docs/api-reference/responses)). "
+            "Nguồn: platform.openai.com."
+        )
+
+        cleaned = _sanitize_wiii_house_text(value, query="tim tren web OpenAI Responses API")
+
+        assert "https://api.openai.com/v1/responses" in cleaned
+        assert "(https://platform.openai.com/docs/api-reference/responses)" in cleaned
+        assert "platform.openai.com" in cleaned
+        assert "https: //" not in cleaned
+        assert "openai. com" not in cleaned
+
     def test_keeps_cjk_when_user_explicitly_asks_for_it(self):
         from app.engine.multi_agent.graph import _sanitize_wiii_house_text
 

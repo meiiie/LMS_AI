@@ -10,6 +10,7 @@ This module provides a SINGLE shared database engine for all repositories.
 """
 
 import logging
+import time
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.exc import NoSuchModuleError
@@ -26,6 +27,9 @@ logger = logging.getLogger(__name__)
 _shared_engine = None
 _shared_session_factory = None
 _engine_initialized = False
+_database_unavailable_until = 0.0
+_database_unavailable_reason = ""
+_DATABASE_UNAVAILABLE_COOLDOWN_SECONDS = 30.0
 
 
 def _build_sync_postgres_url_candidates(raw_url: str) -> list[str]:
@@ -150,6 +154,44 @@ def get_shared_engine():
     return _shared_engine
 
 
+def is_shared_database_temporarily_unavailable() -> bool:
+    """Return True while the process is intentionally failing DB access fast."""
+    return time.monotonic() < _database_unavailable_until
+
+
+def mark_shared_database_unavailable(
+    reason: Exception | str,
+    *,
+    cooldown_seconds: float = _DATABASE_UNAVAILABLE_COOLDOWN_SECONDS,
+) -> None:
+    """Throttle repeated DB connection attempts after an observed outage."""
+    global _database_unavailable_until, _database_unavailable_reason
+
+    cooldown = max(1.0, float(cooldown_seconds))
+    now = time.monotonic()
+    until = now + cooldown
+    if until > _database_unavailable_until:
+        _database_unavailable_until = until
+        _database_unavailable_reason = str(reason)
+        logger.warning(
+            "Shared database marked temporarily unavailable for %.0fs: %s",
+            cooldown,
+            _database_unavailable_reason,
+        )
+
+
+def clear_shared_database_unavailable() -> None:
+    """Clear the degraded-DB cooldown.
+
+    This is primarily useful for unit tests that intentionally simulate a DB
+    outage and then immediately mock a healthy pool in the same Python process.
+    """
+    global _database_unavailable_until, _database_unavailable_reason
+
+    _database_unavailable_until = 0.0
+    _database_unavailable_reason = ""
+
+
 def get_shared_session_factory():
     """
     Get the shared SQLAlchemy session factory (Singleton).
@@ -158,6 +200,11 @@ def get_shared_session_factory():
         SQLAlchemy sessionmaker bound to shared engine
     """
     global _shared_session_factory
+
+    if is_shared_database_temporarily_unavailable():
+        raise RuntimeError(
+            "Shared database temporarily unavailable; retry after cooldown"
+        )
     
     if _shared_session_factory is None:
         engine = get_shared_engine()
@@ -181,6 +228,7 @@ def test_connection() -> bool:
         return True
     except Exception as e:
         logger.error("Database connection test failed: %s", e)
+        mark_shared_database_unavailable(e)
         return False
 
 
@@ -222,6 +270,11 @@ async def get_asyncpg_pool(create: bool = True):
     if not create:
         return None
 
+    if is_shared_database_temporarily_unavailable():
+        raise RuntimeError(
+            "Shared asyncpg pool temporarily unavailable; retry after cooldown"
+        )
+
     try:
         import asyncpg
 
@@ -229,6 +282,7 @@ async def get_asyncpg_pool(create: bool = True):
             dsn=settings.asyncpg_url,
             min_size=2,
             max_size=5,
+            timeout=getattr(settings, "postgres_connect_timeout_seconds", 5),
             command_timeout=15,
         )
         _asyncpg_pool = pool
@@ -236,6 +290,7 @@ async def get_asyncpg_pool(create: bool = True):
         return pool
     except Exception as e:
         logger.error("Failed to create asyncpg pool: %s", e)
+        mark_shared_database_unavailable(e)
         raise
 
 

@@ -1,5 +1,7 @@
 # Wiii
 
+![Wiii product platform overview](docs/assets/wiii-readme-hero.svg)
+
 Wiii is a monorepo for an AI platform that combines a FastAPI backend, a Tauri desktop client, iframe/embed delivery, multi-agent orchestration, retrieval and memory pipelines, LMS integrations, and multi-tenant organization support.
 
 This repository is optimized for ongoing product engineering, not as a minimal sample. Start here for the repository shape, the current deployment model, the main architecture documents, and the fastest local entry points.

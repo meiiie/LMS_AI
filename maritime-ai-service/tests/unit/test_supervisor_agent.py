@@ -432,6 +432,26 @@ class TestSupervisorRoute:
         assert base_state["routing_metadata"]["method"] == "structured+capability_override"
 
     @pytest.mark.asyncio
+    async def test_wiii_capability_inventory_does_not_override_to_code_studio(self, mock_llm, base_state):
+        from app.engine.multi_agent import supervisor as supervisor_module
+
+        sup = _make_supervisor(mock_llm)
+        base_state["query"] = (
+            "Wiii hien xu ly duoc anh dau vao, tao anh, Word, Excel, "
+            "video toi muc nao? Tra loi trung thuc, 5 y ngan."
+        )
+
+        with (
+            patch.object(supervisor_module.settings, "enable_conservative_fast_routing", False),
+            _mock_structured_route("DIRECT", intent="off_topic", confidence=0.95),
+        ):
+            result = await sup.route(base_state)
+
+        assert result == "direct"
+        assert base_state["routing_metadata"]["method"] == "structured"
+        assert base_state["routing_metadata"]["intent"] == "off_topic"
+
+    @pytest.mark.asyncio
     async def test_route_llm_unavailable_falls_back(self, base_state):
         sup = _make_supervisor(None)
         # No LLM → rule-based
@@ -749,6 +769,36 @@ class TestSupervisorSynthesize:
         state = {"agent_outputs": {}}
         result = await sup.synthesize(state)
         assert "Xin lỗi" in result
+
+    @pytest.mark.asyncio
+    async def test_no_outputs_salvages_search_tool_events(self, mock_llm):
+        sup = _make_supervisor(mock_llm)
+        state = {
+            "query": "OpenAI latest model announcement 2026",
+            "agent_outputs": {},
+            "tool_call_events": [
+                {
+                    "type": "call",
+                    "id": "web-1",
+                    "name": "tool_web_search",
+                    "args": {"query": "OpenAI latest model announcement 2026"},
+                },
+                {
+                    "type": "result",
+                    "id": "web-1",
+                    "name": "tool_web_search",
+                    "result": (
+                        "**Introducing GPT-5.5 - OpenAI**\n"
+                        "Apr 23, 2026 · OpenAI is releasing GPT-5.5.\n"
+                        "URL: https://openai.com/index/introducing-gpt-5-5/"
+                    ),
+                },
+            ],
+        }
+        result = await sup.synthesize(state)
+        assert "Introducing GPT-5.5" in result
+        assert "https://openai.com/index/introducing-gpt-5-5/" in result
+        assert "chưa xử lý" not in result
 
     @pytest.mark.asyncio
     async def test_multiple_outputs_with_llm(self, mock_llm):

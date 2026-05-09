@@ -72,7 +72,7 @@ export const VisualArtifactCard = memo(function VisualArtifactCard({
         <div className="min-w-0 flex-1">
           <div className="visual-artifact-card__eyebrow">
             <Code2 size={10} className="opacity-50" />
-            <span>{isPending ? "Dang tao visual" : "Visual"}</span>
+            <span>{isPending ? "Đang tạo visual" : "Visual"}</span>
           </div>
           <div className="visual-artifact-card__title">{title}</div>
         </div>
@@ -84,7 +84,7 @@ export const VisualArtifactCard = memo(function VisualArtifactCard({
             <CheckCircle2 size={14} className="text-[var(--green)]" />
           )}
           <span className="text-[10px] text-[var(--text3)]">
-            {isPending ? "Dang tao..." : "Da xong"}
+            {isPending ? "Đang tạo..." : "Đã xong"}
           </span>
         </div>
       </div>
@@ -96,7 +96,7 @@ export const VisualArtifactCard = memo(function VisualArtifactCard({
           className="visual-artifact-card__preview"
           onClick={() => setExpanded(!expanded)}
           aria-expanded={expanded}
-          aria-label={expanded ? "Thu gon code" : "Xem code"}
+          aria-label={expanded ? "Thu gọn code" : "Xem code"}
         >
           <pre className="visual-artifact-card__code">
             <code>

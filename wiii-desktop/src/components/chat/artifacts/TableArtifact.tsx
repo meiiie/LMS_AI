@@ -21,7 +21,10 @@ export default function TableArtifact({ artifact, mode }: Props) {
     try {
       const parsed = JSON.parse(artifact.content);
       if (Array.isArray(parsed)) return parsed;
-      if (artifact.metadata?.table_data && Array.isArray(artifact.metadata.table_data)) {
+      if (
+        artifact.metadata?.table_data &&
+        Array.isArray(artifact.metadata.table_data)
+      ) {
         return artifact.metadata.table_data as Record<string, unknown>[];
       }
       return [];
@@ -40,12 +43,15 @@ export default function TableArtifact({ artifact, mode }: Props) {
     return [...rows].sort((a, b) => {
       const va = a[sortColumn];
       const vb = b[sortColumn];
-      const cmp = String(va ?? "").localeCompare(String(vb ?? ""), undefined, { numeric: true });
+      const cmp = String(va ?? "").localeCompare(String(vb ?? ""), undefined, {
+        numeric: true,
+      });
       return sortDir === "asc" ? cmp : -cmp;
     });
   }, [rows, sortColumn, sortDir]);
 
-  const displayRows = mode === "card" ? sortedRows.slice(0, MAX_CARD_ROWS) : sortedRows;
+  const displayRows =
+    mode === "card" ? sortedRows.slice(0, MAX_CARD_ROWS) : sortedRows;
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -64,9 +70,11 @@ export default function TableArtifact({ artifact, mode }: Props) {
             <Table2 size={18} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium text-text">{artifact.title}</div>
+            <div className="text-sm font-medium text-text">
+              {artifact.title}
+            </div>
             <div className="text-xs text-text-tertiary mt-1">
-              Bang du lieu da duoc tao. Mo tep goc de xem day du neu can.
+              Bảng dữ liệu đã được tạo. Mở tệp gốc để xem đầy đủ nếu cần.
             </div>
           </div>
           {fileUrl && (
@@ -77,7 +85,7 @@ export default function TableArtifact({ artifact, mode }: Props) {
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-surface-tertiary hover:bg-border text-text-secondary hover:text-text transition-colors text-xs shrink-0"
             >
               <Download size={14} />
-              Mo tep
+              Mở tệp
             </a>
           )}
         </div>
@@ -96,12 +104,16 @@ export default function TableArtifact({ artifact, mode }: Props) {
             className="flex items-center gap-1 text-xs text-text-secondary hover:text-text px-2 py-1 rounded bg-surface-tertiary hover:bg-border transition-colors"
           >
             <Download size={12} />
-            Mo tep goc
+            Mở tệp gốc
           </a>
         </div>
       )}
 
-      <div className={mode === "card" ? "overflow-auto max-h-[200px]" : "overflow-auto"}>
+      <div
+        className={
+          mode === "card" ? "overflow-auto max-h-[200px]" : "overflow-auto"
+        }
+      >
         <table className="w-full text-xs">
           <thead>
             <tr>
@@ -121,7 +133,10 @@ export default function TableArtifact({ artifact, mode }: Props) {
           </thead>
           <tbody>
             {displayRows.map((row, index) => (
-              <tr key={index} className="border-t border-border/50 hover:bg-surface-secondary transition-colors">
+              <tr
+                key={index}
+                className="border-t border-border/50 hover:bg-surface-secondary transition-colors"
+              >
                 {columns.map((column) => (
                   <td key={column} className="px-3 py-1.5 text-text">
                     {String(row[column] ?? "")}
@@ -133,7 +148,7 @@ export default function TableArtifact({ artifact, mode }: Props) {
         </table>
         {mode === "card" && rows.length > MAX_CARD_ROWS && (
           <div className="text-center text-[10px] text-text-tertiary py-1">
-            +{rows.length - MAX_CARD_ROWS} hang khac
+            +{rows.length - MAX_CARD_ROWS} hàng khác
           </div>
         )}
       </div>

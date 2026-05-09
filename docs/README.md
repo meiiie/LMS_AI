@@ -12,6 +12,7 @@ Use this folder for repository-level documentation that explains the product, th
 - `plans/2026-04-28-wiii-pipeline-simplification-plan.md`: current request/auth/memory/router/agent/tool/RAG/stream lifecycle and safe LangGraph/history/compat cleanup plan
 - `operations/WIII_DOCUMENTATION_GOVERNANCE.md`: documentation lifecycle, cleanup controls, and issue/PR standards
 - `operations/WIII_GITHUB_GOVERNANCE.md`: GitHub issue, PR, branch, review, label, and merge standards
+- `operations/WIII_SPEC_KIT_WORKFLOW.md`: Spec Kit constitution, specification, planning, and multi-agent workflow for Wiii
 - `operations/WIII_CODEX_REVIEW_SETUP.md`: Codex GitHub Review setup, rollout, operating policy, and rollback controls
 - `operations/WIII_MULTI_AGENT_MAINTAINER_PROTOCOL.md`: multi-agent ownership, maintainer review, CodeRabbit, conflict, and merge protocol
 - `operations/WIII_PRODUCT_RELEASE_RUNBOOK.md`: product release lane, pinned deploys, smoke gates, rollback, and parallel-team safety

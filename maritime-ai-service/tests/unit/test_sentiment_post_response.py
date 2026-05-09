@@ -76,6 +76,35 @@ def test_sentiment_post_response_schedules_analysis_when_enabled():
     mock_ensure_future.assert_called_once()
 
 
+def test_sentiment_post_response_skips_low_value_ephemeral_turns():
+    analyzer = AsyncMock()
+    context = PostResponseContinuityContext(
+        user_id="user-1",
+        user_role="student",
+        message="đói phết nữa",
+        response_text="Kiếm gì dễ ăn trong 5-10 phút trước nha.",
+        domain_id="maritime",
+        organization_id="org-1",
+        channel="web",
+    )
+
+    with patch(
+        "app.services.sentiment_post_response.settings",
+        MagicMock(enable_living_continuity=True),
+    ), patch(
+        "app.services.sentiment_post_response.asyncio.ensure_future",
+        side_effect=_consume_scheduled_coroutine,
+    ) as mock_ensure_future:
+        scheduled = schedule_living_sentiment_continuity(
+            context,
+            analyze_and_process_sentiment=analyzer,
+        )
+
+    assert scheduled is False
+    analyzer.assert_not_called()
+    mock_ensure_future.assert_not_called()
+
+
 def test_sentiment_post_response_swallows_schedule_errors():
     analyzer = AsyncMock()
 

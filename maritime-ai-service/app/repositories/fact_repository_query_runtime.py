@@ -69,7 +69,7 @@ class FactRepositoryQueryRuntimeMixin:
                         WHERE user_id = :user_id
                           AND memory_type = :memory_type
                           {org_filter}
-                        ORDER BY metadata->>'fact_type', created_at DESC
+                        ORDER BY metadata->>'fact_type', COALESCE(updated_at, created_at) DESC, created_at DESC
                         """
                     )
                 else:
@@ -89,7 +89,7 @@ class FactRepositoryQueryRuntimeMixin:
                         WHERE user_id = :user_id
                           AND memory_type = :memory_type
                           {org_filter}
-                        ORDER BY importance DESC, created_at DESC
+                        ORDER BY importance DESC, COALESCE(updated_at, created_at) DESC, created_at DESC
                         LIMIT :limit
                         """
                     )
@@ -358,7 +358,7 @@ class FactRepositoryQueryRuntimeMixin:
                       AND memory_type = :memory_type
                       AND metadata->>'fact_type' = :fact_type
                       {org_filter}
-                    ORDER BY created_at DESC
+                    ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC
                     LIMIT 1
                     """
                 )

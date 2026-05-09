@@ -61,11 +61,17 @@ export interface ReasoningIntervalViewModel {
 }
 
 function formatIntervalDuration(seconds?: number): string {
-  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
+  if (
+    typeof seconds !== "number" ||
+    !Number.isFinite(seconds) ||
+    seconds <= 0
+  ) {
     return "";
   }
   const rounded = Math.round(seconds * 10) / 10;
-  const display = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  const display = Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(1);
   return `Nhịp ${display}s`;
 }
 
@@ -88,7 +94,8 @@ const WIII_FALLBACK_LABELS_DONE = [
 ];
 
 // Detect genuine Wiii persona labels (contain kaomoji, ~, Wiii, emoji patterns)
-const PERSONA_MARKER = /[~≽˶╥⊙¬ᕙ•̀ᴗ•́و\u{1F600}-\u{1F64F}\u{2728}\u{1F31F}]|Wiii/u;
+const PERSONA_MARKER =
+  /[~≽˶╥⊙¬ᕙ•̀ᴗ•́و\u{1F600}-\u{1F64F}\u{2728}\u{1F31F}]|Wiii/u;
 
 /**
  * Header label: ONLY Wiii persona labels from tool_think's persona_label field.
@@ -107,7 +114,9 @@ function getIntervalHeaderLabel(interval: ReasoningIntervalViewModel) {
 
   // Tier 2: Wiii-voice fallback (ALWAYS cute, never technical)
   if (interval.isLive) return WIII_FALLBACK_LABELS_LIVE;
-  return WIII_FALLBACK_LABELS_DONE[Math.floor(Math.random() * WIII_FALLBACK_LABELS_DONE.length)];
+  return WIII_FALLBACK_LABELS_DONE[
+    Math.floor(Math.random() * WIII_FALLBACK_LABELS_DONE.length)
+  ];
 }
 
 /** Full summary for the expanded body preview. */
@@ -123,7 +132,7 @@ function buildPreviewLine(block: PreviewBlockData) {
 
 function buildArtifactLine(block: ArtifactBlockData) {
   const artifact = block.artifact;
-  if (!artifact) return "Da tao mot artifact";
+  if (!artifact) return "Đã tạo một artifact";
   return `${artifact.title}${artifact.artifact_type ? ` • ${artifact.artifact_type}` : ""}`;
 }
 
@@ -134,7 +143,10 @@ function summarizeAction(block: ActionTextBlockData) {
   };
 }
 
-function resolveOperationIcon(kind: ReasoningIntervalItem["kind"], toolName?: string) {
+function resolveOperationIcon(
+  kind: ReasoningIntervalItem["kind"],
+  toolName?: string,
+) {
   if (kind === "status") return Clock3;
   if (kind === "action") return ChevronRight;
   if (kind === "preview") return Globe2;
@@ -150,8 +162,10 @@ function resolveOperationIcon(kind: ReasoningIntervalItem["kind"], toolName?: st
     return Icon;
   }
   if (toolName?.includes("search")) return Globe2;
-  if (toolName?.includes("python") || toolName?.includes("code")) return TerminalSquare;
-  if (toolName?.includes("generate") || toolName?.includes("file")) return FileSearch;
+  if (toolName?.includes("python") || toolName?.includes("code"))
+    return TerminalSquare;
+  if (toolName?.includes("generate") || toolName?.includes("file"))
+    return FileSearch;
   if (toolName?.includes("knowledge")) return BookOpen;
   return Wrench;
 }
@@ -161,20 +175,14 @@ function _normalizeInlineText(value: string | undefined) {
 }
 void _normalizeInlineText;
 
-function renderThinkingMarkdown(
-  block: ThinkingBlockData,
-  withCursor = false,
-) {
+function renderThinkingMarkdown(block: ThinkingBlockData, withCursor = false) {
   const content = block.content?.trim() || "";
   if (!content) return null;
   return (
     <div className="reasoning-interval__thinking">
       <MarkdownRenderer content={content} />
       {withCursor && (
-        <span
-          className="reasoning-interval__cursor"
-          aria-hidden="true"
-        />
+        <span className="reasoning-interval__cursor" aria-hidden="true" />
       )}
     </div>
   );
@@ -199,7 +207,9 @@ function OperationRow({
   body,
   tone = "default",
 }: {
-  icon: ComponentType<{ size?: string | number; className?: string }> | LucideIcon;
+  icon:
+    | ComponentType<{ size?: string | number; className?: string }>
+    | LucideIcon;
   label: string;
   body: string;
   tone?: "default" | "success" | "pending";
@@ -226,7 +236,7 @@ function renderOperationItem(
       <OperationRow
         key={item.id}
         icon={resolveOperationIcon(item.kind)}
-        label="Tien trinh"
+        label="Tiến trình"
         body={item.content}
         tone="pending"
       />
@@ -250,8 +260,9 @@ function renderOperationItem(
       return <ToolExecutionStrip key={item.id} block={item.block} />;
     }
     const summary = summarizeToolExecutionBlock(item.block);
-    const body = [summary.argsLine, summary.resultLine].filter(Boolean).join(" • ")
-      || "Đang thực hiện một thao tác";
+    const body =
+      [summary.argsLine, summary.resultLine].filter(Boolean).join(" • ") ||
+      "Đang thực hiện một thao tác";
     return (
       <OperationRow
         key={item.id}
@@ -293,8 +304,8 @@ function renderOperationItem(
       <OperationRow
         key={item.id}
         icon={resolveOperationIcon(item.kind)}
-        label="Anh kiem chung"
-        body={item.block.label || item.block.url || "Da cap nhat mot anh chup"}
+        label="Ảnh kiểm chứng"
+        body={item.block.label || item.block.url || "Đã cập nhật một ảnh chụp"}
       />
     );
   }
@@ -329,11 +340,19 @@ function ToolIntervalSection({
         tabIndex={0}
         className="reasoning-interval__tool-header"
         onClick={handleClick}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleClick(e as unknown as React.MouseEvent); } }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleClick(e as unknown as React.MouseEvent);
+          }
+        }}
         aria-expanded={expanded}
       >
         <svg
-          width="10" height="10" viewBox="0 0 20 20" fill="currentColor"
+          width="10"
+          height="10"
+          viewBox="0 0 20 20"
+          fill="currentColor"
           className={`reasoning-interval__tool-chevron ${expanded ? "reasoning-interval__tool-chevron--open" : ""}`}
         >
           <path d="M7.16 14.13C6.96 14.31 6.94 14.63 7.13 14.84 7.31 15.04 7.63 15.06 7.84 14.87L12.84 10.37C13.06 10.18 13.06 9.82 12.84 9.63L7.84 5.13C7.63 4.94 7.31 4.96 7.13 5.17 6.94 5.37 6.96 5.69 7.16 5.87L11.75 10 7.16 14.13Z" />
@@ -341,9 +360,7 @@ function ToolIntervalSection({
         {children}
       </div>
       {expanded && thinkingAfter && (
-        <div className="reasoning-interval__tool-body">
-          {thinkingAfter}
-        </div>
+        <div className="reasoning-interval__tool-body">{thinkingAfter}</div>
       )}
     </div>
   );
@@ -356,7 +373,8 @@ function selectVisibleItems(
   keepExpandedTail = false,
 ) {
   const thinkingItems = items.filter(
-    (item): item is Extract<ReasoningIntervalItem, { kind: "thinking" }> => item.kind === "thinking",
+    (item): item is Extract<ReasoningIntervalItem, { kind: "thinking" }> =>
+      item.kind === "thinking",
   );
 
   if (thinkingLevel === "minimal") {
@@ -382,26 +400,40 @@ function selectVisibleItems(
     if (isLive) {
       const latestWindow = thinkingItems.slice(-2);
       visibleThinkingIds = new Set(
-        [firstThinking, ...latestWindow.filter((item) => item.id != firstThinking.id)].map((item) => item.id),
+        [
+          firstThinking,
+          ...latestWindow.filter((item) => item.id != firstThinking.id),
+        ].map((item) => item.id),
       );
-      return items.filter((item) => item.kind !== "thinking" || visibleThinkingIds.has(item.id));
+      return items.filter(
+        (item) => item.kind !== "thinking" || visibleThinkingIds.has(item.id),
+      );
     }
 
     if (keepExpandedTail) {
       const latestWindow = thinkingItems.slice(-2);
       visibleThinkingIds = new Set(
-        [firstThinking, ...latestWindow.filter((item) => item.id !== firstThinking.id)].map((item) => item.id),
+        [
+          firstThinking,
+          ...latestWindow.filter((item) => item.id !== firstThinking.id),
+        ].map((item) => item.id),
       );
-      return items.filter((item) => item.kind !== "thinking" || visibleThinkingIds.has(item.id));
+      return items.filter(
+        (item) => item.kind !== "thinking" || visibleThinkingIds.has(item.id),
+      );
     }
 
     if (lastThinking.id === firstThinking.id) {
       visibleThinkingIds = new Set([firstThinking.id]);
-      return items.filter((item) => item.kind !== "thinking" || visibleThinkingIds.has(item.id));
+      return items.filter(
+        (item) => item.kind !== "thinking" || visibleThinkingIds.has(item.id),
+      );
     }
 
     visibleThinkingIds = new Set([firstThinking.id, lastThinking.id]);
-    return items.filter((item) => item.kind !== "thinking" || visibleThinkingIds.has(item.id));
+    return items.filter(
+      (item) => item.kind !== "thinking" || visibleThinkingIds.has(item.id),
+    );
   }
 
   return items;
@@ -426,10 +458,10 @@ export function ReasoningInterval({
   void getIntervalSummary;
   const durationText = formatIntervalDuration(interval.durationSeconds);
   const keepLongTurnExpanded =
-    thinkingLevel === "balanced"
-    && isDone
-    && typeof interval.durationSeconds === "number"
-    && interval.durationSeconds >= 12;
+    thinkingLevel === "balanced" &&
+    isDone &&
+    typeof interval.durationSeconds === "number" &&
+    interval.durationSeconds >= 12;
 
   // Code Studio delegation: when a tool_create_visual_code call targets a
   // session that Code Studio already owns, skip the inline tool render — the
@@ -443,20 +475,27 @@ export function ReasoningInterval({
   const [userExpanded, setUserExpanded] = useState(false);
   const allItems = interval.items;
   const visibleItems = useMemo(
-    () => selectVisibleItems(allItems, thinkingLevel, !isDone, keepLongTurnExpanded),
+    () =>
+      selectVisibleItems(
+        allItems,
+        thinkingLevel,
+        !isDone,
+        keepLongTurnExpanded,
+      ),
     [allItems, isDone, keepLongTurnExpanded, thinkingLevel],
   );
   const collapsedPreview = useMemo(
     () =>
-      buildCollapsedPreviewText(visibleItems.length > 0 ? visibleItems : allItems)
-      || "",
+      buildCollapsedPreviewText(
+        visibleItems.length > 0 ? visibleItems : allItems,
+      ) || "",
     [allItems, visibleItems],
   );
 
   // Streaming → auto expanded. Done → auto collapsed. User click → manual override.
   const showBody = userToggled
     ? userExpanded
-    : (!isDone || thinkingLevel === "detailed" || keepLongTurnExpanded);
+    : !isDone || thinkingLevel === "detailed" || keepLongTurnExpanded;
 
   const handleToggle = () => {
     setUserToggled(true);
@@ -482,23 +521,39 @@ export function ReasoningInterval({
           {!isDone ? (
             <span className="reasoning-interval__live-dot" />
           ) : (
-            <svg className="reasoning-interval__header-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
+            <svg
+              className="reasoning-interval__header-icon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+              <polyline points="22 4 12 14.01 9 11.01" />
             </svg>
           )}
-          <span className="reasoning-interval__header-label">{headerLabel}</span>
+          <span className="reasoning-interval__header-label" aria-live="polite">
+            {headerLabel}
+          </span>
           {durationText && (
-            <span className="reasoning-interval__header-duration">{durationText}</span>
+            <span className="reasoning-interval__header-duration">
+              {durationText}
+            </span>
           )}
           <svg
-            width="12" height="12" viewBox="0 0 20 20" fill="currentColor"
+            width="12"
+            height="12"
+            viewBox="0 0 20 20"
+            fill="currentColor"
             className={`reasoning-interval__chevron ${showBody ? "reasoning-interval__chevron--open" : ""}`}
           >
             <path d="M14.128 7.16482C14.3126 6.95983 14.6298 6.94336 14.835 7.12771C15.0402 7.31242 15.0567 7.62952 14.8721 7.83477L10.372 12.835C10.1755 13.0551 9.82445 13.0551 9.62788 12.835L5.12778 7.83477C4.94317 7.62952 4.95963 7.31242 5.16489 7.12771C5.37015 6.94336 5.68741 6.95983 5.87193 7.16482L9.99995 11.7519L14.128 7.16482Z" />
           </svg>
         </button>
-        <span className="sr-only" role="status" aria-live="polite">{headerLabel}</span>
-
         {!showBody && collapsedPreview ? (
           <div className="reasoning-interval__collapsed-preview">
             <MarkdownRenderer content={collapsedPreview} />
@@ -508,6 +563,8 @@ export function ReasoningInterval({
         {/* Thinking body: timeline line via ::before, contained here */}
         <div
           className={`reasoning-interval__thinking-body ${showBody ? "reasoning-interval__thinking-body--expanded" : "reasoning-interval__thinking-body--collapsed"}`}
+          hidden={!showBody}
+          aria-hidden={!showBody}
         >
           {(() => {
             // Group items: thinking shown inline, operations get their following thinking as expandable body
@@ -516,22 +573,28 @@ export function ReasoningInterval({
               const item = visibleItems[idx];
 
               if (item.kind === "thinking") {
-                const isLast = idx === visibleItems.length - 1 || visibleItems.slice(idx + 1).every((i) => i.kind !== "thinking");
+                const isLast =
+                  idx === visibleItems.length - 1 ||
+                  visibleItems
+                    .slice(idx + 1)
+                    .every((i) => i.kind !== "thinking");
                 const showCursor = !isDone && isLast;
                 elements.push(
                   <div key={item.id} className="reasoning-interval__segment">
                     {renderThinkingMarkdown(item.block, showCursor)}
-                  </div>
+                  </div>,
                 );
                 continue;
               }
 
               // Delegate to Code Studio panel when it owns the target session.
               if (
-                item.kind === "tool"
-                && item.block.tool.name === "tool_create_visual_code"
+                item.kind === "tool" &&
+                item.block.tool.name === "tool_create_visual_code"
               ) {
-                const vsid = (item.block.tool.args as Record<string, unknown> | undefined)?.visual_session_id;
+                const vsid = (
+                  item.block.tool.args as Record<string, unknown> | undefined
+                )?.visual_session_id;
                 if (typeof vsid === "string" && codeStudioSessions[vsid]) {
                   continue;
                 }
@@ -542,10 +605,14 @@ export function ReasoningInterval({
               if (!operation) continue;
 
               let thinkingAfterNode: ReactNode = null;
-              if (idx + 1 < visibleItems.length && visibleItems[idx + 1].kind === "thinking") {
+              if (
+                idx + 1 < visibleItems.length &&
+                visibleItems[idx + 1].kind === "thinking"
+              ) {
                 const nextThinking = visibleItems[idx + 1];
                 thinkingAfterNode = renderThinkingMarkdown(
-                  (nextThinking as { block: ThinkingBlockData }).block, false
+                  (nextThinking as { block: ThinkingBlockData }).block,
+                  false,
                 );
                 idx++; // Skip the thinking item — it's rendered inside the tool section
               }
@@ -555,12 +622,13 @@ export function ReasoningInterval({
                   key={item.id}
                   thinkingAfter={thinkingAfterNode}
                   defaultExpanded={
-                    Boolean(thinkingAfterNode)
-                    && (thinkingLevel === "detailed" || (thinkingLevel === "balanced" && showBody))
+                    Boolean(thinkingAfterNode) &&
+                    (thinkingLevel === "detailed" ||
+                      (thinkingLevel === "balanced" && showBody))
                   }
                 >
                   {operation}
-                </ToolIntervalSection>
+                </ToolIntervalSection>,
               );
             }
             return elements;
@@ -569,11 +637,25 @@ export function ReasoningInterval({
           {/* Terminal label — shown when thinking is complete */}
           {isDone && (
             <div className="reasoning-interval__terminal">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
               </svg>
               <span>Wiii đã xem xong ≽^•⩊•^≼</span>
-              {durationText && <span className="reasoning-interval__header-duration">{durationText}</span>}
+              {durationText && (
+                <span className="reasoning-interval__header-duration">
+                  {durationText}
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -633,7 +715,9 @@ function renderInspectorBlock(block: ContentBlock) {
   }
 
   if (block.type === "visual") {
-    return <VisualBlock key={block.id} block={block as VisualBlockData} embedded />;
+    return (
+      <VisualBlock key={block.id} block={block as VisualBlockData} embedded />
+    );
   }
 
   if (block.type === "answer") {
@@ -671,7 +755,7 @@ export function ThinkingInspectorDrawer({
             exit={{ opacity: 0 }}
             className="reasoning-inspector__backdrop"
             onClick={onClose}
-            aria-label="Dong trace"
+            aria-label="Đóng trace"
           />
           <motion.aside
             initial={{ opacity: 0, x: 28 }}
@@ -690,7 +774,7 @@ export function ThinkingInspectorDrawer({
                 type="button"
                 className="reasoning-inspector__close"
                 onClick={onClose}
-                aria-label="Dong trace"
+                aria-label="Đóng trace"
               >
                 <X size={16} />
               </button>

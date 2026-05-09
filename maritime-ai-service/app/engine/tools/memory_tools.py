@@ -79,6 +79,15 @@ def get_user_cache() -> Dict[str, Any]:
     return _get_state().user_cache
 
 
+def _strip_memory_metadata(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep user-facing memory tools from exposing internal timestamp helper keys."""
+    return {
+        key: value
+        for key, value in (data or {}).items()
+        if not str(key).endswith("__updated_at")
+    }
+
+
 # =============================================================================
 # BASIC MEMORY TOOLS
 # =============================================================================
@@ -159,14 +168,14 @@ async def tool_get_user_info(key: str = "all") -> str:
             try:
                 facts = await _semantic_memory.get_user_facts(user_id=user_id)
                 if facts:
-                    user_data.update(facts)
+                    user_data.update(_strip_memory_metadata(facts))
                     # Also populate cache for subsequent calls
-                    state.user_cache.update(facts)
+                    state.user_cache.update(_strip_memory_metadata(facts))
             except Exception as e:
                 logger.warning("Semantic memory retrieval failed: %s", e)
 
         if key == "all":
-            return f"Thong tin user: {user_data}" if user_data else "Chua co thong tin user."
+            return f"Thong tin user: {_strip_memory_metadata(user_data)}" if user_data else "Chua co thong tin user."
         else:
             value = user_data.get(key)
             return f"{key}: {value}" if value else f"Chua co thong tin ve {key}."
@@ -350,7 +359,7 @@ async def tool_list_memories() -> str:
                 facts = await _semantic_memory.get_user_facts(user_id=user_id)
                 if facts:
                     result_parts.append("\n**Thong tin da luu (persistent):**")
-                    for fact_type, fact_value in list(facts.items())[:10]:
+                    for fact_type, fact_value in list(_strip_memory_metadata(facts).items())[:10]:
                         result_parts.append(f"  - {fact_type}: {fact_value}")
             except Exception as e:
                 logger.warning("Semantic memory retrieval failed: %s", e)

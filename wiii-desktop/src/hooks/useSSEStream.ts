@@ -2,7 +2,7 @@
  * SSE streaming hook — connects chat store to SSE parser.
  * Sprint 150: StreamBuffer integration for smooth token rendering.
  */
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { sendMessageStream } from "@/api/chat";
 import { ApiHttpError, initClient } from "@/api/client";
 import {
@@ -24,15 +24,20 @@ import { useToastStore } from "@/stores/toast-store";
 import { useModelStore } from "@/stores/model-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { StreamBuffer } from "@/lib/stream-buffer";
+import { stripWiiiInternalMarkup } from "@/lib/internal-markup";
 import {
   POINTY_FAST_PATH_SOURCE,
   buildPointyFastPathAction,
+  looksExplicitPointyTurn,
 } from "@/lib/pointy-fast-path";
+import { pointAt } from "@/pointy-host/api";
 import { trackVisualTelemetry } from "@/lib/visual-telemetry";
 import type { SSEEventHandler } from "@/api/sse";
 import type {
   AggregationSummary,
   ArtifactType,
+  ChatDocumentAttachment,
+  ChatDocumentContext,
   ChatResponseMetadata,
   DisplayPresentationMeta,
   ImageInput,
@@ -55,6 +60,15 @@ const _thinkToolIds = new Set<string>();
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForPointyLayoutCommit(): Promise<void> {
+  if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+    await sleep(0);
+    return;
+  }
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
 function createStreamRequestId(): string {
@@ -400,6 +414,186 @@ export function useSSEStream() {
   const abortRef = useRef<AbortController | null>(null);
   // Sprint 150: Token smoothing buffers
   const answerBufferRef = useRef<StreamBuffer | null>(null);
+  // v4.0 F7 (2026-05-06) — Clicky-pattern inline `[POINT:...]` tag.
+  // Shadow accumulator captures FULL unstripped answer text (with tag
+  // intact) so onDone can parse + dispatch cursor without round-tripping
+  // through the broken tool_call → SSE pointy_action pipeline.
+  const fullAnswerTextRef = useRef<string>("");
+  // v6.0 F11 (2026-05-06) — streaming dispatch state. "Vừa nói vừa làm":
+  // cursor flies WHILE AI is still streaming text, not after onDone.
+  // Tag regex matches as soon as `]` arrives in stream; embodied parser
+  // fires on sentence boundary. Idempotent via dispatchedThisStreamRef.
+  const dispatchedThisStreamRef = useRef<boolean>(false);
+  const allowEmbodiedDispatchRef = useRef<boolean>(false);
+  type PointyTargetMin = { id: string; label?: string; role?: string };
+  type PointyModules = {
+    parsePointTag: (t: string) => {
+      tag: { selector: string; caption: string } | null;
+      stripped: string;
+    };
+    parseAllPointTags: (t: string) => {
+      tags: { selector: string; caption: string }[];
+      stripped: string;
+    };
+    detectEmbodiedPoint: (
+      text: string,
+      targets: PointyTargetMin[],
+    ) => { target: PointyTargetMin; score: number; sentence: string } | null;
+    detectAllEmbodiedPoints: (
+      text: string,
+      targets: PointyTargetMin[],
+      options?: { threshold?: number; maxMatches?: number },
+    ) => { target: PointyTargetMin; score: number; sentence: string }[];
+    enqueuePoints: (
+      points: { selector: string; caption?: string; durationMs: number }[],
+    ) => number;
+    enqueueTagPoints: (
+      points: { selector: string; caption?: string; durationMs: number }[],
+    ) => number;
+    enqueueEmbodiedPoints: (
+      points: { selector: string; caption?: string; durationMs: number }[],
+    ) => number;
+    clearDispatchQueue: () => void;
+    getTargets: () => PointyTargetMin[];
+  };
+  const pointyModulesRef = useRef<PointyModules | null>(null);
+  // v7.0 F12 — last accumulated text we ran parser on. Streaming dispatch
+  // uses this to compute the DELTA (new content since last parse) so we
+  // don't re-dispatch tags/sentences already processed.
+  const lastParsedLenRef = useRef<number>(0);
+
+  // v6.0 F11 — preload pointy modules ONCE so per-chunk dispatch is
+  // synchronous (no async import overhead per stream chunk).
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      import("@/pointy-host/inline-tag-parser"),
+      import("@/pointy-host/embodied-parser"),
+      import("@/pointy-host/dispatch-queue"),
+      import("@/pointy-host/integration"),
+    ]).then(([tagMod, embodiedMod, queueMod, integrationMod]) => {
+      if (cancelled) return;
+      pointyModulesRef.current = {
+        parsePointTag: tagMod.parsePointTag,
+        parseAllPointTags: tagMod.parseAllPointTags,
+        detectEmbodiedPoint: embodiedMod.detectEmbodiedPoint,
+        detectAllEmbodiedPoints: embodiedMod.detectAllEmbodiedPoints,
+        enqueuePoints: queueMod.enqueuePoints,
+        enqueueTagPoints: queueMod.enqueueTagPoints,
+        enqueueEmbodiedPoints: queueMod.enqueueEmbodiedPoints,
+        clearDispatchQueue: queueMod.clearDispatchQueue,
+        getTargets: () => {
+          integrationMod.refreshPointyContext();
+          const scanner = integrationMod.getPointyScanner();
+          let targets: PointyTargetMin[] = [];
+          if (scanner) {
+            targets = scanner.getTargets().map((t) => ({
+              id: t.id,
+              label: t.label,
+              role: t.role,
+            }));
+          }
+          if (targets.length === 0 && typeof document !== "undefined") {
+            const els = document.querySelectorAll<HTMLElement>(
+              "[data-wiii-id]",
+            );
+            targets = Array.from(els)
+              .map((el) => ({
+                id: el.getAttribute("data-wiii-id") || "",
+                label:
+                  el.getAttribute("aria-label") ||
+                  el.textContent?.trim().slice(0, 40) ||
+                  "",
+                role: el.tagName.toLowerCase(),
+              }))
+              .filter((t) => t.id);
+          }
+          return targets;
+        },
+      };
+    }).catch((err) => {
+      console.warn("[POINTY-STREAM] module preload failed:", err);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * v7.0 F12 (2026-05-06) — multi-target streaming dispatch via queue.
+   *
+   * "Vừa nói vừa làm" with sequence support: a single AI response can
+   * point at multiple elements ("Đầu tiên click X, rồi Y, cuối cùng Z").
+   * Each match is enqueued; cursor visits them in sequence with a hold
+   * duration. Dispatch queue dedupes by (selector + caption) signature.
+   *
+   * Two paths feeding the queue:
+   *   1. Tag — `parseAllPointTags` extracts every `[POINT:...]` in the
+   *      response. Runs every chunk; queue handles dedupe.
+   *   2. Embodied — only on sentence boundary, run `detectAllEmbodiedPoints`
+   *      to find all matches in order. Queue dedupes targets so we don't
+   *      bounce back to same element.
+   *
+   * Idempotency lives in the queue (signature dedup), NOT in a boolean
+   * flag — that's what enables multi-dispatch per stream.
+   */
+  const tryStreamingDispatch = useCallback((accumulated: string): void => {
+    if (dispatchedThisStreamRef.current) return;
+    const mods = pointyModulesRef.current;
+    if (!mods) return;
+    const cleaned = stripWiiiInternalMarkup(accumulated);
+    if (!cleaned.trim()) return;
+
+    // Path 1 — explicit `[POINT:...]` tag (deterministic). Uses TAG-priority
+    // enqueue: cancels any in-flight embodied dispatch + flips flag so
+    // subsequent embodied calls in this stream are skipped. AI explicitly
+    // chose this id → trust it over heuristic guess.
+    const { tags } = mods.parseAllPointTags(cleaned);
+    if (tags.length > 0) {
+      const queued = mods.enqueueTagPoints(
+        tags.map((t) => ({
+          selector: t.selector,
+          caption: t.caption || undefined,
+          durationMs: 2400,
+        })),
+      );
+      if (queued > 0) {
+        console.warn(
+          `[POINTY-STREAM] tag-queue queued=${queued} total_tags=${tags.length} (tag-priority — embodied skipped)`,
+        );
+      }
+    }
+
+    // Path 2 — embodied parser, only on sentence boundary AND only if no
+    // tag fired yet. enqueueEmbodiedPoints internally checks tag-fired
+    // flag and returns 0 if true.
+    if (!allowEmbodiedDispatchRef.current) return;
+
+    const lastChar = cleaned.trimEnd().slice(-1);
+    if ([".", "!", "?", "\n", "~"].includes(lastChar)) {
+      const targets = mods.getTargets();
+      if (targets.length > 0) {
+        const matches = mods.detectAllEmbodiedPoints(cleaned, targets, {
+          threshold: 0.6,
+          maxMatches: 5,
+        });
+        if (matches.length > 0) {
+          const queued = mods.enqueueEmbodiedPoints(
+            matches.map((m) => ({
+              selector: m.target.id,
+              caption: m.target.label || undefined,
+              durationMs: 2400,
+            })),
+          );
+          if (queued > 0) {
+            console.warn(
+              `[POINTY-STREAM] embodied-queue queued=${queued} matches=${matches.length} top="${matches[0].target.id}@${matches[0].score.toFixed(2)}"`,
+            );
+          }
+        }
+      }
+    }
+  }, []);
   const thinkingBufferRef = useRef<StreamBuffer | null>(null);
   // Track current thinking node for buffer flush callback
   const thinkingNodeRef = useRef<string | undefined>(undefined);
@@ -455,6 +649,55 @@ export function useSSEStream() {
       return;
     }
 
+    // Phase 35 — stream-resume protocol.
+    // When stream ends with NO answer received (eof/idle_timeout), the backend
+    // may have produced + persisted the answer via the always-run finalize
+    // hook (chat_stream_coordinator try/finally). Fetch the latest assistant
+    // message from the durable thread log and surface it instead of showing
+    // a generic "luồng đã ngắt" error.
+    if (reason !== "done") {
+      const activeConv = store.activeConversation();
+      const threadId = activeConv?.thread_id;
+      if (threadId) {
+        if (TRACE_SSE) {
+          console.debug("[SSE] stream-resume: fetching latest from", threadId);
+        }
+        void (async () => {
+          try {
+            const { fetchThreadMessages } = await import("@/api/threads");
+            const msgs = await fetchThreadMessages(threadId, 5);
+            const lastAssistant = msgs
+              ?.slice()
+              .reverse()
+              .find((m) => m?.role === "assistant");
+            const recoveredText = (lastAssistant && typeof lastAssistant === "object"
+              && "content" in lastAssistant
+              && typeof (lastAssistant as { content?: unknown }).content === "string")
+              ? (lastAssistant as { content: string }).content.trim()
+              : "";
+            if (recoveredText) {
+              if (TRACE_SSE) {
+                console.debug("[SSE] stream-resume: recovered", recoveredText.length, "chars");
+              }
+              useChatStore.getState().appendStreamingContent(recoveredText);
+              useChatStore.getState().finalizeStream();
+              return;
+            }
+          } catch (err) {
+            console.debug("[SSE] stream-resume failed:", err);
+          }
+          // Recovery fetch failed → fall back to original error message.
+          const fallbackMessage =
+            reason === "idle_timeout"
+              ? "Luồng phản hồi đã im lặng quá lâu trước khi chốt câu trả lời cuối."
+              : "Luồng phản hồi kết thúc sớm trước khi Wiii kịp chốt câu trả lời cuối.";
+          useChatStore.getState().setStreamError(fallbackMessage);
+        })();
+        void useModelStore.getState().fetchProviders({ force: true });
+        return;
+      }
+    }
+
     const fallbackMessage =
       reason === "idle_timeout"
         ? "Luồng phản hồi đã im lặng quá lâu trước khi chốt câu trả lời cuối."
@@ -488,7 +731,13 @@ export function useSSEStream() {
     scheduleIdleGuard();
   }, [scheduleIdleGuard]);
 
-  const sendMessage = useCallback(async (content: string, images?: ImageInput[]) => {
+  const sendMessage = useCallback(async (
+    content: string,
+    images?: ImageInput[],
+    forceSkills?: string[],
+    documents?: ChatDocumentAttachment[],
+    documentContext?: ChatDocumentContext,
+  ) => {
     const settings = useSettingsStore.getState().settings;
     const authHeaders = useSettingsStore.getState().getAuthHeaders();
     const domainId = useDomainStore.getState().activeDomainId;
@@ -510,8 +759,8 @@ export function useSSEStream() {
       conversationId = chatStore.createConversation(domainId, undefined, embedSessionId);
     }
 
-    // Add user message (Sprint 179: with optional images)
-    chatStore.addUserMessage(content, images);
+    // Add user message (Sprint 179 images + per-turn document chips)
+    chatStore.addUserMessage(content, images, documents);
 
     // Initialize the HTTP client with current settings
     initClient(settings.server_url, authHeaders);
@@ -529,12 +778,26 @@ export function useSSEStream() {
 
     const canUseHostActionBridge =
       typeof window !== "undefined" && window.parent !== window;
-    const pointyFastPathAction = canUseHostActionBridge
-      ? buildPointyFastPathAction(
-          content,
-          useHostContextStore.getState().currentContext,
-        )
-      : null;
+    const explicitPointyTurn = settings.pointy_mode === true
+      && looksExplicitPointyTurn(content, forceSkills);
+    let pointyFastPathAction: ReturnType<typeof buildPointyFastPathAction> = null;
+    if (explicitPointyTurn) {
+      await waitForPointyLayoutCommit();
+      try {
+        const { refreshPointyContext } = await import("@/pointy-host/integration");
+        refreshPointyContext();
+      } catch (err) {
+        console.warn(
+          "[SSE] pointy context refresh skipped:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+      pointyFastPathAction = buildPointyFastPathAction(
+        content,
+        useHostContextStore.getState().currentContext,
+      );
+    }
+    const allowPointyEmbodiedDispatch = explicitPointyTurn;
     const hostContextState = useHostContextStore.getState();
     const supportsCursorMove =
       hostContextState.capabilities?.tools?.some(
@@ -542,7 +805,7 @@ export function useSSEStream() {
       ) === true;
     const pointyFastPathPromise = pointyFastPathAction
       ? (async () => {
-          if (supportsCursorMove) {
+          if (canUseHostActionBridge && supportsCursorMove) {
             chatStore.setStreamingStep("Wiii đang nhìn vị trí trên trang...");
             await Promise.race([
               hostContextState.requestAction(
@@ -565,11 +828,30 @@ export function useSSEStream() {
             });
           }
 
-          return hostContextState.requestAction(
-            pointyFastPathAction.action,
-            pointyFastPathAction.params,
-            pointyFastPathAction.requestId,
-          );
+          if (canUseHostActionBridge) {
+            return hostContextState.requestAction(
+              pointyFastPathAction.action,
+              pointyFastPathAction.params,
+              pointyFastPathAction.requestId,
+            );
+          }
+
+          if (pointyFastPathAction.action === "ui.highlight") {
+            const ok = pointAt(pointyFastPathAction.target.id, {
+              caption: pointyFastPathAction.params.message,
+              duration_ms: pointyFastPathAction.params.duration_ms,
+            });
+            return {
+              success: ok,
+              data: ok ? { summary: pointyFastPathAction.params.message } : undefined,
+              error: ok ? undefined : "Pointy target did not resolve in standalone desktop.",
+            };
+          }
+
+          return {
+            success: false,
+            error: "Host bridge unavailable for mutating Pointy action.",
+          };
         })()
           .then((result) => {
             if (TRACE_SSE) {
@@ -619,6 +901,14 @@ export function useSSEStream() {
       targetBufferDepth: 40,
       easeInFrames: 15,
     });
+    // v7.0 F12 — reset streaming dispatch state + queue for new stream.
+    fullAnswerTextRef.current = "";
+    // If deterministic host/tool Pointy already handled this turn, do not
+    // let heuristic embodied parsing point at unrelated message controls.
+    dispatchedThisStreamRef.current = pointyFastPathAction !== null;
+    allowEmbodiedDispatchRef.current = allowPointyEmbodiedDispatch;
+    lastParsedLenRef.current = 0;
+    pointyModulesRef.current?.clearDispatchQueue();
     thinkingBufferRef.current = new StreamBuffer({
       onFlush: (chars) => {
         useChatStore.getState().appendThinkingDelta(chars, thinkingNodeRef.current, thinkingMetaRef.current);
@@ -657,6 +947,14 @@ export function useSSEStream() {
         traceEvent("answer", { length: data.content.length });
         // Sprint 150: Push to buffer instead of direct store update
         answerBufferRef.current?.push(data.content);
+        // v4.0 F7 (2026-05-06) — accumulate FULL answer text (with
+        // [POINT:...] tag intact) for onDone parser. The display path
+        // strips the tag in chat-store.appendStreamingContent.
+        fullAnswerTextRef.current += data.content;
+        // v7.0 F12 — multi-target streaming dispatch. Queue dedupes
+        // already-fired so same target doesn't re-dispatch. Multiple
+        // distinct targets in one response → cursor visits in sequence.
+        tryStreamingDispatch(fullAnswerTextRef.current);
       },
       onSources: (data) => {
         traceEvent("sources", { count: data.sources?.length || 0 });
@@ -678,6 +976,34 @@ export function useSSEStream() {
       },
       onDone: () => {
         traceEvent("done");
+        // Some backend paths (notably source-backed web synthesis) emit the
+        // final answer as a compact chunk right before `done`. Drain before
+        // finalizing, otherwise the message can be committed while the answer
+        // is still sitting in the animation buffer.
+        flushBothBuffers();
+        // v5.0 F8 (2026-05-06) — EMBODIED dispatcher. Wiii body schema:
+        // cursor IS Wiii's hand, driven by Wiii's thinking. Two paths:
+        //
+        //   1. FAST: explicit `[POINT:bare-id:caption]` tag (Clicky pattern)
+        //   2. FALLBACK: scan response for element label + intent phrase
+        //      co-occurrence (Embodied pattern — works WITHOUT tag)
+        //
+        // Both feed `pointy.pointAt`. The fallback is what makes Wiii feel
+        // alive — when Wiii says "Nút gửi ở góc dưới phải nè cậu", body
+        // auto-points without the LLM needing to remember the tag syntax.
+        //
+        // SOTA reference: Anthropic Computer Use 2026 (intent → action),
+        // farzaa/clicky (MIT, github April 2026), Project Astra grounding.
+        const fullText = fullAnswerTextRef.current;
+        fullAnswerTextRef.current = "";
+        // v7.0 F12 — final pass on complete text. Queue dedupes — items
+        // already fired mid-stream are no-ops. This is the SAFETY NET
+        // for cases where streaming dispatch missed (e.g., AI emitted tag
+        // in single chunk after answer is mostly done, or sentence didn't
+        // hit boundary trigger).
+        if (fullText) {
+          tryStreamingDispatch(fullText);
+        }
         queueMicrotask(() => {
           finalizeFromTransport("done");
           const activeConv = useChatStore.getState().activeConversation();
@@ -997,6 +1323,79 @@ export function useSSEStream() {
           reason: data.content.reason || "",
         });
       },
+      onPointyAction: (data) => {
+        // Wiii Pointy v2: agent-controlled cursor / spotlight via
+        // spring-physics CursorRegistry. The backend tool
+        // ``tool_pointy_show`` emits this event; we dispatch through
+        // the pointy-host public API which uses CursorRegistry under
+        // the hood (60Hz spring interpolation, GPU translate3d,
+        // multi-cursor identity-aware) instead of the legacy
+        // single-cursor + Web Animations keyframes.
+        const payload = data.content;
+        traceEvent("pointy_action", {
+          action: payload?.action,
+          selector: payload?.params?.selector,
+          mode: payload?.mode,
+        });
+        // v3.0 F6 (2026-05-06): explicit warn-level log so Vite dev
+        // server forwards it to terminal output. console.info is dropped
+        // by Vite client console hook; only warn/error are forwarded.
+        console.warn("[POINTY-SSE]", JSON.stringify({
+          action: payload?.action,
+          selector: payload?.params?.selector,
+          source: payload?.params?.source,
+          node: data.node,
+        }));
+        if (!payload || !payload.action) {
+          console.warn("[POINTY-SSE] dropped — empty payload or no action");
+          return;
+        }
+        if (payload.action === "ui.highlight" || payload.action === "ui.cursor_move") {
+          dispatchedThisStreamRef.current = true;
+        }
+
+        // Lazy-import to avoid pulling pointy-host into the cold path of
+        // chat streams that never invoke pointy.
+        void import("@/pointy-host/api").then((pointy) => {
+          const params = payload.params || {};
+          const selector = (params.selector as string | undefined) ?? "";
+          const caption = (params.message as string | undefined) ?? "";
+          const duration_ms = (params.duration_ms as number | undefined) ?? 4500;
+
+          switch (payload.action) {
+            case "ui.highlight":
+              if (selector) {
+                const ok = pointy.pointAt(selector, { caption, duration_ms });
+                console.warn(`[POINTY-DISPATCH] selector=${selector} ok=${ok}`);
+                if (!ok) {
+                  console.warn(`[POINTY] selector_not_found: ${selector}`);
+                }
+              } else {
+                console.warn("[POINTY-SSE] highlight action with empty selector");
+              }
+              break;
+            case "ui.cursor_move":
+              if (selector) {
+                pointy.pointAt(selector, { caption, duration_ms, skipSpotlight: true });
+              } else if (
+                typeof params.x === "number" &&
+                typeof params.y === "number"
+              ) {
+                pointy.moveTo(params.x as number, params.y as number, {
+                  label: caption || undefined,
+                });
+              }
+              break;
+            case "ui.clear":
+              pointy.clear();
+              break;
+            default:
+              console.warn(`[POINTY] Unknown action: ${payload.action}`);
+          }
+        }).catch((err) => {
+          console.warn("[POINTY] Failed to load pointy api:", err);
+        });
+      },
       onHostAction: (data) => {
         traceEvent("host_action", { id: data.content?.id, action: data.content?.action });
         // Sprint 222b: AI agent requested a host action
@@ -1145,6 +1544,7 @@ export function useSSEStream() {
           visual_context: visualContext,
           widget_feedback: widgetFeedback,
           code_studio_context: codeStudioContext,
+          document_context: documentContext,
         };
       }
       if (pageData) {
@@ -1155,15 +1555,17 @@ export function useSSEStream() {
           visual_context: visualContext,
           widget_feedback: widgetFeedback,
           code_studio_context: codeStudioContext,
+          document_context: documentContext,
         };
       }
-      if (visualContext || widgetFeedback || codeStudioContext) {
+      if (visualContext || widgetFeedback || codeStudioContext || documentContext) {
         return {
           display_name: displayName,
           role: compatibilityRole,
           visual_context: visualContext,
           widget_feedback: widgetFeedback,
           code_studio_context: codeStudioContext,
+          document_context: documentContext,
         };
       }
       return undefined;
@@ -1206,6 +1608,12 @@ export function useSSEStream() {
       // Per-request provider selection
       provider: selectedProvider !== "auto" ? selectedProvider : undefined,
       model: selectedProvider !== "auto" ? selectedModel ?? undefined : undefined,
+      // Wiii Pointy v2.8: explicit `@plugin-name` mention force-binds
+      // skills regardless of keyword intent gates.
+      force_skills: forceSkills && forceSkills.length > 0 ? forceSkills : undefined,
+      // F18 Phase B (2026-05-07) — Pointy mode user toggle. When ON,
+      // backend tool forcing is only sent for explicit Pointy turns.
+      pointy_mode: explicitPointyTurn,
     };
 
     // Sprint 194b (H5): Facebook cookie now in secure storage, not settings
@@ -1281,6 +1689,20 @@ export function useSSEStream() {
     } finally {
       if (abortRef.current === streamController) {
         abortRef.current = null;
+        clearIdleGuard();
+        if (useChatStore.getState().isStreaming) {
+          const abortReason = streamController.signal.aborted
+            ? streamController.signal.reason
+            : undefined;
+          if (
+            abortReason !== USER_CANCEL_ABORT_REASON &&
+            abortReason !== STREAM_RESTART_ABORT_REASON
+          ) {
+            finalizeFromTransport(
+              abortReason === IDLE_TIMEOUT_ABORT_REASON ? "idle_timeout" : "eof",
+            );
+          }
+        }
       }
     }
   }, [clearIdleGuard, finalizeFromTransport, scheduleIdleGuard, traceEvent]);

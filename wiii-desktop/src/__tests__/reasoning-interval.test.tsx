@@ -207,7 +207,7 @@ describe("ReasoningInterval", () => {
       rawBlocks: [],
     };
 
-    render(
+    const { container } = render(
       <ReasoningInterval
         interval={interval}
         thinkingLevel="balanced"
@@ -217,6 +217,8 @@ describe("ReasoningInterval", () => {
 
     expect(screen.getAllByText("Minh dang gom lai vai moc dang tin roi moi dung phan nhin.").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Wiii da nghi xong~").length).toBeGreaterThan(0);
+    expect(container.querySelector(".sr-only")).toBeNull();
+    expect(container.querySelector(".reasoning-interval__thinking-body")?.hasAttribute("hidden")).toBe(true);
   });
 
   it("keeps summary-only intervals header-only when no delta body was streamed", () => {

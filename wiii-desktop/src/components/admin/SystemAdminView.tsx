@@ -28,13 +28,13 @@ import { OrganizationsTab } from "./OrganizationsTab";
 import { UsersTab } from "./UsersTab";
 
 const TABS: (FullPageTab & { id: AdminTab })[] = [
-  { id: "dashboard", label: "Tong quan", icon: <LayoutDashboard size={16} /> },
+  { id: "dashboard", label: "Tổng quan", icon: <LayoutDashboard size={16} /> },
   { id: "runtime", label: "Runtime", icon: <Server size={16} /> },
-  { id: "users", label: "Nguoi dung", icon: <Users size={16} /> },
-  { id: "organizations", label: "To chuc", icon: <Building2 size={16} /> },
+  { id: "users", label: "Người dùng", icon: <Users size={16} /> },
+  { id: "organizations", label: "Tổ chức", icon: <Building2 size={16} /> },
   { id: "flags", label: "Feature Flags", icon: <Flag size={16} /> },
-  { id: "analytics", label: "Phan tich", icon: <BarChart3 size={16} /> },
-  { id: "audit", label: "Nhat ky", icon: <ScrollText size={16} /> },
+  { id: "analytics", label: "Phân tích", icon: <BarChart3 size={16} /> },
+  { id: "audit", label: "Nhật ký", icon: <ScrollText size={16} /> },
   { id: "gdpr", label: "GDPR", icon: <Shield size={16} /> },
 ];
 
@@ -53,7 +53,7 @@ export function SystemAdminView() {
   return (
     <>
       <FullPageView
-        title="Quan tri he thong"
+        title="Quản trị hệ thống"
         icon={<Shield size={20} />}
         tabs={TABS}
         activeTab={activeTab}

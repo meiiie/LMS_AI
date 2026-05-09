@@ -51,6 +51,10 @@ export function hasRenderableStreamingBlocks(blocks: ContentBlock[]): boolean {
   return blocks.some((block) => hasVisibleThinkingContent(block) && !isHiddenTechnicalStreamingBlock(block));
 }
 
+export function shouldAutoFollowLatestMessage(message?: Pick<Message, "role"> | null): boolean {
+  return message?.role === "user";
+}
+
 interface MessageListProps {
   messages: Message[];
   onSuggestedQuestion: (q: string) => void;
@@ -108,12 +112,34 @@ export function MessageList({
     enabled: useVirtual,
   });
 
+  const scrollToLatestMessage = useCallback((behavior: ScrollBehavior = "smooth") => {
+    scrollToBottom(behavior);
+    if (useVirtual && messages.length > 0) {
+      requestAnimationFrame(() => {
+        virtualizer.scrollToIndex(messages.length - 1, {
+          align: "end",
+          behavior,
+        });
+      });
+    }
+  }, [messages.length, scrollToBottom, useVirtual, virtualizer]);
+
+  const latestMessage = messages[messages.length - 1];
+  useEffect(() => {
+    if (!shouldAutoFollowLatestMessage(latestMessage)) return;
+    scrollToLatestMessage("auto");
+  }, [latestMessage?.id, latestMessage?.role, scrollToLatestMessage]);
+
   return (
     <div className="relative flex-1 overflow-hidden chat-stage">
       <div
         ref={containerRef}
         className="h-full overflow-y-auto px-4 py-6 scroll-container chat-stage__scroller"
+        role="log"
+        aria-label="Lịch sử trò chuyện với Wiii"
         aria-live={isStreaming ? "off" : "polite"}
+        aria-relevant="additions text"
+        tabIndex={0}
       >
         {useVirtual ? (
           <div className="chat-lane">
@@ -207,7 +233,7 @@ export function MessageList({
 
       {!isAtBottom && (
         <button
-          onClick={scrollToBottom}
+          onClick={() => scrollToLatestMessage()}
           className="absolute bottom-4 right-4 w-9 h-9 rounded-full bg-surface border border-border shadow-lg flex items-center justify-center text-text-secondary hover:text-text hover:bg-surface-secondary transition-all animate-fade-in"
           title="Cuộn xuống cuối"
           aria-label="Cuộn xuống cuối"
@@ -244,9 +270,16 @@ function StreamingTimer({
     ? `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`
     : `${elapsed}s`;
 
+  // Phase 35 — `<output>` with `aria-live="polite"` so screen readers announce
+  // progress without interrupting current speech. `aria-atomic="true"` so the
+  // entire status reads each update instead of fragmenting.
   return (
-    <div className="streaming-timer mt-1.5">
-      <span className="streaming-timer__dot" />
+    <output
+      className="streaming-timer mt-1.5"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <span className="streaming-timer__dot" aria-hidden="true" />
       <span className="streaming-timer__label">
         {hasAnswer ? "Wiii đang hoàn thiện" : "Wiii đang suy nghĩ"}
       </span>
@@ -256,6 +289,6 @@ function StreamingTimer({
           {statusText.trim()}
         </span>
       ) : null}
-    </div>
+    </output>
   );
 }

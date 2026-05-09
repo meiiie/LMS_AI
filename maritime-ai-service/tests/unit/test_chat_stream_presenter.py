@@ -329,3 +329,105 @@ def test_serialize_stream_event_thinking_start_marks_summary_as_header_only():
     assert payload["summary"] == "Minh dang gom vai moc dang tin truoc khi chot cau tra loi."
     assert payload["summary_mode"] == "header_only"
     assert payload["phase"] == "attune"
+
+
+def test_serialize_stream_event_emits_pointy_action_through_sse_wire():
+    """v3.0 F6 regression: pointy_action MUST be in the {tool_call,
+    tool_result, host_action, ...} allowlist on line 399. Without it,
+    backend dispatches the event correctly but presenter drops it
+    silently — frontend onPointyAction never fires, cursor stays static.
+    """
+    from types import SimpleNamespace
+
+    presenter = _load_chat_stream_presenter()
+    event = SimpleNamespace(
+        type='pointy_action',
+        content={
+            'action': 'ui.highlight',
+            'requestId': 'pointy-test-1',
+            'request_id': 'pointy-test-1',
+            'params': {'selector': 'chat-send-button', 'message': 'Đây.', 'duration_ms': 4500},
+            'mode': 'highlight',
+        },
+        node='direct',
+        step=None,
+        details=None,
+    )
+    chunks, counter, should_stop = presenter.serialize_stream_event(
+        event=event,
+        event_counter=0,
+        enable_artifacts=True,
+        presentation_state=None,
+    )
+    assert chunks, 'pointy_action must produce at least one SSE chunk'
+    assert should_stop is False
+    # SSE event line: 'event: pointy_action'
+    assert any('event: pointy_action' in c for c in chunks), (
+        f'pointy_action not emitted as SSE event. Got: {chunks!r}'
+    )
+    # Payload preserved.
+    data_line = next(
+        line for line in chunks[0].split('\n') if line.startswith('data: ')
+    )
+    payload = json.loads(data_line[6:])
+    assert payload['content']['action'] == 'ui.highlight'
+    assert payload['content']['params']['selector'] == 'chat-send-button'
+
+
+def test_strip_soul_tags_handles_malformed_and_escaped_variants():
+    presenter = _load_chat_stream_presenter()
+
+    assert presenter._strip_soul_tags(
+        '<!--WIII_SOUL: {"mood":"warm"}--> Nut gui tin nhan.'
+    ) == "Nut gui tin nhan."
+    assert presenter._strip_soul_tags(
+        '<! -- WIII_SOUL: {"mood":"warm"} -- > Nut gui tin nhan.'
+    ) == "Nut gui tin nhan."
+    assert presenter._strip_soul_tags(
+        '&lt;!-- WIII_SOUL: {"mood":"warm"} --&gt; Nut gui tin nhan.'
+    ) == "Nut gui tin nhan."
+
+
+def test_serialize_stream_event_strips_split_soul_tag_from_answer_delta():
+    from types import SimpleNamespace
+
+    presenter = _load_chat_stream_presenter()
+    state = presenter.StreamPresentationState()
+
+    first = SimpleNamespace(
+        type="answer_delta",
+        content='<! --WIII_SOUL: {"mood":"warm"',
+        node="direct",
+        details=None,
+    )
+    chunks, counter, should_stop = presenter.serialize_stream_event(
+        event=first,
+        event_counter=0,
+        enable_artifacts=True,
+        presentation_state=state,
+    )
+
+    assert chunks == []
+    assert counter == 1
+    assert should_stop is False
+
+    second = SimpleNamespace(
+        type="answer_delta",
+        content='}--> Nut gui tin nhan.',
+        node="direct",
+        details=None,
+    )
+    chunks, counter, should_stop = presenter.serialize_stream_event(
+        event=second,
+        event_counter=counter,
+        enable_artifacts=True,
+        presentation_state=state,
+    )
+
+    assert should_stop is False
+    data_line = next(
+        line for line in chunks[0].split("\n") if line.startswith("data: ")
+    )
+    payload = json.loads(data_line[6:])
+    assert payload["content"] == "Nut gui tin nhan."
+    assert "WIII_SOUL" not in chunks[0]

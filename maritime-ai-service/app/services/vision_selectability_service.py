@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import time
 from dataclasses import asdict, dataclass, field
+from types import SimpleNamespace
 from typing import Literal
 
 from app.core.config import settings
@@ -117,15 +118,20 @@ def _provider_is_configured(provider: str) -> bool:
     return False
 
 
-def _resolve_active_provider() -> str | None:
+def _resolve_active_provider(*, allow_local_probe: bool = True) -> str | None:
     for provider in _resolve_provider_order(capability=VisionCapability.VISUAL_DESCRIBE):
+        if provider == "ollama" and not allow_local_probe:
+            continue
         status = _provider_status(provider, VisionCapability.VISUAL_DESCRIBE)
         if status.available:
             return provider
     return None
 
 
-def _build_snapshot_uncached() -> list[VisionProviderSelectability]:
+def _build_snapshot_uncached(
+    *,
+    allow_local_probe: bool = True,
+) -> list[VisionProviderSelectability]:
     provider_order = _resolve_provider_order(capability=VisionCapability.VISUAL_DESCRIBE)
     in_chain = set(provider_order)
     configured_provider = str(getattr(settings, "vision_provider", "auto") or "auto").strip().lower()
@@ -134,7 +140,7 @@ def _build_snapshot_uncached() -> list[VisionProviderSelectability]:
         if configured_provider and configured_provider != "auto"
         else (provider_order[0] if provider_order else None)
     )
-    active_provider = _resolve_active_provider()
+    active_provider = _resolve_active_provider(allow_local_probe=allow_local_probe)
 
     snapshot: list[VisionProviderSelectability] = []
     for provider in SUPPORTED_VISION_PROVIDERS:
@@ -145,7 +151,21 @@ def _build_snapshot_uncached() -> list[VisionProviderSelectability]:
         primary_reason_label: str | None = None
 
         for capability in SUPPORTED_VISION_CAPABILITIES:
-            status = _provider_status(provider, capability)
+            if provider == "ollama" and not allow_local_probe:
+                status = SimpleNamespace(
+                    available=False,
+                    model_name=_provider_default_model(provider, capability),
+                    lane_fit=None,
+                    lane_fit_label=None,
+                    reason_code="host_down",
+                    reason_label=(
+                        "Ollama local chua duoc probe trong luot tai nhanh. "
+                        "Chay Probe capability de kiem tra live."
+                    ),
+                    resolved_base_url=None,
+                )
+            else:
+                status = _provider_status(provider, capability)
             capability_rows.append(
                 VisionCapabilitySelectability(
                     capability=capability.value,
@@ -188,6 +208,7 @@ def _build_snapshot_uncached() -> list[VisionProviderSelectability]:
 def get_vision_selectability_snapshot(
     *,
     force_refresh: bool = False,
+    allow_local_probe: bool = True,
 ) -> list[VisionProviderSelectability]:
     global _selectability_cache
 
@@ -199,7 +220,7 @@ def get_vision_selectability_snapshot(
     ):
         return copy.deepcopy(_selectability_cache.snapshot)
 
-    snapshot = _build_snapshot_uncached()
+    snapshot = _build_snapshot_uncached(allow_local_probe=allow_local_probe)
     _selectability_cache = _CacheEntry(
         created_at=now,
         snapshot=copy.deepcopy(snapshot),

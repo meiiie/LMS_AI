@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _testing, cancelActiveTour, runTour } from "../tour";
 import type { TourStep } from "../types";
+import { clearPointyDomRefreshHook, setPointyDomRefreshHook } from "../dom-refresh";
 
 beforeEach(() => {
   _testing.resetState();
@@ -11,6 +12,7 @@ beforeEach(() => {
 
 afterEach(() => {
   _testing.resetState();
+  clearPointyDomRefreshHook();
   document.body.innerHTML = "";
   vi.useRealTimers();
 });
@@ -62,6 +64,24 @@ describe("runTour", () => {
     const result = await runTour(steps, { resolveSelector: resolver });
     expect(resolver).toHaveBeenCalledWith("wiii://step-1");
     expect(result.completed_steps).toBe(1);
+  });
+
+  it("refreshes DOM before each tour step resolves its target", async () => {
+    let refreshCalls = 0;
+    setPointyDomRefreshHook(() => {
+      refreshCalls += 1;
+      if (!document.querySelector("#late-step")) {
+        document.body.innerHTML = `<div id="late-step"></div>`;
+      }
+    });
+
+    const result = await runTour([
+      { selector: "#late-step", message: "late", duration_ms: 1 },
+    ]);
+
+    expect(refreshCalls).toBe(1);
+    expect(result.completed_steps).toBe(1);
+    expect(result.missing_selectors).toEqual([]);
   });
 
   it("returns 0/0 immediately for an empty steps array", async () => {

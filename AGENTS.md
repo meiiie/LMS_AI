@@ -25,6 +25,7 @@ Primary areas:
 ## Operating Rules
 
 - Follow `docs/operations/WIII_GITHUB_GOVERNANCE.md` for issue, branch, PR, review, and merge workflow.
+- Use `docs/operations/WIII_SPEC_KIT_WORKFLOW.md` and `.specify/memory/constitution.md` for architecture-sensitive, ambiguous, multi-agent, or multi-phase work.
 - Use `codex/` for Codex-authored branches unless a maintainer explicitly requests a different prefix.
 - Open or link an issue for non-trivial work before opening a PR.
 - Keep changes scoped. Do not mix cleanup, docs, runtime behavior, migrations, and UI refactors unless the issue explicitly requires it.
@@ -77,3 +78,10 @@ git status --short
 - For docs/governance changes, verify they match current repository truth and do not introduce stale sprint-report language, vague ownership, or unverifiable process.
 - Do not treat CodeRabbit or Codex Review as replacements for human ownership. Automated findings must be resolved, deferred with rationale, or explicitly marked not applicable before merge.
 - Prefer narrow, actionable review comments with file and line references. Avoid broad style commentary unless it creates correctness, security, maintainability, accessibility, or operational risk.
+
+<!-- SPECKIT START -->
+For Wiii Spec Kit workflow context, read `.specify/memory/constitution.md`
+and `docs/operations/WIII_SPEC_KIT_WORKFLOW.md`. When a Spec Kit feature is
+active, also read that feature's `specs/<feature>/plan.md` and
+`specs/<feature>/tasks.md`.
+<!-- SPECKIT END -->

@@ -25,6 +25,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from app.core.config import settings
 from app.core.security import AuthenticatedUser, is_platform_admin, require_auth
 
 router = APIRouter(prefix="/soul-bridge", tags=["soul-bridge"])
@@ -52,6 +53,22 @@ def _get_bridge():
     return bridge
 
 
+def _disabled_bridge_status() -> Dict[str, Any]:
+    events = [
+        item.strip()
+        for item in getattr(settings, "soul_bridge_bridge_events", "").split(",")
+        if item.strip()
+    ]
+    return {
+        "initialized": False,
+        "soul_id": "wiii",
+        "bridge_events": events,
+        "peer_count": 0,
+        "peers": {},
+        "enabled": bool(getattr(settings, "enable_soul_bridge", False)),
+    }
+
+
 # =============================================================================
 # REST Endpoints
 # =============================================================================
@@ -63,7 +80,14 @@ async def get_bridge_status(
 ) -> Dict[str, Any]:
     """Full bridge status including all peer connection states. Admin only."""
     _require_admin(auth)
-    bridge = _get_bridge()
+    if not settings.enable_soul_bridge:
+        return _disabled_bridge_status()
+    try:
+        bridge = _get_bridge()
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            return _disabled_bridge_status()
+        raise
     return bridge.get_bridge_status()
 
 
@@ -224,6 +248,10 @@ async def soul_bridge_ws(websocket: WebSocket):
     """
     await websocket.accept()
     logger.info("[SOUL_BRIDGE_WS] Peer connected from %s", websocket.client)
+
+    if not settings.enable_soul_bridge:
+        await websocket.close(code=1008, reason="SoulBridge disabled")
+        return
 
     bridge = None
     try:

@@ -8,6 +8,7 @@
 import type { TourStep } from "./types";
 import { hideCursor, moveCursorToRect } from "./cursor";
 import { hideSpotlight, showSpotlight } from "./spotlight";
+import { refreshDomBeforePointyAction } from "./dom-refresh";
 
 let activeTour: { cancelled: boolean } | null = null;
 
@@ -47,22 +48,22 @@ export async function runTour(
   for (let i = startAt; i < steps.length; i++) {
     if (handle.cancelled) break;
     const step = steps[i];
+    refreshDomBeforePointyAction("tourStep");
     const target = resolve(step.selector);
     if (!target) {
       result.missing_selectors.push(step.selector);
       continue;
     }
 
-    if ("scrollIntoView" in target && typeof (target as HTMLElement).scrollIntoView === "function") {
-      (target as HTMLElement).scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-
-    const rect = target.getBoundingClientRect();
+    const rect = target instanceof HTMLElement
+      ? scrollIntoViewIfNeeded(target, target.getBoundingClientRect())
+      : target.getBoundingClientRect();
     moveCursorToRect(rect, { duration_ms: 500 });
 
     showSpotlight(target, {
       message: step.message,
       duration_ms: step.duration_ms ?? 2400,
+      onDismiss: () => cancelActiveTour(),
     });
 
     await interruptibleWait(step.duration_ms ?? 2400, handle);
@@ -103,6 +104,23 @@ function interruptibleWait(ms: number, handle: { cancelled: boolean }): Promise<
     };
     tick();
   });
+}
+
+function scrollIntoViewIfNeeded(target: HTMLElement, rect: DOMRect): DOMRect {
+  if (typeof target.scrollIntoView !== "function") return rect;
+  if (isMostlyVisible(rect)) return rect;
+  target.scrollIntoView({ behavior: "auto", block: "center", inline: "nearest" });
+  return target.getBoundingClientRect();
+}
+
+function isMostlyVisible(rect: DOMRect): boolean {
+  const area = Math.max(0, rect.width) * Math.max(0, rect.height);
+  if (area <= 0) return true;
+  const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 768;
+  const visibleX = Math.max(0, Math.min(rect.right, vw) - Math.max(rect.left, 0));
+  const visibleY = Math.max(0, Math.min(rect.bottom, vh) - Math.max(rect.top, 0));
+  return (visibleX * visibleY) / area >= 0.9;
 }
 
 export const _testing = {

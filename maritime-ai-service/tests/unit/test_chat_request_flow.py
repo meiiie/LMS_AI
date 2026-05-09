@@ -693,6 +693,123 @@ def test_finalize_response_turn_can_persist_immediately_for_streaming():
     assert log_payload["scheduled_hooks"] == ["living_continuity"]
 
 
+def test_finalize_response_turn_defers_completed_stream_persistence():
+    orchestrator = _make_orchestrator()
+    context = _make_chat_context()
+    background_save = MagicMock()
+
+    with patch.object(
+        orchestrator,
+        "upsert_thread_view",
+    ) as mock_upsert, patch(
+        "app.services.chat_orchestrator.schedule_post_response_continuity",
+        return_value=(),
+    ), patch("app.services.chat_orchestrator.logger") as mock_logger:
+        orchestrator.finalize_response_turn(
+            session_id="session-1",
+            user_id="user-1",
+            user_role=UserRole.STUDENT,
+            message="Hello",
+            response_text="Streaming answer",
+            context=context,
+            domain_id="maritime",
+            organization_id="org-1",
+            background_save=background_save,
+            save_response_immediately=False,
+            include_lms_insights=False,
+            transport_type="stream",
+        )
+
+    orchestrator._chat_history.save_message.assert_not_called()
+    mock_upsert.assert_not_called()
+    assert background_save.call_args_list[0].args == (
+        orchestrator._chat_history.save_message,
+        "session-1",
+        "assistant",
+        "Streaming answer",
+        "user-1",
+    )
+    assert background_save.call_args_list[1].args == (mock_upsert,)
+    assert background_save.call_args_list[1].kwargs == {
+        "user_id": "user-1",
+        "session_id": "session-1",
+        "domain_id": "maritime",
+        "title": "Hello",
+        "organization_id": "org-1",
+    }
+    log_payload = json.loads(mock_logger.info.call_args.args[1])
+    assert log_payload["response_persistence"] == "background"
+
+
+def test_finalize_response_turn_skips_fact_extraction_for_direct_ephemeral_turns():
+    orchestrator = _make_orchestrator()
+    context = _make_chat_context()
+    background_save = MagicMock()
+
+    with patch.object(
+        orchestrator,
+        "upsert_thread_view",
+    ), patch(
+        "app.services.chat_orchestrator.schedule_post_response_continuity",
+        return_value=(),
+    ) as mock_schedule_continuity, patch("app.services.chat_orchestrator.logger"):
+        orchestrator.finalize_response_turn(
+            session_id="session-1",
+            user_id="user-1",
+            user_role=UserRole.STUDENT,
+            message="đói phết nữa",
+            response_text="Kiếm gì dễ ăn trong 5-10 phút trước nha.",
+            context=context,
+            domain_id="maritime",
+            organization_id="org-1",
+            current_agent="direct",
+            background_save=background_save,
+            save_response_immediately=True,
+            transport_type="stream",
+        )
+
+    orchestrator._background_runner.schedule_all.assert_not_called()
+    assert mock_schedule_continuity.call_args.kwargs == {
+        "include_lms_insights": False,
+    }
+
+
+def test_finalize_response_turn_keeps_fact_extraction_for_direct_durable_user_fact():
+    orchestrator = _make_orchestrator()
+    context = _make_chat_context()
+    background_save = MagicMock()
+
+    with patch.object(
+        orchestrator,
+        "upsert_thread_view",
+    ), patch(
+        "app.services.chat_orchestrator.schedule_post_response_continuity",
+        return_value=(),
+    ), patch("app.services.chat_orchestrator.logger"):
+        orchestrator.finalize_response_turn(
+            session_id="session-1",
+            user_id="user-1",
+            user_role=UserRole.STUDENT,
+            message="Mình tên là Minh.",
+            response_text="Mình nhớ rồi, Minh.",
+            context=context,
+            domain_id="maritime",
+            organization_id="org-1",
+            current_agent="direct",
+            background_save=background_save,
+            save_response_immediately=True,
+            transport_type="stream",
+        )
+
+    orchestrator._background_runner.schedule_all.assert_called_once()
+    assert (
+        orchestrator._background_runner.schedule_all.call_args.kwargs[
+            "skip_fact_extraction"
+        ]
+        is False
+    )
+
+
 @pytest.mark.asyncio
 async def test_process_with_multi_agent_preserves_runtime_provider_metadata():
     orchestrator = _make_orchestrator()

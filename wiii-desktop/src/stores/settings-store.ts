@@ -63,11 +63,14 @@ function migrateLocalPreviewServerUrl(
   hostname: string,
 ): string | undefined {
   if (!isLocalPreviewHost(hostname) || !serverUrl) return serverUrl;
+  const localPreviewDefault = DEFAULT_SERVER_URL || "http://localhost:8080";
   if (
     serverUrl === "http://localhost:8001" ||
-    serverUrl === "http://127.0.0.1:8001"
+    serverUrl === "http://127.0.0.1:8001" ||
+    serverUrl === "http://localhost:8080" ||
+    serverUrl === "http://127.0.0.1:8080"
   ) {
-    return "http://localhost:8080";
+    return localPreviewDefault;
   }
   return serverUrl;
 }
@@ -123,6 +126,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   show_reasoning_trace: false,
   streaming_version: DEFAULT_STREAMING_VERSION,
   thinking_level: "balanced",
+  pointy_voice_enabled: false,
   // Sprint 194b: facebook_cookie removed — moved to secure-token-storage (H5)
   show_previews: true,  // Sprint 166: Rich preview cards
   show_artifacts: true, // Sprint 167: Interactive artifacts

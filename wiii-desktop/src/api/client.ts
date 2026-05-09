@@ -35,7 +35,7 @@ export class ApiHttpError extends Error {
 async function adaptiveFetch(
   url: string,
   init?: RequestInit,
-  timeoutMs: number = DEFAULT_TIMEOUT_MS
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<Response> {
   // Sprint 85: Timeout via AbortController — prevents hung requests
   const controller = new AbortController();
@@ -43,9 +43,14 @@ async function adaptiveFetch(
 
   // Merge with any existing abort signal
   if (existingSignal) {
-    existingSignal.addEventListener("abort", () => controller.abort(existingSignal.reason));
+    existingSignal.addEventListener("abort", () =>
+      controller.abort(existingSignal.reason),
+    );
   }
-  const timeoutId = setTimeout(() => controller.abort("Request timeout"), timeoutMs);
+  const timeoutId = setTimeout(
+    () => controller.abort("Request timeout"),
+    timeoutMs,
+  );
 
   try {
     const fetchInit: RequestInit = { ...init, signal: controller.signal };
@@ -109,42 +114,57 @@ export class WiiiClient {
       if (body && typeof body === "object" && !Array.isArray(body)) {
         parsedBody = body as Record<string, unknown>;
       }
-      if (typeof parsedBody?.message === "string" && parsedBody.message.trim()) {
+      if (
+        typeof parsedBody?.message === "string" &&
+        parsedBody.message.trim()
+      ) {
         detail = parsedBody.message;
-      } else if (typeof parsedBody?.detail === "string" && parsedBody.detail.trim()) {
+      } else if (
+        typeof parsedBody?.detail === "string" &&
+        parsedBody.detail.trim()
+      ) {
         detail = parsedBody.detail;
       } else if (parsedBody?.detail) {
         detail = JSON.stringify(parsedBody.detail);
       }
-    } catch { /* Body not JSON — keep statusText */ }
+    } catch {
+      /* Body not JSON — keep statusText */
+    }
     throw new ApiHttpError(detail, response.status, parsedBody);
   }
 
   /** GET request */
   async get<T>(
     path: string,
-    params?: Record<string, string>
+    params?: Record<string, string>,
+    timeoutMs: number = DEFAULT_TIMEOUT_MS,
   ): Promise<T> {
     const url = new URL(path, this.baseUrl);
     if (params) {
-      Object.entries(params).forEach(([k, v]) =>
-        url.searchParams.set(k, v)
-      );
+      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
     }
 
-    let response = await adaptiveFetch(url.toString(), {
-      method: "GET",
-      headers: this.resolveHeaders(),
-    });
+    let response = await adaptiveFetch(
+      url.toString(),
+      {
+        method: "GET",
+        headers: this.resolveHeaders(),
+      },
+      timeoutMs,
+    );
 
     // Sprint 192: Auto-retry on 401
     if (response.status === 401 && this.onUnauthorized) {
       const refreshed = await this.onUnauthorized();
       if (refreshed) {
-        response = await adaptiveFetch(url.toString(), {
-          method: "GET",
-          headers: this.resolveHeaders(),
-        });
+        response = await adaptiveFetch(
+          url.toString(),
+          {
+            method: "GET",
+            headers: this.resolveHeaders(),
+          },
+          timeoutMs,
+        );
       }
     }
 
@@ -194,13 +214,11 @@ export class WiiiClient {
   async getWithHeaders<T>(
     path: string,
     extraHeaders: Record<string, string>,
-    params?: Record<string, string>
+    params?: Record<string, string>,
   ): Promise<T> {
     const url = new URL(path, this.baseUrl);
     if (params) {
-      Object.entries(params).forEach(([k, v]) =>
-        url.searchParams.set(k, v)
-      );
+      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
     }
 
     let response = await adaptiveFetch(url.toString(), {
@@ -229,7 +247,7 @@ export class WiiiClient {
   async postWithHeaders<T>(
     path: string,
     body: unknown,
-    extraHeaders: Record<string, string>
+    extraHeaders: Record<string, string>,
   ): Promise<T> {
     const url = new URL(path, this.baseUrl).toString();
 

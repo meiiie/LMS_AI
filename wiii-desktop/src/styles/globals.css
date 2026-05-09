@@ -1196,6 +1196,104 @@ html.dark .shiki span {
   color: var(--text-tertiary);
 }
 
+/* Inline citation chip — Perplexity 2026 pattern. Rendered for every
+   markdown link `[text](url)` in answer body. Compact + clickable. */
+.citation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  margin: 0 1px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  background: color-mix(in srgb, var(--surface-tertiary) 50%, transparent);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.92em;
+  line-height: 1.4;
+  vertical-align: baseline;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.citation-chip:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--text);
+}
+
+.citation-chip__favicon {
+  flex-shrink: 0;
+  border-radius: 2px;
+  vertical-align: -2px;
+}
+
+.citation-chip__text {
+  /* allow line-wrap on long anchor text but stay tight */
+  word-break: normal;
+}
+
+/* Phase 35 — mobile breakpoint polish.
+   Below 768px the chat lane shrinks; tool strips + citation chips need
+   tighter padding and the search-result widget should switch from inline
+   row to vertical stack so titles aren't truncated to nothing. */
+@media (max-width: 767px) {
+  .tool-strip {
+    margin-left: 0.6rem;
+    gap: 0.5rem;
+  }
+  .tool-strip__query,
+  .tool-strip__result {
+    max-width: 100%;
+    font-size: 0.74rem;
+  }
+  .search-result-widget__item {
+    padding: 8px 10px;
+  }
+  .search-result-widget__title {
+    white-space: normal;
+    line-height: 1.3;
+  }
+  .citation-chip {
+    padding: 0 4px;
+    gap: 2px;
+    font-size: 0.88em;
+  }
+  .citation-chip__favicon {
+    width: 10px;
+    height: 10px;
+  }
+  /* StreamingTimer wraps when status text is long */
+  .streaming-timer {
+    flex-wrap: wrap;
+  }
+  .streaming-timer__status {
+    flex-basis: 100%;
+    margin-left: 12px !important;
+    margin-top: 2px;
+  }
+}
+
+/* Numbered citation badge — Perplexity-style citation index. */
+.search-result-widget__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: color-mix(in srgb, var(--accent) 90%, var(--text));
+  line-height: 1;
+}
+
+.search-result-widget__item:hover .search-result-widget__index {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
 .search-result-widget__content {
   display: flex;
   flex-direction: column;
@@ -2667,8 +2765,12 @@ html.dark .shiki span {
   display: flex;
   align-items: flex-start;
   gap: 0.72rem;
-  margin: 0.18rem 0 0.7rem 1.42rem;
-  padding: 0.1rem 0 0;
+  /* Phase 35 — tighten vertical spacing between tool strips. Previously
+     0.7rem bottom margin made 5 stacked tools take half the screen. SOTA
+     reference (Claude.ai, Perplexity) uses ~0.25rem between consecutive
+     tool entries. */
+  margin: 0.12rem 0 0.32rem 1.42rem;
+  padding: 0.08rem 0 0;
 }
 
 .tool-strip__rail {
@@ -2705,6 +2807,52 @@ html.dark .shiki span {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.45rem 0.7rem;
+}
+
+.tool-strip__header--clickable {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.12s ease;
+}
+
+.tool-strip__header--clickable:not(:disabled):hover {
+  background: color-mix(in srgb, var(--surface-tertiary) 60%, transparent);
+}
+
+.tool-strip__header--clickable:disabled {
+  cursor: default;
+}
+
+.tool-strip__expand-chevron {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  transition: transform 0.15s ease;
+}
+
+.tool-strip__expand-chevron--open {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-strip__expand-chevron,
+  .citation-chip,
+  .tool-strip__header--clickable {
+    transition: none !important;
+  }
+  .streaming-timer__dot {
+    animation: none !important;
+  }
+  .streaming-timer__label {
+    animation: none !important;
+    -webkit-text-fill-color: var(--accent) !important;
+  }
 }
 
 .tool-strip__label {

@@ -176,6 +176,25 @@ def _inject_host_context(state: dict) -> str:
     return ""
 
 
+def _inject_document_context(state: dict) -> str:
+    """Compile per-turn uploaded document Markdown into a shared prompt block."""
+    ctx = state.get("context", {}) or {}
+    if not isinstance(ctx, dict):
+        return ""
+    raw_document_context = ctx.get("document_context")
+    if not raw_document_context:
+        return ""
+    try:
+        from app.services.input_processor_context_runtime import (
+            _render_document_context_for_prompt,
+        )
+
+        return _render_document_context_for_prompt(raw_document_context)
+    except Exception as exc:
+        logger.warning("[GRAPH] document_context format failed: %s", exc)
+        return ""
+
+
 def _summarize_host_action_feedback(feedback: dict[str, Any] | None) -> str | None:
     if not isinstance(feedback, dict):
         return None

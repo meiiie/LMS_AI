@@ -82,6 +82,7 @@ async def build_multi_agent_context_impl(
             img.model_dump() if hasattr(img, "model_dump") else img
             for img in context.images
         ] if getattr(context, "images", None) else None,
+        "image_input_error": getattr(context, "image_input_error", None),
         "lms_external_id": lms_external_id,
         "lms_connector_id": lms_connector_id,
         "page_context": getattr(context, "page_context", None),
@@ -93,6 +94,10 @@ async def build_multi_agent_context_impl(
         "visual_context": getattr(context, "visual_context", None),
         "widget_feedback": getattr(context, "widget_feedback", None),
         "code_studio_context": getattr(context, "code_studio_context", None),
+        "document_context": getattr(context, "document_context", None),
+        # Wiii Pointy v2.8: explicit @ mention force-bind list.
+        "force_skills": getattr(context, "force_skills", None),
+        "pointy_mode": bool(getattr(context, "pointy_mode", False)),
     }
 
 

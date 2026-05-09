@@ -151,6 +151,137 @@ def test_unsafe_click_intent_is_demoted_to_highlight():
     assert action["reason"] == "unsafe_click_demoted"
 
 
+def test_send_message_prompt_prefers_send_button_over_message_edit_controls():
+    action = build_pointy_fast_path_action(
+        "Pointy hay chi vao nut Gui tin nhan va noi mot lan thoi.",
+        _context([
+            {
+                "id": "auto:button:chinh-sua-tin-nhan-8",
+                "selector": '[data-wiii-id="auto:button:chinh-sua-tin-nhan-8"]',
+                "label": "Chinh sua tin nhan",
+                "click_safe": False,
+            },
+            {
+                "id": "chat-send-button",
+                "selector": '[data-wiii-id="chat-send-button"]',
+                "label": "Gui tin nhan",
+                "click_safe": False,
+            },
+        ]),
+    )
+
+    assert action is not None
+    assert action["action"] == POINTY_ACTION_HIGHLIGHT
+    assert action["params"]["selector"] == "chat-send-button"
+
+
+def test_natural_pointy_retry_prompt_matches_send_button():
+    action = build_pointy_fast_path_action(
+        "Pointy, chi lai nut Gui va noi that ngan thoi.",
+        _context([
+            {
+                "id": "auto:button:chinh-sua-tin-nhan-8",
+                "selector": '[data-wiii-id="auto:button:chinh-sua-tin-nhan-8"]',
+                "label": "Chinh sua tin nhan",
+                "click_safe": False,
+            },
+            {
+                "id": "chat-send-button",
+                "selector": '[data-wiii-id="chat-send-button"]',
+                "label": "Gui tin nhan",
+                "click_safe": False,
+            },
+        ]),
+    )
+
+    assert action is not None
+    assert action["action"] == POINTY_ACTION_HIGHLIGHT
+    assert action["params"]["selector"] == "chat-send-button"
+
+
+def test_wiii_desktop_send_message_prompt_uses_stable_send_button_when_inventory_is_stale():
+    action = build_pointy_fast_path_action(
+        "Pointy hay chi vao nut Gui tin nhan va noi mot lan thoi.",
+        {
+            "host_context": {
+                "host_type": "wiii-desktop",
+                "page": {
+                    "type": "chat",
+                    "metadata": {
+                        "available_targets": [
+                            {
+                                "id": "auto:button:chinh-sua-tin-nhan-9",
+                                "selector": '[data-wiii-id="auto:button:chinh-sua-tin-nhan-9"]',
+                                "label": "Chinh sua tin nhan",
+                                "click_safe": False,
+                            }
+                        ],
+                    },
+                },
+            },
+        },
+    )
+
+    assert action is not None
+    assert action["action"] == POINTY_ACTION_HIGHLIGHT
+    assert action["params"]["selector"] == "chat-send-button"
+
+
+def test_pointy_topic_memory_prompt_does_not_emit_fast_path_action():
+    action = build_pointy_fast_path_action(
+        (
+            "Trong phien nay, hay nho 3 uu tien bao cao: Pointy phai on dinh, "
+            "Thinking phai hien ro, memory phai dang tin. Tra loi chi: Da ghi nhan."
+        ),
+        _context([
+            {
+                "id": "chat-send-button",
+                "selector": '[data-wiii-id="chat-send-button"]',
+                "label": "Gui tin nhan",
+                "click_safe": False,
+            }
+        ]),
+    )
+
+    assert action is None
+
+
+def test_web_search_prompt_does_not_emit_search_button_fast_path_action():
+    action = build_pointy_fast_path_action(
+        "Tim tren web giup minh: OpenAI Responses API dung de lam gi? Ma kiem thu WEB-528.",
+        _context([
+            {
+                "id": "search-button",
+                "selector": '[data-wiii-id="search-button"]',
+                "label": "Mo tim kiem",
+                "click_safe": True,
+                "click_kind": "search",
+            }
+        ]),
+    )
+
+    assert action is None
+
+
+def test_capability_inventory_prompt_does_not_emit_image_input_fast_path_action():
+    action = build_pointy_fast_path_action(
+        (
+            "Wiii hien xu ly duoc anh dau vao, tao anh, Word, Excel, "
+            "video toi muc nao? Tra loi trung thuc, 5 y ngan."
+        ),
+        _context([
+            {
+                "id": "image-upload-button",
+                "selector": '[data-wiii-id="image-upload-button"]',
+                "label": "Anh dau vao",
+                "click_safe": True,
+            }
+        ]),
+    )
+
+    assert action is None
+
+
 def test_skips_when_frontend_fast_path_already_reported_feedback():
     action = build_pointy_fast_path_action(
         "Wiii oi, nut Kham pha khoa hoc o dau?",

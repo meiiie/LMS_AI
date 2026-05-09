@@ -15,6 +15,8 @@ from uuid import UUID
 
 from app.core.config import settings
 from app.models.schemas import ChatRequest, UserRole
+from app.engine.multi_agent.supervisor_hint_runtime import _normalize_router_text_impl
+from app.engine.multi_agent.supervisor_runtime_support import _looks_reasoning_safety_meta_turn
 from .input_processor_context_runtime import build_context_impl
 from .input_processor_support import (
     extract_user_name_impl,
@@ -79,6 +81,7 @@ class ChatContext:
 
     # Sprint 179: Multimodal Vision
     images: Optional[list] = None  # List[ImageInput] from ChatRequest
+    image_input_error: Optional[str] = None
 
     # Sprint 221: Page-Aware Context
     page_context: Optional[Any] = None
@@ -92,6 +95,18 @@ class ChatContext:
     visual_context: Optional[Any] = None
     widget_feedback: Optional[Any] = None
     code_studio_context: Optional[Any] = None
+    document_context: Optional[Any] = None
+
+    # Wiii Pointy v2.8: explicit `@plugin-name` force-bind từ ChatRequest.
+    # Bypass `_needs_pointy/_needs_news/_needs_legal` intent gates trong
+    # tool_collection. Empty list / None = standard keyword routing.
+    force_skills: Optional[list[str]] = None
+
+    # F18 Phase B (2026-05-07) — Pointy mode UX flag.
+    # When True, user is talking directly to the cursor (action mode).
+    # Backend forces tool_pointy_show invocation per turn + cursor-agent
+    # persona in synthesizer.
+    pointy_mode: bool = False
 
     # Analysis Context
     conversation_analysis: Any = None
@@ -160,6 +175,10 @@ class InputProcessor:
         result = ValidationResult()
 
         if self._guardian_agent is not None:
+            if _looks_reasoning_safety_meta_turn(_normalize_router_text_impl(message)):
+                logger.info("[GUARDIAN] Input reasoning-safety fast path")
+                return result
+
             guardian_decision = await self._guardian_agent.validate_message(
                 message=message,
                 context="education",

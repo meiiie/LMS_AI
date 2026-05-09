@@ -146,6 +146,26 @@ class TestRetrieveFacts:
         assert "role" in types_found
 
     @pytest.mark.asyncio
+    async def test_skips_internal_updated_at_fact_keys(self):
+        semantic_memory = MagicMock()
+        semantic_memory.get_user_facts = AsyncMock(
+            return_value={
+                "preference": "ma semantic test cuoi cua minh la trang xanh 618",
+                "preference__updated_at": "2026-05-07T14:00:00Z",
+            }
+        )
+        node = _make_node(semantic_memory)
+
+        facts = await node._retrieve_facts("user-123")
+
+        assert facts == [
+            {
+                "type": "preference",
+                "content": "ma semantic test cuoi cua minh la trang xanh 618",
+            }
+        ]
+
+    @pytest.mark.asyncio
     async def test_no_service_returns_empty(self):
         node = _make_node()
         facts = await node._retrieve_facts("user-1")
@@ -244,6 +264,68 @@ class TestGenerateResponseContext:
 
         assert text == "Minh nè."
         mock_llm.ainvoke.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_generate_response_short_circuits_explicit_memory_ack(self):
+        node = _make_node()
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=AssertionError("explicit memory ack should not call LLM"))
+
+        text = await node._generate_response(
+            mock_llm,
+            (
+                "Hãy ghi nhớ lâu dài rằng mã semantic test của mình là "
+                "hải đăng bạc 884. Trả lời ngắn gọn rằng đã lưu."
+            ),
+            [],
+            ["preference: mã semantic test của mình là hải đăng bạc 884"],
+            "",
+            {"context": None},
+        )
+
+        assert text == "\u0110\u00e3 l\u01b0u."
+        mock_llm.ainvoke.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_generate_response_keeps_verbose_memory_ack_without_short_directive(self):
+        node = _make_node()
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=AssertionError("explicit memory template should not call LLM"))
+
+        text = await node._generate_response(
+            mock_llm,
+            "Hay ghi nho lau dai rang ma semantic test cua minh la trang xanh 618.",
+            [],
+            ["preference: ma semantic test cua minh la trang xanh 618"],
+            "",
+            {"context": None},
+        )
+
+        assert "trang xanh 618" in text
+        mock_llm.ainvoke.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_generate_response_short_circuits_named_memory_recall(self):
+        node = _make_node()
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=AssertionError("named memory recall should not call LLM"))
+
+        text = await node._generate_response(
+            mock_llm,
+            "Mã semantic test cuối mình vừa nhờ bạn ghi nhớ là gì? Trả lời đúng 1 câu.",
+            [
+                {
+                    "type": "preference",
+                    "content": "preference: mã semantic test cuối của mình là la bàn đỏ 317",
+                }
+            ],
+            [],
+            "",
+            {"context": None},
+        )
+
+        assert text == "la bàn đỏ 317"
+        mock_llm.ainvoke.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +429,7 @@ class TestMemoryPublicThinking:
         assert result.get("thinking") == "Minh nhan ra ten Nam tu ngu canh."
 
     @pytest.mark.asyncio
-    async def test_process_with_llm_no_thinking_when_none(self, mock_semantic_memory, base_state):
+    async def test_process_with_llm_adds_public_memory_thinking_when_none(self, mock_semantic_memory, base_state):
         node = _make_node(mock_semantic_memory)
         mock_llm = AsyncMock()
         mock_llm.ainvoke = AsyncMock(return_value=MagicMock(content="Minh nho roi nhe!"))
@@ -363,4 +445,5 @@ class TestMemoryPublicThinking:
             result = await node.process(base_state, llm=mock_llm)
 
         assert result["memory_output"] == "Minh nho roi nhe!"
-        assert "thinking" not in result
+        assert "mảnh nhớ" in result["thinking"]
+        assert result["thinking_provenance"] == "authored_public_summary"

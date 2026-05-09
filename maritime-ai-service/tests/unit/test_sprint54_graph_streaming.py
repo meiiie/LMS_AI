@@ -62,6 +62,7 @@ if not _had_graph:
 from app.engine.multi_agent.graph_streaming import (
     _convert_bus_event,
     _extract_thinking_content,
+    _is_likely_english,
     _narration_delta_chunks,
     _stream_answer_tokens,
     process_with_multi_agent_streaming,
@@ -231,6 +232,21 @@ def test_narration_delta_chunks_skips_summary_echo():
 # ============================================================================
 # _stream_answer_tokens
 # ============================================================================
+
+
+class TestLanguageDetection:
+    def test_romanized_vietnamese_fast_path_text_is_not_treated_as_english(self):
+        text = (
+            "Minh thay cau da gui anh, nhung hien Wiii chua co provider vision kha dung "
+            "nen minh khong nen doan noi dung anh."
+        )
+
+        assert _is_likely_english(text) is False
+
+    def test_plain_english_still_triggers_translation_detection(self):
+        text = "The attached image appears to show a navigation chart with labels and a short note."
+
+        assert _is_likely_english(text) is True
 
 
 class TestStreamAnswerTokens:

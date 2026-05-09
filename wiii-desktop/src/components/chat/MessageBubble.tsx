@@ -1,6 +1,6 @@
 import { useState, useCallback, memo, lazy, Suspense } from "react";
 import { motion } from "motion/react";
-import { Copy, Check, RefreshCw, ThumbsUp, ThumbsDown, Pencil } from "lucide-react";
+import { Check, Copy, FileText, Film, Pencil, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
 import type { ContentBlock, Message, MoodType } from "@/api/types";
 import type { AvatarState, SoulEmotionData } from "@/lib/avatar/types";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
@@ -9,6 +9,7 @@ import { ThinkingBlock } from "./ThinkingBlock";
 import { InterleavedBlockSequence } from "./InterleavedBlockSequence";
 import { ModelSwitchPromptCard } from "./ModelSwitchPromptCard";
 import { SourceCitation } from "./SourceCitation";
+import { MessageMentions } from "./MessageMentions";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useToastStore } from "@/stores/toast-store";
@@ -16,6 +17,7 @@ import { submitFeedback } from "@/api/feedback";
 import { formatRelativeTime, formatAbsoluteTime } from "@/lib/date-utils";
 import { userMessageEntry, aiMessageEntry } from "@/lib/animations";
 import { useReducedMotion, motionSafe } from "@/hooks/useReducedMotion";
+import { formatBytes } from "@/lib/document-context";
 
 const SuggestedQuestions = lazy(async () => {
   const mod = await import("./SuggestedQuestions");
@@ -89,7 +91,7 @@ export const MessageBubble = memo(function MessageBubble({
         <div className="max-w-[min(85%,800px)]">
           <div className="bg-[var(--user-bg)] rounded-xl px-4 py-2.5 relative">
             <p className="text-[15px] leading-[1.7] font-sans text-text selectable">
-              {message.content}
+              <MessageMentions text={message.content} />
             </p>
 
             {message.images && message.images.length > 0 && (
@@ -106,6 +108,32 @@ export const MessageBubble = memo(function MessageBubble({
                       window.open(img.type === "base64" ? `data:${img.media_type};base64,${img.data}` : img.data);
                     }}
                   />
+                ))}
+              </div>
+            )}
+
+            {message.documents && message.documents.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {message.documents.map((doc) => (
+                  <div
+                    key={doc.id || doc.file_name}
+                    className="flex max-w-[260px] items-start gap-2 rounded-lg border border-[var(--border)] bg-white/55 px-2.5 py-2 text-xs text-text-secondary"
+                  >
+                    {doc.media_kind === "video" ? (
+                      <Film size={14} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+                    ) : (
+                      <FileText size={14} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+                    )}
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-text">{doc.file_name}</div>
+                      <div className="mt-0.5 truncate text-[11px] text-text-tertiary">
+                        {doc.parser || "MarkItDown"} · {formatBytes(doc.size_bytes)}
+                        {doc.char_count ? ` · ${doc.char_count} ký tự` : ""}
+                        {doc.extracted_image_count ? ` · ${doc.extracted_image_count} khung hình` : ""}
+                        {doc.truncated ? " · đã rút gọn" : ""}
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
@@ -260,7 +288,43 @@ export const MessageBubble = memo(function MessageBubble({
       </div>
     </motion.div>
   );
-});
+}, areMessageBubblePropsEqual);
+
+/**
+ * Phase 35 — custom comparator for MessageBubble.
+ *
+ * Default `memo` uses shallow equality. That re-renders every historical
+ * bubble whenever the active streaming bubble's `liveAvatarState`,
+ * `liveAvatarMood`, `liveSoulEmotion` props change (which happens many
+ * times per second during NVIDIA stream). Historical bubbles don't care
+ * about these live props — they're only meaningful for `isLastAssistant`.
+ *
+ * Custom comparator skips re-render when:
+ *  - message reference unchanged (assumed immutable per turn)
+ *  - role-relevant props unchanged
+ *  - live-* props compared ONLY for the last assistant bubble
+ *
+ * Net effect: streaming bubble re-renders, historical bubbles do not.
+ */
+function areMessageBubblePropsEqual(
+  prev: MessageBubbleProps,
+  next: MessageBubbleProps,
+): boolean {
+  if (prev.message !== next.message) return false;
+  if (prev.isLastAssistant !== next.isLastAssistant) return false;
+  if (prev.onSuggestedQuestion !== next.onSuggestedQuestion) return false;
+  if (prev.onRegenerate !== next.onRegenerate) return false;
+  if (prev.onEditMessage !== next.onEditMessage) return false;
+
+  // Live avatar/mood/soul props matter ONLY for the active streaming bubble.
+  if (next.isLastAssistant) {
+    if (prev.liveAvatarState !== next.liveAvatarState) return false;
+    if (prev.liveAvatarMood !== next.liveAvatarMood) return false;
+    if (prev.liveSoulEmotion !== next.liveSoulEmotion) return false;
+  }
+
+  return true;
+}
 
 const AGENT_LABELS: Record<string, string | null> = {
   chat: null,

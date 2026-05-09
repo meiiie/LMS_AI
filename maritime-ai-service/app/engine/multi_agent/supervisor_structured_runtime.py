@@ -5,6 +5,9 @@ from __future__ import annotations
 from app.engine.messages import Message
 from app.engine.messages_adapters import to_openai_dict
 from app.engine.multi_agent.direct_intent import _normalize_for_intent
+from app.engine.multi_agent.supervisor_runtime_support import (
+    _looks_wiii_capability_inventory_turn,
+)
 
 
 _SELFHOOD_FOLLOWUP_QUERY_MARKERS: tuple[str, ...] = (
@@ -192,6 +195,9 @@ async def route_structured_impl(
     chosen_agent = agent_map.get(result.agent, agent_type_enum.DIRECT.value)
     method = "structured"
     visual_decision = resolve_visual_intent_fn(query)
+    is_wiii_capability_inventory = _looks_wiii_capability_inventory_turn(
+        _normalize_for_intent(query)
+    )
 
     logger_obj.info(
         "[SUPERVISOR] CoT: %s -> %s (conf=%.2f, intent=%s)",
@@ -250,6 +256,13 @@ async def route_structured_impl(
             chosen_agent = agent_type_enum.DIRECT.value
             method = "structured+selfhood_followup_override"
 
+    if is_wiii_capability_inventory:
+        resolved_intent = "off_topic"
+        if chosen_agent != agent_type_enum.DIRECT.value:
+            logger_obj.info("[SUPERVISOR] Capability inventory override: %s -> direct", chosen_agent)
+            chosen_agent = agent_type_enum.DIRECT.value
+            method = "structured+capability_inventory_override"
+
     if (
         routing_hint.get("kind") == "visual_followup"
         and routing_hint.get("intent") == "learning"
@@ -262,7 +275,7 @@ async def route_structured_impl(
     if needs_code_studio_fn(query) and chosen_agent in (
         agent_type_enum.DIRECT.value,
         agent_type_enum.TUTOR.value,
-    ):
+    ) and not is_wiii_capability_inventory:
         logger_obj.info("[SUPERVISOR] Capability override: %s -> code_studio_agent", chosen_agent)
         chosen_agent = agent_type_enum.CODE_STUDIO.value
         method = "structured+capability_override"

@@ -32,6 +32,25 @@ def disable_serper():
         yield
 
 
+@pytest.fixture(autouse=True)
+def disable_layered_live_backends():
+    """Keep resilience unit tests on the mocked DDG path only."""
+    with patch(
+        "app.engine.tools.web_search_tools._searxng_search_sync",
+        return_value=[],
+    ), patch(
+        "app.engine.tools.web_search_tools._brave_search_sync",
+        return_value=[],
+    ), patch(
+        "app.engine.tools.web_search_tools._augment_top_result_with_deep_fetch",
+        side_effect=lambda results, _query: results,
+    ), patch(
+        "app.engine.tools.web_search_tools._merge_news_into_search",
+        side_effect=lambda results, _query: results,
+    ):
+        yield
+
+
 def _reset_cb():
     """Reset circuit breaker state."""
     with ws._cb_lock:

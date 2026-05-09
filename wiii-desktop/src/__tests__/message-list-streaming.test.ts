@@ -3,6 +3,7 @@ import type { ContentBlock } from "@/api/types";
 import {
   getVisibleStreamingBlocks,
   hasRenderableStreamingBlocks,
+  shouldAutoFollowLatestMessage,
 } from "@/components/chat/MessageList";
 
 describe("MessageList streaming helpers", () => {
@@ -45,5 +46,11 @@ describe("MessageList streaming helpers", () => {
 
     expect(visible.map((block) => block.type)).toEqual(["action_text"]);
     expect(hasRenderableStreamingBlocks(visible)).toBe(true);
+  });
+
+  it("resumes auto-follow when the latest message is from the user", () => {
+    expect(shouldAutoFollowLatestMessage({ role: "user" })).toBe(true);
+    expect(shouldAutoFollowLatestMessage({ role: "assistant" })).toBe(false);
+    expect(shouldAutoFollowLatestMessage(null)).toBe(false);
   });
 });

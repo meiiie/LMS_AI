@@ -227,6 +227,10 @@ class UserContext(BaseModel):
         default=None,
         description="Active Code Studio session context from chat client for code/app follow-up turns",
     )
+    document_context: Optional[dict] = Field(
+        default=None,
+        description="Per-turn Markdown extracted from files attached in the desktop chat UI",
+    )
 
     model_config = {
         "json_schema_extra": {

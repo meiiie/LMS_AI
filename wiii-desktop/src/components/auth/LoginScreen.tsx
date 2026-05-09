@@ -12,12 +12,19 @@ import { useAuthStore } from "@/stores/auth-store";
 import type { AuthUser } from "@/stores/auth-store";
 import type { AppSettings } from "@/api/types";
 import { WiiiAvatar } from "@/components/common/WiiiAvatar";
-import { buildAuthUserFromPayload, toCompatibilitySettingsRole } from "@/lib/auth-user";
+import {
+  buildAuthUserFromPayload,
+  toCompatibilitySettingsRole,
+} from "@/lib/auth-user";
 import { DEFAULT_SERVER_URL } from "@/lib/constants";
 
 // Dynamic import that bypasses Vite static analysis (plugin may not be installed)
 const _oauthMod = "@fabianlars/tauri-plugin-oauth";
-function loadOAuth(): Promise<{ start: (opts: { ports: number[] }) => Promise<number>; onUrl: (cb: (url: string) => void) => void; cancel: (port: number) => Promise<void> }> {
+function loadOAuth(): Promise<{
+  start: (opts: { ports: number[] }) => Promise<number>;
+  onUrl: (cb: (url: string) => void) => void;
+  cancel: (port: number) => Promise<void>;
+}> {
   return import(/* @vite-ignore */ _oauthMod) as Promise<any>;
 }
 
@@ -100,7 +107,9 @@ export function LoginScreen() {
           throw new Error("URL server không hợp lệ");
         }
       } catch {
-        setError("URL server không hợp lệ. Vui lòng kiểm tra Cài đặt → Kết nối.");
+        setError(
+          "URL server không hợp lệ. Vui lòng kiểm tra Cài đặt → Kết nối.",
+        );
         setIsLoading(false);
         return;
       }
@@ -108,7 +117,10 @@ export function LoginScreen() {
       // Sprint 193: Web browser flow — redirect with hash-based token delivery
       // Security: use URL constructor to prevent query parameter injection
       if (!isTauri) {
-        const loginUrlObj = new URL("/api/v1/auth/google/login", settings.server_url);
+        const loginUrlObj = new URL(
+          "/api/v1/auth/google/login",
+          settings.server_url,
+        );
         loginUrlObj.searchParams.set("redirect_uri", window.location.origin);
         window.location.href = loginUrlObj.toString();
         return; // Page will navigate away — no finally needed
@@ -125,7 +137,10 @@ export function LoginScreen() {
       }
 
       // Open system browser to backend OAuth login
-      const loginUrlObj = new URL("/api/v1/auth/google/login", settings.server_url);
+      const loginUrlObj = new URL(
+        "/api/v1/auth/google/login",
+        settings.server_url,
+      );
       loginUrlObj.searchParams.set("port", String(port));
       const loginUrl = loginUrlObj.toString();
 
@@ -142,7 +157,15 @@ export function LoginScreen() {
       try {
         const oauth = await loadOAuth();
         const callbackUrl = await new Promise<string>((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error("Hết thời gian chờ Google phản hồi. Vui lòng thử lại.")), 60000);
+          const timeout = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  "Hết thời gian chờ Google phản hồi. Vui lòng thử lại.",
+                ),
+              ),
+            60000,
+          );
           oauth.onUrl((url: string) => {
             clearTimeout(timeout);
             resolve(url);
@@ -164,7 +187,9 @@ export function LoginScreen() {
         const avatarUrl = params.get("avatar_url") || "";
 
         if (!accessToken || !refreshToken) {
-          throw new Error("Không nhận được thông tin đăng nhập từ Google. Vui lòng thử lại.");
+          throw new Error(
+            "Không nhận được thông tin đăng nhập từ Google. Vui lòng thử lại.",
+          );
         }
 
         const user: AuthUser = buildAuthUserFromPayload({
@@ -196,7 +221,7 @@ export function LoginScreen() {
       } catch (oauthErr) {
         // If tauri-plugin-oauth isn't available, show manual instructions
         throw new Error(
-          "Không thể nhận callback từ Google. Vui lòng thử lại hoặc dùng Developer Mode."
+          "Không thể nhận callback từ Google. Vui lòng thử lại hoặc dùng Developer Mode.",
         );
       }
     } catch (err) {
@@ -219,9 +244,7 @@ export function LoginScreen() {
       });
       if (!res.ok) {
         const detail = await res.json().catch(() => null);
-        throw new Error(
-          detail?.detail || `Dev login thất bại (${res.status})`,
-        );
+        throw new Error(detail?.detail || `Dev login thất bại (${res.status})`);
       }
       const data = await res.json();
       const user: AuthUser = buildAuthUserFromPayload({
@@ -286,11 +309,14 @@ export function LoginScreen() {
     setError(null);
     setIsLoading(true);
     try {
-      const res = await fetch(`${settings.server_url}/api/v1/auth/magic-link/request`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailValue.trim().toLowerCase() }),
-      });
+      const res = await fetch(
+        `${settings.server_url}/api/v1/auth/magic-link/request`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: emailValue.trim().toLowerCase() }),
+        },
+      );
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.detail || "Không thể gửi magic link");
@@ -316,9 +342,13 @@ export function LoginScreen() {
       // returns the verify URL directly. Auto-open it after the WS is ready so
       // the magic link flow completes without waiting for an email.
       if (data.dev_verify_url) {
-        ws.addEventListener("open", () => {
-          window.open(data.dev_verify_url, "_blank", "noopener,noreferrer");
-        }, { once: true });
+        ws.addEventListener(
+          "open",
+          () => {
+            window.open(data.dev_verify_url, "_blank", "noopener,noreferrer");
+          },
+          { once: true },
+        );
       }
 
       ws.onmessage = async (event) => {
@@ -393,7 +423,8 @@ export function LoginScreen() {
     <div
       className="flex flex-col items-center h-screen pt-[10vh]"
       style={{
-        background: "linear-gradient(180deg, var(--surface) 0%, var(--surface-secondary) 100%)",
+        background:
+          "linear-gradient(180deg, var(--surface) 0%, var(--surface-secondary) 100%)",
       }}
       aria-busy={isLoading}
     >
@@ -460,7 +491,9 @@ export function LoginScreen() {
               />
             </svg>
           )}
-          <span>{isLoading ? "Đang đăng nhập..." : "Đăng nhập với Google"}</span>
+          <span>
+            {isLoading ? "Đang đăng nhập..." : "Đăng nhập với Google"}
+          </span>
         </button>
 
         {/* Error message */}
@@ -484,7 +517,12 @@ export function LoginScreen() {
         {/* Sprint 224: Magic link email login */}
         {emailState === "idle" ? (
           <div className="w-full flex flex-col gap-2.5">
-            <label htmlFor="magic-link-email" className="text-xs font-medium text-text-tertiary">Đăng nhập bằng email</label>
+            <label
+              htmlFor="magic-link-email"
+              className="text-xs font-medium text-text-tertiary"
+            >
+              Đăng nhập bằng email
+            </label>
             <input
               id="magic-link-email"
               type="email"
@@ -507,7 +545,10 @@ export function LoginScreen() {
             </button>
           </div>
         ) : (
-          <div className="w-full flex flex-col items-center gap-3 py-2" aria-live="polite">
+          <div
+            className="w-full flex flex-col items-center gap-3 py-2"
+            aria-live="polite"
+          >
             <div className="text-2xl">✉️</div>
             <p className="text-sm font-medium text-text text-center">
               Kiểm tra email của bạn
@@ -560,7 +601,7 @@ export function LoginScreen() {
               Dành cho nhà phát triển — nhập Khóa API thủ công
             </p>
             <input
-              aria-label="KhÃ³a API"
+              aria-label="Khóa API"
               type="password"
               placeholder="Khóa API"
               value={settings.api_key}
@@ -581,17 +622,25 @@ export function LoginScreen() {
         <div className="text-center mt-8 space-y-1.5">
           <p className="text-[11px] text-text-tertiary leading-relaxed">
             Bằng việc tiếp tục, bạn đồng ý với{" "}
-            <a href="/terms.html" target="_blank" rel="noopener" className="underline underline-offset-2 hover:text-text-secondary transition-colors">
+            <a
+              href="/terms.html"
+              target="_blank"
+              rel="noopener"
+              className="underline underline-offset-2 hover:text-text-secondary transition-colors"
+            >
               Điều khoản sử dụng
             </a>{" "}
             và{" "}
-            <a href="/privacy.html" target="_blank" rel="noopener" className="underline underline-offset-2 hover:text-text-secondary transition-colors">
+            <a
+              href="/privacy.html"
+              target="_blank"
+              rel="noopener"
+              className="underline underline-offset-2 hover:text-text-secondary transition-colors"
+            >
               Chính sách bảo mật
             </a>
           </p>
-          <p className="text-[10px] text-text-quaternary">
-            by The Wiii Lab
-          </p>
+          <p className="text-[10px] text-text-quaternary">by The Wiii Lab</p>
         </div>
       </div>
     </div>

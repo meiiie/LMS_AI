@@ -83,6 +83,7 @@ ZHIPU_DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 NVIDIA_DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 NVIDIA_DEFAULT_MODEL = "deepseek-ai/deepseek-v4-flash"
 NVIDIA_DEFAULT_MODEL_ADVANCED = "deepseek-ai/deepseek-v4-pro"
+NVIDIA_DEFAULT_VISION_MODEL = "meta/llama-3.2-11b-vision-instruct"
 # Phase 32a (#207): Qwen3 thinking model emits ``reasoning_content`` deltas
 # that Wiii's existing thinking-stream extractor already understands.
 # Switch ``NVIDIA_MODEL_ADVANCED`` to this id when you want a visible

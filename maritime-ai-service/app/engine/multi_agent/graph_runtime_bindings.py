@@ -85,6 +85,10 @@ _inject_host_context = _load_attr(
     "app.engine.multi_agent.context_injection",
     "_inject_host_context",
 )
+_inject_document_context = _load_attr(
+    "app.engine.multi_agent.context_injection",
+    "_inject_document_context",
+)
 _inject_operator_context = _load_attr(
     "app.engine.multi_agent.context_injection",
     "_inject_operator_context",

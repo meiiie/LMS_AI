@@ -5,7 +5,7 @@ import type { AdminAuthEvent } from "@/api/types";
 import type { OrgHostActionView } from "@/stores/org-admin-store";
 
 const VIEW_OPTIONS: Array<{ id: OrgHostActionView; label: string }> = [
-  { id: "all", label: "Tat ca" },
+  { id: "all", label: "Tất cả" },
   { id: "previews", label: "Preview" },
   { id: "applies", label: "Apply" },
   { id: "publishes", label: "Publish" },
@@ -53,16 +53,19 @@ export function OrgManagerAudit({ orgId }: { orgId: string }) {
             <Sparkles size={16} />
           </div>
           <div>
-            <div className="text-sm font-medium text-text">Org host action timeline</div>
+            <div className="text-sm font-medium text-text">
+              Timeline host action của tổ chức
+            </div>
             <div className="text-xs text-text-secondary">
-              Theo doi preview, apply, va publish ma Wiii da de xuat hoac thuc hien trong to chuc nay.
+              Theo dõi preview, apply và publish mà Wiii đã đề xuất hoặc thực
+              hiện trong tổ chức này.
             </div>
           </div>
         </div>
 
         {hostActionEvents.length === 0 && !hostActionLoading ? (
           <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-xs text-text-tertiary">
-            Chua co host action nao cho view hien tai.
+            Chưa có host action nào cho chế độ xem hiện tại.
           </div>
         ) : (
           <ol className="space-y-4" aria-label="Org host action timeline">
@@ -81,16 +84,28 @@ export function OrgManagerAudit({ orgId }: { orgId: string }) {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => void fetchHostActionEvents(orgId, Math.max(0, hostActionEventsPage - 1))}
+              onClick={() =>
+                void fetchHostActionEvents(
+                  orgId,
+                  Math.max(0, hostActionEventsPage - 1),
+                )
+              }
               disabled={hostActionEventsPage === 0 || hostActionLoading}
               className="min-h-[36px] rounded-lg border border-border px-3 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Truoc
+              Trước
             </button>
             <button
               type="button"
-              onClick={() => void fetchHostActionEvents(orgId, Math.min(totalPages - 1, hostActionEventsPage + 1))}
-              disabled={hostActionEventsPage + 1 >= totalPages || hostActionLoading}
+              onClick={() =>
+                void fetchHostActionEvents(
+                  orgId,
+                  Math.min(totalPages - 1, hostActionEventsPage + 1),
+                )
+              }
+              disabled={
+                hostActionEventsPage + 1 >= totalPages || hostActionLoading
+              }
               className="min-h-[36px] rounded-lg border border-border px-3 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Sau
@@ -109,7 +124,8 @@ function OrgTimelineItem({ entry }: { entry: AdminAuthEvent }) {
       ? metadata.summary
       : entry.reason || entry.event_type;
   const target =
-    typeof metadata.target_label === "string" && metadata.target_label.trim().length > 0
+    typeof metadata.target_label === "string" &&
+    metadata.target_label.trim().length > 0
       ? metadata.target_label
       : typeof metadata.lesson_id === "string"
         ? metadata.lesson_id
@@ -123,7 +139,10 @@ function OrgTimelineItem({ entry }: { entry: AdminAuthEvent }) {
         aria-hidden="true"
         className="absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] shadow-[0_0_0_4px_rgba(59,130,246,0.12)]"
       />
-      <span aria-hidden="true" className="absolute bottom-[-16px] left-[5px] top-4 w-px bg-border" />
+      <span
+        aria-hidden="true"
+        className="absolute bottom-[-16px] left-[5px] top-4 w-px bg-border"
+      />
       <div className="rounded-xl border border-border bg-surface px-4 py-3 shadow-sm">
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">
@@ -133,7 +152,9 @@ function OrgTimelineItem({ entry }: { entry: AdminAuthEvent }) {
             {String(metadata.preview_kind || entry.provider)}
           </span>
           <span className="ml-auto text-xs text-text-tertiary">
-            {entry.created_at ? new Date(entry.created_at).toLocaleString("vi-VN") : "—"}
+            {entry.created_at
+              ? new Date(entry.created_at).toLocaleString("vi-VN")
+              : "—"}
           </span>
         </div>
         <div className="space-y-2">
@@ -141,8 +162,15 @@ function OrgTimelineItem({ entry }: { entry: AdminAuthEvent }) {
           <div className="grid gap-2 text-xs text-text-secondary sm:grid-cols-2">
             <MetaItem label="User" value={entry.user_id} />
             <MetaItem label="Target" value={String(target)} mono />
-            <MetaItem label="Request" value={String(metadata.request_id || "—")} mono />
-            <MetaItem label="Surface" value={String(metadata.surface || "preview_panel")} />
+            <MetaItem
+              label="Request"
+              value={String(metadata.request_id || "—")}
+              mono
+            />
+            <MetaItem
+              label="Surface"
+              value={String(metadata.surface || "preview_panel")}
+            />
           </div>
         </div>
       </div>
@@ -161,7 +189,9 @@ function MetaItem({
 }) {
   return (
     <div>
-      <span className="block text-[11px] uppercase tracking-wider text-text-tertiary">{label}</span>
+      <span className="block text-[11px] uppercase tracking-wider text-text-tertiary">
+        {label}
+      </span>
       <span className={`${mono ? "font-mono" : ""} text-text`}>{value}</span>
     </div>
   );

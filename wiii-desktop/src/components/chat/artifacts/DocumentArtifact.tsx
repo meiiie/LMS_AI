@@ -26,7 +26,10 @@ export default function DocumentArtifact({ artifact, mode }: Props) {
   const isMarkdown = language === "markdown" || language === "md" || !language;
   const preview = artifactPreviewSnippet(artifact, mode === "card" ? 180 : 600);
   const filename = describeArtifactFile(artifact);
-  const contentType = typeof artifact.metadata?.content_type === "string" ? artifact.metadata.content_type : null;
+  const contentType =
+    typeof artifact.metadata?.content_type === "string"
+      ? artifact.metadata.content_type
+      : null;
 
   if (mode === "card") {
     return (
@@ -36,8 +39,14 @@ export default function DocumentArtifact({ artifact, mode }: Props) {
             <FileText size={18} />
           </div>
           <div className="min-w-0 flex-1">
-            {filename && <div className="text-[11px] text-text-tertiary">{filename}</div>}
-            {contentType && <div className="text-[11px] text-text-tertiary mt-1">{contentType}</div>}
+            {filename && (
+              <div className="text-[11px] text-text-tertiary">{filename}</div>
+            )}
+            {contentType && (
+              <div className="text-[11px] text-text-tertiary mt-1">
+                {contentType}
+              </div>
+            )}
           </div>
           {fileUrl && (
             <a
@@ -47,7 +56,7 @@ export default function DocumentArtifact({ artifact, mode }: Props) {
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-surface-tertiary hover:bg-border text-text-secondary hover:text-text transition-colors text-xs shrink-0"
             >
               <Download size={14} />
-              Tai file
+              Tải file
             </a>
           )}
         </div>
@@ -66,8 +75,12 @@ export default function DocumentArtifact({ artifact, mode }: Props) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-text">{artifact.title}</div>
-          {filename && <div className="text-xs text-text-tertiary mt-1">{filename}</div>}
-          {contentType && <div className="text-xs text-text-tertiary mt-1">{contentType}</div>}
+          {filename && (
+            <div className="text-xs text-text-tertiary mt-1">{filename}</div>
+          )}
+          {contentType && (
+            <div className="text-xs text-text-tertiary mt-1">{contentType}</div>
+          )}
         </div>
         {fileUrl && (
           <a
@@ -77,7 +90,7 @@ export default function DocumentArtifact({ artifact, mode }: Props) {
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-surface-tertiary hover:bg-border text-text-secondary hover:text-text transition-colors text-xs shrink-0"
           >
             <Download size={14} />
-            Tai file
+            Tải file
           </a>
         )}
       </div>

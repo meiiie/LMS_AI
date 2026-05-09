@@ -72,6 +72,25 @@ _VAGUE_BANTER_PHRASES = {
     "cai gi ay",
 }
 
+_HUNGER_CHATTER_MARKERS = (
+    "doi phet",
+    "doi qua",
+    "hoi doi",
+    "bung doi",
+    "dang doi",
+    "minh doi",
+    "hungry",
+    "starving",
+)
+
+_HUNGER_CHATTER_MEMORY_BLOCKERS = (
+    "ghi nho",
+    "hay nho",
+    "luu lai",
+    "nho rang",
+    "trong phien nay",
+)
+
 _IDENTITY_PROBE_MARKERS = (
     "ban la ai",
     "ban ten gi",
@@ -112,6 +131,10 @@ _FAST_CHATTER_BLOCKERS = (
     "bao nhieu",
     "o dau",
     "nhu nao",
+    "phan tich",
+    "so sanh",
+    "thay doi",
+    "viet",
 )
 
 _ROUTING_ARTIFACT_MARKERS = (
@@ -266,9 +289,26 @@ def _looks_clear_social_impl(normalized: str) -> bool:
     return any(normalized == keyword or normalized.startswith(f"{keyword} ") for keyword in _NORMALIZED_SOCIAL_PREFIXES)
 
 
+def _looks_hunger_chatter_impl(normalized: str) -> bool:
+    """Detect short hunger chatter so it does not wait on LLM routing."""
+    query = normalized or ""
+    if not query:
+        return False
+    if any(marker in query for marker in _HUNGER_CHATTER_MEMORY_BLOCKERS):
+        return False
+    if any(marker in query for marker in _FAST_CHATTER_BLOCKERS):
+        return False
+    tokens = [token for token in re.sub(r"[^\w\s]", " ", query).split() if token]
+    # Realistic smoke prompts often carry a marker plus "answer naturally/no
+    # tool" instructions. Keep those obvious hunger/social turns off RAG.
+    if len(tokens) > 40:
+        return False
+    return any(_contains_router_phrase(query, marker) for marker in _HUNGER_CHATTER_MARKERS)
+
+
 def is_obvious_social_turn_impl(query: str) -> bool:
     normalized = _normalize_router_text_impl(query)
-    return _looks_clear_social_impl(normalized)
+    return _looks_clear_social_impl(normalized) or _looks_hunger_chatter_impl(normalized)
 
 
 def classify_fast_chatter_turn_impl(query: str) -> tuple[str, str] | None:
@@ -277,6 +317,8 @@ def classify_fast_chatter_turn_impl(query: str) -> tuple[str, str] | None:
         return None
     if any(marker in normalized for marker in _FAST_CHATTER_BLOCKERS):
         return None
+    if _looks_hunger_chatter_impl(normalized):
+        return ("social", "hunger_chatter")
     if _looks_clear_social_impl(normalized):
         return ("social", "social")
     tokens = [token for token in re.sub(r"[^\w\s]", " ", normalized).split() if token]

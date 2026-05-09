@@ -5,7 +5,9 @@ import { AnalyticsTab } from "@/components/admin/AnalyticsTab";
 import { useAdminStore } from "@/stores/admin-store";
 
 vi.mock("recharts", () => ({
-  ResponsiveContainer: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  ResponsiveContainer: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
   LineChart: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   Line: () => null,
   BarChart: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -44,10 +46,10 @@ describe("AnalyticsTab identity semantics", () => {
   it("shows canonical Wiii account types before compatibility roles", () => {
     render(<AnalyticsTab />);
 
-    expect(screen.getByText("Loai tai khoan Wiii")).toBeTruthy();
+    expect(screen.getByText("Loại tài khoản Wiii")).toBeTruthy();
     expect(screen.getByText("Wiii User")).toBeTruthy();
     expect(screen.getByText("Platform Admin")).toBeTruthy();
-    expect(screen.getByText("Vai tro tuong thich (legacy)")).toBeTruthy();
-    expect(screen.getByText("Vai tro trong to chuc dang loc")).toBeTruthy();
+    expect(screen.getByText("Vai trò tương thích (legacy)")).toBeTruthy();
+    expect(screen.getByText("Vai trò trong tổ chức đang lọc")).toBeTruthy();
   });
 });

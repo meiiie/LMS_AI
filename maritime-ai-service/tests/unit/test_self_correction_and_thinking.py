@@ -34,6 +34,13 @@ class TestSelfCorrection:
         state = {"final_response": "  short  "}
         assert runner._should_retry_response(state, turn=1) is True
 
+    def test_no_retry_on_intentional_direct_reply_only_ack(self, runner):
+        state = {
+            "final_response": "Đã ghi nhận.",
+            "_direct_reply_only_ack": True,
+        }
+        assert runner._should_retry_response(state, turn=1) is False
+
     def test_retry_on_runner_error(self, runner):
         state = {
             "final_response": "Some response",

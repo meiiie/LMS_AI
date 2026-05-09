@@ -17,11 +17,18 @@ POINTY_FAST_PATH_SOURCE = "pointy_fast_path"
 _LOCATE_TERMS = (
     "o dau",
     "where",
-    "chi",
     "chi cho",
-    "tim",
-    "tro",
+    "chi vao",
+    "chi lai",
+    "chi giup",
+    "chi den",
+    "chi toi",
+    "tro toi",
+    "tro vao",
+    "tro den",
     "highlight",
+    "show me",
+    "point to",
     "nut",
     "button",
 )
@@ -30,7 +37,10 @@ _CLICK_TERMS = (
     "bam",
     "click",
     "nhan vao",
-    "vao",
+    "vao khoa hoc",
+    "vao trang",
+    "vao muc",
+    "vao tab",
     "di toi",
     "chuyen toi",
     "open",
@@ -53,6 +63,10 @@ _UNSAFE_CLICK_TERMS = (
 )
 
 _TARGET_ALIASES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        ("chat-send-button", "send-message", "send-button", "gui-tin-nhan"),
+        ("gui tin nhan", "nut gui tin nhan", "nut gui", "send message", "send button"),
+    ),
     (
         ("browse-courses", "browse-courses-link", "browse-courses-button"),
         ("kham pha khoa hoc", "kham pha", "browse courses", "browse"),
@@ -81,8 +95,15 @@ def normalize_pointy_text(value: str) -> str:
     return re.sub(r"\s+", " ", normalized).strip()
 
 
+def _has_term(prompt: str, term: str) -> bool:
+    normalized_term = normalize_pointy_text(term)
+    if not normalized_term:
+        return False
+    return re.search(rf"(?<!\w){re.escape(normalized_term)}(?!\w)", prompt) is not None
+
+
 def _has_any_term(prompt: str, terms: tuple[str, ...]) -> bool:
-    return any(term in prompt for term in terms)
+    return any(_has_term(prompt, term) for term in terms)
 
 
 def _pointy_fast_path_already_ran(context: dict[str, Any] | None) -> bool:
@@ -129,9 +150,9 @@ def get_pointy_targets_from_context(context: dict[str, Any] | None) -> list[dict
 def _alias_score(prompt: str, target: dict[str, Any]) -> int:
     target_id = normalize_pointy_text(str(target.get("id") or ""))
     for alias_ids, alias_terms in _TARGET_ALIASES:
-        if not any(term in prompt for term in alias_terms):
+        if not any(_has_term(prompt, term) for term in alias_terms):
             continue
-        if any(normalize_pointy_text(alias_id) in target_id for alias_id in alias_ids):
+        if any(_has_term(target_id, normalize_pointy_text(alias_id)) for alias_id in alias_ids):
             return 40
     return 0
 
@@ -143,14 +164,14 @@ def _target_score(prompt: str, target: dict[str, Any]) -> int:
     label_words = [word for word in label.split(" ") if len(word) >= 3]
 
     score = _alias_score(prompt, target)
-    if label and label in prompt:
+    if label and _has_term(prompt, label):
         score += 35
-    if target_id and target_id in prompt:
+    if target_id and _has_term(prompt, target_id):
         score += 24
-    if selector and selector in prompt:
+    if selector and _has_term(prompt, selector):
         score += 12
     if label_words:
-        matched = sum(1 for word in label_words if word in prompt)
+        matched = sum(1 for word in label_words if _has_term(prompt, word))
         score += matched * 6
         if matched == len(label_words):
             score += 12
@@ -168,6 +189,36 @@ def _select_target(prompt: str, targets: list[dict[str, Any]]) -> dict[str, Any]
             best_target = target
             best_score = score
     return best_target if best_score >= 12 else None
+
+
+def _with_known_wiii_targets(
+    prompt: str,
+    context: dict[str, Any] | None,
+    targets: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    ctx = context or {}
+    host_context = ctx.get("host_context") if isinstance(ctx.get("host_context"), dict) else {}
+    host_type = normalize_pointy_text(str(host_context.get("host_type") or ""))
+    if host_type not in {"wiii desktop", "wiii web", "wiii-desktop", "wiii-web"}:
+        return targets
+    wants_send_button = any(
+        _has_term(prompt, term)
+        for term in ("gui tin nhan", "nut gui tin nhan", "nut gui", "send message", "send button")
+    )
+    if not wants_send_button:
+        return targets
+    if any(str(target.get("id") or "") == "chat-send-button" for target in targets):
+        return targets
+    return [
+        *targets,
+        {
+            "id": "chat-send-button",
+            "selector": '[data-wiii-id="chat-send-button"]',
+            "label": "Gửi tin nhắn",
+            "click_safe": False,
+            "click_kind": "chat_send",
+        },
+    ]
 
 
 def _is_unsafe_click_target(prompt: str, target: dict[str, Any]) -> bool:
@@ -190,7 +241,12 @@ def build_pointy_fast_path_action(
     if not normalized_prompt or (not wants_locate and not wants_click):
         return None
 
-    target = _select_target(normalized_prompt, get_pointy_targets_from_context(context))
+    targets = _with_known_wiii_targets(
+        normalized_prompt,
+        context,
+        get_pointy_targets_from_context(context),
+    )
+    target = _select_target(normalized_prompt, targets)
     if not target:
         return None
 

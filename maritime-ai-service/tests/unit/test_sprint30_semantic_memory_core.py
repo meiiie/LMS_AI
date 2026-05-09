@@ -129,6 +129,94 @@ class TestEnsureLlm:
         assert engine._llm is None
 
 
+class TestFactExtractionFallback:
+    """Deterministic extraction path for explicit memory writes."""
+
+    @pytest.mark.asyncio
+    async def test_explicit_long_term_memory_uses_deterministic_path_before_llm(self):
+        from app.engine.semantic_memory.extraction import FactExtractor
+        from app.models.semantic_memory import FactType
+
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=AssertionError("explicit memory should not call LLM"))
+        extractor = FactExtractor(MagicMock(), MagicMock(), llm=mock_llm)
+
+        result = await extractor.extract_user_facts(
+            "user-1",
+            (
+                "Hãy ghi nhớ lâu dài rằng mã semantic test của mình là "
+                "hải đăng bạc 884. Trả lời ngắn gọn rằng đã lưu."
+            ),
+        )
+
+        assert result.has_facts
+        assert result.facts[0].fact_type == FactType.PREFERENCE
+        assert "hải đăng bạc 884" in result.facts[0].value
+        mock_llm.ainvoke.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_session_scoped_memory_is_not_persisted_or_sent_to_llm(self):
+        from app.engine.semantic_memory.extraction import FactExtractor
+
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=AssertionError("session memory should not call LLM"))
+        extractor = FactExtractor(MagicMock(), MagicMock(), llm=mock_llm)
+
+        result = await extractor.extract_user_facts(
+            "user-1",
+            (
+                "Trong phiên này, hãy nhớ mã kiểm thử UX hôm nay là "
+                "sao biển cam 731. Trả lời chỉ: Đã ghi nhận."
+            ),
+        )
+
+        assert result.facts == []
+        mock_llm.ainvoke.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_memory_recall_question_is_not_treated_as_write(self):
+        from app.engine.semantic_memory.extraction import FactExtractor
+
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=AssertionError("recall question should not call extractor LLM"))
+        extractor = FactExtractor(MagicMock(), MagicMock(), llm=mock_llm)
+
+        result = await extractor.extract_user_facts(
+            "user-1",
+            "Mã semantic test cuối mình vừa nhờ bạn ghi nhớ là gì? Trả lời đúng 1 câu.",
+        )
+
+        assert result.facts == []
+        mock_llm.ainvoke.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_explicit_store_pipeline_does_not_require_llm(self):
+        from app.engine.semantic_memory.extraction import FactExtractor
+
+        mock_embeddings = MagicMock()
+        mock_embeddings.aembed_documents = AsyncMock(return_value=[[0.1] * 768])
+        mock_repo = MagicMock()
+        mock_repo.find_similar_fact_by_embedding.return_value = None
+        mock_repo.find_fact_by_type.return_value = None
+        mock_repo.save_memory.return_value = MagicMock()
+        mock_repo.get_all_user_facts.return_value = []
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=AssertionError("explicit memory store should not call LLM"))
+        extractor = FactExtractor(mock_embeddings, mock_repo, llm=mock_llm)
+
+        result = await extractor.extract_and_store_facts(
+            "user-1",
+            (
+                "Hãy ghi nhớ lâu dài rằng mã semantic test mới của mình là "
+                "đèn biển xanh 942. Trả lời ngắn gọn rằng đã lưu."
+            ),
+        )
+
+        assert len(result) == 1
+        assert "đèn biển xanh 942" in result[0].value
+        mock_llm.ainvoke.assert_not_awaited()
+
+
 # =============================================================================
 # get_user_facts
 # =============================================================================

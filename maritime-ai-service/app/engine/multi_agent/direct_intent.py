@@ -7,6 +7,8 @@ All functions operate on diacritics-stripped Vietnamese text for keyword matchin
 
 from __future__ import annotations
 
+import re
+
 # ---------------------------------------------------------------------------
 # Sprint 99: Intent-based forced tool calling (Tier 2 -- VTuber pattern)
 # ---------------------------------------------------------------------------
@@ -14,8 +16,9 @@ from __future__ import annotations
 # Keywords that signal the query needs web search (diacritics-free for matching)
 _WEB_INTENT_KEYWORDS: list[str] = [
     # Explicit web requests
+    "@web-search", "@web_search",
     "tim tren mang", "tim tren web", "search web", "tim kiem web",
-    "search online", "tim tren internet", "tra cuu tren mang",
+    "search online", "search the web", "tim tren internet", "tra cuu tren mang",
     "tra cuu tren web", "google",
     # News / current events
     "tin tuc", "ban tin", "news", "thoi su",
@@ -388,6 +391,56 @@ def _needs_direct_knowledge_search(query: str) -> bool:
     if not normalized:
         return False
     return any(keyword in normalized for keyword in _DIRECT_KNOWLEDGE_SEARCH_KEYWORDS)
+
+
+# Wiii Pointy intent — only bind cursor-control tools when the user is
+# asking to be SHOWN, not just told. Keeps the DIRECT prompt tight when
+# the query is pure conversation / explanation.
+_POINTY_INTENT_KEYWORDS: tuple[str, ...] = (
+    # Vietnamese — diacritic-stripped forms
+    "o dau", "cho nao", "chi cho", "chi vao", "chi giup", "chi dum",
+    "dung pointy", "@wiii-pointy",
+    "click vao dau", "nhan vao dau", "bam vao dau",
+    "lam the nao de mo", "lam sao de mo", "lam the nao de bat",
+    "huong dan toi", "huong dan minh", "chi minh",
+    "tro vao", "tro toi", "tro giup",
+    # English
+    "where is", "show me how", "show me where", "point to",
+    "highlight ", "click on the",
+)
+
+
+_POINTY_NEGATION_PATTERNS: tuple[str, ...] = (
+    r"\bkhong\s+(?:can\s+)?(?:su\s+dung|dung|goi|kich\s+hoat|bat)\s+@?wiii[-\s]?pointy\b",
+    r"\bdung\s+(?:su\s+dung|dung|goi|kich\s+hoat|bat)\s+@?wiii[-\s]?pointy\b",
+    r"\b(?:khong|dung)\s+pointy\b",
+    r"\b(?:no|without)\s+pointy\b",
+    r"\bdo\s+not\s+use\s+pointy\b",
+    r"\bdon'?t\s+use\s+pointy\b",
+)
+
+
+def _negates_pointy(query: str) -> bool:
+    normalized = _normalize_for_intent(query)
+    if not normalized:
+        return False
+    return any(re.search(pattern, normalized) is not None for pattern in _POINTY_NEGATION_PATTERNS)
+
+
+def _needs_pointy(query: str) -> bool:
+    """Detect 'show me where / point to / how do I open X' intent.
+
+    When this returns False, the DIRECT agent does NOT bind
+    ``tool_pointy_show`` / ``tool_pointy_clear`` so the LLM prompt stays
+    small. When True, the tools are bound and the wiii-pointy SKILL is
+    injected into the system prompt.
+    """
+    normalized = _normalize_for_intent(query)
+    if not normalized:
+        return False
+    if _negates_pointy(query):
+        return False
+    return any(kw in normalized for kw in _POINTY_INTENT_KEYWORDS)
 
 
 def _should_strip_visual_tools_from_direct(query: str, visual_decision) -> bool:

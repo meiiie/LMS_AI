@@ -20,6 +20,7 @@ from app.engine.multi_agent.stream_utils import (
     create_code_delta_event,
     create_code_open_event,
     create_emotion_event,
+    create_pointy_action_event,
     create_preview_event,
     create_status_event,
     create_thinking_delta_event,
@@ -187,6 +188,30 @@ async def _convert_bus_event_impl(event: dict) -> StreamEvent:
             renderer_contract=str(cs.get("renderer_contract", "") or "") or None,
             node=node,
         )
+    if etype == "pointy_action":
+        # Wiii Pointy: bus event yields the canonical pointy payload as
+        # `content`. Wrap it in a typed StreamEvent so the presenter
+        # routes it through the `pointy_action` allowlist branch (without
+        # this case the converter falls through to `create_status_event`
+        # and the cursor command silently becomes a status event).
+        content = event.get("content") or {}
+        return await create_pointy_action_event(
+            payload=content if isinstance(content, dict) else {},
+            node=node,
+        )
+    if etype == "host_action":
+        # Host action requests bypass conversion when emitted directly via
+        # `create_host_action_event`; this branch covers the rare case
+        # where another node enqueues a host action via the bus.
+        from app.engine.multi_agent.stream_utils import create_host_action_event
+        content = event.get("content") or {}
+        if isinstance(content, dict):
+            return await create_host_action_event(
+                request_id=str(content.get("id", "")),
+                action=str(content.get("action", "")),
+                params=content.get("params") or {},
+                node=node,
+            )
     if etype == "model_switch":
         from_provider = event.get("from_provider", "")
         to_provider = event.get("to_provider", "")
@@ -339,6 +364,27 @@ async def _render_fallback_narration_impl(
 
 def _is_likely_english_impl(text: str) -> bool:
     if not text or len(text) < 30:
+        return False
+    # Several deterministic fast paths intentionally avoid an LLM call and may
+    # emit romanized Vietnamese. Do not send those through a slow translation
+    # pass just because they lack diacritics.
+    lower = f" {text.lower()} "
+    romanized_vietnamese_markers = (
+        " minh ",
+        " cau ",
+        " ban ",
+        " khong ",
+        " nhung ",
+        " hien ",
+        " hay ",
+        " giup ",
+        " tra loi ",
+        " nguoi dung ",
+        " anh ",
+        " wiii ",
+    )
+    marker_count = sum(1 for marker in romanized_vietnamese_markers if marker in lower)
+    if marker_count >= 2:
         return False
     vn_diacritics = set(
         "àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợ"

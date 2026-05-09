@@ -9,6 +9,7 @@ from app.engine.multi_agent.runtime_contracts import WiiiTurnRequest, WiiiTurnRe
 from app.engine.multi_agent.graph_process import process_with_multi_agent_impl
 from app.engine.multi_agent.graph_runtime_bindings import (
     _inject_code_studio_context,
+    _inject_document_context,
     _inject_host_context,
     _inject_host_session,
     _inject_living_context,
@@ -87,6 +88,7 @@ async def process_with_multi_agent(
         cleanup_tracer=_cleanup_tracer,
         resolve_public_thinking_content=_resolve_public_thinking_content,
         generate_session_summary_bg=_generate_session_summary_bg,
+        inject_document_context=_inject_document_context,
         inject_host_context=_inject_host_context,
         inject_host_session=_inject_host_session,
         inject_operator_context=_inject_operator_context,

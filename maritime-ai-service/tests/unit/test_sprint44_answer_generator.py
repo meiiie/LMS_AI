@@ -12,6 +12,67 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
+class TestExtractiveStreamingFallback:
+    """Regression tests for source-safe extractive fallback."""
+
+    def _make_node(self, title: str, content: str):
+        node = MagicMock()
+        node.title = title
+        node.content = content
+        return node
+
+    def test_colreg_query_does_not_cite_irrelevant_rag_sources(self):
+        from app.engine.agentic_rag.answer_generator import _build_extractive_streaming_fallback
+
+        answer = _build_extractive_streaming_fallback(
+            "COLREG là gì? Trả lời 2 câu, nêu nguồn nếu có.",
+            [
+                self._make_node(
+                    "Thiết kế giao diện LMS hàng hải",
+                    "Tài liệu này mô tả quy trình soạn thảo khóa học và kiểm thử tải.",
+                )
+            ],
+            ["- Thiết kế giao diện LMS hàng hải (doc-1)"],
+        )
+
+        assert "COLREG" in answer
+        assert "Quy tắc quốc tế phòng ngừa đâm va" in answer
+        assert "Nguồn tham khảo" not in answer
+        assert "Thiết kế giao diện" not in answer
+
+    def test_relevant_colreg_source_is_still_cited(self):
+        from app.engine.agentic_rag.answer_generator import _build_extractive_streaming_fallback
+
+        answer = _build_extractive_streaming_fallback(
+            "COLREG Rule 5 nói gì?",
+            [
+                self._make_node(
+                    "COLREG Rule 5",
+                    "COLREG Rule 5 requires every vessel to maintain a proper look-out by sight and hearing.",
+                )
+            ],
+            ["- COLREG Rule 5 (doc-2)"],
+        )
+
+        assert "Mình tóm tắt trực tiếp" in answer
+        assert "proper look-out" in answer
+        assert "COLREG Rule 5 (doc-2)" in answer
+
+    def test_colreg_rule15_fallback_is_specific_without_fake_citation(self):
+        from app.engine.agentic_rag.answer_generator import _build_extractive_streaming_fallback
+
+        answer = _build_extractive_streaming_fallback(
+            "Giải thích ngắn Quy tắc 15 COLREGs về tình huống tàu cắt hướng",
+            [],
+            [],
+        )
+
+        assert "Rule 15" in answer
+        assert "mạn phải" in answer
+        assert "tránh cắt qua trước mũi" in answer
+        assert "Nguồn tham khảo" not in answer
+
+
 # ============================================================================
 # generate_response - no nodes
 # ============================================================================
@@ -394,3 +455,36 @@ class TestStreamingGeneration:
         combined = "".join(chunks)
         assert "Recovered answer from fallback" in combined
         assert "Internal processing error" not in combined
+
+    @pytest.mark.asyncio
+    async def test_streaming_llm_failure_yields_source_backed_fallback(self):
+        from app.engine.agentic_rag.answer_generator import AnswerGenerator
+
+        class FakeLLM:
+            async def astream(self, _messages):
+                raise RuntimeError("provider exploded")
+                yield  # pragma: no cover
+
+        mock_loader = MagicMock()
+        mock_loader.build_system_prompt.return_value = "System"
+        mock_loader.get_thinking_instruction.return_value = "Think"
+
+        chunks = []
+        async for chunk in AnswerGenerator.generate_response_streaming(
+            llm=FakeLLM(),
+            prompt_loader=mock_loader,
+            question="What is Rule 5?",
+            nodes=[
+                self._make_node(
+                    title="COLREG Rule 5",
+                    content="Every vessel shall maintain a proper look-out by sight and hearing.",
+                )
+            ],
+        ):
+            chunks.append(chunk)
+
+        combined = "".join(chunks)
+        assert "Internal processing error" not in combined
+        assert "model tổng hợp" not in combined
+        assert "COLREG Rule 5" in combined
+        assert "proper look-out" in combined

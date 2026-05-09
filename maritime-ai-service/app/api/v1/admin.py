@@ -300,18 +300,24 @@ def _build_provider_catalog_capabilities(
     )
 
 
-def _build_embedding_provider_runtime_statuses() -> list[EmbeddingProviderRuntimeStatus]:
+def _build_embedding_provider_runtime_statuses(
+    *,
+    allow_local_probe: bool = False,
+) -> list[EmbeddingProviderRuntimeStatus]:
     return [
         EmbeddingProviderRuntimeStatus(**item.to_dict())
-        for item in get_embedding_selectability_snapshot()
+        for item in get_embedding_selectability_snapshot(allow_local_probe=allow_local_probe)
     ]
 
 
-def _build_vision_provider_runtime_statuses() -> list[VisionProviderRuntimeStatus]:
+def _build_vision_provider_runtime_statuses(
+    *,
+    allow_local_probe: bool = False,
+) -> list[VisionProviderRuntimeStatus]:
     return [
         VisionProviderRuntimeStatus(**item)
         for item in build_vision_runtime_provider_statuses(
-            get_vision_selectability_snapshot()
+            get_vision_selectability_snapshot(allow_local_probe=allow_local_probe)
         )
     ]
 
@@ -339,6 +345,7 @@ def _serialize_llm_runtime(
     *,
     runtime_policy_persisted: bool = False,
     runtime_policy_updated_at: Optional[str] = None,
+    allow_local_probe: bool = False,
 ) -> LlmRuntimeConfigResponse:
     if warnings is None:
         warnings = []
@@ -370,9 +377,13 @@ def _serialize_llm_runtime(
         llm_timeout_provider_override_cls=LlmTimeoutProviderOverride,
         llm_runtime_config_response_cls=LlmRuntimeConfigResponse,
         get_embedding_dimensions_fn=get_embedding_dimensions,
-        build_vision_provider_runtime_statuses_fn=_build_vision_provider_runtime_statuses,
+        build_vision_provider_runtime_statuses_fn=lambda: _build_vision_provider_runtime_statuses(
+            allow_local_probe=allow_local_probe
+        ),
         build_vision_runtime_audit_summary_fn=build_vision_runtime_audit_summary,
-        build_embedding_provider_runtime_statuses_fn=_build_embedding_provider_runtime_statuses,
+        build_embedding_provider_runtime_statuses_fn=lambda: _build_embedding_provider_runtime_statuses(
+            allow_local_probe=allow_local_probe
+        ),
         build_embedding_space_status_fn=_build_embedding_space_status,
         build_embedding_migration_previews_fn=_build_embedding_migration_previews,
     )
@@ -486,6 +497,7 @@ async def refresh_vision_runtime_audit(
             if persisted and persisted.updated_at
             else None
         ),
+        allow_local_probe=True,
     )
 
 

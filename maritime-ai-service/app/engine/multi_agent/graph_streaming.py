@@ -41,6 +41,7 @@ from app.core.config import settings
 from app.core.exceptions import ProviderUnavailableError
 from app.engine.llm_runtime_metadata import resolve_runtime_llm_metadata
 from app.core.constants import PREVIEW_SNIPPET_MAX_LENGTH
+from app.engine.context.pointy_actions import POINTY_ACTION_HIGHLIGHT
 from app.engine.context.pointy_fast_path import build_pointy_fast_path_action
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.graph_support import (
@@ -133,6 +134,7 @@ from app.engine.multi_agent.stream_utils import (
     create_code_delta_event,
     create_code_complete_event,
     create_host_action_event,
+    create_pointy_action_event,
 )
 
 logger = logging.getLogger(__name__)
@@ -183,6 +185,104 @@ _extract_and_stream_emotion_then_answer = functools.partial(
     token_chunk_size=TOKEN_CHUNK_SIZE,
     token_delay_sec=TOKEN_DELAY_SEC,
 )
+
+
+def _pointy_fast_path_target_label(action: dict | None) -> str:
+    if not isinstance(action, dict):
+        return ""
+    target = action.get("target") if isinstance(action.get("target"), dict) else {}
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    return str(target.get("label") or target.get("id") or params.get("selector") or "").strip()
+
+
+def _pointy_fast_path_public_thinking(action: dict | None) -> str:
+    label = _pointy_fast_path_target_label(action)
+    if label:
+        return (
+            f"Mình thấy mục tiêu trên màn hình rồi: {label}. "
+            "Đây là thao tác chỉ vị trí an toàn, nên Wiii đưa con trỏ tới đúng chỗ ngay "
+            "thay vì bắt cậu chờ thêm một vòng suy luận dài."
+        )
+    return (
+        "Mình thấy mục tiêu UI đã đủ rõ trong host context. "
+        "Đây là thao tác chỉ vị trí an toàn, nên Wiii đưa con trỏ tới đúng chỗ ngay."
+    )
+
+
+def _pointy_fast_path_answer(action: dict | None) -> str:
+    params = action.get("params") if isinstance(action, dict) and isinstance(action.get("params"), dict) else {}
+    message = str(params.get("message") or "").strip()
+    if message:
+        return message
+    label = _pointy_fast_path_target_label(action)
+    if label:
+        return f"Mình đã trỏ vào {label} cho cậu thấy ngay."
+    return "Mình đã trỏ đúng vị trí trên giao diện cho cậu."
+
+
+async def _stream_pointy_fast_path_completion(
+    *,
+    action: dict,
+    session_id: str,
+    start_time: float,
+    registry,
+    trace_id: str,
+) -> AsyncGenerator[StreamEvent, None]:
+    """Finish safe Pointy highlight turns without paying a full graph/LLM round."""
+    thinking = _pointy_fast_path_public_thinking(action)
+    answer = _pointy_fast_path_answer(action)
+    label = _pointy_fast_path_target_label(action)
+    elapsed = max(time.time() - start_time, 0.0)
+
+    yield await create_thinking_start_event(
+        "Wiii đang định vị UI",
+        "pointy_fast_path",
+        summary=thinking,
+    )
+    yield await create_thinking_delta_event(thinking, node="pointy_fast_path")
+    yield await create_thinking_end_event(
+        "pointy_fast_path",
+        duration_ms=max(1, int(elapsed * 1000)),
+    )
+    yield await create_answer_event(answer)
+    yield await create_metadata_event(
+        reasoning_trace={
+            "method": "pointy_fast_path",
+            "steps": [
+                "matched_host_inventory_target",
+                "emitted_pointy_action",
+                "completed_without_llm",
+            ],
+        },
+        processing_time=time.time() - start_time,
+        confidence=1.0,
+        model=None,
+        provider="deterministic",
+        runtime_authoritative=True,
+        doc_count=0,
+        thinking=thinking,
+        thinking_content=thinking,
+        agent_type="pointy_fast_path",
+        session_id=session_id,
+        routing_metadata={
+            "method": "pointy_fast_path",
+            "intent": "host_ui_navigation",
+            "target_id": action.get("target", {}).get("id") if isinstance(action.get("target"), dict) else None,
+            "target_label": label or None,
+        },
+    )
+    total_time = time.time() - start_time
+    yield await create_done_event(total_time)
+
+    try:
+        trace_summary = registry.end_request_trace(trace_id)
+        logger.info(
+            "[POINTY_FAST_PATH] Completed safe highlight in %.2fs, %d spans",
+            total_time,
+            trace_summary.get("span_count", 0),
+        )
+    except Exception as exc:
+        logger.debug("[POINTY_FAST_PATH] Trace finalization skipped: %s", exc)
 
 
 
@@ -246,18 +346,58 @@ async def process_with_multi_agent_streaming(
 
         pointy_fast_path = build_pointy_fast_path_action(query, context)
         if pointy_fast_path:
+            pointy_fast_path_action = str(pointy_fast_path.get("action") or "").strip()
             logger.info(
                 "[POINTY_FAST_PATH] Emitting %s for target=%s reason=%s before router",
-                pointy_fast_path["action"],
+                pointy_fast_path_action,
                 pointy_fast_path.get("target", {}).get("id"),
                 pointy_fast_path.get("reason"),
             )
-            yield await create_host_action_event(
-                request_id=pointy_fast_path["request_id"],
-                action=pointy_fast_path["action"],
-                params=pointy_fast_path["params"],
-                node="pointy_fast_path",
-            )
+            # v3.0 dual-path dispatch:
+            # - HIGHLIGHT (read-only): emit `pointy_action` SSE event so the
+            #   frontend's onPointyAction handler dispatches DIRECTLY into
+            #   the pointy-host CursorRegistry (spring physics + dock cursor),
+            #   NO PostMessage roundtrip needed → works on Wiii desktop
+            #   standalone AND inside LMS embed.
+            # - CLICK (mutating): keep `host_action` event so the host
+            #   action bridge handshake gates the click for safety. Only
+            #   reaches LMS embed (standalone has no host parent → 30s
+            #   timeout there is expected and harmless because click intent
+            #   in standalone has no UI to click anyway).
+            from app.engine.context.pointy_actions import POINTY_ACTION_CLICK
+            if pointy_fast_path_action == POINTY_ACTION_CLICK:
+                yield await create_host_action_event(
+                    request_id=pointy_fast_path["request_id"],
+                    action=pointy_fast_path_action,
+                    params=pointy_fast_path["params"],
+                    node="pointy_fast_path",
+                )
+            else:
+                # Pointy-action shape mirror tutor_tool_dispatch_runtime.
+                # `requestId` (camelCase) is the field onPointyAction reads;
+                # we keep `request_id` too for backward compat with any
+                # listener that still uses snake_case.
+                yield await create_pointy_action_event(
+                    payload={
+                        "action": pointy_fast_path_action,
+                        "requestId": pointy_fast_path["request_id"],
+                        "request_id": pointy_fast_path["request_id"],
+                        "params": pointy_fast_path["params"],
+                        "mode": "highlight",
+                    },
+                    node="pointy_fast_path",
+                )
+
+            if pointy_fast_path_action == POINTY_ACTION_HIGHLIGHT:
+                async for completion_event in _stream_pointy_fast_path_completion(
+                    action=pointy_fast_path,
+                    session_id=session_id,
+                    start_time=start_time,
+                    registry=registry,
+                    trace_id=trace_id,
+                ):
+                    yield completion_event
+                return
 
         bootstrap = await build_stream_bootstrap_impl(
             query=query,
@@ -277,6 +417,8 @@ async def process_with_multi_agent_streaming(
         bus_id = bootstrap["bus_id"]
         event_queue = bootstrap["event_queue"]
         initial_state = bootstrap["initial_state"]
+        if pointy_fast_path:
+            initial_state["_pointy_fast_path_action"] = pointy_fast_path
 
         supervisor_thinking_open = False
         supervisor_status_emitted = False

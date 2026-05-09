@@ -15,11 +15,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from app.core.security import AuthenticatedUser, require_auth
-
 from app.auth.token_service import create_token_pair, refresh_access_token, revoke_user_tokens
 from app.auth.user_service import find_or_create_by_google
 from app.core.config import settings
+from app.core.security import AuthenticatedUser, require_auth
 
 logger = logging.getLogger(__name__)
 

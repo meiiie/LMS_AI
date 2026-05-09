@@ -366,6 +366,47 @@ class ContentFilter:
         if domain_id and domain_id in DOMAIN_ALLOWLISTS:
             self._allowlist = DOMAIN_ALLOWLISTS[domain_id]
 
+    @staticmethod
+    def _is_buoi_context_false_positive(original_text: str, normalized_text: str) -> bool:
+        """Avoid conflating safe "buoi" contexts with the vulgar standalone token.
+
+        Vietnamese users often write without diacritics. After normalization,
+        "buổi" (session/meeting) and a vulgar token both collapse to "buoi".
+        Keep blocking standalone abuse, but allow common educational/work
+        contexts such as "buổi học" or "buổi báo cáo".
+        """
+        safe_contexts = (
+            "buoi hoc",
+            "buoi bao cao",
+            "buoi thuyet trinh",
+            "buoi trinh bay",
+            "buoi hop",
+            "buoi thi",
+            "buoi sang",
+            "buoi chieu",
+            "buoi toi",
+            "buoi trua",
+            "buoi dao tao",
+            "buoi huan luyen",
+            "buoi thuc hanh",
+            "buoi seminar",
+            "buoi workshop",
+            "buoi truc",
+        )
+        if any(context in normalized_text for context in safe_contexts):
+            return True
+
+        original = unicodedata.normalize("NFC", original_text.lower())
+        tokens = re.findall(r"[\wÀ-ỹ]+", original, flags=re.UNICODE)
+        buoi_like_tokens = [
+            token for token in tokens if TextNormalizer.normalize(token) == "buoi"
+        ]
+        if not buoi_like_tokens:
+            return False
+
+        safe_original_forms = {"buổi", "bưởi"}
+        return all(token in safe_original_forms for token in buoi_like_tokens)
+
     def check(self, text: str) -> FilterResult:
         """
         Check text for inappropriate content.
@@ -383,6 +424,12 @@ class ContentFilter:
 
         for pattern, severity, match_type in _WORD_LIST:
             if self._matches(normalized, pattern, match_type):
+                if pattern == "buoi" and self._is_buoi_context_false_positive(
+                    text, normalized
+                ):
+                    domain_override = True
+                    continue
+
                 # Check domain allowlist for WARN/FLAG
                 if severity <= Severity.WARN and self._is_allowed_in_domain(
                     normalized, pattern

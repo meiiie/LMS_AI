@@ -54,14 +54,23 @@ def _should_enable_real_code_streaming_impl(
     *,
     llm: Any | None = None,
 ) -> bool:
-    """Enable real Code Studio code-delta streaming only for proven-stable providers."""
+    """Enable real Code Studio code-delta streaming only for proven-stable providers.
+
+    NVIDIA NIM + DeepSeek emit OpenAI-compatible streaming chunks
+    (``delta.tool_calls[].function.arguments``) which LangChain maps to
+    ``chunk.tool_call_chunks`` — same shape as OpenAI/Zhipu/OpenRouter.
+    DeepSeek V4 Flash/Pro have been the Wiii local-prod default since
+    Phase 9c, so they belong in the allowlist alongside the other
+    OpenAI-compat providers.
+    """
     if not getattr(app_config.get_settings(), "enable_real_code_streaming", False):
         return False
 
     normalized = str(provider or "").strip().lower()
-    model_name = str(getattr(llm, "_wiii_model_name", "") or "").strip().lower()
-
-    if normalized in {"openai", "openrouter", "zhipu"}:
+    # Sprint 35e follow-up: include NVIDIA NIM (OpenAI-compat) so
+    # local-prod Wiii deployments running DeepSeek see real token-by-token
+    # code streaming on every code_studio turn.
+    if normalized in {"openai", "openrouter", "zhipu", "nvidia"}:
         return True
 
     return False

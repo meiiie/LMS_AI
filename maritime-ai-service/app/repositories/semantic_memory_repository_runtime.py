@@ -389,6 +389,12 @@ class SemanticMemoryRepositoryRuntimeMixin:
                 return True
         except Exception as exc:
             logger.warning("SemanticMemoryRepository not available: %s", exc)
+            try:
+                from app.core.database import mark_shared_database_unavailable
+
+                mark_shared_database_unavailable(exc)
+            except Exception:
+                pass
             return False
 
     def update_last_accessed(self, memory_id: UUID, user_id: Optional[str] = None) -> bool:

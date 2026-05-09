@@ -2,7 +2,7 @@
  * Audit Logs tab - admin actions, auth events, and host action timeline.
  */
 import { useEffect } from "react";
-import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Sparkles } from "lucide-react";
 import { useAdminStore } from "@/stores/admin-store";
 import type { AuditSubTab } from "@/stores/admin-store";
 import type { AdminAuthEvent } from "@/api/types";
@@ -132,17 +132,40 @@ function AdminAuditTable({
           <tbody>
             {entries.length === 0 && !loading && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-text-tertiary text-xs">
-                  No audit logs
+                <td
+                  colSpan={5}
+                  className="px-4 py-8 text-center text-text-tertiary text-xs"
+                >
+                  <EmptyAuditState
+                    title="Chưa có admin action nào"
+                    description="Khi quản trị viên đổi role, cập nhật feature flag hoặc thao tác dữ liệu hệ thống, Wiii sẽ ghi lại tại đây để dễ truy vết."
+                  />
+                </td>
+              </tr>
+            )}
+            {entries.length === 0 && loading && (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-4 py-8 text-center text-text-tertiary text-xs"
+                >
+                  <LoadingAuditState label="Đang tải admin actions..." />
                 </td>
               </tr>
             )}
             {entries.map((entry) => (
-              <tr key={entry.id} className="border-t border-border hover:bg-surface-secondary transition-colors">
+              <tr
+                key={entry.id}
+                className="border-t border-border hover:bg-surface-secondary transition-colors"
+              >
                 <td className="px-4 py-2.5 text-xs text-text-tertiary whitespace-nowrap">
-                  {entry.occurred_at ? new Date(entry.occurred_at).toLocaleString("vi-VN") : "—"}
+                  {entry.occurred_at
+                    ? new Date(entry.occurred_at).toLocaleString("vi-VN")
+                    : "—"}
                 </td>
-                <td className="px-4 py-2.5 text-text">{entry.actor_name || "—"}</td>
+                <td className="px-4 py-2.5 text-text">
+                  {entry.actor_name || "—"}
+                </td>
                 <td className="px-4 py-2.5">
                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-surface-tertiary text-text-secondary font-mono">
                     {entry.action}
@@ -205,15 +228,36 @@ function AuthEventsTable({
           <tbody>
             {entries.length === 0 && !loading && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-text-tertiary text-xs">
-                  No auth events
+                <td
+                  colSpan={6}
+                  className="px-4 py-8 text-center text-text-tertiary text-xs"
+                >
+                  <EmptyAuditState
+                    title="Chưa có auth event nào"
+                    description="Các lần đăng nhập, refresh token, OAuth/dev-login và sự kiện bảo mật tài khoản sẽ xuất hiện ở đây khi hệ thống ghi nhận được."
+                  />
+                </td>
+              </tr>
+            )}
+            {entries.length === 0 && loading && (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="px-4 py-8 text-center text-text-tertiary text-xs"
+                >
+                  <LoadingAuditState label="Đang tải auth events..." />
                 </td>
               </tr>
             )}
             {entries.map((entry) => (
-              <tr key={entry.id} className="border-t border-border hover:bg-surface-secondary transition-colors">
+              <tr
+                key={entry.id}
+                className="border-t border-border hover:bg-surface-secondary transition-colors"
+              >
                 <td className="px-4 py-2.5 text-xs text-text-tertiary whitespace-nowrap">
-                  {entry.created_at ? new Date(entry.created_at).toLocaleString("vi-VN") : "—"}
+                  {entry.created_at
+                    ? new Date(entry.created_at).toLocaleString("vi-VN")
+                    : "—"}
                 </td>
                 <td className="px-4 py-2.5 text-text text-xs truncate max-w-[150px]">
                   {entry.user_id}
@@ -223,7 +267,9 @@ function AuthEventsTable({
                     {entry.event_type}
                   </span>
                 </td>
-                <td className="px-4 py-2.5 text-xs text-text-secondary">{entry.provider}</td>
+                <td className="px-4 py-2.5 text-xs text-text-secondary">
+                  {entry.provider}
+                </td>
                 <td className="px-4 py-2.5">
                   <span
                     className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
@@ -280,17 +326,23 @@ function HostActionTimeline({
             <Sparkles size={16} />
           </div>
           <div>
-            <div className="text-sm font-medium text-text">Host action timeline</div>
+            <div className="text-sm font-medium text-text">
+              Host action timeline
+            </div>
             <div className="text-xs text-text-secondary">
-              Preview, apply, and publish events emitted by Wiii into the host surface.
+              Preview, apply, and publish events emitted by Wiii into the host
+              surface.
             </div>
           </div>
         </div>
 
         {entries.length === 0 && !loading ? (
-          <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-xs text-text-tertiary">
-            No host actions recorded yet.
-          </div>
+          <EmptyAuditState
+            title="Chưa có host action nào"
+            description="Khi Wiii tạo preview, apply thay đổi hoặc publish nội dung vào host surface, timeline này sẽ cho thấy ai làm gì và vào lúc nào."
+          />
+        ) : entries.length === 0 && loading ? (
+          <LoadingAuditState label="Đang tải host actions..." />
         ) : (
           <ol className="space-y-4" aria-label="Host action timeline">
             {entries.map((entry) => (
@@ -313,9 +365,48 @@ function HostActionTimeline({
   );
 }
 
+function EmptyAuditState({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="mx-auto max-w-xl rounded-lg border border-dashed border-border bg-surface/60 px-4 py-6 text-center">
+      <p className="text-sm font-medium text-text">{title}</p>
+      <p className="mt-2 text-xs leading-5 text-text-secondary">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+function LoadingAuditState({ label }: { label: string }) {
+  return (
+    <div
+      aria-busy="true"
+      className="mx-auto flex max-w-xl items-start justify-center gap-3 rounded-lg border border-border bg-surface/70 px-4 py-6 text-left"
+    >
+      <Loader2
+        size={16}
+        className="mt-0.5 shrink-0 animate-spin text-[var(--accent)]"
+      />
+      <div>
+        <p className="text-sm font-medium text-text">{label}</p>
+        <p className="mt-1 text-xs leading-5 text-text-secondary">
+          Wiii đang truy vấn nhật ký có phân trang. Nếu chưa có dữ liệu, bảng sẽ
+          chuyển sang empty-state có giải thích thay vì chỉ hiện header trống.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function HostActionTimelineItem({ entry }: { entry: AdminAuthEvent }) {
   const metadata = (entry.metadata ?? {}) as Record<string, unknown>;
-  const previewKind = typeof metadata.preview_kind === "string" ? metadata.preview_kind : "";
+  const previewKind =
+    typeof metadata.preview_kind === "string" ? metadata.preview_kind : "";
   const summary =
     typeof metadata.summary === "string" && metadata.summary.trim().length > 0
       ? metadata.summary
@@ -325,7 +416,8 @@ function HostActionTimelineItem({ entry }: { entry: AdminAuthEvent }) {
       ? metadata.action
       : entry.event_type;
   const targetId =
-    typeof metadata.target_id === "string" && metadata.target_id.trim().length > 0
+    typeof metadata.target_id === "string" &&
+    metadata.target_id.trim().length > 0
       ? metadata.target_id
       : "—";
   const surface =
@@ -333,11 +425,15 @@ function HostActionTimelineItem({ entry }: { entry: AdminAuthEvent }) {
       ? metadata.surface
       : "—";
   const requestId =
-    typeof metadata.request_id === "string" && metadata.request_id.trim().length > 0
+    typeof metadata.request_id === "string" &&
+    metadata.request_id.trim().length > 0
       ? metadata.request_id
       : "—";
   const changedFields = Array.isArray(metadata.changed_fields)
-    ? metadata.changed_fields.filter((field): field is string => typeof field === "string" && field.trim().length > 0)
+    ? metadata.changed_fields.filter(
+        (field): field is string =>
+          typeof field === "string" && field.trim().length > 0,
+      )
     : [];
 
   return (
@@ -346,7 +442,10 @@ function HostActionTimelineItem({ entry }: { entry: AdminAuthEvent }) {
         aria-hidden="true"
         className="absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] shadow-[0_0_0_4px_rgba(59,130,246,0.12)]"
       />
-      <span aria-hidden="true" className="absolute left-[5px] top-4 bottom-[-16px] w-px bg-border" />
+      <span
+        aria-hidden="true"
+        className="absolute left-[5px] top-4 bottom-[-16px] w-px bg-border"
+      />
       <div className="rounded-xl border border-border bg-surface px-4 py-3 shadow-sm">
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">
@@ -361,7 +460,9 @@ function HostActionTimelineItem({ entry }: { entry: AdminAuthEvent }) {
             </span>
           )}
           <span className="ml-auto text-xs text-text-tertiary">
-            {entry.created_at ? new Date(entry.created_at).toLocaleString("vi-VN") : "—"}
+            {entry.created_at
+              ? new Date(entry.created_at).toLocaleString("vi-VN")
+              : "—"}
           </span>
         </div>
 
@@ -384,7 +485,10 @@ function HostActionTimelineItem({ entry }: { entry: AdminAuthEvent }) {
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {changedFields.map((field) => (
-                  <span key={field} className="rounded-full bg-surface-secondary px-2 py-0.5 text-[11px] text-text">
+                  <span
+                    key={field}
+                    className="rounded-full bg-surface-secondary px-2 py-0.5 text-[11px] text-text"
+                  >
                     {field}
                   </span>
                 ))}
@@ -394,7 +498,10 @@ function HostActionTimelineItem({ entry }: { entry: AdminAuthEvent }) {
 
           {typeof metadata.question_count === "number" && (
             <div className="text-xs text-text-secondary">
-              Question count: <span className="font-medium text-text">{String(metadata.question_count)}</span>
+              Question count:{" "}
+              <span className="font-medium text-text">
+                {String(metadata.question_count)}
+              </span>
             </div>
           )}
         </div>
@@ -414,7 +521,9 @@ function MetaItem({
 }) {
   return (
     <div>
-      <span className="block text-[11px] uppercase tracking-wider text-text-tertiary">{label}</span>
+      <span className="block text-[11px] uppercase tracking-wider text-text-tertiary">
+        {label}
+      </span>
       <span className={`${mono ? "font-mono" : ""} text-text`}>{value}</span>
     </div>
   );

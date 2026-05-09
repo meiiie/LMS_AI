@@ -9,8 +9,8 @@ from typing import Literal
 
 from app.core.config import settings
 from app.engine.embedding_runtime import (
-    get_embedding_backend,
     openrouter_embedding_credentials_available,
+    peek_semantic_embedding_backend,
     probe_ollama_embedding_model,
     resolve_embedding_dimensions_for_model,
     resolve_embedding_model_for_provider,
@@ -118,16 +118,21 @@ def _missing_config_reason(provider: str) -> tuple[EmbeddingDisabledReasonCode, 
     return ("missing_api_key", "Chua cau hinh API key cho embedding provider nay.")
 
 
-def _build_snapshot_uncached() -> list[EmbeddingProviderSelectability]:
+def _build_snapshot_uncached(
+    *,
+    allow_local_probe: bool = True,
+) -> list[EmbeddingProviderSelectability]:
     provider_order = resolve_embedding_provider_order()
     in_chain = set(provider_order)
     configured_model = getattr(settings, "embedding_model", None)
 
+    cached_backend = peek_semantic_embedding_backend()
     active_provider: str | None = None
-    try:
-        active_provider = get_embedding_backend().provider
-    except Exception:
-        active_provider = None
+    if cached_backend is not None:
+        is_available = getattr(cached_backend, "is_available", None)
+        backend_available = bool(is_available()) if callable(is_available) else True
+        if backend_available:
+            active_provider = getattr(cached_backend, "provider", None)
 
     snapshot: list[EmbeddingProviderSelectability] = []
     default_provider = provider_order[0] if provider_order else None
@@ -170,6 +175,12 @@ def _build_snapshot_uncached() -> list[EmbeddingProviderSelectability]:
                 f"Model {selected_model} chi ho tro {canonical_dimensions}d, "
                 f"nhung runtime dang yeu cau {selected_dimensions}d."
             )
+        elif provider == "ollama" and not allow_local_probe:
+            reason_code = "host_down"
+            reason_label = (
+                "Ollama local chua duoc probe trong luot tai nhanh. "
+                "Chay Probe capability de kiem tra live."
+            )
         elif provider == "ollama":
             probe = probe_ollama_embedding_model(
                 getattr(settings, "ollama_base_url", None) or "",
@@ -208,6 +219,7 @@ def _build_snapshot_uncached() -> list[EmbeddingProviderSelectability]:
 def get_embedding_selectability_snapshot(
     *,
     force_refresh: bool = False,
+    allow_local_probe: bool = True,
 ) -> list[EmbeddingProviderSelectability]:
     global _selectability_cache
 
@@ -219,7 +231,7 @@ def get_embedding_selectability_snapshot(
     ):
         return copy.deepcopy(_selectability_cache.snapshot)
 
-    snapshot = _build_snapshot_uncached()
+    snapshot = _build_snapshot_uncached(allow_local_probe=allow_local_probe)
     _selectability_cache = _CacheEntry(
         created_at=now,
         snapshot=copy.deepcopy(snapshot),

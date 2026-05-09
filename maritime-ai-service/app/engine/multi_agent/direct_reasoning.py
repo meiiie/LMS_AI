@@ -82,6 +82,44 @@ _ANALYTICAL_QUERY_KEYWORDS = (
     "mo hinh",
     "mô hình",
 )
+_CODEBASE_ANALYSIS_KEYWORDS = (
+    "agent",
+    "alembic",
+    "api",
+    "auth",
+    "authentication",
+    "backend",
+    "bang",
+    "class diagram",
+    "codebase",
+    "controller",
+    "database",
+    "diagram",
+    "entity",
+    "filter",
+    "flyway",
+    "github",
+    "jwt",
+    "migration",
+    "repository",
+    "repo",
+    "schema",
+    "security",
+    "service",
+    "source",
+    "table",
+    "uml",
+    "xac thuc",
+)
+_CODEBASE_STRONG_KEYWORDS = (
+    "class diagram",
+    "database",
+    "jwt",
+    "migration",
+    "schema",
+    "source",
+    "xac thuc",
+)
 
 
 def _extract_math_topic_hint(query: str) -> str:
@@ -122,6 +160,24 @@ def _fold_reasoning_text(text: str) -> str:
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     normalized = _fold_reasoning_text(text)
     return any(_fold_reasoning_text(keyword) in normalized for keyword in keywords)
+
+
+def _is_codebase_analysis_query(text: str) -> bool:
+    normalized = _fold_reasoning_text(text)
+    if not any(
+        _fold_reasoning_text(keyword) in normalized
+        for keyword in _CODEBASE_ANALYSIS_KEYWORDS
+    ):
+        return False
+    if any(
+        _fold_reasoning_text(keyword) in normalized
+        for keyword in _CODEBASE_STRONG_KEYWORDS
+    ):
+        return True
+    return any(
+        _fold_reasoning_text(keyword) in normalized
+        for keyword in _ANALYTICAL_QUERY_KEYWORDS
+    )
 
 
 def _has_prefixed_tool(tool_names: list[str], prefixes: tuple[str, ...]) -> bool:
@@ -200,6 +256,13 @@ def _infer_direct_topic_hint(
 ) -> str:
     del state, tool_names
     normalized = _normalize_reasoning_text(query)
+    if _is_codebase_analysis_query(normalized):
+        folded = _fold_reasoning_text(query)
+        if "jwt" in folded or "auth" in folded or "xac thuc" in folded:
+            return "JWT/auth trong codebase"
+        if "schema" in folded or "database" in folded or "table" in folded or "bang" in folded:
+            return "schema/database trong codebase"
+        return "codebase/source-backed analysis"
     if _contains_any(normalized, _MARKET_ANALYSIS_KEYWORDS):
         return "giá dầu"
     if _contains_any(normalized, _MATH_ANALYSIS_KEYWORDS):
@@ -220,6 +283,8 @@ def _infer_direct_thinking_mode(
         return "analytical_market"
     if _contains_any(normalized, _MATH_ANALYSIS_KEYWORDS):
         return "analytical_math"
+    if _is_codebase_analysis_query(normalized):
+        return "analytical_codebase"
     if cue in {"visual", "browser"}:
         return "visual_editorial"
     if cue in {"news", "web"} and _contains_any(normalized, _ANALYTICAL_QUERY_KEYWORDS):
@@ -259,6 +324,28 @@ def _build_direct_analytical_axes(
             "bước suy ra then chốt",
             "hệ quả cần kết luận",
         ]
+    if _is_codebase_analysis_query(normalized):
+        folded = _fold_reasoning_text(query)
+        if "jwt" in folded or "auth" in folded or "xac thuc" in folded:
+            return [
+                "entrypoint dang nhap va tao token",
+                "JwtService/JwtAuthenticationFilter",
+                "User/Role/Organization state",
+                "request lifecycle va refresh path",
+            ]
+        if "database" in folded or "schema" in folded or "table" in folded or "bang" in folded:
+            return [
+                "source schema/migration",
+                "entity nghiep vu cot loi",
+                "junction/infrastructure tables",
+                "khoang cach giua class diagram va database",
+            ]
+        return [
+            "claim cua user",
+            "file/source can kiem",
+            "runtime path lien quan",
+            "ket luan va diem con mo",
+        ]
     if _contains_any(normalized, _ANALYTICAL_QUERY_KEYWORDS):
         return [
             "biến số chính",
@@ -276,6 +363,27 @@ def _build_direct_evidence_plan(
     del state
     normalized = _normalize_reasoning_text(query)
     tool_names = tool_names or []
+    if _is_codebase_analysis_query(normalized):
+        folded = _fold_reasoning_text(query)
+        if "jwt" in folded or "auth" in folded or "xac thuc" in folded:
+            return [
+                "truy tu login/controller sang service tao token",
+                "kiem JwtAuthenticationFilter doc Bearer token moi request",
+                "doi chieu user/role/enabled tu database voi payload token",
+                "tach dieu verified tu inference neu chua doc du file",
+            ]
+        if "database" in folded or "schema" in folded or "table" in folded or "bang" in folded:
+            return [
+                "kiem ke bang tu schema/migration thay vi doan theo so luong",
+                "phan nhom entity chinh, junction table, va infrastructure table",
+                "doi chieu class diagram voi bang thuc te",
+                "ghi ro bang nao thieu va vi sao thieu",
+            ]
+        return [
+            "mo bang cau hoi can kiem chung",
+            "neu nguon/file nao da doc truoc khi ket luan",
+            "noi ro muc do chac va diem con mo neu thieu source",
+        ]
     if _contains_any(normalized, _MARKET_ANALYSIS_KEYWORDS):
         plan = [
             "đối chiếu Brent và WTI",
@@ -358,7 +466,9 @@ async def _build_direct_tool_reflection(
     visual_decision = resolve_visual_intent(query)
     normalized_tool = str(tool_name or "").strip().lower()
 
-    if normalized_tool in {"tool_web_search", "tool_search_news", "tool_search_legal", "tool_search_maritime", "tool_knowledge_search"}:
+    if normalized_tool in {"tool_web_search", "tool_search_news", "tool_search_legal", "tool_search_maritime", "tool_knowledge_search", "tool_fetch_url"}:
+        if _is_codebase_analysis_query(query):
+            return "Minh vua co them nguon de doi chieu claim voi file/schema that; buoc tiep theo la tach dieu da xac minh khoi suy luan."
         if visual_decision.presentation_intent == "chart_runtime":
             return "Mình đã có thêm vài mảnh dữ liệu để dựng thành một hình nhìn ra xu hướng rõ hơn."
         return "Mình đã có thêm vài mảnh dữ liệu để gạn lại cho câu trả lời chắc hơn."

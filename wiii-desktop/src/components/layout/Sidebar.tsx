@@ -57,6 +57,12 @@ export function Sidebar() {
   // Sprint 231h: User profile dropdown menu state
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
+  // Close transient profile UI whenever the main surface changes. Otherwise
+  // its backdrop can keep intercepting clicks after keyboard navigation.
+  useEffect(() => {
+    setUserMenuOpen(false);
+  }, [activeView, sidebarOpen]);
+
   // Sprint 85: Debounce search to prevent O(n) filter on every keystroke
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -145,6 +151,7 @@ export function Sidebar() {
               className={iconBtnClass(false)}
               title="Cuộc trò chuyện mới"
               aria-label="Tạo cuộc trò chuyện mới"
+              data-wiii-id="new-chat-button"
             >
               <Plus size={18} />
             </button>
@@ -247,6 +254,7 @@ export function Sidebar() {
           className="shrink-0 p-1 rounded-md hover:bg-surface-tertiary transition-colors"
           title="Ẩn sidebar"
           aria-label="Ẩn sidebar"
+          data-wiii-id="sidebar-toggle"
         >
           <PanelLeftClose size={16} className="text-text-tertiary" />
         </button>
@@ -258,6 +266,7 @@ export function Sidebar() {
           onClick={handleNewChat}
           className="flex items-center gap-2 w-full px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-text hover:bg-[var(--surface-tertiary)] active:scale-[0.985] transition-all duration-300 text-sm font-medium"
           aria-label="Tạo cuộc trò chuyện mới"
+          data-wiii-id="new-chat-button"
         >
           <Plus size={16} />
           ✨ Trò chuyện mới
@@ -275,6 +284,7 @@ export function Sidebar() {
             placeholder="Mình tìm gì nhỉ?"
             className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-border bg-surface text-text text-xs focus:outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-text-tertiary"
             aria-label="Tìm kiếm cuộc trò chuyện"
+            data-wiii-id="conversation-search"
           />
         </div>
       </div>
@@ -547,7 +557,11 @@ function ConversationItem({
           className="flex-1 bg-surface border border-border rounded px-1.5 py-0.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
         />
       ) : (
-        <span className="flex-1 truncate" onDoubleClick={handleDoubleClick}>
+        <span
+          className="flex-1 truncate"
+          onDoubleClick={handleDoubleClick}
+          title={conv.title}
+        >
           {conv.title}
         </span>
       )}

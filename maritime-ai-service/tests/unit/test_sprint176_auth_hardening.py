@@ -18,6 +18,15 @@ import pytest
 _POOL_PATCH = "app.core.database.get_asyncpg_pool"
 
 
+@pytest.fixture(autouse=True)
+def _reset_db_degraded_cooldown():
+    from app.core.database import clear_shared_database_unavailable
+
+    clear_shared_database_unavailable()
+    yield
+    clear_shared_database_unavailable()
+
+
 def _mock_pool_and_conn():
     """Create standard mock pool + connection for async DB tests.
 
@@ -317,6 +326,38 @@ class TestRefreshFamily:
             pair = await create_token_pair(user_id="user-1")
             assert pair.access_token
             assert pair.refresh_token
+
+    @pytest.mark.asyncio
+    async def test_stateless_dev_refresh_rotates_without_db(self):
+        """Local dev fallback refresh should not depend on PostgreSQL."""
+        with patch("app.auth.token_service.settings") as mock_settings, \
+             patch(_POOL_PATCH, create=True, side_effect=AssertionError("DB should not be used")):
+            mock_settings.jwt_expire_minutes = 30
+            mock_settings.jwt_secret_key = "test-secret-key-12345"
+            mock_settings.jwt_algorithm = "HS256"
+            mock_settings.jwt_refresh_expire_days = 30
+            mock_settings.jwt_audience = "wiii"
+            mock_settings.enable_dev_login = True
+            mock_settings.environment = "development"
+
+            from app.auth.token_service import (
+                create_stateless_refresh_token,
+                refresh_access_token,
+            )
+
+            refresh_token = create_stateless_refresh_token(
+                user_id="user-dev",
+                email="dev@example.test",
+                name="Dev User",
+                role="admin",
+                platform_role="platform_admin",
+                auth_method="dev",
+            )
+            pair = await refresh_access_token(refresh_token)
+
+            assert pair is not None
+            assert pair.access_token
+            assert pair.refresh_token != refresh_token
 
     @pytest.mark.asyncio
     async def test_identity_snapshot_insert_falls_back_to_legacy_schema(self):

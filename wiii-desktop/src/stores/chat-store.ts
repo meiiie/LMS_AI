@@ -13,6 +13,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { v4 as uuidv4 } from "uuid";
 import { loadStore, saveStore } from "@/lib/storage";
+import { stripWiiiInternalMarkupFromStream } from "@/lib/internal-markup";
 import type {
   Conversation,
   Message,
@@ -34,6 +35,7 @@ import type {
   ArtifactData,
   ArtifactBlockData,
   ToolExecutionBlockData,
+  ChatDocumentAttachment,
   ImageInput,
   VisualPayload,
   VisualBlockData,
@@ -84,10 +86,15 @@ function getNarrativeSegments(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-function hasNarrativeSegment(value: string | undefined, candidate: string): boolean {
+function hasNarrativeSegment(
+  value: string | undefined,
+  candidate: string,
+): boolean {
   const normalizedCandidate = normalizeNarrativeText(candidate);
   if (!normalizedCandidate) return false;
-  return getNarrativeSegments(value).some((segment) => normalizeNarrativeText(segment) === normalizedCandidate);
+  return getNarrativeSegments(value).some(
+    (segment) => normalizeNarrativeText(segment) === normalizedCandidate,
+  );
 }
 
 function isReplayProneNarrativeChunk(value: string | undefined): boolean {
@@ -96,7 +103,10 @@ function isReplayProneNarrativeChunk(value: string | undefined): boolean {
   return trimmed.length >= 24 || /\s/u.test(trimmed) || /[.!?…]/u.test(trimmed);
 }
 
-function shouldSkipRepeatedNarrative(existingText: string | undefined, candidate: string): boolean {
+function shouldSkipRepeatedNarrative(
+  existingText: string | undefined,
+  candidate: string,
+): boolean {
   if (!isReplayProneNarrativeChunk(candidate)) return false;
   return hasNarrativeSegment(existingText, candidate);
 }
@@ -182,11 +192,19 @@ interface ChatState {
   loadConversations: () => Promise<void>;
 
   // Actions
-  createConversation: (domainId?: string, organizationId?: string, sessionId?: string) => string;
+  createConversation: (
+    domainId?: string,
+    organizationId?: string,
+    sessionId?: string,
+  ) => string;
   deleteConversation: (id: string) => void;
   setActiveConversation: (id: string | null) => void;
   renameConversation: (id: string, title: string) => void;
-  addUserMessage: (content: string, images?: ImageInput[]) => string | null;
+  addUserMessage: (
+    content: string,
+    images?: ImageInput[],
+    documents?: ChatDocumentAttachment[],
+  ) => string | null;
   startStreaming: () => void;
   appendStreamingContent: (chunk: string) => void;
   setStreamingThinking: (thinking: string) => void;
@@ -194,7 +212,11 @@ interface ChatState {
   setStreamingStep: (step: string) => void;
   setStreamingSources: (sources: SourceInfo[]) => void;
   addStreamingStep: (label: string, node?: string) => void;
-  appendThinkingDelta: (delta: string, node?: string, meta?: DisplayPresentationMeta) => void;
+  appendThinkingDelta: (
+    delta: string,
+    node?: string,
+    meta?: DisplayPresentationMeta,
+  ) => void;
   openThinkingBlock: (
     label: string,
     summary?: string,
@@ -205,12 +227,23 @@ interface ChatState {
   ) => void;
   closeThinkingBlock: (durationMs?: number) => void;
   appendToolCall: (tc: ToolCallInfo, meta?: DisplayPresentationMeta) => void;
-  updateToolCallResult: (id: string, result: string, meta?: DisplayPresentationMeta) => void;
+  updateToolCallResult: (
+    id: string,
+    result: string,
+    meta?: DisplayPresentationMeta,
+  ) => void;
   setStreamingDomainNotice: (notice: string) => void;
   /** Sprint 147: Append bold action text between thinking blocks */
-  appendActionText: (text: string, node?: string, meta?: DisplayPresentationMeta) => void;
+  appendActionText: (
+    text: string,
+    node?: string,
+    meta?: DisplayPresentationMeta,
+  ) => void;
   /** Sprint 153: Append browser screenshot block. */
-  appendScreenshot: (data: { url: string; image: string; label: string; node?: string }, meta?: DisplayPresentationMeta) => void;
+  appendScreenshot: (
+    data: { url: string; image: string; label: string; node?: string },
+    meta?: DisplayPresentationMeta,
+  ) => void;
   /** Sprint 164: Open a subagent parallel dispatch group */
   openSubagentGroup: (label: string, agentNames: string[]) => void;
   /** Sprint 164: Close the active subagent group */
@@ -222,24 +255,48 @@ interface ChatState {
   /** Sprint 164: Append a status message to a specific worker */
   appendWorkerStatus: (workerNode: string, message: string) => void;
   /** Sprint 166: Add a preview item to the streaming state */
-  addPreviewItem: (item: PreviewItemData, node?: string, meta?: DisplayPresentationMeta) => void;
+  addPreviewItem: (
+    item: PreviewItemData,
+    node?: string,
+    meta?: DisplayPresentationMeta,
+  ) => void;
   /** Sprint 167: Add an artifact to the streaming state */
-  addArtifact: (artifact: ArtifactData, node?: string, meta?: DisplayPresentationMeta) => void;
+  addArtifact: (
+    artifact: ArtifactData,
+    node?: string,
+    meta?: DisplayPresentationMeta,
+  ) => void;
   /** Sprint 230: Add a structured inline visual to the streaming state */
-  addVisual: (visual: VisualPayload, node?: string, meta?: DisplayPresentationMeta) => void;
-  openVisualSession: (visual: VisualPayload, node?: string, meta?: DisplayPresentationMeta) => void;
-  patchVisualSession: (visual: VisualPayload, node?: string, meta?: DisplayPresentationMeta) => void;
+  addVisual: (
+    visual: VisualPayload,
+    node?: string,
+    meta?: DisplayPresentationMeta,
+  ) => void;
+  openVisualSession: (
+    visual: VisualPayload,
+    node?: string,
+    meta?: DisplayPresentationMeta,
+  ) => void;
+  patchVisualSession: (
+    visual: VisualPayload,
+    node?: string,
+    meta?: DisplayPresentationMeta,
+  ) => void;
   commitVisualSession: (sessionId: string) => void;
   disposeVisualSession: (sessionId: string, reason?: string) => void;
   updateVisualSessionInteraction: (
     sessionId: string,
-    patch: Partial<Pick<VisualSessionState, "focusedAnnotationId" | "focusedNodeId">> & {
+    patch: Partial<
+      Pick<VisualSessionState, "focusedAnnotationId" | "focusedNodeId">
+    > & {
       controlValues?: Record<string, string | number | boolean>;
       interactionDelta?: number;
     },
   ) => void;
   getActiveVisualContext: () => Record<string, unknown> | undefined;
-  recordWidgetFeedback: (feedback: Omit<WidgetFeedbackItem, "timestamp"> & { timestamp?: string }) => void;
+  recordWidgetFeedback: (
+    feedback: Omit<WidgetFeedbackItem, "timestamp"> & { timestamp?: string },
+  ) => void;
   getActiveWidgetFeedbackContext: () => Record<string, unknown> | undefined;
   // Sprint 141: ThinkingFlow phase actions
   addOrUpdatePhase: (
@@ -250,8 +307,16 @@ interface ChatState {
     summary?: string,
     summaryMode?: ThinkingSummaryMode,
   ) => void;
-  appendPhaseThinking: (content: string, node?: string, stepId?: string) => void;
-  appendPhaseThinkingDelta: (delta: string, node?: string, stepId?: string) => void;
+  appendPhaseThinking: (
+    content: string,
+    node?: string,
+    stepId?: string,
+  ) => void;
+  appendPhaseThinkingDelta: (
+    delta: string,
+    node?: string,
+    stepId?: string,
+  ) => void;
   closeActivePhase: (durationMs?: number) => void;
   appendPhaseStatus: (message: string, node?: string, stepId?: string) => void;
   appendPhaseToolCall: (tc: ToolCallInfo, stepId?: string) => void;
@@ -259,7 +324,10 @@ interface ChatState {
   setPendingStreamMetadata: (metadata: ChatResponseMetadata) => void;
   finalizeStream: (metadata?: ChatResponseMetadata) => void;
   setStreamError: (error: string, metadata?: Record<string, unknown>) => void;
-  setMessageFeedback: (messageId: string, feedback: "up" | "down" | null) => void;
+  setMessageFeedback: (
+    messageId: string,
+    feedback: "up" | "down" | null,
+  ) => void;
   clearStreaming: () => void;
   /** Sprint 218: Clear conversations on logout (prevent cross-user leakage) */
   clearForLogout: () => void;
@@ -276,6 +344,7 @@ let _persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Sprint 225: Prevent concurrent syncFromServer calls
 let _syncInProgress = false;
+let _pendingAnswerInternalMarkup = "";
 
 function persistConversations(conversations: Conversation[]) {
   if (_persistTimer) clearTimeout(_persistTimer);
@@ -283,7 +352,7 @@ function persistConversations(conversations: Conversation[]) {
   const storeKey = getStoreKey();
   _persistTimer = setTimeout(() => {
     saveStore(storeName, storeKey, conversations).catch((err) =>
-      console.warn("[chat-store] Failed to persist:", err)
+      console.warn("[chat-store] Failed to persist:", err),
     );
   }, 2000);
 }
@@ -291,7 +360,7 @@ function persistConversations(conversations: Conversation[]) {
 function persistConversationsImmediate(conversations: Conversation[]) {
   if (_persistTimer) clearTimeout(_persistTimer);
   saveStore(getStoreName(), getStoreKey(), conversations).catch((err) =>
-    console.warn("[chat-store] Failed to persist:", err)
+    console.warn("[chat-store] Failed to persist:", err),
   );
 }
 
@@ -307,25 +376,33 @@ function closeLastThinkingBlockDraft(blocks: ContentBlock[]): void {
   }
 }
 
-function extractSuggestedQuestions(metadata?: ChatResponseMetadata): string[] | undefined {
+function extractSuggestedQuestions(
+  metadata?: ChatResponseMetadata,
+): string[] | undefined {
   const rawSQ =
-    metadata?.suggested_questions
-    ?? (metadata?.data as Record<string, unknown> | undefined)?.suggested_questions;
-  return Array.isArray(rawSQ) ? rawSQ as string[] : undefined;
+    metadata?.suggested_questions ??
+    (metadata?.data as Record<string, unknown> | undefined)
+      ?.suggested_questions;
+  return Array.isArray(rawSQ) ? (rawSQ as string[]) : undefined;
 }
 
-function buildDegradedAssistantContent(state: Pick<
-  ChatState,
-  | "streamingContent"
-  | "streamingBlocks"
-  | "streamingArtifacts"
-  | "streamingPreviews"
->): string {
+function buildDegradedAssistantContent(
+  state: Pick<
+    ChatState,
+    | "streamingContent"
+    | "streamingBlocks"
+    | "streamingArtifacts"
+    | "streamingPreviews"
+  >,
+): string {
   if (state.streamingContent.trim()) return state.streamingContent;
   if (state.streamingBlocks.some((block) => block.type === "visual")) {
-    return "Wiii da tao xong visual inline, nhung phan text tong hop bi ngat truoc khi gui tron ven.";
+    return "Wiii đã tạo xong visual inline, nhưng phần text tổng hợp bị ngắt trước khi gửi trọn vẹn.";
   }
-  if (state.streamingArtifacts.length > 0 || state.streamingPreviews.length > 0) {
+  if (
+    state.streamingArtifacts.length > 0 ||
+    state.streamingPreviews.length > 0
+  ) {
     return "Wiii đã hoàn tất phần tạo nội dung và giữ lại các tệp/kết quả cho bạn, nhưng câu trả lời cuối đã bị ngắt trước khi gửi trọn vẹn.";
   }
   if (state.streamingBlocks.length > 0) {
@@ -334,12 +411,18 @@ function buildDegradedAssistantContent(state: Pick<
   return "Luồng phản hồi đã kết thúc sớm trước khi Wiii kịp gửi câu trả lời cuối.";
 }
 
-function mergeStreamMetadataIntoMessage(message: Message, metadata: ChatResponseMetadata): void {
+function mergeStreamMetadataIntoMessage(
+  message: Message,
+  metadata: ChatResponseMetadata,
+): void {
   message.reasoning_trace = metadata.reasoning_trace;
   message.metadata = metadata;
   message.suggested_questions = extractSuggestedQuestions(metadata);
   const metadataThinking = normalizeThinkingSnapshot(
-    metadata.thinking_lifecycle?.final_text || metadata.thinking_content || metadata.thinking || "",
+    metadata.thinking_lifecycle?.final_text ||
+      metadata.thinking_content ||
+      metadata.thinking ||
+      "",
   );
   if (metadataThinking) {
     const currentThinking = normalizeThinkingSnapshot(message.thinking);
@@ -364,7 +447,8 @@ function pickPreferredFinalThinking(
   if (lifecycleThinking) {
     if (!liveThinking) return lifecycleThinking;
     if (lifecycleThinking === liveThinking) return liveThinking;
-    if (lifecycleThinking.length >= liveThinking.length) return lifecycleThinking;
+    if (lifecycleThinking.length >= liveThinking.length)
+      return lifecycleThinking;
   }
   if (!metadataThinking) return liveThinking || lifecycleThinking;
   if (!liveThinking) return metadataThinking;
@@ -414,7 +498,10 @@ function getMetadataRequestId(value: unknown): string {
   return typeof requestId === "string" ? requestId.trim() : "";
 }
 
-function applyDisplayMeta<T extends DisplayPresentationMeta>(target: T, meta?: DisplayPresentationMeta): T {
+function applyDisplayMeta<T extends DisplayPresentationMeta>(
+  target: T,
+  meta?: DisplayPresentationMeta,
+): T {
   if (!meta) return target;
   if (meta.displayRole) target.displayRole = meta.displayRole;
   if (meta.sequenceId != null) target.sequenceId = meta.sequenceId;
@@ -470,7 +557,9 @@ function findActiveThinkingPhaseIndex(
   return fallbackIndex;
 }
 
-function getVisualSessionId(visual: Pick<VisualPayload, "visual_session_id" | "id">): string {
+function getVisualSessionId(
+  visual: Pick<VisualPayload, "visual_session_id" | "id">,
+): string {
   return visual.visual_session_id || visual.id;
 }
 
@@ -480,7 +569,9 @@ const VISUAL_TOOL_EXECUTION_NAMES = new Set([
   "tool_create_visual_code",
 ]);
 
-function getDefaultVisualControlValues(visual: VisualPayload): Record<string, string | number | boolean> {
+function getDefaultVisualControlValues(
+  visual: VisualPayload,
+): Record<string, string | number | boolean> {
   const values: Record<string, string | number | boolean> = {};
   for (const control of visual.controls || []) {
     if (typeof control.value !== "undefined") {
@@ -507,26 +598,38 @@ function summarizeVisualSessionState(session: VisualSessionState): string {
     .slice(0, 3)
     .map(([key, value]) => `${key}=${String(value)}`)
     .join(", ");
-  const focus = [session.focusedAnnotationId, session.focusedNodeId].filter(Boolean).join(" / ");
+  const focus = [session.focusedAnnotationId, session.focusedNodeId]
+    .filter(Boolean)
+    .join(" / ");
   return [controls, focus].filter(Boolean).join(" | ");
 }
 
 function summarizeWidgetFeedback(feedback: WidgetFeedbackItem): string {
   if (feedback.summary) return feedback.summary;
-  if (typeof feedback.score === "number" && typeof feedback.total_count === "number") {
+  if (
+    typeof feedback.score === "number" &&
+    typeof feedback.total_count === "number"
+  ) {
     return `${feedback.score}/${feedback.total_count}`;
   }
-  if (typeof feedback.correct_count === "number" && typeof feedback.total_count === "number") {
+  if (
+    typeof feedback.correct_count === "number" &&
+    typeof feedback.total_count === "number"
+  ) {
     return `${feedback.correct_count}/${feedback.total_count} dung`;
   }
   return feedback.widget_kind.replaceAll("_", " ");
 }
 
-function matchesVisualBlockSession(block: VisualBlockData, sessionId: string, visualId?: string): boolean {
+function matchesVisualBlockSession(
+  block: VisualBlockData,
+  sessionId: string,
+  visualId?: string,
+): boolean {
   return Boolean(
-    (block.sessionId || block.visual.visual_session_id) === sessionId
-    || block.id === sessionId
-    || (visualId && block.visual.id === visualId),
+    (block.sessionId || block.visual.visual_session_id) === sessionId ||
+    block.id === sessionId ||
+    (visualId && block.visual.id === visualId),
   );
 }
 
@@ -540,12 +643,11 @@ function upsertVisualBlockDraft(
   const sessionId = getVisualSessionId(visual);
   const existingIdx = state.streamingBlocks.findIndex(
     (block) =>
-      block.type === "visual" && (
-        (block as VisualBlockData).sessionId === sessionId
-        || (block as VisualBlockData).visual.visual_session_id === sessionId
-        || (block as VisualBlockData).id === sessionId
-        || (block as VisualBlockData).visual.id === visual.id
-      ),
+      block.type === "visual" &&
+      ((block as VisualBlockData).sessionId === sessionId ||
+        (block as VisualBlockData).visual.visual_session_id === sessionId ||
+        (block as VisualBlockData).id === sessionId ||
+        (block as VisualBlockData).visual.id === visual.id),
   );
 
   if (existingIdx >= 0) {
@@ -559,16 +661,21 @@ function upsertVisualBlockDraft(
     return;
   }
 
-  state.streamingBlocks.push(applyDisplayMeta({
-    type: "visual",
-    id: sessionId,
-    sessionId,
-    visual,
-    node,
-    status,
-    displayRole: "artifact",
-    presentation: "compact",
-  } as VisualBlockData, meta));
+  state.streamingBlocks.push(
+    applyDisplayMeta(
+      {
+        type: "visual",
+        id: sessionId,
+        sessionId,
+        visual,
+        node,
+        status,
+        displayRole: "artifact",
+        presentation: "compact",
+      } as VisualBlockData,
+      meta,
+    ),
+  );
 }
 
 function attachVisualSessionIdToToolExecutionDraft(
@@ -577,9 +684,10 @@ function attachVisualSessionIdToToolExecutionDraft(
   sourceTool?: string,
   node?: string,
 ): void {
-  const matchingToolName = sourceTool && VISUAL_TOOL_EXECUTION_NAMES.has(sourceTool)
-    ? sourceTool
-    : undefined;
+  const matchingToolName =
+    sourceTool && VISUAL_TOOL_EXECUTION_NAMES.has(sourceTool)
+      ? sourceTool
+      : undefined;
 
   for (let i = state.streamingBlocks.length - 1; i >= 0; i--) {
     const block = state.streamingBlocks[i];
@@ -590,13 +698,16 @@ function attachVisualSessionIdToToolExecutionDraft(
     if (node && toolBlock.node && toolBlock.node !== node) continue;
 
     const args = toolBlock.tool.args || {};
-    if (typeof args.visual_session_id === "string" && args.visual_session_id) return;
+    if (typeof args.visual_session_id === "string" && args.visual_session_id)
+      return;
     toolBlock.tool.args = {
       ...args,
       visual_session_id: sessionId,
     };
 
-    const flatToolCall = state.streamingToolCalls.find((tc) => tc.id === toolBlock.tool.id);
+    const flatToolCall = state.streamingToolCalls.find(
+      (tc) => tc.id === toolBlock.tool.id,
+    );
     if (flatToolCall) {
       flatToolCall.args = {
         ...(flatToolCall.args || {}),
@@ -614,7 +725,9 @@ function upsertPersistedVisualBlockDraft(
   meta?: DisplayPresentationMeta,
   status: VisualSessionState["status"] = "open",
 ): boolean {
-  const conversation = state.conversations.find((item) => item.id === state.activeConversationId);
+  const conversation = state.conversations.find(
+    (item) => item.id === state.activeConversationId,
+  );
   if (!conversation) return false;
 
   const sessionId = getVisualSessionId(visual);
@@ -625,7 +738,8 @@ function upsertPersistedVisualBlockDraft(
     for (const block of message.blocks) {
       if (block.type !== "visual") continue;
       const visualBlock = block as VisualBlockData;
-      if (!matchesVisualBlockSession(visualBlock, sessionId, visual.id)) continue;
+      if (!matchesVisualBlockSession(visualBlock, sessionId, visual.id))
+        continue;
       visualBlock.id = sessionId;
       visualBlock.sessionId = sessionId;
       visualBlock.visual = visual;
@@ -640,7 +754,13 @@ function upsertPersistedVisualBlockDraft(
 }
 
 function markVisualSessionStatusDraft(
-  state: Pick<ChatState, "visualSessions" | "streamingBlocks" | "conversations" | "activeConversationId">,
+  state: Pick<
+    ChatState,
+    | "visualSessions"
+    | "streamingBlocks"
+    | "conversations"
+    | "activeConversationId"
+  >,
   sessionId: string,
   status: VisualSessionState["status"],
 ): void {
@@ -650,17 +770,25 @@ function markVisualSessionStatusDraft(
     session.lastUpdatedAt = Date.now();
   }
   for (const block of state.streamingBlocks) {
-    if (block.type === "visual" && matchesVisualBlockSession(block as VisualBlockData, sessionId)) {
+    if (
+      block.type === "visual" &&
+      matchesVisualBlockSession(block as VisualBlockData, sessionId)
+    ) {
       (block as VisualBlockData).status = status;
     }
   }
 
-  const conversation = state.conversations.find((item) => item.id === state.activeConversationId);
+  const conversation = state.conversations.find(
+    (item) => item.id === state.activeConversationId,
+  );
   if (!conversation) return;
   for (const message of conversation.messages) {
     if (!message.blocks) continue;
     for (const block of message.blocks) {
-      if (block.type === "visual" && matchesVisualBlockSession(block as VisualBlockData, sessionId)) {
+      if (
+        block.type === "visual" &&
+        matchesVisualBlockSession(block as VisualBlockData, sessionId)
+      ) {
         (block as VisualBlockData).status = status;
       }
     }
@@ -668,7 +796,13 @@ function markVisualSessionStatusDraft(
 }
 
 function disposeLiveVisualSessionsDraft(
-  state: Pick<ChatState, "visualSessions" | "streamingBlocks" | "conversations" | "activeConversationId">,
+  state: Pick<
+    ChatState,
+    | "visualSessions"
+    | "streamingBlocks"
+    | "conversations"
+    | "activeConversationId"
+  >,
 ): void {
   for (const session of Object.values(state.visualSessions)) {
     if (session.status === "open") {
@@ -681,11 +815,15 @@ function upsertConversationWidgetFeedbackDraft(
   state: Pick<ChatState, "conversations" | "activeConversationId">,
   feedback: WidgetFeedbackItem,
 ): void {
-  const conversation = state.conversations.find((item) => item.id === state.activeConversationId);
+  const conversation = state.conversations.find(
+    (item) => item.id === state.activeConversationId,
+  );
   if (!conversation) return;
 
   const items = conversation.widget_feedback || [];
-  const existingIndex = items.findIndex((item) => item.widget_id === feedback.widget_id);
+  const existingIndex = items.findIndex(
+    (item) => item.widget_id === feedback.widget_id,
+  );
   if (existingIndex >= 0) {
     items[existingIndex] = {
       ...items[existingIndex],
@@ -702,6 +840,7 @@ function upsertConversationWidgetFeedbackDraft(
 }
 
 function resetStreamingDraft(state: ChatState): void {
+  _pendingAnswerInternalMarkup = "";
   state.isStreaming = false;
   state.streamingContent = "";
   state.streamingThinking = "";
@@ -749,7 +888,8 @@ export const useChatStore = create<ChatState>()(
         // Sprint 218: Resolve current user_id for per-user storage
         // Sprint 223-fix: Also read from embed config as fallback (JWT user_id)
         try {
-          const { resolveCurrentChatUserId } = await import("@/stores/chat-store-runtime");
+          const { resolveCurrentChatUserId } =
+            await import("@/stores/chat-store-runtime");
           _currentUserId = resolveCurrentChatUserId();
         } catch {
           _currentUserId = null;
@@ -763,7 +903,11 @@ export const useChatStore = create<ChatState>()(
           }
         }
 
-        const saved = await loadStore<Conversation[]>(getStoreName(), getStoreKey(), []);
+        const saved = await loadStore<Conversation[]>(
+          getStoreName(),
+          getStoreKey(),
+          [],
+        );
         if (saved.length > 0) {
           set((state) => {
             state.conversations = saved;
@@ -771,16 +915,22 @@ export const useChatStore = create<ChatState>()(
             state.isLoaded = true;
           });
         } else {
-          set((state) => { state.isLoaded = true; });
+          set((state) => {
+            state.isLoaded = true;
+          });
         }
 
         // Sprint 225: Background server sync (non-blocking)
-        get().syncFromServer().catch((err) =>
-          console.debug("[chat-store] Server sync skipped:", err)
-        );
+        get()
+          .syncFromServer()
+          .catch((err) =>
+            console.debug("[chat-store] Server sync skipped:", err),
+          );
       } catch (err) {
         console.warn("[chat-store] Failed to load conversations:", err);
-        set((state) => { state.isLoaded = true; });
+        set((state) => {
+          state.isLoaded = true;
+        });
       }
     },
 
@@ -830,13 +980,15 @@ export const useChatStore = create<ChatState>()(
       // Sprint 225: Fire-and-forget server delete
       if (threadId) {
         import("@/api/threads").then(({ deleteServerThread }) =>
-          deleteServerThread(threadId).catch(() => {})
+          deleteServerThread(threadId).catch(() => {}),
         );
       }
     },
 
     setActiveConversation: (id) => {
-      set((state) => { state.activeConversationId = id; });
+      set((state) => {
+        state.activeConversationId = id;
+      });
       // Sprint 225: Lazy-load server messages for stub conversations
       if (id) {
         get().loadServerMessages(id);
@@ -861,13 +1013,15 @@ export const useChatStore = create<ChatState>()(
       // Sprint 225: Fire-and-forget server rename
       if (threadId) {
         import("@/api/threads").then(({ renameServerThread }) =>
-          renameServerThread(threadId, title).catch(() => {})
+          renameServerThread(threadId, title).catch(() => {}),
         );
       }
     },
 
     setSearchQuery: (query) => {
-      set((state) => { state.searchQuery = query; });
+      set((state) => {
+        state.searchQuery = query;
+      });
     },
 
     pinConversation: (id) => {
@@ -886,7 +1040,7 @@ export const useChatStore = create<ChatState>()(
       persistConversationsImmediate(get().conversations);
     },
 
-    addUserMessage: (content, images) => {
+    addUserMessage: (content, images, documents) => {
       const { activeConversationId, conversations } = get();
       if (!activeConversationId) return null;
 
@@ -898,20 +1052,24 @@ export const useChatStore = create<ChatState>()(
         timestamp: new Date().toISOString(),
         // Sprint 179: Attach images to user message for display
         ...(images && images.length > 0 ? { images } : {}),
+        ...(documents && documents.length > 0 ? { documents } : {}),
       };
 
       const conversation = conversations.find(
-        (c) => c.id === activeConversationId
+        (c) => c.id === activeConversationId,
       );
       const isFirstMessage = conversation?.messages.length === 0;
 
       set((state) => {
-        const conv = state.conversations.find((c) => c.id === activeConversationId);
+        const conv = state.conversations.find(
+          (c) => c.id === activeConversationId,
+        );
         if (conv) {
           conv.messages.push(message);
           conv.updated_at = new Date().toISOString();
           if (isFirstMessage) {
-            conv.title = content.slice(0, 50) + (content.length > 50 ? "..." : "");
+            conv.title =
+              content.slice(0, 50) + (content.length > 50 ? "..." : "");
           }
         }
       });
@@ -933,22 +1091,33 @@ export const useChatStore = create<ChatState>()(
 
     appendStreamingContent: (chunk) => {
       set((state) => {
+        const internalMarkup = stripWiiiInternalMarkupFromStream(
+          chunk,
+          _pendingAnswerInternalMarkup,
+        );
+        _pendingAnswerInternalMarkup = internalMarkup.pending;
         // Strip visual reference markers that LLM puts in answer text
-        const clean = chunk
+        const clean = internalMarkup.content
           .replace(/\{visual-[a-f0-9]+\}/gi, "")
           .replace(/<!-- WiiiVisualBridge:visual-[a-f0-9]+ -->/gi, "")
           .replace(/\[Biểu đồ[^\]]*\]/gi, "")
           .replace(/\[Chart[^\]]*\]/gi, "")
           .replace(/\[Visual[^\]]*\]/gi, "")
           .replace(/\(Visuals?[^)]*hiển thị[^)]*\)/gi, "")
-          .replace(/\(Visual[^)]*displayed[^)]*\)/gi, "");
+          .replace(/\(Visual[^)]*displayed[^)]*\)/gi, "")
+          // v4.0 F7 (2026-05-06): Wiii Pointy inline tag — Clicky pattern.
+          // LLM appends [POINT:bare-id] / [POINT:bare-id:caption] / [POINT:none]
+          // at end of response. Strip from display; useSSEStream onDone
+          // parses fullAnswerTextRef (unstripped) to dispatch cursor.
+          .replace(/\[POINT:[^\]]+\]/g, "");
         if (!clean) return; // Skip if chunk was only a visual marker
 
         // Flat field — backward compat
         state.streamingContent += clean;
 
         // Block-based: append to last answer block, or create new one
-        const lastBlock = state.streamingBlocks[state.streamingBlocks.length - 1];
+        const lastBlock =
+          state.streamingBlocks[state.streamingBlocks.length - 1];
         if (lastBlock?.type === "answer") {
           lastBlock.content += clean;
         } else {
@@ -969,18 +1138,28 @@ export const useChatStore = create<ChatState>()(
         const normalizedThinking = normalizeNarrativeText(thinking);
         if (!normalizedThinking) return;
 
-        const lastNarrativeLine = normalizeNarrativeText(getLastNarrativeLine(state.streamingThinking));
-        const lastBlock = state.streamingBlocks[state.streamingBlocks.length - 1];
-        const lastBlockLine = lastBlock?.type === "thinking"
-          ? normalizeNarrativeText(getLastNarrativeLine(lastBlock.content))
-          : "";
-        if (normalizedThinking === lastNarrativeLine && normalizedThinking === lastBlockLine) {
+        const lastNarrativeLine = normalizeNarrativeText(
+          getLastNarrativeLine(state.streamingThinking),
+        );
+        const lastBlock =
+          state.streamingBlocks[state.streamingBlocks.length - 1];
+        const lastBlockLine =
+          lastBlock?.type === "thinking"
+            ? normalizeNarrativeText(getLastNarrativeLine(lastBlock.content))
+            : "";
+        if (
+          normalizedThinking === lastNarrativeLine &&
+          normalizedThinking === lastBlockLine
+        ) {
           return;
         }
         if (hasNarrativeSegment(state.streamingThinking, thinking)) {
           return;
         }
-        if (lastBlock?.type === "thinking" && hasNarrativeSegment(lastBlock.content, thinking)) {
+        if (
+          lastBlock?.type === "thinking" &&
+          hasNarrativeSegment(lastBlock.content, thinking)
+        ) {
           return;
         }
 
@@ -1025,7 +1204,8 @@ export const useChatStore = create<ChatState>()(
     setStreamingStep: (step) => {
       set((state) => {
         state.streamingStep = step;
-        const lastBlock = state.streamingBlocks[state.streamingBlocks.length - 1];
+        const lastBlock =
+          state.streamingBlocks[state.streamingBlocks.length - 1];
         const safeLabel = sanitizeThinkingLabel(step);
         if (lastBlock?.type === "thinking" && !lastBlock.label && safeLabel) {
           lastBlock.label = safeLabel;
@@ -1034,7 +1214,9 @@ export const useChatStore = create<ChatState>()(
     },
 
     setStreamingSources: (sources) => {
-      set((state) => { state.streamingSources = sources; });
+      set((state) => {
+        state.streamingSources = sources;
+      });
     },
 
     addStreamingStep: (label, node) => {
@@ -1048,8 +1230,14 @@ export const useChatStore = create<ChatState>()(
         if (!delta || !delta.trim()) {
           return;
         }
-        const openBlock = findLastOpenThinkingBlock(state.streamingBlocks, meta?.stepId, node);
-        const previousBlock = openBlock || findLastThinkingBlock(state.streamingBlocks, meta?.stepId, node);
+        const openBlock = findLastOpenThinkingBlock(
+          state.streamingBlocks,
+          meta?.stepId,
+          node,
+        );
+        const previousBlock =
+          openBlock ||
+          findLastThinkingBlock(state.streamingBlocks, meta?.stepId, node);
         const existingNarrative = buildThinkingDedupContext(
           openBlock,
           previousBlock,
@@ -1070,7 +1258,11 @@ export const useChatStore = create<ChatState>()(
           }
           applyDisplayMeta(openBlock, meta);
         } else {
-          if (previousBlock && meta?.stepId && previousBlock.stepId === meta.stepId) {
+          if (
+            previousBlock &&
+            meta?.stepId &&
+            previousBlock.stepId === meta.stepId
+          ) {
             previousBlock.content += delta;
             if (node && !previousBlock.node) {
               previousBlock.node = node;
@@ -1079,21 +1271,28 @@ export const useChatStore = create<ChatState>()(
             return;
           }
           const groupId = state._activeSubagentGroupId;
-          state.streamingBlocks.push(applyDisplayMeta({
-            type: "thinking",
-            id: uuidv4(),
-            label: sanitizeThinkingLabel(previousBlock?.label) || sanitizeThinkingLabel(state.streamingStep),
-            summary: previousBlock?.summary,
-            summaryMode: previousBlock?.summaryMode,
-            phase: previousBlock?.phase,
-            node,
-            content: delta,
-            toolCalls: [],
-            startTime: Date.now(),
-            ...(groupId ? { groupId, workerNode: node } : {}),
-            displayRole: "thinking",
-            presentation: "expanded",
-          }, meta));
+          state.streamingBlocks.push(
+            applyDisplayMeta(
+              {
+                type: "thinking",
+                id: uuidv4(),
+                label:
+                  sanitizeThinkingLabel(previousBlock?.label) ||
+                  sanitizeThinkingLabel(state.streamingStep),
+                summary: previousBlock?.summary,
+                summaryMode: previousBlock?.summaryMode,
+                phase: previousBlock?.phase,
+                node,
+                content: delta,
+                toolCalls: [],
+                startTime: Date.now(),
+                ...(groupId ? { groupId, workerNode: node } : {}),
+                displayRole: "thinking",
+                presentation: "expanded",
+              },
+              meta,
+            ),
+          );
         }
       });
     },
@@ -1108,37 +1307,46 @@ export const useChatStore = create<ChatState>()(
         }
         // Open new thinking block - tag with group + workerNode if inside parallel dispatch
         const groupId = state._activeSubagentGroupId;
-        state.streamingBlocks.push(applyDisplayMeta({
-          type: "thinking",
-          id: uuidv4(),
-          label,
-          summary,
-          summaryMode,
-          node,
-          phase,
-          content: "",
-          toolCalls: [],
-          startTime: Date.now(),
-          ...(groupId ? { groupId, workerNode: node } : {}),
-          displayRole: "thinking",
-          stepState: "live",
-          presentation: "expanded",
-        }, meta));
+        state.streamingBlocks.push(
+          applyDisplayMeta(
+            {
+              type: "thinking",
+              id: uuidv4(),
+              label,
+              summary,
+              summaryMode,
+              node,
+              phase,
+              content: "",
+              toolCalls: [],
+              startTime: Date.now(),
+              ...(groupId ? { groupId, workerNode: node } : {}),
+              displayRole: "thinking",
+              stepState: "live",
+              presentation: "expanded",
+            },
+            meta,
+          ),
+        );
       });
     },
 
     setStreamingDomainNotice: (notice) => {
-      set((state) => { state.streamingDomainNotice = notice; });
+      set((state) => {
+        state.streamingDomainNotice = notice;
+      });
     },
 
     appendActionText: (text, node, meta) => {
       set((state) => {
         closeLastThinkingBlockDraft(state.streamingBlocks);
-        const lastBlock = state.streamingBlocks[state.streamingBlocks.length - 1];
+        const lastBlock =
+          state.streamingBlocks[state.streamingBlocks.length - 1];
         if (
-          lastBlock?.type === "action_text"
-          && normalizeNarrativeText(lastBlock.content) === normalizeNarrativeText(text)
-          && (lastBlock.node || "") === (node || "")
+          lastBlock?.type === "action_text" &&
+          normalizeNarrativeText(lastBlock.content) ===
+            normalizeNarrativeText(text) &&
+          (lastBlock.node || "") === (node || "")
         ) {
           return;
         }
@@ -1153,7 +1361,7 @@ export const useChatStore = create<ChatState>()(
               presentation: "compact",
             },
             meta,
-          )
+          ),
         );
       });
     },
@@ -1161,13 +1369,16 @@ export const useChatStore = create<ChatState>()(
     appendScreenshot: (data, meta) => {
       set((state) => {
         closeLastThinkingBlockDraft(state.streamingBlocks);
-        const block: ScreenshotBlockData = applyDisplayMeta({
-          type: "screenshot",
-          id: `screenshot-${Date.now()}`,
-          ...data,
-          displayRole: "artifact",
-          presentation: "compact",
-        }, meta);
+        const block: ScreenshotBlockData = applyDisplayMeta(
+          {
+            type: "screenshot",
+            id: `screenshot-${Date.now()}`,
+            ...data,
+            displayRole: "artifact",
+            presentation: "compact",
+          },
+          meta,
+        );
         state.streamingBlocks.push(block);
       });
     },
@@ -1247,7 +1458,9 @@ export const useChatStore = create<ChatState>()(
 
         for (const block of state.streamingBlocks) {
           if (block.type === "subagent_group" && block.id === groupId) {
-            const worker = block.workers.find((w) => w.agentName === workerNode);
+            const worker = block.workers.find(
+              (w) => w.agentName === workerNode,
+            );
             if (worker && worker.status === "active") {
               worker.status = "completed";
               worker.endTime = Date.now();
@@ -1265,7 +1478,9 @@ export const useChatStore = create<ChatState>()(
 
         for (const block of state.streamingBlocks) {
           if (block.type === "subagent_group" && block.id === groupId) {
-            const worker = block.workers.find((w) => w.agentName === workerNode);
+            const worker = block.workers.find(
+              (w) => w.agentName === workerNode,
+            );
             if (worker) {
               worker.statusMessages.push(message);
             }
@@ -1280,26 +1495,38 @@ export const useChatStore = create<ChatState>()(
     addPreviewItem: (item, node, meta) => {
       set((state) => {
         // Dedup by preview_id
-        if (state.streamingPreviews.some((p) => p.preview_id === item.preview_id)) return;
+        if (
+          state.streamingPreviews.some((p) => p.preview_id === item.preview_id)
+        )
+          return;
         state.streamingPreviews.push(item);
 
         // Find or create preview block in streamingBlocks
-        const lastBlock = state.streamingBlocks[state.streamingBlocks.length - 1];
-        if (lastBlock?.type === "preview" && (lastBlock as PreviewBlockData).node === node) {
+        const lastBlock =
+          state.streamingBlocks[state.streamingBlocks.length - 1];
+        if (
+          lastBlock?.type === "preview" &&
+          (lastBlock as PreviewBlockData).node === node
+        ) {
           // Append to existing group
           (lastBlock as PreviewBlockData).items.push(item);
           applyDisplayMeta(lastBlock as PreviewBlockData, meta);
         } else {
           // New preview block
           closeLastThinkingBlockDraft(state.streamingBlocks);
-          state.streamingBlocks.push(applyDisplayMeta({
-            type: "preview",
-            id: uuidv4(),
-            items: [item],
-            node,
-            displayRole: "tool",
-            presentation: "compact",
-          } as PreviewBlockData, meta));
+          state.streamingBlocks.push(
+            applyDisplayMeta(
+              {
+                type: "preview",
+                id: uuidv4(),
+                items: [item],
+                node,
+                displayRole: "tool",
+                presentation: "compact",
+              } as PreviewBlockData,
+              meta,
+            ),
+          );
         }
       });
     },
@@ -1311,23 +1538,36 @@ export const useChatStore = create<ChatState>()(
         // L-4: Content size limit (1MB)
         const MAX_ARTIFACT_SIZE = 1_000_000;
         if (artifact.content.length > MAX_ARTIFACT_SIZE) {
-          console.warn(`[chat-store] Artifact ${artifact.artifact_id} exceeds 1MB, truncating`);
-          artifact = { ...artifact, content: artifact.content.slice(0, MAX_ARTIFACT_SIZE) + "\n// ... truncated" };
+          console.warn(
+            `[chat-store] Artifact ${artifact.artifact_id} exceeds 1MB, truncating`,
+          );
+          artifact = {
+            ...artifact,
+            content:
+              artifact.content.slice(0, MAX_ARTIFACT_SIZE) +
+              "\n// ... truncated",
+          };
         }
 
         // M-1: Upsert — update existing artifact instead of dropping
         const existingIdx = state.streamingArtifacts.findIndex(
-          (a) => a.artifact_id === artifact.artifact_id
+          (a) => a.artifact_id === artifact.artifact_id,
         );
         if (existingIdx >= 0) {
           state.streamingArtifacts[existingIdx] = artifact;
           // Update block too
           const blockIdx = state.streamingBlocks.findIndex(
-            (b) => b.type === "artifact" && (b as ArtifactBlockData).id === artifact.artifact_id
+            (b) =>
+              b.type === "artifact" &&
+              (b as ArtifactBlockData).id === artifact.artifact_id,
           );
           if (blockIdx >= 0) {
-            (state.streamingBlocks[blockIdx] as ArtifactBlockData).artifact = artifact;
-            applyDisplayMeta(state.streamingBlocks[blockIdx] as ArtifactBlockData, meta);
+            (state.streamingBlocks[blockIdx] as ArtifactBlockData).artifact =
+              artifact;
+            applyDisplayMeta(
+              state.streamingBlocks[blockIdx] as ArtifactBlockData,
+              meta,
+            );
           }
           return;
         }
@@ -1338,14 +1578,19 @@ export const useChatStore = create<ChatState>()(
         // Artifacts can arrive mid-step (e.g. think -> tool -> artifact -> think).
         // Do not force-close the active thinking block here, otherwise later
         // post-tool reflections get split into a duplicate block.
-        state.streamingBlocks.push(applyDisplayMeta({
-          type: "artifact",
-          id: artifact.artifact_id,
-          artifact,
-          node,
-          displayRole: "artifact",
-          presentation: "compact",
-        } as ArtifactBlockData, meta));
+        state.streamingBlocks.push(
+          applyDisplayMeta(
+            {
+              type: "artifact",
+              id: artifact.artifact_id,
+              artifact,
+              node,
+              displayRole: "artifact",
+              presentation: "compact",
+            } as ArtifactBlockData,
+            meta,
+          ),
+        );
       });
     },
 
@@ -1360,7 +1605,9 @@ export const useChatStore = create<ChatState>()(
         attachVisualSessionIdToToolExecutionDraft(
           state,
           sessionId,
-          typeof visual.metadata?.source_tool === "string" ? visual.metadata.source_tool : undefined,
+          typeof visual.metadata?.source_tool === "string"
+            ? visual.metadata.source_tool
+            : undefined,
           node,
         );
         state.visualSessions[sessionId] = {
@@ -1370,7 +1617,10 @@ export const useChatStore = create<ChatState>()(
           revisionCount: (existing?.revisionCount || 0) + 1,
           node: node ?? existing?.node,
           controlValues: existing?.controlValues
-            ? { ...getDefaultVisualControlValues(visual), ...existing.controlValues }
+            ? {
+                ...getDefaultVisualControlValues(visual),
+                ...existing.controlValues,
+              }
             : getDefaultVisualControlValues(visual),
           focusedAnnotationId: existing?.focusedAnnotationId,
           focusedNodeId: existing?.focusedNodeId,
@@ -1388,7 +1638,9 @@ export const useChatStore = create<ChatState>()(
         attachVisualSessionIdToToolExecutionDraft(
           state,
           sessionId,
-          typeof visual.metadata?.source_tool === "string" ? visual.metadata.source_tool : undefined,
+          typeof visual.metadata?.source_tool === "string"
+            ? visual.metadata.source_tool
+            : undefined,
           node,
         );
         state.visualSessions[sessionId] = {
@@ -1398,14 +1650,23 @@ export const useChatStore = create<ChatState>()(
           revisionCount: (existing?.revisionCount || 0) + 1,
           node: node ?? existing?.node,
           controlValues: existing?.controlValues
-            ? { ...getDefaultVisualControlValues(visual), ...existing.controlValues }
+            ? {
+                ...getDefaultVisualControlValues(visual),
+                ...existing.controlValues,
+              }
             : getDefaultVisualControlValues(visual),
           focusedAnnotationId: existing?.focusedAnnotationId,
           focusedNodeId: existing?.focusedNodeId,
           interactionCount: existing?.interactionCount || 0,
           lastUpdatedAt: Date.now(),
         };
-        const patchedPersistedBlock = upsertPersistedVisualBlockDraft(state, visual, node, meta, "open");
+        const patchedPersistedBlock = upsertPersistedVisualBlockDraft(
+          state,
+          visual,
+          node,
+          meta,
+          "open",
+        );
         if (!patchedPersistedBlock) {
           upsertVisualBlockDraft(state, visual, node, meta, "open");
         }
@@ -1448,14 +1709,26 @@ export const useChatStore = create<ChatState>()(
     },
 
     getActiveVisualContext: () => {
-      const { activeConversationId, conversations, streamingBlocks, visualSessions } = get();
-      const conversation = conversations.find((item) => item.id === activeConversationId);
+      const {
+        activeConversationId,
+        conversations,
+        streamingBlocks,
+        visualSessions,
+      } = get();
+      const conversation = conversations.find(
+        (item) => item.id === activeConversationId,
+      );
       const persistedVisualBlocks = (conversation?.messages || [])
         .flatMap((message) => message.blocks || [])
         .filter((block): block is VisualBlockData => block.type === "visual");
-      const liveVisualBlocks = streamingBlocks.filter((block): block is VisualBlockData => block.type === "visual");
+      const liveVisualBlocks = streamingBlocks.filter(
+        (block): block is VisualBlockData => block.type === "visual",
+      );
       const orderedBlocks = [...persistedVisualBlocks, ...liveVisualBlocks];
-      const lastVisualBlock = orderedBlocks.length > 0 ? orderedBlocks[orderedBlocks.length - 1] : undefined;
+      const lastVisualBlock =
+        orderedBlocks.length > 0
+          ? orderedBlocks[orderedBlocks.length - 1]
+          : undefined;
 
       const sessionSummaries = Object.values(visualSessions)
         .filter((session) => session.status !== "disposed")
@@ -1472,7 +1745,8 @@ export const useChatStore = create<ChatState>()(
         }));
       if (sessionSummaries.length === 0 && lastVisualBlock?.visual) {
         sessionSummaries.push({
-          visual_session_id: lastVisualBlock.visual.visual_session_id || lastVisualBlock.id,
+          visual_session_id:
+            lastVisualBlock.visual.visual_session_id || lastVisualBlock.id,
           type: lastVisualBlock.visual.type,
           title: lastVisualBlock.visual.title,
           renderer_kind: lastVisualBlock.visual.renderer_kind,
@@ -1488,7 +1762,9 @@ export const useChatStore = create<ChatState>()(
       }
 
       return {
-        last_visual_session_id: lastVisualBlock?.visual.visual_session_id || lastVisualBlock?.sessionId,
+        last_visual_session_id:
+          lastVisualBlock?.visual.visual_session_id ||
+          lastVisualBlock?.sessionId,
         last_visual_type: lastVisualBlock?.visual.type,
         last_visual_title: lastVisualBlock?.visual.title,
         visual_state_summary: sessionSummaries[0]?.state_summary,
@@ -1511,7 +1787,9 @@ export const useChatStore = create<ChatState>()(
 
     getActiveWidgetFeedbackContext: () => {
       const { activeConversationId, conversations } = get();
-      const conversation = conversations.find((item) => item.id === activeConversationId);
+      const conversation = conversations.find(
+        (item) => item.id === activeConversationId,
+      );
       const feedbackItems = [...(conversation?.widget_feedback || [])]
         .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
         .slice(0, 5);
@@ -1573,7 +1851,11 @@ export const useChatStore = create<ChatState>()(
 
     appendPhaseThinking: (content, node, stepId) => {
       set((state) => {
-        const idx = findActiveThinkingPhaseIndex(state.streamingPhases, stepId, node);
+        const idx = findActiveThinkingPhaseIndex(
+          state.streamingPhases,
+          stepId,
+          node,
+        );
         if (idx >= 0) {
           const phase = state.streamingPhases[idx];
           phase.thinkingContent = phase.thinkingContent
@@ -1585,7 +1867,11 @@ export const useChatStore = create<ChatState>()(
 
     appendPhaseThinkingDelta: (delta, node, stepId) => {
       set((state) => {
-        const idx = findActiveThinkingPhaseIndex(state.streamingPhases, stepId, node);
+        const idx = findActiveThinkingPhaseIndex(
+          state.streamingPhases,
+          stepId,
+          node,
+        );
         if (idx >= 0) {
           state.streamingPhases[idx].thinkingContent += delta;
         }
@@ -1597,7 +1883,8 @@ export const useChatStore = create<ChatState>()(
         for (const p of state.streamingPhases) {
           if (p.status === "active") {
             p.status = "completed";
-            p.endTime = durationMs != null ? p.startTime + durationMs : Date.now();
+            p.endTime =
+              durationMs != null ? p.startTime + durationMs : Date.now();
           }
         }
       });
@@ -1605,7 +1892,11 @@ export const useChatStore = create<ChatState>()(
 
     appendPhaseStatus: (message, node, stepId) => {
       set((state) => {
-        const idx = findActiveThinkingPhaseIndex(state.streamingPhases, stepId, node);
+        const idx = findActiveThinkingPhaseIndex(
+          state.streamingPhases,
+          stepId,
+          node,
+        );
         if (idx >= 0) {
           state.streamingPhases[idx].statusMessages.push(message);
         } else {
@@ -1626,7 +1917,11 @@ export const useChatStore = create<ChatState>()(
 
     appendPhaseToolCall: (tc, stepId) => {
       set((state) => {
-        const idx = findActiveThinkingPhaseIndex(state.streamingPhases, stepId, tc.node);
+        const idx = findActiveThinkingPhaseIndex(
+          state.streamingPhases,
+          stepId,
+          tc.node,
+        );
         if (idx >= 0) {
           state.streamingPhases[idx].toolCalls.push(tc);
         }
@@ -1664,22 +1959,31 @@ export const useChatStore = create<ChatState>()(
         state.streamingToolCalls.push(tc);
 
         // Keep tool call mirrored on current thinking block for backward compat
-        const openBlock = findLastOpenThinkingBlock(state.streamingBlocks, meta?.stepId, tc.node);
+        const openBlock = findLastOpenThinkingBlock(
+          state.streamingBlocks,
+          meta?.stepId,
+          tc.node,
+        );
         if (openBlock) {
           openBlock.toolCalls.push(tc);
         }
 
-        state.streamingBlocks.push(applyDisplayMeta({
-          type: "tool_execution",
-          id: tc.id,
-          tool: { ...tc },
-          node: tc.node,
-          status: tc.result ? "completed" : "pending",
-        } as ToolExecutionBlockData, {
-          displayRole: "tool",
-          presentation: meta?.presentation || "technical",
-          ...meta,
-        }));
+        state.streamingBlocks.push(
+          applyDisplayMeta(
+            {
+              type: "tool_execution",
+              id: tc.id,
+              tool: { ...tc },
+              node: tc.node,
+              status: tc.result ? "completed" : "pending",
+            } as ToolExecutionBlockData,
+            {
+              displayRole: "tool",
+              presentation: meta?.presentation || "technical",
+              ...meta,
+            },
+          ),
+        );
       });
     },
 
@@ -1717,11 +2021,16 @@ export const useChatStore = create<ChatState>()(
           return;
         }
 
-        if (!state.streamCompletedAt || Date.now() - state.streamCompletedAt > 15_000) {
+        if (
+          !state.streamCompletedAt ||
+          Date.now() - state.streamCompletedAt > 15_000
+        ) {
           return;
         }
 
-        const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+        const conv = state.conversations.find(
+          (c) => c.id === state.activeConversationId,
+        );
         const message = conv?.messages[conv.messages.length - 1];
         if (!conv || !message || message.role !== "assistant") return;
 
@@ -1738,7 +2047,10 @@ export const useChatStore = create<ChatState>()(
           conv.session_id = metadata.session_id;
         }
 
-        const backendThreadId = typeof metadata?.thread_id === "string" ? metadata.thread_id : undefined;
+        const backendThreadId =
+          typeof metadata?.thread_id === "string"
+            ? metadata.thread_id
+            : undefined;
         if (backendThreadId && !conv.thread_id) {
           conv.thread_id = backendThreadId;
         }
@@ -1778,11 +2090,16 @@ export const useChatStore = create<ChatState>()(
 
       const closedBlocks: ContentBlock[] = streamingBlocks.map((block) => {
         if (block.type === "thinking" && !block.endTime) {
-          return { ...block, endTime: Date.now(), stepState: "completed" as const };
+          return {
+            ...block,
+            endTime: Date.now(),
+            stepState: "completed" as const,
+          };
         }
         if (block.type === "visual") {
           const visualBlock = block as VisualBlockData;
-          const sessionId = visualBlock.sessionId || visualBlock.visual.visual_session_id;
+          const sessionId =
+            visualBlock.sessionId || visualBlock.visual.visual_session_id;
           if (sessionId && committedVisualSessionIds.includes(sessionId)) {
             return { ...visualBlock, status: "committed" as const };
           }
@@ -1816,17 +2133,23 @@ export const useChatStore = create<ChatState>()(
         thinking: preferredThinking || undefined,
         reasoning_trace: effectiveMetadata?.reasoning_trace,
         suggested_questions: suggestedQuestions,
-        tool_calls: streamingToolCalls.length > 0 ? [...streamingToolCalls] : undefined,
+        tool_calls:
+          streamingToolCalls.length > 0 ? [...streamingToolCalls] : undefined,
         blocks: reconciledBlocks.length > 0 ? reconciledBlocks : undefined,
         domain_notice: streamingDomainNotice || undefined,
-        previews: streamingPreviews.length > 0 ? [...streamingPreviews] : undefined,
-        artifacts: streamingArtifacts.length > 0 ? [...streamingArtifacts] : undefined,
+        previews:
+          streamingPreviews.length > 0 ? [...streamingPreviews] : undefined,
+        artifacts:
+          streamingArtifacts.length > 0 ? [...streamingArtifacts] : undefined,
         metadata: effectiveMetadata,
       };
 
       const backendSessionId = effectiveMetadata?.session_id;
       // Sprint 225: Save thread_id for cross-platform sync
-      const backendThreadId = typeof effectiveMetadata?.thread_id === "string" ? effectiveMetadata.thread_id : undefined;
+      const backendThreadId =
+        typeof effectiveMetadata?.thread_id === "string"
+          ? effectiveMetadata.thread_id
+          : undefined;
 
       set((state) => {
         for (const sessionId of committedVisualSessionIds) {
@@ -1836,7 +2159,9 @@ export const useChatStore = create<ChatState>()(
         state.streamError = "";
         state.streamCompletedAt = Date.now();
 
-        const conv = state.conversations.find((c) => c.id === activeConversationId);
+        const conv = state.conversations.find(
+          (c) => c.id === activeConversationId,
+        );
         if (conv) {
           conv.messages.push(message);
           conv.updated_at = new Date().toISOString();
@@ -1860,7 +2185,7 @@ export const useChatStore = create<ChatState>()(
       const message: Message = {
         id: uuidv4(),
         role: "assistant",
-        content: `❌ Lỗi: ${error}`,
+        content: `Lỗi: ${error}`,
         timestamp: new Date().toISOString(),
         metadata,
       };
@@ -1871,7 +2196,9 @@ export const useChatStore = create<ChatState>()(
         state.streamError = error;
         state.streamCompletedAt = null;
 
-        const conv = state.conversations.find((c) => c.id === activeConversationId);
+        const conv = state.conversations.find(
+          (c) => c.id === activeConversationId,
+        );
         if (conv) {
           conv.messages.push(message);
           conv.updated_at = new Date().toISOString();
@@ -1908,7 +2235,8 @@ export const useChatStore = create<ChatState>()(
       if (_syncInProgress) return;
       _syncInProgress = true;
       try {
-        const { shouldUseServerThreadApis } = await import("@/stores/chat-store-runtime");
+        const { shouldUseServerThreadApis } =
+          await import("@/stores/chat-store-runtime");
         if (!shouldUseServerThreadApis()) return;
 
         const { fetchThreads } = await import("@/api/threads");
@@ -1956,7 +2284,7 @@ export const useChatStore = create<ChatState>()(
 
           // Sort by updated_at descending
           state.conversations.sort((a, b) =>
-            (b.updated_at || "").localeCompare(a.updated_at || "")
+            (b.updated_at || "").localeCompare(a.updated_at || ""),
           );
         });
 
@@ -1975,7 +2303,8 @@ export const useChatStore = create<ChatState>()(
       if (!conv || conv.messages.length > 0 || !conv.thread_id) return;
 
       try {
-        const { shouldUseServerThreadApis } = await import("@/stores/chat-store-runtime");
+        const { shouldUseServerThreadApis } =
+          await import("@/stores/chat-store-runtime");
         if (!shouldUseServerThreadApis()) return;
 
         const { fetchThreadMessages } = await import("@/api/threads");
@@ -1983,7 +2312,9 @@ export const useChatStore = create<ChatState>()(
         if (!msgs || msgs.length === 0) return;
 
         set((state) => {
-          const target = state.conversations.find((c) => c.id === conversationId);
+          const target = state.conversations.find(
+            (c) => c.id === conversationId,
+          );
           if (target && target.messages.length === 0) {
             target.messages = msgs.map((m) => ({
               id: m.id,
@@ -2007,7 +2338,7 @@ export const useChatStore = create<ChatState>()(
       set((state) => {
         state.conversations = [];
         state.activeConversationId = null;
-        state.isLoaded = false;
+        state.isLoaded = true;
         state.visualSessions = {};
         resetStreamingDraft(state);
       });
@@ -2018,7 +2349,11 @@ export const useChatStore = create<ChatState>()(
       if (_persistTimer) clearTimeout(_persistTimer);
       _currentUserId = userId;
       try {
-        const saved = await loadStore<Conversation[]>(getStoreName(), getStoreKey(), []);
+        const saved = await loadStore<Conversation[]>(
+          getStoreName(),
+          getStoreKey(),
+          [],
+        );
         set((state) => {
           state.conversations = saved;
           state.activeConversationId = saved.length > 0 ? saved[0].id : null;
@@ -2027,7 +2362,10 @@ export const useChatStore = create<ChatState>()(
           resetStreamingDraft(state);
         });
       } catch (err) {
-        console.warn("[chat-store] Failed to load conversations for user:", err);
+        console.warn(
+          "[chat-store] Failed to load conversations for user:",
+          err,
+        );
         set((state) => {
           state.conversations = [];
           state.activeConversationId = null;
@@ -2037,5 +2375,5 @@ export const useChatStore = create<ChatState>()(
         });
       }
     },
-  }))
+  })),
 );

@@ -416,6 +416,50 @@ async def dispatch_tutor_tool_call(
             tool_args=tool_args,
         )
 
+    if tool_name in ("tool_pointy_show", "tool_pointy_clear"):
+        # Pointy is a UX side-effect — emit a `pointy_action` SSE event so
+        # the frontend's pointy-host bridge can animate the cursor, then
+        # return a brief acknowledgement to the LLM so streaming continues.
+        from app.engine.tools.pointy_tools import build_pointy_event
+
+        if tool_name == "tool_pointy_clear":
+            payload = build_pointy_event(mode="clear")
+            ack = "[POINTY:clear]"
+        else:
+            payload = build_pointy_event(
+                selector=str(tool_args.get("selector", "")),
+                caption=str(tool_args.get("caption", "")),
+                duration_ms=int(tool_args.get("duration_ms", 4500) or 4500),
+                mode=str(tool_args.get("mode", "highlight") or "highlight"),
+            )
+            ack = (
+                f"[POINTY:{payload['mode']}] "
+                f"target={payload['params']['selector']!r} "
+                f"duration={payload['params']['duration_ms']}ms"
+            )
+
+        await push({
+            "type": "pointy_action",
+            "content": payload,
+            "node": "tutor_agent",
+        })
+        messages.append(
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[_tool_call_dict_to_native(tool_call)],
+            )
+        )
+        messages.append(
+            Message(role="tool", content=ack, tool_call_id=tool_id)
+        )
+        logger_obj.info(
+            "[POINTY] dispatched action=%s selector=%r",
+            payload.get("action"),
+            payload.get("params", {}).get("selector"),
+        )
+        return TutorToolDispatchResult(phase_transition_count=phase_transition_count)
+
     if tool_name in ("tool_character_note", "tool_character_read"):
         try:
             char_tool = get_tool_by_name_fn(tools, tool_name)

@@ -34,6 +34,7 @@ def _serialize_langchain_messages(context: dict | None) -> list[dict]:
 def _apply_graph_context_prompts(
     initial_state: AgentState,
     *,
+    inject_document_context,
     inject_host_context,
     inject_host_session,
     inject_operator_context,
@@ -47,6 +48,15 @@ def _apply_graph_context_prompts(
     host_prompt = inject_host_context(initial_state)
     if host_prompt:
         initial_state["host_context_prompt"] = host_prompt
+    document_prompt = inject_document_context(initial_state)
+    if document_prompt:
+        existing_host_prompt = initial_state.get("host_context_prompt", "")
+        initial_state["document_context_prompt"] = document_prompt
+        initial_state["host_context_prompt"] = (
+            f"{existing_host_prompt}\n\n{document_prompt}"
+            if existing_host_prompt
+            else document_prompt
+        )
     host_capabilities_prompt = initial_state.get("host_capabilities_prompt", "")
     if host_capabilities_prompt:
         initial_state["host_capabilities_prompt"] = host_capabilities_prompt
@@ -166,6 +176,7 @@ async def process_with_multi_agent_impl(
     cleanup_tracer,
     resolve_public_thinking_content,
     generate_session_summary_bg,
+    inject_document_context,
     inject_host_context,
     inject_host_session,
     inject_operator_context,
@@ -216,6 +227,7 @@ async def process_with_multi_agent_impl(
 
     _apply_graph_context_prompts(
         initial_state,
+        inject_document_context=inject_document_context,
         inject_host_context=inject_host_context,
         inject_host_session=inject_host_session,
         inject_operator_context=inject_operator_context,

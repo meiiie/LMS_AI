@@ -328,8 +328,9 @@ class GuardianAgent:
         if len(message_lower) < 5:
             return True
 
-        # Sprint 76: Content filter check for short messages
-        if len(message_lower) < 200:
+        # Sprint 76/247: deterministic filter for safe short-to-medium turns.
+        # WARN+ content still escalates to the Guardian LLM.
+        if len(message_lower) < 500:
             from app.engine.content_filter import get_content_filter
             result = get_content_filter(domain_id).check(message)
             if result.severity >= 3:  # WARN or higher → needs LLM

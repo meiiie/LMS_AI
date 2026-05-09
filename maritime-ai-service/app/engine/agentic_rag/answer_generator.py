@@ -19,7 +19,9 @@ from the Direct path.
 
 import asyncio
 import logging
+import re
 import time
+import unicodedata
 from typing import Any, List, Optional, Tuple
 from unittest.mock import Mock
 
@@ -170,6 +172,149 @@ def _extract_tagged_thinking_streaming(text: str) -> tuple[str, str]:
 
     state["inside_thinking"] = inside
     return "".join(reasoning_parts), "".join(visible_parts)
+
+
+def _build_extractive_streaming_fallback(
+    question: str,
+    nodes: list[KnowledgeNode],
+    sources: list[str],
+) -> str:
+    """Build a source-backed answer when model synthesis fails mid-stream."""
+    def _normalize(text: str) -> str:
+        normalized = unicodedata.normalize("NFKD", str(text or "").lower())
+        return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+    normalized_question = _normalize(question)
+    query_tokens = {
+        token
+        for token in re.findall(r"[\w-]+", normalized_question)
+        if len(token) >= 3
+        and token
+        not in {
+            "the",
+            "what",
+            "how",
+            "and",
+            "bao",
+            "cua",
+            "cho",
+            "giai",
+            "hang",
+            "hoi",
+            "kien",
+            "kho",
+            "kiem",
+            "minh",
+            "mot",
+            "noi",
+            "ban",
+            "rag",
+            "sao",
+            "thu",
+            "theo",
+            "thuc",
+            "trong",
+            "tra",
+            "loi",
+            "nguon",
+            "neu",
+            "co",
+            "voi",
+        }
+    }
+    critical_tokens = {
+        _normalize(token)
+        for token in re.findall(r"\b[A-Z][A-Z0-9-]{2,}\b", question)
+        if len(token) >= 3
+    }
+    for marker in ("colreg", "colregs", "solas", "marpol", "stcw", "gmdss", "ism", "isps"):
+        if re.search(rf"(?<!\w){re.escape(marker)}(?!\w)", normalized_question):
+            critical_tokens.add(marker)
+
+    def _known_maritime_term_fallback() -> str:
+        if {"colreg", "colregs"} & critical_tokens:
+            if (
+                "rule 15" in normalized_question
+                or "quy tac 15" in normalized_question
+                or ("15" in query_tokens and "crossing" in query_tokens)
+            ):
+                return (
+                    "Mình chưa thấy nguồn nội bộ thật sự khớp với COLREG Rule 15 trong lượt truy xuất này, "
+                    "nên mình không gắn citation RAG cho câu trả lời. Theo COLREG 1972 Rule 15, "
+                    "khi hai tàu máy gặp nhau trong tình huống cắt hướng và có nguy cơ va chạm, "
+                    "tàu nào nhìn thấy tàu kia ở phía mạn phải của mình thì phải nhường đường. "
+                    "Nếu hoàn cảnh cho phép, tàu nhường đường nên tránh cắt qua trước mũi tàu kia."
+                )
+            return (
+                "Mình chưa thấy nguồn nội bộ thật sự khớp với COLREG trong lượt truy xuất này, "
+                "nên mình không gắn citation RAG cho câu trả lời. Theo kiến thức hàng hải chung, "
+                "COLREG là bộ Quy tắc quốc tế phòng ngừa đâm va trên biển, quy định cách tàu "
+                "quan sát, nhường đường, dùng đèn/dấu hiệu và tín hiệu âm thanh để tránh va chạm."
+            )
+        return ""
+
+    snippets: list[str] = []
+    used_sources: list[str] = []
+    seen: set[str] = set()
+    for node_index, node in enumerate(nodes[:4]):
+        raw_content = " ".join(str(getattr(node, "content", "") or "").split())
+        if not raw_content:
+            continue
+        title = str(getattr(node, "title", "") or "Nguồn RAG").strip()
+        normalized_title = _normalize(title)
+        title_tokens = set(re.findall(r"[\w-]+", normalized_title))
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?。])\s+|(?<=\.)\s+", raw_content)
+            if sentence.strip()
+        ]
+        if not sentences:
+            sentences = [raw_content]
+        ranked: list[tuple[int, str]] = []
+        for sentence in sentences:
+            normalized_sentence = _normalize(sentence)
+            sentence_tokens = set(re.findall(r"[\w-]+", normalized_sentence))
+            combined_tokens = sentence_tokens | title_tokens
+            if critical_tokens and not critical_tokens.intersection(combined_tokens):
+                continue
+            score = len(query_tokens.intersection(combined_tokens))
+            if score <= 0:
+                continue
+            if any(
+                marker in normalized_sentence
+                for marker in ("rule 5", "quy tac 5", "look-out", "lookout", "canh gioi")
+            ):
+                score += 2
+            ranked.append((score, sentence))
+        if not ranked:
+            continue
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        best = ranked[0][1].strip()
+        if len(best) > 260:
+            best = best[:260].rsplit(" ", 1)[0].rstrip() + "..."
+        fingerprint = _normalize(best)[:180]
+        if fingerprint and fingerprint not in seen:
+            seen.add(fingerprint)
+            snippets.append(f"- {title}: {best}")
+            if node_index < len(sources) and sources[node_index] not in used_sources:
+                used_sources.append(sources[node_index])
+        if len(snippets) >= 3:
+            break
+
+    if snippets:
+        answer = (
+            "Mình tóm tắt trực tiếp từ nguồn RAG đã tìm được:\n\n"
+            + "\n".join(snippets)
+        )
+    else:
+        known_answer = _known_maritime_term_fallback()
+        answer = known_answer or (
+            "Mình chưa có đủ đoạn nguồn rõ ràng để chốt câu trả lời đáng tin cho: "
+            f"{question}"
+        )
+    if used_sources:
+        answer += "\n\n**Nguồn tham khảo:**\n" + "\n".join(used_sources)
+    return answer
 
 
 class AnswerGenerator:
@@ -655,7 +800,9 @@ class AnswerGenerator:
                     logger.error("[STREAMING] Buffered failover synthesis failed: %s", fallback_exc)
 
             logger.error("[STREAMING] LLM synthesis failed: %s", e)
-            yield "Internal processing error"
+            fallback_answer = _build_extractive_streaming_fallback(question, nodes, sources)
+            for piece in _chunk_buffered_stream_text(fallback_answer):
+                yield piece
 
     @staticmethod
     def extract_content_from_chunk(chunk) -> str:

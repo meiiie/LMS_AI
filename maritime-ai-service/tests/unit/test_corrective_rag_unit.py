@@ -85,6 +85,55 @@ class TestCorrectiveRAGResult:
         assert result.thinking is not None
         assert "Rule 15" in result.thinking
 
+    def test_final_result_drops_sources_when_answer_declines_rag_citations(self):
+        from app.engine.agentic_rag.corrective_rag_runtime_support import build_final_result_impl
+
+        result = build_final_result_impl(
+            result_cls=CorrectiveRAGResult,
+            answer=(
+                "Mình chưa thấy nguồn nội bộ thật sự khớp với COLREG trong lượt truy xuất này, "
+                "nên mình không gắn citation RAG cho câu trả lời."
+            ),
+            sources=[{"title": "irrelevant", "document_id": "doc-1"}],
+            analysis=None,
+            grading_result=None,
+            verification_result=None,
+            was_rewritten=False,
+            rewritten_query=None,
+            iterations=1,
+            confidence=50,
+            reasoning_trace=None,
+            thinking_content=None,
+            thinking=None,
+            evidence_images=[{"url": "https://example.invalid/image.png"}],
+        )
+
+        assert result.sources == []
+        assert result.evidence_images == []
+
+    def test_final_result_keeps_sources_when_answer_uses_rag_citations(self):
+        from app.engine.agentic_rag.corrective_rag_runtime_support import build_final_result_impl
+
+        result = build_final_result_impl(
+            result_cls=CorrectiveRAGResult,
+            answer="Mình tóm tắt trực tiếp từ nguồn RAG đã tìm được: COLREG Rule 5...",
+            sources=[{"title": "COLREG Rule 5", "document_id": "doc-2"}],
+            analysis=None,
+            grading_result=None,
+            verification_result=None,
+            was_rewritten=False,
+            rewritten_query=None,
+            iterations=1,
+            confidence=80,
+            reasoning_trace=None,
+            thinking_content=None,
+            thinking=None,
+            evidence_images=[{"url": "https://example.invalid/image.png"}],
+        )
+
+        assert len(result.sources) == 1
+        assert len(result.evidence_images) == 1
+
 
 class TestConfidenceCalculation:
     """Test confidence scoring patterns used in the platform."""
@@ -267,6 +316,231 @@ class TestVisibleCRAGSurface:
         assert result.was_rewritten is True
         assert result.rewritten_query == "COLREGs Rule 15 crossing situation"
         assert "Câu trả lời đã sửa." in result.answer
+
+    @pytest.mark.asyncio
+    async def test_colreg_rule5_exact_query_uses_fast_regulation_answer(self):
+        analyzer = MagicMock()
+        analyzer.analyze = AsyncMock(
+            return_value=MagicMock(
+                complexity=MagicMock(value="simple"),
+                is_domain_related=True,
+                detected_topics=["COLREGs"],
+                requires_multi_step=False,
+                confidence=0.9,
+            )
+        )
+
+        grader = MagicMock()
+        grader.grade_documents = AsyncMock(
+            side_effect=AssertionError("mismatched docs should be dropped before grading")
+        )
+
+        tracer = MagicMock()
+        tracer.start_step = MagicMock()
+        tracer.end_step = MagicMock()
+        tracer.build_trace = MagicMock(return_value=None)
+        tracer.build_thinking_summary = MagicMock(return_value="")
+
+        owner = MagicMock()
+        owner._analyzer = analyzer
+        owner._grader = grader
+        owner._rewriter = None
+        owner._rag = MagicMock()
+        owner._retrieve = AsyncMock(
+            return_value=[
+                {
+                    "node_id": "lms-perf",
+                    "title": "3-5 MB",
+                    "content": "Nen tang co 295 diem cuoi API va ket qua tai video.",
+                    "document_id": "lms",
+                    "score": 0.92,
+                }
+            ]
+        )
+        owner._generate_fallback = AsyncMock(return_value=("", ""))
+        owner._calculate_confidence = MagicMock(return_value=40.0)
+        owner._grade_threshold = 6.0
+        owner._retrieval_score_threshold = 0.3
+
+        settings_obj = MagicMock()
+        settings_obj.enable_adaptive_rag = False
+        settings_obj.enable_visual_rag = False
+        settings_obj.enable_graph_rag = False
+        settings_obj.rag_model_version = "test-rag"
+
+        events = []
+        async for event in process_streaming_impl(
+            owner,
+            "Theo COLREG Rule 5, người trực ca phải duy trì lookout như thế nào?",
+            {"user_role": "student", "conversation_history": ""},
+            result_cls=CorrectiveRAGResult,
+            get_reasoning_tracer_fn=lambda: tracer,
+            settings_obj=settings_obj,
+            step_names_cls=StepNames,
+            build_retrieval_surface_text_fn=lambda count: f"{count} docs",
+            build_house_fallback_reply_fn=lambda: "fallback",
+            is_no_doc_retrieval_text_fn=lambda text: False,
+            normalize_visible_text_fn=lambda text: str(text),
+            max_content_snippet_length=200,
+        ):
+            events.append(event)
+
+        joined = "\n".join(str(event.get("content", "")) for event in events)
+        result = next(event["data"] for event in events if event["type"] == "result")
+
+        assert "COLREG Rule 5" in joined
+        assert "3-5 MB" not in result.answer
+        assert result.sources[0]["title"] == "COLREG 1972 - Rule 5 (Look-out)"
+        owner._retrieve.assert_not_awaited()
+        grader.grade_documents.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_colreg_rule15_crossing_query_uses_fast_no_internal_source_answer(self):
+        grader = MagicMock()
+        grader.grade_documents = AsyncMock(
+            side_effect=AssertionError("Rule 15 fast path should not grade unrelated docs")
+        )
+
+        tracer = MagicMock()
+        tracer.start_step = MagicMock()
+        tracer.end_step = MagicMock()
+        tracer.build_trace = MagicMock(return_value=None)
+        tracer.build_thinking_summary = MagicMock(return_value="")
+
+        owner = MagicMock()
+        owner._analyzer = MagicMock()
+        owner._grader = grader
+        owner._rewriter = None
+        owner._rag = MagicMock()
+        owner._retrieve = AsyncMock(side_effect=AssertionError("Rule 15 fast path should not retrieve"))
+        owner._generate_fallback = AsyncMock(return_value=("", ""))
+        owner._calculate_confidence = MagicMock(return_value=40.0)
+        owner._grade_threshold = 6.0
+        owner._retrieval_score_threshold = 0.3
+
+        settings_obj = MagicMock()
+        settings_obj.enable_adaptive_rag = False
+        settings_obj.enable_visual_rag = False
+        settings_obj.enable_graph_rag = False
+        settings_obj.rag_model_version = "test-rag"
+
+        events = []
+        async for event in process_streaming_impl(
+            owner,
+            "Giải thích ngắn Quy tắc 15 COLREGs về tình huống tàu cắt hướng",
+            {"user_role": "student", "conversation_history": ""},
+            result_cls=CorrectiveRAGResult,
+            get_reasoning_tracer_fn=lambda: tracer,
+            settings_obj=settings_obj,
+            step_names_cls=StepNames,
+            build_retrieval_surface_text_fn=lambda count: f"{count} docs",
+            build_house_fallback_reply_fn=lambda: "fallback",
+            is_no_doc_retrieval_text_fn=lambda text: False,
+            normalize_visible_text_fn=lambda text: str(text),
+            max_content_snippet_length=200,
+        ):
+            events.append(event)
+
+        joined = "\n".join(str(event.get("content", "")) for event in events)
+        result = next(event["data"] for event in events if event["type"] == "result")
+
+        assert "Rule 15" in joined
+        assert joined.count("\n- ") >= 4
+        assert "citation RAG" in joined
+        assert "Rule 13" in joined
+        assert "Rule 14" in joined
+        assert "mạn phải" in joined
+        assert "tránh cắt qua trước mũi" in joined
+        assert result.sources == []
+        owner._retrieve.assert_not_awaited()
+        grader.grade_documents.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_low_score_docs_continue_kb_path_when_web_corrective_missing(self):
+        analyzer = MagicMock()
+        analyzer.analyze = AsyncMock(
+            return_value=MagicMock(
+                complexity=MagicMock(value="simple"),
+                is_domain_related=True,
+                detected_topics=["COLREGs"],
+                requires_multi_step=False,
+                confidence=0.9,
+            )
+        )
+
+        grading_result = MagicMock(avg_score=8.0, relevant_count=1, feedback="")
+        grader = MagicMock()
+        grader.grade_documents = AsyncMock(return_value=grading_result)
+
+        tracer = MagicMock()
+        tracer.start_step = MagicMock()
+        tracer.end_step = MagicMock()
+        tracer.build_trace = MagicMock(return_value=None)
+        tracer.build_thinking_summary = MagicMock(return_value="kb summary")
+
+        docs = [
+            {
+                "node_id": "rule-5",
+                "title": "COLREG Rule 5",
+                "content": "Every vessel shall maintain a proper look-out by sight and hearing.",
+                "document_id": "colregs",
+                "score": 0.01,
+            }
+        ]
+
+        async def _stream_answer(**kwargs):
+            assert kwargs["nodes"][0].title == "COLREG Rule 5"
+            yield "Rule 5 answer from KB."
+
+        owner = MagicMock()
+        owner._analyzer = analyzer
+        owner._grader = grader
+        owner._rewriter = None
+        owner._rag = MagicMock()
+        owner._rag._generate_response_streaming = _stream_answer
+        owner._retrieve = AsyncMock(return_value=docs)
+        owner._calculate_confidence = MagicMock(return_value=82.0)
+        owner._grade_threshold = 6.0
+        owner._retrieval_score_threshold = 0.3
+
+        settings_obj = MagicMock()
+        settings_obj.enable_adaptive_rag = False
+        settings_obj.enable_visual_rag = False
+        settings_obj.enable_graph_rag = False
+        settings_obj.rag_model_version = "test-rag"
+
+        events = []
+        with patch.dict("sys.modules", {"app.engine.agentic_rag.crag_web_corrective": None}):
+            async for event in process_streaming_impl(
+                owner,
+                "Theo COLREG, nguồn nội bộ này nói gì?",
+                {"user_role": "student", "conversation_history": ""},
+                result_cls=CorrectiveRAGResult,
+                get_reasoning_tracer_fn=lambda: tracer,
+                settings_obj=settings_obj,
+                step_names_cls=StepNames,
+                build_retrieval_surface_text_fn=lambda count: f"{count} docs",
+                build_house_fallback_reply_fn=lambda: "fallback",
+                is_no_doc_retrieval_text_fn=lambda text: False,
+                normalize_visible_text_fn=lambda text: str(text),
+                max_content_snippet_length=200,
+            ):
+                events.append(event)
+
+        joined = "\n".join(str(event.get("content", "")) for event in events)
+        result = next(event["data"] for event in events if event["type"] == "result")
+        answer_texts = [
+            str(event.get("content", ""))
+            for event in events
+            if event.get("type") == "answer"
+        ]
+
+        assert "Tiếp tục dùng tài liệu nội bộ" in joined
+        assert "Chuyển sang cách đáp trực tiếp" not in joined
+        assert not any("tài liệu liên quan" in text for text in answer_texts)
+        assert result.sources[0]["title"] == "COLREG Rule 5"
+        assert "Rule 5 answer from KB." in result.answer
+        grader.grade_documents.assert_awaited_once()
 
 
 class TestVerificationSkipOnEmptySources:

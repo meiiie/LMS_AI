@@ -188,6 +188,89 @@ def create_refresh_token() -> str:
     return secrets.token_urlsafe(64)
 
 
+def create_stateless_refresh_token(
+    user_id: str,
+    email: Optional[str] = None,
+    name: Optional[str] = None,
+    role: str = "student",
+    platform_role: Optional[str] = None,
+    organization_role: Optional[str] = None,
+    host_role: Optional[str] = None,
+    role_source: Optional[str] = None,
+    active_organization_id: Optional[str] = None,
+    connector_id: Optional[str] = None,
+    identity_version: Optional[str] = None,
+    auth_method: str = "google",
+) -> str:
+    """Create a signed refresh token for degraded local/dev operation."""
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(days=settings.jwt_refresh_expire_days)
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "name": name,
+        "role": role,
+        "platform_role": platform_role,
+        "organization_role": organization_role,
+        "host_role": host_role,
+        "role_source": role_source,
+        "active_organization_id": active_organization_id,
+        "connector_id": connector_id,
+        "identity_version": identity_version,
+        "auth_method": auth_method,
+        "type": "refresh",
+        "stateless": True,
+        "iss": "wiii",
+        "aud": settings.jwt_audience,
+        "iat": now,
+        "exp": expire,
+        "jti": str(uuid.uuid4()),
+    }
+    payload = {key: value for key, value in payload.items() if value is not None}
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def _decode_stateless_refresh_payload(token: str) -> Optional[dict]:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+            audience=settings.jwt_audience,
+        )
+    except jwt.PyJWTError:
+        try:
+            payload = jwt.decode(
+                token,
+                settings.jwt_secret_key,
+                algorithms=[settings.jwt_algorithm],
+                options={"verify_aud": False},
+            )
+        except jwt.PyJWTError:
+            return None
+
+    if payload.get("type") != "refresh" or payload.get("stateless") is not True:
+        return None
+    return payload
+
+
+def _stateless_refresh_allowed(payload: dict) -> bool:
+    """Keep signed refresh fallback scoped to safe degraded/dev contexts."""
+    if (
+        payload.get("auth_method") == "dev"
+        and getattr(settings, "enable_dev_login", False)
+        and getattr(settings, "environment", "production") != "production"
+    ):
+        return True
+
+    try:
+        from app.core.database import is_shared_database_temporarily_unavailable
+
+        return is_shared_database_temporarily_unavailable()
+    except Exception:
+        return False
+
+
 def decode_jwt_payload(token: str) -> dict:
     """Decode and validate a JWT token, returning the raw claims dict.
 
@@ -263,6 +346,33 @@ async def create_token_pair(
     )
     refresh_token = create_refresh_token()
 
+    try:
+        from app.core.database import is_shared_database_temporarily_unavailable
+
+        if is_shared_database_temporarily_unavailable():
+            logger.warning("Skipping refresh-token persistence because database is in degraded cooldown")
+            return TokenPair(
+                access_token=access_token,
+                refresh_token=create_stateless_refresh_token(
+                    user_id=user_id,
+                    email=email,
+                    name=name,
+                    role=role,
+                    platform_role=platform_role,
+                    organization_role=organization_role,
+                    host_role=host_role,
+                    role_source=role_source,
+                    active_organization_id=active_organization_id,
+                    connector_id=connector_id,
+                    identity_version=identity_version,
+                    auth_method=auth_method,
+                ),
+                token_type="bearer",
+                expires_in=settings.jwt_expire_minutes * 60,
+            )
+    except Exception:
+        pass
+
     # Store refresh token hash in DB
     token_id = str(uuid.uuid4())
     token_hash = _hash_token(refresh_token)
@@ -334,8 +444,33 @@ async def create_token_pair(
                     expires_at,
                     effective_family_id,
                 )
-    except Exception:
-        logger.warning("Failed to store refresh token — token will be stateless only")
+    except Exception as exc:
+        try:
+            from app.core.database import mark_shared_database_unavailable
+
+            mark_shared_database_unavailable(exc)
+        except Exception:
+            pass
+        logger.warning("Failed to store refresh token; issuing signed stateless fallback")
+        return TokenPair(
+            access_token=access_token,
+            refresh_token=create_stateless_refresh_token(
+                user_id=user_id,
+                email=email,
+                name=name,
+                role=role,
+                platform_role=platform_role,
+                organization_role=organization_role,
+                host_role=host_role,
+                role_source=role_source,
+                active_organization_id=active_organization_id,
+                connector_id=connector_id,
+                identity_version=identity_version,
+                auth_method=auth_method,
+            ),
+            token_type="bearer",
+            expires_in=settings.jwt_expire_minutes * 60,
+        )
 
     return TokenPair(
         access_token=access_token,
@@ -355,6 +490,44 @@ async def refresh_access_token(refresh_token: str) -> Optional[TokenPair]:
     Sprint 176: Replay detection via family_id — if a revoked token with
     an active sibling is reused, ALL tokens in that family are purged.
     """
+    stateless_payload = _decode_stateless_refresh_payload(refresh_token)
+    if stateless_payload is not None:
+        if not _stateless_refresh_allowed(stateless_payload):
+            logger.warning("Rejected stateless refresh token outside degraded/dev context")
+            return None
+        return TokenPair(
+            access_token=create_access_token(
+                user_id=stateless_payload["sub"],
+                email=stateless_payload.get("email"),
+                name=stateless_payload.get("name"),
+                role=stateless_payload.get("role", "student"),
+                platform_role=stateless_payload.get("platform_role"),
+                organization_role=stateless_payload.get("organization_role"),
+                host_role=stateless_payload.get("host_role"),
+                role_source=stateless_payload.get("role_source"),
+                active_organization_id=stateless_payload.get("active_organization_id"),
+                connector_id=stateless_payload.get("connector_id"),
+                identity_version=stateless_payload.get("identity_version"),
+                auth_method=stateless_payload.get("auth_method") or "google",
+            ),
+            refresh_token=create_stateless_refresh_token(
+                user_id=stateless_payload["sub"],
+                email=stateless_payload.get("email"),
+                name=stateless_payload.get("name"),
+                role=stateless_payload.get("role", "student"),
+                platform_role=stateless_payload.get("platform_role"),
+                organization_role=stateless_payload.get("organization_role"),
+                host_role=stateless_payload.get("host_role"),
+                role_source=stateless_payload.get("role_source"),
+                active_organization_id=stateless_payload.get("active_organization_id"),
+                connector_id=stateless_payload.get("connector_id"),
+                identity_version=stateless_payload.get("identity_version"),
+                auth_method=stateless_payload.get("auth_method") or "google",
+            ),
+            token_type="bearer",
+            expires_in=settings.jwt_expire_minutes * 60,
+        )
+
     token_hash = _hash_token(refresh_token)
 
     try:

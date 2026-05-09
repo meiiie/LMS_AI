@@ -410,3 +410,109 @@ class TestAdapterRegistry:
         for host_type in ["trading", "crm", "helpdesk", "portal"]:
             adapter = get_host_adapter(host_type)
             assert adapter.host_type == "generic"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Phase F2 (2026-05-06) — Wiii Desktop / Wiii Web standalone adapters.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestWiiiDesktopHostAdapter:
+    def test_resolves_for_wiii_desktop_host_type(self):
+        from app.engine.context.adapters import get_host_adapter
+        from app.engine.context.adapters.wiii_desktop import WiiiDesktopHostAdapter
+
+        adapter = get_host_adapter("wiii-desktop")
+        assert isinstance(adapter, WiiiDesktopHostAdapter)
+
+    def test_resolves_for_wiii_web_host_type(self):
+        from app.engine.context.adapters import get_host_adapter
+        from app.engine.context.adapters.wiii_desktop import WiiiWebHostAdapter
+
+        adapter = get_host_adapter("wiii-web")
+        assert isinstance(adapter, WiiiWebHostAdapter)
+
+    def test_format_includes_anti_lms_hallucination_guardrail(self):
+        from app.engine.context.adapters.wiii_desktop import WiiiDesktopHostAdapter
+        from app.engine.context.host_context import HostContext
+
+        adapter = WiiiDesktopHostAdapter()
+        ctx = HostContext(
+            host_type="wiii-desktop",
+            page={
+                "type": "chat",
+                "title": "Wiii — Trợ Lý",
+                "url": "http://localhost:1420/",
+                "metadata": {
+                    "is_standalone": True,
+                    "is_embedded": False,
+                    "hostname": "localhost",
+                },
+            },
+        )
+        result = adapter.format_context_for_prompt(ctx)
+        assert "Wiii Desktop" in result
+        assert "KHÔNG phải LMS" in result
+        # Anti-hallucination guardrail explicitly bans the canned phrases.
+        assert "panel Wiii" in result
+        assert "trang LMS" in result
+
+    def test_pointy_hint_lists_available_target_ids(self):
+        from app.engine.context.adapters.wiii_desktop import WiiiDesktopHostAdapter
+        from app.engine.context.host_context import HostContext
+
+        adapter = WiiiDesktopHostAdapter()
+        ctx = HostContext(
+            host_type="wiii-desktop",
+            page={
+                "type": "chat",
+                "title": "Wiii",
+                "metadata": {
+                    "available_targets": [
+                        {"id": "chat-send-button", "label": "Gửi"},
+                        {"id": "settings-link", "label": "Cài đặt"},
+                    ],
+                },
+            },
+        )
+        result = adapter.format_context_for_prompt(ctx)
+        # v5.0 (2026-05-06): body schema language replaces tool/tag-only
+        # framing. Cursor IS Wiii's body. Frontend parses response with
+        # hybrid tag fast-path + embodied (intent + label) fallback.
+        assert "body_schema" in result
+        assert "Cursor" in result and "body" in result
+        assert "[POINT:" in result  # tag fast-path still documented
+        assert "chat-send-button" in result
+        assert "settings-link" in result
+        assert "exact-id" in result
+        assert "auto:" in result
+        # Route discipline prevents tag-vs-tool conflicts.
+        assert "Route discipline" in result
+        assert "tool_pointy_show" in result
+
+    def test_pointy_hint_omitted_when_no_targets(self):
+        from app.engine.context.adapters.wiii_desktop import WiiiDesktopHostAdapter
+        from app.engine.context.host_context import HostContext
+
+        adapter = WiiiDesktopHostAdapter()
+        ctx = HostContext(
+            host_type="wiii-desktop",
+            page={"type": "chat", "metadata": {}},
+        )
+        result = adapter.format_context_for_prompt(ctx)
+        # No targets → no body schema instructions surfaced.
+        assert "body_schema" not in result
+        assert "[POINT:" not in result
+
+    def test_wiii_web_adapter_says_wiii_web_not_desktop(self):
+        from app.engine.context.adapters.wiii_desktop import WiiiWebHostAdapter
+        from app.engine.context.host_context import HostContext
+
+        adapter = WiiiWebHostAdapter()
+        ctx = HostContext(
+            host_type="wiii-web",
+            page={"type": "chat", "title": "Wiii Web", "url": "https://wiii.holilihu.online/"},
+        )
+        result = adapter.format_context_for_prompt(ctx)
+        assert "Wiii Web" in result
+        assert "Wiii Desktop" not in result.replace("Wiii Web", "")  # only Wiii Web mentioned

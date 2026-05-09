@@ -4,10 +4,78 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import unicodedata
 from typing import Any, Callable, Optional
 
 
 logger = logging.getLogger(__name__)
+
+
+def _fold_post_response_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFD", str(value or ""))
+    without_marks = "".join(
+        char for char in normalized if unicodedata.category(char) != "Mn"
+    )
+    without_marks = without_marks.replace("đ", "d").replace("Đ", "d")
+    return re.sub(r"\s+", " ", without_marks.lower()).strip()
+
+
+def _is_ephemeral_direct_post_response_turn(
+    *,
+    current_agent: str,
+    message: str,
+) -> bool:
+    agent = str(current_agent or "").strip().lower()
+    if agent != "direct":
+        return False
+
+    folded = _fold_post_response_text(message)
+    if not folded:
+        return False
+
+    if "trong phien nay" in folded and any(
+        marker in folded for marker in ("hay nho", "ghi nho", "luu lai")
+    ):
+        return True
+    if "vua bao" in folded and "nho" in folded:
+        return True
+    if any(marker in folded for marker in ("doi phet", "doi qua", "dang doi")):
+        return True
+    if any(
+        marker in folded
+        for marker in (
+            "ban buon khong",
+            "wiii buon khong",
+            "ban co buon khong",
+            "wiii co buon khong",
+        )
+    ):
+        return True
+    if "wiii" in folded and any(
+        marker in folded
+        for marker in ("xu ly duoc anh", "tao anh", "file word", "excel", "video")
+    ):
+        return True
+    if any(marker in folded for marker in ("visible thinking", "chain-of-thought")):
+        return True
+
+    return False
+
+
+def should_skip_post_response_fact_extraction_impl(
+    *,
+    current_agent: str,
+    message: str,
+) -> bool:
+    """Avoid costly durable extraction for ephemeral deterministic direct turns."""
+    agent = str(current_agent or "").strip().lower()
+    if agent == "memory_agent":
+        return True
+    return _is_ephemeral_direct_post_response_turn(
+        current_agent=current_agent,
+        message=message,
+    )
 
 
 def finalize_response_turn_impl(
@@ -61,24 +129,51 @@ def finalize_response_turn_impl(
     )
 
     if response_text:
-        upsert_thread_view(
-            user_id=user_id,
-            session_id=session_id,
-            domain_id=domain_id,
-            title=message,
-            organization_id=organization_id,
-        )
+        if (
+            transport_type == "stream"
+            and background_save is not None
+            and not save_response_immediately
+        ):
+            background_save(
+                upsert_thread_view,
+                user_id=user_id,
+                session_id=session_id,
+                domain_id=domain_id,
+                title=message,
+                organization_id=organization_id,
+            )
+        else:
+            upsert_thread_view(
+                user_id=user_id,
+                session_id=session_id,
+                domain_id=domain_id,
+                title=message,
+                organization_id=organization_id,
+            )
 
-    if background_save and background_runner:
+    ephemeral_direct_turn = _is_ephemeral_direct_post_response_turn(
+        current_agent=current_agent,
+        message=message,
+    )
+    background_tasks_scheduled = False
+
+    if background_save and background_runner and not ephemeral_direct_turn:
+        skip_fact_extraction = should_skip_post_response_fact_extraction_impl(
+            current_agent=current_agent,
+            message=message,
+        )
         background_runner.schedule_all(
             background_save=background_save,
             user_id=user_id,
             session_id=session_id,
             message=message,
             response=response_text,
-            skip_fact_extraction=current_agent == "memory_agent",
+            skip_fact_extraction=skip_fact_extraction,
             org_id=organization_id or "",
         )
+        background_tasks_scheduled = True
+
+    include_lms_insights_for_turn = include_lms_insights and not ephemeral_direct_turn
 
     scheduled_hooks = schedule_post_response_continuity_fn(
         post_response_context_cls(
@@ -90,7 +185,7 @@ def finalize_response_turn_impl(
             organization_id=organization_id,
             channel=continuity_channel,
         ),
-        include_lms_insights=include_lms_insights,
+        include_lms_insights=include_lms_insights_for_turn,
     )
 
     continuity_summary = {
@@ -100,9 +195,9 @@ def finalize_response_turn_impl(
         "organization_id": organization_id or "",
         "transport_type": transport_type,
         "continuity_channel": continuity_channel,
-        "include_lms_insights": include_lms_insights,
+        "include_lms_insights": include_lms_insights_for_turn,
         "scheduled_hooks": list(scheduled_hooks),
-        "background_tasks_scheduled": bool(background_save and background_runner),
+        "background_tasks_scheduled": background_tasks_scheduled,
         "response_persistence": (
             "immediate"
             if save_response_immediately or background_save is None

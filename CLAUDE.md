@@ -108,6 +108,18 @@ To work as a different agent:
 - Sliding window (15 turns) + summary + TokenBudgetManager (4-layer) + auto-compaction at 75%
 - **Context API**: `/api/v1/chat/context/info`, `/context/compact`, `/context/clear`
 
+### Open-Source Web Search & Deep Fetch (Phase 35, 2026-05-04)
+- **Multi-engine search**: SearXNG self-hosted (60k★, AGPL-3.0) aggregating Google + Bing + Brave + DDG + Qwant + Mojeek + 60 more, fallback to Brave API (optional) → DDG. Container: `wiii-searxng` on internal docker network at `http://searxng:8080`.
+- **Bilingual news merge**: 4-source parallel (`_merge_news_into_search`, 22s deadline via `as_completed`): Google News RSS VI + Google News RSS EN (auto-translate finance terms via `_translate_finance_query_en`) + SearXNG news VI + SearXNG news EN. Wire services first (Reuters/AP weight 3.0), VN press second.
+- **4-tier deep extractor** (`tool_fetch_url`): Crawl4AI (Playwright primary, MIT, 28k★) → Scrapling (Cloudflare bypass, BSD-3, 43.8k★) → Jina Reader (cloud free reader) → httpx + BeautifulSoup. All tiers cache to Valkey (1h URL / 5min news / 24h static).
+- **Auto-augment** (`_augment_top_result_with_deep_fetch`): parallel top-3 URLs, 12s deadline, gated by `_is_deep_query` keyword detection.
+- **Anthropic-format SKILL**: `app/engine/skills/library/web-search/SKILL.md` + `references/{engines,extractors,failure_modes}.md`. Loader: `library_loader.py` with progressive disclosure (metadata always; full body when triggered). Pattern: `https://github.com/anthropics/skills/skill-creator`.
+- **DSML root-cause fix**: NVIDIA DeepSeek occasionally emits tool calls in `<｜DSML｜tool_calls>...` inside `content`. `messages_adapters._parse_dsml_tool_calls` extracts at parser level + sanitize regex strips residue.
+- **Number-format-safe regex**: `(?<!\d)([,.;:!?])(?!\d)` preserves `110.01`, `13:18`, `1.480 đồng/lít`, `0.96%` while still inserting space after sentence punctuation.
+- **Convergence self-eval**: gated by `total_result_chars < 2500` (sparse) — inject rubric msg between rounds; `>= 2500` (rich) — inject STOP-hint to force synthesis.
+- **RPM limiter**: `app/engine/llm_providers/rpm_limiter.py` `SlidingWindowRpmLimiter` wired into `WiiiChatModel.ainvoke`. Per-provider env vars (`NVIDIA_RPM_LIMIT`, `GOOGLE_RPM_LIMIT`); off by default.
+- **Detail report**: `.claude/reports/PHASE-35-WEB-SEARCH-SOTA-2026-05-04.md`
+
 **Primary language:** Vietnamese (prompts, responses, user interactions)
 
 ---

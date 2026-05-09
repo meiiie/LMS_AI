@@ -9,7 +9,21 @@
  */
 import { memo, useMemo, useCallback, useState, useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { X, Copy, Check, Code2, Eye, Terminal, Play, Download, Globe, FileText, FileSpreadsheet, Table2, BarChart3 } from "lucide-react";
+import {
+  X,
+  Copy,
+  Check,
+  Code2,
+  Eye,
+  Terminal,
+  Play,
+  Download,
+  Globe,
+  FileText,
+  FileSpreadsheet,
+  Table2,
+  BarChart3,
+} from "lucide-react";
 import { useUIStore } from "@/stores/ui-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -53,15 +67,17 @@ function getArtifactTabs(artifact: ArtifactData): ArtifactTabConfig[] {
   const hasOutput = artifactHasOutput(artifact);
 
   if (artifact.artifact_type === "code") {
-    tabs.push({ id: "code", label: "Ma nguon", icon: Code2 });
-    if (hasOutput) tabs.push({ id: "output", label: "Ket qua", icon: Terminal });
+    tabs.push({ id: "code", label: "Mã nguồn", icon: Code2 });
+    if (hasOutput)
+      tabs.push({ id: "output", label: "Kết quả", icon: Terminal });
     return tabs;
   }
 
   if (artifact.artifact_type === "html" || artifact.artifact_type === "react") {
-    tabs.push({ id: "preview", label: "Xem truoc", icon: Eye });
-    tabs.push({ id: "code", label: "Ma nguon", icon: Code2 });
-    if (hasOutput) tabs.push({ id: "output", label: "Ket qua", icon: Terminal });
+    tabs.push({ id: "preview", label: "Xem trước", icon: Eye });
+    tabs.push({ id: "code", label: "Mã nguồn", icon: Code2 });
+    if (hasOutput)
+      tabs.push({ id: "output", label: "Kết quả", icon: Terminal });
     return tabs;
   }
 
@@ -69,16 +85,16 @@ function getArtifactTabs(artifact: ArtifactData): ArtifactTabConfig[] {
     id: "preview",
     label:
       artifact.artifact_type === "excel"
-        ? "Du lieu"
+        ? "Dữ liệu"
         : artifact.artifact_type === "chart"
-        ? "Bieu do"
-        : artifact.artifact_type === "table"
-        ? "Bang"
-        : "Noi dung",
+          ? "Biểu đồ"
+          : artifact.artifact_type === "table"
+            ? "Bảng"
+            : "Nội dung",
     icon: Eye,
   });
-  tabs.push({ id: "code", label: "Chi tiet", icon: Code2 });
-  if (hasOutput) tabs.push({ id: "output", label: "Ket qua", icon: Terminal });
+  tabs.push({ id: "code", label: "Chi tiết", icon: Code2 });
+  if (hasOutput) tabs.push({ id: "output", label: "Kết quả", icon: Terminal });
   return tabs;
 }
 
@@ -113,11 +129,19 @@ function ArtifactPanelContent({
           <HeaderIcon size={17} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-text truncate">{artifact.title}</div>
+          <div className="text-sm font-medium text-text truncate">
+            {artifact.title}
+          </div>
           <div className="flex items-center gap-2 mt-1 text-[11px] text-text-tertiary">
-            <span className="uppercase tracking-[0.08em]">{artifact.artifact_type}</span>
-            {fileDescription && <span className="truncate">{fileDescription}</span>}
-            {artifact.language && <span className="font-mono">{artifact.language}</span>}
+            <span className="uppercase tracking-[0.08em]">
+              {artifact.artifact_type}
+            </span>
+            {fileDescription && (
+              <span className="truncate">{fileDescription}</span>
+            )}
+            {artifact.language && (
+              <span className="font-mono">{artifact.language}</span>
+            )}
           </div>
         </div>
         {resolvedFileUrl && (
@@ -126,16 +150,16 @@ function ArtifactPanelContent({
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-surface-tertiary text-text-tertiary hover:text-text transition-colors text-xs"
-            title="Mo hoac tai file da tao"
+            title="Mở hoặc tải file đã tạo"
           >
             <Download size={14} />
-            Tai file
+            Tải file
           </a>
         )}
         <button
           onClick={closeArtifact}
           className="p-1.5 rounded-md hover:bg-surface-tertiary text-text-tertiary hover:text-text transition-colors"
-          aria-label="Dong panel artifact"
+          aria-label="Đóng panel artifact"
         >
           <X size={16} />
         </button>
@@ -165,20 +189,25 @@ function ArtifactPanelContent({
 
       <div className="flex-1 overflow-auto">
         {artifactActiveTab === "preview" && <PreviewTab artifact={artifact} />}
-        {artifactActiveTab === "code" && (
-          artifact.artifact_type === "code" ||
+        {artifactActiveTab === "code" &&
+          (artifact.artifact_type === "code" ||
           artifact.artifact_type === "html" ||
-          artifact.artifact_type === "react"
-            ? <CodeTab artifact={artifact} />
-            : <DetailsTab artifact={artifact} resolvedFileUrl={resolvedFileUrl} />
-        )}
+          artifact.artifact_type === "react" ? (
+            <CodeTab artifact={artifact} />
+          ) : (
+            <DetailsTab artifact={artifact} resolvedFileUrl={resolvedFileUrl} />
+          ))}
         {artifactActiveTab === "output" && <OutputTab artifact={artifact} />}
       </div>
     </>
   );
 }
 
-export const ArtifactPanel = memo(function ArtifactPanel({ inline }: { inline?: boolean }) {
+export const ArtifactPanel = memo(function ArtifactPanel({
+  inline,
+}: {
+  inline?: boolean;
+}) {
   const {
     artifactPanelOpen,
     selectedArtifactId,
@@ -195,26 +224,44 @@ export const ArtifactPanel = memo(function ArtifactPanel({ inline }: { inline?: 
 
   const artifact = useMemo<ArtifactData | null>(() => {
     if (!selectedArtifactId) return null;
-    if (_ephemeralArtifact && _ephemeralArtifact.artifact_id === selectedArtifactId) {
+    if (
+      _ephemeralArtifact &&
+      _ephemeralArtifact.artifact_id === selectedArtifactId
+    ) {
       return _ephemeralArtifact;
     }
-    const streaming = streamingArtifacts.find((item) => item.artifact_id === selectedArtifactId);
+    const streaming = streamingArtifacts.find(
+      (item) => item.artifact_id === selectedArtifactId,
+    );
     if (streaming) return streaming;
     if (messages) {
       for (const message of messages) {
-        const found = message.artifacts?.find((item) => item.artifact_id === selectedArtifactId);
+        const found = message.artifacts?.find(
+          (item) => item.artifact_id === selectedArtifactId,
+        );
         if (found) return found;
       }
     }
     return null;
-  }, [selectedArtifactId, streamingArtifacts, messages, messageCount, _ephemeralArtifact]);
+  }, [
+    selectedArtifactId,
+    streamingArtifacts,
+    messages,
+    messageCount,
+    _ephemeralArtifact,
+  ]);
 
   const resolvedFileUrl = useMemo(
     () => (artifact ? resolveArtifactFileUrl(artifact, serverUrl) : null),
     [artifact, serverUrl],
   );
-  const tabs = useMemo(() => (artifact ? getArtifactTabs(artifact) : []), [artifact]);
-  const HeaderIcon = artifact ? (PANEL_ICONS[artifact.artifact_type] || Code2) : Code2;
+  const tabs = useMemo(
+    () => (artifact ? getArtifactTabs(artifact) : []),
+    [artifact],
+  );
+  const HeaderIcon = artifact
+    ? PANEL_ICONS[artifact.artifact_type] || Code2
+    : Code2;
   const fileDescription = artifact ? describeArtifactFile(artifact) : null;
 
   useEffect(() => {
@@ -290,10 +337,14 @@ function CodeTab({ artifact }: { artifact: ArtifactData }) {
         <button
           onClick={handleCopy}
           className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface-tertiary hover:bg-border text-text-secondary transition-colors"
-          title="Sao chep"
+          title="Sao chép"
         >
-          {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
-          {copied ? "Da sao chep" : "Sao chep"}
+          {copied ? (
+            <Check size={12} className="text-green-500" />
+          ) : (
+            <Copy size={12} />
+          )}
+          {copied ? "Đã sao chép" : "Sao chép"}
         </button>
       </div>
 
@@ -329,8 +380,12 @@ function DetailsTab({
     <div className="p-5 space-y-4">
       <div className="rounded-2xl border border-border bg-surface-secondary p-4">
         <div className="text-sm font-medium text-text">{artifact.title}</div>
-        {filename && <div className="text-xs text-text-tertiary mt-1">{filename}</div>}
-        <div className="text-xs text-text-tertiary mt-1">Loai artifact: {artifact.artifact_type}</div>
+        {filename && (
+          <div className="text-xs text-text-tertiary mt-1">{filename}</div>
+        )}
+        <div className="text-xs text-text-tertiary mt-1">
+          Loại artifact: {artifact.artifact_type}
+        </div>
         {resolvedFileUrl && (
           <a
             href={resolvedFileUrl}
@@ -339,7 +394,7 @@ function DetailsTab({
             className="inline-flex items-center gap-1.5 mt-3 px-3 py-2 rounded-xl bg-surface-tertiary hover:bg-border text-text-secondary hover:text-text transition-colors text-xs"
           >
             <Download size={14} />
-            Mo file da tao
+            Mở file đã tạo
           </a>
         )}
       </div>
@@ -351,7 +406,10 @@ function DetailsTab({
           </div>
           <div className="divide-y divide-border/60">
             {metadataEntries.map(([key, value]) => (
-              <div key={key} className="px-4 py-3 flex items-start gap-4 text-sm">
+              <div
+                key={key}
+                className="px-4 py-3 flex items-start gap-4 text-sm"
+              >
                 <div className="w-32 shrink-0 text-text-tertiary">{key}</div>
                 <div className="min-w-0 text-text break-words">
                   {typeof value === "string" ? value : JSON.stringify(value)}
@@ -363,8 +421,12 @@ function DetailsTab({
       )}
 
       <div className="rounded-2xl border border-border bg-surface-secondary p-4">
-        <div className="text-xs uppercase tracking-wider text-text-tertiary mb-2">Tom tat noi dung</div>
-        <pre className="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed">{summary}</pre>
+        <div className="text-xs uppercase tracking-wider text-text-tertiary mb-2">
+          Tóm tắt nội dung
+        </div>
+        <pre className="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed">
+          {summary}
+        </pre>
       </div>
     </div>
   );
@@ -379,8 +441,10 @@ function OutputTab({ artifact }: { artifact: ArtifactData }) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-text-tertiary py-16">
         <Play size={32} className="mb-3 opacity-50" />
-        <p className="text-sm">Artifact nay khong co kenh output rieng.</p>
-        <p className="text-xs mt-1 opacity-70">Hay xem tab preview hoac chi tiet de lam viec voi file da tao.</p>
+        <p className="text-sm">Artifact này không có kênh output riêng.</p>
+        <p className="text-xs mt-1 opacity-70">
+          Hãy xem tab preview hoặc chi tiết để làm việc với file đã tạo.
+        </p>
       </div>
     );
   }
@@ -389,7 +453,9 @@ function OutputTab({ artifact }: { artifact: ArtifactData }) {
     <div className="p-4 space-y-3">
       {output && (
         <div>
-          <div className="text-[10px] text-text-tertiary font-medium mb-1 uppercase tracking-wider">stdout</div>
+          <div className="text-[10px] text-text-tertiary font-medium mb-1 uppercase tracking-wider">
+            stdout
+          </div>
           <pre className="bg-surface-secondary rounded-lg p-3 text-xs font-mono text-text-secondary overflow-auto max-h-[300px] whitespace-pre-wrap">
             {output}
           </pre>
@@ -398,7 +464,9 @@ function OutputTab({ artifact }: { artifact: ArtifactData }) {
 
       {error && (
         <div>
-          <div className="text-[10px] text-red-500 font-medium mb-1 uppercase tracking-wider">stderr</div>
+          <div className="text-[10px] text-red-500 font-medium mb-1 uppercase tracking-wider">
+            stderr
+          </div>
           <pre className="bg-red-50 dark:bg-red-950/30 rounded-lg p-3 text-xs font-mono text-red-600 dark:text-red-400 overflow-auto max-h-[200px] whitespace-pre-wrap">
             {error}
           </pre>
@@ -407,9 +475,15 @@ function OutputTab({ artifact }: { artifact: ArtifactData }) {
 
       {imageUrl && (
         <div>
-          <div className="text-[10px] text-text-tertiary font-medium mb-1 uppercase tracking-wider">Output</div>
+          <div className="text-[10px] text-text-tertiary font-medium mb-1 uppercase tracking-wider">
+            Output
+          </div>
           <img
-            src={typeof imageUrl === "string" && imageUrl.startsWith("data:") ? imageUrl : `data:image/png;base64,${imageUrl}`}
+            src={
+              typeof imageUrl === "string" && imageUrl.startsWith("data:")
+                ? imageUrl
+                : `data:image/png;base64,${imageUrl}`
+            }
             alt="Execution output"
             className="rounded-lg max-w-full"
           />

@@ -38,12 +38,27 @@ _NOT_NAMES = {
     "s\u01b0",
 }
 
+_NAME_CONTEXT_BLOCKERS = {
+    "cho",
+    "c\u1ee7a",
+    "theo",
+    "v\u1edbi",
+}
+
+
+def _previous_word(message_lower: str, index: int) -> str:
+    prefix = message_lower[:index].rstrip()
+    match = re.search(r"([\w\u00c0-\u1ef9]+)$", prefix, re.IGNORECASE)
+    return match.group(1) if match else ""
+
 
 def extract_user_name_impl(message: str) -> Optional[str]:
     message_lower = message.lower()
     for pattern in _NAME_PATTERNS:
         match = re.search(pattern, message_lower, re.IGNORECASE)
         if not match:
+            continue
+        if _previous_word(message_lower, match.start()).lower() in _NAME_CONTEXT_BLOCKERS:
             continue
         name = match.group(1).capitalize()
         if name.lower() not in _NOT_NAMES:

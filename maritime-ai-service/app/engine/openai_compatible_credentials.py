@@ -13,6 +13,7 @@ from app.engine.model_catalog import (
     NVIDIA_DEFAULT_BASE_URL,
     NVIDIA_DEFAULT_MODEL,
     NVIDIA_DEFAULT_MODEL_ADVANCED,
+    NVIDIA_DEFAULT_VISION_MODEL,
     OPENAI_DEFAULT_BASE_URL,
     OPENAI_DEFAULT_MODEL,
     OPENAI_DEFAULT_MODEL_ADVANCED,
@@ -116,6 +117,10 @@ def resolve_nvidia_model(settings_obj: Any) -> str:
 
 def resolve_nvidia_model_advanced(settings_obj: Any) -> str:
     return _normalize_text(getattr(settings_obj, "nvidia_model_advanced", None)) or NVIDIA_DEFAULT_MODEL_ADVANCED
+
+
+def resolve_nvidia_vision_model(settings_obj: Any) -> str:
+    return _normalize_text(getattr(settings_obj, "nvidia_vision_model", None)) or NVIDIA_DEFAULT_VISION_MODEL
 
 
 def nvidia_credentials_available(settings_obj: Any) -> bool:

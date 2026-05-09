@@ -69,8 +69,35 @@ export function groupConversations(
     );
   }
 
+  // Phase 35 — dedup by session_id (server sync occasionally creates stub
+  // conversations alongside the local conv when thread_id linkage races).
+  // Keep the entry with more messages (or the locally-created one if tied).
+  const bySessionId = new Map<string, Conversation>();
+  const dedupedFiltered: Conversation[] = [];
+  for (const c of filtered) {
+    const sid = c.session_id || c.thread_id;
+    if (!sid) {
+      dedupedFiltered.push(c);
+      continue;
+    }
+    const existing = bySessionId.get(sid);
+    if (!existing) {
+      bySessionId.set(sid, c);
+      dedupedFiltered.push(c);
+      continue;
+    }
+    // Prefer the entry with more messages (real local conv) over server stub.
+    const existingCount = existing.messages?.length ?? existing.message_count ?? 0;
+    const newCount = c.messages?.length ?? c.message_count ?? 0;
+    if (newCount > existingCount) {
+      const idx = dedupedFiltered.indexOf(existing);
+      if (idx >= 0) dedupedFiltered[idx] = c;
+      bySessionId.set(sid, c);
+    }
+  }
+
   // Sort by updated_at descending (most recent first)
-  const sorted = [...filtered].sort(
+  const sorted = [...dedupedFiltered].sort(
     (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
   );
 

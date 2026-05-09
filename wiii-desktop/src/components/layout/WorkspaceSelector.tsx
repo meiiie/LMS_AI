@@ -84,6 +84,7 @@ export function WorkspaceSelector() {
       <div
         className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-text-secondary"
         data-testid="workspace-selector"
+        title={displayName}
       >
         {multiTenantEnabled ? (
           <OrgIcon size={15} className="shrink-0" />
@@ -104,6 +105,7 @@ export function WorkspaceSelector() {
         aria-label="Chọn không gian làm việc"
         aria-expanded={open}
         data-testid="workspace-selector-trigger"
+        title={displayName}
       >
         <OrgIcon size={15} className="shrink-0" />
         <span className="flex-1 truncate text-left font-medium">

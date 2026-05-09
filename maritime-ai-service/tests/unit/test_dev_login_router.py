@@ -18,6 +18,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _reset_db_degraded_cooldown():
+    from app.core.database import clear_shared_database_unavailable
+
+    clear_shared_database_unavailable()
+    yield
+    clear_shared_database_unavailable()
+
+
 def _user_dict(**overrides):
     base = {
         "id": "dev-user-1",
