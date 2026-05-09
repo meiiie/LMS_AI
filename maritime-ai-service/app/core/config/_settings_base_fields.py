@@ -214,6 +214,28 @@ class BaseSettingsFieldsMixin:
     nvidia_base_url: Optional[str] = Field(default=NVIDIA_DEFAULT_BASE_URL, description="NVIDIA NIM API base URL")
     nvidia_model: str = Field(default=NVIDIA_DEFAULT_MODEL, description="NVIDIA model for general tasks")
     nvidia_model_advanced: str = Field(default=NVIDIA_DEFAULT_MODEL_ADVANCED, description="NVIDIA model for complex tasks")
+    enable_llm_model_health_probes: bool = Field(
+        default=True,
+        description="Run background model-level probes so degraded models are skipped before user traffic.",
+    )
+    llm_model_health_probe_timeout_seconds: float = Field(
+        default=8.0,
+        ge=1.0,
+        le=60.0,
+        description="Per-model live probe timeout for model health checks.",
+    )
+    llm_model_health_probe_interval_seconds: float = Field(
+        default=300.0,
+        ge=0.0,
+        le=86400.0,
+        description="Periodic model health probe interval; 0 disables the periodic loop.",
+    )
+    llm_model_health_degraded_ttl_seconds: float = Field(
+        default=300.0,
+        ge=0.0,
+        le=86400.0,
+        description="How long a failed model health probe keeps that model degraded.",
+    )
     openrouter_model_fallbacks: list[str] = Field(
         default_factory=list,
         description="Ordered fallback models for OpenRouter requests",

@@ -14,6 +14,8 @@ class AppRuntimeResources:
     neo4j_repo: Any = None
     runtime_audit_task: asyncio.Task | None = None
     runtime_audit_loop_task: asyncio.Task | None = None
+    model_health_probe_task: asyncio.Task | None = None
+    model_health_probe_loop_task: asyncio.Task | None = None
     scheduled_executor: Any = None
     heartbeat: Any = None
     soul_bridge: Any = None

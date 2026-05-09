@@ -266,6 +266,37 @@ async def _schedule_runtime_audit(
     return runtime_audit_task, runtime_audit_loop_task
 
 
+async def _schedule_model_health_probes(
+    logger_: logging.Logger,
+) -> tuple[asyncio.Task | None, asyncio.Task | None]:
+    """Schedule lightweight model probes so routing can skip degraded models."""
+    if not settings.enable_llm_model_health_probes:
+        return None, None
+
+    try:
+        run_probe_once = _load_attr(
+            "app.services.llm_model_health_probe_service",
+            "run_nvidia_model_health_probe_once",
+        )
+        run_probe_loop = _load_attr(
+            "app.services.llm_model_health_probe_service",
+            "run_nvidia_model_health_probe_loop",
+        )
+
+        probe_task = asyncio.create_task(run_probe_once(logger_obj=logger_))
+        interval = float(settings.llm_model_health_probe_interval_seconds or 0.0)
+        probe_loop_task = (
+            asyncio.create_task(run_probe_loop(logger_obj=logger_))
+            if interval > 0
+            else None
+        )
+        logger_.info("[OK] Scheduled NVIDIA model health probe (interval=%ss)", int(interval))
+        return probe_task, probe_loop_task
+    except Exception as exc:  # pragma: no cover - logging path
+        logger_.warning("[WARN] Could not schedule model health probes: %s", exc)
+        return None, None
+
+
 def _initialize_unified_client(logger_: logging.Logger) -> None:
     if not settings.enable_unified_client:
         return
@@ -543,6 +574,10 @@ async def startup_application(logger_: logging.Logger) -> AppRuntimeResources:
         resources.runtime_audit_task,
         resources.runtime_audit_loop_task,
     ) = await _schedule_runtime_audit(logger_)
+    (
+        resources.model_health_probe_task,
+        resources.model_health_probe_loop_task,
+    ) = await _schedule_model_health_probes(logger_)
     _initialize_unified_client(logger_)
     _validate_embedding_dimensions(logger_)
     _prewarm_rag_agent(logger_)
