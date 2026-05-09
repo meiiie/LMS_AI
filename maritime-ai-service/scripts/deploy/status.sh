@@ -94,9 +94,9 @@ docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\
 echo ""
 echo -e "${GREEN}--- System ---${NC}"
 echo "  Uptime:  $(uptime -p 2>/dev/null || uptime)"
-echo "  RAM:     $(free -h | awk 'NR==2 {printf \"%s used / %s total (%s free)\", $3, $2, $7}')"
-echo "  Swap:    $(free -h | awk 'NR==3 {printf \"%s used / %s total\", $3, $2}')"
-echo "  Disk:    $(df -h / | awk 'NR==2 {printf \"%s used / %s total (%s free, %s)\", $3, $2, $4, $5}')"
+echo "  RAM:     $(free -h | awk 'NR==2 {printf "%s used / %s total (%s free)", $3, $2, $7}')"
+echo "  Swap:    $(free -h | awk 'NR==3 {printf "%s used / %s total", $3, $2}')"
+echo "  Disk:    $(df -h / | awk 'NR==2 {printf "%s used / %s total (%s free, %s)", $3, $2, $4, $5}')"
 
 echo ""
 echo -e "${GREEN}--- PostgreSQL ---${NC}"
@@ -107,8 +107,9 @@ compose exec -T postgres psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" 
 
 echo ""
 echo -e "${GREEN}--- Backups ---${NC}"
-BACKUP_COUNT=$(find "${SERVICE_DIR}/backups" -name "wiii_ai_*.dump" -o -name "predeploy_*.dump" 2>/dev/null | wc -l)
-LATEST_BACKUP=$(find "${SERVICE_DIR}/backups" \( -name "wiii_ai_*.dump" -o -name "predeploy_*.dump" \) -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2- || echo "")
+BACKUP_DIR="${BACKUP_DIR:-${SERVICE_DIR}/backups}"
+BACKUP_COUNT=$(find "$BACKUP_DIR" -type f \( -name "wiii_ai_*.dump" -o -name "predeploy_*.dump" \) 2>/dev/null | wc -l)
+LATEST_BACKUP=$(find "$BACKUP_DIR" -type f \( -name "wiii_ai_*.dump" -o -name "predeploy_*.dump" \) -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2- || echo "")
 echo "  Total backups: ${BACKUP_COUNT}"
 if [ -n "$LATEST_BACKUP" ]; then
     BACKUP_AGE=$(( ($(date +%s) - $(stat -c %Y "$LATEST_BACKUP")) / 3600 ))
