@@ -37,6 +37,37 @@ class TestProductionValidation:
         assert "resend_api_key" in fields
         assert "enable_magic_link_auth" in fields
 
+    def test_magic_link_requires_real_resend_key_when_enabled_in_production(self):
+        """Production Magic Link must fail closed without a real email provider."""
+        from app.core.config import Settings
+
+        with pytest.raises(ValueError, match="RESEND_API_KEY"):
+            Settings(
+                environment="production",
+                api_key="a-real-prod-api-key-with-enough-bytes",
+                jwt_secret_key="jwt]secret]with]enough]entropy]for]prod",
+                session_secret_key="session]secret]with]enough]entropy]for]prod",
+                google_api_key="test",
+                enable_magic_link_auth=True,
+                resend_api_key="",
+            )
+
+    def test_google_oauth_requires_real_client_secret_when_enabled_in_production(self):
+        """Production Google OAuth must fail closed without real OAuth credentials."""
+        from app.core.config import Settings
+
+        with pytest.raises(ValueError, match="GOOGLE_OAUTH_CLIENT_ID"):
+            Settings(
+                environment="production",
+                api_key="a-real-prod-api-key-with-enough-bytes",
+                jwt_secret_key="jwt]secret]with]enough]entropy]for]prod",
+                session_secret_key="session]secret]with]enough]entropy]for]prod",
+                google_api_key="test",
+                enable_google_oauth=True,
+                google_oauth_client_id="",
+                google_oauth_client_secret="",
+            )
+
     def test_api_key_too_short_in_production(self):
         """API key under 16 chars should fail in production."""
         from app.core.config import Settings

@@ -45,7 +45,20 @@ def build_magic_link_html(verify_url: str) -> str:
 
 def _is_resend_configured() -> bool:
     key = getattr(settings, "resend_api_key", "") or ""
-    return bool(key) and not key.startswith("CHANGE_ME")
+    lowered = key.strip().lower()
+    if not lowered:
+        return False
+    placeholder_markers = (
+        "change_me",
+        "change-me",
+        "changeme",
+        "placeholder",
+        "your_",
+        "your-",
+        "example",
+        "dummy",
+    )
+    return not any(marker in lowered for marker in placeholder_markers)
 
 
 async def send_magic_link_email(to_email: str, verify_url: str) -> bool:
@@ -59,10 +72,16 @@ async def send_magic_link_email(to_email: str, verify_url: str) -> bool:
     """
     resend_ready = _is_resend_configured() and resend is not None
 
+    if not resend_ready and getattr(settings, "environment", "") == "production":
+        logger.error(
+            "Magic Link email blocked in production because Resend is not configured."
+        )
+        return False
+
     if not resend_ready:
         # Placeholder secret (CHANGE_ME_...) or missing package → dev fallback.
         # A real production deployment would never ship a CHANGE_ME_ key, so
-        # this branch is safe to leave on even when environment=production.
+        # this branch is only allowed outside production.
         logger.warning(
             "[DEV MAGIC LINK] Resend not configured. Open this URL to finish login for %s:\n  %s",
             to_email, verify_url,

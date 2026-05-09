@@ -144,6 +144,25 @@ def validate_google_compat_url_value(v: str) -> str:
     return v
 
 
+def _is_missing_or_placeholder_secret(value) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return True
+    lowered = text.lower()
+    placeholder_markers = (
+        "change_me",
+        "change-me",
+        "changeme",
+        "placeholder",
+        "your_",
+        "your-",
+        "example",
+        "dummy",
+        "test-secret",
+    )
+    return any(marker in lowered for marker in placeholder_markers)
+
+
 def build_validate_production_security(config_logger):
     def _validate(self):
         if self.environment == "production":
@@ -162,10 +181,28 @@ def build_validate_production_security(config_logger):
                     "SECURITY: api_key must be at least 16 characters in production. "
                     "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
                 )
-            if self.enable_magic_link_auth and not self.resend_api_key:
-                config_logger.warning(
-                    "SECURITY: enable_magic_link_auth=True but RESEND_API_KEY is empty — "
-                    "magic link emails will fail silently"
+            if getattr(
+                self, "enable_magic_link_auth", False
+            ) and _is_missing_or_placeholder_secret(
+                getattr(self, "resend_api_key", None)
+            ):
+                raise ValueError(
+                    "SECURITY: enable_magic_link_auth=True requires a real "
+                    "RESEND_API_KEY in production. Magic Link must fail closed "
+                    "instead of exposing dev verification URLs."
+                )
+            if getattr(self, "enable_google_oauth", False) and (
+                _is_missing_or_placeholder_secret(
+                    getattr(self, "google_oauth_client_id", None)
+                )
+                or _is_missing_or_placeholder_secret(
+                    getattr(self, "google_oauth_client_secret", None)
+                )
+            ):
+                raise ValueError(
+                    "SECURITY: enable_google_oauth=True requires real "
+                    "GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET "
+                    "in production."
                 )
             if (
                 getattr(self, "enable_distributed_magic_link_sessions", False)

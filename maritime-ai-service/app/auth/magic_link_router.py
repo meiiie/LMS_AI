@@ -163,7 +163,19 @@ async def _create_magic_link(email: str, conn) -> dict:
     # email. Surface the verify URL so the UI can auto-open it. Real prod
     # deployments will ship a proper Resend key and never hit this branch.
     resend_key = getattr(settings, "resend_api_key", "") or ""
-    if not resend_key or resend_key.startswith("CHANGE_ME"):
+    resend_key_lower = resend_key.strip().lower()
+    resend_missing_or_placeholder = (
+        not resend_key_lower
+        or resend_key.startswith("CHANGE_ME")
+        or any(
+            marker in resend_key_lower
+            for marker in ("change-me", "changeme", "placeholder", "your-", "your_")
+        )
+    )
+    if (
+        settings.environment != "production"
+        and resend_missing_or_placeholder
+    ):
         response["dev_verify_url"] = verify_url
         response["message"] = (
             "Resend chưa cấu hình — Wiii sẽ tự mở tab xác minh giúp bạn."
