@@ -27,6 +27,7 @@ ZONE=asia-southeast1-c \
 ```
 
 This creates a separate `wiii-production` VM. Do not deploy Wiii containers onto the existing `lms-production` VM.
+Canonical target details live in `docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md#current-gcp-rebuild-target`.
 
 ---
 
@@ -79,17 +80,19 @@ Go to [Google Cloud Console](https://console.cloud.google.com/) → Compute Engi
 |---------|-------|
 | Name | `wiii-production` |
 | Region | `asia-southeast1` (Singapore — lowest latency to Vietnam) |
-| Zone | `asia-southeast1-b` |
-| Machine | `e2-medium` (2 vCPU, 4GB RAM) |
-| Boot disk | Ubuntu 22.04 LTS, **50GB SSD** |
-| Firewall | **Allow HTTP** + **Allow HTTPS** (check both boxes) |
+| Zone | `asia-southeast1-c` |
+| Machine | `e2-standard-2` (2 vCPU, 8GB RAM) |
+| Boot disk | Ubuntu 24.04 LTS, **80GB pd-balanced** |
+| Firewall | HTTP/HTTPS public, SSH restricted to maintainer IPs |
 
 After creation:
 1. Go to **VPC Network → External IP addresses**
 2. Find your VM's IP → click **Reserve** (makes it static)
 3. Note this IP — you'll need it for DNS
 
-**Monthly cost**: ~350K VND ($14), covered by your 26M VND credits (~6 years).
+Prefer the provision helper above so the VM, static IP, firewall tags, and SSH source ranges match the product runbook.
+
+The setup script assumes this single-node profile by default: 4G swap, conservative Docker resource limits, and one app replica until Postgres/cache/object storage move off-host.
 
 ---
 
@@ -100,7 +103,7 @@ SSH into your VM:
 ```bash
 # From Google Cloud Console: click "SSH" button on VM page
 # Or from terminal:
-gcloud compute ssh wiii-production --zone=asia-southeast1-b
+gcloud compute ssh wiii-production --zone=asia-southeast1-c --project=the-wiii-lab
 ```
 
 Run the setup script:

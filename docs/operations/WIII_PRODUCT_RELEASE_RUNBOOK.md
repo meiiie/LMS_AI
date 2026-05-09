@@ -87,6 +87,15 @@ ZONE=asia-southeast1-c \
 
 After provisioning, update DNS or Cloudflare so `wiii.holilihu.online` points to the new static IP. Do not route Wiii traffic to the LMS VM IP.
 
+Verify DNS and edge routing before deploying:
+
+```bash
+dig wiii.holilihu.online +short
+curl -fsSI https://wiii.holilihu.online/embed/
+```
+
+If DNS still resolves to Cloudflare, confirm the Cloudflare origin points to the new static IP and that proxying is intentional. If DNS resolves to the old LMS VM IP, stop and fix DNS before running the deploy script.
+
 ## Preflight Gate
 
 Before deploying, confirm the target commit is suitable for product:
@@ -129,7 +138,7 @@ Use the same SHA tag for app and nginx. Floating `:main` is acceptable only for 
 SSH to the production VM:
 
 ```bash
-gcloud compute ssh wiii-production --zone=asia-southeast1-b --project=valued-range-443614-j4
+gcloud compute ssh wiii-production --zone=asia-southeast1-c --project=the-wiii-lab
 ```
 
 Run a pinned deploy:

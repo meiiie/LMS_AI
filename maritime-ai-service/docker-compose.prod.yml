@@ -13,7 +13,9 @@
 #
 # Prerequisites:
 #   - .env.production file with ALL required secrets
-#   - GOOGLE_API_KEY, API_KEY, JWT_SECRET_KEY must be set
+#   - API_KEY, JWT_SECRET_KEY, and the key for LLM_PROVIDER must be set
+#   - NVIDIA_API_KEY is required for the current NVIDIA product lane
+#   - GOOGLE_API_KEY is required when using Google chat or Gemini embeddings
 #   - POSTGRES_PASSWORD must be changed from defaults
 #   - WIII_APP_IMAGE and WIII_NGINX_IMAGE must point to published production images
 #   - DNS: *.holilihu.online wildcard A record pointing to this server
@@ -239,6 +241,17 @@ services:
         limits:
           cpus: "${BACKUP_CPU_LIMIT:-0.25}"
           memory: "${BACKUP_MEM_LIMIT:-192M}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h postgres -U $${POSTGRES_USER:-wiii} -d $${POSTGRES_DB:-wiii_ai}"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
 
   # =============================================================================
   # NEO4J — Optional Graph Database (opt-in via --profile neo4j)

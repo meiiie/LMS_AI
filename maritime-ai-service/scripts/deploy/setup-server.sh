@@ -11,7 +11,7 @@
 #   2. Installs Docker + Docker Compose v2
 #   3. Installs Caddy (auto-SSL reverse proxy)
 #   4. Creates /opt/wiii app directory + backup directory
-#   5. Configures 2GB swap (critical for 4GB RAM server)
+#   5. Configures swap (default 4G, override via SWAP_SIZE)
 #   6. Kernel tuning for high-connection server
 #   7. Installs fail2ban (brute-force protection)
 #   8. Configures UFW firewall (SSH + HTTP + HTTPS only)
