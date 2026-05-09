@@ -49,6 +49,34 @@ Important guardrail:
 - The default VM profile is `e2-standard-2` in `asia-southeast1-c` with an `80GB` `pd-balanced` boot disk.
 - Docker defaults are tuned for single-node production: `APP_REPLICAS=1`, `GUNICORN_WORKERS=2`, `ASYNC_POOL_MAX_SIZE=20`.
 
+Production `.env.production` is secret-bearing and must stay on the VM. For the current NVIDIA-backed product lane, apply these non-secret shape requirements there rather than committing a changed `.env` template:
+
+```bash
+LLM_PROVIDER=nvidia
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_MODEL=deepseek-ai/deepseek-v4-flash
+NVIDIA_MODEL_ADVANCED=deepseek-ai/deepseek-v4-pro
+AGENT_PROVIDER_CONFIGS={"code_studio_agent":{"tier":"deep","provider":"nvidia","model":"deepseek-ai/deepseek-v4-pro"}}
+
+APP_REPLICAS=1
+GUNICORN_WORKERS=2
+ASYNC_POOL_MAX_SIZE=20
+APP_CPU_LIMIT=1.5
+APP_MEM_LIMIT=2G
+POSTGRES_CPU_LIMIT=1.0
+POSTGRES_MEM_LIMIT=1536M
+MINIO_CPU_LIMIT=0.35
+MINIO_MEM_LIMIT=384M
+VALKEY_CPU_LIMIT=0.25
+VALKEY_MEM_LIMIT=192M
+NGINX_CPU_LIMIT=0.25
+NGINX_MEM_LIMIT=192M
+BACKUP_CPU_LIMIT=0.25
+BACKUP_MEM_LIMIT=192M
+```
+
+`NVIDIA_API_KEY` and all database/auth/object-storage secrets must be copied through the operator's secure channel only; never paste them into issues, PR comments, docs, or shell logs.
+
 Provision the new VM:
 
 ```bash
