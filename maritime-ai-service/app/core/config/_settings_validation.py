@@ -14,6 +14,7 @@ from app.core.config.memory import MemoryConfig
 from app.core.config.product_search import ProductSearchConfig
 from app.core.config.rag import RAGConfig
 from app.core.config.thinking import ThinkingConfig
+from app.core.secret_validation import is_missing_or_placeholder_secret
 from app.engine.llm_provider_registry import get_supported_provider_names
 from app.engine.llm_timeout_policy import loads_timeout_provider_overrides
 
@@ -144,25 +145,6 @@ def validate_google_compat_url_value(v: str) -> str:
     return v
 
 
-def _is_missing_or_placeholder_secret(value) -> bool:
-    text = str(value or "").strip()
-    if not text:
-        return True
-    lowered = text.lower()
-    placeholder_markers = (
-        "change_me",
-        "change-me",
-        "changeme",
-        "placeholder",
-        "your_",
-        "your-",
-        "example",
-        "dummy",
-        "test-secret",
-    )
-    return any(marker in lowered for marker in placeholder_markers)
-
-
 def build_validate_production_security(config_logger):
     def _validate(self):
         if self.environment == "production":
@@ -183,7 +165,7 @@ def build_validate_production_security(config_logger):
                 )
             if getattr(
                 self, "enable_magic_link_auth", False
-            ) and _is_missing_or_placeholder_secret(
+            ) and is_missing_or_placeholder_secret(
                 getattr(self, "resend_api_key", None)
             ):
                 raise ValueError(
@@ -192,10 +174,10 @@ def build_validate_production_security(config_logger):
                     "instead of exposing dev verification URLs."
                 )
             if getattr(self, "enable_google_oauth", False) and (
-                _is_missing_or_placeholder_secret(
+                is_missing_or_placeholder_secret(
                     getattr(self, "google_oauth_client_id", None)
                 )
-                or _is_missing_or_placeholder_secret(
+                or is_missing_or_placeholder_secret(
                     getattr(self, "google_oauth_client_secret", None)
                 )
             ):
