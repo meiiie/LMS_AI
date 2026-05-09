@@ -69,6 +69,9 @@ LLM_MODEL_HEALTH_PROBE_TIMEOUT_SECONDS=45
 AGENT_PROVIDER_CONFIGS={"code_studio_agent":{"tier":"deep","provider":"nvidia","model":"deepseek-ai/deepseek-v4-pro"}}
 
 # Required while production embeddings use models/gemini-embedding-001.
+# Use only the minimum Gemini/API permissions needed for embeddings, track its
+# rotation independently from NVIDIA_API_KEY, and document any provider-specific
+# rotation procedure in the release or auth runbook.
 GOOGLE_API_KEY=<google-gemini-api-key>
 
 APP_REPLICAS=1

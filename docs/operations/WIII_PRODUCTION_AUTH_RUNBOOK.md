@@ -189,10 +189,10 @@ is not required; remove or rotate them if there is any exposure concern.
 
 ## Production Change Procedure
 
-1. Edit `/opt/wiii/maritime-ai-service/.env.production` on the Wiii VM.
-2. Never paste secrets into GitHub issues, pull requests, docs, chat logs, or
-   shell output.
-3. Restart through the pinned deploy path when possible:
+- Edit `/opt/wiii/maritime-ai-service/.env.production` on the Wiii VM.
+- Never paste secrets into GitHub issues, pull requests, docs, chat logs, or
+  shell output.
+- Restart through the pinned deploy path when possible:
 
 ```bash
 cd /opt/wiii
@@ -206,8 +206,10 @@ BASE_URL=https://wiii.holilihu.online \
   bash ./maritime-ai-service/scripts/deploy/deploy.sh
 ```
 
-4. Run auth-specific smoke tests.
-5. Record outcome and rollback notes in the release issue or PR.
+After deploy:
+
+- Run auth-specific smoke tests.
+- Record outcome and rollback notes in the release issue or PR.
 
 ## Operator Notes
 
