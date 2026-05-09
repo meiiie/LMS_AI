@@ -129,6 +129,10 @@ jobs:
     name: Reviewability Gate
     runs-on: ubuntu-latest
     needs: detect-changes
+    # Reviewability is a pre-merge control. On push to main, the change has
+    # already landed and this gate would only make the baseline red after an
+    # intentional admin merge or emergency repair.
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v6
         with:
