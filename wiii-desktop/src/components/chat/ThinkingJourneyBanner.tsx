@@ -24,34 +24,74 @@ interface ThinkingJourneyBannerProps {
 }
 
 const LABEL_RULES: Array<{ keywords: string[]; label: string }> = [
-  { keywords: ["phan tich", "analysis", "analyze", "supervisor", "guardian", "routing"], label: "Lam ro yeu cau" },
-  { keywords: ["tra cuu", "retrieval", "lookup", "rag", "knowledge"], label: "Thu thap thong tin" },
-  { keywords: ["tim kiem web", "web search", "internet", "news", "news search"], label: "Tim nguon moi" },
-  { keywords: ["tim kiem san pham", "product search", "san pham"], label: "Tim kiem san pham" },
-  { keywords: ["danh gia", "grading", "grader", "quality"], label: "Danh gia do tin cay" },
-  { keywords: ["tinh chinh", "rewrite", "refine"], label: "Tinh chinh huong tra loi" },
-  { keywords: ["tong hop", "synthesis", "generation", "tao cau tra loi", "response"], label: "Soan phan hoi" },
-  { keywords: ["bo nho", "memory"], label: "Goi lai ngu canh" },
-  { keywords: ["song song", "parallel", "dispatch"], label: "Phan cong song song" },
-  { keywords: ["hop nhat", "aggregator", "tong hop bao cao"], label: "Hop nhat ket qua" },
-  { keywords: ["social", "off topic", "direct"], label: "Phan hoi truc tiep" },
+  {
+    keywords: [
+      "phan tich",
+      "analysis",
+      "analyze",
+      "supervisor",
+      "guardian",
+      "routing",
+    ],
+    label: "Làm rõ yêu cầu",
+  },
+  {
+    keywords: ["tra cuu", "retrieval", "lookup", "rag", "knowledge"],
+    label: "Thu thập thông tin",
+  },
+  {
+    keywords: ["tim kiem web", "web search", "internet", "news", "news search"],
+    label: "Tìm nguồn mới",
+  },
+  {
+    keywords: ["tim kiem san pham", "product search", "san pham"],
+    label: "Tìm kiếm sản phẩm",
+  },
+  {
+    keywords: ["danh gia", "grading", "grader", "quality"],
+    label: "Đánh giá độ tin cậy",
+  },
+  {
+    keywords: ["tinh chinh", "rewrite", "refine"],
+    label: "Tinh chỉnh hướng trả lời",
+  },
+  {
+    keywords: [
+      "tong hop",
+      "synthesis",
+      "generation",
+      "tao cau tra loi",
+      "response",
+    ],
+    label: "Soạn phản hồi",
+  },
+  { keywords: ["bo nho", "memory"], label: "Gợi lại ngữ cảnh" },
+  {
+    keywords: ["song song", "parallel", "dispatch"],
+    label: "Phân công song song",
+  },
+  {
+    keywords: ["hop nhat", "aggregator", "tong hop bao cao"],
+    label: "Hợp nhất kết quả",
+  },
+  { keywords: ["social", "off topic", "direct"], label: "Phản hồi trực tiếp" },
 ];
 
 const NODE_COPY: Record<string, { label: string }> = {
-  guardian: { label: "Giu an toan dau vao" },
-  supervisor: { label: "Lam ro dieu ban muon" },
-  direct: { label: "Giu nhip tro chuyen" },
-  rag_agent: { label: "Luc lai tai lieu lien quan" },
-  rag: { label: "Luc lai tai lieu lien quan" },
-  tutor_agent: { label: "Sap lai loi giai de hieu" },
-  tutor: { label: "Sap lai loi giai de hieu" },
-  synthesizer: { label: "Det cau tra loi cuoi" },
-  memory_agent: { label: "Goi lai ngu canh cua ban" },
-  product_search_agent: { label: "So gia va doi chieu nguon" },
-  search: { label: "So gia va doi chieu nguon" },
-  parallel_dispatch: { label: "Tach viec cho nhieu huong" },
-  aggregator: { label: "Gop cac huong tot nhat" },
-  colleague_agent: { label: "Tham khao them mot goc nhin" },
+  guardian: { label: "Giữ an toàn đầu vào" },
+  supervisor: { label: "Làm rõ điều bạn muốn" },
+  direct: { label: "Giữ nhịp trò chuyện" },
+  rag_agent: { label: "Lục lại tài liệu liên quan" },
+  rag: { label: "Lục lại tài liệu liên quan" },
+  tutor_agent: { label: "Sắp lại lời giải dễ hiểu" },
+  tutor: { label: "Sắp lại lời giải dễ hiểu" },
+  synthesizer: { label: "Dệt câu trả lời cuối" },
+  memory_agent: { label: "Gợi lại ngữ cảnh của bạn" },
+  product_search_agent: { label: "So giá và đối chiếu nguồn" },
+  search: { label: "So giá và đối chiếu nguồn" },
+  parallel_dispatch: { label: "Tách việc cho nhiều hướng" },
+  aggregator: { label: "Gộp các hướng tốt nhất" },
+  colleague_agent: { label: "Tham khảo thêm một góc nhìn" },
 };
 
 function normalizeText(value: string): string {
@@ -87,8 +127,8 @@ function toSentenceCase(value: string): string {
 
 function joinLabels(labels: string[]): string {
   if (labels.length <= 1) return labels[0] || "";
-  if (labels.length === 2) return `${labels[0]} va ${labels[1]}`;
-  return `${labels.slice(0, -1).join(", ")} va ${labels[labels.length - 1]}`;
+  if (labels.length === 2) return `${labels[0]} và ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")} và ${labels[labels.length - 1]}`;
 }
 
 function formatDuration(totalMs?: number): string | null {
@@ -114,7 +154,11 @@ function getNodeCopy(node?: string) {
   return normalizedNode ? NODE_COPY[normalizedNode] : undefined;
 }
 
-function normalizeJourneyLabel(raw?: string, fallback?: string, node?: string): string {
+function normalizeJourneyLabel(
+  raw?: string,
+  fallback?: string,
+  node?: string,
+): string {
   const nodeCopy = getNodeCopy(node);
   if (nodeCopy) return nodeCopy.label;
 
@@ -127,7 +171,7 @@ function normalizeJourneyLabel(raw?: string, fallback?: string, node?: string): 
     }
   }
 
-  if (!source) return "Dang xu ly";
+  if (!source) return "Đang xử lý";
   return truncateText(source, 42);
 }
 
@@ -143,7 +187,10 @@ function pushStep(steps: JourneyStep[], nextStep: JourneyStep) {
   steps.push(nextStep);
 }
 
-function deriveStepsFromBlocks(blocks: ContentBlock[], isStreaming: boolean): JourneyStep[] {
+function deriveStepsFromBlocks(
+  blocks: ContentBlock[],
+  isStreaming: boolean,
+): JourneyStep[] {
   const steps: JourneyStep[] = [];
 
   for (const block of blocks) {
@@ -151,7 +198,11 @@ function deriveStepsFromBlocks(blocks: ContentBlock[], isStreaming: boolean): Jo
       if (block.groupId) continue;
       pushStep(steps, {
         id: block.id,
-        label: normalizeJourneyLabel(block.summary || block.label, block.content, block.node || block.workerNode),
+        label: normalizeJourneyLabel(
+          block.summary || block.label,
+          block.content,
+          block.node || block.workerNode,
+        ),
         detail: summarizeContent(block.content),
         status: isStreaming && !block.endTime ? "active" : "completed",
         node: block.node || block.workerNode,
@@ -182,7 +233,11 @@ function deriveStepsFromBlocks(blocks: ContentBlock[], isStreaming: boolean): Jo
     if (block.type === "subagent_group") {
       pushStep(steps, {
         id: block.id,
-        label: normalizeJourneyLabel(block.label, block.label, "parallel_dispatch"),
+        label: normalizeJourneyLabel(
+          block.label,
+          block.label,
+          "parallel_dispatch",
+        ),
         detail: summarizeContent(block.label),
         status: isStreaming && !block.endTime ? "active" : "completed",
         node: "parallel_dispatch",
@@ -200,7 +255,9 @@ function deriveStepsFromPhases(phases: ThinkingPhase[]): JourneyStep[] {
 
   for (const phase of phases) {
     const fallbackDetail =
-      phase.statusMessages[phase.statusMessages.length - 1] || phase.thinkingContent || phase.node;
+      phase.statusMessages[phase.statusMessages.length - 1] ||
+      phase.thinkingContent ||
+      phase.node;
 
     pushStep(steps, {
       id: phase.id,
@@ -216,10 +273,16 @@ function deriveStepsFromPhases(phases: ThinkingPhase[]): JourneyStep[] {
   return steps;
 }
 
-function buildJourney(blocks: ContentBlock[], phases: ThinkingPhase[], fallbackLabel: string, isStreaming: boolean) {
-  const steps = phases.length > 0
-    ? deriveStepsFromPhases(phases)
-    : deriveStepsFromBlocks(blocks, isStreaming);
+function buildJourney(
+  blocks: ContentBlock[],
+  phases: ThinkingPhase[],
+  fallbackLabel: string,
+  isStreaming: boolean,
+) {
+  const steps =
+    phases.length > 0
+      ? deriveStepsFromPhases(phases)
+      : deriveStepsFromBlocks(blocks, isStreaming);
 
   if (steps.length === 0 && fallbackLabel) {
     steps.push({
@@ -230,32 +293,43 @@ function buildJourney(blocks: ContentBlock[], phases: ThinkingPhase[], fallbackL
     });
   }
 
-  const activeStep = [...steps].reverse().find((step) => step.status === "active") || steps[steps.length - 1];
-  const completedCount = steps.filter((step) => step.status === "completed").length;
+  const activeStep =
+    [...steps].reverse().find((step) => step.status === "active") ||
+    steps[steps.length - 1];
+  const completedCount = steps.filter(
+    (step) => step.status === "completed",
+  ).length;
   // Sprint 234: Increased from 4→6 for complex multi-tool thinking flows
-  const visibleLabels = Array.from(new Set(steps.map((step) => step.label))).slice(0, 6);
+  const visibleLabels = Array.from(
+    new Set(steps.map((step) => step.label)),
+  ).slice(0, 6);
   const lowerLabels = visibleLabels.map((label) => toSentenceCase(label));
   const headline = isStreaming
-    ? `Wiii dang ${toSentenceCase(activeStep?.label || "xu ly yeu cau")}`
+    ? `Wiii đang ${toSentenceCase(activeStep?.label || "xử lý yêu cầu")}`
     : visibleLabels.length > 0
-      ? `Wiii da ${joinLabels(lowerLabels)}`
-      : "Wiii da hoan tat xu ly";
+      ? `Wiii đã ${joinLabels(lowerLabels)}`
+      : "Wiii đã hoàn tất xử lý";
   const lastDetail = steps
     .map((step) => step.detail)
-    .filter((detail): detail is string => typeof detail === "string" && detail.length > 0)
+    .filter(
+      (detail): detail is string =>
+        typeof detail === "string" && detail.length > 0,
+    )
     .slice(-1)[0];
-  const caption = activeStep?.detail
-    || lastDetail
-    || (isStreaming
-      ? "Mo ra de theo doi nhip suy luan hien tai."
-      : "Mo ra de xem lai toan bo nhung gi da dien ra.");
+  const caption =
+    activeStep?.detail ||
+    lastDetail ||
+    (isStreaming
+      ? "Mở ra để theo dõi nhịp suy luận hiện tại."
+      : "Mở ra để xem lại toàn bộ những gì đã diễn ra.");
 
   const timestamps = steps
     .flatMap((step) => [step.startTime, step.endTime])
     .filter((value): value is number => typeof value === "number");
-  const durationText = timestamps.length >= 2
-    ? formatDuration(Math.max(...timestamps) - Math.min(...timestamps))
-    : null;
+  const durationText =
+    timestamps.length >= 2
+      ? formatDuration(Math.max(...timestamps) - Math.min(...timestamps))
+      : null;
 
   return {
     steps,
@@ -286,7 +360,9 @@ export function ThinkingJourneyBanner({
 
   return (
     <Root
-      {...(onToggle ? { type: "button", onClick: onToggle, "aria-expanded": expanded } : {})}
+      {...(onToggle
+        ? { type: "button", onClick: onToggle, "aria-expanded": expanded }
+        : {})}
       className={`thinking-journey thinking-journey--${mode} ${onToggle ? "thinking-journey--interactive" : ""}`}
     >
       <div className="thinking-journey__header">
@@ -301,12 +377,15 @@ export function ThinkingJourneyBanner({
         <div className="thinking-journey__body">
           <div className="thinking-journey__headline">{journey.headline}</div>
           <div className="thinking-journey__caption">{journey.caption}</div>
-
         </div>
 
         <div className="thinking-journey__meta">
-          <span>{isStreaming ? "Dang xu ly" : "Hoan tat"}</span>
-          <span>{isStreaming ? `${journey.completedCount}/${journey.steps.length} nhip` : `${journey.steps.length} nhip`}</span>
+          <span>{isStreaming ? "Đang xử lý" : "Hoàn tất"}</span>
+          <span>
+            {isStreaming
+              ? `${journey.completedCount}/${journey.steps.length} nhịp`
+              : `${journey.steps.length} nhịp`}
+          </span>
           {journey.durationText && <span>{journey.durationText}</span>}
         </div>
 

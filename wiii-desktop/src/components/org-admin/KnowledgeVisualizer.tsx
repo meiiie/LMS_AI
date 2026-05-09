@@ -5,7 +5,7 @@
  * Renders below the document list in OrgManagerKnowledge.
  */
 import { useState } from "react";
-import { ScatterChart, Network, GitBranch, Search } from "lucide-react";
+import { ScatterChart, Network, GitBranch, Search, Eye } from "lucide-react";
 import { KnowledgeScatter2D } from "./KnowledgeScatter2D";
 import { KnowledgeScatter3D } from "./KnowledgeScatter3D";
 import { KnowledgeGraph } from "./KnowledgeGraph";
@@ -25,13 +25,19 @@ interface KnowledgeVisualizerProps {
   hasDocuments: boolean;
 }
 
-export function KnowledgeVisualizer({ orgId, hasDocuments }: KnowledgeVisualizerProps) {
+export function KnowledgeVisualizer({
+  orgId,
+  hasDocuments,
+}: KnowledgeVisualizerProps) {
   const [activeTab, setActiveTab] = useState<VizTab>("scatter2d");
 
   if (!hasDocuments) {
     return (
       <div className="mt-6 rounded-xl border border-border bg-surface p-6 text-center">
-        <GitBranch size={32} className="mx-auto mb-2 text-text-tertiary opacity-50" />
+        <GitBranch
+          size={32}
+          className="mx-auto mb-2 text-text-tertiary opacity-50"
+        />
         <p className="text-sm text-text-tertiary">
           Tải lên tài liệu trước để xem trực quan hóa
         </p>
@@ -41,13 +47,36 @@ export function KnowledgeVisualizer({ orgId, hasDocuments }: KnowledgeVisualizer
 
   return (
     <div className="mt-6">
+      <div className="mb-4 rounded-xl border border-border bg-surface/70 p-4">
+        <div className="flex items-start gap-3">
+          <Eye size={18} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+          <div>
+            <p className="text-sm font-medium text-text">
+              Mắt tri thức đã sẵn sàng.
+            </p>
+            <p className="mt-1 text-xs leading-5 text-text-secondary">
+              Wiii sẽ không tự chạy PCA/t-SNE hay đồ thị khi bạn chỉ mở tab.
+              Chọn kiểu nhìn, chỉnh tham số nếu cần, rồi bấm tạo biểu đồ để
+              tránh treo UI trên tập tài liệu lớn.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Sub-tab bar */}
-      <div className="flex items-center gap-1 border-b border-border mb-4">
+      <div
+        className="mb-4 flex items-center gap-1 overflow-x-auto border-b border-border"
+        role="tablist"
+        aria-label="Trực quan hóa tri thức"
+      >
         {TABS.map((tab) => (
           <button
             key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+            className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
               activeTab === tab.id
                 ? "border-[var(--accent)] text-[var(--accent)]"
                 : "border-transparent text-text-secondary hover:text-text hover:border-border"

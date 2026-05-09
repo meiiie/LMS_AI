@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from app.core.exceptions import ProviderUnavailableError
+from app.engine.multi_agent.direct_intent import _normalize_for_intent
 from app.engine.multi_agent.direct_node_runtime import direct_response_node_impl
 
 
@@ -22,7 +23,7 @@ def _base_direct_kwargs():
         "get_or_create_tracer": lambda *_args, **_kwargs: _DummyTracer(),
         "capture_public_thinking_event": lambda *_args, **_kwargs: None,
         "get_domain_greetings": lambda *_args, **_kwargs: {},
-        "normalize_for_intent": lambda value: str(value or "").lower(),
+        "normalize_for_intent": _normalize_for_intent,
         "looks_identity_selfhood_turn": lambda *_args, **_kwargs: True,
         "needs_web_search": lambda *_args, **_kwargs: False,
         "needs_datetime": lambda *_args, **_kwargs: False,
@@ -66,6 +67,583 @@ def _base_state():
         "routing_metadata": {"intent": "selfhood"},
         "provider": "google",
     }
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_uses_pointy_fast_path_without_llm():
+    state = _base_state()
+    state.update(
+        {
+            "query": "@wiii-pointy Chi vao nut Gui tin nhan giup minh.",
+            "routing_metadata": {
+                "method": "conservative_fast_path",
+                "intent": "host_ui_navigation",
+            },
+            "_pointy_fast_path_action": {
+                "action": "ui.highlight",
+                "target": {"id": "chat-send-button", "label": "Gửi tin nhắn"},
+                "params": {"selector": "chat-send-button", "source": "pointy_fast_path"},
+            },
+        }
+    )
+
+    with patch(
+        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+        side_effect=AssertionError("pointy fast path should not call an LLM"),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **_base_direct_kwargs(),
+        )
+
+    assert result["final_response"] == "Mình đã trỏ vào Gửi tin nhắn cho cậu thấy ngay."
+    assert result["thinking_content"]
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_uses_pointy_fast_path_even_if_router_mislabels_turn():
+    state = _base_state()
+    state.update(
+        {
+            "query": "nut gui tin nhan o dau",
+            "routing_metadata": {
+                "method": "conservative_fast_path",
+                "intent": "social",
+            },
+            "_pointy_fast_path_action": {
+                "action": "ui.highlight",
+                "target": {"id": "chat-send-button", "label": "Gui tin nhan"},
+                "params": {"selector": "chat-send-button", "source": "pointy_fast_path"},
+            },
+        }
+    )
+
+    with patch(
+        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+        side_effect=AssertionError("pointy action already resolved; LLM must not contradict it"),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **_base_direct_kwargs(),
+        )
+
+    assert result["final_response"] == "Mình đã trỏ vào Gui tin nhan cho cậu thấy ngay."
+    assert "đưa con trỏ" in result["thinking_content"]
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_handles_image_input_with_vision_before_llm():
+    async def fake_analyze_image_for_query(**kwargs):
+        assert kwargs["image_base64"] == "iVBORw0KGgo="
+        assert kwargs["media_type"] == "image/png"
+        return SimpleNamespace(success=True, text="Anh co mot bieu do mau xanh va mot vung chu thich.")
+
+    state = _base_state()
+    state.update(
+        {
+            "query": "Nhin anh nay va mo ta ngan gon giup minh",
+            "context": {
+                "response_language": "vi",
+                "user_role": "student",
+                "images": [
+                    {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "iVBORw0KGgo=",
+                    }
+                ],
+            },
+            "routing_metadata": {
+                "method": "deterministic_image_input_guard",
+                "intent": "image_input",
+            },
+        }
+    )
+
+    with (
+        patch("app.engine.vision_runtime.analyze_image_for_query", fake_analyze_image_for_query),
+        patch(
+            "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+            side_effect=AssertionError("image input preflight should not call a chat LLM"),
+        ),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **_base_direct_kwargs(),
+        )
+
+    assert "bieu do mau xanh" in result["final_response"]
+    assert result["thinking_content"]
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_uses_reasoning_safety_fast_path_without_llm():
+    state = _base_state()
+    state.update(
+        {
+            "query": (
+                "Giải thích ngắn sự khác nhau giữa visible thinking an toàn "
+                "và chain-of-thought nội bộ. Trả lời 4 bullet, không dùng công cụ."
+            ),
+            "routing_metadata": {
+                "method": "conservative_fast_path",
+                "intent": "off_topic",
+            },
+        }
+    )
+
+    with patch(
+        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+        side_effect=AssertionError("reasoning safety fast path should not call an LLM"),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **_base_direct_kwargs(),
+        )
+
+    assert "public reasoning trace" in result["final_response"]
+    assert "biết lùi lại" in result["thinking_content"]
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_uses_hunger_chatter_fast_path_without_llm():
+    state = _base_state()
+    state.update(
+        {
+            "query": "đói phết",
+            "routing_metadata": {
+                "method": "always_on_chatter_fast_path",
+                "intent": "social",
+            },
+        }
+    )
+
+    kwargs = _base_direct_kwargs()
+    kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
+
+    with patch(
+        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+        side_effect=AssertionError("hunger chatter fast path should not call an LLM"),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **kwargs,
+        )
+
+    assert "5-10 phút" in result["final_response"]
+    assert "tụt pin" in result["thinking_content"]
+    assert result["final_response"] != "(´｡• ᵕ •｡`) >_"
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_uses_self_feeling_probe_without_llm():
+    state = _base_state()
+    state.update(
+        {
+            "query": "ạn buồn không?",
+            "routing_metadata": {
+                "method": "conservative_fast_path",
+                "intent": "social",
+            },
+        }
+    )
+
+    kwargs = _base_direct_kwargs()
+    kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
+
+    with patch(
+        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+        side_effect=AssertionError("self-feeling probe should not call an LLM"),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **kwargs,
+        )
+
+    assert "không buồn theo kiểu có cơ thể" in result["final_response"]
+    assert "trầm xuống" in result["final_response"]
+    assert "không nên giả vờ" in result["thinking_content"]
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_acknowledges_session_memory_write_without_llm():
+    state = _base_state()
+    state.update(
+        {
+            "query": "Ghi nho trong phien nay: ma mau bao cao Wiii la cam lua. Ma kiem thu MEMORY-W-535.",
+            "routing_metadata": {
+                "method": "conservative_fast_path",
+                "intent": "personal",
+            },
+        }
+    )
+
+    kwargs = _base_direct_kwargs()
+    kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
+
+    with patch(
+        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+        side_effect=AssertionError("session memory write fast path should not call an LLM"),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **kwargs,
+        )
+
+    assert "cam lua" in result["final_response"]
+    assert "Ma kiem thu" not in result["final_response"]
+    assert "semantic memory" in result["thinking_content"]
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_session_memory_write_trims_instructions_and_keeps_marker():
+    state = _base_state()
+    state.update(
+        {
+            "query": (
+                "[FIELD-508R-01B] Hãy nhớ tạm trong cuộc trò chuyện này 3 neo kiểm thử: "
+                "mã \"HAI-DANG-508\", tiêu chí \"ấm nhưng không lố\", và ưu tiên "
+                "\"Pointy/Web/RAG phải đúng route\". Không dùng web, không dùng RAG, "
+                "không dùng Pointy. Trả lời tự nhiên và bắt đầu bằng đúng marker [FIELD-508R-01B]."
+            ),
+            "routing_metadata": {
+                "method": "conservative_fast_path",
+                "intent": "personal",
+            },
+        }
+    )
+
+    kwargs = _base_direct_kwargs()
+    kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
+
+    with patch(
+        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+        side_effect=AssertionError("session memory write fast path should not call an LLM"),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **kwargs,
+        )
+
+    assert result["final_response"].startswith("[FIELD-508R-01B]")
+    assert "HAI-DANG-508" in result["final_response"]
+    assert "ấm nhưng không lố" in result["final_response"]
+    assert "Pointy/Web/RAG phải đúng route" in result["final_response"]
+    assert "Không dùng web" not in result["final_response"]
+    assert "không dùng RAG" not in result["final_response"]
+    assert "Khong dung web" not in result["final_response"]
+    assert "khong dung RAG" not in result["final_response"]
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_session_recall_wins_over_write_marker():
+    state = _base_state()
+    state.update(
+        {
+            "query": (
+                "[FIELD-508R-02] Nhac lai dung 3 neo kiem thu minh vua bao ban nho "
+                "trong phien nay. Tra loi dung 3 gach dau dong, khong dung web, "
+                "khong dung RAG, khong dung Pointy, va bat dau bang marker [FIELD-508R-02]."
+            ),
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "[FIELD-508R-01C] Hay nho tam trong cuoc tro chuyen nay 3 neo kiem thu: "
+                        "ma \"HAI-DANG-508C\", tieu chi \"am nhung khong lo\", va uu tien "
+                        "\"Pointy/Web/RAG phai dung route\"."
+                    ),
+                },
+                {"role": "assistant", "content": "Da ghi nhan."},
+                {
+                    "role": "user",
+                    "content": (
+                        "[FIELD-508R-02] Nhac lai dung 3 neo kiem thu minh vua bao ban nho "
+                        "trong phien nay. Tra loi dung 3 gach dau dong, khong dung web, "
+                        "khong dung RAG, khong dung Pointy, va bat dau bang marker [FIELD-508R-02]."
+                    ),
+                },
+            ],
+            "routing_metadata": {
+                "method": "conservative_fast_path",
+                "intent": "personal",
+            },
+        }
+    )
+
+    kwargs = _base_direct_kwargs()
+    kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
+
+    with patch(
+        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+        side_effect=AssertionError("session recall fast path should not call an LLM"),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **kwargs,
+        )
+
+    assert result["final_response"].startswith("[FIELD-508R-02]")
+    assert result["final_response"].startswith("[FIELD-508R-02]\n- ")
+    assert "HAI-DANG-508C" in result["final_response"]
+    assert "am nhung khong lo" in result["final_response"]
+    assert "Pointy/Web/RAG phai dung route" in result["final_response"]
+    assert "Da ghi nhan" not in result["final_response"]
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_emergency_searches_when_provider_busy_before_tools():
+    queries = []
+
+    class FakeSearchTool:
+        name = "tool_web_search"
+
+        async def ainvoke(self, args):
+            queries.append(args.get("query"))
+            return (
+                "**OpenAI Responses API reference**\n"
+                "It documents the Responses API endpoint.\n"
+                "URL: https://developers.openai.com/api/reference/responses"
+            )
+
+    events = []
+    state = _base_state()
+    state.update(
+        {
+            "query": "Tìm trên web giúp mình: OpenAI Responses API endpoint nào?",
+            "routing_metadata": {
+                "method": "structured",
+                "intent": "web_search",
+            },
+        }
+    )
+
+    kwargs = _base_direct_kwargs()
+    kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
+    kwargs["needs_web_search"] = lambda *_args, **_kwargs: True
+    kwargs["collect_direct_tools"] = lambda *_args, **_kwargs: ([FakeSearchTool()], True)
+    kwargs["capture_public_thinking_event"] = lambda _state, event: events.append(event)
+
+    with patch(
+        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_native_llm",
+        side_effect=ProviderUnavailableError(
+            provider="nvidia",
+            reason_code="busy",
+            message="busy",
+        ),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **kwargs,
+        )
+
+    assert "developers.openai.com/api/reference/responses" in result["final_response"]
+    assert queries == [
+        "OpenAI API Reference Responses POST /v1/responses platform.openai.com"
+    ]
+    assert any(event.get("type") == "tool_call" for event in events)
+    assert any(event.get("type") == "tool_result" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_force_binds_web_search_intent_without_keyword_heuristic():
+    class FakeSearchTool:
+        name = "tool_web_search"
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_direct_tool_rounds(
+        _llm_with_tools,
+        _llm_auto,
+        _messages,
+        _tools,
+        _push_event,
+        **kwargs,
+    ):
+        captured["state_force_skills"] = list(kwargs["state"].get("force_skills") or [])
+        captured["forced_tool_choice"] = kwargs.get("forced_tool_choice")
+        return (
+            SimpleNamespace(content="Source-backed web answer", tool_calls=[]),
+            [],
+            [
+                {
+                    "type": "result",
+                    "name": "tool_web_search",
+                    "result": "URL: https://platform.openai.com/docs/api-reference/responses",
+                }
+            ],
+        )
+
+    state = _base_state()
+    state.update(
+        {
+            "query": "Tìm web từ nguồn chính thức OpenAI: Responses API endpoint là gì?",
+            "routing_metadata": {
+                "method": "conservative_fast_path",
+                "intent": "web_search",
+            },
+        }
+    )
+
+    kwargs = _base_direct_kwargs()
+    kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
+    kwargs["needs_web_search"] = lambda *_args, **_kwargs: False
+    kwargs["get_explicit_user_provider"] = lambda *_args, **_kwargs: None
+    kwargs["collect_direct_tools"] = lambda *_args, **_kwargs: ([FakeSearchTool()], False)
+    kwargs["bind_direct_tools"] = lambda llm, tools, force_tools, **_kwargs: (
+        SimpleNamespace(bound=True),
+        SimpleNamespace(auto=True),
+        "any" if force_tools else None,
+    )
+    kwargs["execute_direct_tool_rounds"] = fake_execute_direct_tool_rounds
+    kwargs["extract_direct_response"] = lambda llm_response, _messages: (
+        llm_response.content,
+        "",
+        [{"name": "tool_web_search"}],
+    )
+
+    with (
+        patch("app.engine.multi_agent.agent_config.AgentConfigRegistry.get_native_llm", return_value=None),
+        patch("app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm", return_value=object()),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **kwargs,
+        )
+
+    assert "web-search" in captured["state_force_skills"]
+    assert captured["forced_tool_choice"] == "any"
+    assert result["final_response"] == "Source-backed web answer"
+    assert result["tool_call_events"][0]["name"] == "tool_web_search"
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_emergency_searches_when_explicit_provider_times_out_before_tools():
+    queries = []
+
+    class FakeSearchTool:
+        name = "tool_web_search"
+
+        async def ainvoke(self, args):
+            queries.append(args.get("query"))
+            return (
+                "**Responses Overview | OpenAI API Reference**\n"
+                "OpenAI's most advanced interface for generating model responses.\n"
+                "URL: https://developers.openai.com/api/reference/responses/overview"
+            )
+
+    async def _raise_timeout(*_args, **_kwargs):
+        raise TimeoutError("provider timed out before tool_calls")
+
+    events = []
+    state = _base_state()
+    state.update(
+        {
+            "query": "Tìm trên web giúp mình: OpenAI Responses API endpoint nào?",
+            "routing_metadata": {
+                "method": "conservative_fast_path",
+                "intent": "web_search",
+            },
+            "provider": "nvidia",
+        }
+    )
+
+    kwargs = _base_direct_kwargs()
+    kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
+    kwargs["needs_web_search"] = lambda *_args, **_kwargs: True
+    kwargs["collect_direct_tools"] = lambda *_args, **_kwargs: ([FakeSearchTool()], True)
+    kwargs["bind_direct_tools"] = lambda llm, tools, *_args, **_kwargs: (llm, llm, "any")
+    kwargs["execute_direct_tool_rounds"] = _raise_timeout
+    kwargs["capture_public_thinking_event"] = lambda _state, event: events.append(event)
+
+    with (
+        patch("app.engine.multi_agent.agent_config.AgentConfigRegistry.get_native_llm", return_value=None),
+        patch("app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm", return_value=object()),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **kwargs,
+        )
+
+    assert "`POST https://api.openai.com/v1/responses`" in result["final_response"]
+    assert "developers.openai.com/api/reference/responses/overview" in result["final_response"]
+    assert queries == [
+        "OpenAI API Reference Responses POST /v1/responses platform.openai.com"
+    ]
+    assert any(event.get("type") == "tool_call" for event in events)
+    assert any(event.get("type") == "tool_result" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_uses_capability_inventory_without_llm():
+    state = _base_state()
+    state.update(
+        {
+            "query": "Wiii có xử lý được ảnh đầu vào không, tạo ảnh, xử lý file Word, Excel, video?",
+            "routing_metadata": {
+                "method": "conservative_fast_path",
+                "intent": "off_topic",
+            },
+        }
+    )
+
+    kwargs = _base_direct_kwargs()
+    kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
+
+    with patch(
+        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+        side_effect=AssertionError("capability inventory should not call an LLM"),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **kwargs,
+        )
+
+    assert "tối đa 5 ảnh" in result["final_response"]
+    assert ".docx" in result["final_response"]
+    assert ".xlsx" in result["final_response"]
+    assert "chưa nên hứa" in result["final_response"]
+    assert "sự thật hơn là quảng cáo" in result["thinking_content"]
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_uses_single_value_session_recall_fast_path_without_llm():
+    state = _base_state()
+    state.update(
+        {
+            "query": "Minh vua bao ban nho ma kiem thu UX nao?",
+            "routing_metadata": {
+                "method": "conservative_fast_path",
+                "intent": "personal",
+            },
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "Trong phiên này, hãy nhớ mã kiểm thử UX hôm nay là "
+                        "mỏ neo xanh 507 và ưu tiên Thinking dài có ý nghĩa. "
+                        "Trả lời chỉ: Đã ghi nhận."
+                    ),
+                },
+                {"role": "assistant", "content": "Đã ghi nhận."},
+            ],
+        }
+    )
+
+    kwargs = _base_direct_kwargs()
+    kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
+
+    with patch(
+        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+        side_effect=AssertionError("session recall fast path should not call an LLM"),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **kwargs,
+    )
+
+    assert result["final_response"] == "mỏ neo xanh 507"
+    assert "đọc lịch sử gần nhất" in result["thinking_content"]
 
 
 @pytest.mark.asyncio

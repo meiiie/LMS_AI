@@ -14,6 +14,7 @@ Tables:
 """
 
 import logging
+import time
 from typing import List, Optional
 
 from sqlalchemy import text
@@ -29,6 +30,8 @@ from app.engine.character.models import (
 
 logger = logging.getLogger(__name__)
 
+_DB_RETRY_COOLDOWN_SECONDS = 30.0
+
 
 class CharacterRepository:
     """Repository for Wiii's character state (blocks + experiences)."""
@@ -40,6 +43,51 @@ class CharacterRepository:
         self._engine = None
         self._session_factory = None
         self._initialized = False
+        self._unavailable_until = 0.0
+        self._last_unavailable_log_at = 0.0
+
+    def _is_temporarily_unavailable(self) -> bool:
+        try:
+            from app.core.database import is_shared_database_temporarily_unavailable
+
+            if is_shared_database_temporarily_unavailable():
+                return True
+        except Exception:
+            pass
+        return time.monotonic() < self._unavailable_until
+
+    def _mark_unavailable(self, exc: Exception | str) -> None:
+        now = time.monotonic()
+        self._unavailable_until = max(
+            self._unavailable_until,
+            now + _DB_RETRY_COOLDOWN_SECONDS,
+        )
+        try:
+            from app.core.database import mark_shared_database_unavailable
+
+            mark_shared_database_unavailable(
+                exc,
+                cooldown_seconds=_DB_RETRY_COOLDOWN_SECONDS,
+            )
+        except Exception:
+            pass
+        if now - self._last_unavailable_log_at > 15:
+            logger.warning(
+                "CharacterRepository DB temporarily unavailable; using empty living state for %.0fs: %s",
+                _DB_RETRY_COOLDOWN_SECONDS,
+                exc,
+            )
+            self._last_unavailable_log_at = now
+
+    def is_available(self) -> bool:
+        """Best-effort availability signal without forcing a live DB round-trip."""
+        return bool(self._session_factory) and not self._is_temporarily_unavailable()
+
+    def _can_query(self) -> bool:
+        if self._is_temporarily_unavailable():
+            return False
+        self._ensure_initialized()
+        return bool(self._session_factory) and not self._is_temporarily_unavailable()
 
     def _ensure_initialized(self) -> None:
         """Lazy init — load shared engine on first use."""
@@ -53,6 +101,7 @@ class CharacterRepository:
             logger.info("CharacterRepository initialized with shared engine")
         except Exception as e:
             logger.warning("CharacterRepository init failed (DB may not be running): %s", e)
+            self._mark_unavailable(e)
 
     # =========================================================================
     # CHARACTER BLOCKS — CRUD
@@ -64,8 +113,7 @@ class CharacterRepository:
         Args:
             user_id: User ID to filter by. Defaults to '__global__' for backward compat.
         """
-        self._ensure_initialized()
-        if not self._session_factory:
+        if not self._can_query():
             return []
 
         # Sprint 160b: Org-scoped filtering
@@ -105,6 +153,7 @@ class CharacterRepository:
                 ]
         except Exception as e:
             logger.error("Failed to get character blocks for user '%s': %s", user_id, e)
+            self._mark_unavailable(e)
             return []
 
     def get_block(self, label: str, user_id: str = "__global__") -> Optional[CharacterBlock]:
@@ -114,8 +163,7 @@ class CharacterRepository:
             label: Block label (learned_lessons, etc.)
             user_id: User ID to filter by. Defaults to '__global__'.
         """
-        self._ensure_initialized()
-        if not self._session_factory:
+        if not self._can_query():
             return None
 
         # Sprint 160b: Org-scoped filtering
@@ -153,6 +201,7 @@ class CharacterRepository:
                 )
         except Exception as e:
             logger.error("Failed to get block '%s' for user '%s': %s", label, user_id, e)
+            self._mark_unavailable(e)
             return None
 
     def create_block(self, create: CharacterBlockCreate, user_id: str = "__global__") -> Optional[CharacterBlock]:
@@ -162,8 +211,7 @@ class CharacterRepository:
             create: Block creation schema
             user_id: User ID. Defaults to '__global__'.
         """
-        self._ensure_initialized()
-        if not self._session_factory:
+        if not self._can_query():
             return None
 
         # Sprint 160b: Org-scoped filtering
@@ -216,6 +264,7 @@ class CharacterRepository:
                     )
         except Exception as e:
             logger.error("Failed to create block '%s' for user '%s': %s", create.label, user_id, e)
+            self._mark_unavailable(e)
         return None
 
     def update_block(
@@ -233,8 +282,7 @@ class CharacterRepository:
             expected_version: If set, only update if current version matches
             user_id: User ID to scope the update. Defaults to '__global__'.
         """
-        self._ensure_initialized()
-        if not self._session_factory:
+        if not self._can_query():
             return None
 
         # Sprint 160b: Org-scoped filtering
@@ -316,6 +364,7 @@ class CharacterRepository:
                     )
         except Exception as e:
             logger.error("Failed to update block '%s' for user '%s': %s", label, user_id, e)
+            self._mark_unavailable(e)
         return None
 
     # =========================================================================
@@ -324,8 +373,7 @@ class CharacterRepository:
 
     def log_experience(self, create: CharacterExperienceCreate) -> Optional[CharacterExperience]:
         """Log a new experience event."""
-        self._ensure_initialized()
-        if not self._session_factory:
+        if not self._can_query():
             return None
 
         # Sprint 160b: Org-scoped filtering
@@ -372,6 +420,7 @@ class CharacterRepository:
                     )
         except Exception as e:
             logger.error("Failed to log experience: %s", e)
+            self._mark_unavailable(e)
         return None
 
     def get_recent_experiences(
@@ -384,8 +433,7 @@ class CharacterRepository:
 
         Sprint 125: Added user_id filter for per-user isolation.
         """
-        self._ensure_initialized()
-        if not self._session_factory:
+        if not self._can_query():
             return []
 
         # Sprint 160b: Org-scoped filtering
@@ -439,12 +487,12 @@ class CharacterRepository:
                 ]
         except Exception as e:
             logger.error("Failed to get experiences: %s", e)
+            self._mark_unavailable(e)
             return []
 
     def count_experiences(self) -> int:
         """Count total logged experiences."""
-        self._ensure_initialized()
-        if not self._session_factory:
+        if not self._can_query():
             return 0
 
         # Sprint 160b: Org-scoped filtering
@@ -466,6 +514,7 @@ class CharacterRepository:
                 return result.scalar() or 0
         except Exception as e:
             logger.error("Failed to count experiences: %s", e)
+            self._mark_unavailable(e)
             return 0
 
     def cleanup_old_experiences(
@@ -488,8 +537,7 @@ class CharacterRepository:
         Returns:
             Number of deleted experiences
         """
-        self._ensure_initialized()
-        if not self._session_factory:
+        if not self._can_query():
             return 0
 
         # Sprint 160b: Org-scoped filtering
@@ -547,6 +595,7 @@ class CharacterRepository:
 
         except Exception as e:
             logger.error("Failed to cleanup old experiences: %s", e)
+            self._mark_unavailable(e)
             return 0
 
 

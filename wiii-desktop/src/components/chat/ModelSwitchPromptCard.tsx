@@ -35,7 +35,11 @@ export function ModelSwitchPromptCard({
   } = useModelStore();
   const { addToast } = useToastStore();
   const prompt = useMemo(
-    () => resolveModelSwitchPrompt(metadata as Record<string, unknown> | undefined, providers),
+    () =>
+      resolveModelSwitchPrompt(
+        metadata as Record<string, unknown> | undefined,
+        providers,
+      ),
     [metadata, providers],
   );
 
@@ -51,24 +55,29 @@ export function ModelSwitchPromptCard({
 
   const handleRetryOnce = (provider: RequestModelProvider, label: string) => {
     setNextTurnProvider(provider);
-    addToast("info", `Wiii se thu lai luot nay bang ${label}.`, 3500);
+    addToast("info", `Wiii sẽ thử lại lượt này bằng ${label}.`, 3500);
     onRetryOnce?.();
   };
 
-  const handleSessionSwitch = (provider: RequestModelProvider, label: string) => {
+  const handleSessionSwitch = (
+    provider: RequestModelProvider,
+    label: string,
+  ) => {
     setActiveProvider(provider);
-    addToast("success", `Wiii se uu tien ${label} cho cac luot sau.`, 3500);
+    addToast("success", `Wiii sẽ ưu tiên ${label} cho các lượt sau.`, 3500);
   };
 
   return (
     <div className="mt-3 rounded-2xl border border-border bg-surface-secondary/65 px-3.5 py-3">
       <div className="text-sm font-medium text-text">{prompt.title}</div>
-      <p className="mt-1 text-xs leading-6 text-text-secondary">{prompt.message}</p>
+      <p className="mt-1 text-xs leading-6 text-text-secondary">
+        {prompt.message}
+      </p>
 
       {prompt.allow_retry_once && onRetryOnce ? (
         <div className="mt-3">
           <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-text-tertiary">
-            Thu cho luot nay
+            Thử cho lượt này
           </div>
           <div className="flex flex-wrap gap-2">
             {prompt.options.map((option) => (
@@ -77,7 +86,7 @@ export function ModelSwitchPromptCard({
                 type="button"
                 onClick={() => handleRetryOnce(option.provider, option.label)}
                 className={buttonClass("retry")}
-                aria-label={`Thu luot nay bang ${option.label}`}
+                aria-label={`Thử lượt này bằng ${option.label}`}
               >
                 <RotateCcw size={13} />
                 <span>{option.label}</span>
@@ -90,7 +99,7 @@ export function ModelSwitchPromptCard({
       {prompt.allow_session_switch ? (
         <div className="mt-3">
           <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-text-tertiary">
-            Giu cho ca phien
+            Giữ cho cả phiên
           </div>
           <div className="flex flex-wrap gap-2">
             {prompt.options.map((option) => {
@@ -100,16 +109,20 @@ export function ModelSwitchPromptCard({
                   key={`session-${option.provider}`}
                   type="button"
                   disabled={isActive}
-                  onClick={() => handleSessionSwitch(option.provider, option.label)}
+                  onClick={() =>
+                    handleSessionSwitch(option.provider, option.label)
+                  }
                   className={buttonClass("session", isActive)}
                   aria-label={
                     isActive
-                      ? `${option.label} dang duoc dung`
-                      : `Dung ${option.label} cho ca phien`
+                      ? `${option.label} đang được dùng`
+                      : `Dùng ${option.label} cho cả phiên`
                   }
                 >
                   <ArrowRightLeft size={13} />
-                  <span>{isActive ? `${option.label} dang duoc dung` : option.label}</span>
+                  <span>
+                    {isActive ? `${option.label} đang được dùng` : option.label}
+                  </span>
                 </button>
               );
             })}

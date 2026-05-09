@@ -80,6 +80,18 @@ class TestLivingAgentAPI:
         assert state.energy_level == 0.9
         assert state.last_updated is None
 
+    def test_emotional_state_returns_safe_default_when_disabled(self):
+        """Status panels can poll emotional state without noisy 404s when disabled."""
+        with patch("app.core.config.settings") as mock_settings:
+            mock_settings.enable_living_agent = False
+
+            from app.api.v1.living_agent_runtime import get_emotional_state_response
+
+            state = get_emotional_state_response()
+
+        assert state.primary_mood == "neutral"
+        assert state.mood_label == "bình thường"
+
     def test_journal_entry_response_model(self):
         """JournalEntryResponse validates correctly."""
         from app.api.v1.living_agent import JournalEntryResponse

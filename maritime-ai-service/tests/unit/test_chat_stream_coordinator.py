@@ -121,6 +121,130 @@ async def test_generate_stream_v3_events_finalizes_answer_after_stream():
         ]
         == "stream"
     )
+    assert (
+        orchestrator.finalize_response_turn.call_args.kwargs[
+            "save_response_immediately"
+        ]
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_v3_events_bypasses_context_build_for_pointy_highlight():
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "maritime"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name="Minh"),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(
+        side_effect=AssertionError("pointy highlight should not build full context")
+    )
+    orchestrator.finalize_response_turn = MagicMock()
+
+    request = _make_request(
+        message="Pointy hãy chỉ vào nút Gửi tin nhắn.",
+        user_context=SimpleNamespace(
+            host_context={
+                "page": {
+                    "metadata": {
+                        "available_targets": [
+                            {
+                                "id": "chat-send-button",
+                                "selector": '[data-wiii-id="chat-send-button"]',
+                                "label": "Gửi tin nhắn",
+                                "visible": True,
+                                "click_safe": False,
+                            }
+                        ]
+                    }
+                }
+            },
+            page_context=None,
+            host_action_feedback=None,
+        ),
+    )
+
+    chunks = []
+    async for chunk in generate_stream_v3_events(
+        chat_request=request,
+        request_headers={},
+        background_save=MagicMock(),
+        start_time=time.time(),
+        orchestrator=orchestrator,
+    ):
+        chunks.append(chunk)
+
+    assert any("event: pointy_action" in chunk for chunk in chunks)
+    assert any("event: answer" in chunk for chunk in chunks)
+    assert any("event: done" in chunk for chunk in chunks)
+    assert any("v3-pointy_fast_path" in chunk for chunk in chunks)
+    orchestrator.build_multi_agent_execution_input.assert_not_called()
+    orchestrator.finalize_response_turn.assert_called_once()
+    assert (
+        orchestrator.finalize_response_turn.call_args.kwargs["current_agent"]
+        == "pointy_fast_path"
+    )
+    assert (
+        orchestrator.finalize_response_turn.call_args.kwargs[
+            "include_lms_insights"
+        ]
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_v3_events_forwards_metadata_agent_to_finalize():
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "maritime"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name=None),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(return_value=(
+        SimpleNamespace(
+            query="Remember this",
+            user_id="user-1",
+            session_id="session-1",
+            context={"conversation_history": ""},
+            domain_id="maritime",
+            thinking_effort=None,
+            provider=None,
+        )
+    ))
+
+    async def fake_stream_fn(**kwargs):
+        yield SimpleNamespace(type="answer", content="Saved.")
+        yield SimpleNamespace(
+            type="metadata",
+            content={
+                "agent_type": "memory_agent",
+                "routing_metadata": {"final_agent": "memory_agent"},
+            },
+        )
+        yield SimpleNamespace(type="done", content={"processing_time": 0.2})
+
+    chunks = []
+    async for chunk in generate_stream_v3_events(
+        chat_request=_make_request(message="Remember this"),
+        request_headers={},
+        background_save=MagicMock(),
+        start_time=0.0,
+        orchestrator=orchestrator,
+        stream_fn=fake_stream_fn,
+    ):
+        chunks.append(chunk)
+
+    assert any("event: metadata" in chunk for chunk in chunks)
+    orchestrator.finalize_response_turn.assert_called_once()
+    assert (
+        orchestrator.finalize_response_turn.call_args.kwargs["current_agent"]
+        == "memory_agent"
+    )
 
 
 @pytest.mark.asyncio
@@ -693,3 +817,336 @@ async def test_generate_stream_v3_events_emits_model_switch_prompt_for_unavailab
     assert "event: error" in joined
     assert '"model_switch_prompt"' in joined
     assert '"recommended_provider"' in joined
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_v3_events_defers_provider_gate_for_uploaded_context():
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "maritime"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name="Minh"),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(
+        return_value=SimpleNamespace(
+            query="Video nay dai bao lau?",
+            user_id="user-1",
+            session_id="session-1",
+            context={"conversation_history": ""},
+            domain_id="maritime",
+            thinking_effort=None,
+            provider="google",
+            model=None,
+        )
+    )
+
+    async def fake_stream_fn(**kwargs):
+        assert kwargs["provider"] == "google"
+        yield SimpleNamespace(type="answer", content="Video dai khoang 4 giay.")
+        yield SimpleNamespace(type="done", content={"processing_time": 0.1})
+
+    request = _make_request(
+        provider="google",
+        message="Video nay dai bao lau?",
+        user_context=SimpleNamespace(
+            document_context={
+                "source": "desktop_upload",
+                "attachments": [
+                    {
+                        "file_name": "lesson.mp4",
+                        "media_kind": "video",
+                        "markdown": "# Video Context\n\n- Duration: 0:04 (4.20s)",
+                    }
+                ],
+            },
+            host_context=None,
+            page_context=None,
+            host_action_feedback=None,
+        ),
+    )
+
+    chunks = []
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "app.services.llm_selectability_service.ensure_provider_is_selectable",
+            lambda _provider: (_ for _ in ()).throw(
+                ProviderUnavailableError(
+                    provider="google",
+                    reason_code="verifying",
+                    message="Provider dang duoc xac minh.",
+                )
+            ),
+        )
+        async for chunk in generate_stream_v3_events(
+            chat_request=request,
+            request_headers={},
+            background_save=MagicMock(),
+            start_time=0.0,
+            orchestrator=orchestrator,
+            stream_fn=fake_stream_fn,
+        ):
+            chunks.append(chunk)
+
+    joined = "\n".join(chunks)
+    assert "event: error" not in joined
+    assert "Video dai khoang 4 giay." in joined
+    assert request.provider == "auto"
+    orchestrator.build_multi_agent_execution_input.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_v3_events_emits_context_thinking_before_answer_for_uploaded_context():
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "maritime"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name="Minh"),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(
+        return_value=SimpleNamespace(
+            query="Tom tat tai lieu upload",
+            user_id="user-1",
+            session_id="session-1",
+            context={"document_context": {"attachments": [{"markdown": "# Brief"}]}},
+            domain_id="maritime",
+            thinking_effort=None,
+            provider=None,
+            model=None,
+        )
+    )
+
+    async def fake_stream_fn(**_kwargs):
+        yield SimpleNamespace(type="answer", content="Tai lieu noi ve Wiii.")
+        yield SimpleNamespace(type="done", content={"processing_time": 0.1})
+
+    request = _make_request(
+        message="Tom tat tai lieu upload",
+        user_context=SimpleNamespace(
+            document_context={
+                "source": "desktop_upload",
+                "attachments": [
+                    {
+                        "file_name": "brief.md",
+                        "media_kind": "document",
+                        "markdown": "# Brief\n\nPointy can quet DOM truoc.",
+                    }
+                ],
+            },
+            host_context=None,
+            page_context=None,
+            host_action_feedback=None,
+        ),
+    )
+
+    chunks = []
+    async for chunk in generate_stream_v3_events(
+        chat_request=request,
+        request_headers={},
+        background_save=MagicMock(),
+        start_time=0.0,
+        orchestrator=orchestrator,
+        stream_fn=fake_stream_fn,
+    ):
+        chunks.append(chunk)
+
+    thinking_start_index = next(
+        index for index, chunk in enumerate(chunks) if "event: thinking_start" in chunk
+    )
+    thinking_delta_index = next(
+        index for index, chunk in enumerate(chunks) if "event: thinking_delta" in chunk
+    )
+    answer_index = next(
+        index for index, chunk in enumerate(chunks) if "event: answer" in chunk
+    )
+    joined = "\n".join(chunks)
+    assert thinking_start_index < thinking_delta_index < answer_index
+    assert "Wiii đang đọc bối cảnh đính kèm" in joined
+    assert "tài liệu đính kèm" in joined
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_v3_events_suppresses_late_duplicate_context_thinking():
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "maritime"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name="Minh"),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(
+        return_value=SimpleNamespace(
+            query="Tom tat tai lieu upload",
+            user_id="user-1",
+            session_id="session-1",
+            context={"document_context": {"attachments": [{"markdown": "# Brief"}]}},
+            domain_id="maritime",
+            thinking_effort=None,
+            provider=None,
+            model=None,
+        )
+    )
+
+    async def fake_stream_fn(**_kwargs):
+        yield SimpleNamespace(type="answer", content="Tai lieu noi ve Wiii.")
+        yield SimpleNamespace(type="thinking_start", content="Late", node="direct")
+        yield SimpleNamespace(type="thinking_delta", content="Late duplicate", node="direct")
+        yield SimpleNamespace(type="thinking_end", content="", node="direct")
+        yield SimpleNamespace(type="done", content={"processing_time": 0.1})
+
+    request = _make_request(
+        message="Tom tat tai lieu upload",
+        user_context=SimpleNamespace(
+            document_context={
+                "source": "desktop_upload",
+                "attachments": [
+                    {
+                        "file_name": "brief.md",
+                        "media_kind": "document",
+                        "markdown": "# Brief\n\nPointy can quet DOM truoc.",
+                    }
+                ],
+            },
+            host_context=None,
+            page_context=None,
+            host_action_feedback=None,
+        ),
+    )
+
+    chunks = []
+    async for chunk in generate_stream_v3_events(
+        chat_request=request,
+        request_headers={},
+        background_save=MagicMock(),
+        start_time=0.0,
+        orchestrator=orchestrator,
+        stream_fn=fake_stream_fn,
+    ):
+        chunks.append(chunk)
+
+    joined = "\n".join(chunks)
+    assert joined.count("event: thinking_start") == 1
+    assert joined.count("event: thinking_delta") == 1
+    assert "Late duplicate" not in joined
+    assert "Tai lieu noi ve Wiii." in joined
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_v3_events_suppresses_pre_answer_duplicate_image_thinking():
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "maritime"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name="Minh"),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(
+        return_value=SimpleNamespace(
+            query="Anh nay co gi?",
+            user_id="user-1",
+            session_id="session-1",
+            context={"images": [{"type": "base64", "data": "abc"}]},
+            domain_id="maritime",
+            thinking_effort=None,
+            provider="auto",
+            model=None,
+        )
+    )
+
+    async def fake_stream_fn(**_kwargs):
+        yield SimpleNamespace(type="thinking_start", content="Runtime vision", node="direct")
+        yield SimpleNamespace(type="thinking_delta", content="Runtime duplicate", node="direct")
+        yield SimpleNamespace(type="thinking_end", content="", node="direct")
+        yield SimpleNamespace(type="answer", content="Da nhan anh.")
+        yield SimpleNamespace(type="done", content={"processing_time": 0.1})
+
+    request = _make_request(
+        message="Anh nay co gi?",
+        images=[{"type": "base64", "data": "abc", "media_type": "image/png"}],
+    )
+
+    chunks = []
+    async for chunk in generate_stream_v3_events(
+        chat_request=request,
+        request_headers={},
+        background_save=MagicMock(),
+        start_time=0.0,
+        orchestrator=orchestrator,
+        stream_fn=fake_stream_fn,
+    ):
+        chunks.append(chunk)
+
+    joined = "\n".join(chunks)
+    assert joined.count("event: thinking_start") == 1
+    assert joined.count("event: thinking_delta") == 1
+    assert "ảnh đính kèm" in joined
+    assert "Runtime duplicate" not in joined
+    assert "Da nhan anh." in joined
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_v3_events_defers_provider_gate_for_image_input():
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "maritime"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name="Minh"),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(
+        return_value=SimpleNamespace(
+            query="Anh nay co gi?",
+            user_id="user-1",
+            session_id="session-1",
+            context={"images": [{"type": "base64", "data": "abc"}]},
+            domain_id="maritime",
+            thinking_effort=None,
+            provider="auto",
+            model=None,
+        )
+    )
+
+    async def fake_stream_fn(**kwargs):
+        assert kwargs["provider"] == "auto"
+        yield SimpleNamespace(type="answer", content="Vision runtime chua san sang.")
+        yield SimpleNamespace(type="done", content={"processing_time": 0.1})
+
+    request = _make_request(
+        provider="google",
+        message="Anh nay co gi?",
+        images=[{"type": "base64", "data": "abc", "media_type": "image/png"}],
+    )
+
+    chunks = []
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "app.services.llm_selectability_service.ensure_provider_is_selectable",
+            lambda _provider: (_ for _ in ()).throw(
+                ProviderUnavailableError(
+                    provider="google",
+                    reason_code="verifying",
+                    message="Provider dang duoc xac minh.",
+                )
+            ),
+        )
+        async for chunk in generate_stream_v3_events(
+            chat_request=request,
+            request_headers={},
+            background_save=MagicMock(),
+            start_time=0.0,
+            orchestrator=orchestrator,
+            stream_fn=fake_stream_fn,
+        ):
+            chunks.append(chunk)
+
+    joined = "\n".join(chunks)
+    assert "event: error" not in joined
+    assert "Vision runtime chua san sang." in joined
+    assert request.provider == "auto"
+    assert orchestrator.build_multi_agent_execution_input.call_args.kwargs["provider"] == "auto"

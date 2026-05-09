@@ -9,15 +9,57 @@ from app.engine.llm_providers.wiii_chat_model import _ViSpaceInjector
 
 # ── Soul Emotion Tag Stripper ──────────────────────────────────────────────
 # LLM sometimes emits <!--WIII_SOUL:...--> or <!-- WIII_SOUL:...--> tags
-# that must NEVER reach the frontend as visible text. Strip at SSE layer
-# as a safety net regardless of upstream extraction.
-_SOUL_TAG_RE = re.compile(r"<!--\s*WIII_SOUL:.*?-->", re.DOTALL)
+# that must NEVER reach the frontend as visible text. Some markdown/HTML
+# surfaces can also expose malformed variants such as <! --WIII_SOUL:...-->.
+# Strip them at the SSE layer as a safety net regardless of upstream extraction.
+_SOUL_TAG_RE = re.compile(
+    r"(?:<\s*!\s*--|&lt;\s*!\s*--)\s*WIII_SOUL\s*:.*?(?:--\s*>|--\s*&gt;)",
+    re.DOTALL | re.IGNORECASE,
+)
+_SOUL_TAG_AT_START_RE = re.compile(
+    r"^\s*(?:<\s*!\s*--|&lt;\s*!\s*--)\s*WIII_SOUL\s*:",
+    re.IGNORECASE,
+)
+_SOUL_TAG_OPEN_RE = re.compile(
+    r"(?:<\s*!\s*--|&lt;\s*!\s*--)\s*WIII_SOUL\s*:",
+    re.IGNORECASE,
+)
+_SOUL_TAG_PREFIXES = ("<!--wiii_soul:", "&lt;!--wiii_soul:")
+
+
+def _compact_soul_prefix(text: str) -> str:
+    return re.sub(r"\s+", "", text).lower()
+
+
+def _find_incomplete_soul_tag_start(text: str) -> int | None:
+    open_match = _SOUL_TAG_OPEN_RE.search(text)
+    if open_match:
+        return open_match.start()
+
+    # Hold only a tiny trailing prefix that could become a soul tag in the
+    # next token. If it is normal prose (for example "<b"), the next pass will
+    # release it because it no longer matches these prefixes.
+    scan_start = max(0, len(text) - 32)
+    for index in range(scan_start, len(text)):
+        compact_tail = _compact_soul_prefix(text[index:])
+        if compact_tail and any(
+            prefix.startswith(compact_tail) for prefix in _SOUL_TAG_PREFIXES
+        ):
+            return index
+    return None
 
 
 def _strip_soul_tags(text: str) -> str:
-    if not text or "WIII_SOUL" not in text:
+    if not text or "WIII_SOUL" not in text.upper():
         return text
-    return _SOUL_TAG_RE.sub("", text).lstrip()
+    starts_with_internal_tag = bool(_SOUL_TAG_AT_START_RE.search(text))
+    cleaned = _SOUL_TAG_RE.sub("", text)
+    incomplete_start = _find_incomplete_soul_tag_start(cleaned)
+    if incomplete_start is not None:
+        cleaned = cleaned[:incomplete_start]
+    if starts_with_internal_tag:
+        cleaned = cleaned.lstrip()
+    return cleaned
 
 # ── Unified Zombie Phrase Filter (Expert Review P1) ──────────────────────
 # Single source of truth for zombie phrase filtering at SSE presentation
@@ -56,6 +98,7 @@ DISPLAY_ROLE_BY_EVENT: dict[str, str] = {
     "tool_call": "tool",
     "tool_result": "tool",
     "host_action": "tool",
+    "pointy_action": "tool",
     "guided_tutor_proposal": "action",
     "browser_screenshot": "tool",
     "preview": "tool",
@@ -80,6 +123,7 @@ PRESENTATION_BY_EVENT: dict[str, str] = {
     "tool_call": "technical",
     "tool_result": "technical",
     "host_action": "technical",
+    "pointy_action": "compact",
     "guided_tutor_proposal": "compact",
     "browser_screenshot": "technical",
     "preview": "compact",
@@ -108,6 +152,7 @@ class StreamPresentationState:
 
     active_step_by_node: dict[str, str] = field(default_factory=dict)
     last_step_id: str | None = None
+    answer_control_buffer: str = ""
     _vi_thinking: _ViSpaceInjector = field(default_factory=_ViSpaceInjector)
     _vi_answer: _ViSpaceInjector = field(default_factory=_ViSpaceInjector)
 
@@ -157,6 +202,23 @@ class StreamPresentationState:
         if step_id:
             self.last_step_id = step_id
         return step_id
+
+    def strip_answer_delta_control_tags(self, content: str) -> str:
+        """Remove internal control tags even when they span SSE deltas."""
+        combined = f"{self.answer_control_buffer}{content or ''}"
+        self.answer_control_buffer = ""
+        if not combined:
+            return ""
+
+        starts_with_internal_tag = bool(_SOUL_TAG_AT_START_RE.search(combined))
+        cleaned = _SOUL_TAG_RE.sub("", combined)
+        incomplete_start = _find_incomplete_soul_tag_start(cleaned)
+        if incomplete_start is not None:
+            self.answer_control_buffer = cleaned[incomplete_start:]
+            cleaned = cleaned[:incomplete_start]
+        if starts_with_internal_tag:
+            cleaned = cleaned.lstrip()
+        return cleaned
 
 
 def _step_state_for_event(event_type: str) -> str | None:
@@ -377,7 +439,35 @@ def serialize_stream_event(
         )
         return [format_sse("answer", data, event_id=event_counter)], event_counter, False
 
-    if event_type in {"tool_call", "tool_result", "host_action", "guided_tutor_proposal"}:
+    # Sprint 35e follow-up: also strip the soul tag from streaming chunks.
+    # When the LLM begins its reply with ``<!--WIII_SOUL:...-->`` the first
+    # ``answer_delta`` chunk carries the comment opener; without this guard
+    # the SPA renders the raw HTML comment until the closing ``-->`` lands.
+    if event_type == "answer_delta":
+        if presentation_state:
+            delta_content = presentation_state.strip_answer_delta_control_tags(
+                event.content or ""
+            )
+        else:
+            delta_content = _strip_soul_tags(event.content or "")
+        if not delta_content:
+            return [], event_counter, False
+        data = _apply_presentation_metadata(
+            payload={"content": delta_content, "node": getattr(event, "node", None)},
+            event_type=event_type,
+            event_counter=event_counter,
+            event=event,
+            presentation_state=presentation_state,
+        )
+        return [format_sse("answer_delta", data, event_id=event_counter)], event_counter, False
+
+    if event_type in {"tool_call", "tool_result", "host_action", "pointy_action", "guided_tutor_proposal"}:
+        # v3.0 F6 (2026-05-06): pointy_action MUST be in this allowlist.
+        # Without it, presenter falls through to default-drop branch and
+        # the event NEVER reaches the SSE wire — frontend onPointyAction
+        # never fires even though backend yielded the event correctly.
+        # This was the root cause of "tool dispatched but cursor doesn't
+        # move" symptom user hit 2026-05-06.
         data = _apply_presentation_metadata(
             payload={
                 "content": event.content,

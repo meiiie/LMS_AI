@@ -64,7 +64,14 @@ import {
   loadFacebookCookie,
 } from "@/lib/secure-token-storage";
 
-type Tab = "connection" | "profile" | "preferences" | "memory" | "context" | "organization" | "living-agent";
+type Tab =
+  | "connection"
+  | "profile"
+  | "preferences"
+  | "memory"
+  | "context"
+  | "organization"
+  | "living-agent";
 
 export function SettingsPage() {
   const { settings, updateSettings, resetSettings } = useSettingsStore();
@@ -86,7 +93,7 @@ export function SettingsPage() {
   useEffect(() => {
     if (dialogRef.current) {
       const firstFocusable = dialogRef.current.querySelector<HTMLElement>(
-        'button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        'button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
       );
       firstFocusable?.focus();
     }
@@ -101,7 +108,7 @@ export function SettingsPage() {
       }
       if (e.key === "Tab" && dialogRef.current) {
         const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-          'button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          'button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
         );
         if (focusable.length === 0) return;
         const first = focusable[0];
@@ -128,9 +135,13 @@ export function SettingsPage() {
   });
   // Load facebook cookie from secure storage on mount
   useEffect(() => {
-    loadFacebookCookie().then((cookie) => {
-      if (cookie) setDraft((d) => ({ ...d, facebook_cookie: cookie }));
-    }).catch(() => { /* ignore */ });
+    loadFacebookCookie()
+      .then((cookie) => {
+        if (cookie) setDraft((d) => ({ ...d, facebook_cookie: cookie }));
+      })
+      .catch(() => {
+        /* ignore */
+      });
   }, []);
 
   const handleTestConnection = async () => {
@@ -138,13 +149,14 @@ export function SettingsPage() {
     setTestMessage("");
 
     try {
-      const authHeaders = authMode === "oauth"
-        ? useSettingsStore.getState().getAuthHeaders()
-        : {
-            "X-API-Key": draft.api_key,
-            "X-User-ID": settings.user_id,
-            "X-Role": settings.user_role,
-          };
+      const authHeaders =
+        authMode === "oauth"
+          ? useSettingsStore.getState().getAuthHeaders()
+          : {
+              "X-API-Key": draft.api_key,
+              "X-User-ID": settings.user_id,
+              "X-Role": settings.user_role,
+            };
       // Temporarily init client with draft values to test
       initClient(draft.server_url, authHeaders);
 
@@ -157,7 +169,7 @@ export function SettingsPage() {
       } else {
         setTestStatus("error");
         setTestMessage(
-          useConnectionStore.getState().errorMessage || "Không thể kết nối"
+          useConnectionStore.getState().errorMessage || "Không thể kết nối",
         );
       }
     } catch {
@@ -169,7 +181,11 @@ export function SettingsPage() {
   const handleSaveConnection = async () => {
     // Sprint 194b (H5): Save facebook_cookie to secure storage, not settings
     if (draft.facebook_cookie) {
-      try { await storeFacebookCookie(draft.facebook_cookie); } catch { /* ignore */ }
+      try {
+        await storeFacebookCookie(draft.facebook_cookie);
+      } catch {
+        /* ignore */
+      }
     }
     await updateSettings({
       server_url: draft.server_url,
@@ -194,7 +210,7 @@ export function SettingsPage() {
 
   const handleUpdateField = async <K extends keyof AppSettings>(
     key: K,
-    value: AppSettings[K]
+    value: AppSettings[K],
   ) => {
     await updateSettings({ [key]: value });
 
@@ -231,12 +247,24 @@ export function SettingsPage() {
       { id: "context", label: "Ngữ cảnh", icon: <Database size={16} /> },
     ];
     if (isDeveloperMode) {
-      result.push({ id: "connection", label: "Kết nối", icon: <Server size={16} /> });
+      result.push({
+        id: "connection",
+        label: "Kết nối",
+        icon: <Server size={16} />,
+      });
     }
     if (activeOrgId && (isOrgAdmin() || isSystemAdmin())) {
-      result.push({ id: "organization", label: "Tổ chức", icon: <Building2 size={16} /> });
+      result.push({
+        id: "organization",
+        label: "Tổ chức",
+        icon: <Building2 size={16} />,
+      });
     }
-    result.push({ id: "living-agent", label: "Linh hồn", icon: <Heart size={16} /> });
+    result.push({
+      id: "living-agent",
+      label: "Linh hồn",
+      icon: <Heart size={16} />,
+    });
     return result;
   }, [isDeveloperMode, activeOrgId]);
 
@@ -247,12 +275,17 @@ export function SettingsPage() {
       aria-modal="true"
       aria-labelledby="settings-title"
     >
-      <div ref={dialogRef} className="bg-surface rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[85vh] flex flex-col border border-border animate-scale-in">
+      <div
+        ref={dialogRef}
+        className="bg-surface rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[85vh] flex flex-col border border-border animate-scale-in"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2.5">
             <WiiiAvatar state="idle" size={22} />
-            <h2 id="settings-title" className="text-lg font-semibold text-text">Cài đặt cho Wiii</h2>
+            <h2 id="settings-title" className="text-lg font-semibold text-text">
+              Cài đặt cho Wiii
+            </h2>
           </div>
           <button
             onClick={closeSettings}
@@ -305,25 +338,23 @@ export function SettingsPage() {
           )}
 
           {activeTab === "memory" && (
-            <MemoryTab userId={
-              authMode === "oauth" && authUser?.id
-                ? authUser.id
-                // Legacy/dev mode: backend under ENVIRONMENT=production forces
-                // auth.user_id="api-client" for API-key auth, so match that on
-                // the client side to avoid a 403 ownership mismatch.
-                : (authMode === "legacy" ? "api-client" : settings.user_id)
-            } />
+            <MemoryTab
+              userId={
+                authMode === "oauth" && authUser?.id
+                  ? authUser.id
+                  : // Legacy/dev mode: backend under ENVIRONMENT=production forces
+                    // auth.user_id="api-client" for API-key auth, so match that on
+                    // the client side to avoid a 403 ownership mismatch.
+                    authMode === "legacy"
+                    ? "api-client"
+                    : settings.user_id
+              }
+            />
           )}
 
-          {activeTab === "context" && (
-            <ContextTab />
-          )}
-          {activeTab === "organization" && (
-            <OrgSettingsTab />
-          )}
-          {activeTab === "living-agent" && (
-            <LivingAgentPanel />
-          )}
+          {activeTab === "context" && <ContextTab />}
+          {activeTab === "organization" && <OrgSettingsTab />}
+          {activeTab === "living-agent" && <LivingAgentPanel />}
         </div>
 
         {/* Footer */}
@@ -353,13 +384,16 @@ export function SettingsPage() {
             await resetSettings();
             // Sprint 194b (H5): Clear facebook cookie from secure storage
             try {
-              const { clearFacebookCookie } = await import("@/lib/secure-token-storage");
+              const { clearFacebookCookie } =
+                await import("@/lib/secure-token-storage");
               await clearFacebookCookie();
               await clearGeminiApiKey();
               await clearOpenRouterApiKey();
               await clearZhipuApiKey();
               await clearOllamaApiKey();
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
             setDraft({
               server_url: "http://localhost:8080",
               // Phase 31 fix: don't seed a placeholder api_key. The
@@ -384,7 +418,11 @@ export function SettingsPage() {
 /* ===== Connection Tab ===== */
 export interface ConnectionTabProps {
   draft: { server_url: string; api_key: string; facebook_cookie: string };
-  setDraft: (d: { server_url: string; api_key: string; facebook_cookie: string }) => void;
+  setDraft: (d: {
+    server_url: string;
+    api_key: string;
+    facebook_cookie: string;
+  }) => void;
   testStatus: "idle" | "testing" | "success" | "error";
   testMessage: string;
   connStatus: string;
@@ -392,7 +430,10 @@ export interface ConnectionTabProps {
   onSave: () => void;
   // Sprint 216: Developer fields moved from Preferences tab
   settings?: AppSettings;
-  onUpdate?: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
+  onUpdate?: <K extends keyof AppSettings>(
+    key: K,
+    value: AppSettings[K],
+  ) => void;
 }
 
 export function ConnectionTab({
@@ -429,11 +470,16 @@ export function ConnectionTab({
         />
       </FieldGroup>
 
-      <FieldGroup label="Facebook Cookie" hint="Cho phep tim kiem trong hoi nhom Facebook. Lay tu DevTools > Application > Cookies.">
+      <FieldGroup
+        label="Facebook Cookie"
+        hint="Cho phep tim kiem trong hoi nhom Facebook. Lay tu DevTools > Application > Cookies."
+      >
         <input
           type="password"
           value={draft.facebook_cookie}
-          onChange={(e) => setDraft({ ...draft, facebook_cookie: e.target.value })}
+          onChange={(e) =>
+            setDraft({ ...draft, facebook_cookie: e.target.value })
+          }
           placeholder="c_user=...; xs=...; datr=..."
           className="w-full px-3 py-2 rounded-lg border border-border bg-surface-secondary text-text text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
         />
@@ -454,13 +500,13 @@ export function ConnectionTab({
           ) : (
             <Server size={14} />
           )}
-          Kiem tra ket noi
+          Kiểm tra kết nối
         </button>
         <button
           onClick={onSave}
           className="px-4 py-2 rounded-lg bg-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent-hover)] transition-colors"
         >
-          Luu
+          Lưu
         </button>
       </div>
 
@@ -498,11 +544,11 @@ export function ConnectionTab({
 
           <FieldGroup label="Streaming version">
             <div className="flex gap-2">
-              {([
+              {[
                 { value: "v3" as const, label: "V3 (SSE)" },
                 { value: "v2" as const, label: "V2" },
                 { value: "v1" as const, label: "V1" },
-              ]).map((v) => (
+              ].map((v) => (
                 <button
                   key={v.value}
                   onClick={() => onUpdate("streaming_version", v.value)}
@@ -537,14 +583,24 @@ export interface UserTabProps {
   settings: AppSettings;
   onUpdate: <K extends keyof AppSettings>(
     key: K,
-    value: AppSettings[K]
+    value: AppSettings[K],
   ) => void;
 }
 
 export function UserTab({ settings, onUpdate }: UserTabProps) {
-  const { organizations, multiTenantEnabled, activeOrgId, setActiveOrg, orgRole } = useOrgStore();
+  const {
+    organizations,
+    multiTenantEnabled,
+    activeOrgId,
+    setActiveOrg,
+    orgRole,
+  } = useOrgStore();
   // Sprint 218: Subscribe to `domains` so component re-renders after fetchDomains() completes
-  const { domains: _domainList, getFilteredDomains, setOrgFilter } = useDomainStore();
+  const {
+    domains: _domainList,
+    getFilteredDomains,
+    setOrgFilter,
+  } = useDomainStore();
   const { updateSettings } = useSettingsStore();
   const { isAuthenticated, user, authMode, logout } = useAuthStore();
   const { addToast } = useToastStore();
@@ -553,7 +609,9 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
 
   // Linked accounts state (OAuth mode only)
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [connectedWorkspaces, setConnectedWorkspaces] = useState<ConnectedWorkspace[]>([]);
+  const [connectedWorkspaces, setConnectedWorkspaces] = useState<
+    ConnectedWorkspace[]
+  >([]);
   const [identities, setIdentities] = useState<UserIdentity[]>([]);
   const [identitiesLoading, setIdentitiesLoading] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -589,14 +647,18 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
           setIdentities(identitiesResult.value);
         }
       })
-      .catch(() => { /* silent — non-critical */ })
+      .catch(() => {
+        /* silent — non-critical */
+      })
       .finally(() => {
         if (!cancelled) {
           setProfileLoading(false);
           setIdentitiesLoading(false);
         }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [isOAuth]);
 
   const handleUnlink = async (identityId: string) => {
@@ -651,7 +713,10 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
       admin: "Vai trò host: Quản trị host",
       org_admin: "Vai trò host: Quản trị tổ chức host",
     };
-    return hostRoleLabels[effectiveProfile.host_role] || `Vai trò host: ${effectiveProfile.host_role}`;
+    return (
+      hostRoleLabels[effectiveProfile.host_role] ||
+      `Vai trò host: ${effectiveProfile.host_role}`
+    );
   })();
 
   const handleOrgChange = (orgId: string) => {
@@ -674,15 +739,23 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
       {isOAuth && user && (
         <div className="flex items-center gap-3 p-3 rounded-lg bg-surface-secondary border border-border">
           {user.avatar_url ? (
-            <img src={user.avatar_url} alt="" className="w-10 h-10 rounded-full" />
+            <img
+              src={user.avatar_url}
+              alt=""
+              className="w-10 h-10 rounded-full"
+            />
           ) : (
             <div className="w-10 h-10 rounded-full bg-[var(--accent-light)] flex items-center justify-center text-[var(--accent)] font-bold text-sm">
               {(user.name || user.email || "?")[0].toUpperCase()}
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-text truncate">{user.name || "Chưa đặt tên"}</div>
-            <div className="text-xs text-text-tertiary truncate">{user.email}</div>
+            <div className="text-sm font-medium text-text truncate">
+              {user.name || "Chưa đặt tên"}
+            </div>
+            <div className="text-xs text-text-tertiary truncate">
+              {user.email}
+            </div>
             {orgMembershipLabel && (
               <div className="text-[11px] text-text-tertiary truncate">
                 {orgMembershipLabel}
@@ -690,15 +763,23 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
               </div>
             )}
             {hostOverlayLabel && (
-              <div className="text-[11px] text-text-tertiary truncate">{hostOverlayLabel}</div>
-            )}
-            {(effectiveProfile?.connected_workspaces_count || connectedWorkspaces.length) > 0 && (
               <div className="text-[11px] text-text-tertiary truncate">
-                {effectiveProfile?.connected_workspaces_count || connectedWorkspaces.length} không gian đã kết nối
+                {hostOverlayLabel}
+              </div>
+            )}
+            {(effectiveProfile?.connected_workspaces_count ||
+              connectedWorkspaces.length) > 0 && (
+              <div className="text-[11px] text-text-tertiary truncate">
+                {effectiveProfile?.connected_workspaces_count ||
+                  connectedWorkspaces.length}{" "}
+                không gian đã kết nối
               </div>
             )}
             <button
-              onClick={() => { navigator.clipboard.writeText(user.id); addToast("success", "Đã sao chép mã hỗ trợ"); }}
+              onClick={() => {
+                navigator.clipboard.writeText(user.id);
+                addToast("success", "Đã sao chép mã hỗ trợ");
+              }}
               className="text-[10px] text-text-tertiary hover:text-text-secondary transition-colors"
               title="Sao chép mã hỗ trợ"
             >
@@ -722,7 +803,10 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
               {settings.display_name || "Người dùng"}
             </div>
             <button
-              onClick={() => { navigator.clipboard.writeText(settings.user_id); addToast("success", "Đã sao chép mã hỗ trợ"); }}
+              onClick={() => {
+                navigator.clipboard.writeText(settings.user_id);
+                addToast("success", "Đã sao chép mã hỗ trợ");
+              }}
               className="text-[10px] text-text-tertiary hover:text-text-secondary transition-colors"
               title="Sao chép mã hỗ trợ"
             >
@@ -739,7 +823,7 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
       <FieldGroup label="Tên hiển thị" hint="Bảo mình tên bạn để nhớ nhé">
         <input
           type="text"
-          value={isOAuth && user ? (user.name || "") : settings.display_name}
+          value={isOAuth && user ? user.name || "" : settings.display_name}
           onChange={(e) => onUpdate("display_name", e.target.value)}
           placeholder="Bạn tên gì?"
           className="w-full px-3 py-2 rounded-lg border border-border bg-surface-secondary text-text text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
@@ -749,7 +833,9 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
       {/* OAuth mode: Linked accounts section */}
       {isOAuth && (
         <div>
-          <div className="text-sm font-medium text-text-secondary mb-1.5">Không gian đã kết nối</div>
+          <div className="text-sm font-medium text-text-secondary mb-1.5">
+            Không gian đã kết nối
+          </div>
           {profileLoading ? (
             <div className="flex items-center gap-2 text-xs text-text-tertiary py-2">
               <Loader2 size={12} className="animate-spin" />
@@ -762,10 +848,17 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
           ) : (
             <div className="space-y-1.5 mb-4">
               {connectedWorkspaces.map((workspace) => (
-                <div key={workspace.id} className="p-2 rounded-lg border border-border bg-surface-secondary">
+                <div
+                  key={workspace.id}
+                  className="p-2 rounded-lg border border-border bg-surface-secondary"
+                >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-[var(--accent-light)] text-[var(--accent)]">
-                      {(workspace.host_name || workspace.connector_id || workspace.host_type).trim()}
+                      {(
+                        workspace.host_name ||
+                        workspace.connector_id ||
+                        workspace.host_type
+                      ).trim()}
                     </span>
                     <span className="text-[10px] text-text-tertiary uppercase tracking-wide">
                       {workspace.status}
@@ -773,11 +866,14 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
                   </div>
                   <div className="mt-1 text-xs text-text-secondary">
                     {workspace.host_type}
-                    {workspace.host_workspace_id ? ` • ${workspace.host_workspace_id}` : ""}
+                    {workspace.host_workspace_id
+                      ? ` • ${workspace.host_workspace_id}`
+                      : ""}
                   </div>
                   {workspace.last_used_at && (
                     <div className="text-[11px] text-text-tertiary">
-                      Dùng gần nhất: {new Date(workspace.last_used_at).toLocaleString("vi-VN")}
+                      Dùng gần nhất:{" "}
+                      {new Date(workspace.last_used_at).toLocaleString("vi-VN")}
                     </div>
                   )}
                 </div>
@@ -785,29 +881,50 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
             </div>
           )}
 
-          <div className="text-sm font-medium text-text-secondary mb-1.5">Tài khoản liên kết</div>
+          <div className="text-sm font-medium text-text-secondary mb-1.5">
+            Tài khoản liên kết
+          </div>
           {identitiesLoading ? (
             <div className="flex items-center gap-2 text-xs text-text-tertiary py-2">
               <Loader2 size={12} className="animate-spin" />
               Đang tải...
             </div>
           ) : identities.length === 0 ? (
-            <div className="text-xs text-text-tertiary py-2">Không có tài khoản liên kết</div>
+            <div className="text-xs text-text-tertiary py-2">
+              Không có tài khoản liên kết
+            </div>
           ) : (
             <div className="space-y-1.5">
               {identities.map((identity) => (
-                <div key={identity.id} className="flex items-center gap-2 p-2 rounded-lg border border-border bg-surface-secondary">
+                <div
+                  key={identity.id}
+                  className="flex items-center gap-2 p-2 rounded-lg border border-border bg-surface-secondary"
+                >
                   <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-[var(--accent-light)] text-[var(--accent)]">
                     {PROVIDER_LABELS[identity.provider] || identity.provider}
                   </span>
-                  <span className="flex-1 text-xs text-text truncate">{identity.email || identity.display_name || identity.provider_sub}</span>
+                  <span className="flex-1 text-xs text-text truncate">
+                    {identity.email ||
+                      identity.display_name ||
+                      identity.provider_sub}
+                  </span>
                   <button
                     onClick={() => handleUnlink(identity.id)}
-                    disabled={identities.length <= 1 || unlinkingId === identity.id}
+                    disabled={
+                      identities.length <= 1 || unlinkingId === identity.id
+                    }
                     className="text-xs text-red-500 hover:text-red-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    title={identities.length <= 1 ? "Không thể hủy tài khoản cuối cùng" : "Hủy liên kết"}
+                    title={
+                      identities.length <= 1
+                        ? "Không thể hủy tài khoản cuối cùng"
+                        : "Hủy liên kết"
+                    }
                   >
-                    {unlinkingId === identity.id ? <Loader2 size={10} className="animate-spin" /> : "Hủy"}
+                    {unlinkingId === identity.id ? (
+                      <Loader2 size={10} className="animate-spin" />
+                    ) : (
+                      "Hủy"
+                    )}
                   </button>
                 </div>
               ))}
@@ -818,7 +935,10 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
 
       {/* Sprint 156: Organization selector (only when multi-tenant) */}
       {multiTenantEnabled && organizations.length > 1 && (
-        <FieldGroup label="Không gian làm việc" hint="Chọn tổ chức bạn thuộc về">
+        <FieldGroup
+          label="Không gian làm việc"
+          hint="Chọn tổ chức bạn thuộc về"
+        >
           <select
             value={activeOrgId || PERSONAL_ORG_ID}
             onChange={(e) => handleOrgChange(e.target.value)}
@@ -834,11 +954,16 @@ export function UserTab({ settings, onUpdate }: UserTabProps) {
       )}
 
       {/* Sprint 215: Domain → "Lĩnh vực kiến thức" + auto-select when single */}
-      <FieldGroup label="Lĩnh vực kiến thức" hint="Wiii sẽ ưu tiên tra cứu lĩnh vực này">
+      <FieldGroup
+        label="Lĩnh vực kiến thức"
+        hint="Wiii sẽ ưu tiên tra cứu lĩnh vực này"
+      >
         {filteredDomains.length === 1 ? (
           <div className="w-full px-3 py-2 rounded-lg border border-border bg-surface-tertiary text-text text-sm">
             {filteredDomains[0].name_vi || filteredDomains[0].name}
-            <span className="block text-xs text-text-tertiary mt-0.5">Tự động — chỉ có 1 lĩnh vực khả dụng</span>
+            <span className="block text-xs text-text-tertiary mt-0.5">
+              Tự động — chỉ có 1 lĩnh vực khả dụng
+            </span>
           </div>
         ) : filteredDomains.length > 1 ? (
           <select
@@ -875,7 +1000,7 @@ export interface PreferencesTabProps {
   settings: AppSettings;
   onUpdate: <K extends keyof AppSettings>(
     key: K,
-    value: AppSettings[K]
+    value: AppSettings[K],
   ) => void;
 }
 
@@ -917,11 +1042,23 @@ export function PreferencesTab({ settings, onUpdate }: PreferencesTabProps) {
       {settings.show_thinking && (
         <FieldGroup label="Mức độ hiển thị suy nghĩ">
           <div className="flex gap-2">
-            {([
-              { value: "minimal" as const, label: "Tối giản", desc: "Chỉ hiện tiến trình" },
-              { value: "balanced" as const, label: "Cân bằng", desc: "Thu gọn suy nghĩ" },
-              { value: "detailed" as const, label: "Chi tiết", desc: "Mở rộng tất cả" },
-            ]).map((opt) => (
+            {[
+              {
+                value: "minimal" as const,
+                label: "Tối giản",
+                desc: "Chỉ hiện tiến trình",
+              },
+              {
+                value: "balanced" as const,
+                label: "Cân bằng",
+                desc: "Thu gọn suy nghĩ",
+              },
+              {
+                value: "detailed" as const,
+                label: "Chi tiết",
+                desc: "Mở rộng tất cả",
+              },
+            ].map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => onUpdate("thinking_level", opt.value)}
@@ -933,9 +1070,13 @@ export function PreferencesTab({ settings, onUpdate }: PreferencesTabProps) {
                 title={opt.desc}
               >
                 <div className="font-medium">{opt.label}</div>
-                <div className={`mt-0.5 text-[10px] ${
-                  settings.thinking_level === opt.value ? "text-white/80" : "text-text-tertiary"
-                }`}>
+                <div
+                  className={`mt-0.5 text-[10px] ${
+                    settings.thinking_level === opt.value
+                      ? "text-white/80"
+                      : "text-text-tertiary"
+                  }`}
+                >
                   {opt.desc}
                 </div>
               </button>
@@ -959,7 +1100,6 @@ export function PreferencesTab({ settings, onUpdate }: PreferencesTabProps) {
         checked={settings.show_artifacts !== false}
         onChange={(v) => onUpdate("show_artifacts", v)}
       />
-
     </div>
   );
 }
@@ -967,10 +1107,34 @@ export function PreferencesTab({ settings, onUpdate }: PreferencesTabProps) {
 /* ===== Memory Tab (Sprint 80, enhanced Sprint 105, Sprint 219: category grouping) ===== */
 
 /** Sprint 219: Category groups for organized memory display */
-export const MEMORY_CATEGORIES: { id: string; label: string; types: string[] }[] = [
-  { id: "identity", label: "Bản thân", types: ["name", "age", "location", "hometown", "organization", "role", "pronoun_style"] },
-  { id: "learning", label: "Học tập", types: ["learning_style", "level", "strength", "weakness", "goal"] },
-  { id: "personal", label: "Sở thích", types: ["hobby", "interest", "preference", "emotion", "recent_topic"] },
+export const MEMORY_CATEGORIES: {
+  id: string;
+  label: string;
+  types: string[];
+}[] = [
+  {
+    id: "identity",
+    label: "Bản thân",
+    types: [
+      "name",
+      "age",
+      "location",
+      "hometown",
+      "organization",
+      "role",
+      "pronoun_style",
+    ],
+  },
+  {
+    id: "learning",
+    label: "Học tập",
+    types: ["learning_style", "level", "strength", "weakness", "goal"],
+  },
+  {
+    id: "personal",
+    label: "Sở thích",
+    types: ["hobby", "interest", "preference", "emotion", "recent_topic"],
+  },
 ];
 
 /** Render a memory value in a human-readable way.
@@ -998,7 +1162,9 @@ export function MemoryTab({ userId }: { userId: string }) {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<string | null>(null);
-  const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
+  const [collapsedCategories, setCollapsedCategories] = useState<
+    Record<string, boolean>
+  >({});
 
   // Fetch on mount and whenever userId changes
   useEffect(() => {
@@ -1025,7 +1191,7 @@ export function MemoryTab({ userId }: { userId: string }) {
       result = result.filter(
         (m) =>
           m.value.toLowerCase().includes(q) ||
-          (FACT_TYPE_LABELS[m.type] || m.type).toLowerCase().includes(q)
+          (FACT_TYPE_LABELS[m.type] || m.type).toLowerCase().includes(q),
       );
     }
     return result;
@@ -1034,7 +1200,11 @@ export function MemoryTab({ userId }: { userId: string }) {
   // Sprint 219: Group filtered memories by category
   const groupedMemories = useMemo(() => {
     const categorizedTypes = new Set(MEMORY_CATEGORIES.flatMap((c) => c.types));
-    const groups: { id: string; label: string; items: typeof filteredMemories }[] = [];
+    const groups: {
+      id: string;
+      label: string;
+      items: typeof filteredMemories;
+    }[] = [];
 
     for (const cat of MEMORY_CATEGORIES) {
       const items = filteredMemories.filter((m) => cat.types.includes(m.type));
@@ -1044,7 +1214,9 @@ export function MemoryTab({ userId }: { userId: string }) {
     }
 
     // Uncategorized items
-    const uncategorized = filteredMemories.filter((m) => !categorizedTypes.has(m.type));
+    const uncategorized = filteredMemories.filter(
+      (m) => !categorizedTypes.has(m.type),
+    );
     if (uncategorized.length > 0) {
       groups.push({ id: "other", label: "Khác", items: uncategorized });
     }
@@ -1076,7 +1248,9 @@ export function MemoryTab({ userId }: { userId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-sm font-medium text-text">Wiii nhớ gì về bạn</div>
+          <div className="text-sm font-medium text-text">
+            Wiii nhớ gì về bạn
+          </div>
           <div className="text-xs text-text-tertiary">
             Mình ghi nhớ để hiểu bạn hơn
           </div>
@@ -1106,7 +1280,10 @@ export function MemoryTab({ userId }: { userId: string }) {
       {/* Search input */}
       {memories.length > 0 && (
         <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary"
+          />
           <input
             type="text"
             value={searchQuery}
@@ -1167,7 +1344,10 @@ export function MemoryTab({ userId }: { userId: string }) {
       ) : (
         <div className="space-y-3">
           {groupedMemories.map((group) => (
-            <div key={group.id} className="rounded-lg border border-border overflow-hidden">
+            <div
+              key={group.id}
+              className="rounded-lg border border-border overflow-hidden"
+            >
               {/* Category header — collapsible */}
               <button
                 onClick={() => toggleCategory(group.id)}
@@ -1179,7 +1359,9 @@ export function MemoryTab({ userId }: { userId: string }) {
                   ) : (
                     <ChevronDown size={14} className="text-text-tertiary" />
                   )}
-                  <span className="text-sm font-medium text-text">{group.label}</span>
+                  <span className="text-sm font-medium text-text">
+                    {group.label}
+                  </span>
                 </div>
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[var(--accent-light)] text-[var(--accent)]">
                   {group.items.length}
@@ -1307,7 +1489,9 @@ export function ContextTab() {
       <div>
         <div className="flex items-center justify-between text-xs text-text-secondary mb-1">
           <span>Sử dụng: {utilization}%</span>
-          <span>{formatTokens(totalUsed)}/{formatTokens(totalBudget)} tokens</span>
+          <span>
+            {formatTokens(totalUsed)}/{formatTokens(totalBudget)} tokens
+          </span>
         </div>
         <div className="w-full h-3 bg-surface-tertiary rounded-full overflow-hidden">
           <div
@@ -1319,11 +1503,19 @@ export function ContextTab() {
 
       {/* Layer breakdown */}
       <div className="space-y-2">
-        <div className="text-xs font-medium text-text-secondary">Phân bổ bộ nhớ</div>
+        <div className="text-xs font-medium text-text-secondary">
+          Phân bổ bộ nhớ
+        </div>
         {info.layers && (
           <div className="space-y-1.5">
-            <LayerBar label="Cấu hình hệ thống" layer={info.layers.system_prompt} />
-            <LayerBar label="Kiến thức về bạn" layer={info.layers.core_memory} />
+            <LayerBar
+              label="Cấu hình hệ thống"
+              layer={info.layers.system_prompt}
+            />
+            <LayerBar
+              label="Kiến thức về bạn"
+              layer={info.layers.core_memory}
+            />
             <LayerBar label="Tóm tắt" layer={info.layers.summary} />
             <LayerBar label="Tin nhắn" layer={info.layers.recent_messages} />
           </div>
@@ -1339,7 +1531,8 @@ export function ContextTab() {
 
       {/* Summary info */}
       <div className="text-xs text-text-secondary">
-        Tóm tắt: {info.has_summary ? `${info.running_summary_chars} ký tự` : "Chưa có"}
+        Tóm tắt:{" "}
+        {info.has_summary ? `${info.running_summary_chars} ký tự` : "Chưa có"}
       </div>
 
       {error && (
@@ -1389,12 +1582,15 @@ export function LayerBar({
   label: string;
   layer: { budget: number; used: number };
 }) {
-  const pct = layer.budget > 0 ? Math.round((layer.used / layer.budget) * 100) : 0;
+  const pct =
+    layer.budget > 0 ? Math.round((layer.used / layer.budget) * 100) : 0;
   return (
     <div>
       <div className="flex items-center justify-between text-xs text-text-secondary mb-0.5">
         <span>{label}</span>
-        <span>{formatTokens(layer.used)}/{formatTokens(layer.budget)}</span>
+        <span>
+          {formatTokens(layer.used)}/{formatTokens(layer.budget)}
+        </span>
       </div>
       <div className="w-full h-1.5 bg-surface-tertiary rounded-full overflow-hidden">
         <div
@@ -1431,7 +1627,9 @@ export function FieldGroup({
         {label}
       </label>
       {hint && (
-        <div className="text-[11px] text-text-tertiary -mt-0.5 mb-1.5">{hint}</div>
+        <div className="text-[11px] text-text-tertiary -mt-0.5 mb-1.5">
+          {hint}
+        </div>
       )}
       {children}
     </div>

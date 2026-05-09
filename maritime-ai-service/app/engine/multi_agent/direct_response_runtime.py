@@ -149,6 +149,21 @@ def _derive_analytical_thinking_from_answer(
         "thi truong",
         "3 lực chính",
         "3 luc chinh",
+        "jwt",
+        "xac thuc",
+        "authentication",
+        "class diagram",
+        "database",
+        "schema",
+        "migration",
+        "repository",
+        "controller",
+        "filter",
+        "service",
+        "entity",
+        "codebase",
+        "source",
+        "bang",
     )
     tool_markers = {
         "tool_web_search",
@@ -164,6 +179,40 @@ def _derive_analytical_thinking_from_answer(
     used_tools = {str(name or "").strip() for name in (tools_used_names or set()) if str(name or "").strip()}
     if not any(marker in normalized_query for marker in analytical_markers) and not used_tools.intersection(tool_markers):
         return ""
+
+    codebase_markers = (
+        "jwt",
+        "xac thuc",
+        "authentication",
+        "class diagram",
+        "database",
+        "schema",
+        "migration",
+        "repository",
+        "controller",
+        "filter",
+        "service",
+        "entity",
+        "codebase",
+        "source",
+        "bang",
+    )
+    if any(marker in normalized_query for marker in codebase_markers):
+        beats = [
+            "Minh dang coi day la mot cau hoi source-backed, nen can tach phan nao la claim cua user va phan nao phai doi chieu voi file/schema that."
+        ]
+        if any(marker in normalized_query for marker in ("database", "schema", "class diagram", "migration", "bang")):
+            beats.append(
+                "Voi phan bang/schema, cau tra loi nen kiem ke hoac phan nhom: entity nghiep vu chinh, junction table, infrastructure table, va bang them qua migration."
+            )
+        if any(marker in normalized_query for marker in ("jwt", "xac thuc", "authentication")):
+            beats.append(
+                "Voi phan JWT/auth, can truy vet lifecycle tu login tao token sang Bearer request, filter verify, load user/role/enabled tu database, roi moi den authorization va refresh."
+            )
+        beats.append(
+            "Neu source chua du trong context, phai noi ro muc do chac thay vi viet nhu da doc het codebase."
+        )
+        return " ".join(beats)[:520].strip()
 
     first_block = re.split(r"\n{2,}", clean, maxsplit=1)[0].strip()
     first_block = re.sub(r"^#{1,6}\s+", "", first_block).strip()
@@ -295,7 +344,17 @@ def extract_direct_response_impl(llm_response, messages: list):
         )
         if tool_calls:
             for tool_call in tool_calls:
-                tools_used_names.add(tool_call.get("name", "unknown"))
+                # Phase 35 — Google's OpenAI-compat returns ToolCall pydantic
+                # objects, not dicts. NVIDIA returns dicts. Handle both.
+                if isinstance(tool_call, dict):
+                    name = tool_call.get("name", "unknown")
+                else:
+                    name = (
+                        getattr(tool_call, "name", None)
+                        or getattr(getattr(tool_call, "function", None), "name", None)
+                        or "unknown"
+                    )
+                tools_used_names.add(str(name))
 
     if not thinking_content:
         thinking_content = _derive_selfhood_thinking_from_answer(

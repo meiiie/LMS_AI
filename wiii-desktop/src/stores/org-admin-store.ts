@@ -6,7 +6,12 @@
  * Separated from admin-store (system admin) for cleaner UX.
  */
 import { create } from "zustand";
-import type { AdminAuthEvent, AdminOrgMember, AdminOrgDetail, OrgDocument } from "@/api/types";
+import type {
+  AdminAuthEvent,
+  AdminOrgMember,
+  AdminOrgDetail,
+  OrgDocument,
+} from "@/api/types";
 import {
   getAdminOrgDetail,
   getAdminOrgMembers,
@@ -16,10 +21,20 @@ import {
   uploadOrgDocument as apiUploadOrgDocument,
   deleteOrgDocument as apiDeleteOrgDocument,
 } from "@/api/admin";
-import { getOrgHostActionEvents, getOrgSettings, updateOrgSettings } from "@/api/organizations";
+import {
+  getOrgHostActionEvents,
+  getOrgSettings,
+  updateOrgSettings,
+} from "@/api/organizations";
 import type { OrgSettings } from "@/api/types";
 
-export type OrgManagerTab = "dashboard" | "members" | "analytics" | "audit" | "settings" | "knowledge";
+export type OrgManagerTab =
+  | "dashboard"
+  | "members"
+  | "analytics"
+  | "audit"
+  | "settings"
+  | "knowledge";
 export type OrgHostActionView = "all" | "previews" | "applies" | "publishes";
 
 interface OrgAdminToast {
@@ -43,6 +58,8 @@ interface OrgAdminState {
   documents: OrgDocument[];
   documentsTotal: number;
   documentsLoading: boolean;
+  _documentsFetchOrgId: string | null;
+  _documentsFetchPromise: Promise<void> | null;
   hostActionEvents: AdminAuthEvent[];
   hostActionEventsTotal: number;
   hostActionEventsPage: number;
@@ -58,7 +75,10 @@ interface OrgAdminState {
   fetchSettings: (orgId: string) => Promise<void>;
   addMember: (orgId: string, userId: string, role?: string) => Promise<void>;
   removeMember: (orgId: string, userId: string) => Promise<void>;
-  updateSettings: (orgId: string, patch: Record<string, unknown>) => Promise<void>;
+  updateSettings: (
+    orgId: string,
+    patch: Record<string, unknown>,
+  ) => Promise<void>;
   showToast: (type: "success" | "error", message: string) => void;
 
   // Sprint 190: Knowledge actions
@@ -85,6 +105,8 @@ export const useOrgAdminStore = create<OrgAdminState>((set, get) => ({
   documents: [],
   documentsTotal: 0,
   documentsLoading: false,
+  _documentsFetchOrgId: null,
+  _documentsFetchPromise: null,
   hostActionEvents: [],
   hostActionEventsTotal: 0,
   hostActionEventsPage: 0,
@@ -110,6 +132,8 @@ export const useOrgAdminStore = create<OrgAdminState>((set, get) => ({
       documents: [],
       documentsTotal: 0,
       documentsLoading: false,
+      _documentsFetchOrgId: null,
+      _documentsFetchPromise: null,
       hostActionEvents: [],
       hostActionEventsTotal: 0,
       hostActionEventsPage: 0,
@@ -186,15 +210,28 @@ export const useOrgAdminStore = create<OrgAdminState>((set, get) => ({
 
   // Sprint 190: Knowledge document actions
   fetchDocuments: async (orgId) => {
-    set({ documentsLoading: true });
-    try {
-      const resp = await listOrgDocuments(orgId);
-      set({ documents: resp.documents, documentsTotal: resp.total });
-    } catch {
-      get().showToast("error", "Không thể tải danh sách tài liệu");
-    } finally {
-      set({ documentsLoading: false });
+    const inFlight = get()._documentsFetchPromise;
+    if (inFlight && get()._documentsFetchOrgId === orgId) {
+      return inFlight;
     }
+
+    set({ documentsLoading: true });
+    const promise = (async () => {
+      try {
+        const resp = await listOrgDocuments(orgId);
+        set({ documents: resp.documents, documentsTotal: resp.total });
+      } catch {
+        get().showToast("error", "Không thể tải danh sách tài liệu");
+      } finally {
+        set({
+          documentsLoading: false,
+          _documentsFetchOrgId: null,
+          _documentsFetchPromise: null,
+        });
+      }
+    })();
+    set({ _documentsFetchOrgId: orgId, _documentsFetchPromise: promise });
+    return promise;
   },
 
   uploadDocument: async (orgId, file) => {
@@ -249,20 +286,27 @@ export const useOrgAdminStore = create<OrgAdminState>((set, get) => ({
         hostActionEventsTotal: response.total,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Khong the tai host action timeline";
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Không thể tải host action timeline";
       get().showToast("error", msg);
     } finally {
       set({ hostActionLoading: false });
     }
   },
 
-  setHostActionView: (view) => set({ hostActionView: view, hostActionEventsPage: 0 }),
+  setHostActionView: (view) =>
+    set({ hostActionView: view, hostActionEventsPage: 0 }),
 
   showToast: (type, message) => {
     const prev = get()._toastTimer;
     if (prev) clearTimeout(prev);
     const duration = type === "error" ? 6000 : 3000;
-    const timer = setTimeout(() => set({ toast: null, _toastTimer: undefined }), duration);
+    const timer = setTimeout(
+      () => set({ toast: null, _toastTimer: undefined }),
+      duration,
+    );
     set({ toast: { type, message }, _toastTimer: timer });
   },
 }));

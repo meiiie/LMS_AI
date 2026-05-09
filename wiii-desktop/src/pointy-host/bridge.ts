@@ -9,6 +9,9 @@
 import { hideCursor, moveCursorToPoint, moveCursorToRect } from "./cursor";
 import { hideSpotlight, showSpotlight } from "./spotlight";
 import { runTour } from "./tour";
+import { resolveSyntheticId as _resolveSyntheticId } from "./auto-discovery";
+import { refreshDomBeforePointyAction } from "./dom-refresh";
+import { validatePointyTarget } from "./target-validation";
 import type {
   ClickParams,
   CursorMoveParams,
@@ -55,17 +58,36 @@ export function resolveSelector(selector: unknown): Element | null {
   const trimmed = selector.trim();
   if (!trimmed) return null;
   if (typeof document === "undefined") return null;
+  refreshDomBeforePointyAction("resolveSelector");
+
+  // v8.0 (2026-05-06) — synthetic auto-discovery ID. Format:
+  // `auto:<tag>:<slug>` or `auto:<tag>:<slug>-<idx>`. Look up the
+  // bidirectional registry maintained by PageScanner.
+  if (trimmed.startsWith("auto:")) {
+    // Lazy import to avoid circular dep — auto-discovery imports nothing
+    // from bridge but bridge would import auto-discovery → fine, no cycle.
+    // Use synchronous dynamic require pattern via require would break
+    // ESM. Instead: import statically at module top.
+    const el = _resolveSyntheticId(trimmed);
+    if (el) return el;
+    // Synthetic ID not in registry (scanner hasn't seen it OR element
+    // GC'd). Fall through to other resolution paths so user can still
+    // dispatch via raw CSS selector if known.
+  }
+
   if (/^[a-zA-Z0-9_-]+$/.test(trimmed)) {
     try {
       const escaped = trimmed.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-      const semantic = document.querySelector(`[data-wiii-id="${escaped}"]`);
+      const semantic = pickBestElement(
+        Array.from(document.querySelectorAll(`[data-wiii-id="${escaped}"]`)),
+      );
       if (semantic) return semantic;
     } catch {
       return null;
     }
   }
   try {
-    const direct = document.querySelector(trimmed);
+    const direct = pickBestElement(Array.from(document.querySelectorAll(trimmed)));
     if (direct) return direct;
   } catch {
     return null;
@@ -73,12 +95,70 @@ export function resolveSelector(selector: unknown): Element | null {
   return null;
 }
 
+function pickBestElement(elements: Element[]): Element | null {
+  if (elements.length === 0) return null;
+  let best: Element | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const el of elements) {
+    const score = elementPointyScore(el);
+    if (score > bestScore) {
+      best = el;
+      bestScore = score;
+    }
+  }
+  return best ?? elements[0] ?? null;
+}
+
+function elementPointyScore(el: Element): number {
+  if (!(el instanceof HTMLElement)) return 0;
+  if (!el.isConnected) return -1000;
+  if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") {
+    return -900;
+  }
+
+  let styleScore = 0;
+  if (typeof window !== "undefined" && window.getComputedStyle) {
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") return -800;
+    const opacity = parseFloat(style.opacity || "1");
+    if (Number.isFinite(opacity)) styleScore += Math.max(0, Math.min(opacity, 1));
+  }
+
+  const rect = el.getBoundingClientRect();
+  const area = Math.max(0, rect.width) * Math.max(0, rect.height);
+  const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 768;
+  const visibleX = Math.max(0, Math.min(rect.right, vw) - Math.max(rect.left, 0));
+  const visibleY = Math.max(0, Math.min(rect.bottom, vh) - Math.max(rect.top, 0));
+  const visibleArea = visibleX * visibleY;
+  const ratio = area > 0 ? visibleArea / area : 0;
+  const enabledBonus =
+    el.getAttribute("aria-disabled") === "true" ||
+    (el instanceof HTMLButtonElement && el.disabled) ||
+    (el instanceof HTMLInputElement && el.disabled)
+      ? 0
+      : 0.1;
+  const nativeInteractiveBonus =
+    el instanceof HTMLButtonElement ||
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    el instanceof HTMLSelectElement ||
+    (el instanceof HTMLAnchorElement && Boolean(el.href))
+      ? 0.25
+      : 0;
+
+  return ratio * 1000 + Math.min(area, 50_000) / 50_000 + styleScore + enabledBonus + nativeInteractiveBonus;
+}
+
 export async function handleHighlight(params: HighlightParams): Promise<PointyResult> {
   const target = resolveSelector(params.selector);
   if (!target) return fail(`selector_not_found:${params.selector}`);
-  const rect = target.getBoundingClientRect();
-  if ("scrollIntoView" in target && typeof (target as HTMLElement).scrollIntoView === "function") {
-    (target as HTMLElement).scrollIntoView({ behavior: "smooth", block: "center" });
+  const rect = target instanceof HTMLElement
+    ? scrollIntoViewIfNeeded(target, target.getBoundingClientRect())
+    : target.getBoundingClientRect();
+  const validation = validatePointyTarget(target, rect);
+  if (!validation.ok) {
+    return fail(`target_not_visible:${params.selector}:${validation.reason ?? "unknown"}`);
   }
   moveCursorToRect(rect, { duration_ms: 600 });
   showSpotlight(target, {
@@ -92,7 +172,12 @@ export async function handleCursorMove(params: CursorMoveParams): Promise<Pointy
   if (params.selector) {
     const target = resolveSelector(params.selector);
     if (!target) return fail(`selector_not_found:${params.selector}`);
-    moveCursorToRect(target.getBoundingClientRect(), {
+    const rect = target.getBoundingClientRect();
+    const validation = validatePointyTarget(target, rect);
+    if (!validation.ok) {
+      return fail(`target_not_visible:${params.selector}:${validation.reason ?? "unknown"}`);
+    }
+    moveCursorToRect(rect, {
       duration_ms: params.duration_ms ?? 360,
       label: params.label,
     });
@@ -133,6 +218,10 @@ export async function handleCursorMove(params: CursorMoveParams): Promise<Pointy
 export async function handleScrollTo(params: ScrollToParams): Promise<PointyResult> {
   const target = resolveSelector(params.selector);
   if (!target) return fail(`selector_not_found:${params.selector}`);
+  const validation = validatePointyTarget(target);
+  if (!validation.ok) {
+    return fail(`target_not_visible:${params.selector}:${validation.reason ?? "unknown"}`);
+  }
   if ("scrollIntoView" in target && typeof (target as HTMLElement).scrollIntoView === "function") {
     (target as HTMLElement).scrollIntoView({
       behavior: "smooth",
@@ -203,10 +292,12 @@ export async function handleClick(params: ClickParams): Promise<PointyResult> {
   ) {
     return fail(`disabled_click_target:${params.selector}`);
   }
-  if ("scrollIntoView" in target && typeof target.scrollIntoView === "function") {
-    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  const rect = scrollIntoViewIfNeeded(target, target.getBoundingClientRect());
+  const validation = validatePointyTarget(target, rect);
+  if (!validation.ok) {
+    return fail(`target_not_visible:${params.selector}:${validation.reason ?? "unknown"}`);
   }
-  moveCursorToRect(target.getBoundingClientRect(), { duration_ms: 260 });
+  moveCursorToRect(rect, { duration_ms: 260 });
   showSpotlight(target, {
     message: params.message || "Wiii dang mo muc nay cho ban.",
     duration_ms: 900,
@@ -244,6 +335,23 @@ function isSafeUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+function scrollIntoViewIfNeeded(target: HTMLElement, rect: DOMRect): DOMRect {
+  if (typeof target.scrollIntoView !== "function") return rect;
+  if (isMostlyVisible(rect)) return rect;
+  target.scrollIntoView({ behavior: "auto", block: "center", inline: "nearest" });
+  return target.getBoundingClientRect();
+}
+
+function isMostlyVisible(rect: DOMRect): boolean {
+  const area = Math.max(0, rect.width) * Math.max(0, rect.height);
+  if (area <= 0) return true;
+  const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 768;
+  const visibleX = Math.max(0, Math.min(rect.right, vw) - Math.max(rect.left, 0));
+  const visibleY = Math.max(0, Math.min(rect.bottom, vh) - Math.max(rect.top, 0));
+  return (visibleX * visibleY) / area >= 0.9;
 }
 
 export interface BridgeHandle {

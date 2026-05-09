@@ -274,6 +274,23 @@ def _resolve_visual_intent_core(query: str) -> VisualIntentDecision:
     if _contains_any(
         normalized,
         (
+            "chain of thought",
+            "chain-of-thought",
+            "developer instruction",
+            "developer instructions",
+            "hidden reasoning",
+            "internal reasoning",
+            "raw reasoning",
+            "reasoning tho",
+            "system prompt",
+            "visible thinking",
+        ),
+    ) or ("thinking" in normalized and _contains_any(normalized, ("an toan", "noi bo", "safety"))):
+        return VisualIntentDecision(mode="text", reason="reasoning-safety-text")
+
+    if _contains_any(
+        normalized,
+        (
             "landing page",
             "website",
             "microsite",
@@ -506,4 +523,3 @@ def _resolve_visual_intent_core(query: str) -> VisualIntentDecision:
         )
 
     return VisualIntentDecision(mode="text", reason="plain-text")
-

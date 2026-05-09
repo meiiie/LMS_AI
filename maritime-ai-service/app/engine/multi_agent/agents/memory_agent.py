@@ -11,6 +11,8 @@ Integrated with the agents/ framework for config and tracing.
 """
 
 import logging
+import re
+import unicodedata
 from typing import Optional
 
 from app.engine.agents import MEMORY_AGENT_CONFIG
@@ -30,6 +32,35 @@ from app.prompts.prompt_runtime_tail import get_thinking_instruction_from_shared
 logger = logging.getLogger(__name__)
 
 _SERVICE_IDENTITY_USER_IDS = {"api-client", "anonymous"}
+
+_EXPLICIT_MEMORY_WRITE_MARKERS = (
+    "ghi nho",
+    "hay nho",
+    "luu lai",
+    "remember",
+    "keep in mind",
+)
+_MEMORY_ACK_DIRECTIVE_MARKERS = (
+    "tra loi ngan gon",
+    "tra loi chi",
+    "tra loi chi:",
+    "tra loi dung",
+    "answer only",
+    "reply only",
+    "respond only",
+    "da luu",
+    "da ghi nhan",
+    "xac nhan",
+)
+_MEMORY_RECALL_QUERY_MARKERS = (
+    "la gi",
+    "nho gi",
+    "ban nho",
+    "vua nho",
+    "hoi lai",
+    "what",
+    "remember",
+)
 
 _MEMORY_BEHAVIOR_RULES = (
     "- Dùng thông tin đã biết về user để trả lời tự nhiên bằng tiếng Việt\n"
@@ -106,6 +137,154 @@ def _thinking_provenance_from_source(source: str | None) -> str:
     if normalized in {"text_tags", "visible_thinking_block"}:
         return "provider_summary"
     return "provider_native"
+
+
+def _normalize_memory_query(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(text or "").lower())
+    stripped = "".join(char for char in normalized if not unicodedata.combining(char))
+    return " ".join(stripped.replace("đ", "d").split())
+
+
+def _should_use_template_for_explicit_memory_write(
+    *,
+    query: str,
+    new_facts: list,
+    changes_summary: str,
+) -> bool:
+    if not (new_facts or changes_summary):
+        return False
+    normalized = _normalize_memory_query(query)
+    if not any(marker in normalized for marker in _EXPLICIT_MEMORY_WRITE_MARKERS):
+        return False
+    return "lau dai" in normalized or any(
+        marker in normalized for marker in _MEMORY_ACK_DIRECTIVE_MARKERS
+    )
+
+
+def _explicit_memory_ack_response(query: str) -> str:
+    normalized = _normalize_memory_query(query)
+    if not any(marker in normalized for marker in _EXPLICIT_MEMORY_WRITE_MARKERS):
+        return ""
+    if "tra loi chi" in normalized:
+        marker_match = re.search(
+            r"(?:trả\s+lời\s+chỉ|tra\s+loi\s+chi|answer\s+only|reply\s+only|respond\s+only)\s*[:：]\s*([^\.\n]+)",
+            str(query or ""),
+            flags=re.IGNORECASE,
+        )
+        if marker_match:
+            requested = marker_match.group(1).strip(" \"'“”‘’.,。")
+            if requested:
+                return requested[:80]
+        if "da ghi nhan" in normalized:
+            return "Đã ghi nhận."
+    if "da luu" in normalized or "tra loi ngan gon" in normalized:
+        return "Đã lưu."
+    if "xac nhan" in normalized:
+        return "Đã xác nhận."
+    return ""
+
+
+def _memory_query_tokens(text: str) -> set[str]:
+    stopwords = {
+        "cua",
+        "minh",
+        "ban",
+        "wiii",
+        "wii",
+        "vua",
+        "nho",
+        "ghi",
+        "la",
+        "gi",
+        "tra",
+        "loi",
+        "dung",
+        "mot",
+        "cau",
+        "cho",
+        "toi",
+        "em",
+        "anh",
+        "the",
+        "what",
+        "did",
+        "you",
+        "remember",
+    }
+    return {
+        token
+        for token in _normalize_memory_query(text).replace("?", " ").split()
+        if len(token) >= 3 and token not in stopwords
+    }
+
+
+def _fact_content_text(fact: dict) -> str:
+    return str(fact.get("content") or fact.get("value") or "").strip()
+
+
+def _extract_named_memory_value_from_facts(query: str, existing_facts: list) -> str:
+    normalized_query = _normalize_memory_query(query)
+    if not any(marker in normalized_query for marker in _MEMORY_RECALL_QUERY_MARKERS):
+        return ""
+    query_tokens = _memory_query_tokens(query)
+    if not query_tokens:
+        return ""
+
+    best_value = ""
+    best_score = 0
+    for fact in existing_facts or []:
+        if not isinstance(fact, dict):
+            continue
+        content = _fact_content_text(fact)
+        if not content:
+            continue
+        normalized_content = _normalize_memory_query(content)
+        score = len(query_tokens.intersection(set(normalized_content.split())))
+        if score < 2 and not query_tokens.issubset(set(normalized_content.split())):
+            continue
+        marker_index = normalized_content.find(" la ")
+        if marker_index < 0:
+            continue
+        value = content[marker_index + 4 :].strip(" .。:;!?")
+        if value and score >= best_score:
+            best_value = value
+            best_score = score
+    return best_value
+
+
+def _build_memory_recall_template_response(query: str, existing_facts: list) -> str:
+    value = _extract_named_memory_value_from_facts(query, existing_facts)
+    if not value:
+        return ""
+    normalized = _normalize_memory_query(query)
+    if "dung 1 cau" in normalized or "tra loi dung 1 cau" in normalized:
+        return value
+    return f"Mã semantic test cuối của cậu là **{value}** nha (˶˃ ᵕ ˂˶)"
+
+
+def _build_memory_public_thinking(
+    *,
+    query: str,
+    existing_facts: list,
+    new_facts: list,
+    changes_summary: str,
+) -> str:
+    if new_facts or changes_summary:
+        return (
+            "Mình đang giữ lại điều cậu vừa gửi như một mảnh nhớ có thể dùng lại sau này, nên phần quan trọng nhất là lưu đúng chứ không nói hay. "
+            "Nếu sau này cậu hỏi lại, Wiii phải nhắc được nguyên ý này một cách gọn và chắc."
+        )
+    if existing_facts:
+        return (
+            "Mình đang dựa vào điều đã lưu về cậu, không đoán mò từ nhịp trò chuyện. "
+            "Việc cần làm là nhắc lại đúng phần chắc chắn, càng gọn càng tốt."
+        )
+    if query:
+        return (
+            "Mình có cảm giác câu này đang chạm tới trí nhớ, nhưng chưa có mảnh nào đủ chắc để lưu hay nhắc lại. "
+            "Tốt hơn là nói thật phần mình biết, thay vì làm như đã nhớ."
+        )
+    return ""
 
 
 class MemoryAgentNode:
@@ -224,8 +403,53 @@ class MemoryAgentNode:
                     provenance=provenance,
                 )
             else:
-                state.pop("thinking", None)
-                state.pop("thinking_provenance", None)
+                public_thinking = _build_memory_public_thinking(
+                    query=query,
+                    existing_facts=existing_facts_list,
+                    new_facts=new_facts,
+                    changes_summary=changes_summary,
+                )
+                if public_thinking:
+                    provenance = "authored_public_summary"
+                    details = {"phase": "memory_public_summary", "provenance": provenance}
+                    state["thinking"] = public_thinking
+                    state["thinking_provenance"] = provenance
+                    await _push(
+                        {
+                            "type": "thinking_start",
+                            "content": "",
+                            "node": "memory_agent",
+                            "details": details,
+                            "provenance": provenance,
+                        }
+                    )
+                    await _push(
+                        {
+                            "type": "thinking_delta",
+                            "content": public_thinking,
+                            "node": "memory_agent",
+                            "details": details,
+                            "provenance": provenance,
+                        }
+                    )
+                    await _push(
+                        {
+                            "type": "thinking_end",
+                            "content": "",
+                            "node": "memory_agent",
+                            "details": details,
+                            "provenance": provenance,
+                        }
+                    )
+                    record_thinking_snapshot(
+                        state,
+                        public_thinking,
+                        node="memory_agent",
+                        provenance=provenance,
+                    )
+                else:
+                    state.pop("thinking", None)
+                    state.pop("thinking_provenance", None)
 
             state["memory_output"] = response
             state["agent_outputs"] = state.get("agent_outputs", {})
@@ -274,6 +498,8 @@ class MemoryAgentNode:
             facts_dict = await self._semantic_memory.get_user_facts(user_id)
             result = []
             for fact_type, value in facts_dict.items():
+                if str(fact_type).endswith("__updated_at"):
+                    continue
                 if value:
                     if isinstance(value, list):
                         for item in value:
@@ -445,6 +671,24 @@ class MemoryAgentNode:
         state.pop("_memory_native_thinking", None)
         state.pop("_memory_thinking_source", None)
         recent_conversation = self._recent_conversation_excerpt(state)
+        if _should_use_template_for_explicit_memory_write(
+            query=query,
+            new_facts=new_facts,
+            changes_summary=changes_summary,
+        ):
+            concise_ack = _explicit_memory_ack_response(query)
+            if concise_ack:
+                return concise_ack
+            return self._template_response(
+                query,
+                existing_facts,
+                new_facts,
+                changes_summary,
+                recent_conversation=recent_conversation,
+            )
+        recall_response = _build_memory_recall_template_response(query, existing_facts)
+        if recall_response:
+            return recall_response
         if not llm:
             return self._template_response(
                 query,

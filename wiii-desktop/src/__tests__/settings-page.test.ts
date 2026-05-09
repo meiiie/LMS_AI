@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useAuthStore } from "@/stores/auth-store";
+import { DEFAULT_SERVER_URL } from "@/lib/constants";
 
 // Mock API dependencies for org-store
 vi.mock("@/api/organizations", () => ({
@@ -110,7 +111,7 @@ describe("Settings Store", () => {
     await useSettingsStore.getState().resetSettings();
 
     const { settings } = useSettingsStore.getState();
-    expect(settings.server_url).toBe("http://localhost:8080");
+    expect(settings.server_url).toBe(DEFAULT_SERVER_URL);
     expect(settings.theme).toBe("system");
     expect(settings.user_role).toBe("student");
   });

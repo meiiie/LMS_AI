@@ -179,6 +179,19 @@ describe("Chat Store — Streaming", () => {
     expect(useChatStore.getState().streamingContent).toBe("Hello world!");
   });
 
+  it("strips split WIII_SOUL metadata from streaming answer content", () => {
+    const store = useChatStore.getState();
+    store.startStreaming();
+    store.appendStreamingContent('<! --WIII_SOUL: {"mood":"warm"');
+
+    expect(useChatStore.getState().streamingContent).toBe("");
+
+    store.appendStreamingContent("}--> Nut gui tin nhan.");
+
+    expect(useChatStore.getState().streamingContent).toBe("Nut gui tin nhan.");
+    expect(useChatStore.getState().streamingBlocks[0]?.type).toBe("answer");
+  });
+
   it("should set streaming thinking", () => {
     useChatStore.getState().startStreaming();
 

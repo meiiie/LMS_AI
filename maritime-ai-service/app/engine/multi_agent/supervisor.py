@@ -57,6 +57,9 @@ from app.engine.multi_agent.supervisor_runtime_support import (
     resolve_house_routing_provider_impl,
     validate_domain_routing_impl,
 )
+from app.engine.multi_agent.direct_search_synthesis_fallback import (
+    build_search_template_fallback,
+)
 from app.engine.multi_agent.supervisor_surface import (
     _build_recent_turns_for_routing_impl as _build_recent_turns_for_routing,
     _clean_supervisor_visible_reasoning_impl as _clean_supervisor_visible_reasoning,
@@ -145,6 +148,21 @@ _VISUAL_LEARNING_CUES = (
     "with charts",
     "visual",
 )
+
+
+def _has_uploaded_document_context(context: dict) -> bool:
+    document_context = context.get("document_context")
+    if not isinstance(document_context, dict):
+        return False
+    attachments = document_context.get("attachments")
+    if not isinstance(attachments, list):
+        return False
+    return any(
+        isinstance(item, dict) and str(item.get("markdown") or "").strip()
+        for item in attachments
+    )
+
+
 class SupervisorAgent:
     """
     Supervisor Agent - Coordinates specialized agents.
@@ -218,6 +236,58 @@ class SupervisorAgent:
         query = state.get("query", "")
         context = state.get("context", {})
         domain_config = state.get("domain_config", {})
+
+        if isinstance(context, dict) and _has_uploaded_document_context(context):
+            agent = AgentType.DIRECT.value
+            intent = "uploaded_file_context"
+            method = "deterministic_document_context_guard"
+            state["routing_metadata"] = {
+                "intent": intent,
+                "confidence": 1.0,
+                "reasoning": _finalize_routing_reasoning(
+                    raw_reasoning=(
+                        "user attached a per-turn parsed file; use uploaded file context "
+                        "before broad RAG corpus retrieval"
+                    ),
+                    method=method,
+                    chosen_agent=agent,
+                    intent=intent,
+                    query=query,
+                ),
+                "llm_reasoning": "",
+                "method": method,
+                "final_agent": agent,
+            }
+            return agent
+
+        image_guard_intent = ""
+        image_guard_reason = ""
+        if isinstance(context, dict):
+            if context.get("image_input_error"):
+                image_guard_intent = "image_input_unavailable"
+                image_guard_reason = "image attached but vision runtime is unavailable"
+            elif context.get("images"):
+                image_guard_intent = "image_input"
+                image_guard_reason = "image attached and should be handled by direct vision lane"
+
+        if image_guard_intent:
+            agent = AgentType.DIRECT.value
+            method = "deterministic_image_input_guard"
+            state["routing_metadata"] = {
+                "intent": image_guard_intent,
+                "confidence": 1.0,
+                "reasoning": _finalize_routing_reasoning(
+                    raw_reasoning=image_guard_reason,
+                    method=method,
+                    chosen_agent=agent,
+                    intent=image_guard_intent,
+                    query=query,
+                ),
+                "llm_reasoning": "",
+                "method": method,
+                "final_agent": agent,
+            }
+            return agent
 
         _apply_routing_hint(state, query)
 
@@ -388,6 +458,8 @@ class SupervisorAgent:
             classify_fast_chatter_turn_fn=classify_fast_chatter_turn,
             looks_clear_social_fn=_looks_clear_social,
             direct_agent_name=AgentType.DIRECT.value,
+            memory_agent_name=AgentType.MEMORY.value,
+            rag_agent_name=AgentType.RAG.value,
         )
 
     def _validate_domain_routing(self, query: str, chosen_agent: str,
@@ -449,8 +521,34 @@ class SupervisorAgent:
         if len(text_outputs) == 1:
             return list(text_outputs.values())[0]
 
-        # If no outputs, return error
+        # If no outputs, preserve evidence gathered by a tool round before
+        # falling back to a generic apology. This catches cases where an agent
+        # node failed after search succeeded, leaving tool_call_events in state.
         if not text_outputs:
+            tool_events = state.get("tool_call_events") or []
+            if tool_events:
+                try:
+                    template_response = build_search_template_fallback(
+                        query=str(state.get("query") or ""),
+                        tool_call_events=list(tool_events),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "[SYNTHESIZER] Search template salvage failed: %s",
+                        exc,
+                    )
+                    template_response = ""
+                if template_response:
+                    logger.warning(
+                        "[SYNTHESIZER] No agent output, salvaged %d chars from tool_call_events",
+                        len(template_response),
+                    )
+                    return template_response
+
+            existing_final = str(state.get("final_response") or "").strip()
+            if existing_final:
+                return existing_final
+
             return "Xin lỗi, mình chưa xử lý được yêu cầu này nha~ (˶˃ ᵕ ˂˶)"
 
         # Synthesize multiple outputs

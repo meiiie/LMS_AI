@@ -21,15 +21,16 @@ import { OrgManagerMembers } from "./OrgManagerMembers";
 import { OrgManagerSettings } from "./OrgManagerSettings";
 import { OrgManagerKnowledge } from "./OrgManagerKnowledge";
 import { OrgManagerAudit } from "./OrgManagerAudit";
+import { OrgManagerActivity } from "./OrgManagerActivity";
 import { PanelToast } from "@/components/admin/AdminToast";
 
 const TABS: (FullPageTab & { id: OrgManagerTab })[] = [
-  { id: "dashboard", label: "Tong quan", icon: <LayoutDashboard size={16} /> },
-  { id: "members", label: "Thanh vien", icon: <Users size={16} /> },
-  { id: "analytics", label: "Hoat dong", icon: <BarChart3 size={16} /> },
+  { id: "dashboard", label: "Tổng quan", icon: <LayoutDashboard size={16} /> },
+  { id: "members", label: "Thành viên", icon: <Users size={16} /> },
+  { id: "analytics", label: "Hoạt động", icon: <BarChart3 size={16} /> },
   { id: "audit", label: "Host actions", icon: <ScrollText size={16} /> },
-  { id: "settings", label: "Cai dat", icon: <Settings size={16} /> },
-  { id: "knowledge", label: "Tri thuc", icon: <BookOpen size={16} /> },
+  { id: "settings", label: "Cài đặt", icon: <Settings size={16} /> },
+  { id: "knowledge", label: "Tri thức", icon: <BookOpen size={16} /> },
 ];
 
 export function OrgAdminView() {
@@ -39,7 +40,6 @@ export function OrgAdminView() {
     setActiveTab,
     fetchOrgDetail,
     fetchMembers,
-    fetchDocuments,
     orgDetail,
     reset,
   } = useOrgAdminStore();
@@ -49,20 +49,20 @@ export function OrgAdminView() {
     if (orgManagerTargetOrgId) {
       void fetchOrgDetail(orgManagerTargetOrgId);
       void fetchMembers(orgManagerTargetOrgId);
-      void fetchDocuments(orgManagerTargetOrgId);
     }
-  }, [orgManagerTargetOrgId, fetchOrgDetail, fetchMembers, fetchDocuments]);
+  }, [orgManagerTargetOrgId, fetchOrgDetail, fetchMembers]);
 
   useEffect(() => {
     return () => reset();
   }, [reset]);
 
-  const orgName = orgDetail?.display_name || orgDetail?.name || orgManagerTargetOrgId || "";
+  const orgName =
+    orgDetail?.display_name || orgDetail?.name || orgManagerTargetOrgId || "";
 
   return (
     <>
       <FullPageView
-        title="Quan ly to chuc"
+        title="Quản lý tổ chức"
         subtitle={orgName}
         icon={<Building2 size={20} />}
         tabs={TABS}
@@ -74,10 +74,8 @@ export function OrgAdminView() {
         {activeTab === "members" && orgManagerTargetOrgId && (
           <OrgManagerMembers orgId={orgManagerTargetOrgId} />
         )}
-        {activeTab === "analytics" && (
-          <div className="py-12 text-center text-sm text-text-tertiary">
-            Tinh nang phan tich hoat dong se som ra mat.
-          </div>
+        {activeTab === "analytics" && orgManagerTargetOrgId && (
+          <OrgManagerActivity orgId={orgManagerTargetOrgId} />
         )}
         {activeTab === "audit" && orgManagerTargetOrgId && (
           <OrgManagerAudit orgId={orgManagerTargetOrgId} />

@@ -215,6 +215,15 @@ def test_ignores_false_positive_visual_terms():
     assert decision.force_tool is False
 
 
+def test_ignores_reasoning_safety_meta_as_visual_comparison():
+    decision = resolve_visual_intent(
+        "Giải thích sự khác nhau giữa visible thinking an toàn và chain-of-thought nội bộ"
+    )
+    assert decision.mode == "text"
+    assert decision.force_tool is False
+    assert decision.reason == "reasoning-safety-text"
+
+
 def test_detects_visual_patch_followup():
     assert detect_visual_patch_request("Highlight only the bottleneck and keep the same visual session.")
     assert detect_visual_patch_request("Biến sơ đồ này thành 3 bước")

@@ -7,11 +7,78 @@ import contextlib
 import logging
 import time
 import uuid
-from typing import Any, Optional
+from typing import Optional
 
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.code_studio_template_scaffold import (
+    build_code_studio_scaffold,
+    build_scaffold_visible_caption,
+    detect_scaffold_kind,
+)
+from app.engine.runtime.runtime_metrics import inc_counter
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_tc(tc: object) -> dict:
+    """Normalize a tool_call entry into a dict with id/name/args.
+
+    LangChain BaseChatModel emits dict-shaped tool_calls, native ``Message``
+    construction (``_AM``) emits Pydantic ``ToolCall`` objects with
+    attributes ``id``/``name``/``arguments``. Iterators in this module
+    expect both shapes to expose ``.get(...)``-style access — this helper
+    bridges the gap so the scaffold injection path stays compatible with
+    real LLM-driven tool calls.
+    """
+    if isinstance(tc, dict):
+        return tc
+    return {
+        "id": str(getattr(tc, "id", "") or ""),
+        "name": str(getattr(tc, "name", "") or ""),
+        "args": getattr(tc, "arguments", None) or getattr(tc, "args", {}) or {},
+    }
+
+
+def _build_scaffold_manual_tool_call(
+    query: str,
+    *,
+    reason: str = "unknown",
+) -> tuple[dict, str]:
+    """Build a synthetic tool_call payload that injects an HTML scaffold.
+
+    Returned ``manual_tc`` matches the shape expected by the rest of the
+    code_studio loop (``name``/``args``/``id``); ``visible_caption`` is the
+    short Vietnamese explainer the chat thread shows above the canvas.
+
+    The ``reason`` label is forwarded to the
+    ``wiii.code_studio.scaffold.engaged`` counter so operators can see in
+    Grafana whether stream timeouts, ainvoke timeouts, or LLM-prose-only
+    rounds are driving the fallback rate.
+
+    Pattern reference: Anthropic Computer Use 2026 evidence-pool retention
+    + Wiii VISUAL_CODE_GEN.md "host-governed runtime" lane.
+    """
+    scaffold_html = build_code_studio_scaffold(query)
+    visible_caption = build_scaffold_visible_caption(query)
+    kind = detect_scaffold_kind(query)
+    short_title = (query or "Khung dựng cảnh").strip()[:60]
+    manual_tc = {
+        "name": "tool_create_visual_code",
+        "args": {
+            "code_html": scaffold_html,
+            "title": short_title,
+            "subtitle": "Khung tạm — Wiii sẽ mở rộng khi bạn mô tả thêm",
+        },
+        "id": f"scaffold_tc_{uuid.uuid4().hex[:8]}",
+    }
+    try:
+        inc_counter(
+            "wiii.code_studio.scaffold.engaged",
+            labels={"kind": kind, "reason": reason},
+        )
+    except Exception:  # noqa: BLE001 — never let metrics break a request
+        pass
+    return manual_tc, visible_caption
 
 
 async def execute_code_studio_tool_rounds_impl(
@@ -109,99 +176,136 @@ async def execute_code_studio_tool_rounds_impl(
         )
 
         llm_response = None
-        chunk_timeout = 90
-        code_done_timeout = 30
+        # Operator-tunable resilience timeouts (Sprint 35d). Defaults trade
+        # provider-healthy latency against worst-case scaffold-fallback time.
+        chunk_timeout = float(getattr(settings_obj, "code_studio_chunk_timeout_seconds", 30.0))
+        code_done_timeout = float(getattr(settings_obj, "code_studio_code_done_timeout_seconds", 30.0))
+        # Overall ceiling for the streaming pass. NVIDIA NIM occasionally
+        # emits tiny chunks indefinitely without ever closing the stream,
+        # and the per-chunk asyncio.wait_for cannot reliably cancel the
+        # underlying httpx connection. We therefore wrap the entire stream
+        # loop with asyncio.timeout() (Python 3.11+) so the runtime cancels
+        # the whole task tree and the graceful scaffold fallback engages.
+        stream_overall_timeout = float(getattr(settings_obj, "code_studio_stream_overall_timeout_seconds", 90.0))
         code_html_done_at: float | None = None
+        astream_timed_out = False
         try:
-            astream_iter = llm_with_tools.astream(messages).__aiter__()
-            while True:
-                if code_html_done_at and (time.time() - code_html_done_at) > code_done_timeout:
-                    has_tool_calls = bool(llm_response and getattr(llm_response, "tool_calls", None))
-                    if has_tool_calls:
-                        logger.info("[CODE_STUDIO] code_html + tool_call complete, breaking astream")
-                        break
-                    if (time.time() - code_html_done_at) > code_done_timeout * 3:
-                        logger.warning(
-                            "[CODE_STUDIO] code_html done but no tool_call after %ds, force break",
-                            code_done_timeout * 3,
-                        )
-                        break
-
-                try:
-                    timeout = code_done_timeout if code_html_done_at else chunk_timeout
-                    chunk = await asyncio.wait_for(astream_iter.__anext__(), timeout=timeout)
-                except StopAsyncIteration:
-                    break
-                except asyncio.TimeoutError:
-                    if code_html_done_at:
-                        logger.info("[CODE_STUDIO] code_html already complete, proceeding to tool execution")
-                    else:
-                        logger.warning("[CODE_STUDIO] astream chunk timeout after %ds", chunk_timeout)
-                    break
-
-                llm_response = chunk if llm_response is None else llm_response + chunk
-
-                if hasattr(chunk, "tool_call_chunks") and chunk.tool_call_chunks:
-                    for tc_chunk in chunk.tool_call_chunks:
-                        tc_args = tc_chunk.get("args") or ""
-                        if not tc_args:
-                            continue
-                        delta = code_streamer.feed(tc_args)
-
-                        if delta and not code_open_emitted and code_streamer.is_code_html_started:
-                            await push_event(
-                                {
-                                    "type": "code_open",
-                                    "content": {
-                                        "session_id": stream_session_id,
-                                        "title": query[:60] if query else "Code Studio",
-                                        "language": "html",
-                                        "version": 1,
-                                        "studio_lane": "app",
-                                        "artifact_kind": "html_app",
-                                    },
-                                    "node": "code_studio_agent",
-                                }
-                            )
-                            code_open_emitted = True
-
-                        if delta and code_open_emitted:
-                            stream_chunk_size = 500
-                            for ci in range(0, len(delta), stream_chunk_size):
-                                sub_chunk = delta[ci : ci + stream_chunk_size]
-                                await push_event(
-                                    {
-                                        "type": "code_delta",
-                                        "content": {
-                                            "session_id": stream_session_id,
-                                            "chunk": sub_chunk,
-                                            "chunk_index": stream_chunk_index,
-                                            "total_bytes": 0,
-                                        },
-                                        "node": "code_studio_agent",
-                                    }
+            try:
+                async with asyncio.timeout(stream_overall_timeout):
+                    # Sprint 35e follow-up: bring astream() initialisation
+                    # INSIDE the asyncio.timeout block. NVIDIA NIM can hang
+                    # at the HTTP-setup phase before the first chunk lands;
+                    # initialising the iterator outside the timeout context
+                    # let those hangs bypass the cap and stall the pipeline
+                    # for >360s in the worst case.
+                    astream_iter = llm_with_tools.astream(messages).__aiter__()
+                    while True:
+                        if code_html_done_at and (time.time() - code_html_done_at) > code_done_timeout:
+                            has_tool_calls = bool(llm_response and getattr(llm_response, "tool_calls", None))
+                            if has_tool_calls:
+                                logger.info("[CODE_STUDIO] code_html + tool_call complete, breaking astream")
+                                break
+                            if (time.time() - code_html_done_at) > code_done_timeout * 3:
+                                logger.warning(
+                                    "[CODE_STUDIO] code_html done but no tool_call after %ds, force break",
+                                    code_done_timeout * 3,
                                 )
-                                stream_chunk_index += 1
-                                if ci + stream_chunk_size < len(delta):
-                                    await asyncio.sleep(0.02)
+                                break
 
-                        if code_streamer.is_code_html_complete and not code_html_done_at:
-                            code_html_done_at = time.time()
-                            logger.info(
-                                "[CODE_STUDIO] code_html fully extracted: %d chars",
-                                len(code_streamer.full_code_html),
-                            )
-        except Exception as stream_err:
-            logger.warning("[CODE_STUDIO] astream failed, falling back to ainvoke: %s", stream_err)
-            llm_response = await ainvoke_with_fallback(
-                llm_with_tools,
-                messages,
-                tools=tools,
-                tool_choice=forced_tool_choice,
-                provider=provider,
-                push_event=push_event,
+                        try:
+                            timeout = code_done_timeout if code_html_done_at else chunk_timeout
+                            chunk = await asyncio.wait_for(astream_iter.__anext__(), timeout=timeout)
+                        except StopAsyncIteration:
+                            break
+                        except asyncio.TimeoutError:
+                            if code_html_done_at:
+                                logger.info("[CODE_STUDIO] code_html already complete, proceeding to tool execution")
+                            else:
+                                logger.warning("[CODE_STUDIO] astream chunk timeout after %ds", chunk_timeout)
+                            break
+
+                        llm_response = chunk if llm_response is None else llm_response + chunk
+
+                        if hasattr(chunk, "tool_call_chunks") and chunk.tool_call_chunks:
+                            for tc_chunk in chunk.tool_call_chunks:
+                                tc_args = tc_chunk.get("args") or ""
+                                if not tc_args:
+                                    continue
+                                delta = code_streamer.feed(tc_args)
+
+                                if delta and not code_open_emitted and code_streamer.is_code_html_started:
+                                    await push_event(
+                                        {
+                                            "type": "code_open",
+                                            "content": {
+                                                "session_id": stream_session_id,
+                                                "title": query[:60] if query else "Code Studio",
+                                                "language": "html",
+                                                "version": 1,
+                                                "studio_lane": "app",
+                                                "artifact_kind": "html_app",
+                                            },
+                                            "node": "code_studio_agent",
+                                        }
+                                    )
+                                    code_open_emitted = True
+
+                                if delta and code_open_emitted:
+                                    stream_chunk_size = 500
+                                    for ci in range(0, len(delta), stream_chunk_size):
+                                        sub_chunk = delta[ci : ci + stream_chunk_size]
+                                        await push_event(
+                                            {
+                                                "type": "code_delta",
+                                                "content": {
+                                                    "session_id": stream_session_id,
+                                                    "chunk": sub_chunk,
+                                                    "chunk_index": stream_chunk_index,
+                                                    "total_bytes": 0,
+                                                },
+                                                "node": "code_studio_agent",
+                                            }
+                                        )
+                                        stream_chunk_index += 1
+                                        if ci + stream_chunk_size < len(delta):
+                                            await asyncio.sleep(0.02)
+
+                                if code_streamer.is_code_html_complete and not code_html_done_at:
+                                    code_html_done_at = time.time()
+                                    logger.info(
+                                        "[CODE_STUDIO] code_html fully extracted: %d chars",
+                                        len(code_streamer.full_code_html),
+                                    )
+            except (asyncio.TimeoutError, TimeoutError):
+                astream_timed_out = True
+                logger.warning(
+                    "[CODE_STUDIO] astream overall timeout after %ds — engaging graceful scaffold",
+                    stream_overall_timeout,
+                )
+            # Existing code below uses the astream loop's outputs.
+            # Fall through to the unchanged tail logic.
+            pass
+        except Exception as stream_err_outer:
+            logger.warning(
+                "[CODE_STUDIO] astream wrapper failed: %s",
+                stream_err_outer,
             )
-            code_open_emitted = False
+            astream_timed_out = True
+
+        if astream_timed_out:
+            # Graceful path when the entire streaming pass had to be cancelled
+            # (provider-level hang or connection reset that the per-chunk
+            # timeout could not interrupt).
+            try:
+                manual_tc, visible_caption = _build_scaffold_manual_tool_call(
+                    query, reason="stream_overall_timeout"
+                )
+                llm_response = _AM(content=visible_caption, tool_calls=[manual_tc])
+            except Exception as scaffold_err:
+                logger.warning(
+                    "[CODE_STUDIO] Scaffold construction after stream timeout failed: %s",
+                    scaffold_err,
+                )
 
         if llm_response is None:
             llm_response = _AM(content="")
@@ -224,9 +328,30 @@ async def execute_code_studio_tool_rounds_impl(
                 content=getattr(llm_response, "content", "") if llm_response else "",
                 tool_calls=[manual_tc],
             )
+        elif not has_tool_calls and not code_streamer.full_code_html:
+            # Stream finished/timed-out without producing either a tool call
+            # or any usable code_html. Fall through to the topic-aware scaffold
+            # so the user still gets a canvas instead of an empty turn.
+            logger.warning(
+                "[CODE_STUDIO] Stream produced no tool_calls and no code_html — "
+                "engaging graceful HTML scaffold"
+            )
+            manual_tc, visible_caption = _build_scaffold_manual_tool_call(
+                query, reason="stream_empty"
+            )
+            llm_response = _AM(
+                content=visible_caption,
+                tool_calls=[manual_tc],
+            )
     else:
         progress_messages = build_code_studio_progress_messages(query, state)
-        llm_hard_timeout = 240
+        # Non-streaming planning call — operator-tunable so the graceful
+        # scaffold can engage well before the user's HTTP timeout. The
+        # streaming path covers the same query type within
+        # ``code_studio_stream_overall_timeout_seconds`` when the provider
+        # is healthy; an unhealthy provider fails over to the topic-aware
+        # scaffold rather than burning a multi-minute wait.
+        llm_hard_timeout = float(getattr(settings_obj, "code_studio_llm_hard_timeout_seconds", 90.0))
         poll_interval = 8.0
 
         async def llm_call():
@@ -243,7 +368,6 @@ async def execute_code_studio_tool_rounds_impl(
         llm_task = asyncio.create_task(llm_call())
         progress_idx = 0
         llm_start = time.time()
-        timed_out = False
         llm_response = None
         planning_beat = await render_reasoning_fast(
             state=state,
@@ -286,7 +410,6 @@ async def execute_code_studio_tool_rounds_impl(
         progress_idx = 1
         while not llm_task.done():
             if time.time() - llm_start > llm_hard_timeout:
-                timed_out = True
                 llm_task.cancel()
                 logger.warning("[CODE_STUDIO] ainvoke hard timeout after %ds", llm_hard_timeout)
                 await push_event(
@@ -311,11 +434,27 @@ async def execute_code_studio_tool_rounds_impl(
                             fallback_llm = fallback_llm.bind_tools(tools, tool_choice=forced_tool_choice)
                         else:
                             fallback_llm = fallback_llm.bind_tools(tools)
-                    llm_response = await asyncio.wait_for(fallback_llm.ainvoke(messages), timeout=120.0)
+                    fallback_ainvoke_timeout = float(getattr(
+                        settings_obj,
+                        "code_studio_fallback_ainvoke_timeout_seconds",
+                        60.0,
+                    ))
+                    llm_response = await asyncio.wait_for(
+                        fallback_llm.ainvoke(messages),
+                        timeout=fallback_ainvoke_timeout,
+                    )
                 except Exception as fb_err:
-                    logger.warning("[CODE_STUDIO] Fallback ainvoke also failed: %s", fb_err)
+                    logger.warning(
+                        "[CODE_STUDIO] Fallback ainvoke also failed (%s) — engaging "
+                        "graceful HTML scaffold so user still gets a canvas",
+                        fb_err,
+                    )
+                    manual_tc, visible_caption = _build_scaffold_manual_tool_call(
+                        query, reason="ainvoke_fallback_fail"
+                    )
                     llm_response = _AM(
-                        content="Xin lỗi, mình cần thêm thời gian để tạo mô phỏng này. Hãy thử lại nhé."
+                        content=visible_caption,
+                        tool_calls=[manual_tc],
                     )
                 break
             try:
@@ -338,38 +477,59 @@ async def execute_code_studio_tool_rounds_impl(
         await push_event({"type": "thinking_end", "content": "", "node": "code_studio_agent"})
         if llm_response is None:
             if llm_task.cancelled():
+                logger.warning(
+                    "[CODE_STUDIO] LLM call cancelled — engaging graceful HTML scaffold"
+                )
+                manual_tc, visible_caption = _build_scaffold_manual_tool_call(
+                    query, reason="ainvoke_cancelled"
+                )
                 llm_response = _AM(
-                    content=build_code_studio_missing_tool_response(query, state, timed_out=True)
+                    content=visible_caption,
+                    tool_calls=[manual_tc],
                 )
             else:
                 llm_exc = llm_task.exception()
                 if llm_exc is not None:
                     logger.warning(
-                        "[CODE_STUDIO] Initial tool-planning call failed before any tool call: %s",
+                        "[CODE_STUDIO] Initial tool-planning call failed before any tool call (%s) "
+                        "— engaging graceful HTML scaffold",
                         llm_exc,
                     )
+                    manual_tc, visible_caption = _build_scaffold_manual_tool_call(
+                        query, reason="ainvoke_exception"
+                    )
                     llm_response = _AM(
-                        content=build_code_studio_missing_tool_response(
-                            query,
-                            state,
-                            timed_out=timed_out or isinstance(llm_exc, TimeoutError),
-                        )
+                        content=visible_caption,
+                        tool_calls=[manual_tc],
                     )
                 else:
                     llm_response = llm_task.result()
 
     has_initial_tool_calls = bool(llm_response and getattr(llm_response, "tool_calls", None))
     if not has_initial_tool_calls and requires_code_studio_visual_delivery(query, tools):
+        logger.warning(
+            "[CODE_STUDIO] LLM returned prose without tool call but visual "
+            "delivery is required — engaging graceful HTML scaffold"
+        )
+        manual_tc, visible_caption = _build_scaffold_manual_tool_call(
+            query, reason="llm_prose_no_tool_call"
+        )
         llm_response = _AM(
-            content=build_code_studio_missing_tool_response(
-                query,
-                state,
-                timed_out=bool(locals().get("timed_out", False)),
-            )
+            content=visible_caption,
+            tool_calls=[manual_tc],
         )
 
     total_tool_calls = 0
     max_total_tool_calls = 6
+    # Sprint 35e follow-up: cap the post-tool synthesizer round so the
+    # graceful scaffold path doesn't burn 15+ minutes when NVIDIA NIM
+    # stalls after our scaffold tool result lands. Without this cap,
+    # ``TIMEOUT_PROFILE_BACKGROUND`` lets the wait stretch indefinitely.
+    post_tool_synthesis_timeout = float(getattr(
+        settings_obj,
+        "code_studio_post_tool_synthesis_timeout_seconds",
+        90.0,
+    ))
 
     for tool_round in range(max_rounds):
         if not (tools and hasattr(llm_response, "tool_calls") and llm_response.tool_calls):
@@ -378,7 +538,11 @@ async def execute_code_studio_tool_rounds_impl(
             logger.warning("[CODE_STUDIO] Total tool call cap reached (%d), stopping retry loop", max_total_tool_calls)
             break
 
-        round_tool_names = [str(tc.get("name", "unknown")) for tc in llm_response.tool_calls if tc.get("name")]
+        round_tool_names = [
+            str(_normalize_tc(tc).get("name", "unknown"))
+            for tc in llm_response.tool_calls
+            if _normalize_tc(tc).get("name")
+        ]
         round_cue = infer_code_studio_reasoning_cue(query, round_tool_names)
         round_phase = "verify" if tool_round > 0 else "ground"
         try:
@@ -419,32 +583,57 @@ async def execute_code_studio_tool_rounds_impl(
         terminal_failure_detected = False
         visual_session_ids: list[str] = []
         active_visual_session_ids = collect_active_visual_session_ids(state)
+        logger.info(
+            "[CODE_STUDIO] Entering tool round %d/%d, %d tool_calls in response",
+            tool_round + 1,
+            max_rounds,
+            len(llm_response.tool_calls),
+        )
         for tc in llm_response.tool_calls:
             total_tool_calls += 1
             if total_tool_calls > max_total_tool_calls:
                 logger.warning("[CODE_STUDIO] Skipping tool call %d (cap %d)", total_tool_calls, max_total_tool_calls)
                 break
-            tc_id = tc.get("id", f"tc_{tool_round}")
-            tc_name = tc.get("name", "unknown")
-            await push_event({"type": "tool_call", "content": {"name": tc_name, "args": tc.get("args", {}), "id": tc_id}, "node": "code_studio_agent"})
-            tool_call_events.append({"type": "call", "name": tc_name, "args": tc.get("args", {}), "id": tc_id})
+            tc_dict = _normalize_tc(tc)
+            tc_id = tc_dict.get("id") or f"tc_{tool_round}"
+            tc_name = tc_dict.get("name", "unknown")
+            tc_args = tc_dict.get("args") or {}
+            logger.info(
+                "[CODE_STUDIO] Invoking tool %s (id=%s, args_keys=%s)",
+                tc_name, tc_id, list(tc_args.keys()) if isinstance(tc_args, dict) else "?",
+            )
+            await push_event({"type": "tool_call", "content": {"name": tc_name, "args": tc_args, "id": tc_id}, "node": "code_studio_agent"})
+            tool_call_events.append({"type": "call", "name": tc_name, "args": tc_args, "id": tc_id})
             matched = get_tool_by_name(tools, str(tc_name).strip())
+            logger.info(
+                "[CODE_STUDIO] Tool match: %s (matched=%s, tools_count=%d)",
+                tc_name, bool(matched), len(tools),
+            )
             try:
                 if matched:
                     result = await invoke_tool_with_runtime(
                         matched,
-                        tc["args"],
+                        tc_args,
                         tool_name=tc_name,
                         runtime_context_base=runtime_context_base,
                         tool_call_id=tc_id,
-                        query_snippet=str(tc.get("args", {}).get("query", ""))[:100],
+                        query_snippet=str(tc_args.get("query", "") if isinstance(tc_args, dict) else "")[:100],
                         prefer_async=False,
                         run_sync_in_thread=True,
                     )
+                    logger.info(
+                        "[CODE_STUDIO] Tool %s returned %d chars (preview: %s)",
+                        tc_name, len(str(result)), str(result)[:120].replace("\n", " "),
+                    )
                 else:
+                    logger.warning(
+                        "[CODE_STUDIO] Unknown tool %s; available: %s",
+                        tc_name,
+                        [getattr(t, "name", "?") for t in tools],
+                    )
                     result = "Unknown tool"
             except Exception as te:
-                logger.warning("[CODE_STUDIO] Tool %s failed: %s", tc_name, te)
+                logger.warning("[CODE_STUDIO] Tool %s failed: %s", tc_name, te, exc_info=True)
                 result = "Tool unavailable"
 
             await push_event(
@@ -525,14 +714,45 @@ async def execute_code_studio_tool_rounds_impl(
         if terminal_failure_detected:
             llm_response = _AM(content=build_code_studio_terminal_failure_response(query, tool_call_events))
             break
-        llm_response = await ainvoke_with_fallback(
-            llm_auto,
-            messages,
-            tools=tools,
-            provider=provider,
-            push_event=push_event,
-            timeout_profile=TIMEOUT_PROFILE_BACKGROUND,
-        )
+        try:
+            llm_response = await asyncio.wait_for(
+                ainvoke_with_fallback(
+                    llm_auto,
+                    messages,
+                    tools=tools,
+                    provider=provider,
+                    push_event=push_event,
+                    timeout_profile=TIMEOUT_PROFILE_BACKGROUND,
+                ),
+                timeout=post_tool_synthesis_timeout,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            logger.warning(
+                "[CODE_STUDIO] Post-tool synthesizer exceeded %.1fs — keeping "
+                "scaffold output and emitting a short Vietnamese summary",
+                post_tool_synthesis_timeout,
+            )
+            llm_response = _AM(
+                content=(
+                    "Mình đã ghim canvas ngay phía trên. Chia sẻ thêm chi tiết "
+                    "(tâm trạng nhân vật, bối cảnh, hoặc tham số cụ thể) để "
+                    "Wiii mở rộng cảnh đúng hướng nhé."
+                )
+            )
+            break
+        except Exception as synth_err:
+            logger.warning(
+                "[CODE_STUDIO] Post-tool synthesizer failed (%s) — keeping "
+                "scaffold output and emitting a short Vietnamese summary",
+                synth_err,
+            )
+            llm_response = _AM(
+                content=(
+                    "Mình đã ghim canvas ngay phía trên. Chia sẻ thêm chi tiết "
+                    "để Wiii mở rộng cảnh đúng hướng nhé."
+                )
+            )
+            break
         if tools and hasattr(llm_response, "tool_calls") and llm_response.tool_calls:
             transition = await render_reasoning_fast(
                 state=state,

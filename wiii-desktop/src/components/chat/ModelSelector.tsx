@@ -3,7 +3,7 @@
  */
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { AlertCircle, ChevronUp, Cpu, Sparkles } from "lucide-react";
+import { AlertCircle, ChevronUp, Cpu, Sparkles, Check } from "lucide-react";
 import { useModelStore, type RequestModelProvider } from "@/stores/model-store";
 
 const PROVIDER_ICONS: Record<string, typeof Cpu> = {
@@ -136,9 +136,11 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
       <button
         onClick={() => setOpen((value) => !value)}
         className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-text-secondary transition-colors hover:bg-surface-tertiary hover:text-text"
-        aria-label="Chon provider"
+        aria-label="Chọn model AI"
         aria-expanded={open}
         data-testid="model-selector-trigger"
+        data-wiii-id="model-selector"
+        data-wiii-synonyms="chọn model,đổi model,chọn model ai,model ai,ai model,đổi llm,provider ai"
       >
         <ActiveIcon size={13} />
         <span>{activeLabel}</span>
@@ -208,10 +210,10 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
                         className={`mt-1 h-2 w-2 rounded-full ${
                           disabled ? "bg-gray-400" : "bg-green-500"
                         }`}
-                        title={disabled ? "Tam khoa" : "San sang"}
+                        title={disabled ? "Tạm khoá" : "Sẵn sàng"}
                       />
                     ) : isActive ? (
-                      <span className="ml-auto text-xs text-[var(--accent)]">✓</span>
+                      <Check size={14} className="ml-auto text-[var(--accent)]" aria-label="Đã chọn" />
                     ) : null}
                   </button>
                 );

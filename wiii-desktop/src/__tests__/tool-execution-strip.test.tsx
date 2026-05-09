@@ -22,7 +22,14 @@ describe("ToolExecutionStrip", () => {
           language: "html",
           status: "complete",
           code: "<div>app</div>",
-          versions: [{ version: 1, code: "<div>app</div>", title: "Pendulum App", timestamp: Date.now() }],
+          versions: [
+            {
+              version: 1,
+              code: "<div>app</div>",
+              title: "Pendulum App",
+              timestamp: Date.now(),
+            },
+          ],
           activeVersion: 1,
           chunkCount: 1,
           totalBytes: 14,
@@ -114,10 +121,15 @@ describe("ToolExecutionStrip", () => {
 
     render(<ToolExecutionStrip block={block} />);
 
-    expect(screen.getByText("Script Python de tao bieu do chart.png")).toBeTruthy();
-    expect(screen.getByText("Da tao 1 tep: chart.png")).toBeTruthy();
+    expect(
+      screen.getByText("Script Python để tạo biểu đồ chart.png"),
+    ).toBeTruthy();
+    expect(screen.queryByText("Đã tạo 1 tệp: chart.png")).toBeNull();
     expect(screen.queryByText(/import matplotlib/i)).toBeNull();
     expect(screen.queryByText(/\/home\/appuser/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Chạy mã Python/i }));
+    expect(screen.getByText("Đã tạo 1 tệp: chart.png")).toBeTruthy();
   });
 
   it("reveals sanitized technical detail only when expanded", () => {
@@ -131,17 +143,20 @@ describe("ToolExecutionStrip", () => {
         args: {
           code: "print('hello')\nplt.savefig('demo.png')",
         },
-        result: "Output: done\nArtifacts:\n- demo.png (image/png) -> C:\\temp\\generated\\demo.png",
+        result:
+          "Output: done\nArtifacts:\n- demo.png (image/png) -> C:\\temp\\generated\\demo.png",
       },
     };
 
     render(<ToolExecutionStrip block={block} />);
 
-    expect(screen.queryByRole("region", { name: "Chi tiet script" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Chi tiết script" }),
+    ).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /chi tiet/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Chạy mã Python/i }));
 
-    const detail = screen.getByRole("region", { name: "Chi tiet script" });
+    const detail = screen.getByRole("region", { name: "Chi tiết script" });
     expect(detail).toBeTruthy();
     expect(screen.getByText(/print\('hello'\)/i)).toBeTruthy();
     expect(screen.queryByText(/C:\\temp\\generated/i)).toBeNull();
@@ -165,8 +180,21 @@ describe("ToolExecutionStrip", () => {
 
     render(<ToolExecutionStrip block={block} />);
 
-    expect(screen.getByText("Dang phac thao minh hoa cho: Softmax vs linear attention")).toBeTruthy();
-    expect(screen.getByText("Da chen minh hoa ngay trong cau tra loi")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Đang phác thảo minh họa cho: Softmax vs linear attention",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("Đã chèn minh họa ngay trong câu trả lời"),
+    ).toBeNull();
     expect(screen.queryByText(/ky thuat/i)).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Dựng visual giải thích/i }),
+    );
+    expect(
+      screen.getByText("Đã chèn minh họa ngay trong câu trả lời"),
+    ).toBeTruthy();
   });
 });

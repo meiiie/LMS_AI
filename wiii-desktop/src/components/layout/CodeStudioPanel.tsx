@@ -15,7 +15,11 @@ import { InlineVisualFrame } from "@/components/common/InlineVisualFrame";
 
 type StudioTab = "code" | "preview";
 
-export const CodeStudioPanel = memo(function CodeStudioPanel({ inline }: { inline?: boolean }) {
+export const CodeStudioPanel = memo(function CodeStudioPanel({
+  inline,
+}: {
+  inline?: boolean;
+}) {
   const codeStudioPanelOpen = useUIStore((s) => s.codeStudioPanelOpen);
   const closeCodeStudio = useUIStore((s) => s.closeCodeStudio);
   const session = useCodeStudioStore((s) =>
@@ -57,14 +61,16 @@ const CodeStudioContent = memo(function CodeStudioContent({
   session: CodeStudioSession;
   onClose: () => void;
 }) {
-  const explicitRequestedView = (session.metadata as Record<string, unknown> | undefined)
-    ?.requestedView as StudioTab | undefined;
+  const explicitRequestedView = (
+    session.metadata as Record<string, unknown> | undefined
+  )?.requestedView as StudioTab | undefined;
   const preferredTab = explicitRequestedView === "preview" ? "preview" : "code";
   const setRequestedView = useCodeStudioStore((s) => s.setRequestedView);
   const [activeTab, setActiveTab] = useState<StudioTab>(preferredTab);
   const switchVersion = useCodeStudioStore((s) => s.switchVersion);
   const isStreaming = session.status === "streaming";
-  const showPreviewBadge = session.status === "complete" && activeTab === "code";
+  const showPreviewBadge =
+    session.status === "complete" && activeTab === "code";
 
   useEffect(() => {
     setActiveTab(preferredTab);
@@ -95,11 +101,27 @@ const CodeStudioContent = memo(function CodeStudioContent({
   const planItems = useMemo(() => {
     const code = session.code.toLowerCase();
     return [
-      { label: "Thiết kế giao diện", done: code.includes("<style") || code.includes("css") },
-      { label: "Canvas / SVG", done: code.includes("<canvas") || code.includes("<svg") },
-      { label: "Logic xử lý", done: code.includes("<script") || code.includes("function") },
-      { label: "Controls tương tác", done: code.includes('type="range"') || code.includes("<button") },
-      { label: "Kết nối Wiii Bridge", done: code.includes("wiiivisualbridge") || code.includes("reportresult") },
+      {
+        label: "Thiết kế giao diện",
+        done: code.includes("<style") || code.includes("css"),
+      },
+      {
+        label: "Canvas / SVG",
+        done: code.includes("<canvas") || code.includes("<svg"),
+      },
+      {
+        label: "Logic xử lý",
+        done: code.includes("<script") || code.includes("function"),
+      },
+      {
+        label: "Controls tương tác",
+        done: code.includes('type="range"') || code.includes("<button"),
+      },
+      {
+        label: "Kết nối Wiii Bridge",
+        done:
+          code.includes("wiiivisualbridge") || code.includes("reportresult"),
+      },
     ];
   }, [session.code]);
 
@@ -111,9 +133,13 @@ const CodeStudioContent = memo(function CodeStudioContent({
           <Code2 size={17} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-text truncate">{session.title}</div>
+          <div className="text-sm font-medium text-text truncate">
+            {session.title}
+          </div>
           <div className="flex items-center gap-2 mt-1 text-[11px] text-text-tertiary">
-            <span className="uppercase tracking-[0.08em]">{session.language}</span>
+            <span className="uppercase tracking-[0.08em]">
+              {session.language}
+            </span>
             {isStreaming && (
               <span className="flex items-center gap-1 text-[var(--accent)]">
                 <Loader2 size={10} className="animate-spin" />
@@ -138,7 +164,12 @@ const CodeStudioContent = memo(function CodeStudioContent({
       {isStreaming && (
         <div className="flex flex-wrap gap-x-3 gap-y-1 px-4 py-2 border-b border-border/50 text-[10px]">
           {planItems.map((item) => (
-            <span key={item.label} className={item.done ? "text-[var(--green)]" : "text-text-tertiary/50"}>
+            <span
+              key={item.label}
+              className={
+                item.done ? "text-[var(--green)]" : "text-text-tertiary/50"
+              }
+            >
               {item.done ? "\u2713" : "\u25CB"} {item.label}
             </span>
           ))}
@@ -214,8 +245,8 @@ function TabButton({
         active
           ? "text-[var(--accent)]"
           : disabled
-          ? "text-text-tertiary/40 cursor-not-allowed"
-          : "text-text-tertiary hover:text-text-secondary"
+            ? "text-text-tertiary/40 cursor-not-allowed"
+            : "text-text-tertiary hover:text-text-secondary"
       }`}
     >
       <Icon size={14} />
@@ -273,7 +304,10 @@ function CodeTab({ session }: { session: CodeStudioSession }) {
         <span className="text-[10px] text-text-tertiary">
           {lineCount} dòng · {session.code.length} bytes
           {isStreaming && session.totalBytes > 0 && (
-            <> · {Math.round((session.code.length / session.totalBytes) * 100)}%</>
+            <>
+              {" "}
+              · {Math.round((session.code.length / session.totalBytes) * 100)}%
+            </>
           )}
         </span>
         <div className="flex gap-1">
@@ -283,14 +317,18 @@ function CodeTab({ session }: { session: CodeStudioSession }) {
             className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface-tertiary hover:bg-border text-text-secondary transition-colors disabled:opacity-40"
             title="Sao chép"
           >
-            {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
-            {copied ? "Da chep" : "Copy"}
+            {copied ? (
+              <Check size={12} className="text-green-500" />
+            ) : (
+              <Copy size={12} />
+            )}
+            {copied ? "Đã chép" : "Copy"}
           </button>
           <button
             onClick={handleDownload}
             disabled={isStreaming}
             className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface-tertiary hover:bg-border text-text-secondary transition-colors disabled:opacity-40"
-            title="Tai xuong"
+            title="Tải xuống"
           >
             <Download size={12} />
           </button>
@@ -316,7 +354,9 @@ function PreviewTab({ session }: { session: CodeStudioSession }) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-text-tertiary py-16">
         <Loader2 size={32} className="mb-3 animate-spin opacity-50" />
-        <p className="text-sm">Đang tạo code, preview sẽ hiện sau khi hoàn thành.</p>
+        <p className="text-sm">
+          Đang tạo code, preview sẽ hiện sau khi hoàn thành.
+        </p>
       </div>
     );
   }
@@ -325,7 +365,7 @@ function PreviewTab({ session }: { session: CodeStudioSession }) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-text-tertiary py-16">
         <Eye size={32} className="mb-3 opacity-50" />
-        <p className="text-sm">Khong co code de preview.</p>
+        <p className="text-sm">Không có code để preview.</p>
       </div>
     );
   }

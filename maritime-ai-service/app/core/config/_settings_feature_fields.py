@@ -45,6 +45,29 @@ class FeatureSettingsMixin:
     enable_soul_emotion: bool = Field(default=False, description="Enable LLM inline emotion tags for avatar")
     soul_emotion_buffer_bytes: int = Field(default=512, ge=256, le=2048, description="Max bytes to buffer for soul emotion extraction")
 
+    # Pointy Voice (ElevenLabs)
+    enable_pointy_voice: bool = Field(
+        default=True,
+        description="Enable optional Pointy voice synthesis through the backend voice proxy",
+    )
+    elevenlabs_api_key: Optional[str] = Field(
+        default=None,
+        description="ElevenLabs API key for backend-proxied text-to-speech",
+        repr=False,
+    )
+    elevenlabs_voice_id: str = Field(
+        default="JBFqnCBsd6RMkjVDRZzb",
+        description="ElevenLabs voice id used for Pointy captions",
+    )
+    elevenlabs_model_id: str = Field(
+        default="eleven_flash_v2_5",
+        description="ElevenLabs TTS model id; Flash v2.5 is tuned for low-latency UI speech",
+    )
+    elevenlabs_output_format: str = Field(
+        default="mp3_22050_32",
+        description="ElevenLabs output format for short Pointy captions",
+    )
+
     # Knowledge Management
     cross_domain_search: bool = Field(default=True, description="Search all domains with soft boost")
     domain_boost_score: float = Field(default=0.15, ge=0.0, le=1.0, description="RRF boost for same-domain results")
@@ -152,6 +175,23 @@ class FeatureSettingsMixin:
     enable_product_search: bool = Field(default=True, description="Enable product search agent")
     serper_api_key: Optional[str] = Field(default=None, description="Serper.dev API key", repr=False)
     apify_api_token: Optional[str] = Field(default=None, description="Apify API token", repr=False)
+    brave_api_key: Optional[str] = Field(default=None, description="Brave Search API key (free 2k/mo, more reliable than DDG)", repr=False)
+    searxng_url: Optional[str] = Field(
+        default="http://searxng:8080",
+        description="SearXNG meta-search base URL (self-hosted, AGPL-3.0). "
+                    "Empty disables SearXNG primary; falls back to Brave/DDG.",
+    )
+
+    # Phase 35 — per-provider client-side RPM throttle. 0 disables.
+    nvidia_rpm_limit: int = Field(
+        default=0, ge=0, le=10000,
+        description="Cap NVIDIA NIM requests per minute (0=disabled). "
+                    "Recommended 30-60 for free tier to avoid 429.",
+    )
+    google_rpm_limit: int = Field(
+        default=0, ge=0, le=10000,
+        description="Cap Google Gemini requests per minute (0=disabled).",
+    )
 
     # Site Playbooks (Firecrawl pattern)
     enable_site_playbooks: bool = Field(default=True, description="Enable YAML-driven site playbooks for scraping config")

@@ -86,6 +86,7 @@ async def build_stream_bootstrap_impl(
 
     from app.engine.multi_agent.graph_runtime_bindings import (
         _inject_code_studio_context,
+        _inject_document_context,
         _inject_host_context,
         _inject_host_session,
         _inject_living_context,
@@ -98,6 +99,15 @@ async def build_stream_bootstrap_impl(
     host_prompt = _inject_host_context(initial_state)
     if host_prompt:
         initial_state["host_context_prompt"] = host_prompt
+    document_prompt = _inject_document_context(initial_state)
+    if document_prompt:
+        existing_host_prompt = initial_state.get("host_context_prompt", "")
+        initial_state["document_context_prompt"] = document_prompt
+        initial_state["host_context_prompt"] = (
+            f"{existing_host_prompt}\n\n{document_prompt}"
+            if existing_host_prompt
+            else document_prompt
+        )
     host_capabilities_prompt = initial_state.get("host_capabilities_prompt", "")
     if host_capabilities_prompt:
         initial_state["host_capabilities_prompt"] = host_capabilities_prompt

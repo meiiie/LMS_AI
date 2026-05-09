@@ -93,6 +93,32 @@ def test_provider_status_marks_zhipu_ocr_as_specialist(monkeypatch):
     assert status.lane_fit_label == "OCR specialist"
 
 
+def test_openai_vision_generation_kwargs_use_current_token_param_for_gpt5():
+    from app.engine import vision_runtime as vr
+
+    kwargs = vr._openai_vision_generation_kwargs(
+        provider="openai",
+        model_name="gpt-5.4-mini",
+        max_output_tokens=512,
+        temperature=0.2,
+    )
+
+    assert kwargs == {"max_completion_tokens": 512}
+
+
+def test_openai_vision_generation_kwargs_keep_compat_shape_for_openrouter():
+    from app.engine import vision_runtime as vr
+
+    kwargs = vr._openai_vision_generation_kwargs(
+        provider="openrouter",
+        model_name="openai/gpt-5.4-mini",
+        max_output_tokens=512,
+        temperature=0.2,
+    )
+
+    assert kwargs == {"max_tokens": 512, "temperature": 0.2}
+
+
 def test_provider_status_marks_ollama_ocr_as_fallback(monkeypatch):
     from app.engine import vision_runtime as vr
 
@@ -216,6 +242,68 @@ def test_provider_status_accepts_openrouter_qwen_vl(monkeypatch):
     assert status.model_name == "qwen/qwen2.5-vl-32b-instruct"
 
 
+def test_provider_status_accepts_nvidia_vlm(monkeypatch):
+    from app.engine import vision_runtime as vr
+
+    monkeypatch.setattr(vr.settings, "nvidia_api_key", "nvapi-test-key", raising=False)
+    monkeypatch.setattr(
+        vr.settings,
+        "nvidia_base_url",
+        "https://integrate.api.nvidia.com/v1",
+        raising=False,
+    )
+
+    status = vr._provider_status(
+        "nvidia",
+        vr.VisionCapability.VISUAL_DESCRIBE,
+        model_name="nvidia/nemotron-nano-12b-v2-vl",
+    )
+
+    assert status.available is True
+    assert status.model_name == "nvidia/nemotron-nano-12b-v2-vl"
+    assert status.resolved_base_url == "https://integrate.api.nvidia.com/v1"
+
+
+@pytest.mark.parametrize(
+    "model_name",
+    [
+        "meta/llama-3.2-11b-vision-instruct",
+        "meta/llama-4-maverick-17b-128e-instruct",
+        "google/gemma-4-31b-it",
+        "mistralai/ministral-14b-instruct-2512",
+        "moonshotai/kimi-k2.6",
+    ],
+)
+def test_provider_status_accepts_nvidia_catalog_multimodal_models(monkeypatch, model_name):
+    from app.engine import vision_runtime as vr
+
+    monkeypatch.setattr(vr.settings, "nvidia_api_key", "nvapi-test-key", raising=False)
+
+    status = vr._provider_status(
+        "nvidia",
+        vr.VisionCapability.VISUAL_DESCRIBE,
+        model_name=model_name,
+    )
+
+    assert status.available is True
+    assert status.model_name == model_name
+
+
+def test_provider_status_rejects_nvidia_text_model_for_vision(monkeypatch):
+    from app.engine import vision_runtime as vr
+
+    monkeypatch.setattr(vr.settings, "nvidia_api_key", "nvapi-test-key", raising=False)
+
+    status = vr._provider_status(
+        "nvidia",
+        vr.VisionCapability.VISUAL_DESCRIBE,
+        model_name="deepseek-ai/deepseek-v4-flash",
+    )
+
+    assert status.available is False
+    assert status.reason_code == "model_unverified"
+
+
 def test_provider_status_accepts_zhipu_glm_ocr(monkeypatch):
     from app.engine import vision_runtime as vr
 
@@ -315,6 +403,36 @@ def test_build_image_data_url_keeps_existing_data_url():
         )
         == original
     )
+
+
+def test_image_analysis_prompt_prioritizes_exact_marker_text():
+    from app.engine import vision_runtime as vr
+
+    prompt = vr._build_image_analysis_prompt("Đọc marker trong ảnh")
+
+    assert "copy the exact visible text verbatim" in prompt
+    assert "only visible evidence" in prompt
+    assert "Final answer must be in Vietnamese" in prompt
+    assert "background color" in prompt
+    assert "Answer every explicit part" in prompt
+
+
+def test_compact_repeated_vision_text_removes_exact_sentence_loops():
+    from app.engine import vision_runtime as vr
+
+    compacted = vr._compact_repeated_vision_text(
+        "Marker là WIII. Nền màu xanh. Nền màu xanh. Nền màu xanh."
+    )
+
+    assert compacted == "Marker là WIII. Nền màu xanh."
+
+
+def test_compact_repeated_vision_text_strips_answer_label():
+    from app.engine import vision_runtime as vr
+
+    compacted = vr._compact_repeated_vision_text('**Answer:** * "WIII BLUE 729".\n* Nen xanh.')
+
+    assert compacted == '"WIII BLUE 729". Nen xanh.'
 
 
 def test_provider_status_autoselects_local_vision_model_for_ollama(monkeypatch):

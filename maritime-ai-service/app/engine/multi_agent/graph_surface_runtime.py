@@ -43,6 +43,28 @@ _HOUSE_LITERAL_REPLACEMENTS = (
     ("\u5462,", " nh\u1ec9,"),
     ("\u5462", " nh\u1ec9"),
 )
+_BROKEN_SOUL_PREFIX_MARKERS = (
+    "mouthcurve",
+    "eyeshape",
+    "eyeopenness",
+    "blush",
+    "intensity",
+)
+_BROKEN_SOUL_PREFIX_RE = re.compile(r"^\s*.{0,1400}?-->\s*", re.DOTALL)
+
+
+def _strip_broken_soul_prefix(value: str) -> str:
+    """Remove truncated WIII_SOUL emotion JSON leaked at the start of text.
+
+    Complete tags are stripped at the SSE layer. This catches tail-only leaks
+    such as `"face": {"mouthCurve": ...}-->` that can appear after chunking.
+    """
+    prefix = str(value or "")[:1400].lower()
+    if "-->" not in prefix:
+        return value
+    if not any(marker in prefix for marker in _BROKEN_SOUL_PREFIX_MARKERS):
+        return value
+    return _BROKEN_SOUL_PREFIX_RE.sub("", value, count=1)
 
 
 def get_effective_provider_impl(state) -> Optional[str]:
@@ -150,6 +172,12 @@ def query_allows_cjk_surface_impl(query: str) -> bool:
     return bool(_HOUSE_CJK_CHAR_RE.search(compact))
 
 
+_HOUSE_LINKISH_RE = re.compile(
+    r"https?://[^\s<>)\]\"']+|(?<![\w@])(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>)\]\"']*)?",
+    re.IGNORECASE,
+)
+
+
 def sanitize_wiii_house_text_impl(
     value: str,
     *,
@@ -159,7 +187,17 @@ def sanitize_wiii_house_text_impl(
     cleaned = str(value or "")
     if not cleaned:
         return cleaned
+    cleaned = _strip_broken_soul_prefix(cleaned)
+    protected_urls: list[str] = []
+
+    def _protect_url(match: re.Match[str]) -> str:
+        protected_urls.append(match.group(0))
+        return f"__WIII_URL_{len(protected_urls) - 1}__"
+
+    cleaned = _HOUSE_LINKISH_RE.sub(_protect_url, cleaned)
     if query_allows_cjk_surface_fn(query):
+        for index, url in enumerate(protected_urls):
+            cleaned = cleaned.replace(f"__WIII_URL_{index}__", url)
         return cleaned.strip()
 
     for old, new in _HOUSE_LITERAL_REPLACEMENTS:
@@ -168,9 +206,26 @@ def sanitize_wiii_house_text_impl(
     cleaned = _HOUSE_CJK_CHAR_RE.sub("", cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
     cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
-    cleaned = re.sub(r"([,.;:!?])([^\s])", r"\1 \2", cleaned)
+    # Insert space after punctuation, but PRESERVE numeric formats: "110.01",
+    # "13:18", "1,480", "0,96%". Negative lookbehind/lookahead skips when
+    # punctuation sits between two digits (Vietnamese/finance number format).
+    cleaned = re.sub(r"(?<!\d)([,.;:!?])(?!\d)([^\s])", r"\1 \2", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    return cleaned.strip()
+    # Phase 35 — strip DeepSeek native tool-call markup that leaks through
+    # NVIDIA NIM (`<｜DSML｜tool_calls>...</｜DSML｜tool_calls>`). When parser
+    # misses these and they reach final synthesis, user sees raw XML.
+    # Strip the entire DSML block (open + content + close).
+    cleaned = re.sub(
+        r"<｜DSML｜tool_calls>.*?</｜DSML｜tool_calls>",
+        "", cleaned, flags=re.DOTALL,
+    )
+    # Also strip stray opening or closing DSML tags (asymmetric leak).
+    cleaned = re.sub(r"</?｜DSML｜[^>]*>", "", cleaned)
+    cleaned = re.sub(r"</?\|DSML\|[^>]*>", "", cleaned)  # ASCII variant
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    for index, url in enumerate(protected_urls):
+        cleaned = cleaned.replace(f"__WIII_URL_{index}__", url)
+    return cleaned
 
 
 async def build_direct_round_label_impl(

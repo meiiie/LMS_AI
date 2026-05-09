@@ -303,7 +303,7 @@ async def _execute_code_studio_tool_rounds(
     tools: list,
     push_event,
     runtime_context_base=None,
-    max_rounds: int = 3,
+    max_rounds: int = 2,  # Phase 35: 3→2 (NVIDIA NIM ~60s/round; cap latency)
     query: str = "",
     state: Optional[AgentState] = None,
     provider: str | None = None,

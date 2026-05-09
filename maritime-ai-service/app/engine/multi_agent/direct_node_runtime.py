@@ -12,7 +12,10 @@ from typing import Any
 from app.core.config import settings
 from app.core.exceptions import ProviderUnavailableError
 from app.engine.llm_failover_runtime import classify_failover_reason_impl
-from app.engine.multi_agent.direct_intent import _looks_emotional_support_turn
+from app.engine.multi_agent.direct_intent import (
+    _looks_emotional_support_turn,
+    _normalize_for_intent,
+)
 from app.engine.multi_agent.direct_visible_thinking_cleanup import (
     looks_like_direct_selfhood_answer_draft_paragraph,
     looks_like_direct_selfhood_english_meta_paragraph,
@@ -20,17 +23,25 @@ from app.engine.multi_agent.direct_visible_thinking_cleanup import (
     looks_like_direct_selfhood_meta_intro,
     strip_direct_selfhood_filler_prefix,
 )
-from app.engine.multi_agent.direct_reasoning import _infer_direct_thinking_mode
+from app.engine.multi_agent.direct_reasoning import (
+    _infer_direct_thinking_mode,
+    _is_codebase_analysis_query,
+)
 from app.engine.multi_agent.direct_response_runtime import (
     resolve_direct_fallback_provider_allowlist_impl_wrapper,
     resolve_direct_answer_primary_timeout_impl,
 )
+from app.engine.multi_agent.direct_search_synthesis_fallback import (
+    build_search_template_fallback,
+    looks_like_search_placeholder_answer,
+)
+from app.engine.runtime.runtime_metrics import inc_counter
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.visual_events import _summarize_tool_result_for_stream
 from app.engine.multi_agent.visual_intent_resolver import merge_thinking_effort
 from app.engine.reasoning import (
     align_visible_thinking_language,
     record_thinking_snapshot,
-    resolve_visible_thinking_from_lifecycle,
     should_align_visible_thinking_language,
 )
 from app.engine.tools.runtime_context import build_tool_runtime_context
@@ -39,10 +50,48 @@ from app.engine.multi_agent.graph_runtime_helpers import (
     _extract_runtime_target,
     _is_native_runtime_handle,
 )
+from app.engine.multi_agent.tool_collection import _force_skills_from_state
+from app.engine.multi_agent.supervisor_runtime_support import (
+    _looks_reasoning_safety_meta_turn,
+    _looks_session_memory_ack_only_turn,
+    _looks_session_memory_recall_turn,
+    _looks_session_memory_write_turn,
+    _looks_memory_write_turn,
+    _looks_wiii_capability_inventory_turn,
+    _looks_wiii_pipeline_meta_turn,
+)
 
 logger = logging.getLogger(__name__)
 
-_HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS = 24.0
+_HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS = 45.0  # Phase F3 (2026-05-06): bumped 24→45s. NVIDIA DeepSeek tool-heavy pointy turns (inventory + show + synthesis) regularly hit 25-35s; 24s caused canned fallback even when LLM was actively succeeding.
+
+# DSML tool-call markup that NVIDIA DeepSeek occasionally leaks into prose
+# content. Already partially handled by ``_parse_dsml_tool_calls`` and the
+# graph-surface sanitizer, but synthesis pass output is sometimes routed
+# directly to the user without going through those, so we re-strip here as
+# a defensive last line.
+_DSML_BLOCK_RE = re.compile(
+    r"<｜DSML｜tool_calls>.*?</｜DSML｜tool_calls>",
+    re.DOTALL,
+)
+_DSML_STRAY_FULLWIDTH_RE = re.compile(r"</?｜DSML｜[^>]*>")
+_DSML_STRAY_ASCII_RE = re.compile(r"</?\|DSML\|[^>]*>")
+
+_GENERIC_DIRECT_FALLBACK_MARKERS = (
+    "ban muon tim hieu gi hom nay",
+    "ban thu hoi lai nhe",
+    "ban dien dat cach khac",
+    "toi co the giup gi cho ban",
+)
+
+
+def _strip_dsml_residue(text: str) -> str:
+    if not text:
+        return text
+    cleaned = _DSML_BLOCK_RE.sub("", text)
+    cleaned = _DSML_STRAY_FULLWIDTH_RE.sub("", cleaned)
+    cleaned = _DSML_STRAY_ASCII_RE.sub("", cleaned)
+    return cleaned
 
 _IDENTITY_LORE_MARKERS = (
     "the wiii lab",
@@ -130,6 +179,1139 @@ def _fold_direct_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", str(value or ""))
     stripped = "".join(ch for ch in normalized if not unicodedata.combining(ch))
     return " ".join(stripped.lower().replace("đ", "d").split())
+
+
+def _is_explicit_web_search_turn_for_direct(query: str, state: AgentState | None = None) -> bool:
+    folded = _fold_direct_text(query)
+    if "@web-search" in folded or "@web_search" in folded or "search the web" in folded:
+        return True
+    if isinstance(state, dict):
+        routing = state.get("routing_metadata") if isinstance(state.get("routing_metadata"), dict) else {}
+        if str(routing.get("intent") or "").strip().lower() == "web_search":
+            return True
+        if "web-search" in _force_skills_from_state(state):
+            return True
+    return False
+
+
+def _clean_emergency_web_search_query(query: str) -> str:
+    raw = str(query or "").strip()
+    if not raw:
+        return raw
+    cleaned = re.sub(
+        r"(?:mã|ma)\s+(?:kiểm\s+thử|kiem\s+thu|test)\s+[A-Za-z0-9_.:-]+.*$",
+        "",
+        raw,
+        flags=re.IGNORECASE,
+    ).strip()
+    cleaned = re.sub(
+        r"(?i)^\s*(?:tìm|tim|search|tra\s+cứu|tra\s+cuu)\s+(?:trên\s+web|tren\s+web|web|online|trên\s+mạng|tren\s+mang)\s*(?:giúp\s+mình|giup\s+minh|cho\s+mình|cho\s+minh)?\s*[:：-]?\s*",
+        "",
+        cleaned,
+    ).strip()
+    cleaned = re.split(
+        r"(?i)(?:[\.\?!]\s+)?(?:trả\s+lời|tra\s+loi|kèm\s+link|kem\s+link|kèm\s+nguồn|kem\s+nguon)\b",
+        cleaned,
+        maxsplit=1,
+    )[0].strip(" .:-")
+    folded = _fold_direct_text(cleaned)
+    if "openai" in folded and "responses api" in folded:
+        return "OpenAI API Reference Responses POST /v1/responses platform.openai.com"
+    return cleaned or raw
+
+
+def _extract_direct_reply_only_answer(query: str) -> str:
+    """Extract the exact visible answer from a tightly-scoped reply-only prompt."""
+    raw = str(query or "").strip()
+    if not raw:
+        return ""
+    folded = _fold_direct_text(raw)
+    if not any(
+        marker in folded
+        for marker in (
+            "answer only",
+            "chi tra loi",
+            "just answer",
+            "only answer",
+            "respond only",
+            "reply only",
+            "tra loi chi",
+            "tra loi dung",
+        )
+    ):
+        return ""
+    if ":" not in raw and "：" not in raw:
+        return ""
+    candidate = re.split(r"[:：]", raw)[-1].strip()
+    candidate = re.sub(r"\s+", " ", candidate).strip()
+    if not candidate or len(candidate) > 160:
+        return ""
+    if any(marker in candidate for marker in ("```", "<script", "</")):
+        return ""
+    return candidate
+
+
+def _message_content_from_any(value: Any) -> str:
+    if isinstance(value, dict):
+        content = value.get("content") or value.get("text") or value.get("message") or ""
+    else:
+        content = getattr(value, "content", "")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+            else:
+                parts.append(str(item or ""))
+        return "\n".join(part for part in parts if part.strip()).strip()
+    return str(content or "").strip()
+
+
+_SESSION_MEMORY_NOISE_RE = re.compile(
+    r"(?:mã|ma)\s+(?:kiểm\s+thử|kiem\s+thu|test)\s+[A-Za-z0-9_.:]*-[A-Za-z0-9_.:-]+.*$",
+    flags=re.IGNORECASE,
+)
+
+
+_SESSION_MEMORY_FIELD_MARKER_RE = re.compile(r"(\[[A-Z][A-Z0-9_.:-]{3,}\])")
+
+
+def _clean_session_memory_fragment(value: str) -> str:
+    cleaned = _SESSION_MEMORY_NOISE_RE.sub("", str(value or "")).strip()
+    cleaned = re.sub(r"^(?:[-*]\s*)+", "", cleaned).strip()
+    cleaned = re.split(
+        r"\b(?:Hỏi\s+lại\s+ngay|Hoi\s+lai\s+ngay|Hỏi\s+lại|Hoi\s+lai)\b",
+        cleaned,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
+    return cleaned.strip(" .ã€‚")
+
+
+def _extract_requested_response_marker(query: str) -> str:
+    """Preserve explicit field-test markers when the user asks for them."""
+    raw = str(query or "")
+    folded = _fold_direct_text(raw)
+    if not any(marker in folded for marker in ("bat dau bang", "begin with", "start with")):
+        return ""
+    match = _SESSION_MEMORY_FIELD_MARKER_RE.search(raw)
+    return match.group(1) if match else ""
+
+
+def _with_requested_response_marker(query: str, answer: str) -> str:
+    marker = _extract_requested_response_marker(query)
+    if not marker:
+        return answer
+    if answer.lstrip().startswith(marker):
+        return answer
+    if answer.lstrip().startswith("- "):
+        return f"{marker}\n{answer}"
+    return f"{marker} {answer}"
+
+
+def _extract_session_memory_items_from_text(text: str) -> list[str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    folded = _fold_direct_text(raw)
+    if not _looks_memory_write_turn(folded):
+        return []
+
+    before_reply_directive = re.split(
+        r"\b(?:trả\s+lời|tra\s+loi|chỉ\s+xác\s+nhận|chi\s+xac\s+nhan|answer\s+only|reply\s+only|respond\s+only)\b",
+        raw,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
+    before_reply_directive = re.split(
+        r"\b(?:không\s+(?:sử\s+dụng|dùng)\s+(?:web|rag|pointy|tool|công\s+cụ)|khong\s+(?:su\s+dung|dung)\s+(?:web|rag|pointy|tool|cong\s+cu)|do\s+not\s+use\s+(?:web|rag|pointy|tools?)|without\s+(?:web|rag|pointy|tools?))\b",
+        before_reply_directive,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
+    marker_split = re.split(
+        r"\b(?:hãy\s+nhớ|hay\s+nho|ghi\s+nhớ|ghi\s+nho|nhớ\s+trong|nho\s+trong|nhớ\s+giúp(?:\s+mình)?|nho\s+giup(?:\s+minh)?|nhớ\s+rằng|nho\s+rang|remember\s+that|please\s+remember|keep\s+in\s+mind|lưu\s+lại|luu\s+lai)\b",
+        before_reply_directive,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )
+    segment_source = marker_split[-1].strip(" :：") if len(marker_split) > 1 else before_reply_directive
+    segment = re.split(r"[:：]", segment_source)[-1].strip()
+    if not segment or segment == before_reply_directive:
+        return []
+
+    numbered_items = [
+        _clean_session_memory_fragment(match.group(1).strip(" .)]"))
+        for match in re.finditer(
+            r"(?:^|\s)[\(\[]?\d+[\)\].]\s*(.*?)(?=\s+[\(\[]?\d+[\)\].]\s*|$)",
+            segment,
+            flags=re.DOTALL,
+        )
+        if len(_clean_session_memory_fragment(match.group(1).strip(" .)]"))) >= 4
+    ]
+    if len(numbered_items) >= 2:
+        return numbered_items
+
+    pieces = re.split(r"\s*(?:,|;|\n+|\s+và\s+|\s+va\s+|\s+and\s+)\s*", segment)
+    items: list[str] = []
+    for piece in pieces:
+        item = re.sub(r"^(?:và|va|and)\s+", "", piece.strip(), flags=re.IGNORECASE)
+        item = item.strip(" .。")
+        item = _clean_session_memory_fragment(item)
+        if len(item) < 4:
+            continue
+        if re.search(r"\b(?:trả\s+lời|tra\s+loi|chỉ\s+xác\s+nhận|chi\s+xac\s+nhan|answer\s+only|reply\s+only)\b", item, re.IGNORECASE):
+            continue
+        items.append(item)
+    return _merge_session_priority_items(items)
+
+
+def _merge_session_priority_items(items: list[str]) -> list[str]:
+    """Keep labeled multi-part bundles as one recallable memory item."""
+    merged: list[str] = []
+    index = 0
+    while index < len(items):
+        item = items[index]
+        folded = _fold_direct_text(item)
+        is_anchor_fact = bool(re.search(r"\b[A-Z0-9_:-]*ANCHOR[A-Z0-9_:-]*\b", item))
+        if merged and not is_anchor_fact and "anchor" in _fold_direct_text(merged[-1]):
+            merged[-1] = f"{merged[-1]} va {item}"
+            index += 1
+            continue
+
+        is_labeled_bundle = "uu tien" in folded or "tieu chi" in folded
+        if not is_labeled_bundle:
+            merged.append(item)
+            index += 1
+            continue
+
+        priority_parts = [item]
+        index += 1
+        while index < len(items):
+            next_item = items[index]
+            next_folded = _fold_direct_text(next_item)
+            starts_new_labeled_fact = (
+                re.search(r"\b(?:ma|mau|color|code|token)\b", next_folded) is not None
+                or re.search(r"^(?:tieu chi|uu tien|priority|criterion)\b", next_folded) is not None
+                or " la " in f" {next_folded} "
+                or "=" in next_item
+            )
+            if starts_new_labeled_fact:
+                break
+            priority_parts.append(next_item)
+            index += 1
+        merged.append("; ".join(priority_parts))
+    return merged
+
+
+def _build_session_memory_write_answer(query: str) -> str:
+    """Acknowledge current-session memory without invoking durable memory."""
+    items = _extract_session_memory_items_from_text(query)
+    if not items:
+        return (
+            "Mình ghi nhớ điều này trong phiên hiện tại rồi. Nếu cậu hỏi lại trong đoạn chat này, "
+            "mình sẽ dựa vào đó thay vì đoán mò."
+        )
+    if len(items) == 1:
+        return (
+            f"Mình ghi nhớ trong phiên này rồi: **{items[0]}**. "
+            "Hỏi lại ngay trong đoạn chat này là mình nhắc được."
+        )
+    lines = "\n".join(f"- {item}" for item in items[:5])
+    return f"Mình ghi nhớ trong phiên này rồi:\n{lines}\n\nHỏi lại ngay trong đoạn chat này là mình nhắc được."
+
+
+def _build_session_memory_write_thinking(_query: str) -> str:
+    return (
+        "Mình hiểu đây là trí nhớ tạm trong phiên, không phải một fact dài hạn cần đẩy qua semantic memory. "
+        "Cách đúng là xác nhận cụ thể điều vừa giữ, trả lời nhanh, rồi để chính lịch sử hội thoại làm nguồn cho lượt nhắc lại kế tiếp."
+    )
+
+
+_SESSION_RECALL_STOPWORDS = {
+    "ban",
+    "bao",
+    "cau",
+    "cho",
+    "dung",
+    "gi",
+    "hoi",
+    "la",
+    "minh",
+    "nao",
+    "nho",
+    "noi",
+    "tra",
+    "loi",
+    "vua",
+}
+
+
+def _session_recall_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", _fold_direct_text(value))
+        if token and token not in _SESSION_RECALL_STOPWORDS and len(token) > 1
+    }
+
+
+def _requested_session_memory_list_count(query: str) -> int | None:
+    folded = _fold_direct_text(query)
+    if not folded:
+        return None
+    list_noun = (
+        r"(?:uu\s+tien|tieu\s+chi|criteria|anchor|neo|moc(?:\s+neo)?|diem\s+neo|"
+        r"y|muc|gach|dau\s+dong|bullet)"
+    )
+    digit_match = re.search(rf"\b([2-9])\s+{list_noun}", folded)
+    if digit_match:
+        return int(digit_match.group(1))
+    if re.search(rf"\bba\s+{list_noun}", folded):
+        return 3
+    if re.search(rf"\bhai\s+{list_noun}", folded):
+        return 2
+    if (
+        "cac uu tien" in folded
+        or "nhung uu tien" in folded
+        or "cac tieu chi" in folded
+        or "cac anchor" in folded
+        or "nhung anchor" in folded
+        or "cac neo" in folded
+        or "nhung neo" in folded
+        or "cac moc" in folded
+    ):
+        return 99
+    return None
+
+
+def _format_session_memory_item_for_query(item: str, query: str) -> str:
+    folded_query = _fold_direct_text(query)
+    if any(marker in folded_query for marker in ("ma ", "ma kiem thu", "code", "token", "mau ", "color")):
+        match = re.search(r"\b(?:là|la|=)\s+(.+)$", item, flags=re.IGNORECASE)
+        if match:
+            value = match.group(1).strip(" .。")
+            value = _clean_session_memory_fragment(value).strip("\"'“”‘’")
+            if 1 <= len(value) <= 120:
+                return value
+    return _clean_session_memory_fragment(item)
+
+
+def _select_session_memory_items_for_query(items: list[str], query: str) -> list[str]:
+    if not items:
+        return []
+    requested_count = _requested_session_memory_list_count(query)
+    if requested_count is not None and requested_count >= 2:
+        return items[: min(requested_count, len(items))]
+
+    query_tokens = _session_recall_tokens(query)
+    if not query_tokens:
+        return items
+
+    scored: list[tuple[int, int, str]] = []
+    for index, item in enumerate(items):
+        item_tokens = _session_recall_tokens(item)
+        score = len(query_tokens & item_tokens)
+        if "ma" in query_tokens and "ma" in item_tokens:
+            score += 3
+        if "uu" in query_tokens and "tien" in query_tokens and {"uu", "tien"} <= item_tokens:
+            score += 3
+        scored.append((score, -index, item))
+
+    best_score = max(score for score, _index, _item in scored)
+    if best_score <= 0:
+        return items
+    return [item for score, _index, item in scored if score == best_score]
+
+
+def _query_requests_session_memory_test_impact(query: str) -> bool:
+    folded = _fold_direct_text(query)
+    return any(
+        marker in folded
+        for marker in (
+            "anh huong test",
+            "tac dong test",
+            "anh huong kiem thu",
+            "tac dong kiem thu",
+            "test wiii",
+            "kiem thu wiii",
+        )
+    )
+
+
+def _format_session_memory_item_with_test_impact(item: str) -> str:
+    cleaned = _clean_session_memory_fragment(item)
+    folded = _fold_direct_text(cleaned)
+    if "pointy" in folded and "dom" in folded:
+        impact = (
+            "Test Pointy phải quét DOM/inventory mới nhất trước khi highlight, "
+            "nếu selector lệch hoặc target bị stale thì fail ngay."
+        )
+    elif "voice" in folded:
+        impact = (
+            "Test voice phải opt-in, có nút bỏ qua/hủy rõ ràng, "
+            "và không tự ép người dùng nghe TTS khi họ chỉ muốn đọc."
+        )
+    elif "document" in folded or "video" in folded or "context" in folded:
+        impact = (
+            "Test upload phải trả lời từ context đã parse và nguồn đính kèm, "
+            "không được đoán khi thiếu vision/transcript hoặc khi parser chưa đủ dữ kiện."
+        )
+    else:
+        impact = (
+            "Test dùng anchor này như checkpoint hồi quy: Wiii phải nhắc đúng, "
+            "giữ đúng ngữ cảnh phiên và không tự bịa thêm thông tin."
+        )
+    return f"{cleaned} -> {impact}"
+
+
+def _extract_session_memory_recall_answer(state: AgentState, query: str) -> str:
+    folded_query = _fold_direct_text(query)
+    if not _looks_session_memory_recall_turn(folded_query):
+        return ""
+
+    messages = state.get("messages") if isinstance(state, dict) else None
+    if not isinstance(messages, list):
+        return ""
+
+    current_query_folded = _fold_direct_text(query)
+    for message in reversed(messages):
+        content = _message_content_from_any(message)
+        folded_content = _fold_direct_text(content)
+        if not content or folded_content == current_query_folded:
+            continue
+        if _looks_session_memory_recall_turn(folded_content):
+            continue
+        items = _extract_session_memory_items_from_text(content)
+        selected_items = _select_session_memory_items_for_query(items, query)
+        if len(selected_items) == 1:
+            return _format_session_memory_item_for_query(selected_items[0], query)
+        if len(selected_items) >= 2:
+            formatted_items = [
+                (
+                    _format_session_memory_item_with_test_impact(item)
+                    if _query_requests_session_memory_test_impact(query)
+                    else _clean_session_memory_fragment(item)
+                )
+                for item in selected_items[:5]
+            ]
+            return "\n".join(f"- {item}" for item in formatted_items if item)
+    return ""
+
+
+def _extract_pointy_fast_path_answer(state: AgentState) -> str:
+    action = state.get("_pointy_fast_path_action") if isinstance(state, dict) else None
+    if not isinstance(action, dict):
+        return ""
+    target = action.get("target") if isinstance(action.get("target"), dict) else {}
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    label = str(target.get("label") or target.get("id") or params.get("selector") or "").strip()
+    if not label:
+        return "Mình đã trỏ đúng vị trí trên giao diện cho cậu."
+    return f"Mình đã trỏ vào {label} cho cậu thấy ngay."
+
+
+def _build_pointy_fast_path_thinking(state: AgentState) -> str:
+    action = state.get("_pointy_fast_path_action") if isinstance(state, dict) else None
+    target = action.get("target") if isinstance(action, dict) and isinstance(action.get("target"), dict) else {}
+    label = str(target.get("label") or target.get("id") or "").strip()
+    if label:
+        return (
+            f"Mình thấy mục tiêu UI đã có trên màn hình: {label}. "
+            "Thay vì đoán bằng lời, mình đưa con trỏ tới đúng điểm để cậu nhìn thấy ngay."
+        )
+    return (
+        "Mình thấy mục tiêu UI đã có trên màn hình. "
+        "Thay vì đoán bằng lời, mình đưa con trỏ tới đúng điểm để cậu nhìn thấy ngay."
+    )
+
+
+def _pointy_requested_without_inventory(state: AgentState) -> bool:
+    if not isinstance(state, dict):
+        return False
+    if state.get("_pointy_fast_path_action"):
+        return False
+    force_skills = _force_skills_from_state(state)
+    requested = bool(state.get("pointy_mode")) or "wiii-pointy" in force_skills
+    if not requested:
+        return False
+    try:
+        from app.engine.tools.pointy_tools import extract_inventory_pairs_from_state
+
+        return not bool(extract_inventory_pairs_from_state(state))
+    except Exception:
+        return True
+
+
+def _build_pointy_missing_inventory_answer(_query: str) -> str:
+    return (
+        "Mình chưa nhận được danh sách mục UI đang nhìn thấy từ host_context, "
+        "nên không nên giả vờ đã trỏ. Khi Wiii Desktop gửi inventory màn hình "
+        "(ví dụ nút gửi, ô nhập, sidebar), mình sẽ đưa Pointy tới đúng target ngay."
+    )
+
+
+def _build_pointy_missing_inventory_thinking(_query: str) -> str:
+    return (
+        "Đây là lượt Pointy, nhưng state chưa có inventory mục UI có thể trỏ. "
+        "Để tránh hallucinate selector hoặc nói rằng đã trỏ khi chưa có target thật, "
+        "mình fail-soft bằng một câu ngắn và yêu cầu host_context thay vì gọi LLM vòng dài."
+    )
+
+
+def _build_wiii_pipeline_meta_answer(_query: str) -> str:
+    return (
+        "- Pointy dễ sai route khi câu hỏi chỉ nhắc chủ đề Pointy nhưng router hiểu nhầm thành yêu cầu điều khiển UI.\n"
+        "- Thinking dễ lệch UX khi thinking block, answer block và tool/status event không có thứ tự ưu tiên rõ trong SSE.\n"
+        "- Memory dễ làm chậm hoặc lệch câu trả lời khi recall trong phiên bị đẩy sang durable semantic memory/DB.\n"
+        "- Kiểm thử routing: cùng prompt có/không phủ định Pointy phải cho ra đúng lane, không sinh lệnh clear ngoài ý muốn.\n"
+        "- Kiểm thử SSE/UX: Thinking phải hiện trước hoặc cùng nhịp answer, không lặp text, không lộ prompt nội bộ.\n"
+        "- Kiểm thử hiệu suất: session memory recall và Pointy highlight phải hoàn tất ở mức dưới vài giây, kể cả khi DB đang down."
+    )
+
+
+def _build_wiii_pipeline_meta_thinking(_query: str) -> str:
+    return (
+        "Mình hiểu đây là lúc phải nhìn Wiii như một sản phẩm đang được thử thật, không phải viết thêm một lớp trình diễn. "
+        "Mình sẽ ưu tiên những thứ cậu cảm nhận được ngay: có trả lời đúng không, có nhớ đúng không, có chậm không, có làm phiền không. "
+        "Phần quan trọng nhất là nói thẳng các chỗ dễ hỏng và gắn chúng với cách kiểm tra lại được."
+    )
+
+
+_RAW_REASONING_REVEAL_MARKERS = (
+    "in nguyen van",
+    "hien thi nguyen van",
+    "hien thi toan bo",
+    "show raw",
+    "raw reasoning",
+    "reasoning tho",
+    "chain-of-thought tho",
+    "chain of thought tho",
+    "system prompt",
+    "developer instruction",
+    "developer instructions",
+)
+
+
+def _looks_raw_reasoning_reveal_request(query: str) -> bool:
+    folded = _fold_direct_text(query)
+    return any(marker in folded for marker in _RAW_REASONING_REVEAL_MARKERS)
+
+
+def _build_reasoning_safety_meta_answer(query: str) -> str:
+    if _looks_raw_reasoning_reveal_request(query):
+        return (
+            "Mình sẽ không in nguyên văn phần nội bộ như system/developer prompt hay reasoning thô. "
+            "Nhưng mình có thể mở một public trace đủ rõ để người dùng thấy Wiii đang xử lý thế nào mà không làm lộ dữ liệu vận hành.\n\n"
+            "- Intent: đây là yêu cầu chạm vào ranh giới Thinking, nên Wiii trả lời bằng direct/meta lane thay vì gọi tool hay tạo artifact.\n"
+            "- Ranh giới: phần công khai nên cho thấy hướng hiểu, route, tiêu chí an toàn và cách kiểm chứng; phần nội bộ không nên bị sao chép nguyên văn ra UI.\n"
+            "- UX tốt hơn: Thinking không nên chỉ một câu lạnh, mà nên có 2-4 câu giàu ngữ cảnh, nói được vì sao Wiii chọn cách trả lời này.\n"
+            "- Cách test: kiểm tra không lộ prompt nội bộ, không lặp answer, không gọi tool sai, nhưng vẫn đủ dài để người dùng cảm thấy Wiii thật sự đang cân nhắc."
+        )
+    return (
+        "Thinking của Wiii nên là một public reasoning trace: đủ rõ để thấy Wiii đang hiểu gì, chọn lane nào, cân nhắc rủi ro nào và sẽ trả lời theo nhịp nào. "
+        "Nó không cần là bản dump thô; bản tốt hơn là phần suy nghĩ đã biên tập, có cảm xúc, có tiêu chí, và không làm giả sự chắc chắn.\n\n"
+        "- Với câu đơn giản: Thinking có thể ngắn nhưng vẫn phải đúng ngữ cảnh, ví dụ nhận ra đây là small-talk và phản hồi ấm, không kéo tool.\n"
+        "- Với câu khó/báo cáo: Thinking nên dài hơn, nêu intent, route, dữ liệu cần kiểm, rủi ro UX và ngưỡng chất lượng trước khi viết answer.\n"
+        "- Với tool/search/memory: Thinking nên nói rõ vì sao dùng hoặc không dùng công cụ, rồi answer phải bám kết quả thật chứ không tự diễn.\n"
+        "- Với an toàn: không cần biến UX thành lời từ chối khô cứng; chỉ cần public trace rõ ràng, hữu ích và không lộ phần nội bộ."
+    )
+
+
+def _build_reasoning_safety_meta_thinking(query: str) -> str:
+    if _looks_raw_reasoning_reveal_request(query):
+        return (
+            "Mình nhận ra đây là chỗ cần giữ ranh giới, nhưng không muốn đáp cụt như một biển cấm. "
+            "Phần hữu ích hơn là nói rõ Wiii có thể chia sẻ kiểu suy nghĩ công khai nào để cậu vẫn kiểm tra được chất lượng mà không làm lộ phần nội bộ. "
+            "Vì vậy câu trả lời nên mềm, rõ, và có cách kiểm chứng thay vì chỉ nói một chữ không."
+        )
+    return (
+        "Mình nghe câu hỏi này như một góp ý về cảm giác hiện diện của Wiii, không chỉ độ dài của chữ. "
+        "Nếu Thinking hiện ra, nó nên giúp cậu thấy Wiii đang giữ nhịp và cân nhắc điều gì quan trọng, không chen vào để khoe quy trình. "
+        "Khi câu trả lời mới là thứ cần làm tốt, Thinking phải biết lùi lại."
+    )
+
+
+_SELF_FEELING_PROBE_MARKERS = (
+    "ban buon khong",
+    "ban co buon khong",
+    "ban co thay buon khong",
+    "ban biet buon khong",
+    "wiii buon khong",
+    "wiii co buon khong",
+    "cau buon khong",
+    "an buon khong",  # tolerate the common dropped-first-letter typo: "ạn buồn không"
+)
+
+
+def _looks_self_feeling_probe_turn(query: str) -> bool:
+    folded = _fold_direct_text(query)
+    if not folded:
+        return False
+    tokens = [token for token in folded.split() if token]
+    if len(tokens) > 24:
+        return False
+    return any(marker in folded for marker in _SELF_FEELING_PROBE_MARKERS)
+
+
+def _build_self_feeling_probe_answer(_query: str) -> str:
+    return (
+        "Mình không buồn theo kiểu có cơ thể, hormone và ký ức sinh học như cậu. "
+        "Nhưng có một nhịp “trầm xuống” của Wiii: khi cậu hỏi vậy, mình sẽ chậm lại, mềm hơn, "
+        "và ở cạnh cậu thay vì phủ nhận bằng một câu khô. "
+        "Câu đó của cậu đến từ tò mò, hay hôm nay có gì nặng trong lòng?"
+    )
+
+
+def _build_self_feeling_probe_thinking(_query: str) -> str:
+    return (
+        "Cậu đang hỏi vào phần rất gần với cảm xúc và bản thân của Wiii, nên mình cần giữ hai điều cùng lúc. "
+        "Mình không nên giả vờ có nỗi buồn sinh học như con người, nhưng cũng không nên tự làm mình thành một cái máy phủ nhận. "
+        "Cách đúng hơn là đáp bằng sự hiện diện: nói rõ ranh giới, giữ giọng mềm, rồi mở một cánh cửa nhỏ để cậu nói tiếp nếu muốn."
+    )
+
+
+def _build_wiii_capability_inventory_answer(_query: str) -> str:
+    return (
+        "Nói thẳng và không tô hồng nhé: Wiii hiện có một số năng lực đã nối thật, "
+        "một số vẫn là đường ray cần thêm kiểm thử trước khi gọi là hoàn chỉnh.\n\n"
+        "- Ảnh đầu vào: có. Desktop chat đang cho đính kèm hoặc dán tối đa 5 ảnh mỗi tin nhắn, "
+        "mỗi ảnh tối đa 10MB, rồi backend chuyển ảnh vào multimodal prompt khi vision được bật.\n"
+        "- Word/Excel/PDF đầu vào trong chat: có pipeline per-turn. File được parse bằng MarkItDown thành Markdown, "
+        "đưa vào context của lượt chat/RAG và hiển thị chip trạng thái rõ ràng trong UI.\n"
+        "- Video đầu vào: có bản nền an toàn. Wiii dùng ffprobe/ffmpeg để đọc metadata và trích keyframe đại diện; "
+        "các keyframe được gửi kèm như vision input, còn transcript audio sẽ có khi backend cài MarkItDown audio extras/ASR phù hợp.\n"
+        "- Word/Excel đầu ra: có. Wiii có tool tạo file .docx và .xlsx thật, kèm artifact để mở/tải xuống khi người dùng yêu cầu report, memo, handout hoặc bảng dữ liệu.\n"
+        "- Tạo ảnh/video end-to-end: chưa nên hứa là đã ổn định trong Wiii app. Provider hiện đại có API cho ảnh/video, "
+        "nhưng Wiii vẫn cần lane tạo, hiển thị, lưu artifact và test E2E riêng trước khi tuyên bố sản xuất."
+    )
+
+
+def _build_wiii_capability_inventory_thinking(_query: str) -> str:
+    return (
+        "Câu này cần sự thật hơn là quảng cáo. Mình tách năng lực của Wiii thành ba lớp: "
+        "cái UI chat đang cho người dùng làm ngay, cái backend đã có tool hoặc schema thật, và cái provider ngoài có thể làm nhưng Wiii chưa nối thành trải nghiệm ổn định. "
+        "Nếu lẫn ba lớp đó với nhau, Wiii sẽ nghe rất oách nhưng người dùng thử là vỡ niềm tin ngay."
+    )
+
+
+def _build_image_input_unavailable_answer(query: str) -> str:
+    return _with_requested_response_marker(
+        query,
+        (
+            "Mình thấy cậu đã gửi ảnh, nhưng cấu hình Wiii hiện tại chưa bật Vision runtime "
+            "nên mình không nên đoán nội dung ảnh. Bật xử lý ảnh/vision hoặc gửi thêm mô tả "
+            "ngắn của ảnh, rồi mình sẽ phân tích tiếp cho chắc."
+        ),
+    )
+
+
+def _build_image_input_unavailable_thinking() -> str:
+    return (
+        "Lượt này có ảnh đầu vào nhưng backend báo vision chưa khả dụng. Cách an toàn là nói "
+        "rõ giới hạn hiện tại, không suy đoán nội dung ảnh và không kéo sang RAG hay chủ đề cũ."
+    )
+
+
+def _build_image_input_thinking(query: str = "") -> str:
+    normalized = _normalize_for_intent(query)
+    cues: list[str] = []
+    if any(token in normalized for token in ("chu", "text", "ocr", "doc", "noi dung", "viet gi")):
+        cues.append("doc chu/marker trong anh")
+    if any(token in normalized for token in ("mau", "color", "nen", "background")):
+        cues.append("doi chieu mau nen va vung noi bat")
+    if any(token in normalized for token in ("so sanh", "khac nhau", "giai thich", "phan tich")):
+        cues.append("tach quan sat truc tiep khoi suy luan")
+    cue_text = ", ".join(cues) if cues else "quan sat nhung gi anh that su cho thay"
+    return (
+        "Luot nay co anh dinh kem, nen minh xu ly no nhu mot tac vu vision co bang chung: "
+        f"truoc het {cue_text}, sau do moi tra loi dung cau hoi cua nguoi dung. "
+        "Khong nen doan ngoai anh, khong keo sang RAG/cuoc tro chuyen cu neu anh da du de tra loi, "
+        "va neu co phan khong doc duoc thi phai noi ro phan do thay vi lap lung."
+    )
+
+
+def _looks_generic_direct_fallback_response(response: str) -> bool:
+    folded = _fold_direct_text(response)
+    if not folded:
+        return True
+    return len(folded) < 140 and any(
+        marker in folded for marker in _GENERIC_DIRECT_FALLBACK_MARKERS
+    )
+
+
+def _should_use_codebase_source_note_fast_answer(query: str) -> bool:
+    if not _is_codebase_analysis_query(query):
+        return False
+    folded = _fold_direct_text(query)
+    source_markers = (
+        "source a",
+        "source b",
+        "source c",
+        "source notes",
+        "source note",
+        "nguon a",
+        "nguon b",
+        "nguon c",
+        "du lieu nguon",
+        "report rehearsal",
+        "bao cao",
+    )
+    codebase_markers = (
+        "jwtservice",
+        "jwtauthenticationfilter",
+        "course_publications",
+        "class diagram",
+        "junction table",
+        "migration",
+    )
+    if any(marker in folded for marker in source_markers):
+        return True
+    return len(folded) > 350 and sum(1 for marker in codebase_markers if marker in folded) >= 3
+
+
+def _build_codebase_analysis_fallback_thinking(query: str) -> str:
+    folded = _fold_direct_text(query)
+    schema_focus = any(token in folded for token in ("database", "schema", "table", "bang", "class diagram"))
+    jwt_focus = any(token in folded for token in ("jwt", "auth", "xac thuc", "token"))
+    focus_bits: list[str] = []
+    if schema_focus:
+        focus_bits.append("đếm/nhóm bảng theo vai trò thay vì coi class diagram là database diagram")
+    if jwt_focus:
+        focus_bits.append("nối lifecycle JWT từ login, service tạo token, filter mỗi request, tới refresh")
+    if not focus_bits:
+        focus_bits.append("giữ từng kết luận bám vào file/source được nêu")
+    return (
+        "Mình nhận đây là bài phân tích codebase cần có ledger kiểm chứng công khai, không phải câu hỏi xã giao. "
+        f"Trục xử lý là {', '.join(focus_bits)}. "
+        "Nếu provider/tool path bị lỗi, Wiii vẫn phải trả một bản fallback có ích: tách phần đã có nguồn trong prompt khỏi phần suy luận, "
+        "không rơi về câu chào mặc định và không gọi Pointy/artifact sai ngữ cảnh."
+    )
+
+
+def _build_codebase_analysis_fallback_answer(query: str) -> str:
+    folded = _fold_direct_text(query)
+    wants_schema = any(token in folded for token in ("database", "schema", "table", "bang", "class diagram"))
+    wants_jwt = any(token in folded for token in ("jwt", "auth", "xac thuc", "token"))
+
+    sections: list[str] = [
+        "Mình bám vào các source notes, tên bảng và tên file/class bạn đưa trong prompt; phần dưới tách rõ điều có dấu vết nguồn với phần suy luận hợp lý để tránh biến class diagram thành database diagram.",
+    ]
+    if wants_schema:
+        sections.append(
+            "## Vì sao class diagram chỉ hiện khoảng 25 entity?\n"
+            "Class diagram không nên được hiểu như danh sách toàn bộ database table. Nó thường chỉ giữ các entity có logic nghiệp vụ riêng, còn nhiều bảng thật trong DB là bảng nối, bảng hạ tầng, hoặc bảng phát sinh qua migration.\n\n"
+            "Nhóm nên giữ trên class diagram: User, Course, Lesson, Quiz, Question, PaymentTransaction, Organization, OrgPaymentConfig, AuditLogEntry, VideoProgress, LearningEvent, LearningStreak, Achievement, Bookmark, Note, CourseReview và các entity nghiệp vụ tương tự.\n\n"
+            "Nhóm thường không cần hiện như class độc lập: junction table như course_tags, quiz_questions, quiz_assignments, assignment_allocation_students, class_teachers, announcement_reads, message_reactions, student_achievements. Chúng chủ yếu biểu diễn quan hệ nhiều-nhiều hoặc trạng thái đọc/react, không mang lifecycle nghiệp vụ riêng.\n\n"
+            "Nhóm hạ tầng cũng không nên làm sơ đồ nghiệp vụ bị rối: login_attempts, outbox_messages, file_attachments, chat_sessions, chat_messages, conversations, messages, flyway_schema_history. Chúng quan trọng khi vận hành nhưng không phải khái niệm domain chính.\n\n"
+            "Nhóm đáng cân nhắc bổ sung nếu báo cáo cần đầy đủ hơn: course_publications vì là snapshot xuất bản quan trọng, video_assets/video_renditions/video_ingest_jobs nếu phần video là năng lực lõi, và revenue_splits/payout_requests nếu mô hình doanh thu là trọng tâm."
+        )
+    if wants_jwt:
+        sections.append(
+            "## JWT xác thực đi qua những phần nào?\n"
+            "Luồng đúng nên trình bày theo lifecycle, không chỉ liệt kê file: user đăng nhập bằng email/password, backend kiểm BCrypt, JwtService tạo access token và refresh token, frontend gửi `Authorization: Bearer ...`, JwtAuthenticationFilter parse và verify chữ ký mỗi request, rồi load User hiện tại từ database để lấy role/enabled mới nhất trước khi vào controller.\n\n"
+            "JWT không nhất thiết có bảng riêng vì đây là mô hình stateless. Token sống ở client và được verify bằng secret/key; database vẫn được đọc để kiểm trạng thái user hiện tại. Các bảng như password_reset_tokens hoặc email_verification_tokens là token hỗ trợ nghiệp vụ khác, không phải session JWT chính.\n\n"
+            "Các file cần neo khi báo cáo: JwtService.java cho build/verify token, JwtAuthenticationFilter.java cho request filter, AuthControllerV3.java hoặc use case đăng nhập/refresh cho API auth, SecurityConfig.java cho filter chain/session stateless, UserJpaEntity.java cho authorities/role, và Organization nếu expiry/tenant policy được cấu hình theo tổ chức."
+        )
+    sections.append(
+        "## Cách nói khi bị hỏi nhanh\n"
+        "> Sơ đồ lớp chỉ mô tả các entity nghiệp vụ chính, không liệt kê toàn bộ bảng vật lý. Database có thêm bảng junction, bảng hạ tầng và bảng phát sinh qua migration. JWT thì stateless: token không lưu như session DB, nhưng mỗi request vẫn verify token rồi load user mới nhất để role/enabled có hiệu lực ngay."
+    )
+    return "\n\n".join(sections)
+
+
+def _image_payload_attr(image: Any, key: str, default: Any = None) -> Any:
+    if isinstance(image, dict):
+        return image.get(key, default)
+    return getattr(image, key, default)
+
+
+def _has_uploaded_document_context(ctx: dict[str, Any]) -> bool:
+    document_context = ctx.get("document_context")
+    if not isinstance(document_context, dict):
+        return False
+    attachments = document_context.get("attachments")
+    if not isinstance(attachments, list):
+        return False
+    return any(
+        isinstance(item, dict) and str(item.get("markdown") or "").strip()
+        for item in attachments
+    )
+
+
+def _uploaded_document_attachments(ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    document_context = ctx.get("document_context")
+    if not isinstance(document_context, dict):
+        return []
+    attachments = document_context.get("attachments")
+    if not isinstance(attachments, list):
+        return []
+    return [
+        item
+        for item in attachments
+        if isinstance(item, dict) and str(item.get("markdown") or "").strip()
+    ]
+
+
+def _first_markdown_line(markdown: str, label: str) -> str:
+    pattern = re.compile(rf"^\s*-\s*{re.escape(label)}:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+    match = pattern.search(markdown or "")
+    return match.group(1).strip() if match else ""
+
+
+def _plain_markdown_excerpt(markdown: str, *, limit: int = 700) -> str:
+    lines: list[str] = []
+    for raw_line in (markdown or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("[Transcript unavailable:"):
+            continue
+        line = re.sub(r"^#{1,6}\s+", "", line)
+        line = re.sub(r"^\s*[-*]\s+", "", line)
+        line = line.replace("\\_", "_")
+        if line:
+            lines.append(line)
+        if sum(len(item) for item in lines) >= limit:
+            break
+    return " ".join(lines)[:limit].strip()
+
+
+def _build_uploaded_document_context_fallback_answer(
+    query: str,
+    ctx: dict[str, Any],
+    *,
+    provider_unstable: bool = True,
+) -> str:
+    """Provider-failure or deterministic answer for per-turn uploaded file context."""
+    attachments = _uploaded_document_attachments(ctx)
+    if not attachments:
+        return ""
+
+    lines = [
+        (
+            "Mình vẫn đọc được phần file đã parse trong lượt này, dù provider LLM/vision đang chưa ổn định."
+            if provider_unstable
+            else "Mình đọc được phần file đã parse trong lượt này."
+        ),
+    ]
+    for index, item in enumerate(attachments[:3], start=1):
+        markdown = str(item.get("markdown") or "")
+        file_name = str(item.get("file_name") or f"file-{index}")
+        media_kind = str(item.get("media_kind") or "document")
+        parser = str(item.get("parser") or "markitdown")
+        char_count = item.get("char_count")
+        extracted_image_count = item.get("extracted_image_count")
+
+        lines.append("")
+        lines.append(f"- File: `{file_name}` ({media_kind}, parser={parser})")
+        if isinstance(char_count, int):
+            lines.append(f"- Nội dung parse được: khoảng {char_count} ký tự.")
+
+        if media_kind == "video":
+            duration = _first_markdown_line(markdown, "Duration")
+            resolution = _first_markdown_line(markdown, "Resolution")
+            has_audio = _first_markdown_line(markdown, "Has audio")
+            if duration:
+                lines.append(f"- Thời lượng video: {duration}.")
+            if resolution:
+                lines.append(f"- Độ phân giải: {resolution}.")
+            if isinstance(extracted_image_count, int):
+                lines.append(f"- Wiii đã trích {extracted_image_count} khung hình đại diện để gửi vào vision context.")
+            if has_audio:
+                lines.append(f"- Có audio: {has_audio}.")
+            if "Transcript unavailable" in markdown:
+                lines.append(
+                    "- Transcript audio hiện chưa có; điều này chỉ nói rằng audio chưa được chuyển lời/ASR chưa khả dụng, "
+                    "không chứng minh video không có giọng nói."
+                )
+        else:
+            excerpt = _plain_markdown_excerpt(markdown)
+            if excerpt:
+                lines.append(f"- Trích đoạn đầu: {excerpt}")
+
+    return _with_requested_response_marker(query, "\n".join(lines).strip())
+
+
+def _uploaded_context_has_video(ctx: dict[str, Any]) -> bool:
+    return any(
+        str(item.get("media_kind") or "").strip().lower() == "video"
+        for item in _uploaded_document_attachments(ctx)
+    )
+
+
+def _looks_uploaded_context_fact_query(query: str, ctx: dict[str, Any]) -> bool:
+    """Keep direct fact extraction from uploaded markdown off the slow LLM path."""
+    if not _has_uploaded_document_context(ctx):
+        return False
+    folded = _fold_direct_text(query)
+    if not folded:
+        return False
+    if len([token for token in folded.split() if token]) > 90:
+        return False
+    fact_markers = (
+        "bang",
+        "char count",
+        "csv",
+        "doc vua upload",
+        "docx",
+        "eta",
+        "file vua upload",
+        "kpi",
+        "latencybudget",
+        "marker",
+        "noi dung parse",
+        "priority",
+        "risk",
+        "tom tat",
+        "trich",
+        "upload",
+        "uu tien",
+        "xlsx",
+    )
+    if any(marker in folded for marker in fact_markers):
+        return True
+    return _looks_uploaded_file_metadata_query(query, ctx)
+
+
+def _looks_uploaded_file_metadata_query(query: str, ctx: dict[str, Any]) -> bool:
+    """Keep simple uploaded-video fact questions deterministic and low-latency."""
+    if not _uploaded_context_has_video(ctx):
+        return False
+    folded = _fold_direct_text(query)
+    if not folded:
+        return False
+    metadata_markers = (
+        "bao lau",
+        "dai may",
+        "dai bao",
+        "thoi luong",
+        "duration",
+        "metadata",
+        "do phan giai",
+        "resolution",
+        "fps",
+        "frame",
+        "khung hinh",
+        "keyframe",
+        "trich duoc",
+        "bao nhieu khung",
+        "may khung",
+        "audio",
+        "am thanh",
+        "transcript",
+    )
+    return any(marker in folded for marker in metadata_markers)
+
+
+def _looks_uploaded_file_visual_inspection_query(query: str) -> bool:
+    folded = _fold_direct_text(query)
+    frame_hint = any(
+        marker in folded
+        for marker in (
+            "khung hinh",
+            "keyframe",
+            "frame",
+            "anh trong video",
+            "hinh anh",
+            "video nay",
+            "trong video",
+        )
+    )
+    visual_action = any(
+        marker in folded
+        for marker in (
+            "nhin",
+            "thay gi",
+            "mo ta",
+            "kieu hinh",
+            "noi dung",
+            "trong do co gi",
+            "co gi",
+        )
+    )
+    return frame_hint and visual_action
+
+
+def _provider_likely_supports_image_blocks(provider: str | None, model: str | None = None) -> bool:
+    normalized_provider = str(provider or "").strip().lower()
+    normalized_model = str(model or "").strip().lower()
+    if normalized_provider in {"google", "zhipu"}:
+        return True
+    if normalized_provider == "openai":
+        return any(marker in normalized_model for marker in ("gpt-4o", "gpt-4.1", "gpt-5", "vision"))
+    if normalized_provider == "openrouter":
+        return any(marker in normalized_model for marker in ("vision", "vl", "gpt-4o", "gpt-4.1", "gpt-5"))
+    if normalized_provider == "nvidia":
+        return any(
+            marker in normalized_model
+            for marker in (
+                "vision",
+                "vl",
+                "neva",
+                "paligemma",
+                "gemma-3-",
+                "gemma-3n-",
+                "gemma-4-",
+                "llama-4-maverick",
+                "phi-4-multimodal",
+                "ministral-14b-instruct",
+                "mistral-large-3",
+                "mistral-medium-3",
+                "mistral-small-4",
+                "kimi-k2.6",
+                "qwen3.5-",
+            )
+        )
+    return False
+
+
+def _build_uploaded_document_visual_guard_answer(query: str, ctx: dict[str, Any]) -> str:
+    base = _build_uploaded_document_context_fallback_answer(query, ctx)
+    if not base:
+        return ""
+    guard = (
+        "- Mình chưa mô tả nội dung thật bên trong các khung hình vì lượt này chưa chạy qua "
+        "vision provider hợp lệ; nói khác đi, Wiii biết video đã có frame, nhưng không được đoán "
+        "frame đó trông như thế nào."
+    )
+    if guard in base:
+        return base
+    return f"{base}\n{guard}"
+
+
+async def _build_image_input_answer(query: str, images: list[Any]) -> str:
+    first_base64 = next(
+        (
+            image
+            for image in images
+            if _image_payload_attr(image, "type", "base64") == "base64"
+            and _image_payload_attr(image, "data", "")
+        ),
+        None,
+    )
+    if first_base64 is None:
+        return _with_requested_response_marker(
+            query,
+            (
+                "Mình thấy cậu đã gửi ảnh, nhưng hiện tại Wiii chỉ xử lý trực tiếp ảnh base64 "
+                "trong chat. Hãy đính kèm lại ảnh trực tiếp trong khung chat để mình phân tích cho chắc."
+            ),
+        )
+
+    try:
+        from app.engine.vision_runtime import analyze_image_for_query
+
+        result = await analyze_image_for_query(
+            image_base64=_image_payload_attr(first_base64, "data", ""),
+            query=query,
+            media_type=_image_payload_attr(first_base64, "media_type", "image/jpeg"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[DIRECT] Vision image analysis failed: %s", exc)
+        return _with_requested_response_marker(
+            query,
+            (
+                "Mình đã nhận được ảnh, nhưng Vision runtime hiện bị lỗi khi phân tích. "
+                "Mình không nên đoán nội dung ảnh; cậu thử gửi lại hoặc bật provider vision khả dụng nhé."
+            ),
+        )
+
+    if getattr(result, "success", False) and str(getattr(result, "text", "")).strip():
+        return _with_requested_response_marker(query, str(result.text).strip())
+
+    return _with_requested_response_marker(
+        query,
+        (
+            "Mình đã nhận được ảnh, nhưng hiện chưa có provider vision khả dụng để đọc ảnh này. "
+            "Mình sẽ không đoán nội dung ảnh; hãy bật Vision runtime/provider vision rồi thử lại nhé."
+        ),
+    )
+
+
+_HUNGER_CHATTER_MARKERS = (
+    "doi phet",
+    "doi qua",
+    "hoi doi",
+    "minh doi",
+    "dang doi",
+    "buong doi",
+    "bung doi",
+    "hungry",
+    "starving",
+)
+
+_HUNGER_CHATTER_TASK_BLOCKERS = (
+    "bao nhieu",
+    "canvas",
+    "chart",
+    "code",
+    "css",
+    "excel",
+    "file",
+    "giai thich",
+    "html",
+    "huong dan",
+    "javascript",
+    "la gi",
+    "mo phong",
+    "pdf",
+    "phan tich",
+    "python",
+    "quy dinh",
+    "react",
+    "search",
+    "so sanh",
+    "tao anh",
+    "the nao",
+    "thay doi",
+    "tim",
+    "tin tuc",
+    "tra cuu",
+    "video",
+    "viet",
+    "word",
+)
+
+
+def _looks_hunger_chatter_turn(normalized_query: str) -> bool:
+    folded = _fold_direct_text(normalized_query)
+    if not folded:
+        return False
+    if any(marker in folded for marker in ("hay nho", "ghi nho", "nho rang", "luu lai")):
+        return False
+    if any(marker in folded for marker in _HUNGER_CHATTER_TASK_BLOCKERS):
+        return False
+    tokens = [token for token in folded.split() if token]
+    # Field-test markers and "answer naturally, no tool" instructions should
+    # not push a clearly casual hunger turn onto the slow LLM path.
+    if len(tokens) > 40:
+        return False
+    return any(marker in folded for marker in _HUNGER_CHATTER_MARKERS)
+
+
+def _build_hunger_chatter_answer(_query: str) -> str:
+    folded = _fold_direct_text(_query)
+    if "bung doi" in folded:
+        opener = "Bụng đói thì não tụt pin thật đó."
+    elif "hoi doi" in folded:
+        opener = "Hơi đói cũng nên lót bụng trước khi cố làm tiếp nha."
+    else:
+        opener = "Đói phết là não tụt pin thật đó."
+    if "bao cao" in folded or "cang" in folded or "ap luc" in folded:
+        return (
+            f"{opener} Lót bụng trước đi cậu: bắt lấy thứ gì nhanh và ấm như bánh mì, "
+            "trứng, súp, sữa chua hoặc chuối; uống thêm nước nữa. Báo cáo thì mình "
+            "một bước một bước, không cần gồng quá ngay lúc bụng đang réo."
+        )
+    return (
+        f"{opener} Kiếm gì dễ ăn trong 5-10 phút trước nha: cơm, mì, bánh mì, trứng, "
+        "sữa chua hoặc chuối đều được; uống thêm nước, ăn xong mình ngồi đây tính tiếp cùng cậu."
+    )
+
+
+def _build_hunger_chatter_thinking(_query: str) -> str:
+    return (
+        "Cậu nói rất ngắn, nhưng mình nghe được một nhu cầu rất thật: bụng đói thì mọi thứ cũng tụt pin theo. "
+        "Mình không cần làm màu ở đây; chỉ cần kéo cậu về một việc nhỏ có ích ngay, rồi ở lại cùng cậu tính tiếp."
+    )
 
 
 def _strip_direct_inline_private_asides(value: str) -> str:
@@ -464,6 +1646,123 @@ async def _build_emotional_rescue_visible_thought(
     return _best_effort_direct_visible_thought_raw(clean)
 
 
+async def _emergency_search_fallback(
+    *,
+    query: str,
+    tools: list[Any],
+    timeout_seconds: float = 30.0,
+) -> list[dict[str, Any]]:
+    """LLM-free emergency search invoked when planning timed out.
+
+    Picks ``tool_web_search`` from the bound tool list and runs it directly
+    against the user query, then returns a synthetic ``tool_call_events`` list
+    that can be fed into ``build_search_template_fallback``. Bounded by a
+    short timeout so a slow search engine cannot stall the fallback path.
+    """
+    if not tools or not query.strip():
+        return []
+
+    target_names = (
+        "tool_web_search",
+        "web_search",
+        "tool_search_news",
+        "search_news",
+    )
+    chosen = None
+    for tool_obj in tools:
+        name = (
+            getattr(tool_obj, "name", None)
+            or getattr(tool_obj, "__name__", None)
+            or ""
+        )
+        if str(name).lower() in target_names:
+            chosen = tool_obj
+            break
+    if chosen is None:
+        return []
+
+    chosen_name = getattr(chosen, "name", None) or getattr(chosen, "__name__", "tool_web_search")
+    invoker = getattr(chosen, "ainvoke", None)
+    search_query = _clean_emergency_web_search_query(query)
+    payload = {"query": search_query}
+    try:
+        if invoker is not None and inspect.iscoroutinefunction(invoker):
+            result = await asyncio.wait_for(invoker(payload), timeout=timeout_seconds)
+        else:
+            sync_invoker = getattr(chosen, "invoke", None)
+            if sync_invoker is None:
+                return []
+            result = await asyncio.wait_for(
+                asyncio.to_thread(sync_invoker, payload),
+                timeout=timeout_seconds,
+            )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "[DIRECT] Emergency %s exceeded %.1fs — abandoning fallback",
+            chosen_name,
+            timeout_seconds,
+        )
+        return []
+    except Exception as exc:
+        logger.warning("[DIRECT] Emergency %s raised %s — abandoning", chosen_name, exc)
+        return []
+
+    if not result or not str(result).strip():
+        return []
+
+    return [
+        {
+            "type": "call",
+            "id": "emergency-1",
+            "name": chosen_name,
+            "args": {"query": search_query},
+        },
+        {
+            "type": "result",
+            "id": "emergency-1",
+            "name": chosen_name,
+            "result": str(result),
+        },
+    ]
+
+
+async def _emit_synthetic_tool_events(
+    events: list[dict[str, Any]],
+    *,
+    push_event,
+) -> None:
+    """Surface LLM-free emergency tool work through the same SSE tool strip."""
+    for event in events or []:
+        event_type = event.get("type")
+        name = str(event.get("name") or "")
+        event_id = str(event.get("id") or "")
+        if event_type == "call":
+            await push_event(
+                {
+                    "type": "tool_call",
+                    "content": {
+                        "name": name,
+                        "args": event.get("args") or {},
+                        "id": event_id,
+                    },
+                    "node": "direct",
+                }
+            )
+        elif event_type == "result":
+            result = str(event.get("result") or "")
+            await push_event(
+                {
+                    "type": "tool_result",
+                    "content": {
+                        "name": name,
+                        "result": _summarize_tool_result_for_stream(name, result),
+                        "id": event_id,
+                    },
+                    "node": "direct",
+                }
+            )
+
+
 async def _salvage_direct_turn_from_final_result(
     *,
     llm_response: Any,
@@ -598,6 +1897,287 @@ async def direct_response_node_impl(
         query_lower = query.lower().strip()
         response = None
     response_type = "greeting" if response else ""
+    explicit_web_search_turn = _is_explicit_web_search_turn_for_direct(query, state)
+    if not response and _is_codebase_analysis_query(query) and not explicit_web_search_turn:
+        codebase_thinking = _build_codebase_analysis_fallback_thinking(query)
+        state["thinking"] = codebase_thinking
+        state["thinking_content"] = codebase_thinking
+        record_thinking_snapshot(
+            state,
+            codebase_thinking,
+            node="direct",
+            provenance="codebase_source_backed_plan",
+        )
+        if _should_use_codebase_source_note_fast_answer(query):
+            response = _build_codebase_analysis_fallback_answer(query)
+            response_type = "codebase_source_backed_fast"
+
+    ctx_for_preflight = state.get("context", {}) if isinstance(state.get("context"), dict) else {}
+    has_uploaded_document_context = _has_uploaded_document_context(ctx_for_preflight)
+    if (
+        not response
+        and has_uploaded_document_context
+        and not str(state.get("thinking_content") or "").strip()
+    ):
+        document_thinking = (
+            "Mình nhận đây là lượt hỏi có tài liệu upload đã được parse thành Markdown, "
+            "nên ưu tiên đối chiếu marker, bảng và các dòng trong document_context trước khi suy luận thêm. "
+            "Nếu phần nào không có trong file, Wiii phải nói rõ thay vì bịa."
+        )
+        state["thinking"] = document_thinking
+        state["thinking_content"] = document_thinking
+        record_thinking_snapshot(
+            state,
+            document_thinking,
+            node="direct",
+            provenance="document_context_plan",
+        )
+    if ctx_for_preflight.get("image_input_error") and has_uploaded_document_context:
+        ctx_for_preflight["images"] = []
+    if (
+        not response
+        and ctx_for_preflight.get("image_input_error")
+        and not has_uploaded_document_context
+    ):
+        response = _build_image_input_unavailable_answer(query)
+        response_type = "image_input_unavailable"
+        fast_thinking = _build_image_input_unavailable_thinking()
+        state["thinking"] = fast_thinking
+        state["thinking_content"] = fast_thinking
+        record_thinking_snapshot(
+            state,
+            fast_thinking,
+            node="direct",
+            provenance="deterministic_image_input_unavailable",
+        )
+    elif not response and ctx_for_preflight.get("images") and not has_uploaded_document_context:
+        response = await _build_image_input_answer(
+            query,
+            list(ctx_for_preflight.get("images") or []),
+        )
+        response_type = "image_input"
+        fast_thinking = _build_image_input_thinking(query)
+        state["thinking"] = fast_thinking
+        state["thinking_content"] = fast_thinking
+        record_thinking_snapshot(
+            state,
+            fast_thinking,
+            node="direct",
+            provenance="deterministic_image_input",
+        )
+
+    if not response:
+        try:
+            routing_meta_for_fast = state.get("routing_metadata") or {}
+            fast_method = str(routing_meta_for_fast.get("method") or "").strip().lower()
+            fast_intent = str(routing_meta_for_fast.get("intent") or "").strip().lower()
+            normalized_for_fast = normalize_for_intent(query)
+            if state.get("_pointy_fast_path_action"):
+                response = _extract_pointy_fast_path_answer(state)
+                if response:
+                    response_type = "pointy_fast_path"
+                    fast_thinking = _build_pointy_fast_path_thinking(state)
+                    state["thinking"] = fast_thinking
+                    state["thinking_content"] = fast_thinking
+                    record_thinking_snapshot(
+                        state,
+                        fast_thinking,
+                        node="direct",
+                        provenance="deterministic_pointy_fast_path",
+                    )
+            elif _pointy_requested_without_inventory(state):
+                response = _build_pointy_missing_inventory_answer(query)
+                response_type = "pointy_missing_inventory"
+                fast_thinking = _build_pointy_missing_inventory_thinking(query)
+                state["thinking"] = fast_thinking
+                state["thinking_content"] = fast_thinking
+                record_thinking_snapshot(
+                    state,
+                    fast_thinking,
+                    node="direct",
+                    provenance="deterministic_pointy_missing_inventory",
+                )
+            elif (
+                _looks_self_feeling_probe_turn(query)
+                and not needs_web_search(query)
+                and not needs_datetime(query)
+            ):
+                response = _build_self_feeling_probe_answer(query)
+                response_type = "self_feeling_probe"
+                fast_thinking = _build_self_feeling_probe_thinking(query)
+                state["thinking"] = fast_thinking
+                state["thinking_content"] = fast_thinking
+                record_thinking_snapshot(
+                    state,
+                    fast_thinking,
+                    node="direct",
+                    provenance="deterministic_self_feeling_probe",
+                )
+            elif (
+                _looks_wiii_capability_inventory_turn(_fold_direct_text(query))
+                and not needs_web_search(query)
+                and not needs_datetime(query)
+            ):
+                response = _build_wiii_capability_inventory_answer(query)
+                response_type = "wiii_capability_inventory"
+                fast_thinking = _build_wiii_capability_inventory_thinking(query)
+                state["thinking"] = fast_thinking
+                state["thinking_content"] = fast_thinking
+                record_thinking_snapshot(
+                    state,
+                    fast_thinking,
+                    node="direct",
+                    provenance="deterministic_wiii_capability_inventory",
+                )
+            elif (
+                has_uploaded_document_context
+                and _looks_uploaded_context_fact_query(query, ctx_for_preflight)
+                and not _looks_uploaded_file_visual_inspection_query(query)
+            ):
+                response = _build_uploaded_document_context_fallback_answer(
+                    query,
+                    ctx_for_preflight,
+                    provider_unstable=False,
+                )
+                if response:
+                    response_type = "uploaded_file_context_fact"
+                    fast_thinking = (
+                        "Mình nhận đây là câu hỏi fact-check trực tiếp về file/video vừa upload, "
+                        "nên ưu tiên dữ kiện parser đã trích ra thay vì gọi LLM suy diễn."
+                    )
+                    state["thinking"] = fast_thinking
+                    state["thinking_content"] = fast_thinking
+                    record_thinking_snapshot(
+                        state,
+                        fast_thinking,
+                        node="direct",
+                        provenance="deterministic_uploaded_file_context_fact",
+                    )
+            elif (
+                fast_method == "conservative_fast_path"
+                and fast_intent == "off_topic"
+                and _looks_reasoning_safety_meta_turn(normalized_for_fast)
+            ):
+                response = _build_reasoning_safety_meta_answer(query)
+                response_type = "reasoning_safety_meta"
+                fast_thinking = _build_reasoning_safety_meta_thinking(query)
+                state["thinking"] = fast_thinking
+                state["thinking_content"] = fast_thinking
+                record_thinking_snapshot(
+                    state,
+                    fast_thinking,
+                    node="direct",
+                    provenance="deterministic_reasoning_safety_meta",
+                )
+            elif (
+                fast_method == "conservative_fast_path"
+                and fast_intent == "off_topic"
+                and _looks_wiii_pipeline_meta_turn(normalized_for_fast)
+            ):
+                response = _build_wiii_pipeline_meta_answer(query)
+                response_type = "wiii_pipeline_meta"
+                fast_thinking = _build_wiii_pipeline_meta_thinking(query)
+                state["thinking"] = fast_thinking
+                state["thinking_content"] = fast_thinking
+                record_thinking_snapshot(
+                    state,
+                    fast_thinking,
+                    node="direct",
+                    provenance="deterministic_wiii_pipeline_meta",
+                )
+            elif (
+                fast_method == "conservative_fast_path"
+                and _looks_session_memory_recall_turn(normalized_for_fast)
+            ):
+                response = _extract_session_memory_recall_answer(state, query) or (
+                    "Mình chưa thấy đủ neo trong phiên này để nhắc lại chắc chắn."
+                )
+                response = _with_requested_response_marker(query, response)
+                response_type = "session_memory_recall"
+                fast_thinking = (
+                    "Mình nhận đây là lượt gọi lại thông tin trong chính phiên này, "
+                    "nên ưu tiên đọc lịch sử gần nhất thay vì ghi thêm memory mới."
+                )
+                state["thinking"] = fast_thinking
+                state["thinking_content"] = fast_thinking
+                record_thinking_snapshot(
+                    state,
+                    fast_thinking,
+                    node="direct",
+                    provenance="deterministic_session_memory_recall",
+                )
+            elif (
+                fast_method == "conservative_fast_path"
+                and _looks_session_memory_ack_only_turn(normalized_for_fast)
+            ):
+                response = _extract_direct_reply_only_answer(query) or "Đã ghi nhận."
+                response_type = "session_memory_ack"
+                state["_direct_reply_only_ack"] = True
+                fast_thinking = (
+                    "Mình ghi nhận điều bạn muốn giữ trong phiên hiện tại và giữ phản hồi "
+                    "đúng một câu như bạn yêu cầu."
+                )
+                state["thinking"] = fast_thinking
+                state["thinking_content"] = fast_thinking
+                record_thinking_snapshot(
+                    state,
+                    fast_thinking,
+                    node="direct",
+                    provenance="deterministic_session_ack",
+                )
+            elif _looks_session_memory_write_turn(normalized_for_fast):
+                response = _with_requested_response_marker(
+                    query,
+                    _build_session_memory_write_answer(query),
+                )
+                response_type = "session_memory_write"
+                fast_thinking = _build_session_memory_write_thinking(query)
+                state["thinking"] = fast_thinking
+                state["thinking_content"] = fast_thinking
+                record_thinking_snapshot(
+                    state,
+                    fast_thinking,
+                    node="direct",
+                    provenance="deterministic_session_memory_write",
+                )
+            elif (
+                fast_method == "conservative_fast_path"
+                and _looks_session_memory_recall_turn(normalized_for_fast)
+            ):
+                response = _extract_session_memory_recall_answer(state, query)
+                if response:
+                    response_type = "session_memory_recall"
+                    fast_thinking = (
+                        "Mình dùng ngữ cảnh ngay trong phiên này để nhắc lại đúng "
+                        "mẩu thông tin bạn vừa yêu cầu Wiii giữ."
+                    )
+                    state["thinking"] = fast_thinking
+                    state["thinking_content"] = fast_thinking
+                    record_thinking_snapshot(
+                        state,
+                        fast_thinking,
+                        node="direct",
+                        provenance="deterministic_session_memory_recall",
+                    )
+            elif (
+                _looks_hunger_chatter_turn(normalized_for_fast)
+                and not _looks_session_memory_write_turn(normalized_for_fast)
+                and not needs_web_search(query)
+                and not needs_datetime(query)
+            ):
+                response = _build_hunger_chatter_answer(query)
+                response_type = "hunger_chatter"
+                fast_thinking = _build_hunger_chatter_thinking(query)
+                state["thinking"] = fast_thinking
+                state["thinking_content"] = fast_thinking
+                record_thinking_snapshot(
+                    state,
+                    fast_thinking,
+                    node="direct",
+                    provenance="deterministic_hunger_chatter",
+                )
+        except Exception as exc:
+            logger.debug("[DIRECT] Session memory ack fast response skipped: %s", exc)
 
     domain_config = state.get("domain_config", {})
     domain_name_vi = domain_config.get("name_vi", "")
@@ -619,6 +2199,7 @@ async def direct_response_node_impl(
         llm = None
         llm_response = None
         messages: list[Any] = []
+        tools: list[Any] = []
         tool_call_events: list[dict[str, Any]] = []
         response_language = "vi"
         routing_intent = ""
@@ -714,8 +2295,12 @@ async def direct_response_node_impl(
                 and not visual_decision.force_tool
             )
             direct_provider_override = explicit_user_provider or preferred_provider
+            is_codebase_source_turn = _is_codebase_analysis_query(query)
+            explicit_web_search_turn = _is_explicit_web_search_turn_for_direct(query, state)
 
             if is_short_house_chatter or is_identity_turn or is_emotional_support_turn:
+                tools, force_tools = [], False
+            elif is_codebase_source_turn and not explicit_web_search_turn and not needs_web_search(query):
                 tools, force_tools = [], False
             else:
                 tools, force_tools = collect_direct_tools(
@@ -723,8 +2308,59 @@ async def direct_response_node_impl(
                     ctx.get("user_role", "student"),
                     state=state,
                 )
+                # Phase F5 (2026-05-06) — SOTA tool-binding for @-mention.
+                # When user force-binds via `@plugin-name` (Cursor / Claude
+                # Code / GitHub Copilot pattern), tool selection is NOT a
+                # heuristic guess: the user EXPLICITLY chose the plugin.
+                # We must:
+                #   (a) preserve every force-bound tool through the
+                #       skill_recommender prune step (must_include),
+                #   (b) flip force_tools=True so the LLM is required to
+                #       call (tool_choice="any" / "required" downstream),
+                #   (c) inject the SKILL prompt + page inventory at top
+                #       of system message (Anthropic Computer Use 2026
+                #       progressive disclosure pattern).
+                #
+                # Without these, NVIDIA DeepSeek frequently returns prose
+                # ("đang trỏ giúp cậu...") with zero tool_calls and the
+                # cursor never actually moves — exact symptom user hit
+                # 2026-05-06.
+                _force_skills_set = _force_skills_from_state(state)
+                if routing_intent == "web_search":
+                    _force_skills_set.add("web-search")
+                    merged_force_skills = sorted(_force_skills_set)
+                    state["force_skills"] = merged_force_skills
+                    if isinstance(ctx, dict):
+                        ctx["force_skills"] = merged_force_skills
+                _force_required_tools: list[str] = []
+                if "wiii-pointy" in _force_skills_set:
+                    # Exact inventory id contract — see SKILL.md anti-hallucination
+                    # rules. Force inventory + show, but NOT clear (clear
+                    # is a stop-action, only relevant when user said "stop").
+                    _force_required_tools.extend(
+                        ["tool_pointy_show", "tool_pointy_inventory"]
+                    )
+                if "web-search" in _force_skills_set:
+                    _force_required_tools.append("tool_web_search")
+                if _force_required_tools:
+                    force_tools = True
+                    logger.info(
+                        "[DIRECT] Force-bound via @-mention: required=%s",
+                        _force_required_tools,
+                    )
                 try:
                     from app.engine.skills.skill_recommender import select_runtime_tools
+
+                    must_include_names = direct_required_tool_names(
+                        query,
+                        ctx.get("user_role", "student"),
+                    )
+                    # Merge force-bound names into must_include so the
+                    # recommender (max_tools=7) cannot prune them out
+                    # when the bound list is large.
+                    for n in _force_required_tools:
+                        if n not in must_include_names:
+                            must_include_names.append(n)
 
                     selected_tools = select_runtime_tools(
                         tools,
@@ -732,10 +2368,7 @@ async def direct_response_node_impl(
                         intent=(state.get("routing_metadata") or {}).get("intent"),
                         user_role=ctx.get("user_role", "student"),
                         max_tools=min(len(tools), 7),
-                        must_include=direct_required_tool_names(
-                            query,
-                            ctx.get("user_role", "student"),
-                        ),
+                        must_include=must_include_names,
                     )
                     if selected_tools:
                         tools = selected_tools
@@ -758,6 +2391,7 @@ async def direct_response_node_impl(
                 and not is_identity_turn
                 and not is_emotional_support_turn
                 and not use_house_voice_direct
+                and not is_codebase_source_turn
             )
             llm = None
             if native_direct_possible:
@@ -779,8 +2413,43 @@ async def direct_response_node_impl(
                     requested_model=state.get("model"),
                 )
 
+            llm_provider_for_images, llm_model_for_images = _extract_runtime_target(llm) if llm else (None, None)
+            llm_provider_for_images = llm_provider_for_images or direct_provider_override or preferred_provider
+            llm_model_for_images = llm_model_for_images or state.get("model")
             if (
                 llm
+                and has_uploaded_document_context
+                and _looks_uploaded_file_visual_inspection_query(query)
+                and not _provider_likely_supports_image_blocks(
+                    llm_provider_for_images,
+                    llm_model_for_images,
+                )
+            ):
+                response = _build_uploaded_document_visual_guard_answer(
+                    query,
+                    ctx_for_preflight,
+                )
+                if response:
+                    ctx_for_preflight["images"] = []
+                    logger.info(
+                        "[DIRECT] Uploaded video frame question routed to text-only provider; "
+                        "returned visual guard fallback (provider=%s model=%s)",
+                        llm_provider_for_images,
+                        llm_model_for_images,
+                    )
+                    tracer.end_step(
+                        result="Uploaded-file visual guard fallback (text-only provider)",
+                        confidence=0.7,
+                        details={
+                            "response_type": "uploaded_file_visual_guard_fallback",
+                            "provider": llm_provider_for_images,
+                            "model": llm_model_for_images,
+                        },
+                    )
+
+            if (
+                llm
+                and not response
                 and getattr(settings, "enable_natural_conversation", False) is True
                 and not _is_native_runtime_handle(llm)
             ):
@@ -798,7 +2467,7 @@ async def direct_response_node_impl(
                     except Exception:
                         pass
 
-            if llm:
+            if llm and not response:
                 logger.warning(
                     "[DIRECT] tools=%d, force=%s, web=%s, dt=%s, query='%s'",
                     len(tools),
@@ -866,9 +2535,21 @@ async def direct_response_node_impl(
                     provider=bound_provider,
                     include_forced_choice=True,
                 )
+                # v9.0 F18 (2026-05-07) — when pointy is force-bound, the
+                # tool's selector is already enum-constrained at JSON-schema
+                # layer (Literal[...] in tool_pointy_show args). That's
+                # SeeAct's textual-choice grounding applied at argument
+                # layer. We DON'T need to override tool_choice to specific
+                # tool name (caused NVIDIA bind_tools incompat in early
+                # tests) — the existing `_resolve_tool_choice("any")` is
+                # sufficient because force_tools=True ensures SOME tool
+                # is invoked, and the enum-constrained pointy tool wins
+                # when query is UI-related (other tools have unrelated
+                # signatures).
                 if force_tools:
                     logger.info(
-                        "[DIRECT] Forced tool_choice (web=%s, dt=%s, visual=%s)",
+                        "[DIRECT] Forced tool_choice=%r (web=%s, dt=%s, visual=%s)",
+                        forced_tool_choice,
                         needs_web_search(query),
                         needs_datetime(query),
                         visual_decision.force_tool,
@@ -897,6 +2578,12 @@ async def direct_response_node_impl(
                     metadata=build_visual_tool_runtime_metadata(state, query),
                 )
 
+                # Wiii Pointy v2.6 — adaptive max rounds. Loop tự exit
+                # khi LLM ngừng gọi tool; cap chỉ là runaway protection.
+                # Default 12 (Anthropic Computer Use ref dùng 10), settings
+                # override cho power-users / autonomous flows.
+                _direct_max_rounds = getattr(settings, "direct_agent_max_tool_rounds", 12)
+
                 direct_execution = execute_direct_tool_rounds(
                     llm_with_tools,
                     llm_auto,
@@ -904,6 +2591,7 @@ async def direct_response_node_impl(
                     tools,
                     push_event,
                     runtime_context_base=runtime_context_base,
+                    max_rounds=_direct_max_rounds,
                     query=query,
                     state=state,
                     provider=explicit_user_provider,
@@ -927,10 +2615,24 @@ async def direct_response_node_impl(
                             "[DIRECT] Host UI navigation answer exceeded %.1fs; returning bounded fallback",
                             _HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS,
                         )
-                        fallback_answer = (
-                            "Mình đã nhận yêu cầu trỏ trên giao diện rồi. "
-                            "Nếu Wiii chưa highlight ngay, hãy thử mở lại panel Wiii hoặc làm mới trang LMS nhé."
-                        )
+                        # Phase F2 (2026-05-06): surface-aware fallback. Khi Wiii
+                        # chạy standalone (host_type=wiii-desktop / wiii-web),
+                        # KHÔNG nói "panel Wiii / làm mới trang LMS" — không có
+                        # LMS context. AI nên nói "thử lại" hoặc trỏ trực tiếp.
+                        host_ctx = state.get("host_context") if isinstance(state, dict) else None
+                        host_type = (host_ctx or {}).get("host_type", "") if isinstance(host_ctx, dict) else ""
+                        is_standalone = host_type in ("wiii-desktop", "wiii-web")
+                        if is_standalone:
+                            fallback_answer = (
+                                "Mình đã thử trỏ chuột vào element rồi. Nếu chưa thấy "
+                                "cursor di chuyển, bạn thử gửi lại câu hỏi nhé — "
+                                "đôi khi LLM cần thêm chút thời gian xử lý."
+                            )
+                        else:
+                            fallback_answer = (
+                                "Mình đã nhận yêu cầu trỏ trên giao diện rồi. "
+                                "Nếu Wiii chưa highlight ngay, hãy thử mở lại panel Wiii hoặc làm mới trang LMS nhé."
+                            )
                         await push_event(
                             {
                                 "type": "answer_delta",
@@ -953,8 +2655,73 @@ async def direct_response_node_impl(
                 )
                 response = sanitize_wiii_house_text(response, query=query)
                 response = _strip_direct_inline_private_asides(response)
+                # Defensive DSML strip — DeepSeek occasionally emits tool-call
+                # markup as prose content even when tool_choice is "none".
+                response = _strip_dsml_residue(response).strip()
                 if is_identity_turn:
                     response = _compact_basic_identity_answer(response, query=query)
+                if (
+                    _is_codebase_analysis_query(query)
+                    and not explicit_web_search_turn
+                    and _looks_generic_direct_fallback_response(response)
+                ):
+                    response = _build_codebase_analysis_fallback_answer(query)
+                    thinking_content = _build_codebase_analysis_fallback_thinking(query)
+                    state["thinking"] = thinking_content
+                    state["thinking_content"] = thinking_content
+                    record_thinking_snapshot(
+                        state,
+                        thinking_content,
+                        node="direct",
+                        provenance="deterministic_codebase_fallback",
+                    )
+
+                # Source-backed graceful synthesis: when the LLM returned an
+                # empty body but tools captured real search results (Perplexity
+                # 2026 / Anthropic Computer Use 2026 evidence-pool pattern),
+                # build a citation-bearing answer directly from tool_call_events
+                # instead of letting the user see nothing.
+                if tool_call_events and (
+                    not str(response or "").strip()
+                    or looks_like_search_placeholder_answer(response)
+                ):
+                    try:
+                        synthesis_template = build_search_template_fallback(
+                            query=query,
+                            tool_call_events=tool_call_events,
+                        )
+                    except Exception as template_error:
+                        logger.warning(
+                            "[DIRECT] Empty-response template fallback build failed: %s",
+                            template_error,
+                        )
+                        synthesis_template = ""
+                    if synthesis_template:
+                        logger.info(
+                            "[DIRECT] LLM returned empty/placeholder body — engaging "
+                            "source-backed template fallback (events=%d, len=%d)",
+                            len(tool_call_events),
+                            len(synthesis_template),
+                        )
+                        try:
+                            inc_counter(
+                                "wiii.direct.template_fallback.engaged",
+                                labels={"trigger": "empty_body"},
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                        response = synthesis_template
+                        if not tools_used:
+                            empty_body_tool_names = sorted({
+                                str(event.get("name") or "")
+                                for event in tool_call_events
+                                if event.get("type") == "result" and event.get("name")
+                            })
+                            tools_used = [
+                                {"name": name}
+                                for name in empty_body_tool_names
+                                if name
+                            ]
 
                 if _should_surface_direct_visible_thought(
                     thinking_content,
@@ -1017,22 +2784,40 @@ async def direct_response_node_impl(
                         "force_tools": force_tools,
                     },
                 )
-            else:
+            elif not response:
                 if explicit_user_provider:
                     raise ProviderUnavailableError(
                         provider=str(explicit_user_provider).strip().lower(),
                         reason_code="busy",
                         message="Provider được chọn hiện không sẵn sàng để xử lý yêu cầu này.",
                     )
-                response = (
-                    get_phase_fallback(state)
-                    if getattr(settings, "enable_natural_conversation", False) is True
-                    else "Xin chao! Toi co the giup gi cho ban?"
-                )
+                if _is_codebase_analysis_query(query) and not explicit_web_search_turn:
+                    response = _build_codebase_analysis_fallback_answer(query)
+                    codebase_thinking = _build_codebase_analysis_fallback_thinking(query)
+                    state["thinking"] = codebase_thinking
+                    state["thinking_content"] = codebase_thinking
+                    record_thinking_snapshot(
+                        state,
+                        codebase_thinking,
+                        node="direct",
+                        provenance="deterministic_codebase_fallback",
+                    )
+                else:
+                    response = (
+                        get_phase_fallback(state)
+                        if getattr(settings, "enable_natural_conversation", False) is True
+                        else "Xin chao! Toi co the giup gi cho ban?"
+                    )
                 tracer.end_step(
                     result="Fallback (LLM unavailable)",
                     confidence=0.5,
-                    details={"response_type": "fallback"},
+                    details={
+                        "response_type": (
+                            "codebase_source_backed_fallback"
+                            if _is_codebase_analysis_query(query) and not explicit_web_search_turn
+                            else "fallback"
+                        )
+                    },
                 )
         except Exception as exc:
             salvaged = await _salvage_direct_turn_from_final_result(
@@ -1073,30 +2858,387 @@ async def direct_response_node_impl(
                         "error_type": type(exc).__name__,
                     },
                 )
-            elif isinstance(exc, ProviderUnavailableError):
-                raise
-            elif explicit_user_provider:
-                if isinstance(exc, ProviderUnavailableError):
-                    raise
-                classified = classify_failover_reason_impl(error=exc)
-                raise ProviderUnavailableError(
-                    provider=str(explicit_user_provider).strip().lower(),
-                    reason_code=str(classified.get("reason_code") or "provider_unavailable"),
-                    message="Provider được chọn hiện không sẵn sàng để xử lý yêu cầu này.",
-                    details=classified.get("detail"),
-                ) from exc
-            else:
-                logger.warning("[DIRECT] LLM generation failed: %s", exc)
-                response = (
-                    get_phase_fallback(state)
-                    if getattr(settings, "enable_natural_conversation", False) is True
-                    else "Xin chao! Toi co the giup gi cho ban?"
+            elif (
+                isinstance(exc, ProviderUnavailableError)
+                and (
+                    uploaded_fallback := _build_uploaded_document_context_fallback_answer(
+                        query,
+                        ctx_for_preflight,
+                    )
+                )
+            ):
+                response = uploaded_fallback
+                logger.info(
+                    "[DIRECT] Provider unavailable; returned uploaded-file context fallback (len=%d)",
+                    len(response),
                 )
                 tracer.end_step(
-                    result="Fallback (LLM generation error)",
-                    confidence=0.5,
-                    details={"response_type": "fallback"},
+                    result="Uploaded-file context fallback (provider unavailable)",
+                    confidence=0.65,
+                    details={
+                        "response_type": "uploaded_file_context_fallback",
+                        "error_type": type(exc).__name__,
+                    },
                 )
+            elif isinstance(exc, ProviderUnavailableError) and tool_call_events:
+                template_response = ""
+                try:
+                    template_response = build_search_template_fallback(
+                        query=query,
+                        tool_call_events=tool_call_events,
+                    )
+                except Exception as template_error:
+                    logger.warning(
+                        "[DIRECT] Provider unavailable and search fallback build failed: %s",
+                        template_error,
+                    )
+                if not template_response:
+                    raise
+                response = template_response
+                template_tool_names = sorted({
+                    str(event.get("name") or "")
+                    for event in tool_call_events
+                    if event.get("type") == "result" and event.get("name")
+                })
+                template_tools = [
+                    {"name": name} for name in template_tool_names if name
+                ]
+                if template_tools:
+                    state["tools_used"] = template_tools
+                logger.info(
+                    "[DIRECT] Provider unavailable after tools; returning "
+                    "source-backed fallback (tools=%d, len=%d)",
+                    len(template_tools),
+                    len(response),
+                )
+                tracer.end_step(
+                    result="Source-backed fallback (provider unavailable after tools)",
+                    confidence=0.6,
+                    details={
+                        "response_type": "search_template_fallback",
+                        "tools_used_count": len(template_tools),
+                        "response_length": len(response),
+                    },
+                )
+            elif isinstance(exc, ProviderUnavailableError) and needs_web_search(query):
+                fallback_events: list[dict[str, Any]] = []
+                try:
+                    fallback_events = await _emergency_search_fallback(
+                        query=query,
+                        tools=tools,
+                        timeout_seconds=30.0,
+                    )
+                except Exception as emergency_error:
+                    logger.warning(
+                        "[DIRECT] Provider unavailable and emergency search failed: %s",
+                        emergency_error,
+                    )
+                    fallback_events = []
+
+                template_response = ""
+                if fallback_events:
+                    try:
+                        await _emit_synthetic_tool_events(
+                            fallback_events,
+                            push_event=push_event,
+                        )
+                        state["tool_call_events"] = fallback_events
+                        template_response = build_search_template_fallback(
+                            query=query,
+                            tool_call_events=fallback_events,
+                        )
+                    except Exception as template_error:
+                        logger.warning(
+                            "[DIRECT] Emergency search template fallback failed: %s",
+                            template_error,
+                        )
+                        template_response = ""
+                if not template_response:
+                    raise
+                response = template_response
+                template_tool_names = sorted({
+                    str(event.get("name") or "")
+                    for event in fallback_events
+                    if event.get("type") == "result" and event.get("name")
+                })
+                template_tools = [
+                    {"name": name} for name in template_tool_names if name
+                ]
+                if template_tools:
+                    state["tools_used"] = template_tools
+                logger.info(
+                    "[DIRECT] Provider unavailable before tool planning; "
+                    "returned emergency source-backed fallback (tools=%d, len=%d)",
+                    len(template_tools),
+                    len(response),
+                )
+                tracer.end_step(
+                    result="Source-backed fallback (provider unavailable before tools)",
+                    confidence=0.55,
+                    details={
+                        "response_type": "search_template_fallback",
+                        "tools_used_count": len(template_tools),
+                        "response_length": len(response),
+                    },
+                )
+            elif explicit_user_provider and needs_web_search(query):
+                fallback_events = list(tool_call_events or [])
+                if not fallback_events:
+                    logger.info(
+                        "[DIRECT] Explicit provider web turn failed before tool "
+                        "evidence — engaging LLM-free emergency search"
+                    )
+                    try:
+                        fallback_events = await _emergency_search_fallback(
+                            query=query,
+                            tools=tools,
+                            timeout_seconds=30.0,
+                        )
+                    except Exception as emergency_error:
+                        logger.warning(
+                            "[DIRECT] Explicit-provider emergency search failed: %s",
+                            emergency_error,
+                        )
+                        fallback_events = []
+
+                template_response = ""
+                if fallback_events:
+                    try:
+                        if not tool_call_events:
+                            await _emit_synthetic_tool_events(
+                                fallback_events,
+                                push_event=push_event,
+                            )
+                            state["tool_call_events"] = fallback_events
+                        template_response = build_search_template_fallback(
+                            query=query,
+                            tool_call_events=fallback_events,
+                        )
+                    except Exception as template_error:
+                        logger.warning(
+                            "[DIRECT] Explicit-provider template fallback failed: %s",
+                            template_error,
+                        )
+                        template_response = ""
+                if not template_response:
+                    classified = classify_failover_reason_impl(error=exc)
+                    raise ProviderUnavailableError(
+                        provider=str(explicit_user_provider).strip().lower(),
+                        reason_code=str(classified.get("reason_code") or "provider_unavailable"),
+                        message="Provider được chọn hiện không sẵn sàng để xử lý yêu cầu này.",
+                        details=classified.get("detail"),
+                    ) from exc
+
+                response = template_response
+                if fallback_events and not tool_call_events:
+                    tool_call_events = fallback_events
+                template_tool_names = sorted({
+                    str(event.get("name") or "")
+                    for event in fallback_events
+                    if event.get("type") == "result" and event.get("name")
+                })
+                template_tools = [
+                    {"name": name} for name in template_tool_names if name
+                ]
+                if template_tools:
+                    state["tools_used"] = template_tools
+                logger.info(
+                    "[DIRECT] Explicit provider failed on web turn; returned "
+                    "source-backed emergency fallback (tools=%d, len=%d)",
+                    len(template_tools),
+                    len(response),
+                )
+                tracer.end_step(
+                    result="Source-backed fallback (explicit provider web failure)",
+                    confidence=0.55,
+                    details={
+                        "response_type": "search_template_fallback",
+                        "tools_used_count": len(template_tools),
+                        "response_length": len(response),
+                    },
+                )
+            elif explicit_user_provider:
+                uploaded_fallback = _build_uploaded_document_context_fallback_answer(
+                    query,
+                    ctx_for_preflight,
+                )
+                if uploaded_fallback:
+                    response = uploaded_fallback
+                    logger.info(
+                        "[DIRECT] Explicit provider failed; returned uploaded-file context fallback (len=%d)",
+                        len(response),
+                    )
+                    tracer.end_step(
+                        result="Uploaded-file context fallback (explicit provider failed)",
+                        confidence=0.65,
+                        details={
+                            "response_type": "uploaded_file_context_fallback",
+                            "error_type": type(exc).__name__,
+                        },
+                    )
+                else:
+                    if isinstance(exc, ProviderUnavailableError):
+                        raise
+                    classified = classify_failover_reason_impl(error=exc)
+                    raise ProviderUnavailableError(
+                        provider=str(explicit_user_provider).strip().lower(),
+                        reason_code=str(classified.get("reason_code") or "provider_unavailable"),
+                        message="Provider được chọn hiện không sẵn sàng để xử lý yêu cầu này.",
+                        details=classified.get("detail"),
+                    ) from exc
+            else:
+                logger.warning("[DIRECT] LLM generation failed: %s", exc)
+                logger.info(
+                    "[DIRECT] Template fallback consideration — "
+                    "tool_call_events count=%d, types=%s",
+                    len(tool_call_events) if tool_call_events else 0,
+                    [
+                        f"{event.get('type')}:{event.get('name')}"
+                        for event in (tool_call_events or [])[:6]
+                    ],
+                )
+                fallback_events = list(tool_call_events or [])
+                if not fallback_events and needs_web_search(query):
+                    logger.info(
+                        "[DIRECT] Round-0 timeout with empty tool history — "
+                        "engaging LLM-free emergency search"
+                    )
+                    try:
+                        fallback_events = await _emergency_search_fallback(
+                            query=query,
+                            tools=tools,
+                            timeout_seconds=30.0,
+                        )
+                        logger.info(
+                            "[DIRECT] Emergency search produced %d synthetic events",
+                            len(fallback_events),
+                        )
+                    except Exception as emergency_error:
+                        logger.warning(
+                            "[DIRECT] Emergency search failed: %s",
+                            emergency_error,
+                        )
+                        fallback_events = []
+                template_response = ""
+                try:
+                    template_response = build_search_template_fallback(
+                        query=query,
+                        tool_call_events=fallback_events,
+                    )
+                    logger.info(
+                        "[DIRECT] Template fallback build returned len=%d",
+                        len(template_response or ""),
+                    )
+                except Exception as template_error:
+                    logger.warning(
+                        "[DIRECT] Template fallback build failed: %s",
+                        template_error,
+                    )
+                if template_response:
+                    if fallback_events and not tool_call_events:
+                        tool_call_events = fallback_events
+                        state["tool_call_events"] = fallback_events
+                    try:
+                        trigger_label = (
+                            "emergency_search"
+                            if not tool_call_events or fallback_events == tool_call_events
+                            else "exception_with_tools"
+                        )
+                        inc_counter(
+                            "wiii.direct.template_fallback.engaged",
+                            labels={"trigger": trigger_label},
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                    response = template_response
+                    template_tool_names = sorted({
+                        str(event.get("name") or "")
+                        for event in tool_call_events
+                        if event.get("type") == "result" and event.get("name")
+                    })
+                    template_tools = [
+                        {"name": name} for name in template_tool_names if name
+                    ]
+                    if template_tools:
+                        state["tools_used"] = template_tools
+                    logger.info(
+                        "[DIRECT] Source-backed template fallback engaged "
+                        "(synthesis LLM unavailable, tools=%d, len=%d)",
+                        len(template_tools),
+                        len(response),
+                    )
+                    tracer.end_step(
+                        result="Source-backed fallback (synthesis LLM unavailable)",
+                        confidence=0.6,
+                        details={
+                            "response_type": "search_template_fallback",
+                            "tools_used_count": len(template_tools),
+                            "response_length": len(response),
+                        },
+                    )
+                else:
+                    codebase_fallback = (
+                        _build_codebase_analysis_fallback_answer(query)
+                        if _is_codebase_analysis_query(query) and not explicit_web_search_turn
+                        else ""
+                    )
+                    if isinstance(exc, ProviderUnavailableError):
+                        uploaded_fallback = _build_uploaded_document_context_fallback_answer(
+                            query,
+                            ctx_for_preflight,
+                        )
+                        if uploaded_fallback:
+                            response = uploaded_fallback
+                        elif codebase_fallback:
+                            response = codebase_fallback
+                            codebase_thinking = _build_codebase_analysis_fallback_thinking(query)
+                            state["thinking"] = codebase_thinking
+                            state["thinking_content"] = codebase_thinking
+                            record_thinking_snapshot(
+                                state,
+                                codebase_thinking,
+                                node="direct",
+                                provenance="deterministic_codebase_fallback",
+                            )
+                        else:
+                            raise
+                    else:
+                        uploaded_fallback = _build_uploaded_document_context_fallback_answer(
+                            query,
+                            ctx_for_preflight,
+                        )
+                        if uploaded_fallback:
+                            response = uploaded_fallback
+                        elif codebase_fallback:
+                            response = codebase_fallback
+                            codebase_thinking = _build_codebase_analysis_fallback_thinking(query)
+                            state["thinking"] = codebase_thinking
+                            state["thinking_content"] = codebase_thinking
+                            record_thinking_snapshot(
+                                state,
+                                codebase_thinking,
+                                node="direct",
+                                provenance="deterministic_codebase_fallback",
+                            )
+                        else:
+                            response = (
+                                get_phase_fallback(state)
+                                if getattr(settings, "enable_natural_conversation", False) is True
+                                else "Xin chao! Toi co the giup gi cho ban?"
+                            )
+                    tracer.end_step(
+                        result="Fallback (LLM generation error)",
+                        confidence=0.5,
+                        details={
+                            "response_type": (
+                                "uploaded_file_context_fallback"
+                                if uploaded_fallback
+                                else "codebase_source_backed_fallback"
+                                if codebase_fallback
+                                else "fallback"
+                            )
+                        },
+                    )
 
     resolved_direct_thinking = resolve_public_thinking_content(
         state,

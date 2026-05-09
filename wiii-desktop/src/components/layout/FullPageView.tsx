@@ -6,6 +6,7 @@
  */
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowLeft } from "lucide-react";
+import { useId } from "react";
 import { viewEnter } from "@/lib/animations";
 import { useReducedMotion, motionSafe } from "@/hooks/useReducedMotion";
 
@@ -39,17 +40,18 @@ export function FullPageView({
   footer,
 }: FullPageViewProps) {
   const reduced = useReducedMotion();
+  const titleId = useId();
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0 flex-col md:flex-row">
       {/* Section Sidebar */}
-      <div className="shrink-0 w-[220px] bg-surface-secondary border-r border-border flex flex-col">
+      <div className="shrink-0 w-full md:w-[220px] max-h-[46dvh] md:max-h-none bg-surface-secondary border-b md:border-b-0 md:border-r border-border flex flex-col">
         {/* Header */}
-        <div className="px-4 pt-5 pb-4">
+        <div className="px-4 pt-4 md:pt-5 pb-3 md:pb-4">
           <div className="flex items-center gap-2.5">
             <span className="text-[var(--accent)]">{icon}</span>
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-text truncate">{title}</h2>
+              <h2 id={titleId} className="text-sm font-semibold text-text truncate">{title}</h2>
               {subtitle && (
                 <p className="text-xs text-text-tertiary truncate mt-0.5">{subtitle}</p>
               )}
@@ -58,14 +60,17 @@ export function FullPageView({
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto" aria-label={title}>
+        <nav
+          className="flex md:block flex-none md:flex-1 gap-1 md:space-y-0.5 px-3 md:px-2 overflow-x-auto md:overflow-x-visible md:overflow-y-auto"
+          aria-label={title}
+        >
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
-              className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm transition-colors ${
+              className={`flex shrink-0 md:shrink items-center gap-2.5 md:w-full px-3 py-2 rounded-lg text-sm transition-colors ${
                 activeTab === tab.id
-                  ? "bg-[var(--accent)]/10 text-[var(--accent)] font-medium border-l-2 border-[var(--accent)] -ml-[2px] pl-[calc(0.75rem+2px)]"
+                  ? "bg-[var(--accent)]/10 text-[var(--accent)] font-medium md:border-l-2 border-[var(--accent)] md:-ml-[2px] md:pl-[calc(0.75rem+2px)]"
                   : "text-text-secondary hover:bg-surface-tertiary hover:text-text"
               }`}
               aria-current={activeTab === tab.id ? "page" : undefined}
@@ -90,7 +95,11 @@ export function FullPageView({
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-y-auto">
+      <main
+        className="flex-1 min-w-0 overflow-y-auto"
+        aria-labelledby={titleId}
+        data-testid="full-page-content"
+      >
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -98,12 +107,12 @@ export function FullPageView({
             initial={reduced ? false : "hidden"}
             animate="visible"
             exit={reduced ? undefined : "exit"}
-            className="p-6 max-w-7xl"
+            className="p-4 md:p-6 max-w-full md:max-w-7xl"
           >
             {children}
           </motion.div>
         </AnimatePresence>
-      </div>
+      </main>
     </div>
   );
 }

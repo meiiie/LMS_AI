@@ -34,6 +34,7 @@ from app.engine.openai_compatible_credentials import (
 
 logger = logging.getLogger(__name__)
 OLLAMA_EMBEDDING_PROBE_CACHE_TTL_SECONDS = 15.0
+OLLAMA_EMBEDDING_PROBE_TIMEOUT_SECONDS = 0.5
 _SECRET_REDACTION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"sk-[A-Za-z0-9_-]+"), "sk-REDACTED"),
     (re.compile(r"(?i)(api key provided:\s*)([^\s,'\"}]+)"), r"\1[REDACTED]"),
@@ -183,7 +184,7 @@ def probe_ollama_embedding_model(base_url: str, model_name: str) -> OllamaEmbedd
         url = _build_ollama_tags_url(candidate_base_url)
         request = Request(url, headers={"Accept": "application/json"})
         try:
-            with urlopen(request, timeout=2.0) as response:
+            with urlopen(request, timeout=OLLAMA_EMBEDDING_PROBE_TIMEOUT_SECONDS) as response:
                 payload = json.load(response)
             resolved_base_url = candidate_base_url
             break
@@ -712,6 +713,11 @@ def get_semantic_embedding_backend() -> SemanticEmbeddingBackend:
     global _semantic_embedding_backend
     if _semantic_embedding_backend is None:
         _semantic_embedding_backend = SemanticEmbeddingBackend()
+    return _semantic_embedding_backend
+
+
+def peek_semantic_embedding_backend() -> SemanticEmbeddingBackend | None:
+    """Return the cached embedding backend without initializing providers."""
     return _semantic_embedding_backend
 
 

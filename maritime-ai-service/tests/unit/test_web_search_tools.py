@@ -33,6 +33,25 @@ def disable_serper():
         yield
 
 
+@pytest.fixture(autouse=True)
+def disable_layered_live_backends():
+    """Keep unit tests offline even when SearXNG/Brave/deep-fetch are enabled."""
+    with patch(
+        "app.engine.tools.web_search_tools._searxng_search_sync",
+        return_value=[],
+    ), patch(
+        "app.engine.tools.web_search_tools._brave_search_sync",
+        return_value=[],
+    ), patch(
+        "app.engine.tools.web_search_tools._augment_top_result_with_deep_fetch",
+        side_effect=lambda results, _query: results,
+    ), patch(
+        "app.engine.tools.web_search_tools._merge_news_into_search",
+        side_effect=lambda results, _query: results,
+    ):
+        yield
+
+
 class TestWebSearchTool:
     """Test tool_web_search function."""
 
@@ -67,6 +86,61 @@ class TestWebSearchTool:
         result = tool_web_search.invoke({"query": "test"})
 
         assert "Lỗi" in result
+
+    def test_official_source_uses_site_restricted_branch(self):
+        """Official source requests should not wait for generic news merging."""
+        from app.engine.tools import web_search_tools as ws
+
+        official_results = [
+            {
+                "title": "Introducing GPT-5.5 | OpenAI",
+                "body": "OpenAI is releasing GPT-5.5, its latest model.",
+                "href": "https://openai.com/index/introducing-gpt-5-5/",
+            }
+        ]
+
+        with patch.object(ws, "_search_sync_with_timeout", return_value=official_results) as search_mock, patch.object(
+            ws, "_searxng_search_sync", side_effect=AssertionError("generic search should be skipped")
+        ), patch.object(
+            ws, "_merge_news_into_search", side_effect=AssertionError("news merge should be skipped")
+        ):
+            result = ws.tool_web_search.invoke(
+                {"query": "OpenAI official blog latest model announcement 2026"}
+            )
+
+        assert "Introducing GPT-5.5" in result
+        assert "https://openai.com/index/introducing-gpt-5-5/" in result
+        assert search_mock.call_args.args[0].startswith("site:openai.com/index")
+
+    def test_official_latest_model_ranks_newer_gpt_release_first(self):
+        """Latest official OpenAI model queries should prefer newer GPT releases."""
+        from app.engine.tools import web_search_tools as ws
+
+        official_results = [
+            {
+                "title": "Introducing GPT-5.2 - OpenAI",
+                "body": "GPT-5.2 Thinking is the best model yet for professional use.",
+                "href": "https://openai.com/index/introducing-gpt-5-2/",
+            },
+            {
+                "title": "Introducing GPT-5.5 - OpenAI",
+                "body": "We're releasing GPT-5.5, our smartest model yet.",
+                "href": "https://openai.com/index/introducing-gpt-5-5/",
+            },
+            {
+                "title": "GPT-5.5 Instant: smarter, clearer, and more personalized - OpenAI",
+                "body": "Updates ChatGPT's default model.",
+                "href": "https://openai.com/index/gpt-5-5-instant/",
+            },
+        ]
+
+        with patch.object(ws, "_search_sync_with_timeout", return_value=official_results):
+            ranked = ws._official_site_search_sync(
+                "OpenAI official blog latest model announcement 2026",
+                max_results=5,
+            )
+
+        assert ranked[0]["title"] == "Introducing GPT-5.5 - OpenAI"
 
 
 class TestWebSearchRegistration:

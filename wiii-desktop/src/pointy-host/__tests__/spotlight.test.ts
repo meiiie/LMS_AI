@@ -1,7 +1,7 @@
 /**
  * Spotlight tests — overlay creation, tooltip position math, lifecycle.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   _testing,
   computeTooltipPosition,
@@ -52,11 +52,45 @@ describe("showSpotlight", () => {
     expect(ring).not.toBeNull();
     expect(ring.style.opacity).toBe("1");
     expect(tooltip).not.toBeNull();
-    expect(tooltip.textContent).toBe("Nhấn vào đây để bắt đầu");
+    expect(tooltip.textContent).toContain("Nhấn vào đây để bắt đầu");
+    expect(document.querySelector(`#${_testing.DISMISS_BUTTON_ID}`)?.textContent).toBe("Bỏ qua");
+    expect(tooltip.getAttribute("aria-hidden")).toBe("false");
     expect(overlay.style.background).toContain("radial-gradient");
   });
 
-  it("hideSpotlight clears overlay background", () => {
+  it("lets the user dismiss a spotlight with the Bỏ qua button", () => {
+    const onDismiss = vi.fn();
+    document.body.innerHTML = `<button data-wiii-id="cta" style="width:100px;height:30px">Start</button>`;
+    const target = document.querySelector('[data-wiii-id="cta"]')!;
+    showSpotlight(target, {
+      message: "Step one",
+      duration_ms: 1000,
+      onDismiss,
+    });
+    const button = document.querySelector(`#${_testing.DISMISS_BUTTON_ID}`) as HTMLButtonElement;
+    button.click();
+    const tooltip = document.querySelector(`#${_testing.TOOLTIP_ID}`) as HTMLDivElement;
+    const ring = document.querySelector(`#${_testing.TARGET_RING_ID}`) as HTMLDivElement;
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(tooltip.getAttribute("aria-hidden")).toBe("true");
+    expect(ring.style.opacity).toBe("0");
+  });
+
+  it("lets keyboard users dismiss a spotlight with Escape", () => {
+    const onDismiss = vi.fn();
+    document.body.innerHTML = `<button data-wiii-id="cta">Start</button>`;
+    showSpotlight(document.querySelector('[data-wiii-id="cta"]')!, {
+      message: "Step one",
+      duration_ms: 1000,
+      onDismiss,
+    });
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    const tooltip = document.querySelector(`#${_testing.TOOLTIP_ID}`) as HTMLDivElement;
+    expect(tooltip.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("hideSpotlight clears overlay background and stale tooltip text", () => {
     document.body.innerHTML = `<button data-wiii-id="x" style="width:50px;height:20px"></button>`;
     showSpotlight(document.querySelector('[data-wiii-id="x"]')!, {
       message: "x",
@@ -64,7 +98,10 @@ describe("showSpotlight", () => {
     });
     hideSpotlight();
     const overlay = document.querySelector(`#${_testing.OVERLAY_ID}`) as HTMLDivElement;
+    const tooltip = document.querySelector(`#${_testing.TOOLTIP_ID}`) as HTMLDivElement;
     expect(overlay.style.background).toBe("transparent");
+    expect(tooltip.textContent).toBe("");
+    expect(tooltip.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("does not show tooltip when message is omitted", () => {
@@ -72,6 +109,8 @@ describe("showSpotlight", () => {
     showSpotlight(document.querySelector('[data-wiii-id="silent"]')!, { duration_ms: 999 });
     const tooltip = document.querySelector(`#${_testing.TOOLTIP_ID}`) as HTMLDivElement;
     expect(tooltip.style.opacity).toBe("0");
+    expect(tooltip.textContent).toBe("");
+    expect(tooltip.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("destroySpotlight after hideSpotlight is idempotent", () => {
@@ -90,7 +129,7 @@ describe("showSpotlight", () => {
     showSpotlight(document.getElementById("a")!, { message: "first", duration_ms: 1000 });
     showSpotlight(document.getElementById("b")!, { message: "second", duration_ms: 1000 });
     const tooltip = document.querySelector(`#${_testing.TOOLTIP_ID}`) as HTMLDivElement;
-    expect(tooltip.textContent).toBe("second");
+    expect(tooltip.textContent).toContain("second");
   });
 });
 

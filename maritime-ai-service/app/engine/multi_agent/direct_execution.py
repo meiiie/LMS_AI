@@ -402,25 +402,21 @@ def _split_visible_answer_chunks(text: str, *, target_size: int = 160) -> list[s
     if len(clean) <= target_size:
         return [clean]
 
-    sentence_like = [
-        part.strip()
-        for part in re.split(r"(?<=[\.\!\?…])\s+", clean)
-        if part and part.strip()
-    ]
-    if not sentence_like:
-        sentence_like = [clean]
-
     chunks: list[str] = []
-    current = ""
-    for piece in sentence_like:
-        candidate = piece if not current else f"{current} {piece}"
-        if current and len(candidate) > target_size:
-            chunks.append(current)
-            current = piece
-            continue
-        current = candidate
-    if current:
-        chunks.append(current)
+    start = 0
+    while start < len(clean):
+        end = min(len(clean), start + target_size)
+        if end < len(clean):
+            search_start = max(start + 1, end - 40)
+            boundary = -1
+            for index in range(end, search_start, -1):
+                if clean[index - 1].isspace():
+                    boundary = index
+                    break
+            if boundary > start:
+                end = boundary
+        chunks.append(clean[start:end])
+        start = end
     return chunks or [clean]
 
 
@@ -656,10 +652,17 @@ async def _stream_direct_wait_heartbeats(
     phase: str,
     cue: str,
     tool_names: Optional[list[str]] = None,
-    interval_sec: float = 6.0,
+    interval_sec: float = 3.0,
     stop_signal: Optional[asyncio.Event] = None,
 ) -> None:
-    """Emit compact visible wait beats so slow provider paths do not feel frozen."""
+    """Emit compact visible wait beats so slow provider paths do not feel frozen.
+
+    Phase 35 — interval bumped 6→3s + cap 2→8 beats (covers up to 24s of
+    silence). User reports "không biết Wiii đang làm gì" during NVIDIA
+    NIM synth pauses; 3s cadence keeps the StreamingTimer status alive
+    so the UI always shows the current phase ("Đang đọc reuters.com",
+    "Đang dệt câu trả lời", etc.) rather than freezing at last value.
+    """
     beat_index = 0
     while True:
         if stop_signal is not None:
@@ -673,7 +676,10 @@ async def _stream_direct_wait_heartbeats(
         else:
             await asyncio.sleep(interval_sec)
         beat_index += 1
-        if beat_index > 2:
+        if beat_index > 8:
+            # 8 × 3s = 24s coverage. Beyond this NVIDIA almost certainly
+            # timed out at the LLM-pool layer (45s LIGHT timeout); don't
+            # spam status events — let the timeout propagate normally.
             return
         wait_text = _build_direct_wait_heartbeat_text(
             query=query,

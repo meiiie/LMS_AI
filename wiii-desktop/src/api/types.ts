@@ -16,6 +16,27 @@ export interface ImageInput {
   detail?: "auto" | "low" | "high";
 }
 
+export interface ChatDocumentAttachment {
+  id?: string;
+  file_name: string;
+  mime_type?: string | null;
+  media_kind?: "document" | "video";
+  size_bytes: number;
+  parser?: string;
+  char_count?: number;
+  truncated?: boolean;
+  extracted_image_count?: number;
+}
+
+export interface ChatDocumentContextAttachment extends ChatDocumentAttachment {
+  markdown: string;
+}
+
+export interface ChatDocumentContext {
+  source: "desktop_upload";
+  attachments: ChatDocumentContextAttachment[];
+}
+
 export interface ChatVisualContext {
   last_visual_session_id?: string;
   last_visual_type?: string;
@@ -100,6 +121,7 @@ export interface ChatUserContext {
   visual_context?: ChatVisualContext | null;
   widget_feedback?: ChatWidgetFeedbackContext | null;
   code_studio_context?: ChatCodeStudioContext | null;
+  document_context?: ChatDocumentContext | null;
   [key: string]: unknown;
 }
 
@@ -116,6 +138,12 @@ export interface ChatRequest {
   user_context?: ChatUserContext;
   provider?: "auto" | "google" | "zhipu" | "openai" | "openrouter" | "nvidia" | "ollama";
   model?: string;
+  /** Wiii Pointy v2.8: explicit @plugin-name force-bind from chat input. */
+  force_skills?: string[];
+  /** F18 Phase B (2026-05-07) — Pointy mode flag. */
+  pointy_mode?: boolean;
+  /** Optional ElevenLabs-backed spoken Pointy captions. Audio is opt-in. */
+  pointy_voice_enabled?: boolean;
 }
 
 // ===== Chat Response =====
@@ -898,6 +926,41 @@ export interface SSEHostActionEvent {
   presentation?: PresentationMode;
 }
 
+/**
+ * Wiii Pointy SSE event — agent invokes ``tool_pointy_show`` /
+ * ``tool_pointy_clear`` and the runtime emits this to drive the
+ * collaborator cursor / spotlight overlay.
+ *
+ * The action / params shape mirrors the existing ``PointyFastPathAction``
+ * so the same in-app handlers (``handleHighlight`` / ``handleCursorMove``
+ * from ``pointy-host/bridge.ts``) can run without a translation layer.
+ * See ``app/engine/skills/library/wiii-pointy/SKILL.md`` for trigger
+ * taxonomy and caption guidance.
+ */
+export interface SSEPointyActionEvent {
+  content: {
+    action: "ui.highlight" | "ui.cursor_move" | "ui.clear";
+    requestId: string;
+    params: {
+      selector?: string;
+      message?: string;
+      duration_ms?: number;
+      x?: number;
+      y?: number;
+      coordinate_space?: "viewport" | "normalized";
+      label?: string;
+      source: string;
+    };
+    mode: "highlight" | "cursor" | "clear";
+  };
+  node?: string;
+  display_role?: DisplayRole;
+  sequence_id?: number;
+  step_id?: string;
+  step_state?: StepState;
+  presentation?: PresentationMode;
+}
+
 /** Code Studio: session opened */
 export interface SSECodeOpenEvent {
   content: {
@@ -1257,6 +1320,8 @@ export interface Message {
   artifacts?: ArtifactData[];
   /** Sprint 179: User-attached images (multimodal vision) */
   images?: ImageInput[];
+  /** Per-turn user-attached documents shown as chips; Markdown lives only in request context. */
+  documents?: ChatDocumentAttachment[];
   is_streaming?: boolean;
   metadata?: Record<string, unknown>;
 }
@@ -1303,6 +1368,12 @@ export interface AppSettings {
   font_size?: "small" | "medium" | "large";
   show_thinking: boolean;
   show_reasoning_trace: boolean;
+  /** F18 Phase B (2026-05-07) — Pointy mode: user talks directly to
+   * cursor; backend forces tool_pointy_show per turn (deterministic
+   * UI navigation, cursor-agent persona). */
+  pointy_mode?: boolean;
+  /** Optional ElevenLabs-backed spoken Pointy captions. Audio is opt-in. */
+  pointy_voice_enabled?: boolean;
   streaming_version: "v1" | "v2" | "v3";
   /** Sprint 140: Thinking level — minimal (status only), balanced (collapsed), detailed (expanded) */
   thinking_level: ThinkingLevel;

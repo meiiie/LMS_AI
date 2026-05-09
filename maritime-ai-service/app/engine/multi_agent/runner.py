@@ -619,6 +619,9 @@ class WiiiRunner:
         if isinstance(grader_score, (int, float)) and grader_score > 0:
             return grader_score < 3
 
+        if state.get("_direct_reply_only_ack"):
+            return False
+
         # No grader score — check response quality
         response = (state.get("final_response") or "").strip()
         if not response or len(response) < 20:

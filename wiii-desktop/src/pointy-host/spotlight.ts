@@ -8,6 +8,7 @@
 const OVERLAY_ID = "wiii-pointy-overlay";
 const TARGET_RING_ID = "wiii-pointy-target-ring";
 const TOOLTIP_ID = "wiii-pointy-tooltip";
+const DISMISS_BUTTON_ID = "wiii-pointy-dismiss";
 const BRAND_ORANGE = "#F97316";
 const BRAND_CREAM = "#FAF5EE";
 const PADDING = 8;
@@ -16,6 +17,9 @@ let overlayEl: HTMLDivElement | null = null;
 let targetRingEl: HTMLDivElement | null = null;
 let tooltipEl: HTMLDivElement | null = null;
 let activeTimer: ReturnType<typeof setTimeout> | null = null;
+let activeFollowFrame: number | null = null;
+let activeDismissHandler: (() => void) | null = null;
+let keydownInstalled = false;
 
 function createOverlay(): HTMLDivElement {
   const el = document.createElement("div");
@@ -56,12 +60,14 @@ function createTooltip(): HTMLDivElement {
   const el = document.createElement("div");
   el.id = TOOLTIP_ID;
   el.setAttribute("data-wiii-pointy", "tooltip");
-  el.setAttribute("role", "status");
+  el.setAttribute("role", "group");
   el.setAttribute("aria-live", "polite");
+  el.setAttribute("aria-label", "Hướng dẫn Pointy");
+  el.setAttribute("aria-hidden", "true");
   Object.assign(el.style, {
     position: "fixed",
     zIndex: "2147483647",
-    pointerEvents: "none",
+    pointerEvents: "auto",
     background: BRAND_CREAM,
     color: "#1F2937",
     border: `2px solid ${BRAND_ORANGE}`,
@@ -70,13 +76,86 @@ function createTooltip(): HTMLDivElement {
     fontFamily: "system-ui, -apple-system, sans-serif",
     fontSize: "14px",
     fontWeight: "500",
-    maxWidth: "280px",
+    lineHeight: "1.45",
+    maxWidth: "min(360px, calc(100vw - 24px))",
     boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
     opacity: "0",
     transform: "translateY(4px)",
     transition: "opacity 180ms ease-out, transform 180ms ease-out",
   });
   return el;
+}
+
+function ensureKeyboardDismiss(): void {
+  if (keydownInstalled || typeof document === "undefined") return;
+  document.addEventListener("keydown", handleKeydownDismiss);
+  keydownInstalled = true;
+}
+
+function handleKeydownDismiss(event: KeyboardEvent): void {
+  if (event.key !== "Escape") return;
+  if (!tooltipEl || tooltipEl.getAttribute("aria-hidden") === "true") return;
+  event.preventDefault();
+  dismissActiveSpotlight();
+}
+
+function dismissActiveSpotlight(): void {
+  const onDismiss = activeDismissHandler;
+  hideSpotlight();
+  onDismiss?.();
+}
+
+function renderTooltipContent(
+  tooltip: HTMLDivElement,
+  message: string,
+  dismissLabel: string,
+): void {
+  tooltip.replaceChildren();
+
+  const wrap = document.createElement("div");
+  Object.assign(wrap.style, {
+    display: "grid",
+    gap: "8px",
+  });
+
+  const text = document.createElement("span");
+  text.textContent = message;
+  Object.assign(text.style, {
+    minWidth: "0",
+    lineHeight: "1.45",
+  });
+
+  const actions = document.createElement("div");
+  Object.assign(actions.style, {
+    display: "flex",
+    justifyContent: "flex-end",
+    paddingTop: "2px",
+  });
+
+  const button = document.createElement("button");
+  button.id = DISMISS_BUTTON_ID;
+  button.type = "button";
+  button.textContent = dismissLabel;
+  button.setAttribute("aria-label", `${dismissLabel} hướng dẫn Pointy`);
+  Object.assign(button.style, {
+    flex: "0 0 auto",
+    minHeight: "28px",
+    minWidth: "58px",
+    border: "1px solid rgba(249,115,22,0.42)",
+    borderRadius: "999px",
+    background: "rgba(249,115,22,0.1)",
+    color: BRAND_ORANGE,
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: "12px",
+    fontWeight: "700",
+    padding: "3px 9px",
+  });
+  button.addEventListener("click", dismissActiveSpotlight);
+
+  actions.appendChild(button);
+  wrap.append(text, actions);
+  tooltip.appendChild(wrap);
 }
 
 function ensureElements(): { overlay: HTMLDivElement; targetRing: HTMLDivElement; tooltip: HTMLDivElement } {
@@ -93,6 +172,60 @@ function ensureElements(): { overlay: HTMLDivElement; targetRing: HTMLDivElement
     document.body.appendChild(tooltipEl);
   }
   return { overlay: overlayEl, targetRing: targetRingEl, tooltip: tooltipEl };
+}
+
+function positionSpotlight(target: Element): void {
+  if (!overlayEl || !targetRingEl || !tooltipEl) return;
+  if (!target.isConnected) return;
+  const rect = target.getBoundingClientRect();
+
+  // Radial dim with a hole punched around the target.
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const r = Math.max(rect.width, rect.height) / 2 + PADDING;
+  overlayEl.style.background = `radial-gradient(circle at ${cx}px ${cy}px, transparent 0px, transparent ${r}px, rgba(15,23,42,0.45) ${r + 24}px)`;
+
+  const ringPad = Math.max(6, Math.min(14, Math.max(rect.width, rect.height) * 0.08));
+  Object.assign(targetRingEl.style, {
+    left: `${Math.max(4, rect.left - ringPad)}px`,
+    top: `${Math.max(4, rect.top - ringPad)}px`,
+    width: `${rect.width + ringPad * 2}px`,
+    height: `${rect.height + ringPad * 2}px`,
+    borderRadius: `${Math.min(18, Math.max(10, ringPad + 8))}px`,
+    opacity: "1",
+    transform: "scale(1)",
+  });
+
+  if (tooltipEl.getAttribute("aria-hidden") === "false") {
+    const tRect = tooltipEl.getBoundingClientRect();
+    const viewport = {
+      width: window.innerWidth || document.documentElement.clientWidth,
+      height: window.innerHeight || document.documentElement.clientHeight,
+    };
+    const { left, top } = computeTooltipPosition(rect, tRect, viewport);
+    tooltipEl.style.left = `${left}px`;
+    tooltipEl.style.top = `${top}px`;
+  }
+}
+
+function startFollowingTarget(target: Element): void {
+  stopFollowingTarget();
+  const tick = () => {
+    if (!target.isConnected || !targetRingEl || targetRingEl.style.opacity === "0") {
+      activeFollowFrame = null;
+      return;
+    }
+    positionSpotlight(target);
+    activeFollowFrame = requestAnimationFrame(tick);
+  };
+  activeFollowFrame = requestAnimationFrame(tick);
+}
+
+function stopFollowingTarget(): void {
+  if (activeFollowFrame !== null) {
+    cancelAnimationFrame(activeFollowFrame);
+    activeFollowFrame = null;
+  }
 }
 
 /** Position tooltip below the target by default; flip above if it would overflow. */
@@ -119,49 +252,33 @@ export interface SpotlightOptions {
   message?: string;
   duration_ms?: number;
   onClose?: () => void;
+  onDismiss?: () => void;
+  dismissLabel?: string;
 }
 
 export function showSpotlight(target: Element, opts: SpotlightOptions = {}): void {
-  const { overlay, targetRing, tooltip } = ensureElements();
-  const rect = target.getBoundingClientRect();
-
-  // Radial dim with a hole punched around the target.
-  const cx = rect.left + rect.width / 2;
-  const cy = rect.top + rect.height / 2;
-  const r = Math.max(rect.width, rect.height) / 2 + PADDING;
-  overlay.style.background = `radial-gradient(circle at ${cx}px ${cy}px, transparent 0px, transparent ${r}px, rgba(15,23,42,0.45) ${r + 24}px)`;
-
-  const ringPad = Math.max(6, Math.min(14, Math.max(rect.width, rect.height) * 0.08));
-  Object.assign(targetRing.style, {
-    left: `${Math.max(4, rect.left - ringPad)}px`,
-    top: `${Math.max(4, rect.top - ringPad)}px`,
-    width: `${rect.width + ringPad * 2}px`,
-    height: `${rect.height + ringPad * 2}px`,
-    borderRadius: `${Math.min(18, Math.max(10, ringPad + 8))}px`,
-    opacity: "1",
-    transform: "scale(1)",
-  });
+  const { tooltip } = ensureElements();
+  ensureKeyboardDismiss();
 
   if (opts.message) {
-    tooltip.textContent = opts.message;
+    activeDismissHandler = opts.onDismiss ?? null;
+    renderTooltipContent(tooltip, opts.message, opts.dismissLabel ?? "Bỏ qua");
+    tooltip.setAttribute("aria-hidden", "false");
     tooltip.style.opacity = "0";
     tooltip.style.transform = "translateY(4px)";
-    // Force layout so we can measure.
-    const tRect = tooltip.getBoundingClientRect();
-    const viewport = {
-      width: window.innerWidth || document.documentElement.clientWidth,
-      height: window.innerHeight || document.documentElement.clientHeight,
-    };
-    const { left, top } = computeTooltipPosition(rect, tRect, viewport);
-    tooltip.style.left = `${left}px`;
-    tooltip.style.top = `${top}px`;
+    positionSpotlight(target);
     requestAnimationFrame(() => {
       tooltip.style.opacity = "1";
       tooltip.style.transform = "translateY(0)";
     });
   } else {
+    activeDismissHandler = null;
+    tooltip.replaceChildren();
+    tooltip.setAttribute("aria-hidden", "true");
     tooltip.style.opacity = "0";
+    positionSpotlight(target);
   }
+  startFollowingTarget(target);
 
   if (activeTimer) {
     clearTimeout(activeTimer);
@@ -175,6 +292,7 @@ export function showSpotlight(target: Element, opts: SpotlightOptions = {}): voi
 }
 
 export function hideSpotlight(): void {
+  stopFollowingTarget();
   if (activeTimer) {
     clearTimeout(activeTimer);
     activeTimer = null;
@@ -185,12 +303,16 @@ export function hideSpotlight(): void {
     targetRingEl.style.transform = "scale(0.98)";
   }
   if (tooltipEl) {
+    tooltipEl.replaceChildren();
+    tooltipEl.setAttribute("aria-hidden", "true");
     tooltipEl.style.opacity = "0";
     tooltipEl.style.transform = "translateY(4px)";
   }
+  activeDismissHandler = null;
 }
 
 export function destroySpotlight(): void {
+  stopFollowingTarget();
   if (activeTimer) {
     clearTimeout(activeTimer);
     activeTimer = null;
@@ -201,12 +323,14 @@ export function destroySpotlight(): void {
   overlayEl = null;
   targetRingEl = null;
   tooltipEl = null;
+  activeDismissHandler = null;
 }
 
 export const _testing = {
   OVERLAY_ID,
   TARGET_RING_ID,
   TOOLTIP_ID,
+  DISMISS_BUTTON_ID,
   getOverlay: () => overlayEl,
   getTargetRing: () => targetRingEl,
   getTooltip: () => tooltipEl,

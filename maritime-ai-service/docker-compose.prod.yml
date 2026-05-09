@@ -68,8 +68,9 @@ services:
     # Sprint 232: Removed container_name to allow docker compose scale
     # container_name: wiii-app
     # Sprint 232: Removed host port mapping (Nginx connects via internal network)
-    # ports:
-    #   - "127.0.0.1:${APP_PORT:-8000}:8000"
+    # Re-enabled for local-only stack so desktop UI on host can reach the API.
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
     env_file:
       - .env.production
     environment:
@@ -124,11 +125,24 @@ services:
         reservations:
           cpus: "0.5"
           memory: "512M"
+    # Phase 35 — healthcheck tuned for slow LLM provider paths.
+    # NVIDIA NIM free tier can hold a worker thread for 60-120s on complex
+    # synthesis. With prior settings (interval=30s, retries=5, timeout=10s)
+    # a 90-second pipeline would race against the healthcheck loop and
+    # occasionally trigger container restart mid-stream → user sees tools
+    # complete but answer text never arrives. Tuning rationale:
+    #   - interval bumped 30→45s: less likely to overlap with active turn
+    #   - timeout bumped 10→15s: /health/live should always respond fast,
+    #     but guard against transient main-loop blocking by sync compute
+    #   - start_period bumped 90→180s: NVIDIA cold start + lazy imports
+    #     can take >120s on first request after container boot
+    #   - retries kept at 5: total failure budget = 5 × 45s = 225s before
+    #     unhealthy mark. Combined with 180s start_period → 405s grace.
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]
-      interval: 30s
-      timeout: 10s
-      start_period: 90s
+      interval: 45s
+      timeout: 15s
+      start_period: 180s
       retries: 5
     logging:
       driver: "json-file"
@@ -364,6 +378,46 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # =============================================================================
+  # SEARXNG — Self-hosted meta-search aggregator (Phase 35)
+  # Aggregates 70+ engines (Google, Bing, Brave, DDG, Qwant, Mojeek, etc.)
+  # without API keys. Replaces SerpAPI / Brave-paid for breaking-news coverage.
+  # Internal-only on `wiii-network`; backend hits `http://searxng:8080`.
+  # Pattern: AGPL-3.0 OSS, 60k+ stars, used by Open WebUI / LiteLLM / Cherry.
+  # =============================================================================
+  searxng:
+    image: searxng/searxng:latest
+    container_name: wiii-searxng
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+      - UWSGI_WORKERS=2
+      - UWSGI_THREADS=4
+    networks:
+      - wiii-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "512M"
+        reservations:
+          cpus: "0.1"
+          memory: "128M"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
     logging:
       driver: "json-file"
       options:

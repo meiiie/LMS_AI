@@ -9,6 +9,7 @@ Requirements: 4.1, 4.2, 4.3
 """
 import json
 import logging
+import re
 import unicodedata
 from datetime import datetime
 from typing import List, Optional
@@ -47,6 +48,54 @@ _VIETNAMESE_PRONOUNS = {
     "ban": "bạn", "cau": "cậu",
 }
 
+_EXPLICIT_MEMORY_MARKERS = (
+    "ghi nho",
+    "hay nho",
+    "luu lai",
+    "nho rang",
+    "remember that",
+    "please remember",
+    "keep in mind",
+)
+
+_SESSION_MEMORY_MARKERS = (
+    "for this conversation",
+    "for this session",
+    "in this conversation",
+    "in this session",
+    "phien hien tai",
+    "trong cuoc tro chuyen nay",
+    "trong phien nay",
+    "trong session nay",
+)
+
+_MEMORY_RECALL_QUESTION_MARKERS = (
+    "vua nho ban ghi nho",
+    "nho ban ghi nho",
+    "ban ghi nho la gi",
+    "ban nho la gi",
+    "da bao ban nho",
+    "minh da nho ban",
+    "minh vua nho ban",
+    "nho gi",
+    "ghi nho gi",
+    "what did i ask you to remember",
+    "what did you remember",
+)
+
+_REPLY_DIRECTIVE_RE = re.compile(
+    r"\b(?:trả\s+lời|tra\s+loi|answer\s+only|reply\s+only|respond\s+only)\b",
+    flags=re.IGNORECASE,
+)
+
+_EXPLICIT_MEMORY_SPLIT_RE = re.compile(
+    r"\b(?:hãy\s+ghi\s+nhớ\s+lâu\s+dài\s+rằng|hay\s+ghi\s+nho\s+lau\s+dai\s+rang|"
+    r"hãy\s+ghi\s+nhớ\s+rằng|hay\s+ghi\s+nho\s+rang|hãy\s+nhớ\s+rằng|hay\s+nho\s+rang|"
+    r"hãy\s+nhớ|hay\s+nho|ghi\s+nhớ|ghi\s+nho|nhớ\s+rằng|nho\s+rang|"
+    r"lưu\s+lại|luu\s+lai|remember\s+that|please\s+remember|keep\s+in\s+mind)\b",
+    flags=re.IGNORECASE,
+)
+
 
 def _detect_pronoun_as_name(message: str) -> Optional[str]:
     """
@@ -74,6 +123,83 @@ def _detect_pronoun_as_name(message: str) -> Optional[str]:
         if len(stripped) >= 2 and stripped[1] in context_words:
             return first_word
     return None
+
+
+def _normalize_memory_text(text: str) -> str:
+    return " ".join(_strip_diacritics(text).lower().replace("đ", "d").split())
+
+
+def _has_explicit_memory_marker(normalized_text: str) -> bool:
+    return any(marker in normalized_text for marker in _EXPLICIT_MEMORY_MARKERS)
+
+
+def _is_session_scoped_explicit_memory_request(message: str) -> bool:
+    normalized = _normalize_memory_text(message)
+    return _has_explicit_memory_marker(normalized) and any(
+        marker in normalized for marker in _SESSION_MEMORY_MARKERS
+    )
+
+
+def _is_memory_recall_question(message: str) -> bool:
+    normalized = _normalize_memory_text(message)
+    if not normalized:
+        return False
+    has_question_shape = "?" in str(message or "") or " la gi" in normalized or normalized.endswith(" gi")
+    if not has_question_shape:
+        return False
+    if any(marker in normalized for marker in _MEMORY_RECALL_QUESTION_MARKERS):
+        return True
+    return ("nho" in normalized or "ghi nho" in normalized) and (
+        " la gi" in normalized or " gi" in normalized
+    )
+
+
+def _extract_explicit_memory_segment(message: str) -> str:
+    before_reply_directive = _REPLY_DIRECTIVE_RE.split(str(message or ""), maxsplit=1)[0].strip()
+    if not before_reply_directive:
+        return ""
+    marker_split = _EXPLICIT_MEMORY_SPLIT_RE.split(before_reply_directive, maxsplit=1)
+    if len(marker_split) < 2:
+        return ""
+    segment = marker_split[-1].strip(" :：.。")
+    return re.sub(r"\s+", " ", segment).strip()
+
+
+def _rule_based_explicit_user_facts(message: str) -> list[UserFact]:
+    """Deterministic path for explicit durable-memory writes."""
+    normalized = _normalize_memory_text(message)
+    if not normalized:
+        return []
+    if _is_memory_recall_question(message):
+        return []
+    if _is_session_scoped_explicit_memory_request(message):
+        return []
+    if not _has_explicit_memory_marker(normalized):
+        return []
+
+    segment = _extract_explicit_memory_segment(message)
+    if not segment or len(segment) < 4 or len(segment) > 260:
+        return []
+    if any(marker in segment.lower() for marker in ("```", "<script", "</")):
+        return []
+
+    normalized_segment = _normalize_memory_text(segment)
+    fact_type = FactType.PREFERENCE
+    if any(marker in normalized_segment for marker in ("muc tieu", "goal", "can dat", "muon hoc")):
+        fact_type = FactType.GOAL
+    elif any(marker in normalized_segment for marker in ("so thich", "thich", "prefer")):
+        fact_type = FactType.PREFERENCE
+    elif any(marker in normalized_segment for marker in ("quan tam", "interest")):
+        fact_type = FactType.INTEREST
+
+    return [
+        UserFact(
+            fact_type=fact_type,
+            value=segment,
+            confidence=0.92,
+            source_message=message,
+        )
+    ]
 
 
 class FactExtractor:
@@ -150,11 +276,6 @@ class FactExtractor:
 
         Requirements: 4.1, 4.2, 4.3
         """
-        self._ensure_llm()
-
-        if not self._llm:
-            return []
-
         # Sprint 123 (P4): Prune stale memories before extracting new ones
         try:
             from app.services.memory_lifecycle import prune_stale_memories
@@ -230,10 +351,24 @@ class FactExtractor:
 
         Requirements: 4.1, 4.2
         """
+        rule_facts = _rule_based_explicit_user_facts(message)
+        if (
+            rule_facts
+            or _is_session_scoped_explicit_memory_request(message)
+            or _is_memory_recall_question(message)
+        ):
+            return UserFactExtraction(
+                facts=rule_facts,
+                raw_message=message,
+            )
+
         self._ensure_llm()
 
         if not self._llm:
-            return UserFactExtraction(facts=[], raw_message=message)
+            return UserFactExtraction(
+                facts=[],
+                raw_message=message,
+            )
 
         try:
             prompt = self._build_fact_extraction_prompt(message, existing_facts)
@@ -244,6 +379,8 @@ class FactExtractor:
 
             # Parse JSON response
             facts = self._parse_fact_extraction_response(text_content, message)
+            if not facts:
+                facts = rule_facts
 
             return UserFactExtraction(
                 facts=facts,
@@ -252,7 +389,10 @@ class FactExtractor:
 
         except Exception as e:
             logger.error("Fact extraction failed: %s", e)
-            return UserFactExtraction(facts=[], raw_message=message)
+            return UserFactExtraction(
+                facts=rule_facts,
+                raw_message=message,
+            )
     
     async def store_user_fact_upsert(
         self,

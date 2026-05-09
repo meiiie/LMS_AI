@@ -67,6 +67,7 @@ Pillow>=10.0.0  # CHỈ THỊ 26: Image processing
 # Or use Docling Serve: docker pull doclingproject/docling-serve
 # Feature-gated: USE_DOCLING_FOR_COURSE_GEN=true
 # docling>=2.30.0  # Uncomment when ready to deploy Docling
+markitdown[pdf,docx,pptx,xlsx,audio-transcription]>=0.1.5  # Lightweight Office/PDF/audio-to-Markdown parser
 
 # Object Storage (MinIO SDK)
 minio>=7.2.20
@@ -110,6 +111,13 @@ lxml>=6.1.0
 # Optional: only needed when enable_browser_scraping=True
 # Install browser: playwright install chromium
 playwright>=1.58.0
+
+# Phase 35 — Open-source SOTA web search stack (no paid API).
+# Crawl4AI installed separately in Dockerfile.prod (lxml resolver conflict).
+# Scrapling: adaptive scraper, Cloudflare bypass (43.8k★, BSD-3).
+# feedparser: Google News RSS / Bing News RSS (free, breaking news).
+scrapling>=0.4.7
+feedparser>=6.0.0
 
 # Telegram Bot (Sprint 12: Multi-Channel Gateway, optional)
 aiogram>=3.27.0,<4.0.0

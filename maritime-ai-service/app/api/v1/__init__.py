@@ -64,7 +64,12 @@ def _build_router() -> APIRouter:
         ("app.api.v1.mood.router", "Mood"),
         ("app.api.v1.generated_files.router", "Generated Files"),
         ("app.api.v1.llm_status.router", "LLM Status"),
+        ("app.api.v1.document_context.router", "Document Context"),
+        ("app.api.v1.voice.router", "Voice"),
+        ("app.api.v1.soul_bridge.router", "Soul Bridge"),
+        ("app.api.v1.living_agent.router", "Living Agent"),
         ("app.auth.user_router.router", "User"),
+        ("app.auth.token_router.router", "Auth Tokens"),
     ]
     for import_path, label in core_router_specs:
         _register_router(router, import_path, label)
@@ -73,11 +78,9 @@ def _build_router() -> APIRouter:
         ("enable_websocket", "app.api.v1.websocket.router", "WebSocket"),
         ("enable_google_oauth", "app.auth.google_oauth.router", "Google OAuth"),
         ("enable_lms_token_exchange", "app.auth.lms_auth_router.router", "LMS Token Exchange"),
-        ("enable_living_agent", "app.api.v1.living_agent.router", "Living Agent"),
         ("enable_messenger_webhook", "app.api.v1.messenger_webhook.router", "Messenger Webhook"),
         ("enable_zalo_webhook", "app.api.v1.zalo_webhook.router", "Zalo Webhook"),
         ("enable_org_knowledge", "app.api.v1.org_knowledge.router", "Org Knowledge"),
-        ("enable_soul_bridge", "app.api.v1.soul_bridge.router", "Soul Bridge"),
         (
             "enable_knowledge_visualization",
             "app.api.v1.knowledge_visualization.router",

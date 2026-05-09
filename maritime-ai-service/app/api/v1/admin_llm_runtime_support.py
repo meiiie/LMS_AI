@@ -36,18 +36,37 @@ async def build_model_catalog_response_runtime_impl(
     )
     from app.services.llm_selectability_service import invalidate_llm_selectability_cache
 
+    # Keep the read-only catalog endpoint fast. Expensive provider discovery
+    # belongs to the explicit "Probe capability" action, not initial UI load.
+    discovery_enabled = bool(run_live_probe)
     catalog = await ModelCatalogService.get_full_catalog(
-        ollama_base_url=settings_obj.ollama_base_url if settings_obj.ollama_base_url else None,
+        ollama_base_url=(
+            settings_obj.ollama_base_url
+            if discovery_enabled and settings_obj.ollama_base_url
+            else None
+        ),
         active_provider=settings_obj.llm_provider,
-        google_api_key=settings_obj.google_api_key,
+        google_api_key=settings_obj.google_api_key if discovery_enabled else None,
         openai_base_url=settings_obj.openai_base_url,
-        openai_api_key=settings_obj.openai_api_key,
+        openai_api_key=settings_obj.openai_api_key if discovery_enabled else None,
         openrouter_base_url=getattr(settings_obj, "openrouter_base_url", None),
-        openrouter_api_key=getattr(settings_obj, "openrouter_api_key", None),
+        openrouter_api_key=(
+            getattr(settings_obj, "openrouter_api_key", None)
+            if discovery_enabled
+            else None
+        ),
         nvidia_base_url=getattr(settings_obj, "nvidia_base_url", None),
-        nvidia_api_key=getattr(settings_obj, "nvidia_api_key", None),
+        nvidia_api_key=(
+            getattr(settings_obj, "nvidia_api_key", None)
+            if discovery_enabled
+            else None
+        ),
         zhipu_base_url=getattr(settings_obj, "zhipu_base_url", None),
-        zhipu_api_key=getattr(settings_obj, "zhipu_api_key", None),
+        zhipu_api_key=(
+            getattr(settings_obj, "zhipu_api_key", None)
+            if discovery_enabled
+            else None
+        ),
     )
 
     discovery_record = record_runtime_discovery_snapshot(catalog)

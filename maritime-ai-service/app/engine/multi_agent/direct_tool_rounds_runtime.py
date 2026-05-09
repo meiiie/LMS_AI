@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import sys
+import unicodedata
 from typing import Any, Optional
 
 from app.core.config import settings
@@ -19,7 +21,9 @@ from app.engine.multi_agent.direct_reasoning import (
     _build_direct_tool_reflection,
     _infer_direct_reasoning_cue,
     _infer_direct_thinking_mode,
-    _infer_direct_topic_hint,
+)
+from app.engine.multi_agent.direct_search_synthesis_fallback import (
+    build_search_template_fallback,
 )
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.visual_events import (
@@ -33,9 +37,16 @@ from app.engine.multi_agent.visual_intent_resolver import (
     required_visual_tool_names,
     resolve_visual_intent,
 )
+from app.engine.reasoning import record_thinking_snapshot
 
 
 logger = logging.getLogger(__name__)
+
+_FORCED_WEB_SEARCH_TOOL_NAMES = (
+    "tool_web_search",
+    "web_search",
+)
+_RICH_SEARCH_RESULT_CHAR_FLOOR = 1200
 
 
 def _extract_direct_visible_text(content: Any) -> str:
@@ -114,6 +125,206 @@ def _build_tool_result_message(
     return Message(role="tool", content=content, tool_call_id=tool_call_id)
 
 
+def _validate_pointy_selector(selector: str, state: Any) -> str | None:
+    """Validate LLM-provided pointy selector vs available_targets.
+
+    Returns None khi selector OK, hoặc error message string khi hallucinated.
+    Error message được trả về như tool_result để LLM thấy + correct round
+    tiếp với exact id từ inventory.
+
+    v3.0 anti-hallucination defense (server-side). Compound CSS, aria-label
+    patterns, .class selectors đều bị reject vì:
+
+    1. Bypass Wiii's data-wiii-id stable handle priority (architectural)
+    2. Brittle vs UI refactors (Tailwind classes, BEM names change)
+    3. Silent fail mode trên frontend khi không match real DOM
+    """
+    if not selector:
+        return (
+            "ERROR: Empty selector. Required: exact `id` from "
+            "tool_pointy_inventory. Example: tool_pointy_show("
+            'selector="chat-send-button", caption="..."). Call '
+            "tool_pointy_inventory first if unsure."
+        )
+
+    # Exact Wiii ids include annotated handles (chat-send-button) and
+    # scanner-generated synthetic ids (auto:button:gui-tin-nhan).
+    import re
+    wiii_id_re = re.compile(
+        r"^(?:[a-zA-Z][a-zA-Z0-9_-]*|auto:[a-z0-9_-]+:[a-z0-9_-]+(?:-\d+)?)$"
+    )
+    is_wiii_id = bool(wiii_id_re.match(selector))
+
+    # Verbose [data-wiii-id="..."] form cũng OK (Wiii's documented selector form).
+    is_data_wiii_id_form = bool(
+        re.match(r'^\[data-wiii-id=("[\w-]+"|\'[\w-]+\'|[\w-]+)\]$', selector)
+    )
+
+    # v9.0 F18: read inventory from BOTH state forms (dict + attr).
+    # state can be plain dict (graph_stream_runtime) OR SimpleNamespace.
+    def _read_inventory_ids(s: Any) -> list[str]:
+        host = None
+        if isinstance(s, dict):
+            host = s.get("host_context") or (s.get("context") or {}).get("host_context")
+        else:
+            host = getattr(s, "host_context", None)
+        if not isinstance(host, dict):
+            return []
+        page = host.get("page") or {}
+        metadata = page.get("metadata") or {} if isinstance(page, dict) else {}
+        targets = metadata.get("available_targets") or []
+        if not isinstance(targets, list):
+            return []
+        return [str(t.get("id")) for t in targets if isinstance(t, dict) and t.get("id")]
+
+    inventory_ids = _read_inventory_ids(state)
+    if inventory_ids and selector in inventory_ids:
+        return None
+
+    # Bất kỳ form nào KHÔNG phải Wiii id và KHÔNG phải data-wiii-id form
+    # → likely hallucination (compound CSS, aria-label, .class, ...).
+    if not (is_wiii_id or is_data_wiii_id_form):
+        examples = ", ".join(f'"{i}"' for i in inventory_ids[:3]) if inventory_ids else '"chat-send-button"'
+        return (
+            f"ERROR: Selector {selector!r} is NOT a valid Wiii Pointy id.\n"
+            f"DO NOT generate CSS selectors, aria-label patterns, or .class selectors.\n"
+            f"REQUIRED: exact id from current inventory. Synthetic auto ids like "
+            f"`auto:button:gui-tin-nhan` are valid when they appear in inventory.\n"
+            f"Available ids on this page: {inventory_ids[:10]}\n"
+            f"Correct form: tool_pointy_show(selector={examples.split(',')[0] if examples else '...'}, caption=\"...\")"
+        )
+
+    # Wiii id form: verify exists trong available_targets if inventory available.
+    if is_wiii_id and inventory_ids:
+        available_list = sorted(set(inventory_ids))[:10]
+        return (
+            f"ERROR: id {selector!r} không có trong available_targets trên page hiện tại.\n"
+            f"Available ids: {available_list}\n"
+            f"Re-call tool_pointy_show với một id chính xác từ list trên, "
+            f"hoặc nói prose nếu element không tồn tại."
+        )
+
+    return None
+
+
+def _format_pointy_inventory(state: Any) -> str:
+    """Format pointable elements + cursor state cho LLM.
+
+    Reads ``state.host_context.page.metadata.available_targets`` (set
+    bởi frontend qua HostContextStore Sprint 222 mechanism) plus
+    ``state.host_context.page.metadata.cursor_state`` nếu có.
+
+    v3.0 (Battleship): inventory text là PRESCRIPTIVE — mỗi item include
+    inline directive ``→ call: tool_pointy_show(selector="<id>")`` để
+    LLM khó ignore và không hallucinate compound CSS selectors.
+    """
+    if state is None:
+        return "Pointy inventory unavailable (no chat state)."
+    host_context = getattr(state, "host_context", None) or {}
+    page = host_context.get("page", {}) if isinstance(host_context, dict) else {}
+    metadata = page.get("metadata", {}) if isinstance(page, dict) else {}
+    targets = metadata.get("available_targets") or []
+    cursor_state = metadata.get("cursor_state")
+
+    lines: list[str] = []
+    if not targets:
+        lines.append(
+            "No pointable elements published by the host. The frontend "
+            "may not have integrated PageScanner yet, or this turn ran "
+            "without host_context. Use prose to describe locations."
+        )
+    else:
+        visible = [t for t in targets if t.get("visible")]
+        offscreen = [t for t in targets if not t.get("visible")]
+        lines.append(
+            f"Pointable elements ({len(visible)} visible, "
+            f"{len(offscreen)} off-screen). USE EXACT id BELOW — DO NOT "
+            f"generate CSS / compound / aria-label selectors:"
+        )
+        display = visible if visible else targets
+        for t in display[:30]:
+            tid = t.get("id") or t.get("selector") or "?"
+            role = t.get("role", "other")
+            label = t.get("label") or ""
+            click_safe = " (click_safe)" if t.get("click_safe") else ""
+            label_part = f' "{label}"' if label else ""
+            offscreen_tag = " [offscreen]" if not t.get("visible") else ""
+            # v3.0: prescriptive directive — LLM khó ignore inline call hint.
+            lines.append(
+                f'- id="{tid}" ({role}){label_part}{click_safe}{offscreen_tag}\n'
+                f'  → call: tool_pointy_show(selector="{tid}", caption="...")'
+            )
+        if len(display) > 30:
+            lines.append(f"… {len(display) - 30} more elements omitted.")
+
+    if isinstance(cursor_state, dict):
+        pos = cursor_state.get("position") or {}
+        x = pos.get("x", "?")
+        y = pos.get("y", "?")
+        state_name = cursor_state.get("awarenessState", "?")
+        last = cursor_state.get("currentSelector")
+        last_part = f' last_target="{last}"' if last else ""
+        lines.append(
+            f"Wiii cursor: pos=({x}, {y}) state={state_name}{last_part}"
+        )
+
+    # User's real OS cursor (Wiii Pointy v2.5).
+    user_cursor = metadata.get("user_cursor_state")
+    if isinstance(user_cursor, dict):
+        upos = user_cursor.get("position")
+        if isinstance(upos, dict):
+            ux = upos.get("x", "?")
+            uy = upos.get("y", "?")
+            idle = user_cursor.get("idle_ms", 0)
+            hovered = user_cursor.get("hovered_id")
+            hovered_label = user_cursor.get("hovered_label")
+            clicked = user_cursor.get("recently_clicked", False)
+            parts = [f"User cursor: pos=({ux}, {uy}) idle={idle}ms"]
+            if hovered:
+                hover_part = f' hovering="{hovered}"'
+                if hovered_label:
+                    hover_part += f' (label="{hovered_label}")'
+                parts.append(hover_part)
+            if clicked:
+                parts.append("recently_clicked=true")
+            lines.append(" ".join(parts))
+        else:
+            lines.append("User cursor: not yet tracked.")
+
+    # User's attention/presence (Wiii Pointy v2.6 — tab visibility, blur, idle
+    # + v2.7 behavior counters: copy/paste/right-click + selected text).
+    attention = metadata.get("user_attention")
+    if isinstance(attention, dict):
+        status = attention.get("status", "?")
+        blurs = attention.get("blur_count", 0)
+        tab_switches = attention.get("tab_switch_count", 0)
+        away_ms = attention.get("total_away_ms", 0)
+        last_away = attention.get("last_away_duration_ms", 0)
+        parts = [f"User attention: status={status}"]
+        if blurs > 0 or tab_switches > 0:
+            parts.append(f"blurs={blurs} tab_switches={tab_switches}")
+        if away_ms > 0:
+            parts.append(f"total_away={away_ms // 1000}s")
+        if last_away > 0 and status == "active":
+            parts.append(f"just_returned (was away {last_away // 1000}s)")
+        # v2.7 behavior counters
+        copies = attention.get("copy_count", 0)
+        pastes = attention.get("paste_count", 0)
+        right_clicks = attention.get("context_menu_count", 0)
+        if copies or pastes or right_clicks:
+            parts.append(
+                f"behaviour: copies={copies} pastes={pastes} right_clicks={right_clicks}"
+            )
+        lines.append(" ".join(parts))
+        # Last selected text on its own line for readability.
+        selected = attention.get("last_selected_text")
+        if isinstance(selected, str) and selected.strip():
+            preview = selected[:60].replace("\n", " ")
+            lines.append(f'User selected text: "{preview}"')
+
+    return "\n".join(lines)
+
+
 def _build_user_instruction_message(
     content: str,
     *,
@@ -128,6 +339,172 @@ def _build_user_instruction_message(
     from app.engine.messages import Message
 
     return Message(role="user", content=content)
+
+
+def _build_assistant_message(
+    content: str,
+    *,
+    native_tool_messages: bool,
+) -> Any:
+    if native_tool_messages:
+        from app.engine.native_chat_runtime import make_assistant_message
+
+        return make_assistant_message(content)
+
+    from app.engine.messages import Message
+
+    return Message(role="assistant", content=content)
+
+
+def _force_skills_for_turn(state: AgentState | None) -> set[str]:
+    if not isinstance(state, dict):
+        return set()
+    force_skills = state.get("force_skills")
+    if not force_skills:
+        ctx = state.get("context")
+        if isinstance(ctx, dict):
+            force_skills = ctx.get("force_skills")
+    if isinstance(force_skills, (list, tuple, set)):
+        return {str(skill).strip().lower() for skill in force_skills if skill}
+    return set()
+
+
+def _has_search_tool_result(tool_call_events: list[dict]) -> bool:
+    search_tool_names = {
+        "tool_web_search",
+        "web_search",
+        "tool_search_news",
+        "search_news",
+        "tool_search_legal",
+        "search_legal",
+        "tool_search_maritime",
+        "search_maritime",
+    }
+    return any(
+        event.get("type") == "result"
+        and str(event.get("name") or "").strip().lower() in search_tool_names
+        and str(event.get("result") or "").strip()
+        for event in tool_call_events or []
+    )
+
+
+def _has_fetch_tool_result(tool_call_events: list[dict]) -> bool:
+    return any(
+        event.get("type") == "result"
+        and str(event.get("name") or "").strip().lower() in {"tool_fetch_url", "fetch_url"}
+        and str(event.get("result") or "").strip()
+        for event in tool_call_events or []
+    )
+
+
+def _fold_tool_round_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    stripped = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return " ".join(stripped.lower().replace("đ", "d").split())
+
+
+def _looks_explicit_web_search_query(query: str) -> bool:
+    folded = _fold_tool_round_text(query)
+    if not folded:
+        return False
+    if "@web-search" in folded or "@web_search" in folded:
+        return True
+    if "web" in folded and any(marker in folded for marker in ("tim", "search", "tra cuu")):
+        return True
+    return any(
+        marker in folded
+        for marker in (
+            "tim tren mang",
+            "tim kiem tren mang",
+            "search the web",
+            "look up online",
+        )
+    )
+
+
+def _is_search_tool_name(name: str) -> bool:
+    return str(name or "").strip().lower() in {
+        "tool_web_search",
+        "web_search",
+        "tool_search_news",
+        "search_news",
+        "tool_search_legal",
+        "search_legal",
+        "tool_search_maritime",
+        "search_maritime",
+    }
+
+
+def _prefer_official_query_for_known_docs(args: Any, user_query: str) -> dict:
+    normalized_args = dict(args or {}) if isinstance(args, dict) else {}
+    current_query = str(normalized_args.get("query") or normalized_args.get("q") or "")
+    folded = _fold_tool_round_text(f"{user_query} {current_query}")
+    if "openai" in folded and "responses api" in folded:
+        normalized_args["query"] = (
+            "OpenAI API Reference Responses POST /v1/responses platform.openai.com"
+        )
+    return normalized_args
+
+
+def _should_return_search_template_after_tool_round(
+    *,
+    query: str,
+    state: AgentState | None,
+    tool_call_events: list[dict],
+    tool_round: int,
+) -> bool:
+    if not _has_search_tool_result(tool_call_events):
+        return False
+    routing_meta = state.get("routing_metadata") if isinstance(state, dict) else {}
+    routing_intent = str((routing_meta or {}).get("intent") or "").strip().lower()
+    explicit_web = routing_intent == "web_search" or _looks_explicit_web_search_query(query)
+    if not explicit_web:
+        return False
+    search_result_chars = sum(
+        len(str(event.get("result") or ""))
+        for event in tool_call_events or []
+        if event.get("type") == "result" and _is_search_tool_name(str(event.get("name") or ""))
+    )
+    return (
+        _has_fetch_tool_result(tool_call_events)
+        or tool_round >= 1
+        or search_result_chars >= _RICH_SEARCH_RESULT_CHAR_FLOOR
+    )
+
+
+def _is_explicit_web_search_turn(query: str, state: AgentState | None) -> bool:
+    routing_meta = state.get("routing_metadata") if isinstance(state, dict) else {}
+    routing_intent = str((routing_meta or {}).get("intent") or "").strip().lower()
+    return (
+        "web-search" in _force_skills_for_turn(state)
+        or routing_intent == "web_search"
+        or _looks_explicit_web_search_query(query)
+    )
+
+
+def _should_use_search_template_for_empty_response(
+    *,
+    query: str,
+    state: AgentState | None,
+    tool_call_events: list[dict],
+) -> bool:
+    return (
+        _is_explicit_web_search_turn(query, state)
+        and _has_search_tool_result(tool_call_events)
+    )
+
+
+def _clean_forced_web_search_query(query: str) -> str:
+    """Convert an explicit @web-search turn into a clean tool query."""
+    text = str(query or "").strip()
+    text = re.sub(r"(?i)@web-search\b", "", text).strip()
+    text = re.split(
+        r"(?i)\b(?:trả\s+lời|tra\s+loi|answer|respond|reply)\b",
+        text,
+        maxsplit=1,
+    )[0].strip()
+    text = text.strip(" .:-–—")
+    return text or str(query or "").strip()
 
 
 async def execute_direct_tool_rounds_impl(
@@ -273,6 +650,145 @@ async def execute_direct_tool_rounds_impl(
     )
     streamed_direct_answer = False
     try:
+        if tools and "web-search" in _force_skills_for_turn(state):
+            forced_search_tool = None
+            forced_search_tool_name = ""
+            for candidate_name in _FORCED_WEB_SEARCH_TOOL_NAMES:
+                forced_search_tool = graph_get_tool_by_name(tools, candidate_name)
+                if forced_search_tool:
+                    forced_search_tool_name = candidate_name
+                    break
+
+            if forced_search_tool is not None:
+                tc_id = "forced_web_search_0"
+                tc_args = {"query": _clean_forced_web_search_query(query)}
+                await push_event(
+                    {
+                        "type": "tool_call",
+                        "content": {
+                            "name": forced_search_tool_name,
+                            "args": tc_args,
+                            "id": tc_id,
+                        },
+                        "node": "direct",
+                    }
+                )
+                tool_call_events.append(
+                    {
+                        "type": "call",
+                        "name": forced_search_tool_name,
+                        "args": tc_args,
+                        "id": tc_id,
+                    }
+                )
+                try:
+                    result = await graph_invoke_tool_with_runtime(
+                        forced_search_tool,
+                        tc_args,
+                        tool_name=forced_search_tool_name,
+                        runtime_context_base=runtime_context_base,
+                        tool_call_id=tc_id,
+                        query_snippet=str(tc_args.get("query", ""))[:100],
+                        prefer_async=False,
+                        run_sync_in_thread=True,
+                    )
+                except Exception as tool_error:
+                    logger.warning(
+                        "[DIRECT] Forced @web-search tool failed: %s",
+                        tool_error,
+                    )
+                    result = "Tool unavailable"
+
+                await push_event(
+                    {
+                        "type": "tool_result",
+                        "content": {
+                            "name": forced_search_tool_name,
+                            "result": _summarize_tool_result_for_stream(
+                                forced_search_tool_name,
+                                result,
+                            ),
+                            "id": tc_id,
+                        },
+                        "node": "direct",
+                    }
+                )
+                tool_call_events.append(
+                    {
+                        "type": "result",
+                        "name": forced_search_tool_name,
+                        "result": result,
+                        "id": tc_id,
+                    }
+                )
+                template_response = ""
+                try:
+                    template_response = build_search_template_fallback(
+                        query=query,
+                        tool_call_events=tool_call_events,
+                    )
+                except Exception as template_error:  # noqa: BLE001
+                    logger.warning(
+                        "[DIRECT] Forced @web-search template synthesis failed: %s",
+                        template_error,
+                    )
+                if not template_response:
+                    template_response = (
+                        "Mình đã gọi web-search, nhưng chưa lấy được nguồn đủ rõ "
+                        "để tổng hợp chắc tay cho lượt này. Cậu thử đổi từ khóa "
+                        "hẹp hơn một chút nhé."
+                    )
+                web_thinking = (
+                    "Mình nhận đây là lượt @web-search rõ ràng, nên ưu tiên gọi "
+                    "tool_web_search trước khi viết câu trả lời. Mình chỉ tổng hợp "
+                    "từ URL/snippet tool trả về; nếu synthesizer chậm hoặc rỗng thì "
+                    "dùng fallback có nguồn thay vì trả lời bằng lời xin lỗi rỗng."
+                )
+                state["thinking"] = web_thinking
+                state["thinking_content"] = web_thinking
+                record_thinking_snapshot(
+                    state,
+                    web_thinking,
+                    node="direct",
+                    provenance="deterministic_forced_web_search",
+                )
+                await push_event(
+                    {
+                        "type": "thinking_start",
+                        "content": "",
+                        "node": "direct",
+                        "summary": "Tra cứu web có nguồn",
+                    }
+                )
+                await push_event(
+                    {
+                        "type": "thinking_delta",
+                        "content": web_thinking,
+                        "node": "direct",
+                    }
+                )
+                await push_event(
+                    {
+                        "type": "thinking_end",
+                        "content": "",
+                        "node": "direct",
+                    }
+                )
+                logger.info(
+                    "[DIRECT] Forced @web-search executed deterministically "
+                    "without planner LLM (events=%d, len=%d)",
+                    len(tool_call_events),
+                    len(template_response),
+                )
+                return (
+                    _build_assistant_message(
+                        template_response,
+                        native_tool_messages=native_tool_messages,
+                    ),
+                    messages,
+                    tool_call_events,
+                )
+
         if tools and forced_tool_choice:
             # Forced tool choice — use ainvoke to ensure tool calls happen
             candidate_provider, _candidate_model = remember_execution_target(
@@ -330,25 +846,46 @@ async def execute_direct_tool_rounds_impl(
     if not streamed_direct_answer and opening_thinking_started:
         await push_event({"type": "thinking_end", "content": "", "node": "direct"})
 
+    # Phase 35 — normalize tool_call shapes. NVIDIA OpenAI-compat returns
+    # raw dicts; Google compat + Anthropic adapter convert via
+    # `from_openai_response` → pydantic `ToolCall(id, name, arguments)`.
+    # Existing loop body assumes dict access (`tc.get("args")`). Normalize
+    # here so both shapes work without rewriting 50+ lines downstream.
+    def _normalize_tc(tc) -> dict:
+        if isinstance(tc, dict):
+            return tc
+        return {
+            "id": getattr(tc, "id", "") or "",
+            "name": getattr(tc, "name", "") or "",
+            "args": getattr(tc, "arguments", None)
+                    or getattr(tc, "args", None)
+                    or {},
+        }
+
     for tool_round in range(max_rounds):
         if not (tools and hasattr(llm_response, "tool_calls") and llm_response.tool_calls):
             break
+        normalized_tool_calls = [_normalize_tc(tc) for tc in llm_response.tool_calls]
         round_tool_names = [
             str(tc.get("name", "unknown"))
-            for tc in llm_response.tool_calls
+            for tc in normalized_tool_calls
             if tc.get("name")
         ]
         round_cue = _infer_direct_reasoning_cue(query, state, round_tool_names)
         messages.append(llm_response)
         visual_session_ids: list[str] = []
         active_visual_session_ids = _collect_active_visual_session_ids(state)
-        for tc in llm_response.tool_calls:
+        for tc in normalized_tool_calls:
             tc_id = tc.get("id", f"tc_{tool_round}")
             tc_name = tc.get("name", "unknown")
+            tc_args = tc.get("args", {}) or {}
+            if _is_search_tool_name(str(tc_name)):
+                tc_args = _prefer_official_query_for_known_docs(tc_args, query)
+                tc["args"] = tc_args
             await push_event(
                 {
                     "type": "tool_call",
-                    "content": {"name": tc_name, "args": tc.get("args", {}), "id": tc_id},
+                    "content": {"name": tc_name, "args": tc_args, "id": tc_id},
                     "node": "direct",
                 }
             )
@@ -356,7 +893,7 @@ async def execute_direct_tool_rounds_impl(
                 {
                     "type": "call",
                     "name": tc_name,
-                    "args": tc.get("args", {}),
+                    "args": tc_args,
                     "id": tc_id,
                 }
             )
@@ -365,16 +902,27 @@ async def execute_direct_tool_rounds_impl(
                 if matched:
                     result = await graph_invoke_tool_with_runtime(
                         matched,
-                        tc["args"],
+                        tc_args,
                         tool_name=tc_name,
                         runtime_context_base=runtime_context_base,
                         tool_call_id=tc_id,
-                        query_snippet=str(tc.get("args", {}).get("query", ""))[:100],
+                        query_snippet=str(tc_args.get("query", ""))[:100],
                         prefer_async=False,
                         run_sync_in_thread=True,
                     )
                 else:
-                    result = "Unknown tool"
+                    # Phase 35 — when LLM hallucinates a tool name (or DSML
+                    # parser extracts a bad name), don't surface "Unknown tool"
+                    # to the user's source list. Log warning + return a
+                    # structured error result so the model can recover.
+                    logger.warning(
+                        "[DIRECT] LLM called unknown tool name=%r — skipping",
+                        tc_name,
+                    )
+                    result = (
+                        f"Lỗi: không tìm thấy tool `{tc_name}` trong registry. "
+                        "Hãy gọi đúng tên tool có sẵn."
+                    )
             except Exception as tool_error:
                 logger.warning("[DIRECT] Tool %s failed: %s", tc_name, tool_error)
                 result = "Tool unavailable"
@@ -389,6 +937,73 @@ async def execute_direct_tool_rounds_impl(
                     "node": "direct",
                 }
             )
+            # Wiii Pointy — agent invoked tool_pointy_show / clear.
+            #
+            # v3.0 anti-hallucination: validate selector vs available_targets
+            # BEFORE emit SSE. Khi LLM hallucinate (compound CSS, aria-label
+            # patterns, .class selectors) → return structured error trong
+            # tool_result. AI nhận error message → tự correct round tiếp với
+            # exact id từ inventory.
+            if tc_name in ("tool_pointy_show", "tool_pointy_clear"):
+                try:
+                    from app.engine.tools.pointy_tools import build_pointy_event
+                    if tc_name == "tool_pointy_clear":
+                        pointy_payload = build_pointy_event(mode="clear")
+                        validation_error = None
+                    else:
+                        pointy_args = tc.get("args", {}) or {}
+                        raw_selector = str(pointy_args.get("selector", "")).strip()
+                        # Validate selector vs inventory.
+                        validation_error = _validate_pointy_selector(
+                            raw_selector, state
+                        )
+                        if validation_error:
+                            # Hallucinated → override result với error message
+                            # cho LLM thấy. Skip SSE dispatch.
+                            result = validation_error
+                            logger.warning(
+                                "[POINTY] selector validation FAILED: %s | raw=%r",
+                                validation_error[:120],
+                                raw_selector[:80],
+                            )
+                            pointy_payload = None
+                        else:
+                            pointy_payload = build_pointy_event(
+                                selector=raw_selector,
+                                caption=str(pointy_args.get("caption", "")),
+                                duration_ms=int(pointy_args.get("duration_ms", 4500) or 4500),
+                                mode=str(pointy_args.get("mode", "highlight") or "highlight"),
+                            )
+                    if pointy_payload is not None:
+                        await push_event({
+                            "type": "pointy_action",
+                            "content": pointy_payload,
+                            "node": "direct",
+                        })
+                        logger.info(
+                            "[POINTY] dispatched action=%s selector=%r (direct)",
+                            pointy_payload.get("action"),
+                            pointy_payload.get("params", {}).get("selector"),
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[POINTY] direct emit failed: %s", exc)
+
+            # Wiii Pointy inventory query — replace the tool's [POINTY:
+            # inventory] ack with the actual list of available_targets
+            # from host context so the LLM has something useful to read
+            # in its next round.
+            if tc_name == "tool_pointy_inventory":
+                try:
+                    inventory_text = _format_pointy_inventory(state)
+                    # Replace the result the LLM will see with the
+                    # actual inventory (overwrite the ack string).
+                    result = inventory_text
+                    logger.info(
+                        "[POINTY] inventory served (%d chars)",
+                        len(inventory_text),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[POINTY] inventory format failed: %s", exc)
             await graph_maybe_emit_host_action_event(
                 push_event=push_event,
                 tool_name=tc_name,
@@ -456,6 +1071,128 @@ async def execute_direct_tool_rounds_impl(
             visual_session_ids=visual_session_ids,
             tool_call_events=tool_call_events,
         )
+
+        if (
+            "web-search" in _force_skills_for_turn(state)
+            and _has_search_tool_result(tool_call_events)
+        ):
+            template_response = ""
+            try:
+                template_response = build_search_template_fallback(
+                    query=query,
+                    tool_call_events=tool_call_events,
+                )
+            except Exception as template_error:  # noqa: BLE001
+                logger.warning(
+                    "[DIRECT] Forced @web-search template synthesis failed: %s",
+                    template_error,
+                )
+            if template_response:
+                logger.info(
+                    "[DIRECT] Forced @web-search returning source-backed template "
+                    "immediately after tool result (events=%d, len=%d)",
+                    len(tool_call_events),
+                    len(template_response),
+                )
+                return (
+                    _build_assistant_message(
+                        template_response,
+                        native_tool_messages=native_tool_messages,
+                    ),
+                    messages,
+                    tool_call_events,
+                )
+
+        # Phase 35 — convergence self-eval rubric injected after round 0.
+        # SOTA Anthropic Claude tool-use pattern: explicit "is info sufficient?"
+        # check between rounds. ONLY inject when round 0 returned sparse content
+        # (< 2500 chars) — when search already rich, avoid extra NVIDIA round
+        # (each round adds 30-60s on free tier).
+        if _should_return_search_template_after_tool_round(
+            query=query,
+            state=state,
+            tool_call_events=tool_call_events,
+            tool_round=tool_round,
+        ):
+            template_response = ""
+            try:
+                template_response = build_search_template_fallback(
+                    query=query,
+                    tool_call_events=tool_call_events,
+                )
+            except Exception as template_error:  # noqa: BLE001
+                logger.warning(
+                    "[DIRECT] Explicit web-search template synthesis failed: %s",
+                    template_error,
+                )
+            if template_response:
+                logger.info(
+                    "[DIRECT] Explicit web-search returning source-backed template "
+                    "after tool evidence (round=%d, events=%d, len=%d)",
+                    tool_round,
+                    len(tool_call_events),
+                    len(template_response),
+                )
+                return (
+                    _build_assistant_message(
+                        template_response,
+                        native_tool_messages=native_tool_messages,
+                    ),
+                    messages,
+                    tool_call_events,
+                )
+
+        if tool_round == 0 and tool_call_events and not requires_visual_commit:
+            search_tool_names = {
+                "tool_web_search", "tool_search_news",
+                "tool_search_legal", "tool_search_maritime", "tool_fetch_url",
+            }
+            had_search_tool = any(
+                str(ev.get("name") or "").strip() in search_tool_names
+                for ev in tool_call_events
+                if ev.get("type") == "call"
+            )
+            # Compute total content volume from this round's tool results.
+            total_result_chars = sum(
+                len(str(ev.get("result") or ""))
+                for ev in tool_call_events
+                if ev.get("type") == "result"
+            )
+            if had_search_tool and total_result_chars < 2500:
+                messages.append(
+                    _build_user_instruction_message(
+                        "Đánh giá nhanh kết quả vừa rồi:\n"
+                        "- Số liệu cụ thể (giá / con số / ngày): ĐỦ hay THIẾU?\n"
+                        "- Bối cảnh / lý do biến động: ĐỦ hay THIẾU?\n"
+                        "- Tin nóng địa chính trị (Iran, OPEC+, Hormuz, Fed) "
+                        "có liên quan: đã search chưa?\n\n"
+                        "Nếu THIẾU mục nào → gọi 1 tool bổ sung (tool_search_news "
+                        "với query KHÁC, hoặc tool_fetch_url trên URL hứa hẹn nhất).\n"
+                        "Nếu ĐỦ → trả lời NGAY với cấu trúc: số liệu chính (bold) + "
+                        "bối cảnh 2-3 câu + takeaway 1-2 câu. KHÔNG search lại.\n\n"
+                        "Định dạng số: '110.01' KHÔNG '110, 01'; '13:18' KHÔNG '13: 18'.",
+                        native_tool_messages=native_tool_messages,
+                    )
+                )
+                logger.info(
+                    "[DIRECT] Convergence self-eval injected (round 0 sparse: %d chars)",
+                    total_result_chars,
+                )
+            elif had_search_tool:
+                # Round 0 already rich → hint LLM to STOP and synthesize.
+                messages.append(
+                    _build_user_instruction_message(
+                        "Kết quả search đã đủ phong phú. Trả lời NGAY (KHÔNG gọi "
+                        "thêm tool) với cấu trúc: số liệu chính (bold) + bối cảnh "
+                        "2-3 câu + takeaway 1-2 câu.\n"
+                        "Định dạng số: '110.01' KHÔNG '110, 01'; '13:18' KHÔNG '13: 18'.",
+                        native_tool_messages=native_tool_messages,
+                    )
+                )
+                logger.info(
+                    "[DIRECT] Convergence STOP-hint injected (round 0 rich: %d chars)",
+                    total_result_chars,
+                )
         post_tool_heartbeat = asyncio.create_task(
             graph_stream_direct_wait_heartbeats(
                 push_event,
@@ -541,6 +1278,40 @@ async def execute_direct_tool_rounds_impl(
     visible_response_text = _extract_direct_visible_text(
         getattr(llm_response, "content", "")
     )
+    if (
+        tool_call_events
+        and not visible_response_text
+        and _should_use_search_template_for_empty_response(
+            query=query,
+            state=state,
+            tool_call_events=tool_call_events,
+        )
+    ):
+        template_response = ""
+        try:
+            template_response = build_search_template_fallback(
+                query=query,
+                tool_call_events=tool_call_events,
+            )
+        except Exception as template_error:  # noqa: BLE001
+            logger.warning(
+                "[DIRECT] Web-search empty-response template synthesis failed: %s",
+                template_error,
+            )
+        if template_response:
+            logger.info(
+                "[DIRECT] Web-search returning source-backed template "
+                "without slow synthesis LLM (events=%d, len=%d)",
+                len(tool_call_events),
+                len(template_response),
+            )
+            llm_response = _build_assistant_message(
+                template_response,
+                native_tool_messages=native_tool_messages,
+            )
+            visible_response_text = template_response
+            remaining_tool_calls = False
+
     if tool_call_events and (remaining_tool_calls or not visible_response_text):
         logger.warning(
             "[DIRECT] Tool loop ended without final prose "
@@ -580,6 +1351,12 @@ async def execute_direct_tool_rounds_impl(
                 fallback_source=llm_base,
             )
             resolved_provider = candidate_provider or resolved_provider
+            # Synthesis after a successful tool round needs a longer timeout
+            # than a tool-bound planning call: context is larger (full search
+            # results + fetched URL bodies) and the model must produce prose
+            # that obeys the SKILL Step 4 structure. The "moderate" profile
+            # gives DeepSeek-light enough headroom on long prompts without
+            # needing a full deep-tier model.
             llm_response = await graph_ainvoke_with_fallback(
                 synthesis_llm,
                 synthesis_messages,
@@ -588,7 +1365,7 @@ async def execute_direct_tool_rounds_impl(
                 resolved_provider=resolved_provider,
                 failover_mode=request_failover_mode,
                 push_event=push_event,
-                timeout_profile=followup_timeout_profile,
+                timeout_profile="moderate",
                 state=state,
                 allowed_fallback_providers=allowed_fallback_providers,
             )

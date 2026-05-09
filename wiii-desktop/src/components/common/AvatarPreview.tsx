@@ -66,73 +66,73 @@ const SOUL_PRESETS: Record<
   { label: string; mood: MoodType; face: Record<string, number>; intensity: number }
 > = {
   happy: {
-    label: "Vui ve",
+    label: "Vui vẻ",
     mood: "warm",
     face: { mouthCurve: 0.8, eyeOpenness: 1.1, blush: 0.4, pupilSize: 1.1 },
     intensity: 0.9,
   },
   surprised: {
-    label: "Ngac nhien",
+    label: "Ngạc nhiên",
     mood: "excited",
     face: { eyeOpenness: 1.4, mouthOpenness: 0.6, pupilSize: 1.3, browRaise: 0.5 },
     intensity: 1.0,
   },
   thinking_deep: {
-    label: "Suy tu",
+    label: "Suy tư",
     mood: "gentle",
     face: { eyeOpenness: 0.8, browTilt: 0.3, pupilOffsetY: -0.2, mouthCurve: 0.1 },
     intensity: 0.7,
   },
   shy: {
-    label: "Ngai ngung",
+    label: "Ngại ngùng",
     mood: "warm",
     face: { blush: 0.8, eyeOpenness: 0.7, mouthCurve: 0.3, mouthWidth: 0.7 },
     intensity: 0.85,
   },
   worried: {
-    label: "Lo lang",
+    label: "Lo lắng",
     mood: "concerned",
     face: { browTilt: -0.3, eyeOpenness: 1.1, mouthCurve: -0.2, pupilSize: 0.9 },
     intensity: 0.8,
   },
   sleepy: {
-    label: "Buon ngu",
+    label: "Buồn ngủ",
     mood: "gentle",
     face: { eyeOpenness: 0.5, mouthOpenness: 0.3, browRaise: -0.2, blinkRate: 0.3 },
     intensity: 0.6,
   },
   confident: {
-    label: "Tu tin",
+    label: "Tự tin",
     mood: "excited",
     face: { mouthCurve: 0.5, eyeOpenness: 0.9, browRaise: 0.3, pupilSize: 1.05 },
     intensity: 0.75,
   },
   sad: {
-    label: "Buon",
+    label: "Buồn",
     mood: "concerned",
     face: { mouthCurve: -0.4, eyeOpenness: 0.75, browTilt: -0.4, blush: 0.1 },
     intensity: 0.85,
   },
   pouty: {
-    label: "Phu phieng",
+    label: "Phụng phịu",
     mood: "gentle",
     face: { mouthShape: 4, mouthCurve: 0.1, blush: 0.5, eyeOpenness: 0.85, browRaise: -0.1 },
     intensity: 0.9,
   },
   dizzy: {
-    label: "Choang vang",
+    label: "Choáng váng",
     mood: "concerned",
     face: { mouthOpenness: 0.4, browTilt: -0.3, eyeOpenness: 1.2, mouthShape: 3, pupilSize: 0.7 },
     intensity: 1.0,
   },
   cat_smile: {
-    label: "Meo cuoi",
+    label: "Mèo cười",
     mood: "excited",
     face: { mouthShape: 1, eyeShape: 0.6, mouthCurve: 0.5, blush: 0.3, pupilSize: 1.15 },
     intensity: 0.85,
   },
   crying: {
-    label: "Khoc",
+    label: "Khóc",
     mood: "concerned",
     face: { browRaise: 0.35, mouthCurve: -0.3, eyeOpenness: 0.9, blush: 0.15, browTilt: -0.3 },
     intensity: 0.9,
@@ -140,17 +140,17 @@ const SOUL_PRESETS: Record<
 };
 
 const FACE_SLIDERS = [
-  { key: "eyeOpenness", label: "Mat mo", min: 0.3, max: 1.5, step: 0.05, default: 1.0 },
-  { key: "pupilSize", label: "Dong tu", min: 0.5, max: 1.5, step: 0.05, default: 1.0 },
-  { key: "eyeShape", label: "Mat cuoi ^_^", min: 0, max: 1.0, step: 0.05, default: 0 },
-  { key: "mouthCurve", label: "Cuoi", min: -0.5, max: 1.0, step: 0.05, default: 0.3 },
-  { key: "mouthOpenness", label: "Mieng mo", min: 0, max: 1.0, step: 0.05, default: 0 },
-  { key: "mouthWidth", label: "Mieng rong", min: 0.5, max: 1.5, step: 0.05, default: 1.0 },
-  { key: "browRaise", label: "Chan may", min: -0.5, max: 0.5, step: 0.05, default: 0 },
-  { key: "browTilt", label: "May nghieng", min: -0.5, max: 0.5, step: 0.05, default: 0 },
-  { key: "blush", label: "Do mat", min: 0, max: 1.0, step: 0.05, default: 0 },
-  { key: "pupilOffsetX", label: "Nhin LR", min: -0.3, max: 0.3, step: 0.02, default: 0 },
-  { key: "pupilOffsetY", label: "Nhin UD", min: -0.3, max: 0.3, step: 0.02, default: 0 },
+  { key: "eyeOpenness", label: "Mắt mở", min: 0.3, max: 1.5, step: 0.05, default: 1.0 },
+  { key: "pupilSize", label: "Đồng tử", min: 0.5, max: 1.5, step: 0.05, default: 1.0 },
+  { key: "eyeShape", label: "Mắt cười ^_^", min: 0, max: 1.0, step: 0.05, default: 0 },
+  { key: "mouthCurve", label: "Cười", min: -0.5, max: 1.0, step: 0.05, default: 0.3 },
+  { key: "mouthOpenness", label: "Miệng mở", min: 0, max: 1.0, step: 0.05, default: 0 },
+  { key: "mouthWidth", label: "Miệng rộng", min: 0.5, max: 1.5, step: 0.05, default: 1.0 },
+  { key: "browRaise", label: "Chân mày", min: -0.5, max: 0.5, step: 0.05, default: 0 },
+  { key: "browTilt", label: "Mày nghiêng", min: -0.5, max: 0.5, step: 0.05, default: 0 },
+  { key: "blush", label: "Đỏ mặt", min: 0, max: 1.0, step: 0.05, default: 0 },
+  { key: "pupilOffsetX", label: "Nhìn LR", min: -0.3, max: 0.3, step: 0.02, default: 0 },
+  { key: "pupilOffsetY", label: "Nhìn UD", min: -0.3, max: 0.3, step: 0.02, default: 0 },
 ];
 
 /** Mouth shape options */
@@ -512,11 +512,11 @@ export function AvatarPreview() {
             <h2 style={S.h2}>Reaction Chains (cinematic arcs)</h2>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {[
-                { id: "surprise_to_smile", label: "Ngac nhien → Cuoi", desc: "surprise→sparkle→nod" },
-                { id: "panic_to_relief", label: "Hoang hot → Tho phao", desc: "panic→flinch(×)→sigh" },
-                { id: "love_struck", label: "Tinh yeu set danh", desc: "doki→blush→shy" },
-                { id: "false_alarm", label: "Hut hon", desc: "startle(×)→perk→giggle" },
-                { id: "frustration", label: "Buc boi", desc: "hmph→twitch→sigh" },
+                { id: "surprise_to_smile", label: "Ngạc nhiên → Cười", desc: "surprise→sparkle→nod" },
+                { id: "panic_to_relief", label: "Hoảng hốt → Thở phào", desc: "panic→flinch(×)→sigh" },
+                { id: "love_struck", label: "Tình yêu sét đánh", desc: "doki→blush→shy" },
+                { id: "false_alarm", label: "Hụt hồn", desc: "startle(×)→perk→giggle" },
+                { id: "frustration", label: "Bực bội", desc: "hmph→twitch→sigh" },
               ].map((chain) => (
                 <button
                   key={chain.id}

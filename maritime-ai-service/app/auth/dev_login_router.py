@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -73,6 +74,76 @@ def _is_private_source(host: Optional[str]) -> bool:
     return ip.is_loopback or ip.is_private or ip.is_link_local
 
 
+def _build_stateless_dev_user(*, email: str, name: str, role: str) -> dict:
+    """Create a stable local-dev identity when PostgreSQL is unavailable."""
+    user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"wiii:dev-login:{email.lower()}"))
+    platform_role = "platform_admin" if role == "admin" else "user"
+    return {
+        "id": user_id,
+        "email": email,
+        "name": name,
+        "avatar_url": None,
+        "role": role,
+        "platform_role": platform_role,
+        "is_active": True,
+    }
+
+
+async def _find_or_create_dev_user(
+    *,
+    provider: str,
+    provider_sub: str,
+    provider_issuer: Optional[str],
+    email: Optional[str],
+    name: Optional[str],
+    role: str,
+    email_verified: bool,
+) -> dict:
+    """Use persisted users when possible, with a localhost-only stateless fallback."""
+    fallback_email = email or provider_sub
+    fallback_name = name or "Dev User"
+    try:
+        from app.core.database import is_shared_database_temporarily_unavailable
+
+        if is_shared_database_temporarily_unavailable():
+            return _build_stateless_dev_user(
+                email=fallback_email,
+                name=fallback_name,
+                role=role,
+            )
+
+        user = await find_or_create_by_provider(
+            provider=provider,
+            provider_sub=provider_sub,
+            provider_issuer=provider_issuer,
+            email=email,
+            name=name,
+            role=role,
+            email_verified=email_verified,
+        )
+        return user or _build_stateless_dev_user(
+            email=fallback_email,
+            name=fallback_name,
+            role=role,
+        )
+    except Exception as exc:
+        try:
+            from app.core.database import mark_shared_database_unavailable
+
+            mark_shared_database_unavailable(exc)
+        except Exception:
+            pass
+        logger.warning(
+            "/auth/dev-login using stateless fallback because user DB is unavailable: %s",
+            exc,
+        )
+        return _build_stateless_dev_user(
+            email=fallback_email,
+            name=fallback_name,
+            role=role,
+        )
+
+
 @router.get("/dev-login/status")
 async def dev_login_status() -> dict:
     """Public probe so the frontend knows whether to render the dev button."""
@@ -106,7 +177,7 @@ async def dev_login(request: Request, body: Optional[DevLoginRequest] = None) ->
             detail=f"role must be student/teacher/admin (got {role!r})",
         )
 
-    user = await find_or_create_by_provider(
+    user = await _find_or_create_dev_user(
         provider="dev",
         provider_sub=email,
         provider_issuer="localhost",

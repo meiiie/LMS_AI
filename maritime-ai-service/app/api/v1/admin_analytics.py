@@ -7,9 +7,10 @@ Endpoints:
   GET /admin/analytics/users       — User growth, engagement
 """
 import logging
+from datetime import date, datetime, time, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.admin_security import check_admin_module as _check_admin_module
 from app.api.deps import RequireAdmin
@@ -17,6 +18,29 @@ from app.api.deps import RequireAdmin
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/analytics", tags=["admin-analytics"])
+
+
+def _parse_timestamptz_boundary(value: Optional[str], *, end_of_day: bool = False) -> Optional[datetime]:
+    """Convert query-string date boundaries into asyncpg-compatible datetimes."""
+    if not value:
+        return None
+
+    raw = value.strip()
+    try:
+        if len(raw) == 10:
+            parsed_date = date.fromisoformat(raw)
+            boundary_time = time.max if end_of_day else time.min
+            return datetime.combine(parsed_date, boundary_time, tzinfo=timezone.utc)
+
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Date filters must use ISO format, for example 2026-04-09",
+        ) from exc
 
 
 async def _get_pool():
@@ -37,22 +61,24 @@ async def analytics_overview(
 ):
     """Overview analytics: daily active users, chat volume, error rate."""
     pool = await _get_pool()
+    from_boundary = _parse_timestamptz_boundary(from_date)
+    to_boundary = _parse_timestamptz_boundary(to_date, end_of_day=True)
 
     # Build safe date boundaries
     conditions_base = []
     params = []
     idx = 1
 
-    if from_date:
+    if from_boundary:
         conditions_base.append(f"created_at >= ${idx}::timestamptz")
-        params.append(from_date)
+        params.append(from_boundary)
         idx += 1
     else:
         conditions_base.append("created_at >= NOW() - INTERVAL '30 days'")
 
-    if to_date:
+    if to_boundary:
         conditions_base.append(f"created_at <= ${idx}::timestamptz")
-        params.append(to_date)
+        params.append(to_boundary)
         idx += 1
 
     org_cond = ""
@@ -153,18 +179,20 @@ async def analytics_llm_usage(
 ):
     """LLM usage analytics: tokens, cost, breakdown."""
     pool = await _get_pool()
+    from_boundary = _parse_timestamptz_boundary(from_date)
+    to_boundary = _parse_timestamptz_boundary(to_date, end_of_day=True)
 
     conditions = ["created_at >= NOW() - INTERVAL '30 days'"]
     params = []
     idx = 1
 
-    if from_date:
+    if from_boundary:
         conditions[0] = f"created_at >= ${idx}::timestamptz"
-        params.append(from_date)
+        params.append(from_boundary)
         idx += 1
-    if to_date:
+    if to_boundary:
         conditions.append(f"created_at <= ${idx}::timestamptz")
-        params.append(to_date)
+        params.append(to_boundary)
         idx += 1
     if org_id:
         conditions.append(f"organization_id = ${idx}")
@@ -286,21 +314,23 @@ async def analytics_users(
 ):
     """User analytics: growth, engagement, account-type distribution."""
     pool = await _get_pool()
+    from_boundary = _parse_timestamptz_boundary(from_date)
+    to_boundary = _parse_timestamptz_boundary(to_date, end_of_day=True)
 
     date_conditions = []
     date_params = []
     idx = 1
 
-    if from_date:
+    if from_boundary:
         date_conditions.append(f"created_at >= ${idx}::timestamptz")
-        date_params.append(from_date)
+        date_params.append(from_boundary)
         idx += 1
     else:
         date_conditions.append("created_at >= NOW() - INTERVAL '30 days'")
 
-    if to_date:
+    if to_boundary:
         date_conditions.append(f"created_at <= ${idx}::timestamptz")
-        date_params.append(to_date)
+        date_params.append(to_boundary)
         idx += 1
 
     user_where = "WHERE " + " AND ".join(date_conditions)

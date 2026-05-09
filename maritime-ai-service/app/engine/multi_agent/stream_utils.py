@@ -47,6 +47,7 @@ class StreamEventType:
     VISUAL_COMMIT = "visual_commit"              # Sprint 231: Commit inline visual session
     VISUAL_DISPOSE = "visual_dispose"            # Sprint 231: Dispose inline visual session
     HOST_ACTION = "host_action"                    # Sprint 222b: Bidirectional host action request
+    POINTY_ACTION = "pointy_action"                # Wiii Pointy: agent-controlled cursor / spotlight
     CODE_OPEN = "code_open"                          # Code Studio: session metadata
     CODE_DELTA = "code_delta"                        # Code Studio: chunked code content
     CODE_COMPLETE = "code_complete"                  # Code Studio: full code + trigger preview
@@ -620,5 +621,24 @@ async def create_host_action_event(
             "action": action,
             "params": params,
         },
+        node=node,
+    )
+
+
+async def create_pointy_action_event(
+    payload: dict,
+    node: Optional[str] = None,
+) -> StreamEvent:
+    """Wiii Pointy: SSE event carrying an agent-controlled cursor command.
+
+    The bus-side payload built by ``build_pointy_event`` already has the
+    canonical shape (action, requestId, params, mode). Wrap it in a
+    StreamEvent so the bus→stream converter and presenter can route the
+    event through the SSE wire as a ``pointy_action`` event (not a fallback
+    ``status`` event, which silently drops the cursor command).
+    """
+    return StreamEvent(
+        type=StreamEventType.POINTY_ACTION,
+        content=dict(payload) if isinstance(payload, dict) else {},
         node=node,
     )

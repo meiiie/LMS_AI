@@ -40,6 +40,45 @@ def _needs_legal_search(query: str) -> bool:
     return _load_attr("app.engine.multi_agent.direct_intent", "_needs_legal_search")(query)
 
 
+def _needs_pointy(query: str) -> bool:
+    return _load_attr("app.engine.multi_agent.direct_intent", "_needs_pointy")(query)
+
+
+def _force_skills_from_state(state: Optional["AgentState"]) -> set[str]:
+    """Extract `force_skills` từ AgentState (Wiii Pointy v2.8 @ mention).
+
+    Returns empty set nếu không có. Force_skills được set qua ChatRequest
+    → ChatContext → graph_context dict (NOT top-level state). Threading:
+
+      ChatRequest.force_skills (Pydantic)
+      → input_processor_context_runtime.py sets context.force_skills
+      → chat_orchestrator_multi_agent.build_multi_agent_context_impl
+        sets graph_context["force_skills"] = list(...)
+      → graph_stream_runtime initial_state["context"] = graph_context
+      → state["context"]["force_skills"]  ← READ FROM HERE
+
+    v3.0 F3 fix (2026-05-06): previously read state["force_skills"]
+    directly which is always None — caused chip rendering correctly but
+    `[DIRECT] tools=0, force=False` log entries even when @ mention was
+    typed. Now read from state["context"]["force_skills"] và fallback
+    state["force_skills"] for backward compat.
+    """
+    if not state:
+        return set()
+    if not isinstance(state, dict):
+        return set()
+    force_skills = state.get("force_skills")
+    if not force_skills:
+        ctx = state.get("context")
+        if isinstance(ctx, dict):
+            force_skills = ctx.get("force_skills")
+    if not force_skills:
+        return set()
+    if isinstance(force_skills, (list, tuple, set)):
+        return {str(s).strip().lower() for s in force_skills if s}
+    return set()
+
+
 def _needs_analysis_tool(query: str) -> bool:
     return _load_attr("app.engine.multi_agent.direct_intent", "_needs_analysis_tool")(query)
 
@@ -53,6 +92,17 @@ def _needs_direct_knowledge_search(query: str) -> bool:
         "app.engine.multi_agent.direct_intent",
         "_needs_direct_knowledge_search",
     )(query)
+
+
+def _looks_reasoning_safety_meta_turn(query: str) -> bool:
+    try:
+        normalized = _normalize_for_intent(query)
+        return _load_attr(
+            "app.engine.multi_agent.supervisor_runtime_support",
+            "_looks_reasoning_safety_meta_turn",
+        )(normalized)
+    except Exception:
+        return False
 
 
 def _infer_direct_thinking_mode(
@@ -144,8 +194,60 @@ def _is_host_ui_navigation_route(state: Optional[AgentState]) -> bool:
     return str(metadata.get("intent") or "").strip().lower() == "host_ui_navigation"
 
 
+def _routing_intent(state: Optional[AgentState]) -> str:
+    if not isinstance(state, dict):
+        return ""
+    metadata = state.get("routing_metadata")
+    if not isinstance(metadata, dict):
+        return ""
+    return str(metadata.get("intent") or "").strip().lower()
+
+
+def _should_use_no_tools_for_direct_prose(
+    *,
+    query: str,
+    state: Optional[AgentState],
+    visual_decision: Any,
+    force_tools: bool,
+) -> bool:
+    """Keep plain prose direct turns off the heavy tool-schema path."""
+    if _looks_reasoning_safety_meta_turn(query):
+        return True
+    if force_tools:
+        return False
+    if _routing_intent(state) not in {
+        "general",
+        "off_topic",
+        "social",
+        "personal",
+        "emotional",
+        "identity",
+        "selfhood",
+    }:
+        return False
+    if getattr(visual_decision, "force_tool", False):
+        return False
+    return not (
+        _needs_web_search(query)
+        or _needs_datetime(query)
+        or _needs_news_search(query)
+        or _needs_legal_search(query)
+        or _needs_lms_query(query)
+        or _needs_direct_knowledge_search(query)
+    )
+
+
 def _host_action_tools(tools: list[Any]) -> list[Any]:
-    return [tool for tool in tools if _tool_name(tool).startswith("host_action__")]
+    """Filter tools to those allowed during host_ui_navigation routing.
+
+    Sprint 222 host_action__ tools are mutating capabilities the host
+    page exposes (LMS embed, dashboards). Wiii Pointy v3.0 (2026-05-06)
+    adds pointy tools to this allowlist because pointy is the primary
+    way Wiii answers "where is X" / "click Y" questions on STANDALONE
+    Wiii desktop / Wiii web — there is no host_action bridge there.
+    """
+    allowed_prefixes = ("host_action__", "tool_pointy_")
+    return [tool for tool in tools if _tool_name(tool).startswith(allowed_prefixes)]
 
 
 def _collect_direct_tools(query: str, user_role: str = "student", state: Optional[AgentState] = None):
@@ -194,11 +296,85 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
             "app.engine.tools.web_search_tools",
             "tool_search_maritime",
         )
-        _direct_tools = [
-            *_direct_tools, tool_current_datetime,
-            tool_web_search, tool_search_news,
-            tool_search_legal, tool_search_maritime,
-        ]
+        tool_fetch_url = _load_attr(
+            "app.engine.tools.web_fetch_tool",
+            "tool_fetch_url",
+        )
+        # Phase 35 — intent-aware tool pruning. NVIDIA DeepSeek V4 with 8 tools
+        # in prompt regularly times out (>45s). Bind only what query actually
+        # needs. Always include datetime + general web_search + fetch_url
+        # (cheap escalation). Specialty tools only when intent matches.
+        _direct_tools = [*_direct_tools, tool_current_datetime,
+                         tool_web_search, tool_fetch_url]
+        # v2.8: force-bind via @web-search mention overrides news/legal gates.
+        web_search_forced = "web-search" in _force_skills_from_state(state)
+        if _needs_news_search(query) or web_search_forced:
+            _direct_tools.append(tool_search_news)
+        if _needs_legal_search(query) or web_search_forced:
+            _direct_tools.append(tool_search_legal)
+        # Wiii Pointy — bind cursor-control tools either via keyword
+        # intent (`_needs_pointy`) HOẶC explicit `@wiii-pointy` mention
+        # (force_skills override, v2.8). Force-bind bypasses keyword
+        # gates → user controls invocation explicitly.
+        force_skills = _force_skills_from_state(state)
+        pointy_forced = "wiii-pointy" in force_skills
+        host_ui_navigation = _is_host_ui_navigation_route(state)
+        if pointy_forced or host_ui_navigation or _needs_pointy(query):
+            try:
+                # v9.0 F18 (2026-05-07) — SeeAct enum-constrained tool.
+                # Build tool_pointy_show with `selector: Literal[<inventory>]`
+                # so AI is JSON-schema-forced to pick from current page's
+                # available_targets. NVIDIA DeepSeek + OpenAI compatible
+                # APIs honor enum constraint at sampling time → kills
+                # hallucinated id failure mode (14-43% in v8.3 → ~5-10% target).
+                make_enum_tool = _load_attr(
+                    "app.engine.tools.pointy_tools",
+                    "make_pointy_show_with_enum",
+                )
+                extract_pairs = _load_attr(
+                    "app.engine.tools.pointy_tools",
+                    "extract_inventory_pairs_from_state",
+                )
+                inventory_pairs = extract_pairs(state) if state else []
+                if inventory_pairs:
+                    tool_pointy_show = make_enum_tool(inventory_pairs)
+                    logger.info(
+                        "[DIRECT] Pointy tool enum-bound (%d ids w/ labels): %s",
+                        len(inventory_pairs),
+                        ",".join(
+                            f"{tid}={lbl[:24]!r}" for tid, lbl in inventory_pairs[:3]
+                        ),
+                    )
+                else:
+                    # Fallback: static tool (no inventory available).
+                    tool_pointy_show = _load_attr(
+                        "app.engine.tools.pointy_tools", "tool_pointy_show"
+                    )
+                tool_pointy_clear = _load_attr(
+                    "app.engine.tools.pointy_tools", "tool_pointy_clear"
+                )
+                tool_pointy_inventory = _load_attr(
+                    "app.engine.tools.pointy_tools", "tool_pointy_inventory"
+                )
+                _direct_tools.extend(
+                    [tool_pointy_show, tool_pointy_clear, tool_pointy_inventory]
+                )
+                if pointy_forced:
+                    logger.info("[DIRECT] Pointy tools force-bound via @wiii-pointy mention")
+            except Exception as _e:
+                logger.debug("[DIRECT] Pointy tools unavailable: %s", _e)
+        # Maritime is the default domain — bind tool only when query mentions
+        # maritime/COLREGs/SOLAS/ship terminology so generic queries stay light.
+        try:
+            _needs_maritime = _load_attr(
+                "app.engine.multi_agent.direct_intent",
+                "_needs_maritime_search",
+            )
+            if _needs_maritime(query):
+                _direct_tools.append(tool_search_maritime)
+        except Exception:  # noqa: BLE001
+            # If helper missing, default to including maritime (safe for domain).
+            _direct_tools.append(tool_search_maritime)
     except Exception as _e:
         logger.debug("[DIRECT] Utility/web search tools unavailable: %s", _e)
 
@@ -269,6 +445,17 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         scoped_host_tools = _host_action_tools(_direct_tools)
         return scoped_host_tools, bool(scoped_host_tools)
 
+    if _looks_reasoning_safety_meta_turn(query) and _routing_intent(state) in {
+        "general",
+        "off_topic",
+        "personal",
+        "social",
+    }:
+        return [], False
+
+    force_skills = _force_skills_from_state(state)
+    web_search_forced = "web-search" in force_skills
+
     # Structured visuals re-enable lightweight inline diagram/chart tools for direct,
     # but keep heavy artifact/file generation inside code_studio_agent.
     if getattr(settings, "enable_structured_visuals", False):
@@ -320,6 +507,21 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         visual_decision,
         structured_visuals_enabled=getattr(settings, "enable_structured_visuals", False),
     )
+    if web_search_forced:
+        # Explicit @web-search is a stronger user contract than visual intent.
+        # Research prompts often mention charts, pipelines, or summaries; those
+        # words must not narrow the tool bundle to visual generation.
+        _direct_tools = [
+            tool
+            for tool in _direct_tools
+            if str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "")
+            not in {
+                "tool_create_visual_code",
+                "tool_generate_visual",
+                "tool_generate_mermaid",
+                "tool_generate_interactive_chart",
+            }
+        ]
     if _should_strip_visual_tools_from_direct(query, visual_decision):
         _direct_tools = [
             tool for tool in _direct_tools
@@ -360,6 +562,7 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
             or _needs_news_search(query)
             or _needs_legal_search(query)
             or _needs_lms_query(query)
+            or web_search_forced
         )
     ):
         preferred_name = visual_decision.preferred_tool
@@ -389,10 +592,19 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
             query=query[:180],
         )
     force_tools = bool(_direct_tools) and (
-        _needs_web_search(query) or _needs_datetime(query)
+        web_search_forced
+        or _needs_web_search(query) or _needs_datetime(query)
         or _needs_news_search(query) or _needs_legal_search(query)
         or _needs_lms_query(query) or _needs_visual_tool
     )
+
+    if _should_use_no_tools_for_direct_prose(
+        query=query,
+        state=state,
+        visual_decision=visual_decision,
+        force_tools=force_tools,
+    ):
+        return [], False
 
     # Agent handoff tool (Phase 3)
     if getattr(settings, "enable_agent_handoffs", True) and not force_tools:

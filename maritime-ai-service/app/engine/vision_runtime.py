@@ -18,6 +18,7 @@ import asyncio
 import base64
 import io
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -30,6 +31,9 @@ from urllib.request import Request, urlopen
 from app.core.config import settings
 from app.engine.openai_compatible_credentials import (
     openrouter_credentials_available,
+    resolve_nvidia_api_key,
+    resolve_nvidia_base_url,
+    resolve_nvidia_vision_model,
     resolve_openai_api_key,
     resolve_openai_base_url,
     resolve_openai_model,
@@ -120,6 +124,37 @@ def _sanitize_error_for_log(value: object) -> str:
             head, _, _ = text.partition(marker)
             text = f"{head}{replacement}"
     return text
+
+
+def _compact_repeated_vision_text(text: str) -> str:
+    """Trim exact repeated sentence/line loops from provider vision output."""
+    normalized = re.sub(r"[ \t]+", " ", str(text or "").strip())
+    normalized = re.sub(
+        r"^\s*(?:\*\*)?\s*(?:answer|final answer|response)\s*:\s*(?:\*\*)?\s*",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    ).strip()
+    normalized = re.sub(r"(?m)^\s*[-*]\s+", "", normalized).strip()
+    if not normalized:
+        return ""
+    chunks = [
+        chunk.strip()
+        for chunk in re.split(r"(?<=[.!?。！？])\s+|\n+", normalized)
+        if chunk.strip()
+    ]
+    if len(chunks) <= 2:
+        return " ".join(chunks).strip()
+
+    seen: set[str] = set()
+    kept: list[str] = []
+    for chunk in chunks:
+        key = re.sub(r"\s+", " ", chunk).strip().casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(chunk)
+    return " ".join(kept).strip()
 
 
 def _normalize_provider(provider: str | None) -> str | None:
@@ -244,6 +279,38 @@ def _looks_like_openrouter_vision_model(model_name: str | None) -> bool:
         "glm-5v",
         "vision",
         "vl",
+    )
+    return any(keyword in normalized for keyword in keywords)
+
+
+def _looks_like_nvidia_vision_model(model_name: str | None) -> bool:
+    normalized = str(model_name or "").strip().lower()
+    if not normalized:
+        return False
+    # Keep this conservative: these markers are NVIDIA catalog multimodal IDs
+    # that are documented and/or directly probed through the NVIDIA endpoint.
+    keywords = (
+        "vision",
+        "vl",
+        "neva",
+        "paligemma",
+        "gemma-3-",
+        "gemma-3n-",
+        "gemma-4-",
+        "nemotron-nano-12b-v2-vl",
+        "llama-3.1-nemotron-nano-vl",
+        "llama-3.2-11b-vision",
+        "llama-3.2-90b-vision",
+        "llama-4-maverick",
+        "phi-3-vision",
+        "phi-3.5-vision",
+        "phi-4-multimodal",
+        "ministral-14b-instruct",
+        "mistral-large-3",
+        "mistral-medium-3",
+        "mistral-small-4",
+        "kimi-k2.6",
+        "qwen3.5-",
     )
     return any(keyword in normalized for keyword in keywords)
 
@@ -383,6 +450,8 @@ def _provider_base_default_model(provider: str, capability: VisionCapability) ->
         if capability == VisionCapability.OCR_EXTRACT:
             return resolve_openrouter_model_advanced(settings)
         return resolve_openrouter_model(settings)
+    if provider == "nvidia":
+        return resolve_nvidia_vision_model(settings)
     if provider == "ollama":
         return settings.ollama_model
     if provider == "zhipu":
@@ -414,11 +483,11 @@ def _provider_lane_fit(
     if capability == VisionCapability.OCR_EXTRACT:
         if normalized_provider == "zhipu" and _looks_like_zhipu_ocr_model(model):
             return "specialist", "OCR specialist"
-        if normalized_provider in {"google", "openai", "openrouter", "ollama", "zhipu"} and model:
+        if normalized_provider in {"google", "openai", "openrouter", "nvidia", "ollama", "zhipu"} and model:
             return "fallback", "OCR fallback"
         return None, None
 
-    if normalized_provider in {"google", "openai", "openrouter", "ollama", "zhipu"} and model:
+    if normalized_provider in {"google", "openai", "openrouter", "nvidia", "ollama", "zhipu"} and model:
         return "general", "General vision"
     return None, None
 
@@ -466,6 +535,7 @@ def _vision_provider_status(
 
 
 _ollama_probe_cache: dict[tuple[str, str], tuple[float, VisionProviderStatus]] = {}
+OLLAMA_VISION_TAGS_PROBE_TIMEOUT_SECONDS = 0.5
 
 
 def reset_vision_runtime_caches() -> None:
@@ -657,7 +727,7 @@ def _probe_ollama_vision_status(
         url = f"{candidate_base_url}/api/tags"
         request = Request(url, headers={"Accept": "application/json"})
         try:
-            with urlopen(request, timeout=2.0) as response:
+            with urlopen(request, timeout=OLLAMA_VISION_TAGS_PROBE_TIMEOUT_SECONDS) as response:
                 import json
 
                 payload = json.load(response)
@@ -838,6 +908,36 @@ def _provider_status(
             resolved_base_url=base_url,
         )
 
+    if provider == "nvidia":
+        base_url = _normalize_base_url(resolve_nvidia_base_url(settings))
+        if not resolve_nvidia_api_key(settings):
+            return _vision_provider_status(
+                provider=provider,
+                capability=capability,
+                available=False,
+                model_name=model,
+                reason_code="missing_api_key",
+                reason_label="NVIDIA API key cho vision runtime dang thieu.",
+                resolved_base_url=base_url,
+            )
+        if not _looks_like_nvidia_vision_model(model):
+            return _vision_provider_status(
+                provider=provider,
+                capability=capability,
+                available=False,
+                model_name=model,
+                reason_code="model_unverified",
+                reason_label="Model NVIDIA hien tai chua duoc xac nhan la VLM/image-capable.",
+                resolved_base_url=base_url,
+            )
+        return _vision_provider_status(
+            provider=provider,
+            capability=capability,
+            available=True,
+            model_name=model,
+            resolved_base_url=base_url,
+        )
+
     if provider == "ollama":
         return _probe_ollama_vision_status(
             model,
@@ -927,7 +1027,7 @@ def _resolve_provider_order(
     elif configured_provider and configured_provider != "auto":
         chain.append(configured_provider)
 
-    for item in configured_chain + fallback_chain + ["google", "openai", "openrouter", "ollama"]:
+    for item in configured_chain + fallback_chain + ["google", "openai", "openrouter", "nvidia", "ollama"]:
         normalized = _normalize_provider(item)
         if normalized and normalized not in chain:
             chain.append(normalized)
@@ -1111,6 +1211,25 @@ def _build_image_data_url(*, image_base64: str, media_type: str) -> str:
     return f"data:{media_type};base64,{normalized}"
 
 
+def _openai_vision_generation_kwargs(
+    *,
+    provider: str,
+    model_name: str,
+    max_output_tokens: int,
+    temperature: float,
+) -> dict[str, Any]:
+    normalized_model = str(model_name or "").strip().lower()
+    # Newer OpenAI Chat Completions models reject legacy max_tokens. Keep this
+    # scoped to the first-party OpenAI endpoint so OpenRouter/Zhipu/Ollama
+    # compatibility layers continue receiving the parameter shape they expect.
+    if provider == "openai" and normalized_model.startswith(("gpt-5", "o3", "o4")):
+        return {"max_completion_tokens": max_output_tokens}
+    return {
+        "max_tokens": max_output_tokens,
+        "temperature": temperature,
+    }
+
+
 async def _run_openai_compatible_vision_request(
     *,
     provider: str,
@@ -1136,14 +1255,17 @@ async def _run_openai_compatible_vision_request(
     elif provider == "openrouter":
         api_key = resolve_openrouter_api_key(settings)
         base_url = resolved_base_url or resolve_openrouter_base_url(settings)
+    elif provider == "nvidia":
+        api_key = resolve_nvidia_api_key(settings)
+        base_url = resolved_base_url or resolve_nvidia_base_url(settings)
     else:
         api_key = resolve_openai_api_key(settings)
         base_url = resolved_base_url or resolve_openai_base_url(settings) or "https://api.openai.com/v1"
 
     client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-    response = await client.chat.completions.create(
-        model=model_name,
-        messages=[
+    request_kwargs: dict[str, Any] = {
+        "model": model_name,
+        "messages": [
             {
                 "role": "user",
                 "content": _build_openai_image_content(
@@ -1153,8 +1275,15 @@ async def _run_openai_compatible_vision_request(
                 ),
             }
         ],
-        max_tokens=max_output_tokens,
-        temperature=temperature,
+        **_openai_vision_generation_kwargs(
+            provider=provider,
+            model_name=model_name,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+        ),
+    }
+    response = await client.chat.completions.create(
+        **request_kwargs,
     )
     choice = response.choices[0] if response.choices else None
     message = getattr(choice, "message", None)
@@ -1232,7 +1361,7 @@ async def run_vision_prompt(
                         media_type=media_type,
                         timeout_seconds=timeout_value,
                     )
-                elif provider in {"openai", "openrouter", "ollama", "zhipu"}:
+                elif provider in {"openai", "openrouter", "nvidia", "ollama", "zhipu"}:
                     text = await _run_openai_compatible_vision_request(
                         provider=provider,
                         model_name=status.model_name,
@@ -1247,8 +1376,9 @@ async def run_vision_prompt(
                     continue
 
             if text:
+                cleaned_text = _compact_repeated_vision_text(text)
                 result.success = True
-                result.text = text.strip()
+                result.text = cleaned_text or text.strip()
                 result.provider = provider
                 result.model_name = status.model_name
                 result.resolved_base_url = status.resolved_base_url
@@ -1358,6 +1488,27 @@ async def describe_image_content(
     )
 
 
+def _build_image_analysis_prompt(query: str) -> str:
+    safe_query = str(query or "").strip()[:500] or "Briefly describe the image."
+    return (
+        "You are directly inspecting the attached image.\n"
+        "Answer the user's visual question using only visible evidence.\n\n"
+        f"User question: {safe_query}\n\n"
+        "Rules:\n"
+        "- Answer every explicit part of the user's question. If the user asks for both visible text and color, include both.\n"
+        "- If the user asks to read text, marker, code, or label, copy the exact visible text verbatim.\n"
+        "- If the user asks about color, name the visible color directly.\n"
+        "- If the user asks about background color, mau nen, màu nền, or outer background, answer the background color, not the text color.\n"
+        "- Do not explain the meaning of a marker; only report what is visible.\n"
+        "- Do not say the image is unavailable if you can see it.\n"
+        "- If a character or visual detail is uncertain, say so clearly instead of guessing.\n"
+        "- Final answer must be in Vietnamese; keep exact OCR text inside quotes.\n"
+        "- Do not include labels such as \"Answer:\" or markdown headings.\n"
+        "- Do not use bullet points.\n"
+        "- Answer in 1-3 short natural sentences, no checklist."
+    )
+
+
 async def analyze_image_for_query(
     *,
     image_base64: str,
@@ -1365,28 +1516,15 @@ async def analyze_image_for_query(
     media_type: str = "image/jpeg",
     preferred_provider: str | None = None,
 ) -> VisionResult:
-    prompt = (
-        "Bạn là chuyên gia phân tích tài liệu kỹ thuật.\n"
-        "Hãy mô tả chi tiết nội dung hình ảnh này trong ngữ cảnh câu hỏi của người dùng.\n\n"
-        f"Câu hỏi: {query[:500]}\n\n"
-        "YÊU CẦU:\n"
-        "1. Mô tả cụ thể nội dung hình ảnh (bảng biểu, sơ đồ, biểu đồ, công thức).\n"
-        "2. Nếu là bảng biểu: liệt kê các cột, hàng quan trọng, số liệu chính.\n"
-        "3. Nếu là sơ đồ/biểu đồ: mô tả các thành phần, mối quan hệ, luồng dữ liệu.\n"
-        "4. Nếu là công thức: ghi lại công thức và giải thích các biến.\n"
-        "5. Liên hệ nội dung hình ảnh với câu hỏi nếu có thể.\n"
-        "6. Trả lời bằng tiếng Việt. Giữ nguyên thuật ngữ chuyên ngành bằng tiếng Anh.\n"
-        "7. CHỈ mô tả, KHÔNG trả lời câu hỏi.\n\n"
-        "Trả lời ngắn gọn, súc tích."
-    )
+    prompt = _build_image_analysis_prompt(query)
     return await run_vision_prompt(
         prompt=prompt,
         capability=VisionCapability.GROUNDED_VISUAL_ANSWER,
         image_base64=image_base64,
         media_type=media_type,
         preferred_provider=preferred_provider,
-        max_output_tokens=512,
-        temperature=0.2,
+        max_output_tokens=256,
+        temperature=0.0,
     )
 
 

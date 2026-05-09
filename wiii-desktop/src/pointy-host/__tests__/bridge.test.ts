@@ -16,6 +16,7 @@ import {
   type BridgeHandle,
 } from "../bridge";
 import { destroy } from "../index";
+import { clearPointyDomRefreshHook, setPointyDomRefreshHook } from "../dom-refresh";
 
 const liveBridges: BridgeHandle[] = [];
 
@@ -30,6 +31,7 @@ afterEach(() => {
     liveBridges.pop()?.dispose();
   }
   destroy();
+  clearPointyDomRefreshHook();
   document.body.innerHTML = "";
 });
 
@@ -97,6 +99,28 @@ describe("resolveSelector", () => {
     `;
     expect(resolveSelector("profile-link")?.tagName).toBe("BUTTON");
   });
+  it("chooses the best visible duplicate data-wiii-id candidate", () => {
+    document.body.innerHTML = `
+      <button data-wiii-id="chat-send-button" style="display:none">Old hidden</button>
+      <span data-wiii-id="chat-send-button" data-wiii-role="button" aria-label="Gửi tin nhắn"></span>
+    `;
+    const target = resolveSelector("chat-send-button");
+    expect(target?.tagName).toBe("SPAN");
+    expect(target?.getAttribute("aria-label")).toBe("Gửi tin nhắn");
+  });
+
+  it("refreshes DOM inventory before resolving a selector", () => {
+    let refreshCalls = 0;
+    setPointyDomRefreshHook(() => {
+      refreshCalls += 1;
+      document.body.innerHTML = `<button data-wiii-id="late-target">Late target</button>`;
+    });
+
+    const target = resolveSelector("late-target");
+
+    expect(refreshCalls).toBe(1);
+    expect(target?.tagName).toBe("BUTTON");
+  });
 });
 
 describe("describeTarget", () => {
@@ -127,6 +151,12 @@ describe("handleHighlight", () => {
     const result = await handleHighlight({ selector: "#nope" });
     expect(result.success).toBe(false);
     expect(result.error).toContain("selector_not_found");
+  });
+  it("returns failure when selector resolves to a hidden target", async () => {
+    document.body.innerHTML = `<button id="ghost" style="display:none">Ghost</button>`;
+    const result = await handleHighlight({ selector: "#ghost" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("target_not_visible");
   });
 });
 

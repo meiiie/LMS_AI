@@ -37,10 +37,10 @@ export function HostActionPreviewCard({ item, onClick }: Props) {
   const Icon = resolveIcon(previewKind);
   const badge = resolveBadge(previewKind);
   const targetLabel =
-    (item.metadata?.target_label as string | undefined)
-    ?? (item.metadata?.lesson_title as string | undefined)
-    ?? (item.metadata?.quiz_title as string | undefined)
-    ?? "";
+    (item.metadata?.target_label as string | undefined) ??
+    (item.metadata?.lesson_title as string | undefined) ??
+    (item.metadata?.quiz_title as string | undefined) ??
+    "";
   const confirmation = item.metadata?.requires_confirmation === true;
 
   return (
@@ -90,12 +90,12 @@ export function HostActionPreviewCard({ item, onClick }: Props) {
         )}
         {typeof item.metadata?.changed_count === "number" && (
           <span className="rounded bg-[var(--surface-secondary,#f5f5f0)] px-2 py-1">
-            {item.metadata.changed_count} thay doi
+            {item.metadata.changed_count} thay đổi
           </span>
         )}
         {typeof item.metadata?.question_count === "number" && (
           <span className="rounded bg-[var(--surface-secondary,#f5f5f0)] px-2 py-1">
-            {item.metadata.question_count} cau hoi
+            {item.metadata.question_count} câu hỏi
           </span>
         )}
       </div>

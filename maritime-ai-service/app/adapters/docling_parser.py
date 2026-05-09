@@ -98,6 +98,10 @@ class DoclingParserAdapter(DocumentParserPort):
             )
             self._converter = None
 
+    @property
+    def is_available(self) -> bool:
+        return self._converter is not None
+
     async def parse(self, file_path: str, options: dict | None = None) -> ParsedDocument:
         """Convert document to structured Markdown via Docling."""
         if self._converter is None:

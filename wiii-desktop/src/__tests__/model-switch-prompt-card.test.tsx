@@ -56,12 +56,20 @@ describe("ModelSwitchPromptCard", () => {
         metadata={{
           model_switch_prompt: {
             trigger: "provider_unavailable",
-            title: "Doi model de tiep tuc?",
+            title: "Đổi model để tiếp tục?",
             message: "Gemini dang cham gioi han.",
             recommended_provider: "zhipu",
             options: [
-              { provider: "zhipu", label: "Zhipu GLM", selected_model: "glm-5" },
-              { provider: "openrouter", label: "OpenRouter", selected_model: "openai/gpt-5.4-mini" },
+              {
+                provider: "zhipu",
+                label: "Zhipu GLM",
+                selected_model: "glm-5",
+              },
+              {
+                provider: "openrouter",
+                label: "OpenRouter",
+                selected_model: "openai/gpt-5.4-mini",
+              },
             ],
             allow_retry_once: true,
             allow_session_switch: true,
@@ -71,9 +79,13 @@ describe("ModelSwitchPromptCard", () => {
       />,
     );
 
-    expect(screen.getByText("Doi model de tiep tuc?")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Thu luot nay bang Zhipu GLM" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Dung Zhipu GLM cho ca phien" })).toBeTruthy();
+    expect(screen.getByText("Đổi model để tiếp tục?")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Thử lượt này bằng Zhipu GLM" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Dùng Zhipu GLM cho cả phiên" }),
+    ).toBeTruthy();
   });
 
   it("uses one-shot override for retry-once action", () => {
@@ -83,10 +95,16 @@ describe("ModelSwitchPromptCard", () => {
         metadata={{
           model_switch_prompt: {
             trigger: "provider_unavailable",
-            title: "Doi model de tiep tuc?",
+            title: "Đổi model để tiếp tục?",
             message: "Gemini dang cham gioi han.",
             recommended_provider: "zhipu",
-            options: [{ provider: "zhipu", label: "Zhipu GLM", selected_model: "glm-5" }],
+            options: [
+              {
+                provider: "zhipu",
+                label: "Zhipu GLM",
+                selected_model: "glm-5",
+              },
+            ],
             allow_retry_once: true,
             allow_session_switch: false,
           },
@@ -95,7 +113,9 @@ describe("ModelSwitchPromptCard", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Thu luot nay bang Zhipu GLM" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Thử lượt này bằng Zhipu GLM" }),
+    );
 
     expect(setNextTurnProvider).toHaveBeenCalledWith("zhipu");
     expect(onRetryOnce).toHaveBeenCalledOnce();
@@ -118,7 +138,9 @@ describe("ModelSwitchPromptCard", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Dung Zhipu GLM cho ca phien" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Dùng Zhipu GLM cho cả phiên" }),
+    );
 
     expect(setActiveProvider).toHaveBeenCalledWith("zhipu");
   });

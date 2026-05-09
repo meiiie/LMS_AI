@@ -121,6 +121,19 @@ def test_pronoun_instruction():
     assert isinstance(instruction, str)
 
 
+def test_english_conversation_word_does_not_trigger_bad_con_pronoun():
+    """The word conversation must not trip the Vietnamese 'con' guard."""
+    message = (
+        "Trong phiên này, hãy nhớ ưu tiên memory/conversation nối phải đáng tin "
+        "cho m\u00ecnh."
+    )
+
+    result = detect_pronoun_style(message)
+
+    assert result is not None
+    assert result.get("user_self") == "m\u00ecnh"
+
+
 def test_valid_pronoun_pairs():
     """Test that all valid pronoun pairs are defined correctly."""
 

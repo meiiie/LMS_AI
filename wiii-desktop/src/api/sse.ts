@@ -30,6 +30,7 @@ import type {
   SSEVisualCommitEvent,
   SSEVisualDisposeEvent,
   SSEHostActionEvent,
+  SSEPointyActionEvent,
   SSECodeOpenEvent,
   SSECodeDeltaEvent,
   SSECodeCompleteEvent,
@@ -67,6 +68,8 @@ export interface SSEEventHandler {
   onVisualDispose?: (data: SSEVisualDisposeEvent) => void;
   /** Sprint 222b: Host action request from AI agent */
   onHostAction?: (data: SSEHostActionEvent) => void;
+  /** Wiii Pointy: agent-controlled cursor / spotlight overlay */
+  onPointyAction?: (data: SSEPointyActionEvent) => void;
   /** Code Studio: session opened */
   onCodeOpen?: (data: SSECodeOpenEvent) => void;
   /** Code Studio: chunked code content */
@@ -219,8 +222,13 @@ function dispatchEvent(
     case "thinking":
       handlers.onThinking(data as SSEThinkingEvent);
       break;
-    case "answer": {
-      // Sprint 153b: Guard — content must be string to avoid appending undefined
+    case "answer":
+    case "answer_delta": {
+      // v5.0 F8 (2026-05-06): backend emits `answer_delta` for streaming
+      // chunks (chat_stream_presenter.py:386). Frontend previously only
+      // handled `answer` → answer_delta hit default branch, content
+      // never reached onAnswer / fullAnswerTextRef → embodied parser
+      // had nothing to scan. Treat both event types identically.
       const answerData = data as SSEAnswerEvent;
       if (typeof answerData.content === "string") {
         handlers.onAnswer(answerData);
@@ -311,6 +319,9 @@ function dispatchEvent(
       break;
     case "host_action":
       handlers.onHostAction?.(data as SSEHostActionEvent);
+      break;
+    case "pointy_action":
+      handlers.onPointyAction?.(data as SSEPointyActionEvent);
       break;
     case "code_open":
       handlers.onCodeOpen?.(data as SSECodeOpenEvent);

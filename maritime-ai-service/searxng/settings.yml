@@ -1,0 +1,119 @@
+# SearXNG settings — Wiii internal meta-search.
+# Pattern: aggregates 70+ engines (Google, Bing, Brave, DDG, Qwant, Mojeek, ...)
+# without API keys. Self-hosted, no rate limit at the engine level.
+# Doc: https://docs.searxng.org/admin/engines/settings.html
+
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "Wiii Search"
+  privacypolicy_url: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  formats:
+    - html
+    - json
+    - rss
+
+server:
+  # base_url is rendered into HTML; the JSON API uses the request host directly.
+  base_url: false
+  # Bind on all interfaces inside the container; expose only to internal docker network.
+  bind_address: "0.0.0.0"
+  port: 8080
+  # Secret key — randomized at deploy. Doesn't matter for internal-only use.
+  secret_key: "wiii-internal-only-not-public-do-not-rotate-secret"
+  # Disable bot/limiter — we are the only client (single backend container).
+  limiter: false
+  image_proxy: false
+  http_protocol_version: "1.1"
+  # Internal pool: liberal timeouts.
+  default_http_headers:
+    X-Content-Type-Options: nosniff
+    X-Download-Options: noopen
+    X-Robots-Tag: noindex, nofollow
+    Referrer-Policy: no-referrer
+
+ui:
+  static_use_hash: false
+  default_theme: simple
+  theme_args:
+    simple_style: dark
+
+# Disable redis-based limiter (SearXNG's bot protection); not needed internally.
+redis:
+  url: false
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 12.0
+  pool_connections: 64
+  pool_maxsize: 256
+  enable_http2: true
+  retries: 1
+  useragent_suffix: ""
+  max_redirects: 5
+
+enabled_plugins:
+  - "Hash plugin"
+  - "Self Information"
+  - "Tracker URL remover"
+
+# Engine overrides — boost news-specific engines + tune timeouts.
+# `use_default_settings: true` above means we inherit the full upstream
+# engines list; each entry below overrides only the specific fields named.
+# weight > 1.0 boosts ranking when SearXNG aggregates results across engines.
+engines:
+  # ── Wire services (highest weight — fastest on breaking news) ──
+  - name: reuters
+    weight: 3.0           # Wire-grade, indexed within minutes
+    timeout: 10
+    disabled: false
+
+  - name: bing news
+    weight: 2.5           # Bing index dày, news-fresh
+    timeout: 10
+    disabled: false
+
+  - name: google news
+    weight: 2.5           # Google News VN + EN merged
+    timeout: 10
+    disabled: false
+
+  - name: yahoo news
+    weight: 1.5
+    timeout: 10
+    disabled: false
+
+  - name: brave.news
+    weight: 2.0
+    timeout: 10
+    disabled: false
+
+  # ── Aggregation engines for general queries ──
+  - name: brave
+    weight: 1.5
+    timeout: 8
+
+  - name: duckduckgo
+    weight: 1.2
+    timeout: 8
+
+  - name: google
+    weight: 1.5
+    timeout: 8
+
+  - name: qwant
+    weight: 1.0
+    timeout: 8
+
+  - name: mojeek
+    weight: 1.0
+    timeout: 8

@@ -80,11 +80,76 @@ function escapeHtml(value: string): string {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;")
+    .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
 
-function frameLabel(frameKind: NonNullable<InlineVisualFrameProps["frameKind"]>) {
+/**
+ * Sprint 35e Item 2 — Theme inheritance bridge.
+ *
+ * Reads a curated subset of Wiii host CSS variables off
+ * ``document.documentElement`` and maps them into the iframe-local
+ * ``--wiii-*`` namespace. Pattern reference: VISUAL_CODE_GEN.md v6.2.0
+ * §12 "Theme inheritance contract" — host owns the source of truth, the
+ * iframe inherits a stable, scoped subset.
+ *
+ * Each var falls back to ``""`` when the host stylesheet has not loaded
+ * yet (e.g. during SSR / first paint), so the iframe :root defaults stay
+ * authoritative until a real value lands.
+ */
+export function readHostThemeOverrides(): Record<string, string> {
+  if (typeof document === "undefined") return {};
+  let style: CSSStyleDeclaration;
+  try {
+    style = getComputedStyle(document.documentElement);
+  } catch {
+    return {};
+  }
+  const pull = (name: string) => style.getPropertyValue(name).trim();
+  const overrides: Record<string, string> = {};
+  const accent = pull("--accent");
+  if (accent) overrides["--wiii-accent"] = accent;
+  const surface = pull("--surface");
+  if (surface) overrides["--wiii-bg"] = surface;
+  const surfaceWhite = pull("--surface-white");
+  if (surfaceWhite) overrides["--wiii-panel"] = surfaceWhite;
+  const border = pull("--border");
+  if (border) overrides["--wiii-border"] = border;
+  const text = pull("--text");
+  if (text) overrides["--wiii-text"] = text;
+  const textSecondary = pull("--text-secondary");
+  if (textSecondary) overrides["--wiii-text-secondary"] = textSecondary;
+  const muted = pull("--text-tertiary");
+  if (muted) overrides["--wiii-muted"] = muted;
+  return overrides;
+}
+
+function renderHostThemeOverrideBlock(
+  overrides: Record<string, string> | undefined,
+): string {
+  if (!overrides) return "";
+  const safeEntries = Object.entries(overrides).filter(([key, value]) => {
+    // CSS variable names: ``--<ident>`` only — no whitespace, no closing braces.
+    if (!/^--[a-zA-Z0-9_-]+$/.test(key)) return false;
+    if (value.length > 200) return false;
+    if (/[<>{}\\]/.test(value)) return false;
+    return Boolean(value);
+  });
+  if (safeEntries.length === 0) return "";
+  const declarations = safeEntries
+    .map(([key, value]) => `      ${key}: ${value};`)
+    .join("\n");
+  return `
+  <style data-wiii-host-theme="overrides">
+    :root {
+${declarations}
+    }
+  </style>`;
+}
+
+function frameLabel(
+  frameKind: NonNullable<InlineVisualFrameProps["frameKind"]>,
+) {
   if (frameKind === "app") return "Embedded App";
   if (frameKind === "inline_html") return "Inline Visual";
   return "Interactive Widget";
@@ -93,9 +158,11 @@ function frameLabel(frameKind: NonNullable<InlineVisualFrameProps["frameKind"]>)
 function mergeBodyClassAttribute(attrs: string, extraClass: string) {
   if (!extraClass) return attrs;
   if (!/\bclass=/i.test(attrs)) return `${attrs} class="${extraClass}"`;
-  return attrs.replace(/\bclass=(["'])(.*?)\1/i, (_match, quote: string, value: string) => (
-    `class=${quote}${value} ${extraClass}${quote}`
-  ));
+  return attrs.replace(
+    /\bclass=(["'])(.*?)\1/i,
+    (_match, quote: string, value: string) =>
+      `class=${quote}${value} ${extraClass}${quote}`,
+  );
 }
 
 /**
@@ -166,7 +233,10 @@ function injectIntoHead(content: string, payload: string) {
     return content.replace(/<head[^>]*>/i, (match) => `${match}\n${payload}`);
   }
   if (/<html[^>]*>/i.test(content)) {
-    return content.replace(/<html[^>]*>/i, (match) => `${match}\n<head>\n${payload}\n</head>`);
+    return content.replace(
+      /<html[^>]*>/i,
+      (match) => `${match}\n<head>\n${payload}\n</head>`,
+    );
   }
   return `<!DOCTYPE html>\n<html>\n<head>\n${payload}\n</head>\n${content}\n</html>`;
 }
@@ -181,7 +251,21 @@ export function buildVisualFrameDocument(
     frameKind = "inline_html",
     showFrameIntro = false,
     hostShellMode = frameKind === "legacy" ? "auto" : "force",
-  }: Required<Pick<InlineVisualFrameProps, "title" | "summary" | "sessionId" | "shellVariant" | "frameKind" | "showFrameIntro" | "hostShellMode">>,
+    hostThemeOverrides = undefined,
+  }: Required<
+    Pick<
+      InlineVisualFrameProps,
+      | "title"
+      | "summary"
+      | "sessionId"
+      | "shellVariant"
+      | "frameKind"
+      | "showFrameIntro"
+      | "hostShellMode"
+    >
+  > & {
+    hostThemeOverrides?: Record<string, string>;
+  },
 ): string {
   const hasIntro = showFrameIntro && Boolean(title || summary);
   const bridgeScript = `
@@ -256,18 +340,39 @@ export function buildVisualFrameDocument(
   </script>`;
 
   // Sprint V5: All shells transparent — no more white card container
-  const isEditorialLegacy = frameKind === "legacy" && shellVariant === "editorial";
-  const shellBorder = isEditorialLegacy ? "none" : (frameKind === "legacy" ? "1px solid var(--wiii-border)" : "1px solid transparent");
-  const shellShadow = isEditorialLegacy ? "none" : (frameKind === "legacy" ? "var(--wiii-shadow)" : "none");
-  const shellBackground = isEditorialLegacy ? "transparent" : (frameKind === "legacy" ? "var(--wiii-panel)" : "transparent");
-  const bodyPadding = isEditorialLegacy ? "0" : (frameKind === "legacy"
-    ? "14px"
-    : shellVariant === "immersive"
-      ? "6px 0 0"
-      : "4px 0 0");
-  const contentPadding = isEditorialLegacy ? "0" : (frameKind === "legacy"
-    ? (shellVariant === "immersive" ? "16px" : "14px")
-    : (shellVariant === "immersive" ? "2px 0 0" : "0"));
+  const isEditorialLegacy =
+    frameKind === "legacy" && shellVariant === "editorial";
+  const shellBorder = isEditorialLegacy
+    ? "none"
+    : frameKind === "legacy"
+      ? "1px solid var(--wiii-border)"
+      : "1px solid transparent";
+  const shellShadow = isEditorialLegacy
+    ? "none"
+    : frameKind === "legacy"
+      ? "var(--wiii-shadow)"
+      : "none";
+  const shellBackground = isEditorialLegacy
+    ? "transparent"
+    : frameKind === "legacy"
+      ? "var(--wiii-panel)"
+      : "transparent";
+  const bodyPadding = isEditorialLegacy
+    ? "0"
+    : frameKind === "legacy"
+      ? "14px"
+      : shellVariant === "immersive"
+        ? "6px 0 0"
+        : "4px 0 0";
+  const contentPadding = isEditorialLegacy
+    ? "0"
+    : frameKind === "legacy"
+      ? shellVariant === "immersive"
+        ? "16px"
+        : "14px"
+      : shellVariant === "immersive"
+        ? "2px 0 0"
+        : "0";
 
   const shellStyle = `
   <style>
@@ -284,6 +389,13 @@ export function buildVisualFrameDocument(
       --wiii-radius: 24px;
       --wiii-body: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       --wiii-display: "Newsreader", Georgia, serif;
+      /* Sprint 35e: Scaffold theme inheritance contract.
+       * The graceful HTML scaffold (code_studio_template_scaffold.py)
+       * consumes these so its palette tracks the host theme automatically
+       * when the iframe inherits Wiii's --wiii-* values, and per-deployment
+       * overrides land via the host theme override block below. */
+      --wiii-text-secondary: var(--wiii-muted);
+      --wiii-font-sans: var(--wiii-body);
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: transparent; color: var(--wiii-text); font-family: var(--wiii-body); }
@@ -333,11 +445,11 @@ export function buildVisualFrameDocument(
       background: transparent;
     }
     .wiii-frame-shell {
-      border-radius: ${isEditorialLegacy ? '0' : 'var(--wiii-radius)'};
+      border-radius: ${isEditorialLegacy ? "0" : "var(--wiii-radius)"};
       border: ${shellBorder};
       background: ${shellBackground};
       box-shadow: ${shellShadow};
-      overflow: ${isEditorialLegacy ? 'visible' : 'clip'};
+      overflow: ${isEditorialLegacy ? "visible" : "clip"};
     }
     .wiii-frame-intro {
       padding: 14px 16px 8px;
@@ -429,14 +541,32 @@ export function buildVisualFrameDocument(
     ? `<div class="wiii-frame-intro"><p class="wiii-frame-label">${escapeHtml(frameLabel(frameKind))}</p>${title ? `<h1 class="wiii-frame-title">${escapeHtml(title)}</h1>` : ""}${summary ? `<p class="wiii-frame-summary">${escapeHtml(summary)}</p>` : ""}</div>`
     : "";
 
-  if (/<html/i.test(content)) {
-    const headInjected = injectIntoHead(content, `${FRAME_CSP}\n${STORAGE_SHIM}\n${shellStyle}`);
-    const shouldWrapBody = hostShellMode === "force" && !/wiii-frame-shell|data-wiii-host-shell/i.test(content);
+  // Sprint 35e Item 2 — Host theme overrides land AFTER the iframe :root
+  // defaults so they win the cascade without breaking standalone preview.
+  const themeOverrideBlock = renderHostThemeOverrideBlock(hostThemeOverrides);
 
-    if (shouldWrapBody && /<body[^>]*>/i.test(headInjected) && /<\/body>/i.test(headInjected)) {
-      return headInjected.replace(/<body([^>]*)>([\s\S]*?)<\/body>/i, (_match, attrs: string, bodyContent: string) => {
-        const mergedAttrs = mergeBodyClassAttribute(attrs, "wiii-host-shell-active");
-        return `<body${mergedAttrs} data-wiii-host-shell="true" data-wiii-has-intro="${hasIntro ? "true" : "false"}">
+  if (/<html/i.test(content)) {
+    const headInjected = injectIntoHead(
+      content,
+      `${FRAME_CSP}\n${STORAGE_SHIM}\n${shellStyle}${themeOverrideBlock}`,
+    );
+    const shouldWrapBody =
+      hostShellMode === "force" &&
+      !/wiii-frame-shell|data-wiii-host-shell/i.test(content);
+
+    if (
+      shouldWrapBody &&
+      /<body[^>]*>/i.test(headInjected) &&
+      /<\/body>/i.test(headInjected)
+    ) {
+      return headInjected.replace(
+        /<body([^>]*)>([\s\S]*?)<\/body>/i,
+        (_match, attrs: string, bodyContent: string) => {
+          const mergedAttrs = mergeBodyClassAttribute(
+            attrs,
+            "wiii-host-shell-active",
+          );
+          return `<body${mergedAttrs} data-wiii-host-shell="true" data-wiii-has-intro="${hasIntro ? "true" : "false"}">
   <div class="wiii-frame-shell" data-wiii-frame-kind="${escapeHtml(frameKind)}" data-wiii-shell-variant="${escapeHtml(shellVariant)}">
     ${intro}
     <div class="wiii-frame-content">${bodyContent}</div>
@@ -444,16 +574,26 @@ export function buildVisualFrameDocument(
   ${bridgeScript}
   ${TWEAKS_INJECT}
 </body>`;
-      });
+        },
+      );
     }
 
-    const bodyDecorated = headInjected.replace(/<body([^>]*>)/i, (_match, attrs: string) => {
-      const mergedAttrs = mergeBodyClassAttribute(attrs, hostShellMode === "force" ? "wiii-host-shell-active" : "");
-      return `<body${mergedAttrs}${hostShellMode === "force" ? ` data-wiii-host-shell="true" data-wiii-has-intro="${hasIntro ? "true" : "false"}"` : ""}>`;
-    });
+    const bodyDecorated = headInjected.replace(
+      /<body([^>]*>)/i,
+      (_match, attrs: string) => {
+        const mergedAttrs = mergeBodyClassAttribute(
+          attrs,
+          hostShellMode === "force" ? "wiii-host-shell-active" : "",
+        );
+        return `<body${mergedAttrs}${hostShellMode === "force" ? ` data-wiii-host-shell="true" data-wiii-has-intro="${hasIntro ? "true" : "false"}"` : ""}>`;
+      },
+    );
 
     return /<\/body>/i.test(bodyDecorated)
-      ? bodyDecorated.replace(/<\/body>/i, `${bridgeScript}\n${TWEAKS_INJECT}\n</body>`)
+      ? bodyDecorated.replace(
+          /<\/body>/i,
+          `${bridgeScript}\n${TWEAKS_INJECT}\n</body>`,
+        )
       : `${bodyDecorated}\n${bridgeScript}\n${TWEAKS_INJECT}`;
   }
 
@@ -463,7 +603,7 @@ export function buildVisualFrameDocument(
   <meta charset="utf-8">
   ${FRAME_CSP}
   ${STORAGE_SHIM}
-  ${shellStyle}
+  ${shellStyle}${themeOverrideBlock}
 </head>
 <body class="${hostShellMode === "force" ? "wiii-host-shell-active" : ""}" data-wiii-host-shell="${hostShellMode === "force" ? "true" : "false"}" data-wiii-has-intro="${hasIntro ? "true" : "false"}">
   <div class="wiii-frame-shell" data-wiii-frame-kind="${escapeHtml(frameKind)}" data-wiii-shell-variant="${escapeHtml(shellVariant)}">
@@ -498,17 +638,32 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
   const [tweaksAvailable, setTweaksAvailable] = useState(false);
   const [tweaksActive, setTweaksActive] = useState(false);
 
+  // Sprint 35e Item 2 — read host theme once per mount; the host CSS
+  // is stable for the lifetime of an iframe, so we don't need to track
+  // it reactively. Re-renders triggered by html/title/etc. naturally
+  // pick up any newer values via re-read.
   const wrappedHtml = useMemo(
-    () => buildVisualFrameDocument(html, {
-      title,
-      summary,
+    () =>
+      buildVisualFrameDocument(html, {
+        title,
+        summary,
+        sessionId,
+        shellVariant,
+        frameKind,
+        showFrameIntro,
+        hostShellMode,
+        hostThemeOverrides: readHostThemeOverrides(),
+      }),
+    [
+      frameKind,
+      hostShellMode,
+      html,
       sessionId,
       shellVariant,
-      frameKind,
       showFrameIntro,
-      hostShellMode,
-    }),
-    [frameKind, hostShellMode, html, sessionId, shellVariant, showFrameIntro, summary, title],
+      summary,
+      title,
+    ],
   );
 
   useEffect(() => {
@@ -520,7 +675,9 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
       setBlobUrl(url);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Khong the tao visual frame");
+      setError(
+        err instanceof Error ? err.message : "Không thể tạo visual frame",
+      );
     }
     return () => {
       if (blobUrlRef.current) {
@@ -532,7 +689,8 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
-      if (iframeRef.current && event.source !== iframeRef.current.contentWindow) return;
+      if (iframeRef.current && event.source !== iframeRef.current.contentWindow)
+        return;
       const data = event.data;
       if (!data || typeof data !== "object") return;
 
@@ -546,43 +704,61 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
       if (data.type === "__edit_mode_set_keys" && data.edits) {
         // Fire a bridge event so the host can persist tweaks if desired
         onBridgeEvent?.({ bridgeType: "tweaks_persist", edits: data.edits });
-        window.dispatchEvent(new CustomEvent("wiii:visual-frame", {
-          detail: { bridgeType: "tweaks_persist", edits: data.edits },
-        }));
+        window.dispatchEvent(
+          new CustomEvent("wiii:visual-frame", {
+            detail: { bridgeType: "tweaks_persist", edits: data.edits },
+          }),
+        );
         return;
       }
 
       if (data.type === "wiii-frame-resize") {
-        const nextHeight = (data.payload as { height?: number } | undefined)?.height;
+        const nextHeight = (data.payload as { height?: number } | undefined)
+          ?.height;
         if (typeof nextHeight === "number" && nextHeight > 0) {
-          setHeight(Math.min(Math.max(nextHeight + 10, frameKind === "app" ? 260 : 120), frameKind === "app" ? 980 : 880));
+          setHeight(
+            Math.min(
+              Math.max(nextHeight + 10, frameKind === "app" ? 260 : 120),
+              frameKind === "app" ? 980 : 880,
+            ),
+          );
         }
         return;
       }
-      if (data.type === "wiii-frame-ready" && iframeRef.current?.contentWindow) {
-        iframeRef.current.contentWindow.postMessage({
-          type: "wiii-visual-sync",
-          payload: {
-            sessionId,
-            frameKind,
-            shellVariant,
-            runtimeManifest: runtimeManifest || null,
+      if (
+        data.type === "wiii-frame-ready" &&
+        iframeRef.current?.contentWindow
+      ) {
+        iframeRef.current.contentWindow.postMessage(
+          {
+            type: "wiii-visual-sync",
+            payload: {
+              sessionId,
+              frameKind,
+              shellVariant,
+              runtimeManifest: runtimeManifest || null,
+            },
           },
-        }, "*");
+          "*",
+        );
         return;
       }
       if (
-        data.type === "wiii-frame-telemetry"
-        || data.type === "wiii-frame-interaction"
-        || data.type === "wiii-frame-control"
-        || data.type === "wiii-frame-focus"
-        || data.type === "wiii-frame-result"
+        data.type === "wiii-frame-telemetry" ||
+        data.type === "wiii-frame-interaction" ||
+        data.type === "wiii-frame-control" ||
+        data.type === "wiii-frame-focus" ||
+        data.type === "wiii-frame-result"
       ) {
         const bridgeType =
-          data.type === "wiii-frame-telemetry" ? "telemetry"
-            : data.type === "wiii-frame-control" ? "control"
-              : data.type === "wiii-frame-focus" ? "focus"
-                : data.type === "wiii-frame-result" ? "result"
+          data.type === "wiii-frame-telemetry"
+            ? "telemetry"
+            : data.type === "wiii-frame-control"
+              ? "control"
+              : data.type === "wiii-frame-focus"
+                ? "focus"
+                : data.type === "wiii-frame-result"
+                  ? "result"
                   : "interaction";
         const detail = { bridgeType, ...(data.payload || {}) };
         onBridgeEvent?.(detail);
@@ -613,7 +789,9 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
 
   if (error) {
     return (
-      <div className={`rounded-[20px] border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700 ${className}`}>
+      <div
+        className={`rounded-[20px] border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700 ${className}`}
+      >
         Loi frame: {error}
       </div>
     );
@@ -623,15 +801,14 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
 
   // Sprint V5: editorial = transparent + no card chrome (Claude-like seamless figure)
   // Phase2: overflow-visible for editorial (prevent text clip), overflow-clip for cards
-  const wrapperClassName = frameKind === "legacy"
-    ? (
-        shellVariant === "editorial"
-          ? "overflow-visible bg-transparent"
-          : "overflow-clip rounded-2xl border border-[var(--border)] bg-[rgba(255,255,255,0.92)] shadow-[var(--shadow-md)]"
-      )
-    : shellVariant === "editorial"
-      ? "overflow-visible bg-transparent"
-      : "overflow-clip rounded-2xl bg-transparent";
+  const wrapperClassName =
+    frameKind === "legacy"
+      ? shellVariant === "editorial"
+        ? "overflow-visible bg-transparent"
+        : "overflow-clip rounded-2xl border border-[var(--border)] bg-[rgba(255,255,255,0.92)] shadow-[var(--shadow-md)]"
+      : shellVariant === "editorial"
+        ? "overflow-visible bg-transparent"
+        : "overflow-clip rounded-2xl bg-transparent";
 
   return (
     <div

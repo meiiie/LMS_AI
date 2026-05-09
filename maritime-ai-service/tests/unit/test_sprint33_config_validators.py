@@ -59,6 +59,24 @@ class TestLLMProvider:
             _make_settings(llm_provider="")
 
 
+class TestVisionProvider:
+    @pytest.mark.parametrize(
+        "val",
+        ["google", "openai", "openrouter", "nvidia", "ollama", "zhipu", "auto"],
+    )
+    def test_valid_vision_providers(self, val):
+        s = _make_settings(vision_provider=val)
+        assert s.vision_provider == val
+
+    @pytest.mark.parametrize(
+        "field",
+        ["vision_describe_provider", "vision_ocr_provider", "vision_grounded_provider"],
+    )
+    def test_nvidia_valid_for_capability_provider(self, field):
+        s = _make_settings(**{field: "nvidia"})
+        assert getattr(s, field) == "nvidia"
+
+
 # =============================================================================
 # rag_quality_mode
 # =============================================================================

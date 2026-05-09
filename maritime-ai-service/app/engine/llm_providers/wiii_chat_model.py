@@ -462,6 +462,18 @@ class WiiiChatModel(BaseModel):
         """Async invoke. Returns a native ``Message`` with ``.content`` + ``.tool_calls``."""
         client = self._get_client()
         api_kwargs = self._build_api_kwargs(messages, kwargs, stream=False)
+
+        # Phase 35 — proactive RPM throttle (client-side). Off by default; opt-in
+        # via env (e.g. NVIDIA_RPM_LIMIT=30). Smooths burst load to avoid 429.
+        try:
+            from app.engine.llm_providers.rpm_limiter import get_provider_rpm_limiter
+            provider_key = getattr(self, "_wiii_provider_name", None) or ""
+            limiter = get_provider_rpm_limiter(str(provider_key).lower())
+            if limiter is not None:
+                await limiter.acquire()
+        except Exception:  # noqa: BLE001
+            pass  # rate limiter is best-effort; never block the call
+
         response = await client.chat.completions.create(**api_kwargs)
 
         if not getattr(response, "choices", None):

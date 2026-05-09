@@ -39,6 +39,11 @@ const AvatarPreview = lazy(async () => {
   return { default: mod.AvatarPreview };
 });
 
+const PointyPreview = lazy(async () => {
+  const mod = await import("@/components/common/PointyPreview");
+  return { default: mod.PointyPreview };
+});
+
 function BootSplash({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-surface">
@@ -56,6 +61,17 @@ export default function App() {
     return (
       <Suspense fallback={<BootSplash label="Wiii đang mở bản xem trước..." />}>
         <AvatarPreview />
+      </Suspense>
+    );
+  }
+
+  // Wiii Pointy demo: ?preview=pointy showcases the spring-physics
+  // multi-cursor system. Standalone — no auth, no chat boot, just
+  // visual verification of the cursor architecture.
+  if (window.location.search.includes("preview=pointy")) {
+    return (
+      <Suspense fallback={<BootSplash label="Wiii Pointy đang khởi động..." />}>
+        <PointyPreview />
       </Suspense>
     );
   }
@@ -236,6 +252,23 @@ export default function App() {
     }, 60_000); // Check every minute
     return () => clearInterval(interval);
   }, [authMode, isAuthenticated, isTokenExpiringSoon, refreshAccessToken, settings.server_url]);
+
+  // Wiii Pointy v2.4 — mount awareness layer khi user đã authenticated.
+  // PageScanner quét DOM cho pointable elements + CursorAwareness track
+  // cursor state, publish vào HostContextStore → backend tự nhận qua
+  // host_context.page.metadata trong chat request.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let unmount: (() => void) | null = null;
+    void import("@/pointy-host/integration").then(
+      ({ mountPointyAwareness }) => {
+        unmount = mountPointyAwareness();
+      },
+    );
+    return () => {
+      if (unmount) unmount();
+    };
+  }, [isAuthenticated]);
 
   // Keep settings.user_id in sync with auth.user.id in OAuth mode.
   // Fixes race condition where loadSettings() loads stale anonymous UUID from

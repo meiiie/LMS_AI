@@ -48,15 +48,18 @@ export default function ExcelArtifact({ artifact, mode }: Props) {
       if (typeof va === "number" && typeof vb === "number") {
         return sortDir === "asc" ? va - vb : vb - va;
       }
-      const cmp = String(va ?? "").localeCompare(String(vb ?? ""), undefined, { numeric: true });
+      const cmp = String(va ?? "").localeCompare(String(vb ?? ""), undefined, {
+        numeric: true,
+      });
       return sortDir === "asc" ? cmp : -cmp;
     });
   }, [rows, sortColumn, sortDir]);
 
   const totalPages = Math.ceil(sortedRows.length / PAGE_SIZE);
-  const displayRows = mode === "card"
-    ? sortedRows.slice(0, MAX_CARD_ROWS)
-    : sortedRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const displayRows =
+    mode === "card"
+      ? sortedRows.slice(0, MAX_CARD_ROWS)
+      : sortedRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const handleSort = useCallback((col: string) => {
     setSortColumn((prev) => {
@@ -73,7 +76,9 @@ export default function ExcelArtifact({ artifact, mode }: Props) {
     if (rows.length === 0 || columns.length === 0) return;
     const header = columns.join(",");
     const csvRows = rows.map((row) =>
-      columns.map((column) => `"${String(row[column] ?? "").replace(/"/g, '""')}"`).join(",")
+      columns
+        .map((column) => `"${String(row[column] ?? "").replace(/"/g, '""')}"`)
+        .join(","),
     );
     const csv = [header, ...csvRows].join("\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
@@ -93,9 +98,11 @@ export default function ExcelArtifact({ artifact, mode }: Props) {
             <FileSpreadsheet size={18} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium text-text">{artifact.title}</div>
+            <div className="text-sm font-medium text-text">
+              {artifact.title}
+            </div>
             <div className="text-xs text-text-tertiary mt-1">
-              Bang tinh da tao xong. Ban co the tai file .xlsx de xem day du.
+              Bảng tính đã tạo xong. Bạn có thể tải file .xlsx để xem đầy đủ.
             </div>
           </div>
           {fileUrl && (
@@ -106,7 +113,7 @@ export default function ExcelArtifact({ artifact, mode }: Props) {
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-surface-tertiary hover:bg-border text-text-secondary hover:text-text transition-colors text-xs shrink-0"
             >
               <Download size={14} />
-              Tai XLSX
+              Tải XLSX
             </a>
           )}
         </div>
@@ -116,9 +123,11 @@ export default function ExcelArtifact({ artifact, mode }: Props) {
 
   return (
     <div className="space-y-2">
-      <div className={`flex items-center justify-between ${mode === "panel" ? "px-4 pt-2" : "px-4 pt-4"}`}>
+      <div
+        className={`flex items-center justify-between ${mode === "panel" ? "px-4 pt-2" : "px-4 pt-4"}`}
+      >
         <span className="text-xs text-text-tertiary">
-          {rows.length} hang x {columns.length} cot
+          {rows.length} hàng x {columns.length} cột
         </span>
         <div className="flex items-center gap-2">
           {fileUrl && (
@@ -129,7 +138,7 @@ export default function ExcelArtifact({ artifact, mode }: Props) {
               className="flex items-center gap-1 text-xs text-text-secondary hover:text-text px-2.5 py-1.5 rounded-lg bg-surface-tertiary hover:bg-border transition-colors"
             >
               <Download size={12} />
-              Tai XLSX
+              Tải XLSX
             </a>
           )}
           {mode === "panel" && (
@@ -138,13 +147,15 @@ export default function ExcelArtifact({ artifact, mode }: Props) {
               className="flex items-center gap-1 text-xs text-text-secondary hover:text-text px-2.5 py-1.5 rounded-lg bg-surface-tertiary hover:bg-border transition-colors"
             >
               <Download size={12} />
-              Tai CSV
+              Tải CSV
             </button>
           )}
         </div>
       </div>
 
-      <div className={`overflow-auto ${mode === "panel" ? "px-4 pb-4" : "px-4 pb-3"}`}>
+      <div
+        className={`overflow-auto ${mode === "panel" ? "px-4 pb-4" : "px-4 pb-3"}`}
+      >
         <table className="w-full text-xs">
           <thead>
             <tr>
@@ -164,9 +175,15 @@ export default function ExcelArtifact({ artifact, mode }: Props) {
           </thead>
           <tbody>
             {displayRows.map((row, idx) => (
-              <tr key={idx} className="border-t border-border/50 hover:bg-surface-secondary transition-colors">
+              <tr
+                key={idx}
+                className="border-t border-border/50 hover:bg-surface-secondary transition-colors"
+              >
                 {columns.map((col) => (
-                  <td key={col} className="px-3 py-1.5 text-text whitespace-nowrap">
+                  <td
+                    key={col}
+                    className="px-3 py-1.5 text-text whitespace-nowrap"
+                  >
                     {String(row[col] ?? "")}
                   </td>
                 ))}
@@ -183,7 +200,7 @@ export default function ExcelArtifact({ artifact, mode }: Props) {
             disabled={page === 0}
             className="px-2 py-1 text-xs rounded bg-surface-tertiary disabled:opacity-50 hover:bg-border transition-colors"
           >
-            Truoc
+            Trước
           </button>
           <span className="text-xs text-text-tertiary">
             {page + 1} / {totalPages}
@@ -200,7 +217,7 @@ export default function ExcelArtifact({ artifact, mode }: Props) {
 
       {mode === "card" && rows.length > MAX_CARD_ROWS && (
         <div className="text-center text-[10px] text-text-tertiary pb-3">
-          +{rows.length - MAX_CARD_ROWS} hang khac
+          +{rows.length - MAX_CARD_ROWS} hàng khác
         </div>
       )}
     </div>

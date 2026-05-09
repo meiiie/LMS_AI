@@ -38,7 +38,14 @@ def _register_builtin_adapters() -> None:
     """Lazy-load and register the built-in adapters."""
     from app.engine.context.adapters.generic import GenericHostAdapter
     from app.engine.context.adapters.lms import LMSHostAdapter
+    from app.engine.context.adapters.wiii_desktop import (
+        WiiiDesktopHostAdapter,
+        WiiiWebHostAdapter,
+    )
 
-    for cls in [LMSHostAdapter, GenericHostAdapter]:
+    # Sprint 222 Phase F2 (2026-05-06): WiiiDesktop / WiiiWeb adapters
+    # added so AI knows when user is on standalone Wiii (not embedded
+    # in LMS) — prevents "panel LMS / làm mới trang LMS" hallucination.
+    for cls in [LMSHostAdapter, WiiiDesktopHostAdapter, WiiiWebHostAdapter, GenericHostAdapter]:
         instance = cls()
         _adapters[instance.host_type] = instance

@@ -5,7 +5,12 @@
  * - legacy role is shown only as compatibility/debug context
  */
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Search, ChevronLeft, ChevronRight, MoreHorizontal } from "lucide-react";
+import {
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  MoreHorizontal,
+} from "lucide-react";
 
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { useAuthStore } from "@/stores/auth-store";
@@ -59,7 +64,10 @@ export function UsersTab() {
   const [showRoleSubmenu, setShowRoleSubmenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const [confirmTarget, setConfirmTarget] = useState<{ userId: string; name: string } | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<{
+    userId: string;
+    name: string;
+  } | null>(null);
 
   useEffect(() => {
     fetchUsers({ page: 0 });
@@ -143,7 +151,7 @@ export function UsersTab() {
             type="text"
             value={localSearch}
             onChange={(event) => handleSearch(event.target.value)}
-            placeholder="Tim theo ten, email..."
+            placeholder="Tìm theo tên, email..."
             className="w-full pl-9 pr-3 py-2 rounded-lg border border-border bg-surface-secondary text-text text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
           />
         </div>
@@ -154,18 +162,20 @@ export function UsersTab() {
           className="px-3 py-2 rounded-lg border border-border bg-surface-secondary text-text text-sm focus:outline-none"
           defaultValue=""
         >
-          <option value="">Tat ca loai tai khoan</option>
+          <option value="">Tất cả loại tài khoản</option>
           <option value="user">Wiii User</option>
           <option value="platform_admin">Platform Admin</option>
         </select>
         <select
-          onChange={(event) => fetchUsers({ status: event.target.value, page: 0 })}
+          onChange={(event) =>
+            fetchUsers({ status: event.target.value, page: 0 })
+          }
           className="px-3 py-2 rounded-lg border border-border bg-surface-secondary text-text text-sm focus:outline-none"
           defaultValue=""
         >
-          <option value="">Tat ca trang thai</option>
-          <option value="active">Hoat dong</option>
-          <option value="inactive">Vo hieu</option>
+          <option value="">Tất cả trạng thái</option>
+          <option value="active">Hoạt động</option>
+          <option value="inactive">Vô hiệu</option>
         </select>
       </div>
 
@@ -177,31 +187,40 @@ export function UsersTab() {
                 className="px-4 py-2.5 font-medium cursor-pointer hover:text-text"
                 onClick={() => handleSort("name")}
               >
-                Ten {usersSort.startsWith("name") && (usersSort.endsWith("asc") ? "\u2191" : "\u2193")}
+                Tên{" "}
+                {usersSort.startsWith("name") &&
+                  (usersSort.endsWith("asc") ? "\u2191" : "\u2193")}
               </th>
               <th
                 className="px-4 py-2.5 font-medium cursor-pointer hover:text-text"
                 onClick={() => handleSort("email")}
               >
-                Email {usersSort.startsWith("email") && (usersSort.endsWith("asc") ? "\u2191" : "\u2193")}
+                Email{" "}
+                {usersSort.startsWith("email") &&
+                  (usersSort.endsWith("asc") ? "\u2191" : "\u2193")}
               </th>
-              <th className="px-4 py-2.5 font-medium">Loai tai khoan</th>
-              <th className="px-4 py-2.5 font-medium">Trang thai</th>
-              <th className="px-4 py-2.5 font-medium">To chuc</th>
+              <th className="px-4 py-2.5 font-medium">Loại tài khoản</th>
+              <th className="px-4 py-2.5 font-medium">Trạng thái</th>
+              <th className="px-4 py-2.5 font-medium">Tổ chức</th>
               <th
                 className="px-4 py-2.5 font-medium cursor-pointer hover:text-text"
                 onClick={() => handleSort("created_at")}
               >
-                Ngay tao {usersSort.startsWith("created_at") && (usersSort.endsWith("asc") ? "\u2191" : "\u2193")}
+                Ngày tạo{" "}
+                {usersSort.startsWith("created_at") &&
+                  (usersSort.endsWith("asc") ? "\u2191" : "\u2193")}
               </th>
-              <th className="px-4 py-2.5 font-medium w-[70px]">Hanh dong</th>
+              <th className="px-4 py-2.5 font-medium w-[70px]">Hành động</th>
             </tr>
           </thead>
           <tbody>
             {users.length === 0 && !loading && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-text-tertiary text-xs">
-                  Khong tim thay nguoi dung
+                <td
+                  colSpan={7}
+                  className="px-4 py-8 text-center text-text-tertiary text-xs"
+                >
+                  Không tìm thấy người dùng
                 </td>
               </tr>
             )}
@@ -216,8 +235,12 @@ export function UsersTab() {
                   key={user.id}
                   className="border-t border-border hover:bg-surface-secondary transition-colors"
                 >
-                  <td className="px-4 py-2.5 text-text font-medium">{user.name || "\u2014"}</td>
-                  <td className="px-4 py-2.5 text-text-secondary">{user.email || "\u2014"}</td>
+                  <td className="px-4 py-2.5 text-text font-medium">
+                    {user.name || "\u2014"}
+                  </td>
+                  <td className="px-4 py-2.5 text-text-secondary">
+                    {user.email || "\u2014"}
+                  </td>
                   <td className="px-4 py-2.5">
                     <div className="flex flex-col gap-1">
                       <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[var(--accent-light)] text-[var(--accent)] w-fit">
@@ -236,24 +259,29 @@ export function UsersTab() {
                           : "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
                       }`}
                     >
-                      {user.is_active ? "Hoat dong" : "Vo hieu"}
+                      {user.is_active ? "Hoạt động" : "Vô hiệu"}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 text-text-secondary">{user.organization_count}</td>
+                  <td className="px-4 py-2.5 text-text-secondary">
+                    {user.organization_count}
+                  </td>
                   <td className="px-4 py-2.5 text-text-tertiary text-xs">
                     {user.created_at
                       ? new Date(user.created_at).toLocaleDateString("vi-VN")
                       : "\u2014"}
                   </td>
                   <td className="px-4 py-2.5">
-                    <div className="relative" ref={isMenuOpen ? menuRef : undefined}>
+                    <div
+                      className="relative"
+                      ref={isMenuOpen ? menuRef : undefined}
+                    >
                       <button
                         onClick={() => {
                           setOpenMenuUserId(isMenuOpen ? null : user.id);
                           setShowRoleSubmenu(false);
                         }}
                         className="p-1.5 rounded-lg hover:bg-surface-tertiary transition-colors text-text-secondary"
-                        aria-label={`Hanh dong cho ${user.name || user.email || user.id}`}
+                        aria-label={`Hành động cho ${user.name || user.email || user.id}`}
                       >
                         <MoreHorizontal size={16} />
                       </button>
@@ -265,20 +293,28 @@ export function UsersTab() {
                               {!isSelf && (
                                 <button
                                   onClick={() =>
-                                    handleDeactivate(user.id, user.name || user.email || user.id)
+                                    handleDeactivate(
+                                      user.id,
+                                      user.name || user.email || user.id,
+                                    )
                                   }
                                   className="w-full text-left px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-surface-secondary transition-colors"
                                 >
-                                  Vo hieu hoa
+                                  Vô hiệu hóa
                                 </button>
                               )}
                               <div className="relative">
                                 <button
-                                  onClick={() => setShowRoleSubmenu(!showRoleSubmenu)}
+                                  onClick={() =>
+                                    setShowRoleSubmenu(!showRoleSubmenu)
+                                  }
                                   className="w-full text-left px-3 py-2 text-sm text-text hover:bg-surface-secondary transition-colors flex items-center justify-between"
                                 >
-                                  Doi loai tai khoan
-                                  <ChevronRight size={14} className="text-text-tertiary" />
+                                  Đổi loại tài khoản
+                                  <ChevronRight
+                                    size={14}
+                                    className="text-text-tertiary"
+                                  />
                                 </button>
                                 {showRoleSubmenu && (
                                   <div className="absolute left-full top-0 ml-1 w-44 rounded-lg border border-border bg-surface shadow-lg z-[61] py-1">
@@ -307,7 +343,7 @@ export function UsersTab() {
                               onClick={() => handleReactivate(user.id)}
                               className="w-full text-left px-3 py-2 text-sm text-green-600 dark:text-green-400 hover:bg-surface-secondary transition-colors"
                             >
-                              Kich hoat lai
+                              Kích hoạt lại
                             </button>
                           )}
                         </div>
@@ -324,7 +360,7 @@ export function UsersTab() {
       {usersTotal > 0 && (
         <div className="flex items-center justify-between text-xs text-text-secondary">
           <span>
-            {startIdx}-{endIdx} tren {usersTotal}
+            {startIdx}-{endIdx} trên {usersTotal}
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -333,7 +369,7 @@ export function UsersTab() {
               className="flex items-center gap-1 px-2.5 py-1.5 rounded border border-border hover:bg-surface-tertiary disabled:opacity-30 transition-colors"
             >
               <ChevronLeft size={12} />
-              Trang truoc
+              Trang trước
             </button>
             <span>
               {usersPage + 1} / {totalPages}
@@ -352,9 +388,9 @@ export function UsersTab() {
 
       <ConfirmDialog
         open={!!confirmTarget}
-        title="Vo hieu hoa nguoi dung"
-        message={`Ban co chac chan muon vo hieu hoa "${confirmTarget?.name}"? Nguoi dung se khong the dang nhap cho den khi duoc kich hoat lai.`}
-        confirmLabel="Vo hieu hoa"
+        title="Vô hiệu hóa người dùng"
+        message={`Bạn có chắc chắn muốn vô hiệu hóa "${confirmTarget?.name}"? Người dùng sẽ không thể đăng nhập cho đến khi được kích hoạt lại.`}
+        confirmLabel="Vô hiệu hóa"
         variant="danger"
         onConfirm={handleConfirmDeactivate}
         onCancel={() => setConfirmTarget(null)}

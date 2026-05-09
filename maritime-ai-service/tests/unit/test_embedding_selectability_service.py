@@ -21,8 +21,8 @@ def test_embedding_selectability_snapshot_reports_ollama_model_missing():
         "app.engine.embedding_runtime.settings",
         patched_settings,
     ), patch(
-        "app.services.embedding_selectability_service.get_embedding_backend",
-        side_effect=RuntimeError("backend unavailable"),
+        "app.services.embedding_selectability_service.peek_semantic_embedding_backend",
+        return_value=None,
     ), patch(
         "app.services.embedding_selectability_service.probe_ollama_embedding_model",
         return_value=SimpleNamespace(
@@ -65,7 +65,7 @@ def test_embedding_selectability_snapshot_blocks_openrouter_without_explicit_ope
         "app.engine.embedding_runtime.settings",
         patched_settings,
     ), patch(
-        "app.services.embedding_selectability_service.get_embedding_backend",
+        "app.services.embedding_selectability_service.peek_semantic_embedding_backend",
         return_value=active_backend,
     ), patch(
         "app.services.embedding_selectability_service.probe_ollama_embedding_model",
@@ -101,8 +101,8 @@ def test_embedding_selectability_snapshot_reports_dimension_mismatch():
         "app.engine.embedding_runtime.settings",
         patched_settings,
     ), patch(
-        "app.services.embedding_selectability_service.get_embedding_backend",
-        side_effect=RuntimeError("backend unavailable"),
+        "app.services.embedding_selectability_service.peek_semantic_embedding_backend",
+        return_value=None,
     ):
         mod.invalidate_embedding_selectability_cache()
         snapshot = mod.get_embedding_selectability_snapshot(force_refresh=True)
@@ -133,7 +133,7 @@ def test_embedding_selectability_snapshot_reports_space_mismatch_for_cross_famil
         "app.engine.embedding_runtime.settings",
         patched_settings,
     ), patch(
-        "app.services.embedding_selectability_service.get_embedding_backend",
+        "app.services.embedding_selectability_service.peek_semantic_embedding_backend",
         return_value=active_backend,
     ), patch(
         "app.services.embedding_selectability_service.probe_ollama_embedding_model",

@@ -79,10 +79,22 @@ const runtimeFixture: LlmRuntimeConfig = {
   agent_profiles: {
     routing: { default_provider: "google", tier: "light", provider_models: {} },
     safety: { default_provider: "google", tier: "light", provider_models: {} },
-    knowledge: { default_provider: "google", tier: "moderate", provider_models: {} },
+    knowledge: {
+      default_provider: "google",
+      tier: "moderate",
+      provider_models: {},
+    },
     utility: { default_provider: "google", tier: "light", provider_models: {} },
-    evaluation: { default_provider: "google", tier: "moderate", provider_models: {} },
-    creative: { default_provider: "google", tier: "deep", provider_models: { google: "gemini-3.1-pro-preview" } },
+    evaluation: {
+      default_provider: "google",
+      tier: "moderate",
+      provider_models: {},
+    },
+    creative: {
+      default_provider: "google",
+      tier: "deep",
+      provider_models: { google: "gemini-3.1-pro-preview" },
+    },
   },
   timeout_profiles: {
     light_seconds: 12,
@@ -167,14 +179,17 @@ const runtimeFixture: LlmRuntimeConfig = {
       reason_label: "Model vision local chua duoc cai tren Ollama.",
       last_probe_attempt_at: "2026-03-23T08:05:00Z",
       last_probe_success_at: null,
-      last_probe_error: "ocr_extract: Model vision local chua duoc cai tren Ollama.",
+      last_probe_error:
+        "ocr_extract: Model vision local chua duoc cai tren Ollama.",
       last_runtime_observation_at: null,
       last_runtime_success_at: null,
       last_runtime_error: null,
       last_runtime_note: null,
       last_runtime_source: null,
       degraded: true,
-      degraded_reasons: ["ocr_extract: Model vision local chua duoc cai tren Ollama."],
+      degraded_reasons: [
+        "ocr_extract: Model vision local chua duoc cai tren Ollama.",
+      ],
       recovered: false,
       recovered_reasons: [],
       capabilities: [
@@ -364,7 +379,8 @@ const runtimeFixture: LlmRuntimeConfig = {
       mixed_tables: [],
       warnings: [],
       recommended_steps: ["maintenance"],
-      detail: "Khong the doi embedding model in-place khi vector index van co du lieu song.",
+      detail:
+        "Khong the doi embedding model in-place khi vector index van co du lieu song.",
     },
   ],
   runtime_policy_persisted: true,
@@ -462,7 +478,8 @@ const catalogFixture: ModelCatalogResponse = {
       last_runtime_observation_at: "2026-03-23T08:06:00Z",
       last_runtime_success_at: "2026-03-23T08:06:00Z",
       last_runtime_error: null,
-      last_runtime_note: "chat_sync: completed via google/gemini-3.1-flash-lite-preview.",
+      last_runtime_note:
+        "chat_sync: completed via google/gemini-3.1-flash-lite-preview.",
       last_runtime_source: "chat_sync",
       degraded: false,
       degraded_reasons: [],
@@ -501,7 +518,8 @@ const catalogFixture: ModelCatalogResponse = {
       last_live_probe_attempt_at: null,
       last_live_probe_success_at: null,
       last_live_probe_error: null,
-      live_probe_note: "Shared OpenAI-compatible slot is currently targeting openrouter, not openai.",
+      live_probe_note:
+        "Shared OpenAI-compatible slot is currently targeting openrouter, not openai.",
       degraded: false,
       degraded_reasons: [],
       last_runtime_observation_at: null,
@@ -632,7 +650,10 @@ const catalogFixture: ModelCatalogResponse = {
       last_live_probe_error: "connect timeout",
       live_probe_note: "Live probe failed.",
       degraded: true,
-      degraded_reasons: ["Runtime discovery that current provider slot failed.", "Live capability probe failed."],
+      degraded_reasons: [
+        "Runtime discovery that current provider slot failed.",
+        "Live capability probe failed.",
+      ],
       last_runtime_observation_at: null,
       last_runtime_success_at: null,
       last_runtime_error: null,
@@ -669,43 +690,64 @@ describe("LlmRuntimeTab", () => {
     const adminApi = await import("@/api/admin");
     vi.mocked(adminApi.getLlmRuntimeConfig).mockResolvedValue(runtimeFixture);
     vi.mocked(adminApi.getModelCatalog).mockResolvedValue(catalogFixture);
-    vi.mocked(adminApi.refreshLlmRuntimeAudit).mockResolvedValue(catalogFixture);
-    vi.mocked(adminApi.refreshVisionRuntimeAudit).mockResolvedValue(runtimeFixture);
-    vi.mocked(adminApi.updateLlmRuntimeConfig).mockResolvedValue(runtimeFixture);
+    vi.mocked(adminApi.refreshLlmRuntimeAudit).mockResolvedValue(
+      catalogFixture,
+    );
+    vi.mocked(adminApi.refreshVisionRuntimeAudit).mockResolvedValue(
+      runtimeFixture,
+    );
+    vi.mocked(adminApi.updateLlmRuntimeConfig).mockResolvedValue(
+      runtimeFixture,
+    );
   });
 
   it("loads runtime truth and provider status cards", async () => {
     render(<LlmRuntimeTab />);
 
     await waitFor(() => {
-    expect(screen.getAllByText("Google Gemini").length).toBeGreaterThan(0);
-  });
+      expect(screen.getAllByText("Google Gemini").length).toBeGreaterThan(0);
+    });
 
-  expect(screen.getByText("Runtime va Model Policy")).toBeTruthy();
-  expect(screen.getByText("Vision runtime")).toBeTruthy();
-  expect(screen.getByText("Embedding hien tai")).toBeTruthy();
-  expect(screen.getAllByText("Zhipu GLM").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("Gemini Vision").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Model vision local chua duoc cai tren Ollama.").length).toBeGreaterThan(0);
-  expect(screen.getByText("General vision")).toBeTruthy();
-  expect(screen.getByText("OCR fallback")).toBeTruthy();
-  expect(screen.getAllByText("recovered").length).toBeGreaterThan(0);
-  expect(screen.getByText("chat_sync: completed via google/gemini-3.1-flash-lite-preview.")).toBeTruthy();
-  expect(screen.getByText(/Runtime recovered:/i)).toBeTruthy();
-  expect(screen.getByText(/runtime recovered on:/i)).toBeTruthy();
-  expect(screen.getByText("Runtime da hoi phuc sau probe")).toBeTruthy();
-  expect(screen.getAllByText(/runtime success:/i).length).toBeGreaterThan(0);
-  expect(screen.getByText("Runtime describe call thanh cong.")).toBeTruthy();
-  expect(screen.getAllByText("models/gemini-embedding-001").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("Ollama Embeddings").length).toBeGreaterThan(0);
-  expect(screen.getByText("Model embedding local chua duoc cai tren Ollama.")).toBeTruthy();
-  expect(screen.getByText("Embedding space health")).toBeTruthy();
-  expect(screen.getByText("Migration matrix")).toBeTruthy();
-  expect(screen.getAllByText("same space").length).toBeGreaterThan(0);
-  expect(screen.getAllByText(/Da luu vao system DB/i).length).toBeGreaterThan(0);
-  expect(screen.getAllByText(/Live probe gan nhat/i).length).toBeGreaterThan(0);
-  expect(screen.getAllByText(/Mo ta hop le./i).length).toBeGreaterThan(0);
-  expect(screen.getAllByText(/degraded/i).length).toBeGreaterThan(0);
+    expect(screen.getByText("Runtime và Model Policy")).toBeTruthy();
+    expect(screen.getByText("Vision runtime")).toBeTruthy();
+    expect(screen.getByText("Embedding hiện tại")).toBeTruthy();
+    expect(screen.getAllByText("Zhipu GLM").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Gemini Vision").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Model vision local chua duoc cai tren Ollama.")
+        .length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("General vision")).toBeTruthy();
+    expect(screen.getByText("OCR fallback")).toBeTruthy();
+    expect(screen.getAllByText("recovered").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(
+        "chat_sync: completed via google/gemini-3.1-flash-lite-preview.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/Runtime recovered:/i)).toBeTruthy();
+    expect(screen.getByText(/runtime recovered on:/i)).toBeTruthy();
+    expect(screen.getByText("Runtime da hoi phuc sau probe")).toBeTruthy();
+    expect(screen.getAllByText(/runtime success:/i).length).toBeGreaterThan(0);
+    expect(screen.getByText("Runtime describe call thanh cong.")).toBeTruthy();
+    expect(
+      screen.getAllByText("models/gemini-embedding-001").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText("Ollama Embeddings").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("Model embedding local chua duoc cai tren Ollama."),
+    ).toBeTruthy();
+    expect(screen.getByText("Embedding space health")).toBeTruthy();
+    expect(screen.getByText("Migration matrix")).toBeTruthy();
+    expect(screen.getAllByText("same space").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Đã lưu vào system DB/i).length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getAllByText(/Live probe gần nhất/i).length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getAllByText(/Mo ta hop le./i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/degraded/i).length).toBeGreaterThan(0);
   });
 
   it("normalizes failover chain before saving", async () => {
@@ -717,14 +759,16 @@ describe("LlmRuntimeTab", () => {
     });
 
     const failoverInput = screen.getByDisplayValue("google, zhipu, ollama");
-    fireEvent.change(failoverInput, { target: { value: "google, zhipu, ollama,  " } });
-    fireEvent.click(screen.getByRole("button", { name: "Luu policy" }));
+    fireEvent.change(failoverInput, {
+      target: { value: "google, zhipu, ollama,  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Lưu policy" }));
 
     await waitFor(() => {
       expect(adminApi.updateLlmRuntimeConfig).toHaveBeenCalledWith(
         expect.objectContaining({
           llm_failover_chain: ["google", "zhipu", "ollama"],
-        })
+        }),
       );
     });
   });
@@ -737,9 +781,13 @@ describe("LlmRuntimeTab", () => {
       expect(screen.getByDisplayValue("12")).toBeTruthy();
     });
 
-    fireEvent.change(screen.getByDisplayValue("45"), { target: { value: "50" } });
-    fireEvent.change(screen.getByDisplayValue("55"), { target: { value: "70" } });
-    fireEvent.click(screen.getByRole("button", { name: "Luu policy" }));
+    fireEvent.change(screen.getByDisplayValue("45"), {
+      target: { value: "50" },
+    });
+    fireEvent.change(screen.getByDisplayValue("55"), {
+      target: { value: "70" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Lưu policy" }));
 
     await waitFor(() => {
       expect(adminApi.updateLlmRuntimeConfig).toHaveBeenCalledWith(
@@ -765,11 +813,13 @@ describe("LlmRuntimeTab", () => {
       expect(screen.getByTestId("runtime-embedding-provider")).toBeTruthy();
     });
 
-    fireEvent.change(screen.getByTestId("runtime-embedding-provider"), { target: { value: "ollama" } });
+    fireEvent.change(screen.getByTestId("runtime-embedding-provider"), {
+      target: { value: "ollama" },
+    });
     fireEvent.change(screen.getByTestId("runtime-embedding-failover-chain"), {
       target: { value: "ollama, google" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Luu policy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lưu policy" }));
 
     await waitFor(() => {
       expect(adminApi.updateLlmRuntimeConfig).toHaveBeenCalledWith(
@@ -799,7 +849,7 @@ describe("LlmRuntimeTab", () => {
     fireEvent.change(screen.getByTestId("runtime-vision-timeout"), {
       target: { value: "55" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Luu policy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lưu policy" }));
 
     await waitFor(() => {
       expect(adminApi.updateLlmRuntimeConfig).toHaveBeenCalledWith(
@@ -838,7 +888,7 @@ describe("LlmRuntimeTab", () => {
     fireEvent.change(screen.getByTestId("runtime-vision-grounded-model"), {
       target: { value: "qwen/qwen2.5-vl-32b-instruct" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Luu policy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lưu policy" }));
 
     await waitFor(() => {
       expect(adminApi.updateLlmRuntimeConfig).toHaveBeenCalledWith(
@@ -859,7 +909,9 @@ describe("LlmRuntimeTab", () => {
     render(<LlmRuntimeTab />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Probe capability" })).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Probe capability" }),
+      ).toBeTruthy();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Probe capability" }));
@@ -875,15 +927,19 @@ describe("LlmRuntimeTab", () => {
     vi.mocked(adminApi.getModelCatalog).mockResolvedValue({
       ...catalogFixture,
       audit_persisted: false,
-      audit_warnings: ["Could not persist LLM runtime audit to admin_runtime_settings."],
+      audit_warnings: [
+        "Could not persist LLM runtime audit to admin_runtime_settings.",
+      ],
     });
 
     render(<LlmRuntimeTab />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Dang hien thi ket qua tam thoi/i)).toBeTruthy();
+      expect(screen.getByText(/Đang hiển thị kết quả tạm thời/i)).toBeTruthy();
     });
 
-    expect(screen.getByText(/Could not persist LLM runtime audit/i)).toBeTruthy();
+    expect(
+      screen.getByText(/Could not persist LLM runtime audit/i),
+    ).toBeTruthy();
   });
 });

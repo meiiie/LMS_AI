@@ -91,7 +91,7 @@ export function SoulBridgePanel() {
 
   // Events for selected peer
   const selectedEvents = effectivePeerId
-    ? peerDetails[effectivePeerId]?.recent_events ?? []
+    ? (peerDetails[effectivePeerId]?.recent_events ?? [])
     : [];
 
   // Refresh footer button for sidebar
@@ -149,9 +149,7 @@ export function SoulBridgePanel() {
         />
       )}
 
-      {activeTab === "config" && (
-        <ConfigTab bridgeStatus={bridgeStatus} />
-      )}
+      {activeTab === "config" && <ConfigTab bridgeStatus={bridgeStatus} />}
     </FullPageView>
   );
 }
@@ -178,14 +176,10 @@ function OverviewTab({
         <div className="flex items-center gap-3 mb-3">
           <motion.div
             animate={
-              bridgeStatus?.initialized
-                ? { scale: [1, 1.1, 1] }
-                : { scale: 1 }
+              bridgeStatus?.initialized ? { scale: [1, 1.1, 1] } : { scale: 1 }
             }
             transition={
-              bridgeStatus?.initialized
-                ? { duration: 2, repeat: Infinity }
-                : {}
+              bridgeStatus?.initialized ? { duration: 2, repeat: Infinity } : {}
             }
           >
             <Radio
@@ -204,7 +198,7 @@ function OverviewTab({
             <p className="text-xs text-text-tertiary">
               {bridgeStatus?.initialized
                 ? "Đang hoạt động"
-                : "Chưa khởi tạo"}
+                : "Chưa khởi tạo hoặc đang tắt bằng feature flag"}
             </p>
           </div>
         </div>
@@ -238,7 +232,9 @@ function OverviewTab({
               Chưa có peer nào kết nối
             </p>
             <p className="text-xs text-text-tertiary mt-1">
-              Cấu hình soul_bridge_peers để kết nối với các SubSoul khác
+              Cấu hình enable_soul_bridge và soul_bridge_peers để kết nối với
+              các SubSoul khác. Khi chưa bật, Wiii giữ panel ở chế độ quan sát
+              an toàn thay vì gọi route lỗi.
             </p>
           </div>
         )}
@@ -324,7 +320,24 @@ function EventsTab({
       )}
 
       {/* Timeline */}
-      <EventTimeline events={events} />
+      {events.length > 0 ? (
+        <EventTimeline events={events} />
+      ) : (
+        <div className="rounded-xl border border-dashed border-border bg-surface-secondary/60 px-4 py-8 text-center">
+          <Activity
+            size={24}
+            className="mx-auto mb-3 text-text-tertiary opacity-60"
+          />
+          <p className="text-sm font-medium text-text">
+            Chưa có sự kiện Soul Bridge.
+          </p>
+          <p className="mx-auto mt-2 max-w-xl text-xs leading-5 text-text-secondary">
+            Khi bridge được bật và có peer gửi trạng thái, mood, discovery hoặc
+            consultation, timeline này sẽ hiển thị từng event để mình kiểm tra
+            luồng liên kết giữa các “linh hồn” số.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

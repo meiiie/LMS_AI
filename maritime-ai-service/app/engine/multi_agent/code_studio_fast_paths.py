@@ -225,10 +225,19 @@ async def execute_code_studio_fast_path(
         tool_call_events=tool_call_events,
     )
 
+    matched_name = (
+        getattr(matched, "name", None)
+        or getattr(matched, "__name__", None)
+        or "tool_create_visual_code"
+    )
     return {
         "response": sanitize_code_studio_response(recipe["response"], tool_call_events, state),
         "thinking_content": recipe["thinking_content"],
         "tool_call_events": tool_call_events,
-        "tools_used": [matched],
+        # Presenter contract: tools_used must be a list of dicts with at
+        # least a "name" key (see chat_response_presenter.py). Storing the
+        # raw LangChain Tool object here used to crash the pendulum
+        # fast-path turn with "'Tool' object has no attribute 'get'".
+        "tools_used": [{"name": str(matched_name)}],
         "fast_path": recipe["call_id_prefix"],
     }

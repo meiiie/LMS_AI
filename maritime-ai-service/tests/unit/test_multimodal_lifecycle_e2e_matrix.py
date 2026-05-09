@@ -240,3 +240,50 @@ async def test_input_processor_visual_memory_lifecycle_matrix():
     vm.retrieve_visual_memories.assert_awaited_once()
     assert vm.store_image_memory.call_count == 1
     assert len(scheduled) == 1
+
+
+@pytest.mark.asyncio
+async def test_input_processor_marks_image_input_when_vision_disabled():
+    request = SimpleNamespace(
+        user_id="student-visual-disabled",
+        message="Nhin anh nay giup minh",
+        role="student",
+        user_context=None,
+        images=[
+            SimpleNamespace(
+                type="base64",
+                data=_fake_image_b64(),
+                media_type="image/png",
+            )
+        ],
+    )
+    settings_obj = SimpleNamespace(
+        enable_cross_platform_memory=False,
+        enable_visual_memory=True,
+        visual_memory_context_max_items=3,
+        enable_vision=False,
+        enable_emotional_state=False,
+    )
+
+    with patch(
+        "app.services.input_processor_context_runtime._apply_budgeted_history",
+        new=AsyncMock(return_value=None),
+    ):
+        context = await build_context_impl(
+            request=request,
+            session_id="session-visual-disabled",
+            user_name=None,
+            recent_history_fallback=None,
+            chat_context_cls=ChatContext,
+            semantic_memory=None,
+            chat_history=None,
+            learning_graph=None,
+            memory_summarizer=None,
+            conversation_analyzer=None,
+            settings_obj=settings_obj,
+            logger_obj=MagicMock(),
+        )
+
+    assert context.images is None
+    assert context.image_input_error == "vision_disabled"
+    assert "enable_vision dang tat" in context.semantic_context

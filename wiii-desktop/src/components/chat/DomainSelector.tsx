@@ -5,7 +5,7 @@
  */
 import { useState, useRef, useEffect, useCallback } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Anchor, ChevronUp } from "lucide-react";
+import { Anchor, ChevronUp, Check } from "lucide-react";
 import { useDomainStore } from "@/stores/domain-store";
 import { DOMAIN_ICONS, DOMAIN_LABELS } from "@/lib/domain-config";
 
@@ -89,6 +89,8 @@ export function DomainSelector({ compact: _compact }: DomainSelectorProps = {}) 
         aria-label="Chọn lĩnh vực"
         aria-expanded={open}
         data-testid="domain-selector-trigger"
+        data-wiii-id="domain-selector"
+        data-wiii-synonyms="chọn domain,đổi domain,chọn lĩnh vực,đổi lĩnh vực,domain selector,lĩnh vực"
       >
         <ActiveIcon size={13} />
         <span>{activeLabel}</span>
@@ -132,9 +134,7 @@ export function DomainSelector({ compact: _compact }: DomainSelectorProps = {}) 
                     <Icon size={15} />
                     <span>{label}</span>
                     {isActive && (
-                      <span className="ml-auto text-[var(--accent)] text-xs">
-                        ✓
-                      </span>
+                      <Check size={14} className="ml-auto text-[var(--accent)]" aria-label="Đã chọn" />
                     )}
                   </button>
                 );

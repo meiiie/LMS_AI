@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from app.api.deps import RequireAuth
 from app.core.rate_limit import limiter
 from app.engine.context.host_action_audit import log_host_action_event
-from app.models.schemas import HostActionAuditRequest, HostActionAuditResponse
+from app.models.host_context_schemas import HostActionAuditRequest, HostActionAuditResponse
 
 router = APIRouter(prefix="/host-actions", tags=["host-actions"])
 

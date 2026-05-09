@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import type {
   ArtifactBlockData,
   ContentBlock,
@@ -26,22 +27,64 @@ import { VisualBlock } from "./VisualBlock";
 import { ToolExecutionStrip } from "./ToolExecutionStrip";
 import { useCodeStudioStore } from "@/stores/code-studio-store";
 
-function BlockErrorFallback({ blockType }: { blockType: string }) {
+function BlockErrorFallback({
+  blockType,
+  error,
+  onRetry,
+}: {
+  blockType: string;
+  error?: Error | null;
+  onRetry?: () => void;
+}) {
   return (
-    <div className="rounded-lg border border-border/40 bg-surface-secondary/30 px-3 py-2 text-xs text-text-tertiary">
-      Khong the hien thi noi dung ({blockType})
+    <div
+      className="rounded-lg border border-orange-300/50 bg-orange-50/40 dark:bg-orange-950/20 px-3 py-2 text-xs text-text-secondary flex items-center gap-2 flex-wrap"
+      role="alert"
+    >
+      <AlertTriangle size={14} className="shrink-0 text-orange-500" aria-hidden="true" />
+      <span className="flex-1 min-w-0">
+        Không hiển thị được {blockType === "answer" ? "câu trả lời" : `khối ${blockType}`}
+        {error?.message ? <> — <code className="text-[10px] opacity-70">{error.message.slice(0, 80)}</code></> : null}
+      </span>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="shrink-0 text-[11px] font-medium text-[var(--accent)] hover:underline focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-1 rounded"
+        >
+          Thử lại
+        </button>
+      )}
     </div>
   );
 }
 
 class BlockErrorBoundary extends React.Component<
   { children: React.ReactNode; blockType: string },
-  { hasError: boolean }
+  { hasError: boolean; error: Error | null }
 > {
-  state = { hasError: false };
-  static getDerivedStateFromError() { return { hasError: true }; }
+  state = { hasError: false, error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { hasError: true, error }; }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // Phase 35 — log to console with structured context for debugging.
+    // Previously silent → Vietnamese diacritic crashes (KaTeX) disappeared
+    // entirely with no signal to user OR developer.
+    console.warn(
+      `[BlockErrorBoundary] ${this.props.blockType} crashed:`,
+      error.message,
+      info.componentStack?.split("\n").slice(0, 3).join("\n"),
+    );
+  }
   render() {
-    if (this.state.hasError) return <BlockErrorFallback blockType={this.props.blockType} />;
+    if (this.state.hasError) {
+      return (
+        <BlockErrorFallback
+          blockType={this.props.blockType}
+          error={this.state.error}
+          onRetry={() => this.setState({ hasError: false, error: null })}
+        />
+      );
+    }
     return this.props.children;
   }
 }

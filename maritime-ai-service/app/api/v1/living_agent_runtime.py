@@ -102,7 +102,10 @@ def get_living_agent_status_response() -> LivingAgentStatusResponse:
 
 def get_emotional_state_response() -> EmotionalStateResponse:
     """Build Wiii's current emotional state payload."""
-    check_living_agent_enabled()
+    from app.core.config import settings
+
+    if not settings.enable_living_agent:
+        return EmotionalStateResponse()
 
     try:
         from app.engine.living_agent.emotion_engine import get_emotion_engine

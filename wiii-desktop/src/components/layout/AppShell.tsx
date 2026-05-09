@@ -84,7 +84,11 @@ function ViewFallback({ label }: { label: string }) {
 function useIsMobile(breakpoint = 768) {
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    )
+      return;
     const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
     setIsMobile(mq.matches);
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
@@ -99,7 +103,8 @@ function useIsMobile(breakpoint = 768) {
 }
 
 export function AppShell() {
-  const { sidebarOpen, activeView, setSidebarOpen, toggleSidebar } = useUIStore();
+  const { sidebarOpen, activeView, setSidebarOpen, toggleSidebar } =
+    useUIStore();
   const hasRightPanel = useUIStore((s) => s.hasRightPanel());
   const { status, checkHealth } = useConnectionStore();
   const isMobile = useIsMobile();
@@ -110,7 +115,10 @@ export function AppShell() {
   const isInChat = activeView === "chat";
 
   useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    ) {
       return;
     }
 
@@ -205,7 +213,11 @@ export function AppShell() {
               >
                 <div className="h-full flex overflow-hidden">
                   <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-                    <Suspense fallback={<ViewFallback label="Wiii dang mo cuoc tro chuyen..." />}>
+                    <Suspense
+                      fallback={
+                        <ViewFallback label="Wiii đang mở cuộc trò chuyện..." />
+                      }
+                    >
                       <ChatView />
                     </Suspense>
                   </div>
@@ -219,11 +231,7 @@ export function AppShell() {
               {hasRightPanel && !isMobile && (
                 <>
                   <Separator className="wiii-resize-handle" />
-                  <Panel
-                    id="right-panel"
-                    defaultSize={55}
-                    minSize={30}
-                  >
+                  <Panel id="right-panel" defaultSize={55} minSize={30}>
                     <div className="h-full flex flex-col overflow-hidden">
                       <Suspense fallback={null}>
                         <ArtifactPanel inline />
@@ -236,7 +244,9 @@ export function AppShell() {
               )}
             </Group>
           ) : (
-            <Suspense fallback={<ViewFallback label="Wiii dang mo khong gian nay..." />}>
+            <Suspense
+              fallback={<ViewFallback label="Wiii đang mở không gian này..." />}
+            >
               {activeView === "system-admin" && <SystemAdminView />}
               {activeView === "org-admin" && <OrgAdminView />}
               {activeView === "settings" && <SettingsView />}

@@ -170,10 +170,16 @@ class TestGuardianFastPath:
         guardian = self._make_guardian()
         assert guardian._should_skip_llm("chết đi mày") is False
 
-    def test_does_not_skip_long_message(self):
-        """Messages >= 200 chars do NOT skip (even without banned words)."""
+    def test_skip_safe_medium_message(self):
+        """Safe medium chat turns skip the flaky Guardian LLM."""
         guardian = self._make_guardian()
-        long_msg = "A" * 200
+        medium_msg = "A" * 300
+        assert guardian._should_skip_llm(medium_msg) is True
+
+    def test_does_not_skip_very_long_message(self):
+        """Messages >= 500 chars still use Guardian LLM/fallback."""
+        guardian = self._make_guardian()
+        long_msg = "A" * 500
         assert guardian._should_skip_llm(long_msg) is False
 
     def test_skip_message_just_under_200(self):

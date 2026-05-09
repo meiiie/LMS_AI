@@ -50,9 +50,49 @@ def _summarize_tool_result_for_stream(tool_name: str, result: object) -> str:
         pass
     lowered_tool = str(tool_name or "").strip().lower()
     if any(token in lowered_tool for token in ("web_search", "search_news", "search_legal", "search_maritime")):
+        # Phase 35 — show actual source count + top domain (Perplexity/Claude pattern).
+        # Format from _format_results: "**Title** ... URL: https://domain.com/...",
+        # separated by "---". Count "URL:" markers for source count, extract domains.
+        import re as _re
+        result_str = str(result or "")
+        urls = _re.findall(r"URL:\s*(https?://[^\s\n]+)", result_str)
+        domains: list[str] = []
+        seen_domains: set[str] = set()
+        for u in urls:
+            try:
+                from urllib.parse import urlparse
+                d = urlparse(u).netloc.replace("www.", "")
+                if d and d not in seen_domains:
+                    domains.append(d)
+                    seen_domains.add(d)
+            except Exception:  # noqa: BLE001
+                continue
+        if urls:
+            top = ", ".join(domains[:3])
+            extra = f" +{len(domains) - 3}" if len(domains) > 3 else ""
+            return f"Tìm được {len(urls)} nguồn: {top}{extra}"
+        # No URLs detected → check for "Không tìm thấy" or empty
+        if "không tìm thấy" in result_str.lower():
+            return "Chưa tìm được kết quả phù hợp — sẽ thử cách khác."
         return "Đã kéo thêm vài nguồn để kiểm chéo."
     if "knowledge_search" in lowered_tool:
         return "Đã rà lại phần tri thức liên quan."
+    if "fetch_url" in lowered_tool:
+        # Show source domain when fetching deep content
+        import re as _re
+        result_str = str(result or "")
+        url_match = _re.search(r"#\s+(https?://[^\s\n]+)", result_str)
+        if url_match:
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(url_match.group(1)).netloc.replace("www.", "")
+                # Estimate length of extracted markdown
+                content_len = len(result_str)
+                kb = content_len / 1024
+                return f"Đã đọc chi tiết từ {domain} (~{kb:.1f}KB)"
+            except Exception:  # noqa: BLE001
+                pass
+        return "Đã đọc chi tiết URL."
     if any(token in lowered_tool for token in ("chart", "visual")):
         return "Phần nhìn đang sẵn sàng."
     compact = " ".join(str(result or "").split())

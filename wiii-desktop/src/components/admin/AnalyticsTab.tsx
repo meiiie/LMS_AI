@@ -3,7 +3,7 @@
  * The canonical Wiii view is account-type first; legacy roles remain visible
  * only as compatibility data.
  */
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   LineChart,
   Line,
@@ -15,14 +15,15 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { AlertCircle, Loader2 } from "lucide-react";
 import { useAdminStore } from "@/stores/admin-store";
 import type { DateRange } from "@/stores/admin-store";
 
 const DATE_RANGES: { value: DateRange; label: string }[] = [
-  { value: "7d", label: "7 ngay" },
-  { value: "30d", label: "30 ngay" },
-  { value: "90d", label: "90 ngay" },
-  { value: "all", label: "Tat ca" },
+  { value: "7d", label: "7 ngày" },
+  { value: "30d", label: "30 ngày" },
+  { value: "90d", label: "90 ngày" },
+  { value: "all", label: "Tất cả" },
 ];
 
 const PLATFORM_ROLE_LABELS: Record<string, string> = {
@@ -37,10 +38,10 @@ const LEGACY_ROLE_LABELS: Record<string, string> = {
 };
 
 const ORG_ROLE_LABELS: Record<string, string> = {
-  member: "Thanh vien to chuc",
-  org_admin: "Quan tri to chuc",
-  owner: "Chu so huu to chuc",
-  admin: "Quan tri to chuc",
+  member: "Thành viên tổ chức",
+  org_admin: "Quản trị tổ chức",
+  owner: "Chủ sở hữu tổ chức",
+  admin: "Quản trị tổ chức",
 };
 
 function useThemeColors() {
@@ -67,7 +68,9 @@ function DistributionRow({
   if (!values || Object.keys(values).length === 0) return null;
   return (
     <div>
-      <div className="text-[11px] font-medium text-text-secondary mb-2">{title}</div>
+      <div className="text-[11px] font-medium text-text-secondary mb-2">
+        {title}
+      </div>
       <div className="flex flex-wrap gap-3">
         {Object.entries(values).map(([key, count]) => (
           <div key={key} className="flex items-center gap-1.5 text-xs">
@@ -101,39 +104,53 @@ export function AnalyticsTab() {
     llmUsage,
     userAnalytics,
     analyticsDateRange,
-    loading,
+    error,
     fetchAnalyticsOverview,
     fetchLlmUsage,
     fetchUserAnalytics,
     setAnalyticsDateRange,
   } = useAdminStore();
+  const [localLoading, setLocalLoading] = useState(false);
   const colors = useThemeColors();
 
+  const loadAnalytics = useCallback(
+    async (range?: DateRange) => {
+      setLocalLoading(true);
+      try {
+        await Promise.allSettled([
+          fetchAnalyticsOverview(range),
+          fetchLlmUsage(range),
+          fetchUserAnalytics(range),
+        ]);
+      } finally {
+        setLocalLoading(false);
+      }
+    },
+    [fetchAnalyticsOverview, fetchLlmUsage, fetchUserAnalytics],
+  );
+
   useEffect(() => {
-    fetchAnalyticsOverview();
-    fetchLlmUsage();
-    fetchUserAnalytics();
-  }, [fetchAnalyticsOverview, fetchLlmUsage, fetchUserAnalytics]);
+    void loadAnalytics();
+  }, [loadAnalytics]);
 
   const handleRangeChange = (range: DateRange) => {
     setAnalyticsDateRange(range);
-    fetchAnalyticsOverview(range);
-    fetchLlmUsage(range);
-    fetchUserAnalytics(range);
+    void loadAnalytics(range);
   };
 
   const platformRoleDistribution =
-    userAnalytics?.platform_role_distribution
-    || derivePlatformRoleDistribution(userAnalytics?.role_distribution);
+    userAnalytics?.platform_role_distribution ||
+    derivePlatformRoleDistribution(userAnalytics?.role_distribution);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-text">Phan tich he thong</div>
+        <div className="text-sm font-medium text-text">Phân tích hệ thống</div>
         <div className="flex gap-1.5">
           {DATE_RANGES.map((range) => (
             <button
               key={range.value}
+              disabled={localLoading}
               onClick={() => handleRangeChange(range.value)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                 analyticsDateRange === range.value
@@ -147,15 +164,47 @@ export function AnalyticsTab() {
         </div>
       </div>
 
+      {error && (
+        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-300">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {localLoading && !analyticsOverview && !llmUsage && !userAnalytics && (
+        <div
+          aria-busy="true"
+          className="flex items-start gap-3 rounded-xl border border-border bg-surface-secondary px-4 py-5 text-sm text-text-secondary"
+        >
+          <Loader2
+            size={18}
+            className="mt-0.5 shrink-0 animate-spin text-[var(--accent)]"
+          />
+          <div>
+            <p className="font-medium text-text">
+              Đang tải phân tích hệ thống...
+            </p>
+            <p className="mt-1 text-xs leading-5">
+              Wiii đang lấy song song dữ liệu người dùng, lưu lượng chat và
+              usage LLM. Nếu dữ liệu trống, tab sẽ hiển thị empty-state thay vì
+              treo ở một dòng loading ngắn.
+            </p>
+          </div>
+        </div>
+      )}
+
       {analyticsOverview && analyticsOverview.daily_active_users.length > 0 && (
         <div className="p-4 rounded-xl border border-border bg-surface-secondary">
           <div className="text-xs font-medium text-text-secondary mb-3">
-            Nguoi dung hoat dong hang ngay
+            Người dùng hoạt động hằng ngày
           </div>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={analyticsOverview.daily_active_users}>
               <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: colors.text }} />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 10, fill: colors.text }}
+              />
               <YAxis tick={{ fontSize: 10, fill: colors.text }} />
               <Tooltip
                 contentStyle={{
@@ -180,12 +229,15 @@ export function AnalyticsTab() {
       {analyticsOverview && analyticsOverview.chat_volume.length > 0 && (
         <div className="p-4 rounded-xl border border-border bg-surface-secondary">
           <div className="text-xs font-medium text-text-secondary mb-3">
-            Luong chat hang ngay
+            Lượng chat hằng ngày
           </div>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={analyticsOverview.chat_volume}>
               <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: colors.text }} />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 10, fill: colors.text }}
+              />
               <YAxis tick={{ fontSize: 10, fill: colors.text }} />
               <Tooltip
                 contentStyle={{
@@ -194,8 +246,18 @@ export function AnalyticsTab() {
                   border: `1px solid ${colors.grid}`,
                 }}
               />
-              <Bar dataKey="messages" fill={colors.accent} name="Tin nhan" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="sessions" fill={`${colors.accent}80`} name="Phien" radius={[4, 4, 0, 0]} />
+              <Bar
+                dataKey="messages"
+                fill={colors.accent}
+                name="Tin nhắn"
+                radius={[4, 4, 0, 0]}
+              />
+              <Bar
+                dataKey="sessions"
+                fill={`${colors.accent}80`}
+                name="Phiên"
+                radius={[4, 4, 0, 0]}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -204,7 +266,7 @@ export function AnalyticsTab() {
       {llmUsage && (
         <div className="p-4 rounded-xl border border-border bg-surface-secondary">
           <div className="text-xs font-medium text-text-secondary mb-3">
-            Su dung LLM
+            Sử dụng LLM
           </div>
           <div className="grid grid-cols-3 gap-4 mb-4">
             <div className="text-center">
@@ -221,7 +283,7 @@ export function AnalyticsTab() {
               <div className="text-xl font-semibold text-text">
                 ${llmUsage.total_cost_usd.toFixed(2)}
               </div>
-              <div className="text-[10px] text-text-tertiary">Chi phi</div>
+              <div className="text-[10px] text-text-tertiary">Chi phí</div>
             </div>
             <div className="text-center">
               <div className="text-xl font-semibold text-text">
@@ -235,7 +297,10 @@ export function AnalyticsTab() {
             <ResponsiveContainer width="100%" height={160}>
               <BarChart data={llmUsage.breakdown}>
                 <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
-                <XAxis dataKey="group" tick={{ fontSize: 10, fill: colors.text }} />
+                <XAxis
+                  dataKey="group"
+                  tick={{ fontSize: 10, fill: colors.text }}
+                />
                 <YAxis tick={{ fontSize: 10, fill: colors.text }} />
                 <Tooltip
                   contentStyle={{
@@ -244,20 +309,35 @@ export function AnalyticsTab() {
                     border: `1px solid ${colors.grid}`,
                   }}
                 />
-                <Bar dataKey="tokens" fill={colors.accent} name="Tokens" radius={[4, 4, 0, 0]} />
+                <Bar
+                  dataKey="tokens"
+                  fill={colors.accent}
+                  name="Tokens"
+                  radius={[4, 4, 0, 0]}
+                />
               </BarChart>
             </ResponsiveContainer>
           )}
 
           {llmUsage.top_models.length > 0 && (
             <div className="mt-4">
-              <div className="text-[11px] font-medium text-text-secondary mb-2">Top Models</div>
+              <div className="text-[11px] font-medium text-text-secondary mb-2">
+                Model dùng nhiều
+              </div>
               <div className="space-y-1">
                 {llmUsage.top_models.slice(0, 5).map((model, index) => (
-                  <div key={index} className="flex items-center justify-between text-xs">
-                    <span className="text-text font-mono truncate">{model.model}</span>
+                  <div
+                    key={index}
+                    className="flex items-center justify-between text-xs"
+                  >
+                    <span className="text-text font-mono truncate">
+                      {model.model}
+                    </span>
                     <span className="text-text-tertiary shrink-0 ml-2">
-                      {model.tokens >= 1000 ? `${(model.tokens / 1000).toFixed(1)}k` : model.tokens} tokens
+                      {model.tokens >= 1000
+                        ? `${(model.tokens / 1000).toFixed(1)}k`
+                        : model.tokens}{" "}
+                      tokens
                     </span>
                   </div>
                 ))}
@@ -267,13 +347,21 @@ export function AnalyticsTab() {
 
           {llmUsage.top_users.length > 0 && (
             <div className="mt-4">
-              <div className="text-[11px] font-medium text-text-secondary mb-2">Top Users</div>
+              <div className="text-[11px] font-medium text-text-secondary mb-2">
+                Người dùng nhiều nhất
+              </div>
               <div className="space-y-1">
                 {llmUsage.top_users.slice(0, 5).map((user, index) => (
-                  <div key={index} className="flex items-center justify-between text-xs">
+                  <div
+                    key={index}
+                    className="flex items-center justify-between text-xs"
+                  >
                     <span className="text-text truncate">{user.user_id}</span>
                     <span className="text-text-tertiary shrink-0 ml-2">
-                      {user.tokens >= 1000 ? `${(user.tokens / 1000).toFixed(1)}k` : user.tokens} tokens
+                      {user.tokens >= 1000
+                        ? `${(user.tokens / 1000).toFixed(1)}k`
+                        : user.tokens}{" "}
+                      tokens
                     </span>
                   </div>
                 ))}
@@ -286,36 +374,45 @@ export function AnalyticsTab() {
       {userAnalytics && (
         <div className="p-4 rounded-xl border border-border bg-surface-secondary">
           <div className="text-xs font-medium text-text-secondary mb-3">
-            Nguoi dung
+            Người dùng
           </div>
           <div className="grid grid-cols-3 gap-4 mb-4">
             <div className="text-center">
-              <div className="text-xl font-semibold text-text">{userAnalytics.total_users}</div>
-              <div className="text-[10px] text-text-tertiary">Tong</div>
+              <div className="text-xl font-semibold text-text">
+                {userAnalytics.total_users}
+              </div>
+              <div className="text-[10px] text-text-tertiary">Tổng</div>
             </div>
             <div className="text-center">
-              <div className="text-xl font-semibold text-text">{userAnalytics.new_users_period}</div>
-              <div className="text-[10px] text-text-tertiary">Moi</div>
+              <div className="text-xl font-semibold text-text">
+                {userAnalytics.new_users_period}
+              </div>
+              <div className="text-[10px] text-text-tertiary">Mới</div>
             </div>
             <div className="text-center">
-              <div className="text-xl font-semibold text-text">{userAnalytics.active_users_period}</div>
-              <div className="text-[10px] text-text-tertiary">Hoat dong</div>
+              <div className="text-xl font-semibold text-text">
+                {userAnalytics.active_users_period}
+              </div>
+              <div className="text-[10px] text-text-tertiary">Hoạt động</div>
             </div>
           </div>
 
           <div className="space-y-3">
             <DistributionRow
-              title="Loai tai khoan Wiii"
+              title="Loại tài khoản Wiii"
               values={platformRoleDistribution}
               labels={PLATFORM_ROLE_LABELS}
             />
             <DistributionRow
-              title="Vai tro tuong thich (legacy)"
-              values={userAnalytics.legacy_role_distribution || userAnalytics.role_distribution}
+              title="Vai trò tương thích (legacy)"
+              values={
+                userAnalytics.legacy_role_distribution ||
+                userAnalytics.role_distribution
+              }
               labels={LEGACY_ROLE_LABELS}
             />
             <DistributionRow
-              title="Vai tro trong to chuc dang loc"
+              title="Vai trò trong tổ chức đang lọc"
               values={userAnalytics.organization_role_distribution}
               labels={ORG_ROLE_LABELS}
             />
@@ -323,8 +420,10 @@ export function AnalyticsTab() {
         </div>
       )}
 
-      {loading && !analyticsOverview && (
-        <div className="text-center text-text-tertiary text-xs py-8">Dang tai...</div>
+      {localLoading && analyticsOverview && (
+        <div className="text-center text-text-tertiary text-xs py-8">
+          Đang tải...
+        </div>
       )}
     </div>
   );

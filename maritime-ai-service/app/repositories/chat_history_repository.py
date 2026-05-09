@@ -90,6 +90,12 @@ class ChatHistoryRepository:
             logger.info("Chat history repository using shared database engine")
         except Exception as exc:
             logger.warning("Chat history repository connection failed: %s", exc)
+            try:
+                from app.core.database import mark_shared_database_unavailable
+
+                mark_shared_database_unavailable(exc)
+            except Exception:
+                pass
             self._available = False
 
     def is_available(self) -> bool:

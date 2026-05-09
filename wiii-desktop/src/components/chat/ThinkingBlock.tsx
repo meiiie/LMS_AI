@@ -1,6 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { ChevronDown, Check, Copy, Clock, CheckCircle, Search, Globe, BookOpen, Wrench } from "lucide-react";
+import {
+  ChevronDown,
+  Check,
+  Copy,
+  Clock,
+  CheckCircle,
+  Search,
+  Globe,
+  BookOpen,
+  Wrench,
+} from "lucide-react";
 import type { ToolCallInfo } from "@/api/types";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 
@@ -21,7 +31,6 @@ interface ThinkingBlockProps {
   continuation?: boolean;
 }
 
-
 const PREVIEW_SKIP_PATTERNS = [
   /^toi can:?$/i,
   /^minh can:?$/i,
@@ -41,15 +50,15 @@ const PREVIEW_PREFIX_PATTERNS = [
 ];
 
 const PREVIEW_TOOL_REPLACEMENTS: Array<[RegExp, string]> = [
-  [/tool_knowledge_search/gi, "nguon kien thuc lien quan"],
-  [/tool_maritime_search/gi, "nguon hang hai lien quan"],
-  [/tool_web_search/gi, "nguon web phu hop"],
-  [/tool_search_news/gi, "nguon tin can doi chieu"],
-  [/tool_search_legal/gi, "nguon phap ly lien quan"],
-  [/tool_search_maritime/gi, "nguon hang hai can tra"],
-  [/tool_current_datetime/gi, "moc thoi gian hien tai"],
-  [/tool_calculator/gi, "phep tinh can thiet"],
-  [/tool_[a-z0-9_]+/gi, "mot cong cu phu hop"],
+  [/tool_knowledge_search/gi, "nguồn kiến thức liên quan"],
+  [/tool_maritime_search/gi, "nguồn hàng hải liên quan"],
+  [/tool_web_search/gi, "nguồn web phù hợp"],
+  [/tool_search_news/gi, "nguồn tin cần đối chiếu"],
+  [/tool_search_legal/gi, "nguồn pháp lý liên quan"],
+  [/tool_search_maritime/gi, "nguồn hàng hải cần tra"],
+  [/tool_current_datetime/gi, "mốc thời gian hiện tại"],
+  [/tool_calculator/gi, "phép tính cần thiết"],
+  [/tool_[a-z0-9_]+/gi, "một công cụ phù hợp"],
 ];
 
 // Sprint 234: Increased from 160→280 to match backend adaptive thinking (no hardcoded summary limit)
@@ -90,7 +99,9 @@ function buildPreviewText(content: string, fallback?: string): string {
     .split(/\n+/)
     .map((line) => sanitizePreviewLine(line))
     .filter((line) => line.length > 0)
-    .filter((line) => !PREVIEW_SKIP_PATTERNS.some((pattern) => pattern.test(line)));
+    .filter(
+      (line) => !PREVIEW_SKIP_PATTERNS.some((pattern) => pattern.test(line)),
+    );
 
   const segments = cleanedLines
     .flatMap((line) =>
@@ -121,7 +132,9 @@ function chooseCollapsedPreview(options: {
   const header = sanitizePreviewLine(options.header || "");
   const candidates = [options.summary, options.derived]
     .map((value) => sanitizePreviewLine(value || ""))
-    .filter((value, index, all) => value.length > 0 && all.indexOf(value) === index)
+    .filter(
+      (value, index, all) => value.length > 0 && all.indexOf(value) === index,
+    )
     .filter((value) => !textsOverlap(value, header));
 
   if (candidates.length === 0) return "";
@@ -159,7 +172,10 @@ function textsOverlap(a?: string, b?: string) {
   );
 }
 
-function stripLeadingDuplicateParagraph(content: string, candidates: Array<string | undefined>): string {
+function stripLeadingDuplicateParagraph(
+  content: string,
+  candidates: Array<string | undefined>,
+): string {
   const normalizedCandidates = candidates
     .map((value) => sanitizePreviewLine(value || ""))
     .filter((value) => value.length > 0);
@@ -170,7 +186,9 @@ function stripLeadingDuplicateParagraph(content: string, candidates: Array<strin
   if (paragraphs.length === 0) return content;
 
   const firstParagraph = sanitizePreviewLine(paragraphs[0] || "");
-  const overlaps = normalizedCandidates.some((candidate) => textsOverlap(firstParagraph, candidate));
+  const overlaps = normalizedCandidates.some((candidate) =>
+    textsOverlap(firstParagraph, candidate),
+  );
   if (!overlaps) return content;
 
   const remaining = paragraphs.slice(1).join("\n\n").trim();
@@ -190,7 +208,9 @@ export function ThinkingBlock({
   thinkingLevel = "balanced",
   continuation = false,
 }: ThinkingBlockProps) {
-  const [expanded, setExpanded] = useState(thinkingLevel === "detailed" || autoExpand);
+  const [expanded, setExpanded] = useState(
+    thinkingLevel === "detailed" || autoExpand,
+  );
   const [duration, setDuration] = useState(savedDuration || 0);
   const [copied, setCopied] = useState(false);
   const startTimeRef = useRef<number | null>(null);
@@ -198,17 +218,20 @@ export function ThinkingBlock({
   // D1: Track if block was ever completed — used to detect re-activation
   const wasCompletedRef = useRef(false);
 
-  const handleCopy = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!content) return;
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Fallback for non-secure contexts
-    }
-  }, [content]);
+  const handleCopy = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!content) return;
+      try {
+        await navigator.clipboard.writeText(content);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        // Fallback for non-secure contexts
+      }
+    },
+    [content],
+  );
 
   useEffect(() => {
     if (autoExpand) {
@@ -237,7 +260,10 @@ export function ThinkingBlock({
       if (thinkingLevel !== "detailed") {
         const contentLen = content?.length ?? 0;
         const collapseDelay = Math.min(Math.max(1200, contentLen * 3), 4500);
-        const collapseTimer = setTimeout(() => setExpanded(false), collapseDelay);
+        const collapseTimer = setTimeout(
+          () => setExpanded(false),
+          collapseDelay,
+        );
         // Cancel collapse if block re-activates (becomes streaming again)
         return () => clearTimeout(collapseTimer);
       }
@@ -262,11 +288,17 @@ export function ThinkingBlock({
   const summaryText = summary?.trim() || "";
   const titleSeed = customLabel?.trim() || "";
   const contentForDisplay = content
-    ? stripLeadingDuplicateParagraph(content, [summaryText, titleSeed, phaseHeader])
+    ? stripLeadingDuplicateParagraph(content, [
+        summaryText,
+        titleSeed,
+        phaseHeader,
+      ])
     : "";
-  const previewContent = !expanded && contentForDisplay ? buildPreviewText(contentForDisplay) : "";
+  const previewContent =
+    !expanded && contentForDisplay ? buildPreviewText(contentForDisplay) : "";
   const expandedHeaderText = phaseHeader || titleSeed || defaultTitle;
-  const collapsedHeaderText = titleSeed || phaseHeader || summaryText || defaultTitle;
+  const collapsedHeaderText =
+    titleSeed || phaseHeader || summaryText || defaultTitle;
   const headerText = expanded ? expandedHeaderText : collapsedHeaderText;
   const durationText = duration > 0 ? `${duration}s` : "";
   const collapsedPreview = chooseCollapsedPreview({
@@ -275,13 +307,14 @@ export function ThinkingBlock({
     derived: previewContent.trim(),
   });
   const showPreviewLine = Boolean(
-    collapsedPreview &&
-    !textsOverlap(collapsedPreview, collapsedHeaderText),
+    collapsedPreview && !textsOverlap(collapsedPreview, collapsedHeaderText),
   );
 
   if (continuation) {
     return (
-      <div className={`thinking-block thinking-block--continuation ${isStreaming ? "thinking-block--streaming" : "thinking-block--complete"}`}>
+      <div
+        className={`thinking-block thinking-block--continuation ${isStreaming ? "thinking-block--streaming" : "thinking-block--complete"}`}
+      >
         <div className="thinking-block__continuation-shell">
           <div className="thinking-block__continuation-meta">
             {durationText && (
@@ -305,7 +338,9 @@ export function ThinkingBlock({
   }
 
   return (
-    <div className={`thinking-block group/thinking ${isStreaming ? "thinking-block--streaming" : "thinking-block--complete"}`}>
+    <div
+      className={`thinking-block group/thinking ${isStreaming ? "thinking-block--streaming" : "thinking-block--complete"}`}
+    >
       <div className="flex items-start gap-2">
         {hasContent ? (
           <button
@@ -320,29 +355,44 @@ export function ThinkingBlock({
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ type: "spring", stiffness: 400, damping: 15 }}
                 >
-                  <CheckCircle size={14} className="text-[var(--accent-green)] shrink-0" />
+                  <CheckCircle
+                    size={14}
+                    className="text-[var(--accent-green)] shrink-0"
+                  />
                 </motion.span>
               ) : (
                 <span className="relative shrink-0 flex items-center justify-center w-[16px] h-[16px]">
                   <span className="absolute inset-0 rounded-full border border-[var(--accent-orange)] animate-ping opacity-30" />
-                  <Clock size={12} className="relative text-[var(--accent-orange)]" />
+                  <Clock
+                    size={12}
+                    className="relative text-[var(--accent-orange)]"
+                  />
                 </span>
               )}
             </span>
 
             <span className="thinking-block__header-body">
               <span className="thinking-block__title-row">
-                {phaseHeader && <span className="thinking-block__phase">{phaseHeader}</span>}
+                {phaseHeader && (
+                  <span className="thinking-block__phase">{phaseHeader}</span>
+                )}
                 <span className="thinking-block__title">{headerText}</span>
                 {durationText && (
-                  <span className="thinking-block__duration">{durationText}</span>
+                  <span className="thinking-block__duration">
+                    {durationText}
+                  </span>
                 )}
                 {isStreaming && <span className="thinking-block__live-dot" />}
               </span>
               {!expanded && showPreviewLine && (
                 <span className="thinking-block__preview-line">
                   {collapsedPreview}
-                  {isStreaming && <span className="thinking-block__preview-caret" aria-hidden="true" />}
+                  {isStreaming && (
+                    <span
+                      className="thinking-block__preview-caret"
+                      aria-hidden="true"
+                    />
+                  )}
                 </span>
               )}
             </span>
@@ -356,7 +406,10 @@ export function ThinkingBlock({
           <span className="thinking-block__toggle">
             <span className="thinking-block__status" aria-hidden="true">
               {isStreaming ? (
-                <Clock size={14} className="text-[var(--accent-orange)] animate-pulse" />
+                <Clock
+                  size={14}
+                  className="text-[var(--accent-orange)] animate-pulse"
+                />
               ) : (
                 <CheckCircle size={14} className="text-[var(--accent-green)]" />
               )}
@@ -368,7 +421,12 @@ export function ThinkingBlock({
               {!expanded && showPreviewLine && (
                 <span className="thinking-block__preview-line">
                   {collapsedPreview}
-                  {isStreaming && <span className="thinking-block__preview-caret" aria-hidden="true" />}
+                  {isStreaming && (
+                    <span
+                      className="thinking-block__preview-caret"
+                      aria-hidden="true"
+                    />
+                  )}
                 </span>
               )}
             </span>
@@ -379,10 +437,14 @@ export function ThinkingBlock({
           <button
             onClick={handleCopy}
             className="thinking-block__copy"
-            title="Sao chep suy nghi"
-            aria-label="Sao chep noi dung suy nghi"
+            title="Sao chép suy nghĩ"
+            aria-label="Sao chép nội dung suy nghĩ"
           >
-            {copied ? <Check size={12} className="text-[var(--accent-green)]" /> : <Copy size={12} />}
+            {copied ? (
+              <Check size={12} className="text-[var(--accent-green)]" />
+            ) : (
+              <Copy size={12} />
+            )}
           </button>
         )}
       </div>
@@ -435,7 +497,12 @@ function ToolIcon({ name, spinning }: { name: string; spinning?: boolean }) {
   if (name === "tool_knowledge_search" || name === "tool_maritime_search") {
     return <BookOpen size={14} className={cls} style={{ color }} />;
   }
-  if (name === "tool_web_search" || name === "tool_search_news" || name === "tool_search_legal" || name === "tool_search_maritime") {
+  if (
+    name === "tool_web_search" ||
+    name === "tool_search_news" ||
+    name === "tool_search_legal" ||
+    name === "tool_search_maritime"
+  ) {
     return <Globe size={14} className={cls} style={{ color }} />;
   }
   if (name === "tool_think") {
@@ -466,7 +533,9 @@ function parseToolResult(name: string, result: string): ParsedToolResult {
     } catch {
       // Not JSON
     }
-    const titleMatch = result.match(/(?:Title|Tieu de|Document):\s*(.+?)(?:\n|$)/i);
+    const titleMatch = result.match(
+      /(?:Title|Tieu de|Document):\s*(.+?)(?:\n|$)/i,
+    );
     if (titleMatch) {
       return {
         title: titleMatch[1].trim(),
@@ -493,11 +562,15 @@ export function InlineToolCard({
   const argsPreview = toolCall.args
     ? Object.entries(toolCall.args)
         .slice(0, 2)
-        .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+        .map(
+          ([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`,
+        )
         .join(", ")
     : "";
 
-  const parsed = hasResult ? parseToolResult(toolCall.name, toolCall.result!) : null;
+  const parsed = hasResult
+    ? parseToolResult(toolCall.name, toolCall.result!)
+    : null;
   const isRichResult = parsed && parsed.title;
   const toolLabel = TOOL_LABELS[toolCall.name] || toolCall.name;
 
@@ -512,9 +585,18 @@ export function InlineToolCard({
         <span className="ml-auto shrink-0">
           {isPending ? (
             <span className="flex gap-0.5">
-              <span className="w-1 h-1 rounded-full bg-[var(--accent-orange)] animate-pulse-dot" style={{ animationDelay: "0s" }} />
-              <span className="w-1 h-1 rounded-full bg-[var(--accent-orange)] animate-pulse-dot" style={{ animationDelay: "0.2s" }} />
-              <span className="w-1 h-1 rounded-full bg-[var(--accent-orange)] animate-pulse-dot" style={{ animationDelay: "0.4s" }} />
+              <span
+                className="w-1 h-1 rounded-full bg-[var(--accent-orange)] animate-pulse-dot"
+                style={{ animationDelay: "0s" }}
+              />
+              <span
+                className="w-1 h-1 rounded-full bg-[var(--accent-orange)] animate-pulse-dot"
+                style={{ animationDelay: "0.2s" }}
+              />
+              <span
+                className="w-1 h-1 rounded-full bg-[var(--accent-orange)] animate-pulse-dot"
+                style={{ animationDelay: "0.4s" }}
+              />
             </span>
           ) : hasResult ? (
             <motion.span
@@ -536,13 +618,18 @@ export function InlineToolCard({
           className="th-tool-result-rich"
         >
           <div className="flex items-start gap-2">
-            <BookOpen size={12} className="mt-0.5 shrink-0 text-[var(--accent-orange)]" />
+            <BookOpen
+              size={12}
+              className="mt-0.5 shrink-0 text-[var(--accent-orange)]"
+            />
             <div className="min-w-0 text-left">
               <div className="text-[11px] font-medium text-text-primary truncate">
                 {parsed.title}
               </div>
               <div className="flex items-center gap-1.5 mt-0.5">
-                {parsed.domain && <span className="th-tool-domain-tag">{parsed.domain}</span>}
+                {parsed.domain && (
+                  <span className="th-tool-domain-tag">{parsed.domain}</span>
+                )}
                 {parsed.score != null && (
                   <span className="text-[9px] text-text-tertiary tabular-nums">
                     {(parsed.score * 100).toFixed(0)}% relevance
@@ -555,7 +642,10 @@ export function InlineToolCard({
                 </div>
               )}
             </div>
-            <ChevronDown size={10} className={`shrink-0 mt-1 text-text-tertiary transition-transform ${resultExpanded ? "rotate-0" : "-rotate-90"}`} />
+            <ChevronDown
+              size={10}
+              className={`shrink-0 mt-1 text-text-tertiary transition-transform ${resultExpanded ? "rotate-0" : "-rotate-90"}`}
+            />
           </div>
         </button>
       )}
@@ -569,11 +659,22 @@ export function InlineToolCard({
       {hasResult && isLast && isStreaming && (
         <div className="flex items-center gap-1.5 ml-[26px] mt-1 text-text-tertiary">
           <span className="flex gap-0.5">
-            <span className="w-1 h-1 rounded-full bg-[var(--accent-orange)] animate-pulse-dot" style={{ animationDelay: "0s" }} />
-            <span className="w-1 h-1 rounded-full bg-[var(--accent-orange)] animate-pulse-dot" style={{ animationDelay: "0.2s" }} />
-            <span className="w-1 h-1 rounded-full bg-[var(--accent-orange)] animate-pulse-dot" style={{ animationDelay: "0.4s" }} />
+            <span
+              className="w-1 h-1 rounded-full bg-[var(--accent-orange)] animate-pulse-dot"
+              style={{ animationDelay: "0s" }}
+            />
+            <span
+              className="w-1 h-1 rounded-full bg-[var(--accent-orange)] animate-pulse-dot"
+              style={{ animationDelay: "0.2s" }}
+            />
+            <span
+              className="w-1 h-1 rounded-full bg-[var(--accent-orange)] animate-pulse-dot"
+              style={{ animationDelay: "0.4s" }}
+            />
           </span>
-          <span className="text-[10px]">Wiii dang doi chieu ket qua vua lay ve...</span>
+          <span className="text-[10px]">
+            Wiii đang đối chiếu kết quả vừa lấy về...
+          </span>
         </div>
       )}
     </div>

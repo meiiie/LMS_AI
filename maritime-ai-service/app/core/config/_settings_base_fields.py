@@ -24,6 +24,7 @@ from app.engine.model_catalog import (
     NVIDIA_DEFAULT_BASE_URL,
     NVIDIA_DEFAULT_MODEL,
     NVIDIA_DEFAULT_MODEL_ADVANCED,
+    NVIDIA_DEFAULT_VISION_MODEL,
     ZHIPU_DEFAULT_MODEL,
     ZHIPU_DEFAULT_MODEL_ADVANCED,
     get_embedding_dimensions,
@@ -143,6 +144,7 @@ class BaseSettingsFieldsMixin:
 
     # Course Generation (design spec v2.0, 2026-03-22)
     use_docling_for_course_gen: bool = Field(default=False, description="Use Docling for document conversion (requires pip install docling)")
+    markitdown_enable_plugins: bool = Field(default=False, description="Enable MarkItDown third-party plugins for document conversion")
     docling_vlm_backend: str = Field(default="none", description="VLM backend for scanned pages: 'gemini', 'ollama', 'none'")
     docling_vlm_api_url: Optional[str] = Field(default=None, description="VLM API URL for Docling scanned page extraction")
     docling_vlm_api_key: Optional[str] = Field(default=None, description="VLM API key for Docling", repr=False)
@@ -183,6 +185,63 @@ class BaseSettingsFieldsMixin:
         default=False,
         description="Use astream for real token-by-token code generation (replaces fake chunking)",
     )
+    # Code Studio resilience timeouts (Sprint 35d) — operator-tunable so the
+    # graceful HTML scaffold can engage well before user-facing HTTP timeouts.
+    code_studio_stream_overall_timeout_seconds: float = Field(
+        default=90.0,
+        ge=15.0,
+        le=600.0,
+        description="Hard ceiling for the streaming code-gen pass; cancels astream + engages topic-aware scaffold when exceeded.",
+    )
+    code_studio_chunk_timeout_seconds: float = Field(
+        default=30.0,
+        ge=5.0,
+        le=300.0,
+        description="Per-chunk timeout when waiting on the next astream token; small enough to break out of NVIDIA NIM heartbeat-only streams.",
+    )
+    code_studio_code_done_timeout_seconds: float = Field(
+        default=30.0,
+        ge=5.0,
+        le=180.0,
+        description="Grace period after code_html is fully extracted to wait for the matching tool_call to land before forcing the round complete.",
+    )
+    code_studio_llm_hard_timeout_seconds: float = Field(
+        default=90.0,
+        ge=15.0,
+        le=600.0,
+        description="Hard ceiling for the non-streaming planning ainvoke call; engages graceful scaffold on exceeded.",
+    )
+    code_studio_fallback_ainvoke_timeout_seconds: float = Field(
+        default=60.0,
+        ge=10.0,
+        le=300.0,
+        description="Timeout for the moderate-tier fallback ainvoke after the primary planning call fails; kept tight so the scaffold can engage quickly.",
+    )
+    code_studio_post_tool_synthesis_timeout_seconds: float = Field(
+        default=90.0,
+        ge=15.0,
+        le=600.0,
+        description="Hard ceiling for the synthesizer LLM call invoked AFTER tool execution. Without this cap the graceful-scaffold path stretched to 17+ minutes when NVIDIA NIM stalled mid-stream; capping at 90s lets the canned scaffold caption engage instead.",
+    )
+
+    # Wiii Pointy v2.6 — agentic loop safety caps. Modern SOTA agents
+    # (Anthropic Computer Use 2026 ref, Manus AI, Cursor 3.0, Ralph)
+    # exit naturally when LLM stops calling tools; the cap is a runaway
+    # protection, not a target. Default 12 rounds matches Anthropic
+    # Computer Use ref impl (10) + a small margin for multi-step pointy
+    # tours (5-button guide needs 5 pointy rounds + 1 synthesis).
+    direct_agent_max_tool_rounds: int = Field(
+        default=12,
+        ge=1,
+        le=30,
+        description="Safety cap on the DIRECT agent's tool-calling loop. Loop exits naturally when LLM emits no more tool_calls; this is the upper bound to prevent runaway. Bump for power-users / autonomous flows; lower for cost control. Pre-v2.6 default was 3 (too tight for multi-step pointy tours).",
+    )
+    code_studio_max_tool_rounds: int = Field(
+        default=8,
+        ge=1,
+        le=20,
+        description="Safety cap on Code Studio tool-calling loop. Lower than DIRECT because each Code Studio round invokes NVIDIA NIM with full canvas spec (~60s) — runaway cost is higher.",
+    )
 
     postgres_url = property(build_postgres_url)
     asyncpg_url = property(build_asyncpg_url)
@@ -214,6 +273,10 @@ class BaseSettingsFieldsMixin:
     nvidia_base_url: Optional[str] = Field(default=NVIDIA_DEFAULT_BASE_URL, description="NVIDIA NIM API base URL")
     nvidia_model: str = Field(default=NVIDIA_DEFAULT_MODEL, description="NVIDIA model for general tasks")
     nvidia_model_advanced: str = Field(default=NVIDIA_DEFAULT_MODEL_ADVANCED, description="NVIDIA model for complex tasks")
+    nvidia_vision_model: str = Field(
+        default=NVIDIA_DEFAULT_VISION_MODEL,
+        description="NVIDIA NIM VLM model for image understanding tasks",
+    )
     openrouter_model_fallbacks: list[str] = Field(
         default_factory=list,
         description="Ordered fallback models for OpenRouter requests",

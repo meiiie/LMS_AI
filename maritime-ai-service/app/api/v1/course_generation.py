@@ -79,7 +79,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/course-generation", tags=["Course Generation"])
 
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".pptx"}
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
 RECOVERABLE_PHASES = (
     "CONVERTING",
     "EXPANDING",

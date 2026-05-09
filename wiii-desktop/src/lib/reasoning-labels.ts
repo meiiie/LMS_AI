@@ -13,6 +13,7 @@ export const TOOL_LABELS: Record<string, string> = {
   tool_search_news: "Tìm tin tức",
   tool_search_legal: "Tra cứu pháp luật",
   tool_search_maritime: "Tìm kiếm hàng hải",
+  tool_fetch_url: "Đọc chi tiết URL",
   tool_current_datetime: "Thời gian hiện tại",
   tool_calculator: "Máy tính",
   tool_think: "Suy nghĩ",

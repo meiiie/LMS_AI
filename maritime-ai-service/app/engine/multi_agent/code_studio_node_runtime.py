@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
 
+from app.engine.multi_agent.code_studio_template_scaffold import (
+    build_scaffold_visible_caption,
+    detect_scaffold_kind,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.reasoning import (
     record_thinking_snapshot,
     resolve_visible_thinking_from_lifecycle,
 )
+from app.engine.runtime.runtime_metrics import inc_counter
 
 
 async def code_studio_node_impl(
@@ -324,11 +328,28 @@ async def code_studio_node_impl(
             )
     except Exception as e:
         logger.error("[CODE_STUDIO] Generation failed: %s", e, exc_info=True)
-        response = "Mình gặp trục trặc khi mở Code Studio. Bạn thử lại giúp mình nhé."
+        # Even when the upstream tool-rounds path could not engage its own
+        # scaffold (e.g. tool collection or message building threw early),
+        # speak to the user in the same source-backed-fallback voice — never
+        # ship a generic "có trục trặc" message that hides actual progress.
+        response = build_scaffold_visible_caption(query)
+        try:
+            inc_counter(
+                "wiii.code_studio.scaffold.engaged",
+                labels={
+                    "kind": detect_scaffold_kind(query),
+                    "reason": f"node_outer_{type(e).__name__}",
+                },
+            )
+        except Exception:  # noqa: BLE001 — never let metrics break a request
+            pass
         tracer.end_step(
             result=f"Fallback (code studio error: {type(e).__name__})",
             confidence=0.5,
-            details={"response_type": "fallback", "error": str(e)[:200]},
+            details={
+                "response_type": "code_studio_template_fallback",
+                "error": str(e)[:200],
+            },
         )
 
     if not state.get("thinking_content"):

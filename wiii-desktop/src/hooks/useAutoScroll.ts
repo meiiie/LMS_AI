@@ -11,11 +11,11 @@ export function useAutoScroll(dependency: unknown) {
   const isUserScrolledUp = useRef(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     if (containerRef.current) {
       containerRef.current.scrollTo({
         top: containerRef.current.scrollHeight,
-        behavior: "smooth",
+        behavior,
       });
       isUserScrolledUp.current = false;
       setIsAtBottom(true);

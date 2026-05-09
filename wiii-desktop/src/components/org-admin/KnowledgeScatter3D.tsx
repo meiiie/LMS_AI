@@ -4,11 +4,15 @@
  * Plotly 3D scatter showing embedding clusters with interactive rotation.
  * Lazy-loaded to avoid bundle bloat.
  */
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 import type { ComponentType } from "react";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, PlayCircle } from "lucide-react";
 import { getKnowledgeScatter } from "@/api/admin";
-import type { ScatterResponse, ScatterDocument, ScatterPoint } from "@/api/types";
+import type {
+  ScatterResponse,
+  ScatterDocument,
+  ScatterPoint,
+} from "@/api/types";
 
 // Lazy-load Plotly (1.5MB gl3d-dist-min)
 const Plot = lazy(async () => {
@@ -37,7 +41,11 @@ export function KnowledgeScatter3D({ orgId }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const res = await getKnowledgeScatter(orgId, { method, dimensions: 3, limit });
+      const res = await getKnowledgeScatter(orgId, {
+        method,
+        dimensions: 3,
+        limit,
+      });
       setData(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Lỗi tải dữ liệu");
@@ -46,38 +54,116 @@ export function KnowledgeScatter3D({ orgId }: Props) {
     }
   }, [orgId, method, limit]);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const controls = (
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3 text-xs sm:flex-row sm:flex-wrap sm:items-center">
+      <div className="flex items-center gap-2">
+        <span className="text-text-secondary">Phương pháp:</span>
+        <select
+          value={method}
+          onChange={(e) => setMethod(e.target.value as "pca" | "tsne")}
+          className="rounded-lg border border-border bg-surface px-2 py-1 text-xs text-text"
+        >
+          <option value="pca">PCA</option>
+          <option value="tsne">t-SNE</option>
+        </select>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-text-secondary">Giới hạn:</span>
+        <input
+          type="range"
+          min={100}
+          max={1000}
+          step={100}
+          value={limit}
+          onChange={(e) => setLimit(Number(e.target.value))}
+          className="w-28"
+        />
+        <span className="w-8 text-text-tertiary">{limit}</span>
+      </div>
+      {data && (
+        <span className="text-text-tertiary sm:ml-auto">
+          {data.points.length} điểm | {data.computation_ms}ms | {data.method}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={fetchData}
+        disabled={loading}
+        className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 sm:ml-auto"
+      >
+        {loading ? (
+          <Loader2 size={14} className="animate-spin" />
+        ) : (
+          <PlayCircle size={14} />
+        )}
+        {data ? "Cập nhật" : "Tạo biểu đồ"}
+      </button>
+    </div>
+  );
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12 text-text-secondary">
-        <Loader2 size={20} className="animate-spin mr-2" />
-        Đang tính toán...
+      <div className="space-y-3">
+        {controls}
+        <div className="flex items-center justify-center rounded-xl border border-border bg-surface/70 py-12 text-text-secondary">
+          <Loader2 size={20} className="mr-2 animate-spin" />
+          Đang dựng không gian 3D cho các phân đoạn tài liệu...
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex items-center gap-2 py-8 justify-center text-red-500 text-sm">
-        <AlertCircle size={16} />
-        {error}
+      <div className="space-y-3">
+        {controls}
+        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-8 text-center text-sm text-red-600 dark:border-red-900/60 dark:bg-red-950/20">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} />
+            {error}
+          </div>
+          <p className="max-w-lg text-xs text-red-500/80">
+            3D cần tải thêm thư viện và dữ liệu nhiều hơn. Nếu chậm, hãy giảm
+            giới hạn hoặc dùng 2D trước.
+          </p>
+        </div>
       </div>
     );
   }
 
   if (!data || data.points.length === 0) {
     return (
-      <div className="text-center py-8 text-text-tertiary text-sm">
-        Chưa có dữ liệu embedding. Tải lên tài liệu PDF trước.
+      <div className="space-y-3">
+        {controls}
+        <div className="rounded-xl border border-dashed border-border bg-surface/60 px-4 py-8 text-center">
+          <PlayCircle
+            size={28}
+            className="mx-auto mb-3 text-text-tertiary opacity-60"
+          />
+          <p className="text-sm font-medium text-text">Chưa chạy biểu đồ 3D.</p>
+          <p className="mx-auto mt-2 max-w-xl text-xs leading-5 text-text-secondary">
+            Bấm tạo biểu đồ khi cần xoay và quan sát cụm embedding theo không
+            gian 3 chiều. Wiii sẽ không tải Plotly hay gọi API nặng trước khi
+            bạn yêu cầu.
+          </p>
+          <button
+            type="button"
+            onClick={fetchData}
+            className="mt-4 inline-flex min-h-9 items-center justify-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90"
+          >
+            <PlayCircle size={14} />
+            Tạo biểu đồ 3D
+          </button>
+        </div>
       </div>
     );
   }
 
   // Group by document for traces
-  const grouped = new Map<string, { doc: ScatterDocument; points: ScatterPoint[] }>();
+  const grouped = new Map<
+    string,
+    { doc: ScatterDocument; points: ScatterPoint[] }
+  >();
   for (const doc of data.documents) {
     grouped.set(doc.id, { doc, points: [] });
   }
@@ -94,7 +180,8 @@ export function KnowledgeScatter3D({ orgId }: Props) {
     y: points.map((p) => p.y),
     z: points.map((p) => p.z ?? 0),
     text: points.map(
-      (p) => `${p.document_name}${p.page_number != null ? ` (tr.${p.page_number})` : ""}\n${p.content_preview}`
+      (p) =>
+        `${p.document_name}${p.page_number != null ? ` (tr.${p.page_number})` : ""}\n${p.content_preview}`,
     ),
     hoverinfo: "text" as const,
     marker: {
@@ -104,7 +191,9 @@ export function KnowledgeScatter3D({ orgId }: Props) {
     },
   }));
 
-  const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const isDark =
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark");
 
   const layout = {
     autosize: true,
@@ -123,36 +212,7 @@ export function KnowledgeScatter3D({ orgId }: Props) {
 
   return (
     <div className="space-y-3">
-      {/* Controls */}
-      <div className="flex items-center gap-4 text-xs">
-        <div className="flex items-center gap-2">
-          <span className="text-text-secondary">Phương pháp:</span>
-          <select
-            value={method}
-            onChange={(e) => setMethod(e.target.value as "pca" | "tsne")}
-            className="rounded-lg border border-border bg-surface px-2 py-1 text-xs text-text"
-          >
-            <option value="pca">PCA</option>
-            <option value="tsne">t-SNE</option>
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-text-secondary">Giới hạn:</span>
-          <input
-            type="range"
-            min={100}
-            max={1000}
-            step={100}
-            value={limit}
-            onChange={(e) => setLimit(Number(e.target.value))}
-            className="w-24"
-          />
-          <span className="text-text-tertiary w-8">{limit}</span>
-        </div>
-        <span className="text-text-tertiary ml-auto">
-          {data.points.length} điểm | {data.computation_ms}ms | {data.method}
-        </span>
-      </div>
+      {controls}
 
       {/* 3D Chart */}
       <div className="rounded-xl border border-border bg-surface p-4">
@@ -167,7 +227,11 @@ export function KnowledgeScatter3D({ orgId }: Props) {
           <Plot
             data={traces}
             layout={layout}
-            config={{ responsive: true, displayModeBar: true, displaylogo: false }}
+            config={{
+              responsive: true,
+              displayModeBar: true,
+              displaylogo: false,
+            }}
             style={{ width: "100%", height: 450 }}
           />
         </Suspense>

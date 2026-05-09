@@ -264,6 +264,19 @@ class TestContentFilterSeverity:
         assert result.severity == Severity.ALLOW
         assert "cac" not in result.matched_terms
 
+    def test_buoi_report_context_is_not_blocked(self):
+        """Safe session/meeting contexts must not be confused with vulgar slang."""
+        f = ContentFilter()
+        result = f.check("Minh hoi cang truoc buoi bao cao")
+        assert result.severity == Severity.ALLOW
+        assert "buoi" not in result.matched_terms
+
+    def test_buoi_standalone_still_blocks(self):
+        f = ContentFilter()
+        result = f.check("buoi")
+        assert result.severity >= Severity.BLOCK
+        assert "buoi" in result.matched_terms
+
 # =============================================================================
 # Word Boundary Matching Tests
 # =============================================================================

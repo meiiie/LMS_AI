@@ -33,6 +33,13 @@ INAPPROPRIATE_PRONOUNS = [
 ]
 
 
+def _contains_inappropriate_pronoun(message_lower: str, bad_word: str) -> bool:
+    """Match pronoun/profanity cues as terms, not substrings inside words."""
+    if not message_lower or not bad_word:
+        return False
+    return re.search(rf"(?<!\w){re.escape(bad_word)}(?!\w)", message_lower) is not None
+
+
 def _get_time_of_day_label(hour: int) -> tuple[str, str]:
     if 6 <= hour < 12:
         return "buổi sáng", ""
@@ -65,7 +72,7 @@ def detect_pronoun_style(message: str) -> Optional[Dict[str, str]]:
     message_lower = message.lower()
 
     for bad_word in INAPPROPRIATE_PRONOUNS:
-        if bad_word in message_lower:
+        if _contains_inappropriate_pronoun(message_lower, bad_word):
             logger.warning("Inappropriate pronoun detected: %s", bad_word)
             return None
 

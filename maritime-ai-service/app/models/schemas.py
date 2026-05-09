@@ -2,24 +2,18 @@
 Pydantic Schemas for API Request/Response
 Requirements: 1.1, 1.5, 1.6
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from typing import Any, Literal, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
 from app.models.host_context_schemas import (
-    HostActionAuditRequest,
-    HostActionAuditResponse,
-    HostManifestV1,
-    HostResourceV1,
-    HostToolV1,
     ImageInput,
     PageContext,
     StudentPageState,
     UserContext,
     UserRole,
-    WidgetResultV1,
     utc_now,
 )
 
@@ -126,6 +120,33 @@ class ChatRequest(BaseModel):
         default=None,
         max_length=5,
         description="Optional images for multimodal chat. Max 5 images per request."
+    )
+
+    # Wiii Pointy v2.8: explicit `@plugin-name` mention force-bind.
+    # Frontend parses `@wiii-pointy`, `@web-search`, `@visual-code-gen`
+    # mentions từ chat input → set force_skills=[<canonical-id>, ...]
+    # Backend bypass `_needs_pointy/_needs_news/_needs_legal` intent
+    # gates và force-bind tools + inject SKILL bất kể keyword match.
+    # Pattern chuẩn SOTA 2026: Cursor `@codebase`, GitHub Copilot
+    # `@workspace`, Claude Code `@file`, Cline `@docs`.
+    force_skills: Optional[list[str]] = Field(
+        default=None,
+        max_length=10,
+        description="Explicit skill invocation từ @ mentions trong chat input. "
+                    "Bypass keyword intent gating. Skill ids: 'wiii-pointy', "
+                    "'web-search', 'visual-code-gen'."
+    )
+
+    # F18 Phase B (2026-05-07) — Pointy mode UX flag.
+    # When True, every query is treated as UI-navigation intent: backend
+    # auto-injects "wiii-pointy" into force_skills, forces tool_choice=
+    # "tool_pointy_show" with enum-constrained selector. AI persona shifts
+    # to "cursor agent" — terse, action-focused, always pointing.
+    # Inspired by Cursor's agent-mode toggle + Claude Code --agent flag.
+    pointy_mode: Optional[bool] = Field(
+        default=False,
+        description="When True, treat user as talking directly to the cursor. "
+                    "Forces deterministic tool_pointy_show invocation per turn.",
     )
 
     @field_validator("message")

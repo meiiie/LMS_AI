@@ -3,9 +3,30 @@
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _fold_source_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or "").lower())
+    folded = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", folded).strip()
+
+
+def answer_declines_rag_sources_impl(answer: str) -> bool:
+    """Detect answers that explicitly refused to attach retrieved RAG sources."""
+    folded = _fold_source_text(answer)
+    return any(
+        marker in folded
+        for marker in (
+            "khong gan citation rag",
+            "chua thay nguon noi bo that su khop",
+            "chua co du doan nguon ro rang",
+        )
+    )
 
 
 def _normalize_cached_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -206,9 +227,11 @@ def build_final_result_impl(
     evidence_images: list[dict[str, Any]],
 ) -> Any:
     """Create the public CorrectiveRAGResult payload."""
+    safe_sources = [] if answer_declines_rag_sources_impl(answer) else sources
+    safe_evidence_images = [] if not safe_sources else evidence_images
     return result_cls(
         answer=answer,
-        sources=sources,
+        sources=safe_sources,
         query_analysis=analysis,
         grading_result=grading_result,
         verification_result=verification_result,
@@ -219,7 +242,7 @@ def build_final_result_impl(
         reasoning_trace=reasoning_trace,
         thinking_content=thinking_content,
         thinking=thinking,
-        evidence_images=evidence_images,
+        evidence_images=safe_evidence_images,
     )
 
 
@@ -242,16 +265,17 @@ async def store_cache_response_impl(
         return
 
     try:
+        safe_sources = [] if answer_declines_rag_sources_impl(answer) else sources
         if query_embedding is None:
             query_embedding = await get_query_embedding_impl(query)
         if not query_embedding:
             logger.warning("[CRAG] Skipping cache store due to missing query embedding")
             return
 
-        doc_ids = [source.get("document_id", "") for source in sources if source.get("document_id")]
+        doc_ids = [source.get("document_id", "") for source in safe_sources if source.get("document_id")]
         cache_data = {
             "answer": answer,
-            "sources": sources,
+            "sources": safe_sources,
             "confidence": confidence,
             "thinking": thinking,
         }

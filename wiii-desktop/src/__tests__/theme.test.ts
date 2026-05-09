@@ -21,8 +21,34 @@ function mockMatchMedia(prefersDark = false) {
   });
 }
 
+function mockLocalStorage() {
+  let values: Record<string, string> = {};
+  const storage = {
+    getItem: vi.fn((key: string) => values[key] ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      values[key] = String(value);
+    }),
+    removeItem: vi.fn((key: string) => {
+      delete values[key];
+    }),
+    clear: vi.fn(() => {
+      values = {};
+    }),
+  };
+  Object.defineProperty(window, "localStorage", {
+    value: storage,
+    configurable: true,
+  });
+  Object.defineProperty(globalThis, "localStorage", {
+    value: storage,
+    configurable: true,
+  });
+  return storage;
+}
+
 describe("Theme Utilities", () => {
   beforeEach(() => {
+    mockLocalStorage();
     // Mock matchMedia before each test
     mockMatchMedia(false);
     // Clear dark class and localStorage

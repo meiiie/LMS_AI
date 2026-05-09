@@ -45,57 +45,68 @@ const ARTIFACT_LABELS: Record<ArtifactType, string> = {
   code: "Code",
   html: "HTML",
   react: "React",
-  table: "Bang du lieu",
-  chart: "Bieu do",
-  document: "Tai lieu",
+  table: "Bảng dữ liệu",
+  chart: "Biểu đồ",
+  document: "Tài liệu",
   excel: "Excel",
 };
 
 const ARTIFACT_CTA_LABELS: Record<ArtifactType, string> = {
-  code: "Mo chi tiet",
-  html: "Mo ban xem",
-  react: "Mo ban xem",
-  table: "Mo bang",
-  chart: "Mo bieu do",
-  document: "Mo tai lieu",
-  excel: "Mo bang tinh",
+  code: "Mở chi tiết",
+  html: "Mở bản xem",
+  react: "Mở bản xem",
+  table: "Mở bảng",
+  chart: "Mở biểu đồ",
+  document: "Mở tài liệu",
+  excel: "Mở bảng tính",
 };
 
 const MAX_PREVIEW_LINES = 6;
 
-export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCardProps) {
+export const ArtifactCard = memo(function ArtifactCard({
+  artifact,
+}: ArtifactCardProps) {
   const openArtifact = useUIStore((s) => s.openArtifact);
   const serverUrl = useSettingsStore((s) => s.settings.server_url);
   const Icon = ARTIFACT_ICONS[artifact.artifact_type] || Code2;
-  const label = ARTIFACT_LABELS[artifact.artifact_type] || artifact.artifact_type;
-  const ctaLabel = ARTIFACT_CTA_LABELS[artifact.artifact_type] || "Mo chi tiet";
+  const label =
+    ARTIFACT_LABELS[artifact.artifact_type] || artifact.artifact_type;
+  const ctaLabel = ARTIFACT_CTA_LABELS[artifact.artifact_type] || "Mở chi tiết";
   const resolvedFileUrl = resolveArtifactFileUrl(artifact, serverUrl);
   const downloadable = artifactHasBinaryFile(artifact);
   const previewText = artifactPreviewSnippet(artifact, 220);
   const lines = previewText.split("\n");
   const previewLines = lines.slice(0, MAX_PREVIEW_LINES);
   const hasMore = lines.length > MAX_PREVIEW_LINES;
-  const useRichPreview = artifact.artifact_type !== "code" && artifact.artifact_type !== "react";
+  const useRichPreview =
+    artifact.artifact_type !== "code" && artifact.artifact_type !== "react";
 
-  const excelMeta = artifact.artifact_type === "excel"
-    ? `${artifact.metadata?.row_count ?? "?"} hang x ${artifact.metadata?.column_count ?? "?"} cot`
-    : null;
+  const excelMeta =
+    artifact.artifact_type === "excel"
+      ? `${artifact.metadata?.row_count ?? "?"} hàng x ${artifact.metadata?.column_count ?? "?"} cột`
+      : null;
   const subMeta = excelMeta || describeArtifactFile(artifact);
 
   const handleOpen = useCallback(() => {
     openArtifact(artifact.artifact_id);
   }, [openArtifact, artifact.artifact_id]);
 
-  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      handleOpen();
-    }
-  }, [handleOpen]);
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLElement>) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        handleOpen();
+      }
+    },
+    [handleOpen],
+  );
 
-  const handleDownloadClick = useCallback((event: MouseEvent<HTMLAnchorElement>) => {
-    event.stopPropagation();
-  }, []);
+  const handleDownloadClick = useCallback(
+    (event: MouseEvent<HTMLAnchorElement>) => {
+      event.stopPropagation();
+    },
+    [],
+  );
 
   return (
     <article
@@ -104,7 +115,7 @@ export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCar
       onClick={handleOpen}
       onKeyDown={handleKeyDown}
       className="artifact-card-shell group/artifact"
-      aria-label={`Mo artifact: ${artifact.title}`}
+      aria-label={`Mở artifact: ${artifact.title}`}
     >
       <div className="artifact-card-shell__header">
         <div className="artifact-card-shell__icon">
@@ -114,10 +125,16 @@ export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCar
         <div className="min-w-0 flex-1">
           <div className="artifact-card-shell__eyebrow">
             <span className="artifact-card-shell__type">{label}</span>
-            {artifact.language && <span className="artifact-card-shell__language">{artifact.language}</span>}
+            {artifact.language && (
+              <span className="artifact-card-shell__language">
+                {artifact.language}
+              </span>
+            )}
           </div>
           <div className="artifact-card-shell__title">{artifact.title}</div>
-          {subMeta && <div className="artifact-card-shell__meta">{subMeta}</div>}
+          {subMeta && (
+            <div className="artifact-card-shell__meta">{subMeta}</div>
+          )}
         </div>
 
         <div className="artifact-card-shell__actions">
@@ -133,11 +150,11 @@ export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCar
               rel="noreferrer"
               onClick={handleDownloadClick}
               className="artifact-card-shell__download"
-              title="Tai file"
-              aria-label={`Tai file ${artifact.title}`}
+              title="Tải file"
+              aria-label={`Tải file ${artifact.title}`}
             >
               <Download size={13} />
-              Tai file
+              Tải file
             </a>
           )}
         </div>
@@ -162,24 +179,25 @@ export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCar
         <div
           className="artifact-card-shell__status"
           role="status"
-          aria-label={`Trang thai: ${artifact.metadata.execution_status}`}
+          aria-label={`Trạng thái: ${artifact.metadata.execution_status}`}
         >
           <span
             className={`w-1.5 h-1.5 rounded-full ${
               artifact.metadata.execution_status === "success"
                 ? "bg-green-500"
                 : artifact.metadata.execution_status === "error"
-                ? "bg-red-500"
-                : artifact.metadata.execution_status === "running"
-                ? "bg-amber-500 animate-pulse"
-                : "bg-gray-400"
+                  ? "bg-red-500"
+                  : artifact.metadata.execution_status === "running"
+                    ? "bg-amber-500 animate-pulse"
+                    : "bg-gray-400"
             }`}
           />
           <span className="text-[10px] text-text-tertiary">
-            {artifact.metadata.execution_status === "success" && "Da chay thanh cong"}
-            {artifact.metadata.execution_status === "error" && "Loi thuc thi"}
-            {artifact.metadata.execution_status === "running" && "Dang chay..."}
-            {artifact.metadata.execution_status === "pending" && "Chua chay"}
+            {artifact.metadata.execution_status === "success" &&
+              "Đã chạy thành công"}
+            {artifact.metadata.execution_status === "error" && "Lỗi thực thi"}
+            {artifact.metadata.execution_status === "running" && "Đang chạy..."}
+            {artifact.metadata.execution_status === "pending" && "Chưa chạy"}
           </span>
         </div>
       )}

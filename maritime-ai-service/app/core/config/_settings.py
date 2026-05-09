@@ -133,7 +133,7 @@ class Settings(BaseSettingsFieldsMixin, FeatureSettingsMixin, BaseSettings):
         lambda cls, v: validate_choice_value(
             "vision_provider",
             v,
-            ["google", "openai", "openrouter", "ollama", "zhipu", "auto"],
+            ["google", "openai", "openrouter", "nvidia", "ollama", "zhipu", "auto"],
         )
     )
     validate_vision_capability_provider = field_validator(
@@ -144,7 +144,7 @@ class Settings(BaseSettingsFieldsMixin, FeatureSettingsMixin, BaseSettings):
         lambda cls, v: validate_choice_value(
             "vision_capability_provider",
             v,
-            ["google", "openai", "openrouter", "ollama", "zhipu", "auto"],
+            ["google", "openai", "openrouter", "nvidia", "ollama", "zhipu", "auto"],
         )
     )
     validate_sandbox_provider = field_validator("sandbox_provider")(

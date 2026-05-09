@@ -250,4 +250,28 @@ describe("Chat Persistence — isLoaded flag", () => {
     await useChatStore.getState().loadConversations();
     expect(useChatStore.getState().isLoaded).toBe(true);
   });
+
+  it("should remain true after logout clear so App can leave boot splash", () => {
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "conv-logout",
+          title: "Logout case",
+          domain_id: "maritime",
+          created_at: "2026-05-09T00:00:00Z",
+          updated_at: "2026-05-09T00:00:00Z",
+          messages: [],
+        },
+      ],
+      activeConversationId: "conv-logout",
+      isLoaded: true,
+    });
+
+    useChatStore.getState().clearForLogout();
+
+    const state = useChatStore.getState();
+    expect(state.conversations).toEqual([]);
+    expect(state.activeConversationId).toBeNull();
+    expect(state.isLoaded).toBe(true);
+  });
 });

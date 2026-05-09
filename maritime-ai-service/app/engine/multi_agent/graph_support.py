@@ -48,6 +48,7 @@ def _build_turn_local_state_defaults(context: Optional[dict] = None) -> dict:
         "host_session_prompt": None,
         "operator_session": None,
         "operator_context_prompt": None,
+        "document_context_prompt": None,
         "living_context_prompt": None,
         "memory_block_context": None,
         "reasoning_policy": None,
