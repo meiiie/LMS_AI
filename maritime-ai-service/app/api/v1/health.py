@@ -339,9 +339,12 @@ def _build_llm_model_health_report() -> dict:
             )
 
     degraded_count = sum(1 for item in models if item.get("state") == "degraded")
+    healthy_count = sum(1 for item in models if item.get("state") == "healthy")
+    all_known_models_degraded = bool(models) and degraded_count >= len(models)
     return {
-        "status": "degraded" if degraded_count else "healthy",
+        "status": "degraded" if all_known_models_degraded else "healthy",
         "model_count": len(models),
+        "healthy_count": healthy_count,
         "degraded_count": degraded_count,
         "models": models,
     }
@@ -354,14 +357,21 @@ async def check_llm_model_health() -> ComponentHealth:
         report = _build_llm_model_health_report()
         latency = (time.time() - start) * 1000
         model_count = report["model_count"]
+        healthy_count = report["healthy_count"]
         degraded_count = report["degraded_count"]
 
         if model_count == 0:
             status = ComponentStatus.HEALTHY
             message = "No model health records yet"
-        elif degraded_count:
+        elif degraded_count >= model_count:
             status = ComponentStatus.DEGRADED
-            message = f"{degraded_count}/{model_count} model(s) degraded"
+            message = f"All {model_count} model(s) degraded"
+        elif degraded_count:
+            status = ComponentStatus.HEALTHY
+            message = (
+                f"{degraded_count}/{model_count} model(s) degraded; "
+                f"{healthy_count} model(s) healthy for routing"
+            )
         else:
             status = ComponentStatus.HEALTHY
             message = f"{model_count} model health record(s), all healthy"
