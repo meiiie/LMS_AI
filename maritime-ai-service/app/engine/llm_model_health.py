@@ -21,6 +21,7 @@ _DEGRADING_REASON_CODES = {
     "server_error",
     "provider_unavailable",
     "host_down",
+    "auth_error",
 }
 
 

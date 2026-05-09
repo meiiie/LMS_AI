@@ -65,6 +65,7 @@ FEATURE_TIER_GROUPS: Final[dict[FeatureTier, frozenset[str]]] = {
             "enable_corrective_rag",
             "enable_enhanced_extraction",
             "enable_llm_failover",
+            "enable_llm_model_health_probes",
             "enable_memory_decay",
             "enable_memory_pruning",
             "enable_network_interception",

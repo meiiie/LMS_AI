@@ -196,6 +196,12 @@ async def shutdown_application(resources: AppRuntimeResources, logger_: logging.
         "runtime audit loop", resources.runtime_audit_loop_task, logger_
     )
     await _cancel_background_task(
+        "model health probe", resources.model_health_probe_task, logger_
+    )
+    await _cancel_background_task(
+        "model health probe loop", resources.model_health_probe_loop_task, logger_
+    )
+    await _cancel_background_task(
         "magic link cleanup", resources.magic_link_cleanup_task, logger_
     )
     await _cancel_background_task(
