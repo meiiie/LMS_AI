@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { buildHostActionPreviewItem } from "@/hooks/useSSEStream";
 import { useHostContextStore } from "@/stores/host-context-store";
 
 describe("Host Action SSE + PostMessage Integration (Sprint 222b)", () => {
@@ -61,5 +62,43 @@ describe("Host Action SSE + PostMessage Integration (Sprint 222b)", () => {
     const feedback = useHostContextStore.getState().getActionFeedbackForRequest();
     expect(feedback?.last_action_result?.data?.preview_kind).toBe("quiz_commit");
     expect(feedback?.last_action_result?.summary).toBe("Quiz preview ready.");
+  });
+
+  it("preserves source references from host preview responses", () => {
+    const item = buildHostActionPreviewItem(
+      "authoring.preview_lesson_patch",
+      "req-source-1",
+      {},
+      {
+        preview_token: "lesson-preview-123",
+        preview_kind: "lesson_patch",
+        summary: "Lesson patch preview ready.",
+        lesson_title: "Bai hoc nguon",
+        source_references: [
+          {
+            kind: "lesson",
+            chapter_index: 1,
+            lesson_index: 0,
+            title: "Muc tai lieu",
+            source_pages: [7, "8-9"],
+          },
+        ],
+      },
+      {
+        host_type: "lms",
+        page: { type: "course_editor", title: "Course editor" },
+        workflow_stage: "editing",
+      } as never,
+    );
+
+    expect(item?.metadata?.source_references).toMatchObject([
+      {
+        kind: "lesson",
+        chapter_index: 1,
+        lesson_index: 0,
+        title: "Muc tai lieu",
+        source_pages: [7, "8-9"],
+      },
+    ]);
   });
 });
