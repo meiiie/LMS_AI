@@ -1,0 +1,68 @@
+name: Wiii x LMS integration
+description: Coordinate cross-repository Wiii and Maritime LMS product work.
+title: "[Wiii x LMS]: "
+labels:
+  - coord:watch
+  - integration:wiii-lms
+  - needs-triage
+body:
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: What product outcome should work end-to-end?
+      placeholder: "Teacher uploads a PDF/DOCX and Wiii creates a previewable lesson plan."
+    validations:
+      required: true
+  - type: textarea
+    id: repos
+    attributes:
+      label: Repository responsibilities
+      description: Split ownership between Wiii and LMS.
+      value: |
+        Wiii owns:
+        - Embed/iframe contract
+        - Pointy/voice/document parsing/course-generation API
+        - Preview/apply contract and source-grounded output
+
+        LMS owns:
+        - Angular host UI and route placement
+        - Stable data-wiii-id and safe-click metadata
+        - Teacher upload/review/apply UX
+        - LMS persistence and auth/token exchange
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ] Wiii issue/PR linked
+        - [ ] LMS issue/PR linked
+        - [ ] Product smoke prompt documented
+        - [ ] Screenshot or recording attached
+        - [ ] Preview -> confirm -> apply path verified
+        - [ ] Rollback notes included
+    validations:
+      required: true
+  - type: textarea
+    id: agent-sync
+    attributes:
+      label: Agent sync comment template
+      value: |
+        <!-- wiii-lms-sync:v1 -->
+        ROLE: observer-agent
+        STATUS: in_progress
+        BLOCKER: none
+        NEEDS_OTHER_REPO: none
+        EVIDENCE: issue created
+        NEXT_PATCH: assign first repo owner
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risk notes
+      description: Call out auth, tenant, LMS data mutation, document privacy, or deployment risk.
+    validations:
+      required: true
