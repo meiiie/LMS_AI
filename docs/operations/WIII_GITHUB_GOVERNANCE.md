@@ -283,7 +283,7 @@ A PR is release-ready only when:
 
 Repository hygiene rules:
 
-- Do not commit `.Codex/reports/`, `.Codex/tmp/`, `.Codex/external/`, `.claude/reports/`, dependency folders, caches, logs, screenshots, or local test outputs.
+- Do not commit `.Codex/`, `.claude/`, dependency folders, caches, logs, screenshots, local probes, or local test outputs.
 - Promote durable findings into `docs/operations/` or the relevant product docs.
 - Keep cleanup PRs separate from behavior changes.
 - Use explicit deletion targets instead of broad clean commands.

@@ -20,7 +20,8 @@ Primary areas:
 - `wiii-desktop/`: Tauri v2 desktop app, React 18, TypeScript, Zustand stores, SSE V3 streaming UI, embed app, frontend tests.
 - `docs/`: repository-level architecture, operations, governance, plans, and assets.
 - `.github/`: issue templates, PR template, CODEOWNERS, GitHub Actions, Dependabot, and review automation.
-- `.claude/`: legacy/local Claude Code notes. Treat as non-canonical unless a maintainer explicitly says otherwise; canonical governance, architecture, and cleanup truth lives in `AGENTS.md`, `docs/`, `.github/`, and active GitHub issues.
+
+Legacy local agent folders such as `.claude/` and `.Codex/` are not canonical and must not be committed. Canonical governance, architecture, and cleanup truth lives in `AGENTS.md`, `docs/`, `.github/`, `.agents/skills/`, and active GitHub issues.
 
 ## Operating Rules
 

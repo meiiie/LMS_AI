@@ -42,6 +42,7 @@ Release lines:
 - Consolidated operational governance under `docs/operations/` (GitHub governance, branch protection, multi-agent maintainer protocol, documentation governance, product release, and production auth runbooks).
 - `.coderabbit.yaml` shipped with path-specific review instructions for auth, RAG, multi-agent, living agent, MCP, Alembic, GitHub automation, and operations docs.
 - Removed legacy `.claude/reports/` and `.Codex/reports/` tracked trees from git; durable findings were promoted into `docs/operations/`.
+- Removed the remaining tracked `.claude/` legacy coordination tree and `.Codex` scratch sample; `CLAUDE.md` is now a thin compatibility redirect to `AGENTS.md`.
 
 ---
 

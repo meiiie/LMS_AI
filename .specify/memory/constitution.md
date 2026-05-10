@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Ratified: 2026-05-09
 
-Last amended: 2026-05-09
+Last amended: 2026-05-10
 
 ## Core Principles
 
@@ -37,7 +37,7 @@ Agents must protect unrelated dirty work, never revert changes they did not make
 
 ## Current Runtime Constraints
 
-The canonical source of truth is `AGENTS.md`, `docs/`, `.github/`, active GitHub issues, and current code. `.claude/` is legacy/local unless project leadership says otherwise.
+The canonical source of truth is `AGENTS.md`, `docs/`, `.github/`, `.agents/skills/`, active GitHub issues, and current code. Legacy local scratch folders such as `.claude/` and `.Codex/` must stay ignored and must not be treated as governance, runtime, or architecture truth.
 
 Wiii currently centers on these production surfaces:
 
@@ -77,4 +77,4 @@ This constitution complements `AGENTS.md` and `docs/operations/WIII_GITHUB_GOVER
 
 Amendments require a documented rationale, scope, migration notes when behavior changes, and review from project leadership or an explicitly delegated maintainer.
 
-**Version**: 1.0.0 | **Ratified**: 2026-05-09 | **Last Amended**: 2026-05-09
+**Version**: 1.0.1 | **Ratified**: 2026-05-09 | **Last Amended**: 2026-05-10

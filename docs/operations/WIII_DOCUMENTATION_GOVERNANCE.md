@@ -24,8 +24,8 @@ The repository may contain exploratory reports, but only reviewed documents in c
 | `docs/assets/` | Documentation assets referenced by canonical docs | Canonical only when referenced or explicitly retained as source material |
 | `maritime-ai-service/docs/` | Backend architecture, integration, and deployment docs | Canonical for backend scope |
 | `wiii-desktop/docs/` and `wiii-desktop/README.md` | Desktop-specific documentation | Canonical for desktop scope |
-| `.Codex/reports/` | Retired local scratch report path | Non-canonical, ignored |
-| `.claude/reports/` | Retired legacy scratch report path | Non-canonical, ignored |
+| `.Codex/` | Local Codex scratch output, logs, reports, and probes | Non-canonical, ignored |
+| `.claude/` | Retired legacy/local Claude scratch output | Non-canonical, ignored |
 
 ## Artifact Classes
 
@@ -57,6 +57,7 @@ Working reports should not grow without bounds.
 - Do not bulk-delete tracked reports, migrations, tests, data, or docs without a written inventory and review.
 - As of 2026-04-24, legacy tracked report trees were removed from source control. Do not re-add them; promote durable content into `docs/operations/` instead.
 - As of 2026-05-10, superseded checkpoint, audit, sprint-plan, and unreferenced screenshot artifacts were removed after current runbooks and issues became the source of truth.
+- As of 2026-05-10, tracked legacy `.claude/` coordination files and `.Codex` scratch samples were removed from `main`; use `AGENTS.md`, `.agents/skills/`, `docs/`, `.github/`, and active issues instead.
 
 Recommended review cadence:
 

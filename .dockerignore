@@ -5,6 +5,7 @@
 .vscode/
 .idea/
 .claude/
+.Codex/
 Documents/
 docs/
 tools/

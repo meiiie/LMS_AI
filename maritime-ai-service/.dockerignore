@@ -54,8 +54,9 @@ Dockerfile
 .DS_Store
 Thumbs.db
 
-# Claude multi-agent system
+# Local agent scratch systems
 .claude/
+.Codex/
 
 # Logs & temp
 *.log

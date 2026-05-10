@@ -13,7 +13,8 @@ This repository is optimized for ongoing product engineering, not as a minimal s
 - `docs/`: repository-level documentation, plans, diagrams, screenshots, and doc indexes
 - `Documents/`: supporting reference material and vendor research
 - `tools/`: utilities, fixtures, and one-off helpers
-- `.claude/`: legacy Claude-era agent workflows and project knowledge kept for reference; GitHub issues/PRs and `docs/operations/` are the current coordination surface
+
+Agent instructions now start from `AGENTS.md`, `.agents/skills/`, GitHub issues/PRs, and `docs/operations/`. Legacy local scratch folders such as `.claude/` and `.Codex/` are intentionally ignored and should not be committed.
 
 ## Architecture At A Glance
 

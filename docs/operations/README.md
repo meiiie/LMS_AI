@@ -22,7 +22,7 @@ Operational docs are different from exploratory reports:
 
 ## Promotion Rule
 
-Working reports may start in `.Codex/reports/` or `.claude/reports/`, but any report that should guide engineering work must be promoted here or into the relevant product area docs before it becomes authoritative.
+Working reports may start in local ignored scratch space such as `.Codex/reports/`, but any report that should guide engineering work must be promoted here or into the relevant product area docs before it becomes authoritative. Do not recreate tracked `.claude/` coordination trees.
 
 Historical checkpoints and one-off audits should not stay in this directory after
 their durable findings have moved into current runbooks, active issues, or git

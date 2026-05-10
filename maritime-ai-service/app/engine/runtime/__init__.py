@@ -13,8 +13,8 @@ Patterns borrowed from public engineering writing as of May 2026:
 - OpenAI Codex App Server — same harness drives every surface
 - Unsloth — lane-first architecture + canonical model config
 
-See ``.Codex/reports/RUNTIME-MIGRATION-EPIC-2026-05-02.md`` for the full
-plan and per-phase briefs.
+See ``maritime-ai-service/docs/architecture/RUNTIME-MIGRATION-FINAL-STATE.md``
+for the canonical migration state.
 """
 from .lane import ExecutionLane
 from .spec import RuntimeModelSpec

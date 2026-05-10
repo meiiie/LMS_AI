@@ -36,7 +36,7 @@ def configure_stdio() -> None:
 
 def parse_args() -> argparse.Namespace:
     repo_root = Path(__file__).resolve().parents[2]
-    default_output_dir = repo_root / ".claude" / "reports" / "visual-runtime-v3" / "artifacts"
+    default_output_dir = repo_root / ".Codex" / "reports" / "visual-runtime-v3" / "artifacts"
 
     parser = argparse.ArgumentParser(
         description="Run a real web smoke test for Wiii inline visuals.",

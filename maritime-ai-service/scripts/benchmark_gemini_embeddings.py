@@ -35,7 +35,7 @@ from app.engine.model_catalog import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CORPUS_PATH = Path(__file__).resolve().parent / "data" / "embedding_benchmark_corpus.json"
 DEFAULT_OUTPUT_PATH = (
-    REPO_ROOT / ".claude" / "reports" / "EMBEDDING-2-BENCHMARK-2026-03-11.md"
+    REPO_ROOT / ".Codex" / "reports" / "EMBEDDING-2-BENCHMARK-2026-03-11.md"
 )
 GO_THRESHOLD_RECALL_DELTA = 0.05
 GO_THRESHOLD_MRR_DELTA = 0.03

@@ -88,10 +88,11 @@ maritime-ai-service/.tmp-workspace/
 maritime-ai-service/.env.soul-agi
 wiii-desktop/scripts/screenshots/
 
-# === Claude Code artifacts ===
-.claude/plans/
-.claude/reports/
-.claude/tasks/
+# === Local agent scratch artifacts ===
+.claude/
+**/.claude/
+.Codex/
+**/.Codex/
 /plans/
 
 # === Large data files ===
@@ -114,11 +115,3 @@ pytest-cache-files-*
 !.agents/skills/speckit-*/SKILL.md
 **/AGENTS.md
 !/AGENTS.md
-.Codex/external/
-.Codex/tmp/
-.Codex/reports/
-.Codex/runtime-logs/
-**/.Codex/external/
-**/.Codex/tmp/
-**/.Codex/reports/
-**/.Codex/runtime-logs/
