@@ -331,6 +331,37 @@ def test_uploaded_document_marker_query_stays_deterministic():
     assert "Voice must be optional" in answer
 
 
+def test_uploaded_document_preview_request_bypasses_fact_fast_path():
+    from app.engine.multi_agent.direct_node_runtime import (
+        _looks_uploaded_context_fact_query,
+        _looks_uploaded_document_preview_request,
+    )
+
+    ctx = {
+        "document_context": {
+            "attachments": [
+                {
+                    "file_name": "bridge-watch.docx",
+                    "media_kind": "document",
+                    "parser": "markitdown",
+                    "markdown": (
+                        "Sổ tay trực ca buồng lái\n"
+                        "Marker kiểm thử: WIII_DOC_GOAL_123\n"
+                        "Checklist nguồn trang 4: xác nhận người trực ca.\n"
+                    ),
+                }
+            ]
+        }
+    }
+    query = (
+        "Dựa trên tài liệu Word vừa upload, hãy tạo preview_lesson_patch "
+        "có source_references page 4-5 và approval_token cho lesson hiện tại."
+    )
+
+    assert _looks_uploaded_document_preview_request(query)
+    assert not _looks_uploaded_context_fact_query(query, ctx)
+
+
 def test_uploaded_document_visual_guard_does_not_describe_frames_without_vision():
     from app.engine.multi_agent.direct_node_runtime import (
         _build_uploaded_document_visual_guard_answer,
