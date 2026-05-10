@@ -139,6 +139,15 @@ jobs:
             "APP_DIR='$APP_DIR' DEPLOY_SHA='$DEPLOY_SHA' WIII_APP_IMAGE='$WIII_APP_IMAGE' WIII_NGINX_IMAGE='$WIII_NGINX_IMAGE' REQUIRE_PINNED_IMAGES='$REQUIRE_PINNED_IMAGES' RUN_EXTERNAL_SMOKE='$RUN_EXTERNAL_SMOKE' BASE_URL='$BASE_URL' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$APP_DIR"
+          shopt -s nullglob
+          env_backups=(maritime-ai-service/.env.production.bak-*)
+          if [ "${#env_backups[@]}" -gt 0 ]; then
+            backup_dir="${HOME}/.wiii-deploy-env-backups/$(date -u +%Y%m%d_%H%M%S)"
+            mkdir -p "$backup_dir"
+            chmod 700 "${HOME}/.wiii-deploy-env-backups"
+            mv -- "${env_backups[@]}" "$backup_dir"/
+            echo "Moved ${#env_backups[@]} local env backup file(s) out of checkout before deploy."
+          fi
           bash ./maritime-ai-service/scripts/deploy/deploy.sh
           REMOTE
 
