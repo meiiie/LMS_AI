@@ -20,6 +20,12 @@ import { useToastStore } from "@/stores/toast-store";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import { LazyImage } from "@/components/chat/PreviewCard";
 import { slideInRight } from "@/lib/animations";
+import {
+  formatSourcePages,
+  normalizeSourceReferences,
+  sourceReferenceLabel,
+  type PreviewSourceReference,
+} from "@/lib/source-references";
 import type { PreviewItemData } from "@/api/types";
 
 const HOST_PREVIEW_APPROVAL_REQUIRED_MESSAGE =
@@ -167,6 +173,11 @@ function ExpandedPreview({ item }: { item: PreviewItemData }) {
   const isHostAction = item.preview_type === "host_action";
   const metadataEntries = isHostAction
     ? buildHostActionMetadataEntries(item)
+    : [];
+  const sourceReferences = isHostAction
+    ? normalizeSourceReferences(
+        item.metadata?.source_references ?? item.metadata?.sourceReferences,
+      )
     : [];
   const hostContext = useHostContextStore((s) => s.currentContext);
   const hostCapabilities = useHostContextStore((s) => s.capabilities);
@@ -344,6 +355,9 @@ function ExpandedPreview({ item }: { item: PreviewItemData }) {
                 </div>
               ))}
             </div>
+          )}
+          {sourceReferences.length > 0 && (
+            <HostActionSourceReferences references={sourceReferences} />
           )}
           {(item.metadata?.next_step as string | undefined) && (
             <div className="rounded-lg bg-[var(--accent)]/8 px-3 py-2 text-sm text-text">
@@ -659,6 +673,55 @@ function renderHostActionPreviewDetails(item: PreviewItemData) {
   }
 
   return null;
+}
+
+function HostActionSourceReferences({
+  references,
+}: {
+  references: PreviewSourceReference[];
+}) {
+  return (
+    <section
+      aria-label="Nguon tai lieu"
+      className="rounded-lg border border-border bg-surface px-3 py-3"
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-[11px] uppercase tracking-wider text-text-tertiary">
+          Nguon tai lieu
+        </div>
+        <span className="rounded-full bg-surface-secondary px-2 py-0.5 text-[11px] text-text-secondary">
+          {references.length}
+        </span>
+      </div>
+      <div className="space-y-2">
+        {references.map((ref, index) => (
+          <div
+            key={`${ref.kind || "source"}-${ref.chapter_index ?? "x"}-${ref.lesson_index ?? "x"}-${index}`}
+            className="rounded-md bg-surface-secondary px-3 py-2"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-text">
+                {sourceReferenceLabel(ref)}
+              </span>
+              <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text-secondary">
+                Trang {formatSourcePages(ref.source_pages)}
+              </span>
+              {ref.kind && (
+                <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] uppercase tracking-wider text-text-tertiary">
+                  {ref.kind}
+                </span>
+              )}
+            </div>
+            {ref.excerpt && (
+              <div className="mt-1 text-xs leading-relaxed text-text-secondary">
+                {ref.excerpt}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function HostActionBlockDiffCard({
@@ -1011,6 +1074,9 @@ function buildManualHostActionAuditRequest(
   if (!eventType) {
     return null;
   }
+  const sourceReferences = normalizeSourceReferences(
+    item.metadata?.source_references ?? item.metadata?.sourceReferences,
+  );
 
   return {
     event_type: eventType,
@@ -1069,6 +1135,8 @@ function buildManualHostActionAuditRequest(
         typeof item.metadata?.question_count === "number"
           ? item.metadata.question_count
           : undefined,
+      source_references:
+        sourceReferences.length > 0 ? sourceReferences : undefined,
     },
   };
 }

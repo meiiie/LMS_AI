@@ -167,7 +167,17 @@ describe("PreviewPanel host action operator flow", () => {
   });
 
   it("renders block diff details and confirms apply from the right sidebar preview", async () => {
-    const preview = makeLessonPatchPreview();
+    const preview = makeLessonPatchPreview({
+      source_references: [
+        {
+          kind: "chapter",
+          chapter_index: 0,
+          title: "Doc chuong 1",
+          source_pages: [4, 5],
+          excerpt: "Noi dung goc tu tai lieu.",
+        },
+      ],
+    });
 
     seedConversation([preview]);
     useUIStore.getState().openPreview("host-preview-lesson-1");
@@ -182,6 +192,10 @@ describe("PreviewPanel host action operator flow", () => {
     const diffQueries = within(blockDiffSection as HTMLElement);
     expect(diffQueries.getByText("Noi dung cu")).toBeTruthy();
     expect(diffQueries.getByText("Noi dung moi")).toBeTruthy();
+    expect(screen.getByText("Nguon tai lieu")).toBeTruthy();
+    expect(screen.getByText("Doc chuong 1")).toBeTruthy();
+    expect(screen.getByText("Trang 4, 5")).toBeTruthy();
+    expect(screen.getByText("Noi dung goc tu tai lieu.")).toBeTruthy();
 
     fireEvent.click(
       screen.getByRole("button", { name: "Xác nhận áp dụng vào bài học" }),

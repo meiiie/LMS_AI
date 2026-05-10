@@ -25,6 +25,7 @@ import { useModelStore } from "@/stores/model-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { StreamBuffer } from "@/lib/stream-buffer";
 import { stripWiiiInternalMarkup } from "@/lib/internal-markup";
+import { normalizeSourceReferences } from "@/lib/source-references";
 import {
   POINTY_FAST_PATH_SOURCE,
   buildPointyFastPathAction,
@@ -245,7 +246,7 @@ function mapHostActionAuditEvent(action: string): HostActionAuditEventType | nul
   }
 }
 
-function buildHostActionPreviewItem(
+export function buildHostActionPreviewItem(
   action: string,
   requestId: string,
   params: Record<string, unknown>,
@@ -257,6 +258,9 @@ function buildHostActionPreviewItem(
 
   const previewKind = typeof data.preview_kind === "string" ? data.preview_kind : "";
   const summary = typeof data.summary === "string" ? data.summary.trim() : "Preview is ready.";
+  const sourceReferences = normalizeSourceReferences(
+    data.source_references ?? data.sourceReferences,
+  );
   const changedFields = Array.isArray(data.changed_fields)
     ? data.changed_fields.filter((field): field is string => typeof field === "string" && field.trim().length > 0)
     : [];
@@ -327,6 +331,8 @@ function buildHostActionPreviewItem(
         data.publish_plan && typeof data.publish_plan === "object"
           ? data.publish_plan
           : undefined,
+      source_references:
+        sourceReferences.length > 0 ? sourceReferences : undefined,
       requires_confirmation: true,
       workflow_stage: hostContext?.workflow_stage,
       page_type: hostContext?.page?.type,
@@ -347,6 +353,9 @@ function buildHostActionAuditRequest(
   if (!eventType) return null;
 
   const data = result.data || {};
+  const sourceReferences = normalizeSourceReferences(
+    data.source_references ?? data.sourceReferences,
+  );
   return {
     event_type: eventType,
     action,
@@ -406,6 +415,8 @@ function buildHostActionAuditRequest(
         data.publish_plan && typeof data.publish_plan === "object"
           ? data.publish_plan
           : undefined,
+      source_references:
+        sourceReferences.length > 0 ? sourceReferences : undefined,
     },
   };
 }
