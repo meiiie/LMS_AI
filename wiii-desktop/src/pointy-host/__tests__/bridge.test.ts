@@ -12,6 +12,7 @@ import {
   handleHighlight,
   handleNavigate,
   handleScrollTo,
+  handleShowTour,
   resolveSelector,
   type BridgeHandle,
 } from "../bridge";
@@ -218,6 +219,28 @@ describe("handleScrollTo", () => {
     document.body.innerHTML = `<section id="ch1">Chapter 1</section>`;
     const result = await handleScrollTo({ selector: "#ch1" });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("handleShowTour", () => {
+  it("uses the same data-wiii-id resolver as highlight and click", async () => {
+    document.body.innerHTML = `
+      <button data-wiii-id="continue-lesson">Continue</button>
+      <button data-wiii-id="quiz-card">Quiz</button>
+    `;
+
+    const result = await handleShowTour({
+      steps: [
+        { selector: "continue-lesson", message: "Step 1", duration_ms: 1 },
+        { selector: "quiz-card", message: "Step 2", duration_ms: 1 },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data?.completed_steps).toBe(2);
+    expect(result.data?.total_steps).toBe(2);
+    expect(result.data?.cancelled).toBe(false);
+    expect(result.data?.missing_selectors).toEqual([]);
   });
 });
 
