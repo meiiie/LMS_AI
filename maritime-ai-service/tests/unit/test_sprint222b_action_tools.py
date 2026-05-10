@@ -1,4 +1,6 @@
 """Sprint 222b Phase 5: Dynamic tool generation from host capabilities."""
+import json
+
 import pytest
 
 
@@ -187,3 +189,90 @@ class TestGenerateHostActionTools:
         result = tools[0].invoke({})
         assert '"status": "preview_required"' in result
         assert '"expected_preview_kind": "quiz_publish"' in result
+
+    def test_preview_lesson_tool_description_mentions_source_references_schema(self):
+        from app.engine.context.action_tools import generate_host_action_tools
+
+        tools = generate_host_action_tools(
+            [
+                {
+                    "name": "authoring.preview_lesson_patch",
+                    "description": "Preview lesson changes",
+                    "roles": ["teacher"],
+                    "input_schema": {
+                        "type": "object",
+                        "required": ["lesson_id"],
+                        "properties": {
+                            "lesson_id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "content": {"type": "string"},
+                            "source_references": {
+                                "type": "array",
+                                "items": {"type": "object"},
+                            },
+                        },
+                    },
+                }
+            ],
+            "teacher",
+            event_bus_id="bus-1",
+        )
+
+        assert (
+            "Input fields: lesson_id, title, content, source_references"
+            in tools[0].description
+        )
+        assert "Required: lesson_id" in tools[0].description
+        assert "include `source_references`" in tools[0].description
+
+    def test_preview_lesson_tool_passes_source_references_to_host(self):
+        from app.engine.context.action_tools import generate_host_action_tools
+
+        tools = generate_host_action_tools(
+            [
+                {
+                    "name": "authoring.preview_lesson_patch",
+                    "description": "Preview lesson changes",
+                    "roles": ["teacher"],
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "lesson_id": {"type": "string"},
+                            "source_references": {
+                                "type": "array",
+                                "items": {"type": "object"},
+                            },
+                        },
+                    },
+                }
+            ],
+            "teacher",
+            event_bus_id="bus-1",
+        )
+
+        result = json.loads(
+            tools[0].invoke(
+                {
+                    "lesson_id": "lesson-1",
+                    "source_references": [
+                        {
+                            "kind": "chapter",
+                            "page_start": 2,
+                            "page_end": 3,
+                            "excerpt": "Nguon tai lieu",
+                        }
+                    ],
+                }
+            )
+        )
+
+        assert result["status"] == "action_requested"
+        assert result["action"] == "authoring.preview_lesson_patch"
+        assert result["params"]["source_references"] == [
+            {
+                "kind": "chapter",
+                "page_start": 2,
+                "page_end": 3,
+                "excerpt": "Nguon tai lieu",
+            }
+        ]

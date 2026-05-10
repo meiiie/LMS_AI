@@ -77,6 +77,38 @@ def _expected_preview_kind(action_name: str) -> str | None:
     return None
 
 
+def _format_input_contract(action_name: str, action_def: dict[str, Any]) -> str:
+    input_schema = action_def.get("input_schema")
+    if not isinstance(input_schema, dict):
+        return ""
+
+    properties = input_schema.get("properties")
+    if not isinstance(properties, dict) or not properties:
+        return ""
+
+    fields = [str(name) for name in properties.keys() if str(name).strip()]
+    if not fields:
+        return ""
+
+    lines = ["Input fields: " + ", ".join(fields[:12])]
+    required = input_schema.get("required")
+    if isinstance(required, list):
+        required_fields = [str(name) for name in required if str(name).strip()]
+        if required_fields:
+            lines.append("Required: " + ", ".join(required_fields[:12]))
+
+    if (
+        action_name.strip().lower().endswith("preview_lesson_patch")
+        and "source_references" in properties
+    ):
+        lines.append(
+            "For document-derived lesson/course previews, include `source_references` "
+            "from the uploaded source document so the teacher can verify citations."
+        )
+
+    return "\n" + "\n".join(lines)
+
+
 def generate_host_action_tools(
     capabilities_tools: list[dict[str, Any]],
     user_role: str,
@@ -97,6 +129,7 @@ def generate_host_action_tools(
     for action_def in available:
         action_name = action_def["name"]
         description = action_def.get("description", f"Execute {action_name} on host")
+        input_contract = _format_input_contract(action_name, action_def)
 
         def _make_tool_fn(name: str, br: HostActionBridge, bus_id: str, definition: dict[str, Any]):
             def tool_fn(**kwargs: Any) -> str:
@@ -140,7 +173,7 @@ def generate_host_action_tools(
         tool = StructuredTool.from_function(
             func=_make_tool_fn(action_name, bridge, event_bus_id, action_def),
             name=host_action_tool_name(action_name),
-            description=f"[Host Action: {action_name}] {description}",
+            description=f"[Host Action: {action_name}] {description}{input_contract}",
         )
         tools.append(tool)
 
