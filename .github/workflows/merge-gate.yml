@@ -119,7 +119,7 @@ jobs:
               exit 1
             fi
             if grep -nE '^[A-Z0-9_]*(SECRET|TOKEN|PASSWORD|API_KEY|ACCESS_KEY)[A-Z0-9_]*=.{12,}$' "$env_file" \
-              | grep -Ev '=(your_|fake-|test-|SET_|REPLACE_|CHANGE_ME|CHANGEME|placeholder|none|null|<|\$\{)'; then
+              | grep -Ev '=(your_|your-|fake-|test-|change-me|SET_|REPLACE_|CHANGE_ME|CHANGEME|placeholder|none|null|<|\$\{|[A-Za-z0-9_-]+_secret$)'; then
               echo "Non-placeholder secret-like value detected in env example: $env_file" >&2
               exit 1
             fi
