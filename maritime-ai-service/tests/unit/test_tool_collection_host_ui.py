@@ -223,6 +223,99 @@ def test_uploaded_document_preview_request_forces_preview_host_action(monkeypatc
     assert force_tools is True
 
 
+def test_uploaded_document_preview_binds_safe_preview_when_global_host_actions_disabled(monkeypatch):
+    from app.engine.multi_agent import tool_collection as module
+
+    monkeypatch.setattr(module.settings, "enable_character_tools", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_lms_integration", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_host_actions", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_structured_visuals", False, raising=False)
+    monkeypatch.setattr(module, "_needs_web_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_datetime", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_news_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_legal_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_lms_query", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_direct_knowledge_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_analysis_tool", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_pointy", lambda _query: False)
+    monkeypatch.setattr(module, "_infer_direct_thinking_mode", lambda *_args, **_kwargs: "general")
+    monkeypatch.setattr(module, "filter_tools_for_role", lambda tools, _role: tools)
+    monkeypatch.setattr(module, "filter_tools_for_visual_intent", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        module,
+        "resolve_visual_intent",
+        lambda _query: SimpleNamespace(
+            force_tool=False,
+            mode="text",
+            visual_type=None,
+            preferred_tool=None,
+            presentation_intent="text",
+        ),
+    )
+
+    generated_from: list[dict] = []
+
+    def fake_generate_host_action_tools(capabilities_tools, *_args, **_kwargs):
+        generated_from.extend(capabilities_tools)
+        return [
+            SimpleNamespace(
+                name="host_action__"
+                + str(tool["name"]).replace(".", "__")
+            )
+            for tool in capabilities_tools
+        ]
+
+    def fake_load_attr(module_name: str, attr_name: str):
+        if module_name.endswith("utility_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_search_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_fetch_tool"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("agent_tools") and attr_name == "RAG_KNOWLEDGE_TOOL":
+            return SimpleNamespace(name="tool_rag_knowledge")
+        if module_name.endswith("action_tools") and attr_name == "generate_host_action_tools":
+            return fake_generate_host_action_tools
+        if module_name.endswith("direct_intent") and attr_name == "_needs_maritime_search":
+            return lambda _query: False
+        if module_name.endswith("direct_intent") and attr_name == "_normalize_for_intent":
+            return lambda query: str(query).lower()
+        if attr_name == "get_visual_tools":
+            return lambda: [SimpleNamespace(name="tool_generate_visual")]
+        raise AssertionError(f"Unexpected load: {module_name}.{attr_name}")
+
+    monkeypatch.setattr(module, "_load_attr", fake_load_attr)
+
+    tools, force_tools = module._collect_direct_tools(
+        "Tao ban preview_lesson_patch tu Word vua upload, co citation va source_references.",
+        user_role="teacher",
+        state={
+            "routing_metadata": {"intent": "uploaded_file_context"},
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "lesson.docx",
+                            "markdown": "Marker WIII_DOC_GOAL_456\nNguon trang 2.",
+                        }
+                    ]
+                }
+            },
+            "host_capabilities": {
+                "tools": [
+                    {"name": "authoring.preview_lesson_patch"},
+                    {"name": "authoring.apply_lesson_patch"},
+                    {"name": "course.publish"},
+                ]
+            },
+        },
+    )
+
+    assert [tool.name for tool in tools] == ["host_action__authoring__preview_lesson_patch"]
+    assert [tool["name"] for tool in generated_from] == ["authoring.preview_lesson_patch"]
+    assert force_tools is True
+
+
 def test_force_skills_reads_from_state_context_dict():
     """v3.0 F3 fix: state['context']['force_skills'] is the canonical
     location (NOT state['force_skills']) per graph_stream_runtime

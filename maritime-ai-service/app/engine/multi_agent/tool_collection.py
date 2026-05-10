@@ -253,6 +253,40 @@ def _document_preview_host_action_tools(tools: list[Any]) -> list[Any]:
     ]
 
 
+def _host_capability_tools_from_state(state: Optional[AgentState]) -> list[dict[str, Any]]:
+    if not isinstance(state, dict):
+        return []
+    raw_caps = state.get("host_capabilities")
+    if not raw_caps:
+        context = state.get("context")
+        if isinstance(context, dict):
+            raw_caps = context.get("host_capabilities") or {}
+    if not isinstance(raw_caps, dict):
+        return []
+    capabilities_tools = raw_caps.get("tools")
+    if not isinstance(capabilities_tools, list):
+        return []
+    return [tool for tool in capabilities_tools if isinstance(tool, dict)]
+
+
+def _safe_document_preview_capability_tools(
+    capabilities_tools: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Allow a preview-only bridge even if the global host-action flag is off.
+
+    This fallback is intentionally narrow: it binds only the non-mutating LMS
+    preview action needed for uploaded document -> teacher preview flows. Apply,
+    publish, delete, grading, payment, and other host mutations remain disabled
+    unless `enable_host_actions` is explicitly enabled.
+    """
+    return [
+        tool
+        for tool in capabilities_tools
+        if str(tool.get("name") or "").strip().lower()
+        == "authoring.preview_lesson_patch"
+    ]
+
+
 def _should_use_no_tools_for_direct_prose(
     *,
     query: str,
@@ -468,10 +502,18 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         logger.debug("[DIRECT] LMS tools unavailable: %s", _e)
 
     try:
-        if getattr(settings, "enable_host_actions", False) and state is not None:
-            raw_caps = state.get("host_capabilities") or ((state.get("context") or {}).get("host_capabilities") or {})
-            capabilities_tools = raw_caps.get("tools") if isinstance(raw_caps, dict) else []
-            if capabilities_tools:
+        if state is not None:
+            capabilities_tools = _host_capability_tools_from_state(state)
+            host_actions_enabled = getattr(settings, "enable_host_actions", False)
+            safe_doc_preview_fallback = (
+                not host_actions_enabled
+                and _looks_like_document_preview_request(query, state)
+            )
+            if safe_doc_preview_fallback:
+                capabilities_tools = _safe_document_preview_capability_tools(
+                    capabilities_tools
+                )
+            if capabilities_tools and (host_actions_enabled or safe_doc_preview_fallback):
                 generate_host_action_tools = _load_attr(
                     "app.engine.context.action_tools",
                     "generate_host_action_tools",
