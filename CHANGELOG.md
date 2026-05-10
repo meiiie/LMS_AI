@@ -43,6 +43,7 @@ Release lines:
 - `.coderabbit.yaml` shipped with path-specific review instructions for auth, RAG, multi-agent, living agent, MCP, Alembic, GitHub automation, and operations docs.
 - Removed legacy `.claude/reports/` and `.Codex/reports/` tracked trees from git; durable findings were promoted into `docs/operations/`.
 - Removed the remaining tracked `.claude/` legacy coordination tree and `.Codex` scratch sample; `CLAUDE.md` is now a thin compatibility redirect to `AGENTS.md`.
+- Updated the desktop Tauri Rust stack to `tauri 2.11.1` for Dependabot alert #27; the remaining transitive `glib` advisory is tracked in #280 because `gtk v0.18.2` still requires `glib ^0.18`.
 
 ---
 
