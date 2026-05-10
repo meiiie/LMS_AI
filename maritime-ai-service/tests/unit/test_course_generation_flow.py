@@ -19,6 +19,11 @@ from app.api.v1.course_generation import (
     _run_outline_phase,
     _run_retry_chapter,
 )
+from app.api.v1.course_generation_endpoint_runtime import (
+    expand_chapters_impl,
+    get_generation_status_impl,
+)
+from app.api.v1.course_generation_schemas import GenerationStatusResponse
 from app.models.course_generation import ChapterContentSchema, CourseOutlineSchema
 from app.engine.context.adapters.lms import LMSHostAdapter
 from app.engine.context.host_context import from_legacy_page_context
@@ -194,6 +199,158 @@ def test_require_generation_job_access_allows_admin_bypass():
         {"teacher_id": "teacher-1", "organization_id": "org-a"},
         auth,
     )
+
+
+@pytest.mark.asyncio
+async def test_expand_chapters_impl_requires_legacy_mutation_confirmation():
+    repo = _FakeRepo([
+        {
+            "id": "gen-1",
+            "teacher_id": "teacher-1",
+            "organization_id": "org-a",
+            "phase": "OUTLINE_READY",
+            "outline": {"chapters": [{"title": "Chuong 1", "sourcePages": [1]}]},
+            "progress_percent": 40,
+        }
+    ])
+    auth = AuthenticatedUser(
+        user_id="teacher-1",
+        auth_method="jwt",
+        role="teacher",
+        organization_id="org-a",
+    )
+    req = ExpandRequest(
+        teacher_id="teacher-1",
+        category_id="category-1",
+        course_title="Khoa hoc",
+        approved_chapters=[0],
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await expand_chapters_impl(
+            generation_id="gen-1",
+            req=req,
+            auth=auth,
+            get_course_gen_repo_fn=lambda: repo,
+            require_generation_job_access_fn=_require_generation_job_access,
+            ensure_teacher_matches_auth_fn=_ensure_teacher_matches_auth,
+            normalize_approved_chapters_fn=_normalize_approved_chapters,
+            dispatch_course_generation_task_fn=lambda *args, **kwargs: None,
+            run_expand_phase_fn=lambda *args, **kwargs: None,
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "legacy_lms_mutation_confirmation_required"
+    assert exc.value.detail["required_field"] == "legacy_lms_mutation_confirmed"
+    assert repo.phase_updates == []
+
+
+@pytest.mark.asyncio
+async def test_expand_chapters_impl_allows_explicit_legacy_mutation_confirmation():
+    repo = _FakeRepo([
+        {
+            "id": "gen-1",
+            "teacher_id": "teacher-1",
+            "organization_id": "org-a",
+            "phase": "OUTLINE_READY",
+            "outline": {"chapters": [{"title": "Chuong 1", "sourcePages": [1]}]},
+            "progress_percent": 40,
+        }
+    ])
+    auth = AuthenticatedUser(
+        user_id="teacher-1",
+        auth_method="jwt",
+        role="teacher",
+        organization_id="org-a",
+    )
+    req = ExpandRequest(
+        teacher_id="teacher-1",
+        category_id="category-1",
+        course_title="Khoa hoc",
+        approved_chapters=[0],
+        legacy_lms_mutation_confirmed=True,
+    )
+    dispatched: list[tuple[str, str]] = []
+
+    async def fake_run_expand(generation_id, expand_request):
+        return None
+
+    def fake_dispatch(coro, *, label, generation_id):
+        dispatched.append((label, generation_id))
+        coro.close()
+
+    result = await expand_chapters_impl(
+        generation_id="gen-1",
+        req=req,
+        auth=auth,
+        get_course_gen_repo_fn=lambda: repo,
+        require_generation_job_access_fn=_require_generation_job_access,
+        ensure_teacher_matches_auth_fn=_ensure_teacher_matches_auth,
+        normalize_approved_chapters_fn=_normalize_approved_chapters,
+        dispatch_course_generation_task_fn=fake_dispatch,
+        run_expand_phase_fn=fake_run_expand,
+    )
+
+    assert result["phase"] == "EXPANDING"
+    assert result["mutation_contract"] == "legacy_course_generation_expand"
+    assert result["safe_product_contract"] == "host_action_preview_apply"
+    assert repo.phase_updates[-1][2]["expand_request"]["legacy_lms_mutation_confirmed"] is True
+    assert dispatched == [("course-gen:expand:gen-1", "gen-1")]
+
+
+@pytest.mark.asyncio
+async def test_get_generation_status_includes_outline_source_references():
+    repo = _FakeRepo([
+        {
+            "id": "gen-1",
+            "teacher_id": "teacher-1",
+            "organization_id": "org-a",
+            "phase": "OUTLINE_READY",
+            "outline": {
+                "chapters": [
+                    {
+                        "title": "Chuong 1",
+                        "sourcePages": [1, 2],
+                        "lessons": [
+                            {"title": "Bai 1", "sourcePages": [3]},
+                            {"title": "Bai 2"},
+                        ],
+                    }
+                ]
+            },
+        }
+    ])
+    auth = AuthenticatedUser(
+        user_id="teacher-1",
+        auth_method="jwt",
+        role="teacher",
+        organization_id="org-a",
+    )
+
+    result = await get_generation_status_impl(
+        generation_id="gen-1",
+        auth=auth,
+        generation_status_response_cls=GenerationStatusResponse,
+        get_course_gen_repo_fn=lambda: repo,
+        require_generation_job_access_fn=_require_generation_job_access,
+    )
+
+    assert result.source_references == [
+        {
+            "kind": "chapter",
+            "chapter_index": 0,
+            "title": "Chuong 1",
+            "source_pages": [1, 2],
+        },
+        {
+            "kind": "lesson",
+            "chapter_index": 0,
+            "lesson_index": 0,
+            "chapter_title": "Chuong 1",
+            "title": "Bai 1",
+            "source_pages": [3],
+        },
+    ]
 
 
 @pytest.mark.asyncio

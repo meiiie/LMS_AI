@@ -9,7 +9,7 @@ Design spec v2.0 (2026-03-22), expert-reviewed.
 
 Endpoints:
   POST /course-generation/outline          — upload doc, generate outline
-  POST /course-generation/{id}/expand      — expand approved chapters
+  POST /course-generation/{id}/expand      — legacy direct LMS expansion
   POST /course-generation/{id}/retry/{idx} — retry a failed chapter
   GET  /course-generation/{id}             — poll job status
 """
@@ -161,9 +161,11 @@ async def expand_chapters(
     req: ExpandRequest,
     auth: AuthenticatedUser = Depends(require_auth),
 ):
-    """Expand approved chapters into full content (Phase 2).
+    """Legacy path: expand approved chapters and push directly to LMS.
 
-    Creates course shell in LMS if no course_id provided, then expands each chapter.
+    Requires legacy_lms_mutation_confirmed=true because it creates a course
+    shell in LMS if no course_id is provided, then pushes expanded chapters.
+    Product LMS doc-to-course must use preview -> teacher confirm -> apply.
     """
     return await expand_chapters_impl(
         generation_id=generation_id,
