@@ -928,14 +928,23 @@ function hostActionRequiresInput(
   const capabilityTools = hostCapabilities?.tools ?? [];
   const contextActions = hostContext?.available_actions ?? [];
   return [...capabilityTools, ...contextActions].some((tool) => {
+    if (!tool || typeof tool !== "object") {
+      return false;
+    }
+    const candidate = tool as {
+      action?: unknown;
+      input_schema?: unknown;
+      name?: unknown;
+    };
     const toolName =
-      "name" in tool && typeof tool.name === "string"
-        ? tool.name
-        : "action" in tool && typeof tool.action === "string"
-          ? tool.action
+      typeof candidate.name === "string"
+        ? candidate.name
+        : typeof candidate.action === "string"
+          ? candidate.action
           : "";
     return (
-      toolName === action && schemaRequiresProperty(tool.input_schema, property)
+      toolName === action &&
+      schemaRequiresProperty(candidate.input_schema, property)
     );
   });
 }

@@ -259,6 +259,68 @@ describe("PreviewPanel host action operator flow", () => {
     expect(useHostContextStore.getState().requestAction).not.toHaveBeenCalled();
   });
 
+  it("forwards the LMS approval token when the host preview already confirmed apply", async () => {
+    const preview = makeLessonPatchPreview({
+      approval_token: "approval-lesson-1",
+    });
+    const requestAction = vi.fn().mockResolvedValue({
+      success: true,
+      data: {
+        summary: "Applied with LMS approval.",
+      },
+    });
+    useHostContextStore.setState({
+      capabilities: {
+        host_type: "lms",
+        host_name: "LMS",
+        version: "1",
+        resources: ["course"],
+        surfaces: ["right_sidebar"],
+        tools: [
+          {
+            name: "authoring.apply_lesson_patch",
+            description: "Apply a teacher-approved lesson patch.",
+            input_schema: {
+              type: "object",
+              properties: {
+                preview_token: { type: "string" },
+                approval_token: { type: "string" },
+              },
+              required: ["preview_token", "approval_token"],
+            },
+            requires_confirmation: true,
+            mutates_state: true,
+          },
+        ],
+      },
+      requestAction,
+    } as never);
+
+    seedConversation([preview]);
+    useUIStore.getState().openPreview("host-preview-lesson-1");
+
+    render(<PreviewPanel inline />);
+
+    const button = screen.getByRole("button", {
+      name: "Xác nhận áp dụng vào bài học",
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(requestAction).toHaveBeenCalledWith(
+        "authoring.apply_lesson_patch",
+        {
+          preview_token: "preview-lesson-1",
+          approval_token: "approval-lesson-1",
+        },
+        expect.stringMatching(/^req-preview-apply-/),
+      );
+    });
+    expect(await screen.findByText("Applied with LMS approval.")).toBeTruthy();
+  });
+
   it("treats host_preview_approval_required as the expected LMS safety gate", async () => {
     const preview = makeLessonPatchPreview();
     const requestAction = vi.fn().mockResolvedValue({
