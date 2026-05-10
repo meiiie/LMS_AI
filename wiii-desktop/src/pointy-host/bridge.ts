@@ -269,7 +269,10 @@ export async function handleShowTour(params: ShowTourParams): Promise<PointyResu
     (s): s is TourStep => !!s && typeof s.selector === "string" && typeof s.message === "string",
   );
   if (steps.length === 0) return fail("invalid_tour_steps");
-  const result = await runTour(steps, { startAt: params.start_at });
+  const result = await runTour(steps, {
+    startAt: params.start_at,
+    resolveSelector: (selector) => resolveSelector(selector),
+  });
   return ok({
     summary: `Tour ${result.completed_steps}/${result.total_steps} bước.`,
     completed_steps: result.completed_steps,

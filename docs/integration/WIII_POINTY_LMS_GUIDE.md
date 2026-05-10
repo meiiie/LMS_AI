@@ -1,6 +1,6 @@
 # Wiii Pointy - LMS Integration Guide
 
-Status: V1 production-supported contract
+Status: V1.1 production-supported contract
 
 Owner: Wiii Lab
 
@@ -15,9 +15,13 @@ elements, scroll to them, navigate safe LMS routes, and run guided tours. It is
 the web-native path toward a collaborative-cursor UX: the host app keeps control
 of the DOM, while Wiii requests actions through a typed bridge.
 
-V1 is intentionally read-only. It does not auto-click, auto-fill, submit forms,
-or mutate LMS state. Mutating actions belong to a future V2 contract and must be
-gated by explicit confirmation plus per-tool `mutates_state=true`.
+V1 is intentionally tutor-safe. The default actions highlight, scroll,
+navigate, and run guided tours without mutating LMS state. V1.1 also supports
+fail-closed safe-click for navigation-like elements, but only when the LMS host
+marks the target with `data-wiii-click-safe="true"`. It does not auto-fill,
+submit forms, delete, publish, grade, enroll, pay, or otherwise mutate LMS
+state. Mutating actions belong to a future V2 contract and must be gated by
+explicit confirmation plus per-tool `mutates_state=true`.
 
 ## Integration Contract
 
@@ -65,6 +69,7 @@ iframe frontend already speak this protocol.
 | `ui.scroll_to` | no | no | Scroll a target into view |
 | `ui.navigate` | no | no | Navigate to an internal route or safe absolute URL |
 | `ui.show_tour` | no | no | Run a 2-5 step guided walkthrough |
+| `ui.click` | no | no | Click only host-marked safe navigation targets |
 
 ### `ui.highlight`
 
@@ -138,6 +143,52 @@ Reject loopback, `.local`, `.internal`, and non-`http(s)` URLs fail closed.
 
 A new tour cancels any tour already running.
 
+`ui.show_tour`, `ui.highlight`, `ui.scroll_to`, and `ui.click` all use the same
+selector resolver. The LMS may pass either a normal CSS selector such as
+`[data-wiii-id="continue-lesson"]` or the bare stable id `continue-lesson`.
+Bare ids resolve to `[data-wiii-id="..."]` first, then fall back to CSS.
+
+### `ui.click`
+
+Safe-click is for low-risk navigation controls only. The host must explicitly
+mark each eligible target:
+
+```html
+<button
+  data-wiii-id="continue-lesson"
+  data-wiii-click-safe="true"
+  data-wiii-click-kind="navigation"
+>
+  Tiep tuc bai hoc
+</button>
+```
+
+Request:
+
+```json
+{
+  "selector": "continue-lesson",
+  "message": "Minh mo tiep bai hoc cho ban nhe."
+}
+```
+
+Expected reply:
+
+```json
+{
+  "success": true,
+  "data": {
+    "clicked": true,
+    "click_kind": "navigation"
+  }
+}
+```
+
+If the target lacks `data-wiii-click-safe="true"`, is disabled, hidden, detached,
+or off-screen after validation, Pointy returns a failure such as
+`unsafe_click_target`, `disabled_click_target`, or `target_not_visible` and does
+not call `element.click()`.
+
 ## Selector Discipline
 
 Wiii can only point reliably when the host gives it stable targets.
@@ -145,6 +196,12 @@ Wiii can only point reliably when the host gives it stable targets.
 - Prefer `data-wiii-id` for every interactive element Wiii may reference.
 - Keep IDs semantic and durable, for example `continue-lesson`, `browse-courses`,
   `submit-quiz`, `profile-link`.
+- Add `data-wiii-click-safe="true"` only to low-risk navigation helpers such as
+  `continue-lesson`, `browse-courses`, `open-help`, or `back-to-dashboard`.
+  Do not mark destructive, payment, quiz-answer, grading, publish, enrollment,
+  logout, or final-submit actions as safe-click.
+- Add `data-wiii-click-kind` for observability, for example `navigation`,
+  `open_panel`, `help`, or `preview`.
 - Use `id` only when uniqueness is guaranteed.
 - Avoid raw class names and `nth-child` selectors.
 - Add visible interactive elements to `HostContext.content.structured` as
@@ -163,7 +220,8 @@ filters can enforce the rule.
   throwing into the host page.
 - URL hardening: `ui.navigate` rejects loopback and internal targets to prevent
   SSRF-style behavior.
-- State safety: V1 actions are visual/navigation assistance only; any future
+- State safety: V1/V1.1 actions are visual/navigation assistance only. Safe-click
+  is fail-closed and limited to explicit navigation-like targets. Any future
   mutating action must require confirmation.
 - CSP: the bundle is plain JS plus DOM. No `eval`, workers, or fetch are
   required. `script-src 'self' https://wiii.holilihu.online` is sufficient for
@@ -210,8 +268,9 @@ wiii-desktop/dev-demo/pointy/index.html
 ## Roadmap
 
 - V1: read-only tutor primitives.
-- V2: `ui.click` and `ui.fill_field`, gated by `mutates_state=true` and
-  `requires_confirmation=true`.
+- V1.1: fail-closed `ui.click` for host-marked safe navigation targets.
+- V2: `ui.fill_field` and any mutating click/apply path, gated by
+  `mutates_state=true` and `requires_confirmation=true`.
 - V3: voice-assisted guidance and an operator dashboard surface.
 - Long-term: map `HostCapabilities.tools[]` to WebMCP once that surface is
   stable enough for production.
