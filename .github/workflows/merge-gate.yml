@@ -102,8 +102,8 @@ jobs:
           git diff --name-only "$range" | tee /tmp/changed-files.txt
 
           forbidden='(^|/)(node_modules|__pycache__|\.pytest_cache|\.ruff_cache|\.mypy_cache|dist-embed|dist-web|target|coverage|htmlcov)/|(^|/)\.env($|\.|/)|\.(pem|key|p12|pfx|log|tmp)$'
-          env_example='(^|/)\.env([^/]*\.)?example$'
-          forbidden_hits="$(grep -E "$forbidden" /tmp/changed-files.txt | grep -Ev "$env_example" || true)"
+          env_template='(^|/)\.env([^/]*\.)?(example|template)$'
+          forbidden_hits="$(grep -E "$forbidden" /tmp/changed-files.txt | grep -Ev "$env_template" || true)"
           if [[ -n "$forbidden_hits" ]]; then
             echo "$forbidden_hits"
             echo "Forbidden generated, secret, or local-only artifact detected in the change set." >&2
@@ -119,11 +119,11 @@ jobs:
               exit 1
             fi
             if grep -nE '^[A-Z0-9_]*(SECRET|TOKEN|PASSWORD|API_KEY|ACCESS_KEY)[A-Z0-9_]*=.{12,}$' "$env_file" \
-              | grep -Ev '=(your_|fake-|test-|SET_|REPLACE_|CHANGEME|placeholder|none|null|<|\$\{)'; then
+              | grep -Ev '=(your_|fake-|test-|SET_|REPLACE_|CHANGE_ME|CHANGEME|placeholder|none|null|<|\$\{)'; then
               echo "Non-placeholder secret-like value detected in env example: $env_file" >&2
               exit 1
             fi
-          done < <(grep -E "$env_example" /tmp/changed-files.txt || true)
+          done < <(grep -E "$env_template" /tmp/changed-files.txt || true)
 
   reviewability-gate:
     name: Reviewability Gate
