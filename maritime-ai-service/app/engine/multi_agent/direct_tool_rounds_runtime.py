@@ -47,6 +47,202 @@ _FORCED_WEB_SEARCH_TOOL_NAMES = (
     "web_search",
 )
 _RICH_SEARCH_RESULT_CHAR_FLOOR = 1200
+_DOC_PREVIEW_HOST_ACTION_TOOL = "host_action__authoring__preview_lesson_patch"
+
+
+def _normalize_doc_preview_text(value: Any) -> str:
+    text = str(value or "").replace("\\_", "_")
+    normalized = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
+
+
+def _uploaded_document_attachments_from_state(state: AgentState | None) -> list[dict[str, Any]]:
+    if not isinstance(state, dict):
+        return []
+    ctx = state.get("context")
+    if not isinstance(ctx, dict):
+        return []
+    document_context = ctx.get("document_context")
+    if not isinstance(document_context, dict):
+        return []
+    attachments = document_context.get("attachments")
+    if not isinstance(attachments, list):
+        return []
+    return [
+        item
+        for item in attachments
+        if isinstance(item, dict) and str(item.get("markdown") or "").strip()
+    ]
+
+
+def _find_doc_preview_host_action_tool(tools: list[Any]) -> Any | None:
+    for tool in tools or []:
+        if _tool_name(tool).lower() == _DOC_PREVIEW_HOST_ACTION_TOOL:
+            return tool
+    return None
+
+
+def _should_request_uploaded_doc_preview(
+    *,
+    query: str,
+    state: AgentState | None,
+    tools: list[Any],
+) -> bool:
+    if _find_doc_preview_host_action_tool(tools) is None:
+        return False
+    if not _uploaded_document_attachments_from_state(state):
+        return False
+    normalized = _normalize_doc_preview_text(query)
+    return any(
+        marker in normalized
+        for marker in (
+            "preview",
+            "xem truoc",
+            "ban xem truoc",
+            "ban nhap",
+            "draft",
+            "cap nhat bai hoc",
+            "tao ban xem truoc",
+            "lesson patch",
+            "preview_lesson_patch",
+            "source_references",
+            "citation",
+            "trich dan",
+            "nguon",
+        )
+    )
+
+
+def _first_nonempty_line(text: str) -> str:
+    for line in str(text or "").replace("\\_", "_").splitlines():
+        line = line.strip(" #\t\r\n")
+        if line:
+            return line[:140]
+    return "Tai lieu da tai len"
+
+
+def _extract_marker(text: str) -> str:
+    cleaned = str(text or "").replace("\\_", "_")
+    match = re.search(r"\bWIII_DOC_GOAL_[0-9A-Za-z_-]+\b", cleaned)
+    return match.group(0) if match else ""
+
+
+def _extract_relevant_lines(markdown: str, markers: tuple[str, ...], *, limit: int) -> list[str]:
+    normalized_markers = tuple(_normalize_doc_preview_text(marker) for marker in markers)
+    selected: list[str] = []
+    for raw_line in str(markdown or "").replace("\\_", "_").splitlines():
+        line = raw_line.strip(" -*\t\r\n")
+        if not line:
+            continue
+        normalized_line = _normalize_doc_preview_text(line)
+        if any(marker in normalized_line for marker in normalized_markers):
+            selected.append(line[:220])
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _extract_source_pages(query: str, markdown: str) -> tuple[int | None, int | None]:
+    text = _normalize_doc_preview_text(f"{query}\n{markdown}")
+    range_match = re.search(r"(?:page|trang)\s*(\d{1,3})\s*[-–]\s*(\d{1,3})", text)
+    if range_match:
+        return int(range_match.group(1)), int(range_match.group(2))
+    page_match = re.search(r"(?:page|trang)\s*(\d{1,3})", text)
+    if page_match:
+        page = int(page_match.group(1))
+        return page, page
+    return None, None
+
+
+def _resolve_doc_preview_lesson_id(state: AgentState | None) -> str:
+    if not isinstance(state, dict):
+        return ""
+    ctx = state.get("context")
+    candidates: list[Any] = []
+    if isinstance(ctx, dict):
+        candidates.extend([ctx.get("lesson_id"), ctx.get("lessonId")])
+        for key in ("page_context", "host_context"):
+            value = ctx.get(key)
+            if isinstance(value, dict):
+                candidates.extend([value.get("lesson_id"), value.get("lessonId")])
+    for candidate in candidates:
+        normalized = str(candidate or "").strip()
+        if normalized:
+            return normalized
+    return ""
+
+
+def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> dict[str, Any]:
+    attachments = _uploaded_document_attachments_from_state(state)
+    combined_markdown = "\n\n".join(
+        str(item.get("markdown") or "").strip()
+        for item in attachments
+        if str(item.get("markdown") or "").strip()
+    )
+    first_attachment = attachments[0] if attachments else {}
+    title_source = (
+        str(first_attachment.get("title") or "").strip()
+        or _first_nonempty_line(combined_markdown)
+        or str(first_attachment.get("file_name") or "").strip()
+        or "Tai lieu da tai len"
+    )
+    marker = _extract_marker(query) or _extract_marker(combined_markdown)
+    goals = _extract_relevant_lines(
+        combined_markdown,
+        ("muc tieu hoc tap", "learning objective", "objective", "muc tieu"),
+        limit=4,
+    )
+    checklist = _extract_relevant_lines(
+        combined_markdown,
+        ("checklist", "nguon trang", "source page", "approval_token"),
+        limit=5,
+    )
+    if not goals:
+        goals = [_first_nonempty_line(combined_markdown)]
+    if not checklist:
+        checklist = _extract_relevant_lines(combined_markdown, ("quy trinh", "kiem tra", "xac nhan"), limit=4)
+    if not checklist:
+        checklist = goals[:2]
+
+    source_excerpt = " ".join(checklist[:2])[:360] or _first_nonempty_line(combined_markdown)
+    page_start, page_end = _extract_source_pages(query, combined_markdown)
+    content_lines = [
+        f"# Ban nhap bai hoc tu tai lieu: {title_source}",
+        "",
+        "## Muc tieu hoc tap",
+        *[f"- {line}" for line in goals[:4]],
+        "",
+        "## Checklist truc ca / noi dung can nam",
+        *[f"- {line}" for line in checklist[:5]],
+        "",
+        "## Hoat dong thao luan",
+        "- Hoc vien doi chieu checklist trong tai lieu voi mot tinh huong truc ca thuc te.",
+        "- Nhom nho xac dinh rui ro, nguoi can bao cao, va bang chung can ghi vao nhat ky.",
+        "",
+        "## Cau hoi kiem tra nhanh",
+        "- Khi tam nhin han che, nguoi truc ca can xac nhan nhung nguon thong tin nao truoc khi doi huong?",
+        "- Khi co nguy co va cham, quy trinh bao cao va ghi log nen dien ra nhu the nao?",
+    ]
+    if marker:
+        content_lines.extend(["", f"Marker kiem thu: {marker}"])
+
+    params: dict[str, Any] = {
+        "title": f"Ban nhap: {title_source[:90]}",
+        "content": "\n".join(content_lines),
+        "source_references": [
+            {
+                "kind": "document",
+                "title": title_source,
+                "page_start": page_start,
+                "page_end": page_end,
+                "excerpt": source_excerpt,
+            }
+        ],
+    }
+    lesson_id = _resolve_doc_preview_lesson_id(state)
+    if lesson_id:
+        params["lesson_id"] = lesson_id
+    return params
 
 
 def _extract_direct_visible_text(content: Any) -> str:
@@ -783,6 +979,131 @@ async def execute_direct_tool_rounds_impl(
                 return (
                     _build_assistant_message(
                         template_response,
+                        native_tool_messages=native_tool_messages,
+                    ),
+                    messages,
+                    tool_call_events,
+                )
+
+        if _should_request_uploaded_doc_preview(query=query, state=state, tools=tools):
+            forced_preview_tool = _find_doc_preview_host_action_tool(tools)
+            if forced_preview_tool is not None:
+                tc_id = "forced_doc_preview_0"
+                tc_args = _build_uploaded_doc_preview_params(query, state)
+                await push_event(
+                    {
+                        "type": "tool_call",
+                        "content": {
+                            "name": _DOC_PREVIEW_HOST_ACTION_TOOL,
+                            "args": tc_args,
+                            "id": tc_id,
+                        },
+                        "node": "direct",
+                    }
+                )
+                tool_call_events.append(
+                    {
+                        "type": "call",
+                        "name": _DOC_PREVIEW_HOST_ACTION_TOOL,
+                        "args": tc_args,
+                        "id": tc_id,
+                    }
+                )
+                try:
+                    result = await graph_invoke_tool_with_runtime(
+                        forced_preview_tool,
+                        tc_args,
+                        tool_name=_DOC_PREVIEW_HOST_ACTION_TOOL,
+                        runtime_context_base=runtime_context_base,
+                        tool_call_id=tc_id,
+                        query_snippet=str(tc_args.get("title", ""))[:100],
+                        prefer_async=False,
+                        run_sync_in_thread=True,
+                    )
+                except Exception as tool_error:
+                    logger.warning(
+                        "[DIRECT] Deterministic document preview host action failed: %s",
+                        tool_error,
+                    )
+                    result = "Tool unavailable"
+
+                await push_event(
+                    {
+                        "type": "tool_result",
+                        "content": {
+                            "name": _DOC_PREVIEW_HOST_ACTION_TOOL,
+                            "result": _summarize_tool_result_for_stream(
+                                _DOC_PREVIEW_HOST_ACTION_TOOL,
+                                result,
+                            ),
+                            "id": tc_id,
+                        },
+                        "node": "direct",
+                    }
+                )
+                await graph_maybe_emit_host_action_event(
+                    push_event=push_event,
+                    tool_name=_DOC_PREVIEW_HOST_ACTION_TOOL,
+                    result=result,
+                    node="direct",
+                    tool_call_events=tool_call_events,
+                )
+                tool_call_events.append(
+                    {
+                        "type": "result",
+                        "name": _DOC_PREVIEW_HOST_ACTION_TOOL,
+                        "result": str(result),
+                        "id": tc_id,
+                    }
+                )
+                doc_preview_thinking = (
+                    "Mình nhận đây là flow upload tài liệu -> tạo preview bài học. "
+                    "Vì đây là đường ghi LMS có ràng buộc an toàn, mình không chờ model tự gọi tool; "
+                    "mình dựng payload preview từ document_context và gửi host action preview-only để LMS mở diff/citation trước."
+                )
+                state["thinking"] = doc_preview_thinking
+                state["thinking_content"] = doc_preview_thinking
+                record_thinking_snapshot(
+                    state,
+                    doc_preview_thinking,
+                    node="direct",
+                    provenance="deterministic_document_preview_host_action",
+                )
+                await push_event(
+                    {
+                        "type": "thinking_start",
+                        "content": "",
+                        "node": "direct",
+                        "summary": "Tao preview bai hoc tu tai lieu",
+                    }
+                )
+                await push_event(
+                    {
+                        "type": "thinking_delta",
+                        "content": doc_preview_thinking,
+                        "node": "direct",
+                    }
+                )
+                await push_event(
+                    {
+                        "type": "thinking_end",
+                        "content": "",
+                        "node": "direct",
+                    }
+                )
+                response = (
+                    "Mình đã gửi bản preview từ tài liệu sang LMS. "
+                    "Bạn kiểm tra diff và citation trong hộp xem trước, rồi chỉ bấm Apply nếu nội dung đúng."
+                )
+                logger.info(
+                    "[DIRECT] Deterministic document preview host action requested "
+                    "(attachments=%d, source_refs=%d)",
+                    len(_uploaded_document_attachments_from_state(state)),
+                    len(tc_args.get("source_references") or []),
+                )
+                return (
+                    _build_assistant_message(
+                        response,
                         native_tool_messages=native_tool_messages,
                     ),
                     messages,
