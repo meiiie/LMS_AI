@@ -1,0 +1,74 @@
+{
+  "observer": {
+    "name": "observer-agent",
+    "mode": "report-only"
+  },
+  "labels": [
+    {
+      "name": "coord:watch",
+      "color": "6f42c1",
+      "description": "Include this item in Wiii/LMS coordination watcher digests."
+    },
+    {
+      "name": "integration:wiii-lms",
+      "color": "0e8a16",
+      "description": "Cross-repository Wiii and Maritime LMS integration."
+    },
+    {
+      "name": "needs-wiii",
+      "color": "fbca04",
+      "description": "Blocked until Wiii repo changes or clarifies a contract."
+    },
+    {
+      "name": "needs-lms",
+      "color": "fbca04",
+      "description": "Blocked until LMS repo changes or clarifies host behavior."
+    },
+    {
+      "name": "blocked:other-repo",
+      "color": "d73a4a",
+      "description": "Blocked by the partner repository."
+    },
+    {
+      "name": "agent:wiii",
+      "color": "1d76db",
+      "description": "Next implementation step belongs to the Wiii agent."
+    },
+    {
+      "name": "agent:lms",
+      "color": "1d76db",
+      "description": "Next implementation step belongs to the LMS agent."
+    },
+    {
+      "name": "agent:observer",
+      "color": "5319e7",
+      "description": "Observer/coordinator issue or PR."
+    }
+  ],
+  "repos": [
+    {
+      "key": "wiii",
+      "full_name": "meiiie/wiii",
+      "role": "wiii-agent",
+      "partner_repo": "linhlinhlin/LMS_hohulili",
+      "watch_labels": [
+        "coord:watch",
+        "integration:wiii-lms",
+        "needs-lms",
+        "blocked:other-repo"
+      ]
+    },
+    {
+      "key": "lms",
+      "full_name": "linhlinhlin/LMS_hohulili",
+      "role": "lms-agent",
+      "partner_repo": "meiiie/wiii",
+      "watch_labels": [
+        "coord:watch",
+        "integration:wiii-lms",
+        "needs-wiii",
+        "blocked:other-repo"
+      ]
+    }
+  ]
+}
