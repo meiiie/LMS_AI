@@ -105,6 +105,10 @@ def _format_input_contract(action_name: str, action_def: dict[str, Any]) -> str:
             "For document-derived lesson/course previews, include `source_references` "
             "from the uploaded source document so the teacher can verify citations."
         )
+        lines.append(
+            "When an uploaded Word/PDF/document is the source, build `content` from that "
+            "document context and keep preview-only behavior; do not call an apply action."
+        )
 
     return "\n" + "\n".join(lines)
 

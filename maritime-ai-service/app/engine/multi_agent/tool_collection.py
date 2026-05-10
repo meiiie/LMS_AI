@@ -203,6 +203,56 @@ def _routing_intent(state: Optional[AgentState]) -> str:
     return str(metadata.get("intent") or "").strip().lower()
 
 
+def _has_uploaded_document_context_state(state: Optional[AgentState]) -> bool:
+    if not isinstance(state, dict):
+        return False
+    context = state.get("context")
+    if not isinstance(context, dict):
+        return False
+    document_context = context.get("document_context")
+    if not isinstance(document_context, dict):
+        return False
+    attachments = document_context.get("attachments")
+    if not isinstance(attachments, list):
+        return False
+    return any(
+        isinstance(item, dict) and str(item.get("markdown") or "").strip()
+        for item in attachments
+    )
+
+
+def _looks_like_document_preview_request(query: str, state: Optional[AgentState]) -> bool:
+    if not _has_uploaded_document_context_state(state):
+        return False
+    normalized = _normalize_for_intent(query)
+    return any(
+        marker in normalized
+        for marker in (
+            "preview",
+            "xem truoc",
+            "ban xem truoc",
+            "ban nhap",
+            "draft",
+            "cap nhat bai hoc",
+            "tao bai hoc",
+            "lesson patch",
+            "preview_lesson_patch",
+            "source_references",
+            "citation",
+            "trich dan",
+            "nguon",
+        )
+    )
+
+
+def _document_preview_host_action_tools(tools: list[Any]) -> list[Any]:
+    return [
+        tool
+        for tool in tools
+        if _tool_name(tool).lower() == "host_action__authoring__preview_lesson_patch"
+    ]
+
+
 def _should_use_no_tools_for_direct_prose(
     *,
     query: str,
@@ -444,6 +494,14 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
     if _is_host_ui_navigation_route(state):
         scoped_host_tools = _host_action_tools(_direct_tools)
         return scoped_host_tools, bool(scoped_host_tools)
+
+    if _looks_like_document_preview_request(query, state):
+        preview_tools = _document_preview_host_action_tools(_direct_tools)
+        if preview_tools:
+            logger.info(
+                "[DIRECT] Forcing LMS document preview host action for uploaded document context"
+            )
+            return preview_tools[:1], True
 
     if _looks_reasoning_safety_meta_turn(query) and _routing_intent(state) in {
         "general",
