@@ -162,6 +162,29 @@ Use the same SHA tag for app and nginx. Floating `:main` is acceptable only for 
 
 ## Deploy
 
+Preferred path after the VM has been provisioned is the manual GitHub Actions
+workflow `Deploy Production`. Configure the GitHub `production` environment with
+these secrets:
+
+- `WIII_PRODUCTION_HOST`: production VM hostname or public IP
+- `WIII_PRODUCTION_USER`: SSH user that owns `/opt/wiii`
+- `WIII_PRODUCTION_SSH_KEY`: private key allowed to SSH to the VM
+- `WIII_PRODUCTION_KNOWN_HOSTS`: optional but recommended pinned SSH host key;
+  if absent, the workflow uses `ssh-keyscan` during the run
+
+Optional environment variables:
+
+- `WIII_PRODUCTION_SSH_PORT`: defaults to `22`
+- `WIII_PRODUCTION_APP_DIR`: defaults to `/opt/wiii`
+
+The workflow validates that the target SHA is reachable from `origin/main`,
+checks the matching `wiii-app:sha-...` and `wiii-nginx:sha-...` GHCR images,
+runs the production deploy script over SSH, then verifies that
+`/pointy/wiii-pointy.umd.js` returns JavaScript instead of the SPA shell.
+
+Manual VM deploy remains supported and is the recovery path if GitHub-hosted
+deployment is unavailable.
+
 SSH to the production VM:
 
 ```bash
@@ -211,6 +234,10 @@ Run these from a local machine:
 curl -fsS https://wiii.holilihu.online/api/v1/health/live
 curl -fsSI https://wiii.holilihu.online/embed/
 curl -fsSI https://wiii.holilihu.online/pointy/wiii-pointy.umd.js
+API_KEY=<production-api-key>
+curl -fsS \
+  -H "X-API-Key: ${API_KEY}" \
+  https://wiii.holilihu.online/api/v1/voice/status
 ```
 
 Minimum product smoke criteria:
@@ -218,11 +245,35 @@ Minimum product smoke criteria:
 - public health returns `200`
 - `/embed/` returns `200` and has the expected frame policy
 - `/pointy/wiii-pointy.umd.js` returns JavaScript content and never falls through to the SPA shell
+- `/api/v1/voice/status` is registered and returns provider `elevenlabs` when authenticated
 - SSE V3 smoke reaches metadata and done events
 - a normal short chat returns without a long silent period
 - LMS iframe loads Wiii without cross-origin console errors beyond known sandbox limitations
 - optional Magic Link or Google OAuth smoke passes if that login method was
   changed during the release
+
+## Pointy Voice Operator Notes
+
+The chat composer includes `Pointy` and `Voice` controls. The ElevenLabs key
+input appears only after Pointy mode is on and the operator clicks `Voice` while
+the backend reports missing voice config. The key is sent to
+`/api/v1/voice/config` and stored encrypted server-side; the frontend must not
+store the raw key.
+
+Production can also be preconfigured on the VM:
+
+```bash
+ENABLE_HOST_ACTIONS=true
+ENABLE_POINTY_VOICE=true
+ELEVENLABS_API_KEY=<elevenlabs-api-key>
+ELEVENLABS_VOICE_ID=JBFqnCBsd6RMkjVDRZzb
+ELEVENLABS_MODEL_ID=eleven_flash_v2_5
+ELEVENLABS_OUTPUT_FORMAT=mp3_22050_32
+```
+
+If the public Pointy URL returns `text/html`, production is still serving the old
+SPA/nginx image or the nginx route has not rolled out. Redeploy the matching
+`wiii-nginx:sha-...` image before debugging LMS iframe code.
 
 ## Rollback
 

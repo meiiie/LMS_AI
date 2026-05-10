@@ -1,0 +1,168 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_sha:
+        description: "Full main-branch commit SHA to deploy. Defaults to origin/main HEAD."
+        required: false
+        type: string
+      base_url:
+        description: "Public URL used by post-deploy smoke checks."
+        required: true
+        default: "https://wiii.holilihu.online"
+        type: string
+      run_external_smoke:
+        description: "Run the production smoke test from the VM after rollout."
+        required: true
+        default: true
+        type: boolean
+      require_pinned_images:
+        description: "Block floating :main image tags during production deploy."
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy pinned GHCR images to production VM
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ inputs.base_url }}
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve deploy SHA and images
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --prune origin main
+          SHA="${{ inputs.deploy_sha }}"
+          if [ -z "$SHA" ]; then
+            SHA="$(git rev-parse origin/main)"
+          fi
+
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "deploy_sha must be a full 40-character commit SHA." >&2
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "Refusing to deploy a SHA that is not reachable from origin/main: $SHA" >&2
+            exit 1
+          fi
+
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          APP_IMAGE="ghcr.io/${OWNER}/wiii-app:sha-${SHA}"
+          NGINX_IMAGE="ghcr.io/${OWNER}/wiii-nginx:sha-${SHA}"
+
+          {
+            echo "sha=$SHA"
+            echo "short_sha=${SHA:0:12}"
+            echo "app_image=$APP_IMAGE"
+            echo "nginx_image=$NGINX_IMAGE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Validate published images exist
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+          docker manifest inspect "${{ steps.release.outputs.app_image }}" >/dev/null
+          docker manifest inspect "${{ steps.release.outputs.nginx_image }}" >/dev/null
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          PROD_HOST: ${{ secrets.WIII_PRODUCTION_HOST }}
+          PROD_USER: ${{ secrets.WIII_PRODUCTION_USER }}
+          PROD_SSH_KEY: ${{ secrets.WIII_PRODUCTION_SSH_KEY }}
+          PROD_KNOWN_HOSTS: ${{ secrets.WIII_PRODUCTION_KNOWN_HOSTS }}
+          PROD_SSH_PORT: ${{ vars.WIII_PRODUCTION_SSH_PORT }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PROD_HOST:-}" ] || [ -z "${PROD_USER:-}" ] || [ -z "${PROD_SSH_KEY:-}" ]; then
+            echo "Missing required production SSH secrets: WIII_PRODUCTION_HOST, WIII_PRODUCTION_USER, WIII_PRODUCTION_SSH_KEY." >&2
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$PROD_SSH_KEY" > ~/.ssh/wiii_production_key
+          chmod 600 ~/.ssh/wiii_production_key
+          if [ -n "${PROD_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$PROD_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "${PROD_SSH_PORT:-22}" "$PROD_HOST" >> ~/.ssh/known_hosts
+          fi
+
+      - name: Deploy on production VM
+        shell: bash
+        env:
+          PROD_HOST: ${{ secrets.WIII_PRODUCTION_HOST }}
+          PROD_USER: ${{ secrets.WIII_PRODUCTION_USER }}
+          PROD_SSH_PORT: ${{ vars.WIII_PRODUCTION_SSH_PORT }}
+          PROD_APP_DIR: ${{ vars.WIII_PRODUCTION_APP_DIR }}
+          DEPLOY_SHA: ${{ steps.release.outputs.sha }}
+          WIII_APP_IMAGE: ${{ steps.release.outputs.app_image }}
+          WIII_NGINX_IMAGE: ${{ steps.release.outputs.nginx_image }}
+          REQUIRE_PINNED_IMAGES: ${{ inputs.require_pinned_images }}
+          RUN_EXTERNAL_SMOKE: ${{ inputs.run_external_smoke }}
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -euo pipefail
+
+          APP_DIR="${PROD_APP_DIR:-/opt/wiii}"
+          SSH_TARGET="${PROD_USER}@${PROD_HOST}"
+          SSH_PORT="${PROD_SSH_PORT:-22}"
+
+          ssh -i ~/.ssh/wiii_production_key -p "$SSH_PORT" "$SSH_TARGET" \
+            "APP_DIR='$APP_DIR' DEPLOY_SHA='$DEPLOY_SHA' WIII_APP_IMAGE='$WIII_APP_IMAGE' WIII_NGINX_IMAGE='$WIII_NGINX_IMAGE' REQUIRE_PINNED_IMAGES='$REQUIRE_PINNED_IMAGES' RUN_EXTERNAL_SMOKE='$RUN_EXTERNAL_SMOKE' BASE_URL='$BASE_URL' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$APP_DIR"
+          bash ./maritime-ai-service/scripts/deploy/deploy.sh
+          REMOTE
+
+      - name: Verify public Pointy bundle after deploy
+        shell: bash
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -euo pipefail
+
+          headers="$(mktemp)"
+          body="$(mktemp)"
+          http_code="$(curl -sS -D "$headers" -o "$body" -w "%{http_code}" "${BASE_URL}/pointy/wiii-pointy.umd.js")"
+          if [ "$http_code" != "200" ]; then
+            echo "Pointy bundle returned HTTP $http_code" >&2
+            cat "$headers" >&2
+            exit 1
+          fi
+          if ! grep -qiE 'content-type:.*(javascript|ecmascript)' "$headers"; then
+            echo "Pointy bundle did not return a JavaScript content type." >&2
+            cat "$headers" >&2
+            exit 1
+          fi
+          if grep -qiE '<!doctype html|<html' "$body"; then
+            echo "Pointy bundle returned SPA HTML instead of JavaScript." >&2
+            exit 1
+          fi
