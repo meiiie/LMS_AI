@@ -12,12 +12,18 @@ import {
 } from "@/api/host-actions";
 import { useUIStore } from "@/stores/ui-store";
 import { useChatStore } from "@/stores/chat-store";
-import { useHostContextStore } from "@/stores/host-context-store";
+import {
+  useHostContextStore,
+  type ActionResult,
+} from "@/stores/host-context-store";
 import { useToastStore } from "@/stores/toast-store";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import { LazyImage } from "@/components/chat/PreviewCard";
 import { slideInRight } from "@/lib/animations";
 import type { PreviewItemData } from "@/api/types";
+
+const HOST_PREVIEW_APPROVAL_REQUIRED_MESSAGE =
+  "LMS đang giữ quyền áp dụng trong hộp thoại preview. Hãy xác nhận trực tiếp trong LMS để Wiii không tự thay đổi dữ liệu.";
 
 /** Shared content for both inline and overlay modes */
 function PreviewPanelContent({
@@ -173,8 +179,26 @@ function ExpandedPreview({ item }: { item: PreviewItemData }) {
     typeof item.metadata?.preview_token === "string"
       ? item.metadata.preview_token
       : "";
+  const approvalToken =
+    typeof item.metadata?.approval_token === "string"
+      ? item.metadata.approval_token
+      : "";
+  const applyNeedsHostApproval = Boolean(
+    applyConfig &&
+      !approvalToken &&
+      hostActionRequiresInput(
+        applyConfig.action,
+        "approval_token",
+        hostCapabilities,
+        hostContext,
+      ),
+  );
   const canExecuteApply = Boolean(
-    isHostAction && applyConfig && previewToken && hostContext?.host_type,
+    isHostAction &&
+      applyConfig &&
+      previewToken &&
+      hostContext?.host_type &&
+      !applyNeedsHostApproval,
   );
 
   useEffect(() => {
@@ -192,14 +216,27 @@ function ExpandedPreview({ item }: { item: PreviewItemData }) {
       message: "Wiii đang gửi xác nhận sang LMS...",
     });
     try {
+      const applyParams: Record<string, string> = {
+        preview_token: previewToken,
+      };
+      if (approvalToken) {
+        applyParams.approval_token = approvalToken;
+      }
+
       const result = await useHostContextStore
         .getState()
-        .requestAction(
-          applyConfig.action,
-          { preview_token: previewToken },
-          requestId,
-        );
+        .requestAction(applyConfig.action, applyParams, requestId);
       if (!result.success) {
+        if (isHostPreviewApprovalRequired(result)) {
+          setOperatorState({
+            status: "idle",
+            message: HOST_PREVIEW_APPROVAL_REQUIRED_MESSAGE,
+          });
+          useToastStore
+            .getState()
+            .addToast("info", HOST_PREVIEW_APPROVAL_REQUIRED_MESSAGE, 4500);
+          return;
+        }
         throw new Error(result.error || "Không thể áp dụng thay đổi này.");
       }
 
@@ -228,6 +265,16 @@ function ExpandedPreview({ item }: { item: PreviewItemData }) {
         });
       }
     } catch (error) {
+      if (isHostPreviewApprovalRequired(error)) {
+        setOperatorState({
+          status: "idle",
+          message: HOST_PREVIEW_APPROVAL_REQUIRED_MESSAGE,
+        });
+        useToastStore
+          .getState()
+          .addToast("info", HOST_PREVIEW_APPROVAL_REQUIRED_MESSAGE, 4500);
+        return;
+      }
       const message =
         error instanceof Error
           ? error.message
@@ -355,7 +402,9 @@ function ExpandedPreview({ item }: { item: PreviewItemData }) {
                 className="mt-2 text-xs text-text-secondary"
               >
                 {!canExecuteApply && operatorState.status === "idle"
-                  ? "CTA này chỉ hoạt động khi Wiii đang được nhúng trong host sidebar có bridge xác nhận."
+                  ? applyNeedsHostApproval
+                    ? HOST_PREVIEW_APPROVAL_REQUIRED_MESSAGE
+                    : "CTA này chỉ hoạt động khi Wiii đang được nhúng trong host sidebar có bridge xác nhận."
                   : operatorState.message}
               </div>
             </div>
@@ -866,6 +915,70 @@ function resolveHostActionApplyConfig(item: PreviewItemData): {
     label: "Xác nhận áp dụng",
     successLabel: "Đã áp dụng thay đổi vào host.",
   };
+}
+
+function hostActionRequiresInput(
+  action: string,
+  property: string,
+  hostCapabilities: ReturnType<
+    typeof useHostContextStore.getState
+  >["capabilities"],
+  hostContext: ReturnType<typeof useHostContextStore.getState>["currentContext"],
+): boolean {
+  const capabilityTools = hostCapabilities?.tools ?? [];
+  const contextActions = hostContext?.available_actions ?? [];
+  return [...capabilityTools, ...contextActions].some((tool) => {
+    if (!tool || typeof tool !== "object") {
+      return false;
+    }
+    const candidate = tool as {
+      action?: unknown;
+      input_schema?: unknown;
+      name?: unknown;
+    };
+    const toolName =
+      typeof candidate.name === "string"
+        ? candidate.name
+        : typeof candidate.action === "string"
+          ? candidate.action
+          : "";
+    return (
+      toolName === action &&
+      schemaRequiresProperty(candidate.input_schema, property)
+    );
+  });
+}
+
+function schemaRequiresProperty(schema: unknown, property: string): boolean {
+  if (!schema || typeof schema !== "object") {
+    return false;
+  }
+  const required = (schema as { required?: unknown }).required;
+  return (
+    Array.isArray(required) &&
+    required.some((field) => field === property)
+  );
+}
+
+function isHostPreviewApprovalRequired(result: unknown): boolean {
+  if (result instanceof Error) {
+    return result.message.includes("host_preview_approval_required");
+  }
+  if (!result || typeof result !== "object") {
+    return false;
+  }
+
+  const actionResult = result as ActionResult;
+  const error = typeof actionResult.error === "string" ? actionResult.error : "";
+  const code =
+    typeof actionResult.data?.code === "string"
+      ? actionResult.data.code
+      : typeof actionResult.data?.error_code === "string"
+        ? actionResult.data.error_code
+        : "";
+  return [error, code].some((value) =>
+    value.includes("host_preview_approval_required"),
+  );
 }
 
 function mapManualHostActionAuditEvent(
