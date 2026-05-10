@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildHostActionPreviewItem } from "@/hooks/useSSEStream";
 import { useHostContextStore } from "@/stores/host-context-store";
+import type { HostContext } from "@/stores/host-context-store";
 
 describe("Host Action SSE + PostMessage Integration (Sprint 222b)", () => {
   it("wiii:action-response resolves pending action", async () => {
@@ -65,6 +66,12 @@ describe("Host Action SSE + PostMessage Integration (Sprint 222b)", () => {
   });
 
   it("preserves source references from host preview responses", () => {
+    const hostContext = {
+      host_type: "lms",
+      page: { type: "course_editor", title: "Course editor" },
+      workflow_stage: "editing",
+    } satisfies HostContext;
+
     const item = buildHostActionPreviewItem(
       "authoring.preview_lesson_patch",
       "req-source-1",
@@ -84,11 +91,7 @@ describe("Host Action SSE + PostMessage Integration (Sprint 222b)", () => {
           },
         ],
       },
-      {
-        host_type: "lms",
-        page: { type: "course_editor", title: "Course editor" },
-        workflow_stage: "editing",
-      } as never,
+      hostContext,
     );
 
     expect(item?.metadata?.source_references).toMatchObject([
