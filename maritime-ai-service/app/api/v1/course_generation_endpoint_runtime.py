@@ -9,6 +9,74 @@ from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
 
+SAFE_DOC_TO_COURSE_CONTRACT = "host_action_preview_apply"
+LEGACY_DIRECT_EXPAND_CONTRACT = "legacy_course_generation_expand"
+LEGACY_EXPAND_CONFIRMATION_REQUIRED = {
+    "code": "legacy_lms_mutation_confirmation_required",
+    "message": (
+        "POST /course-generation/{generation_id}/expand is a legacy direct LMS "
+        "mutation path. Product LMS doc-to-course must use preview -> teacher "
+        "confirm -> apply instead."
+    ),
+    "required_field": "legacy_lms_mutation_confirmed",
+    "safe_contract": SAFE_DOC_TO_COURSE_CONTRACT,
+    "issue": "meiiie/wiii#285",
+}
+
+
+def _source_pages(value: Any) -> list[Any]:
+    if not isinstance(value, list):
+        return []
+    return [page for page in value if page is not None]
+
+
+def build_outline_source_references(outline: Any) -> list[dict[str, Any]]:
+    if not isinstance(outline, dict):
+        return []
+
+    chapters = outline.get("chapters")
+    if not isinstance(chapters, list):
+        return []
+
+    references: list[dict[str, Any]] = []
+    for chapter_index, chapter in enumerate(chapters):
+        if not isinstance(chapter, dict):
+            continue
+
+        chapter_title = chapter.get("title")
+        chapter_pages = _source_pages(chapter.get("sourcePages"))
+        if chapter_pages:
+            references.append(
+                {
+                    "kind": "chapter",
+                    "chapter_index": chapter_index,
+                    "title": chapter_title,
+                    "source_pages": chapter_pages,
+                }
+            )
+
+        lessons = chapter.get("lessons")
+        if not isinstance(lessons, list):
+            continue
+
+        for lesson_index, lesson in enumerate(lessons):
+            if not isinstance(lesson, dict):
+                continue
+            lesson_pages = _source_pages(lesson.get("sourcePages"))
+            if not lesson_pages:
+                continue
+            references.append(
+                {
+                    "kind": "lesson",
+                    "chapter_index": chapter_index,
+                    "lesson_index": lesson_index,
+                    "chapter_title": chapter_title,
+                    "title": lesson.get("title"),
+                    "source_pages": lesson_pages,
+                }
+            )
+    return references
+
 
 async def list_generation_jobs_impl(
     *,
@@ -126,6 +194,14 @@ async def expand_chapters_impl(
     if job["phase"] != "OUTLINE_READY":
         raise HTTPException(400, f"Cannot expand: phase is '{job['phase']}', expected 'OUTLINE_READY'")
     ensure_teacher_matches_auth_fn(req.teacher_id, auth)
+    if not req.legacy_lms_mutation_confirmed:
+        raise HTTPException(
+            409,
+            {
+                **LEGACY_EXPAND_CONFIRMATION_REQUIRED,
+                "generation_id": generation_id,
+            },
+        )
 
     outline = job.get("outline") or {}
     chapters = outline.get("chapters") or []
@@ -154,6 +230,8 @@ async def expand_chapters_impl(
         "generation_id": generation_id,
         "phase": "EXPANDING",
         "progress_percent": max(job.get("progress_percent", 40), 45),
+        "mutation_contract": LEGACY_DIRECT_EXPAND_CONTRACT,
+        "safe_product_contract": SAFE_DOC_TO_COURSE_CONTRACT,
     }
 
 
@@ -360,6 +438,7 @@ async def get_generation_status_impl(
         generation_id=job["id"],
         phase=job["phase"],
         outline=job.get("outline"),
+        source_references=build_outline_source_references(job.get("outline")),
         course_id=job.get("course_id"),
         completed_chapters=job.get("completed_chapters", []),
         failed_chapters=job.get("failed_chapters", []),

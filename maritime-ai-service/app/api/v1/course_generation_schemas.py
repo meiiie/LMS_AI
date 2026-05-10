@@ -32,6 +32,7 @@ class GenerationStatusResponse(BaseModel):
     generation_id: str
     phase: str
     outline: Optional[dict] = None
+    source_references: list[dict] = Field(default_factory=list)
     course_id: Optional[str] = None
     completed_chapters: list[dict] = Field(default_factory=list)
     failed_chapters: list[dict] = Field(default_factory=list)
@@ -56,6 +57,13 @@ class ExpandRequest(BaseModel):
     course_title: str
     approved_chapters: list[int] = Field(min_length=1)
     language: str = "vi"
+    legacy_lms_mutation_confirmed: bool = Field(
+        default=False,
+        description=(
+            "Explicit opt-in for the legacy direct LMS mutation path. "
+            "Product LMS doc-to-course flows must use preview -> teacher confirm -> apply."
+        ),
+    )
 
     @field_validator("approved_chapters")
     @classmethod
