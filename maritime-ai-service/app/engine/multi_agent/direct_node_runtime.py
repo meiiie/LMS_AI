@@ -1037,12 +1037,37 @@ def _uploaded_context_has_video(ctx: dict[str, Any]) -> bool:
     )
 
 
+def _looks_uploaded_document_preview_request(query: str) -> bool:
+    """Route document-to-course preview requests away from fact fast-paths."""
+    folded = _fold_direct_text(query)
+    if not folded:
+        return False
+    preview_markers = (
+        "approval_token",
+        "ban nhap",
+        "ban xem truoc",
+        "citation",
+        "diff",
+        "lesson patch",
+        "preview",
+        "preview_lesson_patch",
+        "source references",
+        "source_references",
+        "tao ban xem truoc",
+        "trich dan",
+        "xem truoc",
+    )
+    return any(marker in folded for marker in preview_markers)
+
+
 def _looks_uploaded_context_fact_query(query: str, ctx: dict[str, Any]) -> bool:
     """Keep direct fact extraction from uploaded markdown off the slow LLM path."""
     if not _has_uploaded_document_context(ctx):
         return False
     folded = _fold_direct_text(query)
     if not folded:
+        return False
+    if _looks_uploaded_document_preview_request(query):
         return False
     if len([token for token in folded.split() if token]) > 90:
         return False
