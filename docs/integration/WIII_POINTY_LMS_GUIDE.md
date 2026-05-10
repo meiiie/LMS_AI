@@ -189,6 +189,34 @@ or off-screen after validation, Pointy returns a failure such as
 `unsafe_click_target`, `disabled_click_target`, or `target_not_visible` and does
 not call `element.click()`.
 
+### V1.1 Testing Strategy And Known Limitations
+
+Verify `ui.click` at three layers before treating an LMS page as product-ready:
+
+- Unit tests should cover shared selector resolution, including bare
+  `data-wiii-id` values and normal selectors, so `ui.click`, `ui.highlight`,
+  `ui.scroll_to`, and `ui.show_tour` resolve targets consistently.
+- Integration or E2E tests should exercise safe-click success paths with
+  `data-wiii-click-safe="true"` and `data-wiii-click-kind`, then verify
+  fail-closed behavior for unsafe, disabled, hidden, detached, or off-screen
+  targets.
+- Product smoke should use real LMS pages and confirm that safe-click is only
+  attached to navigation-like targets such as continue, open panel, help, or
+  back-to-dashboard.
+
+Current limits:
+
+- `ui.click` only clicks host-marked targets with
+  `data-wiii-click-safe="true"`; unmarked targets fail closed.
+- `data-wiii-click-kind` is observability metadata, not a permission override.
+- Pointy will not click quiz answers, submit, publish, enroll, payment,
+  grading, logout, delete, or other mutating controls in V1.1.
+- Pointy will not click elements that fail selector resolution or visibility
+  validation, including detached and off-screen targets.
+- Selector resolution prefers stable `data-wiii-id` values, then falls back to
+  CSS. LMS pages should avoid raw class names and fragile `nth-child`
+  selectors.
+
 ## Selector Discipline
 
 Wiii can only point reliably when the host gives it stable targets.

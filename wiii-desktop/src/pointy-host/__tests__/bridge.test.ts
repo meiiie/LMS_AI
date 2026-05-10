@@ -238,6 +238,8 @@ describe("handleShowTour", () => {
 
     expect(result.success).toBe(true);
     expect(result.data?.completed_steps).toBe(2);
+    expect(result.data?.total_steps).toBe(2);
+    expect(result.data?.cancelled).toBe(false);
     expect(result.data?.missing_selectors).toEqual([]);
   });
 });
