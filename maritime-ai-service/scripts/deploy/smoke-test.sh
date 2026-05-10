@@ -88,6 +88,16 @@ if [ -n "$API_KEY" ]; then
         2>/dev/null || echo "000")
     check "Chat API (POST /chat)" "$([ "$HTTP" = "200" ] && echo true || echo false)"
 
+    VOICE_BODY="$(mktemp)"
+    VOICE_HTTP=$(curl -s -o "$VOICE_BODY" -w "%{http_code}" \
+        "${BASE_URL}/api/v1/voice/status" \
+        -H "X-API-Key: ${API_KEY}" \
+        --max-time 20 \
+        2>/dev/null || echo "000")
+    check "Pointy voice status endpoint registered" "$([ "$VOICE_HTTP" = "200" ] && echo true || echo false)"
+    check "Pointy voice status reports ElevenLabs provider" "$([ "$VOICE_HTTP" = "200" ] && grep -q '"provider":"elevenlabs"' "$VOICE_BODY" && echo true || echo false)"
+    rm -f "$VOICE_BODY"
+
     STREAM_BODY=$(curl -sN \
         -X POST "${BASE_URL}/api/v1/chat/stream/v3" \
         -H "Content-Type: application/json" \

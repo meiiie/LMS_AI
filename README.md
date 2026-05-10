@@ -98,19 +98,20 @@ Production now uses CI-built immutable images for both the backend app and nginx
 Current deployment flow:
 
 1. Push to `main` triggers `.github/workflows/build-production-images.yml`.
-2. CI builds `wiii-desktop/dist-embed/` as a build artifact.
+2. CI builds `wiii-desktop/dist-embed/` and `wiii-desktop/dist-pointy/` as build artifacts.
 3. CI builds and publishes:
    - `ghcr.io/meiiie/wiii-app:*` (legacy `ghcr.io/meiiie/lms-ai-app:*` is still pushed for one release window)
    - `ghcr.io/meiiie/wiii-nginx:*` (legacy `ghcr.io/meiiie/lms-ai-nginx:*` is still pushed for one release window)
 4. The app image serves embed assets from `/app-embed`.
-5. The nginx image serves embed assets from `/usr/share/nginx/embed`.
+5. The nginx image serves embed assets from `/usr/share/nginx/embed` and the Pointy host bridge from `/usr/share/nginx/pointy`.
 6. Production deploy pulls tagged images instead of rebuilding frontend assets on the host.
 
 Operational consequence:
 
 - production no longer depends on `wiii-desktop/dist-embed/` being committed or present in the server checkout
 - rollback is image-tag based rather than “rebuild on host” based
-- `/embed/` verification belongs in post-deploy smoke testing
+- `/embed/` and `/pointy/wiii-pointy.umd.js` verification belongs in post-deploy smoke testing
+- Pointy Voice uses the backend ElevenLabs proxy at `/api/v1/voice/*`; raw ElevenLabs keys stay in production secrets or encrypted runtime settings, never in frontend storage
 
 Current release controls:
 
