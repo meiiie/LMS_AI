@@ -86,6 +86,7 @@ test-results/
 Documents/
 maritime-ai-service/.tmp-workspace/
 maritime-ai-service/.env.soul-agi
+maritime-ai-service/.env.production.bak-*
 wiii-desktop/scripts/screenshots/
 
 # === Local agent scratch artifacts ===
