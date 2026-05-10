@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -313,6 +314,109 @@ async def test_forced_web_search_runs_tool_without_planner_or_synthesis_llm():
     assert "https://openai.com/index/introducing-gpt-5-5/" in llm_response.content
     assert [event["type"] for event in tool_call_events] == ["call", "result"]
     assert tool_call_events[0]["args"]["query"] == "OpenAI latest model announcement 2026"
+
+
+@pytest.mark.asyncio
+async def test_uploaded_document_preview_runs_host_action_without_planner_llm():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        execute_direct_tool_rounds_impl,
+    )
+
+    captured: dict[str, object] = {}
+
+    class FakeHostPreviewTool:
+        name = "host_action__authoring__preview_lesson_patch"
+
+        def invoke(self, args):
+            captured["args"] = dict(args)
+            return json.dumps(
+                {
+                    "status": "action_requested",
+                    "request_id": "host-preview-1",
+                    "action": "authoring.preview_lesson_patch",
+                    "params": args,
+                },
+                ensure_ascii=False,
+            )
+
+        async def ainvoke(self, args):
+            return self.invoke(args)
+
+    events: list[dict] = []
+
+    async def push_event(event):
+        events.append(event)
+
+    async def fake_ainvoke_with_fallback(_llm, _messages, **_kwargs):
+        raise AssertionError("uploaded document preview should not depend on planner LLM")
+
+    async def fake_stream_direct_answer_with_fallback(*args, **kwargs):
+        raise AssertionError("document preview should not use no-tool streaming path")
+
+    async def fake_stream_direct_wait_heartbeats(*args, **kwargs):
+        stop_signal = kwargs.get("stop_signal")
+        if stop_signal is not None:
+            await stop_signal.wait()
+            return
+        await asyncio.Future()
+
+    async def push_status_only_progress(*args, **kwargs):
+        return None
+
+    markdown = (
+        "So tay truc ca buong lai\n"
+        "Marker kiem thu: WIII_DOC_GOAL_123\n"
+        "Muc tieu hoc tap 1: giai thich quy trinh truc ca khi tam nhin han che.\n"
+        "Checklist nguon trang 4: xac nhan nguoi truc ca, kiem tra thiet bi dinh vi.\n"
+        "Checklist nguon trang 5: bao thuyen truong, giam toc an toan, ghi nhat ky.\n"
+    )
+    state = {
+        "context": {
+            "document_context": {
+                "attachments": [
+                    {
+                        "file_name": "so-tay-truc-ca.docx",
+                        "markdown": markdown,
+                    }
+                ]
+            },
+            "page_context": {"lesson_id": "lesson-from-url"},
+        }
+    }
+
+    with patch(
+        "app.engine.multi_agent.graph._ainvoke_with_fallback",
+        new=fake_ainvoke_with_fallback,
+    ), patch(
+        "app.engine.multi_agent.graph._stream_direct_wait_heartbeats",
+        new=fake_stream_direct_wait_heartbeats,
+    ):
+        llm_response, _messages, tool_call_events = await execute_direct_tool_rounds_impl(
+            llm_with_tools=object(),
+            llm_auto=object(),
+            messages=[],
+            tools=[FakeHostPreviewTool()],
+            push_event=push_event,
+            query=(
+                "Dua tren tai lieu Word vua upload, tao preview_lesson_patch "
+                "co source_references page 4-5 va marker WIII_DOC_GOAL_123."
+            ),
+            state=state,
+            forced_tool_choice="host_action__authoring__preview_lesson_patch",
+            ainvoke_with_fallback=fake_ainvoke_with_fallback,
+            stream_direct_answer_with_fallback=fake_stream_direct_answer_with_fallback,
+            stream_direct_wait_heartbeats=fake_stream_direct_wait_heartbeats,
+            push_status_only_progress=push_status_only_progress,
+        )
+
+    preview_args = captured["args"]
+    assert preview_args["lesson_id"] == "lesson-from-url"
+    assert "WIII_DOC_GOAL_123" in preview_args["content"]
+    assert preview_args["source_references"][0]["page_start"] == 4
+    assert preview_args["source_references"][0]["page_end"] == 5
+    assert [event["type"] for event in tool_call_events] == ["call", "host_action", "result"]
+    assert any(event.get("type") == "host_action" for event in events)
+    assert "preview" in llm_response.content.lower()
 
 
 @pytest.mark.asyncio
