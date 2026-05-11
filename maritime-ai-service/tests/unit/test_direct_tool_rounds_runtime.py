@@ -882,6 +882,40 @@ def test_uploaded_doc_preview_preserves_labelled_non_wiii_marker_from_query():
     assert marker in params["content"]
 
 
+def test_uploaded_doc_preview_prefers_explicit_query_title_over_parser_metadata():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_preview_params,
+    )
+
+    params = _build_uploaded_doc_preview_params(
+        (
+            'Tao preview_lesson_patch cho giao vien. '
+            'Trong preview gui source_references title la "Huong dan su dung HoLiLiHu LMS".'
+        ),
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "manual.docx",
+                            "title": "Parser provenance",
+                            "markdown": (
+                                "Parser provenance\n"
+                                "Muc tieu hoc tap: giao vien cap nhat bai hoc trong LMS.\n"
+                                "Checklist: kiem tra tieu de, noi dung va nguon truoc khi luu.\n"
+                            ),
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    assert params["title"] == "Bản nháp: Huong dan su dung HoLiLiHu LMS"
+    assert params["source_references"][0]["title"] == "Huong dan su dung HoLiLiHu LMS"
+    assert "Parser provenance" not in params["title"]
+
+
 def test_uploaded_doc_preview_prefers_real_teacher_heading_over_smart_excerpt_outline():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         _build_uploaded_doc_preview_params,
