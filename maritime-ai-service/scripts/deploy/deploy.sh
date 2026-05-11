@@ -47,6 +47,7 @@ REQUIRE_PINNED_IMAGES="${REQUIRE_PINNED_IMAGES:-false}"
 SKIP_IMAGE_MANIFEST_CHECK="${SKIP_IMAGE_MANIFEST_CHECK:-false}"
 SKIP_PREDEPLOY_BACKUP="${SKIP_PREDEPLOY_BACKUP:-false}"
 RUN_EXTERNAL_SMOKE="${RUN_EXTERNAL_SMOKE:-false}"
+SKIP_PRE_PULL_DOCKER_CLEANUP="${SKIP_PRE_PULL_DOCKER_CLEANUP:-false}"
 
 case "$ENV_FILE" in
     /*)
@@ -216,8 +217,26 @@ validate_compose_config() {
     compose config --quiet
 }
 
+cleanup_docker_before_pull() {
+    if [ "$SKIP_PRE_PULL_DOCKER_CLEANUP" = "true" ]; then
+        warn "Skipping Docker pre-pull cleanup because SKIP_PRE_PULL_DOCKER_CLEANUP=true."
+        return 0
+    fi
+
+    info "Step 4/10: Reclaiming unused Docker image/build cache before pulling images..."
+    docker system df || true
+
+    # Do not prune volumes: production data lives in Docker volumes.
+    # Running containers keep their current images pinned, so image prune only
+    # removes layers not referenced by the live stack.
+    docker image prune -af || true
+    docker builder prune -af || true
+
+    docker system df || true
+}
+
 pull_images() {
-    info "Step 4/9: Pulling production images..."
+    info "Step 5/10: Pulling production images..."
     compose pull app nginx
 }
 
@@ -250,14 +269,14 @@ wait_for_health() {
 }
 
 start_data_services() {
-    info "Step 5/9: Starting data services..."
+    info "Step 6/10: Starting data services..."
     compose up -d postgres minio minio-init valkey
     info "Waiting for PostgreSQL..."
     wait_for_health postgres 90 3
 }
 
 create_predeploy_backup() {
-    info "Step 6/9: Creating pre-deploy database backup..."
+    info "Step 7/10: Creating pre-deploy database backup..."
 
     if [ "$SKIP_PREDEPLOY_BACKUP" = "true" ]; then
         warn "Skipping pre-deploy backup because SKIP_PREDEPLOY_BACKUP=true."
@@ -286,13 +305,13 @@ create_predeploy_backup() {
 }
 
 run_migrations() {
-    info "Step 7/9: Running Alembic migrations..."
+    info "Step 8/10: Running Alembic migrations..."
     compose run --rm app alembic upgrade head
     info "Migrations complete."
 }
 
 start_runtime() {
-    info "Step 8/9: Starting application and nginx..."
+    info "Step 9/10: Starting application and nginx..."
     compose up -d app
     wait_for_health app 150 3
 
@@ -309,7 +328,7 @@ reload_caddy() {
 }
 
 run_final_smoke() {
-    info "Step 9/9: Running local release smoke checks..."
+    info "Step 10/10: Running local release smoke checks..."
 
     local nginx_port
     nginx_port="$(clean_value "${NGINX_HTTP_PORT:-$(env_value NGINX_HTTP_PORT || true)}")"
@@ -385,6 +404,7 @@ main() {
     sync_release_code
     validate_images
     validate_compose_config
+    cleanup_docker_before_pull
     pull_images
     start_data_services
     create_predeploy_backup
