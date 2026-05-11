@@ -64,14 +64,65 @@ from app.engine.multi_agent.supervisor_runtime_support import (
 logger = logging.getLogger(__name__)
 
 _DOC_PREVIEW_HOST_ACTION_TOOL = "host_action__authoring__preview_lesson_patch"
+_DOC_COURSE_HOST_ACTION_TOOL = "host_action__authoring__generate_course_from_document"
 
 
 def _has_document_preview_host_action_tool(tools: list[Any]) -> bool:
     return any(
         str(getattr(tool, "name", "") or getattr(tool, "__name__", "")).strip().lower()
-        == _DOC_PREVIEW_HOST_ACTION_TOOL
+        in {_DOC_PREVIEW_HOST_ACTION_TOOL, _DOC_COURSE_HOST_ACTION_TOOL}
         for tool in tools
     )
+
+
+def _looks_uploaded_document_course_request(query: str) -> bool:
+    folded = _fold_direct_text(query)
+    if any(
+        marker in folded
+        for marker in (
+            "preview_lesson_patch",
+            "lesson patch",
+            "bai hoc hien tai",
+            "cap nhat bai hoc",
+        )
+    ):
+        return False
+    return any(
+        marker in folded
+        for marker in (
+            "generate_course_from_document",
+            "course architect",
+            "course outline",
+            "full course",
+            "toan bo khoa",
+            "cay khoa",
+            "chia khoa",
+            "tao khoa hoc",
+            "thiet ke khoa hoc",
+            "cau truc khoa hoc",
+            "chuong/bai",
+            "chuong bai",
+            "module",
+            "outline",
+        )
+    )
+
+
+def _document_preview_forced_tool_choice(query: str, tools: list[Any]) -> str:
+    preferred = (
+        _DOC_COURSE_HOST_ACTION_TOOL
+        if _looks_uploaded_document_course_request(query)
+        else _DOC_PREVIEW_HOST_ACTION_TOOL
+    )
+    tool_names = {
+        str(getattr(tool, "name", "") or getattr(tool, "__name__", "")).strip().lower()
+        for tool in tools
+    }
+    if preferred in tool_names:
+        return preferred
+    if _DOC_PREVIEW_HOST_ACTION_TOOL in tool_names:
+        return _DOC_PREVIEW_HOST_ACTION_TOOL
+    return _DOC_COURSE_HOST_ACTION_TOOL
 
 
 def _as_plain_direct_mapping(value: Any) -> dict[str, Any]:
@@ -112,10 +163,10 @@ def _extract_document_preview_capabilities(
             continue
         for raw_tool in raw_tools:
             tool_def = _as_plain_direct_mapping(raw_tool)
-            if (
-                str(tool_def.get("name") or "").strip().lower()
-                == "authoring.preview_lesson_patch"
-            ):
+            if str(tool_def.get("name") or "").strip().lower() in {
+                "authoring.preview_lesson_patch",
+                "authoring.generate_course_from_document",
+            }:
                 preview_capabilities.append(tool_def)
     return preview_capabilities
 
@@ -189,11 +240,12 @@ def _rebind_document_preview_host_action_tool(
             logger.debug("[DIRECT] Document preview host action rebind failed: %s", exc)
             return tools, force_tools, debug
 
+        wanted_tool = _document_preview_forced_tool_choice(query, generated)
         preview_tools = [
             tool
             for tool in generated
             if str(getattr(tool, "name", "") or getattr(tool, "__name__", "")).strip().lower()
-            == _DOC_PREVIEW_HOST_ACTION_TOOL
+            == wanted_tool
         ]
         if preview_tools:
             debug.update({
@@ -1204,6 +1256,15 @@ def _looks_uploaded_document_preview_request(query: str) -> bool:
         "source references",
         "source_references",
         "tao ban xem truoc",
+        "tao khoa hoc",
+        "thiet ke khoa hoc",
+        "cau truc khoa hoc",
+        "toan bo khoa",
+        "cay khoa",
+        "chia khoa",
+        "course architect",
+        "course outline",
+        "generate_course_from_document",
         "trich dan",
         "xem truoc",
     )
@@ -2153,7 +2214,7 @@ async def direct_response_node_impl(
                     max_rounds=1,
                     query=query,
                     state=state,
-                    forced_tool_choice=_DOC_PREVIEW_HOST_ACTION_TOOL,
+                    forced_tool_choice=_document_preview_forced_tool_choice(query, preview_tools),
                     llm_base=None,
                     native_tool_messages=False,
                 )
@@ -2704,7 +2765,7 @@ async def direct_response_node_impl(
                         max_rounds=1,
                         query=query,
                         state=state,
-                        forced_tool_choice=_DOC_PREVIEW_HOST_ACTION_TOOL,
+                        forced_tool_choice=_document_preview_forced_tool_choice(query, tools),
                         llm_base=None,
                         native_tool_messages=False,
                     )

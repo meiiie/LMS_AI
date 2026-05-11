@@ -426,6 +426,166 @@ async def test_uploaded_document_preview_runs_host_action_without_planner_llm():
     assert "preview" in llm_response.content.lower()
 
 
+@pytest.mark.asyncio
+async def test_uploaded_document_course_plan_runs_host_action_without_planner_llm():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        execute_direct_tool_rounds_impl,
+    )
+
+    captured: dict[str, object] = {}
+
+    class FakeHostCourseTool:
+        name = "host_action__authoring__generate_course_from_document"
+
+        def invoke(self, args):
+            captured["args"] = dict(args)
+            return json.dumps(
+                {
+                    "status": "action_requested",
+                    "request_id": "host-course-1",
+                    "action": "authoring.generate_course_from_document",
+                    "params": args,
+                },
+                ensure_ascii=False,
+            )
+
+        async def ainvoke(self, args):
+            return self.invoke(args)
+
+    events: list[dict] = []
+
+    async def push_event(event):
+        events.append(event)
+
+    async def fake_ainvoke_with_fallback(_llm, _messages, **_kwargs):
+        raise AssertionError("uploaded document course plan should not depend on planner LLM")
+
+    async def fake_stream_direct_answer_with_fallback(*args, **kwargs):
+        raise AssertionError("document course plan should not use no-tool streaming path")
+
+    async def fake_stream_direct_wait_heartbeats(*args, **kwargs):
+        stop_signal = kwargs.get("stop_signal")
+        if stop_signal is not None:
+            await stop_signal.wait()
+            return
+        await asyncio.Future()
+
+    async def push_status_only_progress(*args, **kwargs):
+        return None
+
+    markdown = (
+        "# Hướng Dẫn Sử Dụng HoLiLiHu LMS\n"
+        "Nguồn section: 1. Tổng Quan (trang 1-2)\n"
+        "# 3. Hướng Dẫn Cho Học Viên\n"
+        "Nguồn section: 3. Hướng Dẫn Cho Học Viên (trang 12-20)\n"
+        "# 4. Hướng Dẫn Cho Giảng Viên\n"
+        "Nguồn section: 4. Hướng Dẫn Cho Giảng Viên (trang 21-34)\n"
+        "## 4.2. Tạo khóa học mới\n"
+        "Nguồn section: 4.2. Tạo khóa học mới (trang 23-25)\n"
+        "## 4.5. Thêm video, tài liệu và quiz\n"
+        "Nguồn section: 4.5. Thêm video, tài liệu và quiz (trang 29-31)\n"
+        "# 5. Hướng Dẫn Cho Quản Lý\n"
+        "Nguồn section: 5. Hướng Dẫn Cho Quản Lý (trang 35-42)\n"
+    )
+    state = {
+        "context": {
+            "document_context": {
+                "attachments": [
+                    {
+                        "file_name": "Huong_dan_su_dung_HoLiLiHu_LMS.docx",
+                        "markdown": markdown,
+                    }
+                ]
+            },
+            "page_context": {"course_id": "course-from-url"},
+        }
+    }
+
+    with patch(
+        "app.engine.multi_agent.graph._ainvoke_with_fallback",
+        new=fake_ainvoke_with_fallback,
+    ), patch(
+        "app.engine.multi_agent.graph._stream_direct_wait_heartbeats",
+        new=fake_stream_direct_wait_heartbeats,
+    ):
+        llm_response, _messages, tool_call_events = await execute_direct_tool_rounds_impl(
+            llm_with_tools=object(),
+            llm_auto=object(),
+            messages=[],
+            tools=[FakeHostCourseTool()],
+            push_event=push_event,
+            query="Dựa trên tài liệu Word vừa upload, hãy tạo toàn bộ khóa học theo chương/bài có citation.",
+            state=state,
+            forced_tool_choice="host_action__authoring__generate_course_from_document",
+            ainvoke_with_fallback=fake_ainvoke_with_fallback,
+            stream_direct_answer_with_fallback=fake_stream_direct_answer_with_fallback,
+            stream_direct_wait_heartbeats=fake_stream_direct_wait_heartbeats,
+            push_status_only_progress=push_status_only_progress,
+        )
+
+    course_args = captured["args"]
+    course_plan = course_args["course_plan"]
+    assert course_args["course_id"] == "course-from-url"
+    assert course_args["action"] == "preview_course_plan_from_document"
+    assert course_plan["title"] == "Khai thác HoLiLiHu LMS từ tài liệu hướng dẫn"
+    assert len(course_plan["chapters"]) == 5
+    assert sum(len(chapter["lessons"]) for chapter in course_plan["chapters"]) >= 15
+    assert "Tác nghiệp giảng viên" in course_plan["chapters"][2]["title"]
+    assert "source_references" in course_plan["chapters"][2]["lessons"][0]
+    assert any(ref.get("page_start") == 23 for ref in course_args["source_references"])
+    assert [event["type"] for event in tool_call_events] == ["call", "host_action", "result"]
+    assert any(event.get("type") == "host_action" for event in events)
+    assert "khóa học" in llm_response.content.lower()
+
+
+def test_uploaded_doc_course_plan_builder_creates_full_lms_architecture():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_course_params,
+    )
+
+    markdown = (
+        "# Hướng Dẫn Sử Dụng HoLiLiHu LMS\n"
+        "Nguồn section: 1. Tổng Quan (trang 1-2)\n"
+        "# 3. Hướng Dẫn Cho Học Viên\n"
+        "Nguồn section: 3. Hướng Dẫn Cho Học Viên (trang 12-20)\n"
+        "# 4. Hướng Dẫn Cho Giảng Viên\n"
+        "Nguồn section: 4. Hướng Dẫn Cho Giảng Viên (trang 21-34)\n"
+        "## 4.2. Tạo khóa học mới\n"
+        "Nguồn section: 4.2. Tạo khóa học mới (trang 23-25)\n"
+        "## 4.5. Thêm video, tài liệu và quiz\n"
+        "Nguồn section: 4.5. Thêm video, tài liệu và quiz (trang 29-31)\n"
+        "# 5. Hướng Dẫn Cho Quản Lý\n"
+        "Nguồn section: 5. Hướng Dẫn Cho Quản Lý (trang 35-42)\n"
+    )
+    params = _build_uploaded_doc_course_params(
+        "Tạo khóa học đầy đủ từ tài liệu Word này, chia chương/bài có source_references.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "Huong_dan_su_dung_HoLiLiHu_LMS.docx",
+                            "markdown": markdown,
+                        }
+                    ]
+                },
+                "page_context": {"course_id": "course-1"},
+            }
+        },
+    )
+
+    plan = params["course_plan"]
+    assert params["course_id"] == "course-1"
+    assert params["changed_fields"] == ["course_structure"]
+    assert len(plan["chapters"]) == 5
+    titles = [chapter["title"] for chapter in plan["chapters"]]
+    assert any("Hành trình học viên" in title for title in titles)
+    assert any("Tác nghiệp giảng viên" in title for title in titles)
+    assert any("Quản lý" in title for title in titles)
+    assert plan["chapters"][2]["lessons"][0]["source_references"][0]["page_start"] == 23
+    assert "không publish tự động" in " ".join(plan["implementation_checklist"])
+
+
 def test_uploaded_doc_preview_skips_logo_data_uri_and_focuses_teacher_manual():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         _build_uploaded_doc_preview_params,

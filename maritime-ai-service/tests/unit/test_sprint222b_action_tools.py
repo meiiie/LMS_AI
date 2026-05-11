@@ -276,3 +276,74 @@ class TestGenerateHostActionTools:
                 "excerpt": "Nguon tai lieu",
             }
         ]
+
+    def test_generate_course_from_document_tool_contract_mentions_course_plan(self):
+        from app.engine.context.action_tools import generate_host_action_tools
+
+        tools = generate_host_action_tools(
+            [
+                {
+                    "name": "authoring.generate_course_from_document",
+                    "description": "Preview a course plan from an uploaded document",
+                    "roles": ["teacher"],
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "course_id": {"type": "string"},
+                            "course_plan": {"type": "object"},
+                            "source_references": {
+                                "type": "array",
+                                "items": {"type": "object"},
+                            },
+                        },
+                    },
+                }
+            ],
+            "teacher",
+            event_bus_id="bus-1",
+        )
+
+        assert "Input fields: course_id, course_plan, source_references" in tools[0].description
+        assert "structured `course_plan`" in tools[0].description
+        assert "preview-first" in tools[0].description
+
+    def test_apply_course_plan_requires_matching_preview_token(self):
+        from app.engine.context.action_tools import generate_host_action_tools
+
+        tools = generate_host_action_tools(
+            [
+                {
+                    "name": "authoring.apply_course_plan",
+                    "description": "Apply a confirmed course plan",
+                    "roles": ["teacher"],
+                    "requires_confirmation": True,
+                    "mutates_state": True,
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "preview_token": {"type": "string"},
+                            "approval_token": {"type": "string"},
+                        },
+                    },
+                }
+            ],
+            "teacher",
+            event_bus_id="bus-1",
+            approval_context={
+                "query": "đồng ý áp dụng",
+                "host_action_feedback": {
+                    "last_action_result": {
+                        "action": "authoring.generate_course_from_document",
+                        "data": {
+                            "preview_token": "course-preview-1",
+                            "preview_kind": "course_plan",
+                        },
+                    }
+                },
+            },
+        )
+
+        result = json.loads(tools[0].invoke({}))
+
+        assert result["status"] == "action_requested"
+        assert result["params"]["preview_token"] == "course-preview-1"

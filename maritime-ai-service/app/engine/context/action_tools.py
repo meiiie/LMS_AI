@@ -68,6 +68,8 @@ def _extract_latest_preview(approval_context: dict[str, Any] | None) -> dict[str
 
 def _expected_preview_kind(action_name: str) -> str | None:
     normalized = action_name.strip().lower()
+    if normalized.endswith("apply_course_plan"):
+        return "course_plan"
     if normalized.endswith("apply_lesson_patch"):
         return "lesson_patch"
     if normalized.endswith("apply_quiz_commit"):
@@ -108,6 +110,18 @@ def _format_input_contract(action_name: str, action_def: dict[str, Any]) -> str:
         lines.append(
             "When an uploaded Word/PDF/document is the source, build `content` from that "
             "document context and keep preview-only behavior; do not call an apply action."
+        )
+
+    if action_name.strip().lower().endswith("generate_course_from_document"):
+        lines.append(
+            "For uploaded Word/PDF/document course generation, include a structured "
+            "`course_plan` with `chapters`, each chapter's `lessons`, and "
+            "`source_references` so the teacher can verify citations."
+        )
+        lines.append(
+            "This action is preview-first: do not call `authoring.apply_course_plan` "
+            "unless the LMS has returned a matching preview_token and the user has "
+            "explicitly confirmed apply."
         )
 
     return "\n" + "\n".join(lines)

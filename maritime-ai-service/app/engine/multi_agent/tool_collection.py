@@ -235,6 +235,15 @@ def _looks_like_document_preview_request(query: str, state: Optional[AgentState]
             "draft",
             "cap nhat bai hoc",
             "tao bai hoc",
+            "tao khoa hoc",
+            "thiet ke khoa hoc",
+            "cau truc khoa hoc",
+            "toan bo khoa",
+            "cay khoa",
+            "chia khoa",
+            "course architect",
+            "course outline",
+            "generate_course_from_document",
             "lesson patch",
             "preview_lesson_patch",
             "source_references",
@@ -245,11 +254,67 @@ def _looks_like_document_preview_request(query: str, state: Optional[AgentState]
     )
 
 
+def _looks_like_document_course_preview_request(query: str, state: Optional[AgentState]) -> bool:
+    if not _has_uploaded_document_context_state(state):
+        return False
+    normalized = _normalize_for_intent(query)
+    if any(
+        marker in normalized
+        for marker in (
+            "preview_lesson_patch",
+            "lesson patch",
+            "bai hoc hien tai",
+            "cap nhat bai hoc",
+        )
+    ):
+        return False
+    return any(
+        marker in normalized
+        for marker in (
+            "generate_course_from_document",
+            "course architect",
+            "course outline",
+            "full course",
+            "toan bo khoa",
+            "cay khoa",
+            "chia khoa",
+            "tao khoa hoc",
+            "thiet ke khoa hoc",
+            "cau truc khoa hoc",
+            "chuong/bai",
+            "chuong bai",
+            "module",
+            "outline",
+        )
+    )
+
+
 def _document_preview_host_action_tools(tools: list[Any]) -> list[Any]:
-    return [
+    course_tools = [
+        tool
+        for tool in tools
+        if _tool_name(tool).lower() == "host_action__authoring__generate_course_from_document"
+    ]
+    lesson_tools = [
         tool
         for tool in tools
         if _tool_name(tool).lower() == "host_action__authoring__preview_lesson_patch"
+    ]
+    return course_tools + lesson_tools
+
+
+def _preferred_document_preview_host_action_tools(
+    tools: list[Any],
+    query: str,
+    state: Optional[AgentState],
+) -> list[Any]:
+    preferred = "host_action__authoring__generate_course_from_document" if (
+        _looks_like_document_course_preview_request(query, state)
+    ) else "host_action__authoring__preview_lesson_patch"
+    return [
+        tool
+        for tool in tools
+        if _tool_name(tool).lower() == preferred
     ]
 
 
@@ -283,7 +348,10 @@ def _safe_document_preview_capability_tools(
         tool
         for tool in capabilities_tools
         if str(tool.get("name") or "").strip().lower()
-        == "authoring.preview_lesson_patch"
+        in {
+            "authoring.preview_lesson_patch",
+            "authoring.generate_course_from_document",
+        }
     ]
 
 
@@ -538,7 +606,7 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         return scoped_host_tools, bool(scoped_host_tools)
 
     if _looks_like_document_preview_request(query, state):
-        preview_tools = _document_preview_host_action_tools(_direct_tools)
+        preview_tools = _preferred_document_preview_host_action_tools(_direct_tools, query, state)
         if preview_tools:
             logger.info(
                 "[DIRECT] Forcing LMS document preview host action for uploaded document context"
