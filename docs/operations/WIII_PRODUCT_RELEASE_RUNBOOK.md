@@ -54,8 +54,16 @@ Important guardrail:
 
 - `lms-production` in `the-wiii-lab` is the LMS VM and must not be used for Wiii containers.
 - Wiii should be deployed to a separate VM, default name `wiii-production`.
-- The default VM profile is `e2-standard-2` in `asia-southeast1-c` with an `80GB` `pd-balanced` boot disk.
-- Docker defaults are tuned for single-node production: `APP_REPLICAS=1`, `GUNICORN_WORKERS=2`, `ASYNC_POOL_MAX_SIZE=20`.
+- The default VM profile for the teacher document-to-course lane is
+  `e2-standard-4` in `asia-southeast1-c` with an `80GB` `pd-balanced` boot disk.
+  `e2-standard-2` is acceptable only for the fast MarkItDown profile; Docling
+  precision parsing plus PostgreSQL/MinIO/Valkey on one VM needs the extra RAM
+  headroom.
+- Docker defaults are tuned for single-node production: `APP_REPLICAS=1`,
+  `GUNICORN_WORKERS=2`, `ASYNC_POOL_MAX_SIZE=20`, `APP_MEM_LIMIT=4G`.
+- Production app images are built with `INSTALL_PRECISION_DOCS=true`, which
+  installs `maritime-ai-service/requirements-precision.txt` and enables the
+  Docling parser without slowing every regular unit-test install.
 
 Production `.env.production` is secret-bearing and must stay on the VM. For the current NVIDIA-backed product lane, apply these non-secret shape requirements there rather than committing a changed `.env` template:
 
@@ -77,8 +85,15 @@ GOOGLE_API_KEY=<google-gemini-api-key>
 APP_REPLICAS=1
 GUNICORN_WORKERS=2
 ASYNC_POOL_MAX_SIZE=20
-APP_CPU_LIMIT=1.5
-APP_MEM_LIMIT=2G
+APP_CPU_LIMIT=2.0
+APP_MEM_LIMIT=4G
+DOCUMENT_CONTEXT_PARSER_MODE=precision
+USE_DOCLING_FOR_COURSE_GEN=true
+DOCLING_VLM_BACKEND=none
+DOCLING_VLM_API_URL=
+DOCLING_VLM_API_KEY=
+DOCLING_VLM_MODEL=gemini-3.1-flash-lite
+DOCLING_LIBREOFFICE_CMD=/usr/bin/soffice
 POSTGRES_CPU_LIMIT=1.0
 POSTGRES_MEM_LIMIT=1536M
 MINIO_CPU_LIMIT=0.35

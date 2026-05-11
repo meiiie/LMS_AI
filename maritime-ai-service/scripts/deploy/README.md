@@ -81,7 +81,7 @@ Go to [Google Cloud Console](https://console.cloud.google.com/) → Compute Engi
 | Name | `wiii-production` |
 | Region | `asia-southeast1` (Singapore — lowest latency to Vietnam) |
 | Zone | `asia-southeast1-c` |
-| Machine | `e2-standard-2` (2 vCPU, 8GB RAM) |
+| Machine | `e2-standard-4` (4 vCPU, 16GB RAM) for Docling precision; `e2-standard-2` only for fast MarkItDown |
 | Boot disk | Ubuntu 24.04 LTS, **80GB pd-balanced** |
 | Firewall | HTTP/HTTPS public, SSH restricted to maintainer IPs |
 
@@ -92,7 +92,10 @@ After creation:
 
 Prefer the provision helper above so the VM, static IP, firewall tags, and SSH source ranges match the product runbook.
 
-The setup script assumes this single-node profile by default: 4G swap, conservative Docker resource limits, and one app replica until Postgres/cache/object storage move off-host.
+The setup script assumes this single-node profile by default: 4G swap,
+conservative Docker resource limits, one app replica until Postgres/cache/object
+storage move off-host, and enough RAM headroom for the Docling precision parser
+plus LibreOffice-based Office layout/image conversion.
 
 ---
 
@@ -430,8 +433,11 @@ grep DATABASE_URL .env.production
 free -h
 docker stats --no-stream
 
-# If tight, reduce Gunicorn workers in .env.production
-# GUNICORN_WORKERS=2  (instead of 4)
+# If tight, keep Gunicorn workers conservative and disable precision as a
+# temporary rollback until the VM is resized.
+# GUNICORN_WORKERS=2
+# DOCUMENT_CONTEXT_PARSER_MODE=fast
+# USE_DOCLING_FOR_COURSE_GEN=false
 ```
 
 ---
@@ -440,7 +446,7 @@ docker stats --no-stream
 
 | Item | Monthly Cost | Notes |
 |------|-------------|-------|
-| GCP e2-medium | ~350K VND | Covered by 26M credits (~6 years) |
+| GCP VM | Use Google Cloud Pricing Calculator | `e2-standard-4` recommended for precision-docs |
 | `.online` domain | ~20K VND | ~250K VND/year |
 | Cloudflare DNS | Free | Free tier is sufficient |
 | Caddy SSL | Free | Let's Encrypt automatic |
@@ -467,4 +473,6 @@ Neo4j is disabled by default since Sprint 165. If you need GraphRAG:
 2. The `docker-compose.prod.yml` includes Neo4j — it will start automatically
 3. Set a strong `NEO4J_PASSWORD`
 
-> Note: Neo4j adds ~2GB RAM usage. On e2-medium (4GB), consider upgrading to e2-standard-4 (4 vCPU, 16GB) if enabling Neo4j.
+> Note: Neo4j adds ~2GB RAM usage. If Neo4j and Docling precision run on the
+> same VM, keep at least the `e2-standard-4` profile or move stateful services
+> off-host before increasing app workers.
