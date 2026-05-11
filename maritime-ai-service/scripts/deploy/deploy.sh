@@ -155,7 +155,7 @@ validate_environment() {
 }
 
 sync_release_code() {
-    info "Step 1/9: Syncing release code..."
+    info "Step 1/10: Syncing release code..."
     require_clean_checkout
 
     cd "$APP_DIR"
@@ -182,7 +182,7 @@ sync_release_code() {
 }
 
 validate_images() {
-    info "Step 2/9: Validating image tags..."
+    info "Step 2/10: Validating image tags..."
 
     APP_IMAGE="$(clean_value "${WIII_APP_IMAGE:-$(env_value WIII_APP_IMAGE || true)}")"
     NGINX_IMAGE="$(clean_value "${WIII_NGINX_IMAGE:-$(env_value WIII_NGINX_IMAGE || true)}")"
@@ -213,7 +213,7 @@ validate_images() {
 }
 
 validate_compose_config() {
-    info "Step 3/9: Validating docker compose configuration..."
+    info "Step 3/10: Validating docker compose configuration..."
     compose config --quiet
 }
 
