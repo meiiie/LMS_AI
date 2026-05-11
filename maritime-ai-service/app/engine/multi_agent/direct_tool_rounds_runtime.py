@@ -115,10 +115,32 @@ def _should_request_uploaded_doc_preview(
 
 def _first_nonempty_line(text: str) -> str:
     for line in str(text or "").replace("\\_", "_").splitlines():
-        line = line.strip(" #\t\r\n")
+        line = _clean_doc_preview_line(line)
         if line:
             return line[:140]
     return "Tài liệu đã tải lên"
+
+
+def _clean_doc_preview_line(value: str) -> str:
+    line = str(value or "").replace("\\_", "_").strip()
+    if not line:
+        return ""
+    lowered = line.lower()
+    if line.startswith("![") or "data:image" in lowered or "base64" in lowered:
+        return ""
+    if "<w:" in lowered or "</w:" in lowered:
+        return ""
+    if line.startswith("|") and line.endswith("|"):
+        return ""
+    line = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", line)
+    line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
+    line = re.sub(r"[*_`]+", "", line)
+    line = re.sub(r"\s+", " ", line).strip(" #*-:\t\r\n|")
+    if not line or not re.search(r"[\wÀ-ỹ]", line, flags=re.IGNORECASE):
+        return ""
+    if set(line) <= {"-", "|", " ", ":"}:
+        return ""
+    return line[:220]
 
 
 def _extract_marker(text: str) -> str:
@@ -131,7 +153,7 @@ def _extract_relevant_lines(markdown: str, markers: tuple[str, ...], *, limit: i
     normalized_markers = tuple(_normalize_doc_preview_text(marker) for marker in markers)
     selected: list[str] = []
     for raw_line in str(markdown or "").replace("\\_", "_").splitlines():
-        line = raw_line.strip(" -*\t\r\n")
+        line = _clean_doc_preview_line(raw_line)
         if not line:
             continue
         normalized_line = _normalize_doc_preview_text(line)
@@ -140,6 +162,43 @@ def _extract_relevant_lines(markdown: str, markers: tuple[str, ...], *, limit: i
         if len(selected) >= limit:
             break
     return selected
+
+
+def _extract_doc_preview_title_from_query(query: str) -> str:
+    match = re.search(
+        r"(?:title|tiêu đề|tieu de)\s*(?:là|la|is|:)\s*[\"“”']([^\"“”']{3,140})[\"“”']",
+        str(query or ""),
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return _clean_doc_preview_line(match.group(1))
+    return ""
+
+
+def _focus_doc_preview_markdown(query: str, markdown: str) -> str:
+    normalized_query = _normalize_doc_preview_text(query)
+    role_markers: tuple[str, ...] = ()
+    if any(marker in normalized_query for marker in ("giang vien", "teacher")):
+        role_markers = ("huong dan cho giang vien", "danh cho giang vien")
+    elif any(marker in normalized_query for marker in ("hoc vien", "student")):
+        role_markers = ("huong dan cho hoc vien", "danh cho hoc vien")
+    elif any(marker in normalized_query for marker in ("quan ly", "manager", "admin")):
+        role_markers = ("huong dan cho quan ly", "quan tri", "admin")
+    if not role_markers:
+        return markdown
+
+    lines = str(markdown or "").replace("\\_", "_").splitlines()
+    normalized_markers = tuple(_normalize_doc_preview_text(marker) for marker in role_markers)
+    for index, raw_line in enumerate(lines):
+        cleaned = _clean_doc_preview_line(raw_line)
+        if not cleaned:
+            continue
+        normalized_line = _normalize_doc_preview_text(cleaned)
+        if any(marker in normalized_line for marker in normalized_markers):
+            start = max(0, index - 2)
+            end = min(len(lines), index + 140)
+            return "\n".join(lines[start:end])
+    return markdown
 
 
 def _extract_source_pages(query: str, markdown: str) -> tuple[int | None, int | None]:
@@ -180,48 +239,95 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
         if str(item.get("markdown") or "").strip()
     )
     first_attachment = attachments[0] if attachments else {}
+    query_title = _extract_doc_preview_title_from_query(query)
     title_source = (
         str(first_attachment.get("title") or "").strip()
+        or query_title
         or _first_nonempty_line(combined_markdown)
         or str(first_attachment.get("file_name") or "").strip()
         or "Tài liệu đã tải lên"
     )
+    focused_markdown = _focus_doc_preview_markdown(query, combined_markdown)
     marker = _extract_marker(query) or _extract_marker(combined_markdown)
     goals = _extract_relevant_lines(
-        combined_markdown,
+        focused_markdown,
         ("muc tieu hoc tap", "learning objective", "objective", "muc tieu"),
         limit=4,
     )
+    if not goals:
+        goals = _extract_relevant_lines(
+            focused_markdown,
+            ("giang vien", "teacher", "hoc vien", "lms", "khoa hoc", "bai hoc"),
+            limit=4,
+        )
     checklist = _extract_relevant_lines(
-        combined_markdown,
-        ("checklist", "nguon trang", "source page", "approval_token"),
+        focused_markdown,
+        (
+            "checklist",
+            "nguon trang",
+            "source page",
+            "approval_token",
+            "quy trinh",
+            "thao tac",
+            "tao khoa",
+            "soan",
+            "xuat ban",
+            "quiz",
+        ),
         limit=5,
     )
     if not goals:
-        goals = [_first_nonempty_line(combined_markdown)]
+        goals = [_first_nonempty_line(focused_markdown) or _first_nonempty_line(combined_markdown)]
     if not checklist:
-        checklist = _extract_relevant_lines(combined_markdown, ("quy trinh", "kiem tra", "xac nhan"), limit=4)
+        checklist = _extract_relevant_lines(focused_markdown, ("quy trinh", "kiem tra", "xac nhan"), limit=4)
     if not checklist:
         checklist = goals[:2]
 
-    source_excerpt = " ".join(checklist[:2])[:360] or _first_nonempty_line(combined_markdown)
+    source_excerpt = " ".join(checklist[:2])[:360] or _first_nonempty_line(focused_markdown) or _first_nonempty_line(combined_markdown)
     page_start, page_end = _extract_source_pages(query, combined_markdown)
+    domain_text = _normalize_doc_preview_text(f"{query}\n{title_source}\n{combined_markdown[:2000]}")
+    is_lms_manual = any(marker in domain_text for marker in ("lms", "holilihu", "giang vien", "hoc vien", "quan ly"))
+    checklist_heading = (
+        "## Checklist thao tác / nội dung cần nắm"
+        if is_lms_manual
+        else "## Checklist trực ca / nội dung cần nắm"
+    )
+    discussion_lines = (
+        [
+            "- Giảng viên thực hành mở đúng khu vực quản lý khóa học, kiểm tra bài học và xác nhận dữ liệu trước khi lưu.",
+            "- Nhóm nhỏ ghi lại lỗi thường gặp khi đăng nhập, tạo nội dung hoặc kiểm tra tiến độ học viên.",
+        ]
+        if is_lms_manual
+        else [
+            "- Học viên đối chiếu checklist trong tài liệu với một tình huống trực ca thực tế.",
+            "- Nhóm nhỏ xác định rủi ro, người cần báo cáo và bằng chứng cần ghi vào nhật ký.",
+        ]
+    )
+    quick_questions = (
+        [
+            "- Khi tạo hoặc cập nhật bài học trong LMS, giảng viên cần kiểm tra những mục nào trước khi xuất bản?",
+            "- Khi học viên báo lỗi đăng nhập hoặc không thấy nội dung, cần thu thập thông tin nào để hỗ trợ?",
+        ]
+        if is_lms_manual
+        else [
+            "- Khi tầm nhìn hạn chế, người trực ca cần xác nhận những nguồn thông tin nào trước khi đổi hướng?",
+            "- Khi có nguy cơ va chạm, quy trình báo cáo và ghi log nên diễn ra như thế nào?",
+        ]
+    )
     content_lines = [
         f"# Bản nháp bài học từ tài liệu: {title_source}",
         "",
         "## Mục tiêu học tập",
         *[f"- {line}" for line in goals[:4]],
         "",
-        "## Checklist trực ca / nội dung cần nắm",
+        checklist_heading,
         *[f"- {line}" for line in checklist[:5]],
         "",
         "## Hoạt động thảo luận",
-        "- Học viên đối chiếu checklist trong tài liệu với một tình huống trực ca thực tế.",
-        "- Nhóm nhỏ xác định rủi ro, người cần báo cáo và bằng chứng cần ghi vào nhật ký.",
+        *discussion_lines,
         "",
         "## Câu hỏi kiểm tra nhanh",
-        "- Khi tầm nhìn hạn chế, người trực ca cần xác nhận những nguồn thông tin nào trước khi đổi hướng?",
-        "- Khi có nguy cơ va chạm, quy trình báo cáo và ghi log nên diễn ra như thế nào?",
+        *quick_questions,
     ]
     if marker:
         content_lines.extend(["", f"Marker kiểm thử: {marker}"])
