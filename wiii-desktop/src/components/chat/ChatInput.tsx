@@ -17,7 +17,12 @@ import {
   toDisplayDocumentAttachment,
   type ParsedDocumentForContext,
 } from "@/lib/document-context";
-import type { DocumentContextExtractedImage, DocumentContextSectionSnippet } from "@/api/document-context";
+import type {
+  DocumentContextEmbeddedAsset,
+  DocumentContextExtractedImage,
+  DocumentContextProvenanceLevel,
+  DocumentContextSectionSnippet,
+} from "@/api/document-context";
 import {
   parseSkillMentions,
   detectMentionTyping,
@@ -89,10 +94,17 @@ interface AttachedDocument {
   media_kind?: "document" | "video";
   size_bytes: number;
   parser?: string;
+  parser_chain?: string[];
+  parser_warning?: string | null;
+  provenance_level?: DocumentContextProvenanceLevel;
   char_count?: number;
   truncated?: boolean;
   extracted_images?: DocumentContextExtractedImage[];
   extracted_image_count?: number;
+  embedded_assets?: DocumentContextEmbeddedAsset[];
+  embedded_asset_count?: number;
+  figure_count?: number;
+  table_count?: number;
   section_snippets?: DocumentContextSectionSnippet[];
   markdown?: string;
   status: "parsing" | "ready" | "error";
@@ -157,9 +169,16 @@ function toParsedDocumentForContext(doc: AttachedDocument): ParsedDocumentForCon
     media_kind: doc.media_kind,
     size_bytes: doc.size_bytes,
     parser: doc.parser || "markitdown",
+    parser_chain: doc.parser_chain,
+    parser_warning: doc.parser_warning,
+    provenance_level: doc.provenance_level,
     char_count: doc.char_count,
     extracted_images: doc.extracted_images,
     extracted_image_count: doc.extracted_image_count,
+    embedded_assets: doc.embedded_assets,
+    embedded_asset_count: doc.embedded_asset_count,
+    figure_count: doc.figure_count,
+    table_count: doc.table_count,
     section_snippets: doc.section_snippets,
     truncated: doc.truncated,
     markdown: doc.markdown,
@@ -183,13 +202,21 @@ function DocumentAttachmentStrip({
         const frameLabel = doc.extracted_image_count
           ? ` · ${doc.extracted_image_count} khung hình`
           : "";
+        const assetLabel = doc.embedded_asset_count
+          ? ` · ${doc.embedded_asset_count} asset`
+          : "";
+        const provenanceLabel = doc.provenance_level === "page_layout"
+          ? " · layout"
+          : doc.provenance_level === "page_marker"
+            ? " · page"
+            : "";
         const label = isParsing
           ? isVideo
             ? "Wiii đang đọc video..."
             : "Wiii đang đọc..."
           : isError
             ? doc.error || "Chưa đọc được"
-            : `${doc.parser || "MarkItDown"} · ${formatBytes(doc.size_bytes)} · ${doc.char_count ?? 0} ký tự${frameLabel}${doc.truncated ? " · đã rút gọn" : ""}`;
+            : `${doc.parser || "MarkItDown"}${provenanceLabel} · ${formatBytes(doc.size_bytes)} · ${doc.char_count ?? 0} ký tự${frameLabel}${assetLabel}${doc.truncated ? " · đã rút gọn" : ""}`;
         return (
           <div
             key={doc.id}
@@ -483,9 +510,16 @@ export function ChatInput({ onSend, onCancel, editingMessage, onClearEdit, cente
                   media_kind: parsed.media_kind || mediaKind,
                   size_bytes: parsed.size_bytes,
                   parser: parsed.parser,
+                  parser_chain: parsed.parser_chain || [],
+                  parser_warning: parsed.parser_warning || null,
+                  provenance_level: parsed.provenance_level,
                   char_count: parsed.char_count,
                   extracted_images: parsed.extracted_images || [],
                   extracted_image_count: parsed.extracted_image_count || 0,
+                  embedded_assets: parsed.embedded_assets || [],
+                  embedded_asset_count: parsed.embedded_asset_count || 0,
+                  figure_count: parsed.figure_count || 0,
+                  table_count: parsed.table_count || 0,
                   section_snippets: parsed.section_snippets || [],
                   truncated: parsed.truncated,
                   markdown: parsed.markdown,

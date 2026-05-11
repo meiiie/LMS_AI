@@ -5,6 +5,7 @@ import type {
   ImageInput,
 } from "@/api/types";
 import type {
+  DocumentContextEmbeddedAsset,
   DocumentContextExtractedImage,
   DocumentContextSectionSnippet,
 } from "@/api/document-context";
@@ -48,6 +49,7 @@ interface ContextSection {
 export interface ParsedDocumentForContext extends ChatDocumentContextAttachment {
   id: string;
   extracted_images?: DocumentContextExtractedImage[];
+  embedded_assets?: DocumentContextEmbeddedAsset[];
   section_snippets?: DocumentContextSectionSnippet[];
 }
 
@@ -60,10 +62,16 @@ export function toDisplayDocumentAttachment(
     mime_type: doc.mime_type,
     size_bytes: doc.size_bytes,
     parser: doc.parser,
+    parser_chain: doc.parser_chain,
+    parser_warning: doc.parser_warning,
+    provenance_level: doc.provenance_level,
     char_count: doc.char_count,
     truncated: doc.truncated,
     media_kind: doc.media_kind,
     extracted_image_count: doc.extracted_image_count,
+    embedded_asset_count: doc.embedded_asset_count,
+    figure_count: doc.figure_count,
+    table_count: doc.table_count,
   };
 }
 
@@ -111,9 +119,15 @@ export function buildChatDocumentContext(
       mime_type: doc.mime_type,
       size_bytes: doc.size_bytes,
       parser: doc.parser || "markitdown",
+      parser_chain: doc.parser_chain,
+      parser_warning: doc.parser_warning,
+      provenance_level: doc.provenance_level,
       char_count: doc.char_count,
       media_kind: doc.media_kind,
       extracted_image_count: doc.extracted_image_count,
+      embedded_asset_count: doc.embedded_asset_count,
+      figure_count: doc.figure_count,
+      table_count: doc.table_count,
       truncated: Boolean(doc.truncated || doc.markdown.length > markdown.length),
       markdown,
     });
@@ -146,10 +160,12 @@ function buildBoundedDocumentMarkdown(
     : Math.min(1_500, Math.max(700, Math.floor(maxChars * 0.22)));
   const chunks: string[] = [
     title,
+    renderParserProvenanceSummary(doc),
+    renderEmbeddedAssetSummary(doc),
     outline,
     "## Trích đoạn đầu tài liệu",
     markdown.slice(0, headBudget).trim(),
-  ];
+  ].filter(Boolean);
 
   const prioritySections = sections
     .filter((section) => section.priority > 0)
@@ -177,6 +193,37 @@ function buildBoundedDocumentMarkdown(
   chunks.push("## Trích đoạn cuối tài liệu", markdown.slice(-tailBudget).trim());
 
   return compactToBudget(chunks.join("\n\n"), maxChars);
+}
+
+function renderParserProvenanceSummary(doc: ParsedDocumentForContext): string {
+  const provenance = doc.provenance_level;
+  const parserChain = doc.parser_chain?.length ? doc.parser_chain.join(" -> ") : doc.parser;
+  if (!provenance && !parserChain) return "";
+  return [
+    "## Parser provenance",
+    `- parser_chain: ${parserChain || "unknown"}`,
+    `- provenance_level: ${provenance || "unknown"}`,
+    doc.parser_warning ? `- parser_warning: ${doc.parser_warning}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function renderEmbeddedAssetSummary(doc: ParsedDocumentForContext): string {
+  const assetCount = doc.embedded_asset_count || 0;
+  if (assetCount <= 0 && !doc.figure_count && !doc.table_count) return "";
+  const parts = [
+    doc.figure_count ? `${doc.figure_count} figure/image` : "",
+    doc.table_count ? `${doc.table_count} table` : "",
+  ].filter(Boolean);
+  return [
+    "## Embedded asset signals",
+    `- detected_assets: ${assetCount}`,
+    parts.length ? `- asset_types: ${parts.join(", ")}` : "",
+    "Use these as extraction signals only; inspect source references before relying on visual details.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function normalizeDocumentMarkdown(markdown: string): string {

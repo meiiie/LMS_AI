@@ -23,9 +23,15 @@ export interface ChatDocumentAttachment {
   media_kind?: "document" | "video";
   size_bytes: number;
   parser?: string;
+  parser_chain?: string[];
+  parser_warning?: string | null;
+  provenance_level?: "text_only" | "structured_text" | "page_marker" | "page_layout";
   char_count?: number;
   truncated?: boolean;
   extracted_image_count?: number;
+  embedded_asset_count?: number;
+  figure_count?: number;
+  table_count?: number;
 }
 
 export interface ChatDocumentContextAttachment extends ChatDocumentAttachment {

@@ -110,8 +110,11 @@ def _render_document_context_for_prompt(document_context: Any) -> str:
             continue
         file_name = str(_document_context_attr(item, "file_name", f"document-{idx}") or f"document-{idx}")
         parser = str(_document_context_attr(item, "parser", "markitdown") or "markitdown")
+        provenance_level = str(_document_context_attr(item, "provenance_level", "") or "")
+        parser_chain = _document_context_attr(item, "parser_chain", None)
         media_kind = str(_document_context_attr(item, "media_kind", "document") or "document")
         extracted_image_count = _document_context_attr(item, "extracted_image_count", None)
+        embedded_asset_count = _document_context_attr(item, "embedded_asset_count", None)
         char_count = _document_context_attr(item, "char_count", len(markdown))
         truncated = bool(_document_context_attr(item, "truncated", False))
         excerpt = markdown[:remaining].rstrip()
@@ -121,10 +124,25 @@ def _render_document_context_for_prompt(document_context: Any) -> str:
             if isinstance(extracted_image_count, int) and extracted_image_count > 0
             else ""
         )
+        asset_suffix = (
+            f" | embedded_assets={embedded_asset_count}"
+            if isinstance(embedded_asset_count, int) and embedded_asset_count > 0
+            else ""
+        )
+        chain_suffix = (
+            f" | parser_chain={' -> '.join(str(item) for item in parser_chain)}"
+            if isinstance(parser_chain, list) and parser_chain
+            else ""
+        )
+        provenance_suffix = (
+            f" | provenance={provenance_level}"
+            if provenance_level
+            else ""
+        )
         sections.extend(
             [
                 "",
-                f"[Tai lieu {idx}] {file_name} | kind={media_kind} | parser={parser} | chars={char_count} | truncated={truncated}{image_suffix}",
+                f"[Tai lieu {idx}] {file_name} | kind={media_kind} | parser={parser}{chain_suffix}{provenance_suffix} | chars={char_count} | truncated={truncated}{image_suffix}{asset_suffix}",
                 excerpt,
             ]
         )

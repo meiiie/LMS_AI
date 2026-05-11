@@ -1218,13 +1218,21 @@ def _build_uploaded_document_context_fallback_answer(
         file_name = str(item.get("file_name") or f"file-{index}")
         media_kind = str(item.get("media_kind") or "document")
         parser = str(item.get("parser") or "markitdown")
+        provenance_level = str(item.get("provenance_level") or "")
         char_count = item.get("char_count")
         extracted_image_count = item.get("extracted_image_count")
+        embedded_asset_count = item.get("embedded_asset_count")
 
         lines.append("")
-        lines.append(f"- File: `{file_name}` ({media_kind}, parser={parser})")
+        provenance_text = f", provenance={provenance_level}" if provenance_level else ""
+        lines.append(f"- File: `{file_name}` ({media_kind}, parser={parser}{provenance_text})")
         if isinstance(char_count, int):
             lines.append(f"- Nội dung parse được: khoảng {char_count} ký tự.")
+        if isinstance(embedded_asset_count, int) and embedded_asset_count > 0:
+            lines.append(
+                f"- Parser phát hiện {embedded_asset_count} asset nhúng (hình/bảng); "
+                "cần citation/vision rõ ràng trước khi mô tả chi tiết hình ảnh."
+            )
 
         if media_kind == "video":
             duration = _first_markdown_line(markdown, "Duration")

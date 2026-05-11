@@ -87,6 +87,43 @@ The current Wiii status response emits references for:
 LMS may display these references as page chips, source rows, or citation links,
 but should preserve the page values verbatim.
 
+## Parser And Provenance Levels
+
+Wiii uses a hybrid parser policy:
+
+- `fast`: MarkItDown only. Best for quick LLM-ready Markdown from clean Office/PDF
+  files.
+- `auto`: MarkItDown first, then promote to Docling when the fast parse has weak
+  page/layout provenance.
+- `precision`: Docling first, MarkItDown fallback. Use this for teacher
+  doc-to-course flows where citations, embedded figures, tables, or page/layout
+  provenance matter.
+
+MarkItDown plugins such as OCR can recover text from embedded images, but that
+is still an inline text extraction lane. For teacher-facing citation UX, Docling
+or an equivalent structured document map should own page/figure/table
+provenance so LMS can show what Wiii relied on.
+
+The parse response should be treated as a source contract, not just text:
+
+- `parser`: final parser that produced the usable context.
+- `parser_chain`: parsers attempted/used, for example `["markitdown", "docling"]`.
+- `provenance_level`: one of `text_only`, `structured_text`, `page_marker`,
+  `page_layout`.
+- `embedded_asset_count`, `figure_count`, `table_count`: signals that the source
+  had visual/table material that may require citation or vision review.
+
+`page_layout` is the preferred level for LMS citations. `text_only` is usable for
+drafting, but LMS should avoid presenting exact page/figure claims as verified
+unless the preview carries source references that the teacher can inspect.
+
+Operational note: Docling is intentionally optional because it can add several GB
+of model/runtime footprint. Production deployments can enable it with
+`pip install -e ".[precision-docs]"` and `DOCUMENT_CONTEXT_PARSER_MODE=precision`
+or `USE_DOCLING_FOR_COURSE_GEN=true`. If Docling is unavailable, Wiii must fall
+back to MarkItDown and surface a parser warning rather than silently pretending
+the citation precision is higher than it is.
+
 ## LMS-Side Requirements
 
 The LMS host must implement the apply side in its own repository:
