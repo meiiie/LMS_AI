@@ -63,6 +63,16 @@ from app.engine.multi_agent.supervisor_runtime_support import (
 
 logger = logging.getLogger(__name__)
 
+_DOC_PREVIEW_HOST_ACTION_TOOL = "host_action__authoring__preview_lesson_patch"
+
+
+def _has_document_preview_host_action_tool(tools: list[Any]) -> bool:
+    return any(
+        str(getattr(tool, "name", "") or getattr(tool, "__name__", "")).strip().lower()
+        == _DOC_PREVIEW_HOST_ACTION_TOOL
+        for tool in tools
+    )
+
 _HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS = 45.0  # Phase F3 (2026-05-06): bumped 24→45s. NVIDIA DeepSeek tool-heavy pointy turns (inventory + show + synthesis) regularly hit 25-35s; 24s caused canned fallback even when LLM was actively succeeding.
 
 # DSML tool-call markup that NVIDIA DeepSeek occasionally leaks into prose
@@ -2320,7 +2330,10 @@ async def direct_response_node_impl(
                 and not visual_decision.force_tool
             )
             direct_provider_override = explicit_user_provider or preferred_provider
-            is_codebase_source_turn = _is_codebase_analysis_query(query)
+            is_codebase_source_turn = _is_codebase_analysis_query(query) and not (
+                has_uploaded_document_context
+                and _looks_uploaded_document_preview_request(query)
+            )
             explicit_web_search_turn = _is_explicit_web_search_turn_for_direct(query, state)
 
             if is_short_house_chatter or is_identity_turn or is_emotional_support_turn:
@@ -2380,6 +2393,12 @@ async def direct_response_node_impl(
                         query,
                         ctx.get("user_role", "student"),
                     )
+                    if (
+                        has_uploaded_document_context
+                        and _looks_uploaded_document_preview_request(query)
+                        and _DOC_PREVIEW_HOST_ACTION_TOOL not in must_include_names
+                    ):
+                        must_include_names.append(_DOC_PREVIEW_HOST_ACTION_TOOL)
                     # Merge force-bound names into must_include so the
                     # recommender (max_tools=7) cannot prune them out
                     # when the bound list is large.
@@ -2404,6 +2423,80 @@ async def direct_response_node_impl(
                 except Exception as selection_error:
                     logger.debug("[DIRECT] Runtime tool selection skipped: %s", selection_error)
 
+            if (
+                not response
+                and has_uploaded_document_context
+                and _looks_uploaded_document_preview_request(query)
+                and _has_document_preview_host_action_tool(tools)
+            ):
+                try:
+                    preview_runtime_context = build_tool_runtime_context(
+                        event_bus_id=bus_id,
+                        request_id=ctx.get("request_id"),
+                        session_id=state.get("session_id"),
+                        organization_id=state.get("organization_id"),
+                        user_id=state.get("user_id"),
+                        user_role=ctx.get("user_role", "student"),
+                        node="direct",
+                        source="agentic_loop",
+                        metadata=build_visual_tool_runtime_metadata(state, query),
+                    )
+                    llm_response, messages, tool_call_events = await execute_direct_tool_rounds(
+                        object(),
+                        object(),
+                        messages,
+                        tools,
+                        push_event,
+                        runtime_context_base=preview_runtime_context,
+                        max_rounds=1,
+                        query=query,
+                        state=state,
+                        forced_tool_choice=_DOC_PREVIEW_HOST_ACTION_TOOL,
+                        llm_base=None,
+                        native_tool_messages=False,
+                    )
+                    if tool_call_events:
+                        state["tool_call_events"] = tool_call_events
+
+                    response, thinking_content, tools_used = extract_direct_response(
+                        llm_response,
+                        messages,
+                    )
+                    response = sanitize_structured_visual_answer_text(
+                        response,
+                        tool_call_events=tool_call_events,
+                    )
+                    response = sanitize_wiii_house_text(response, query=query)
+                    response = _strip_direct_inline_private_asides(response)
+                    response = _strip_dsml_residue(response).strip()
+                    if not tools_used:
+                        preview_tool_names = sorted({
+                            str(event.get("name") or "")
+                            for event in tool_call_events
+                            if event.get("name")
+                        })
+                        tools_used = [
+                            {"name": name}
+                            for name in preview_tool_names
+                            if name
+                        ]
+                    if tools_used:
+                        state["tools_used"] = tools_used
+                    tracer.end_step(
+                        result="Deterministic uploaded-document preview host action",
+                        confidence=0.9,
+                        details={
+                            "response_type": "document_preview_host_action",
+                            "tools_bound": len(tools),
+                            "force_tools": force_tools,
+                        },
+                    )
+                except Exception as preview_error:
+                    logger.warning(
+                        "[DIRECT] Deterministic document preview pre-LLM path failed: %s",
+                        preview_error,
+                    )
+
             direct_node_id = "direct_identity" if is_identity_turn else "direct"
 
             from app.engine.multi_agent.openai_stream_runtime import (
@@ -2419,7 +2512,7 @@ async def direct_response_node_impl(
                 and not is_codebase_source_turn
             )
             llm = None
-            if native_direct_possible:
+            if native_direct_possible and not response:
                 llm = AgentConfigRegistry.get_native_llm(
                     direct_node_id,
                     effort_override=thinking_effort,
@@ -2430,7 +2523,7 @@ async def direct_response_node_impl(
                     getattr(llm, "_wiii_provider_name", None)
                 ):
                     llm = None
-            if llm is None:
+            if llm is None and not response:
                 llm = AgentConfigRegistry.get_llm(
                     direct_node_id,
                     effort_override=thinking_effort,

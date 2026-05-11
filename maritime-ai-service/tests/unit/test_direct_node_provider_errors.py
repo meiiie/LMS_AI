@@ -132,6 +132,95 @@ async def test_direct_response_node_uses_pointy_fast_path_even_if_router_mislabe
 
 
 @pytest.mark.asyncio
+async def test_direct_response_node_runs_document_preview_tool_before_llm():
+    state = _base_state()
+    state.update(
+        {
+            "query": (
+                "Dua tren tai lieu Word vua upload, tao preview_lesson_patch "
+                "co source_references cho bai hoc hien tai."
+            ),
+            "routing_metadata": {
+                "method": "deterministic_document_context_guard",
+                "intent": "uploaded_file_context",
+            },
+            "context": {
+                "response_language": "vi",
+                "user_role": "teacher",
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "lesson.docx",
+                            "markdown": "Marker WIII_DOC_GOAL_789\nNguon trang 4.",
+                        }
+                    ]
+                },
+                "host_capabilities": {
+                    "tools": [
+                        {"name": "authoring.preview_lesson_patch"},
+                    ]
+                },
+            },
+        }
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_direct_tool_rounds(*args, **kwargs):
+        captured["forced_tool_choice"] = kwargs.get("forced_tool_choice")
+        captured["tools"] = args[3]
+        return (
+            SimpleNamespace(content="Mình đã gửi bản preview sang LMS."),
+            [],
+            [
+                {
+                    "type": "call",
+                    "name": "host_action__authoring__preview_lesson_patch",
+                },
+                {
+                    "type": "host_action",
+                    "name": "host_action__authoring__preview_lesson_patch",
+                },
+            ],
+        )
+
+    kwargs = _base_direct_kwargs()
+    kwargs.update(
+        {
+            "looks_identity_selfhood_turn": lambda *_args, **_kwargs: False,
+            "get_effective_provider": lambda *_args, **_kwargs: None,
+            "get_explicit_user_provider": lambda *_args, **_kwargs: None,
+            "collect_direct_tools": lambda *_args, **_kwargs: (
+                [SimpleNamespace(name="host_action__authoring__preview_lesson_patch")],
+                True,
+            ),
+            "execute_direct_tool_rounds": fake_execute_direct_tool_rounds,
+            "extract_direct_response": lambda *_args, **_kwargs: (
+                "Mình đã gửi bản preview sang LMS.",
+                "Tạo preview từ tài liệu upload trước khi gọi LLM.",
+                [],
+            ),
+        }
+    )
+
+    with (
+        patch(
+            "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_native_llm",
+            side_effect=AssertionError("preview host action should not need native LLM"),
+        ),
+        patch(
+            "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+            side_effect=AssertionError("preview host action should not need planner LLM"),
+        ),
+    ):
+        result = await direct_response_node_impl(state, **kwargs)
+
+    assert result["final_response"] == "Mình đã gửi bản preview sang LMS."
+    assert captured["forced_tool_choice"] == "host_action__authoring__preview_lesson_patch"
+    assert result["tool_call_events"][0]["type"] == "call"
+
+
+@pytest.mark.asyncio
 async def test_direct_response_node_handles_image_input_with_vision_before_llm():
     async def fake_analyze_image_for_query(**kwargs):
         assert kwargs["image_base64"] == "iVBORw0KGgo="
