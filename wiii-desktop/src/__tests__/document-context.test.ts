@@ -100,6 +100,7 @@ describe("document context helpers", () => {
 
   it("prioritizes teacher authoring sections over incidental admin teacher mentions", () => {
     const snippets = [
+      ["3.7. Hoc video tuong tac", "Hoc vien tra loi khi video tam dung."],
       ["4. Huong Dan Cho Giang Vien", "Tong quan quy trinh tao va van hanh khoa hoc."],
       ["4.2. Tao khoa hoc moi", "Nhap thong tin khoa hoc, muc tieu va mo ta cho hoc vien."],
       ["4.4. Soan cau truc chuong va bai", "Sap xep chuong, bai, tai lieu va thu tu hoc."],
@@ -130,6 +131,7 @@ describe("document context helpers", () => {
     expect(bounded).toContain("Nguồn section: 4.4. Soan cau truc chuong va bai");
     expect(bounded).toContain("Nguồn section: 4.5. Them bai video va video tuong tac");
     expect(bounded).toContain("Nguồn section: 4.6. Tao cau hoi trong ngan hang");
+    expect(bounded).not.toContain("Nguồn section: 3.7. Hoc video tuong tac");
     expect(bounded).not.toContain("Nguồn section: 6.2. Quan ly giang vien");
     expect(bounded).not.toContain("Nguồn section: 4.9. Doc phan tich giang vien");
   });
