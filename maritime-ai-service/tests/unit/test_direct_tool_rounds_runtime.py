@@ -1014,6 +1014,43 @@ def test_uploaded_doc_preview_filters_bare_table_labels_from_goals():
     assert "xac nhan tieu de" in content
 
 
+def test_uploaded_doc_preview_keeps_ordered_actions_out_of_learning_goals():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_preview_params,
+    )
+
+    params = _build_uploaded_doc_preview_params(
+        "Tao preview_lesson_patch cho giao vien tu tai lieu vua upload.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "manual.docx",
+                            "markdown": (
+                                "Huong dan su dung HoLiLiHu LMS\n"
+                                "Muc tieu hoc tap: giao vien hieu cach chuan bi bai hoc truoc khi luu.\n"
+                                "| **Buoc** | **Thao tac** | **Ket qua dung** |\n"
+                                "| **3** | Them anh dai dien va nhap muc tieu bai hoc khi soan bai. |"
+                                "Noi dung duoc hien thi dung cho hoc vien. |\n"
+                                "Checklist: xac nhan source references va preview approval.\n"
+                            ),
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    content = params["content"]
+    objectives_section = content.split("## Checklist", 1)[0]
+    checklist_section = content.split("## Checklist", 1)[1]
+    assert "giao vien hieu cach chuan bi bai hoc" in objectives_section
+    assert "Them anh dai dien" not in objectives_section
+    assert "- 3 - Them anh" not in content
+    assert "Them anh dai dien va nhap muc tieu bai hoc" in checklist_section
+
+
 @pytest.mark.asyncio
 async def test_execute_direct_tool_rounds_forwards_runtime_tier_to_failover_helper():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
