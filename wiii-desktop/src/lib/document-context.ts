@@ -11,8 +11,8 @@ import type {
 
 export const MAX_DOCUMENT_CONTEXT_CHARS = 8_000;
 const SECTION_CONTEXT_TITLE_LIMIT = 28;
-const PRIORITY_SECTION_LIMIT = 4;
-const PRIORITY_SECTION_CHARS = 1_300;
+const PRIORITY_SECTION_LIMIT = 6;
+const PRIORITY_SECTION_CHARS = 1_050;
 
 interface MarkdownSection {
   title: string;
@@ -122,9 +122,12 @@ function buildBoundedDocumentMarkdown(
     return markdown.slice(0, maxChars).trim();
   }
 
+  const hasSectionSnippets = Boolean(doc.section_snippets?.length);
   const title = `# Tài liệu upload: ${doc.file_name}`;
   const outline = renderSectionOutline(sections);
-  const headBudget = Math.min(1_500, Math.max(700, Math.floor(maxChars * 0.22)));
+  const headBudget = hasSectionSnippets
+    ? Math.min(900, Math.max(520, Math.floor(maxChars * 0.12)))
+    : Math.min(1_500, Math.max(700, Math.floor(maxChars * 0.22)));
   const chunks: string[] = [
     title,
     outline,
@@ -152,7 +155,9 @@ function buildBoundedDocumentMarkdown(
     }
   }
 
-  const tailBudget = Math.min(900, Math.max(350, Math.floor(maxChars * 0.12)));
+  const tailBudget = hasSectionSnippets
+    ? Math.min(520, Math.max(260, Math.floor(maxChars * 0.07)))
+    : Math.min(900, Math.max(350, Math.floor(maxChars * 0.12)));
   chunks.push("## Trích đoạn cuối tài liệu", markdown.slice(-tailBudget).trim());
 
   return compactToBudget(chunks.join("\n\n"), maxChars);
@@ -249,10 +254,17 @@ function formatSectionSourceLine(section: ContextSection): string {
 
 function scoreSectionTitle(title: string): number {
   const normalized = stripVietnameseDiacritics(title).toLowerCase();
-  if (/\b(giang vien|giao vien|teacher|instructor)\b/.test(normalized)) return 100;
-  if (/(tao khoa|soan|chuong va bai|cau hoi|bai tap|xuat ban|phan tich giang vien)/.test(normalized)) {
-    return 85;
+  const isTeacher = /\b(giang vien|giao vien|teacher|instructor)\b/.test(normalized);
+  const isAdminManagement = /\b(quan ly|org_admin|admin|manager)\b/.test(normalized);
+  if (/(huong dan cho giang vien|danh cho giang vien|teacher guide)/.test(normalized)) return 100;
+  if (
+    /(tao khoa|hoan thien thong tin khoa|soan|chuong va bai|them bai video|video tuong tac|tao cau hoi|ngan hang cau hoi|bai tap|cai dat khoa|gui duyet|xuat ban)/.test(normalized)
+  ) {
+    return 95;
   }
+  if (/(checklist.*giang vien|giang vien.*checklist|kiem tra truoc khi xuat ban)/.test(normalized)) return 90;
+  if (/phan tich giang vien/.test(normalized)) return 60;
+  if (isTeacher && !isAdminManagement) return 80;
   if (/\b(hoc vien|student|learner)\b/.test(normalized)) return 65;
   if (/\b(quan ly|org_admin|admin|manager)\b/.test(normalized)) return 55;
   if (/(checklist|quy trinh|video tuong tac|van hanh)/.test(normalized)) return 45;

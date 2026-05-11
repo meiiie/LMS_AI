@@ -170,6 +170,8 @@ def _clean_doc_preview_line(value: str) -> str:
             for cell in cells
             if cell.strip()
         ]
+        while cells and _normalize_doc_preview_text(cells[0]) in {"□", "☐", "☑", "✓", "x"}:
+            cells = cells[1:]
         if not cells or all(set(cell) <= {"-", " ", ":"} for cell in cells):
             return ""
         line = " - ".join(cells)
@@ -383,6 +385,7 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
     content_lines = [
         f"# Bản nháp bài học từ tài liệu: {title_source}",
         "",
+        *([f"Marker kiểm thử: {marker}", ""] if marker else []),
         "## Mục tiêu học tập",
         *[f"- {_strip_doc_preview_goal_label(line)}" for line in goals[:4]],
         "",
@@ -395,11 +398,18 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
         "## Câu hỏi kiểm tra nhanh",
         *quick_questions,
     ]
-    if marker:
-        content_lines.extend(["", f"Marker kiểm thử: {marker}"])
+    description = (
+        "Bài học giúp giảng viên chuyển tài liệu hướng dẫn HoLiLiHu LMS thành "
+        "các thao tác tạo khóa, soạn chương/bài, thêm video/tài liệu/quiz, "
+        "kiểm tra và gửi duyệt một cách an toàn."
+        if is_lms_manual
+        else "Bài học giúp người học chuyển tài liệu nguồn thành checklist thao tác, "
+        "tình huống thực hành và câu hỏi kiểm tra nhanh."
+    )
 
     params: dict[str, Any] = {
         "title": f"Bản nháp: {title_source[:90]}",
+        "description": description,
         "content": "\n".join(content_lines),
         "source_references": [
             {
