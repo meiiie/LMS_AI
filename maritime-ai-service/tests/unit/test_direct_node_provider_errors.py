@@ -170,7 +170,7 @@ async def test_direct_response_node_runs_document_preview_tool_before_llm():
         captured["forced_tool_choice"] = kwargs.get("forced_tool_choice")
         captured["tools"] = args[3]
         return (
-            SimpleNamespace(content="Mình đã gửi bản preview sang LMS."),
+            SimpleNamespace(content="Preview sent to LMS."),
             [],
             [
                 {
@@ -217,6 +217,105 @@ async def test_direct_response_node_runs_document_preview_tool_before_llm():
 
     assert result["final_response"] == "Mình đã gửi bản preview sang LMS."
     assert captured["forced_tool_choice"] == "host_action__authoring__preview_lesson_patch"
+    assert result["tool_call_events"][0]["type"] == "call"
+
+
+@pytest.mark.asyncio
+async def test_direct_response_node_rebinds_document_preview_tool_when_collection_misses():
+    state = _base_state()
+    state.update(
+        {
+            "query": (
+                "Dua tren tai lieu Word vua upload, tao preview_lesson_patch "
+                "co source_references va approval_token cho bai hoc hien tai."
+            ),
+            "session_id": "session-doc-preview",
+            "routing_metadata": {
+                "method": "deterministic_document_context_guard",
+                "intent": "uploaded_file_context",
+            },
+            "context": {
+                "response_language": "vi",
+                "user_role": "teacher",
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "lesson.docx",
+                            "markdown": "Marker WIII_DOC_GOAL_456\nNguon trang 5.",
+                        }
+                    ]
+                },
+                "host_capabilities": {
+                    "tools": [
+                        {
+                            "name": "authoring.preview_lesson_patch",
+                            "description": "Preview lesson patch",
+                            "roles": ["teacher"],
+                            "permission": "manage:courses",
+                            "mutates_state": False,
+                            "requires_confirmation": False,
+                        },
+                    ]
+                },
+            },
+        }
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_direct_tool_rounds(*args, **kwargs):
+        captured["forced_tool_choice"] = kwargs.get("forced_tool_choice")
+        captured["tool_names"] = [
+            getattr(tool, "name", getattr(tool, "__name__", ""))
+            for tool in args[3]
+        ]
+        return (
+            SimpleNamespace(content="Preview sent to LMS."),
+            [],
+            [
+                {
+                    "type": "call",
+                    "name": "host_action__authoring__preview_lesson_patch",
+                },
+                {
+                    "type": "host_action",
+                    "name": "host_action__authoring__preview_lesson_patch",
+                },
+            ],
+        )
+
+    kwargs = _base_direct_kwargs()
+    kwargs.update(
+        {
+            "looks_identity_selfhood_turn": lambda *_args, **_kwargs: False,
+            "get_effective_provider": lambda *_args, **_kwargs: None,
+            "get_explicit_user_provider": lambda *_args, **_kwargs: None,
+            "collect_direct_tools": lambda *_args, **_kwargs: ([], False),
+            "execute_direct_tool_rounds": fake_execute_direct_tool_rounds,
+            "extract_direct_response": lambda *_args, **_kwargs: (
+                "Preview sent to LMS.",
+                "Preview was created from a declared host capability.",
+                [],
+            ),
+        }
+    )
+
+    with (
+        patch(
+            "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_native_llm",
+            side_effect=AssertionError("preview host action should not need native LLM"),
+        ),
+        patch(
+            "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+            side_effect=AssertionError("preview host action should not need planner LLM"),
+        ),
+    ):
+        result = await direct_response_node_impl(state, **kwargs)
+
+    assert result["final_response"] == "Preview sent to LMS."
+    assert captured["forced_tool_choice"] == "host_action__authoring__preview_lesson_patch"
+    assert captured["tool_names"] == ["host_action__authoring__preview_lesson_patch"]
+    assert result["routing_metadata"]["doc_preview_runtime"]["status"] == "rebound"
     assert result["tool_call_events"][0]["type"] == "call"
 
 
