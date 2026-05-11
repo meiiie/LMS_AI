@@ -816,6 +816,72 @@ def test_uploaded_doc_preview_skips_logo_data_uri_and_focuses_teacher_manual():
     assert "WIII_DOC_GOAL_REAL_MANUAL" in content
 
 
+def test_uploaded_doc_preview_preserves_general_wiii_marker_from_query():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_preview_params,
+    )
+
+    marker = "WIII_PRODUCT_E2E_20260512024500"
+    params = _build_uploaded_doc_preview_params(
+        (
+            "Tao preview_lesson_patch cho giao vien tu tai lieu vua upload. "
+            f"Noi dung bai hoc moi phai chua marker kiem thu chinh xac: {marker}."
+        ),
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "manual.docx",
+                            "markdown": (
+                                "Huong dan su dung HoLiLiHu LMS\n"
+                                "Muc tieu hoc tap: giao vien tao khoa hoc va kiem tra noi dung.\n"
+                                "Quy trinh thao tac: mo khoa hoc, cap nhat bai hoc, kiem tra quiz.\n"
+                            ),
+                        }
+                    ]
+                },
+                "page_context": {"lesson_id": "lesson-e2e"},
+            }
+        },
+    )
+
+    assert params["lesson_id"] == "lesson-e2e"
+    assert marker in params["content"]
+
+
+def test_uploaded_doc_preview_preserves_labelled_non_wiii_marker_from_query():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_preview_params,
+    )
+
+    marker = "COURSE_PATCH_MARKER_42"
+    params = _build_uploaded_doc_preview_params(
+        (
+            "Create a safe LMS preview from the uploaded document. "
+            f"Exact marker: {marker}."
+        ),
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "manual.docx",
+                            "markdown": (
+                                "Bridge resource management guide\n"
+                                "Learning objective: verify the checklist before saving.\n"
+                                "Checklist: title, lesson content, source references, preview approval.\n"
+                            ),
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    assert marker in params["content"]
+
+
 def test_uploaded_doc_preview_prefers_real_teacher_heading_over_smart_excerpt_outline():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         _build_uploaded_doc_preview_params,
