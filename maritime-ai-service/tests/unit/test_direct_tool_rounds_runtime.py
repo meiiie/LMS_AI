@@ -657,6 +657,99 @@ def test_uploaded_doc_course_plan_builder_keeps_maritime_research_out_of_lms_man
     )
 
 
+def test_generic_uploaded_doc_course_clusters_full_long_document_map():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_course_params,
+        _normalize_doc_preview_text,
+    )
+
+    sections = []
+    for index in range(1, 25):
+        sections.append(
+            "\n".join(
+                [
+                    f"# Section {index}: Operational capability {index}",
+                    f"This section explains capability {index}, constraints, evidence, and practical decisions.",
+                    f"Nguon section: Section {index}: Operational capability {index} (trang {index}-{index})",
+                ]
+            )
+        )
+    markdown = "# Complex operations handbook\n" + "\n\n".join(sections)
+
+    params = _build_uploaded_doc_course_params(
+        "Turn this uploaded handbook into a complete course plan with citations.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "complex-operations-handbook.docx",
+                            "title": "Complex operations handbook",
+                            "markdown": markdown,
+                        }
+                    ]
+                },
+                "page_context": {"course_id": "course-generic"},
+            }
+        },
+    )
+
+    plan = params["course_plan"]
+    normalized_plan = _normalize_doc_preview_text(json.dumps(plan, ensure_ascii=False))
+
+    assert params["course_id"] == "course-generic"
+    assert plan["document_domain"]["id"] == "generic_document_course"
+    assert len(plan["chapters"]) == 6
+    assert sum(len(chapter["lessons"]) for chapter in plan["chapters"]) == 18
+    assert plan["document_map_summary"]["strategy"] == "cluster_full_document_map"
+    assert plan["document_map_summary"]["candidate_section_count"] >= 24
+    assert params["quality_report"]["status"] == "pass"
+    assert params["quality_report"]["source_reference_count"] >= 24
+    assert "section 24" in normalized_plan
+    assert "section 1" in normalized_plan
+    assert all(
+        lesson.get("source_references")
+        for chapter in plan["chapters"]
+        for lesson in chapter["lessons"]
+    )
+
+
+def test_uploaded_doc_course_parses_unicode_vietnamese_source_lines():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_course_params,
+    )
+
+    markdown = (
+        "# Báo cáo vận hành\n"
+        "Nguồn section: Tổng quan vận hành (trang 7-9)\n"
+        "# Quy trình kiểm tra\n"
+        "Nguồn section: Quy trình kiểm tra (trang 12)\n"
+        "# Đánh giá sau triển khai\n"
+        "Nguồn section: Đánh giá sau triển khai (trang 18-20)\n"
+    )
+
+    params = _build_uploaded_doc_course_params(
+        "Tạo khóa học từ báo cáo này với citation.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "bao-cao-van-hanh.docx",
+                            "title": "Báo cáo vận hành",
+                            "markdown": markdown,
+                        }
+                    ]
+                },
+            }
+        },
+    )
+
+    assert params["quality_report"]["source_reference_count"] == 3
+    assert params["source_references"][0]["page_start"] == 7
+    assert params["source_references"][0]["page_end"] == 9
+
+
 def test_uploaded_doc_course_request_matches_real_teacher_curriculum_wording():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         _looks_uploaded_doc_course_request,

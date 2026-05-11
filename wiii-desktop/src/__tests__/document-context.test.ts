@@ -131,9 +131,9 @@ describe("document context helpers", () => {
     expect(bounded).toContain("Nguồn section: 4.4. Soan cau truc chuong va bai");
     expect(bounded).toContain("Nguồn section: 4.5. Them bai video va video tuong tac");
     expect(bounded).toContain("Nguồn section: 4.6. Tao cau hoi trong ngan hang");
-    expect(bounded).not.toContain("Nguồn section: 3.7. Hoc video tuong tac");
-    expect(bounded).not.toContain("Nguồn section: 6.2. Quan ly giang vien");
-    expect(bounded).not.toContain("Nguồn section: 4.9. Doc phan tich giang vien");
+    expect(bounded).not.toContain("Hoc vien tra loi khi video tam dung");
+    expect(bounded).not.toContain("Admin tim va ho tro tai khoan giang vien");
+    expect(bounded).not.toContain("Theo doi hieu qua khoa va noi dung hoc vien dang vuong");
   });
 
   it("strips markdown from display attachments", () => {
@@ -141,6 +141,35 @@ describe("document context helpers", () => {
 
     expect(display.file_name).toBe("brief.docx");
     expect("markdown" in display).toBe(false);
+  });
+
+  it("keeps outline source lines for long non-priority documents", () => {
+    const sectionSnippets = Array.from({ length: 35 }, (_, index) => {
+      const sectionNumber = index + 1;
+      return {
+        title: `Section ${sectionNumber}: Operational topic ${sectionNumber}`,
+        markdown: `# Section ${sectionNumber}: Operational topic ${sectionNumber}\n\nNeutral operational content ${sectionNumber}.`,
+        char_start: sectionNumber * 1000,
+        char_end: sectionNumber * 1000 + 800,
+        source_pages: [sectionNumber],
+      };
+    });
+
+    const context = buildChatDocumentContext([
+      makeDoc({
+        file_name: "long-neutral-report.docx",
+        markdown: "# Long neutral report\n\n" + "Opening context ".repeat(1200),
+        char_count: 90_000,
+        truncated: true,
+        section_snippets: sectionSnippets,
+      }),
+    ], 9_000);
+    const bounded = context?.attachments[0].markdown || "";
+
+    expect(bounded.length).toBeLessThanOrEqual(9_000);
+    expect(bounded).toContain("Nguồn section: Section 1: Operational topic 1 (trang 1)");
+    expect(bounded).toContain("Nguồn section: Section 35: Operational topic 35 (trang 35)");
+    expect(bounded).not.toContain("còn 1 mục khác");
   });
 
   it("preserves video frame metadata without putting frame bytes in document context", () => {
