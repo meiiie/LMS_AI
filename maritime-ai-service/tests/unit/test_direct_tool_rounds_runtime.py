@@ -1117,6 +1117,40 @@ def test_uploaded_doc_preview_shapes_descriptive_excerpt_into_learning_goal():
     )
 
 
+def test_uploaded_doc_preview_supplements_sparse_lms_learning_goals():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_preview_params,
+    )
+
+    params = _build_uploaded_doc_preview_params(
+        "Tao preview_lesson_patch cho giao vien tu tai lieu vua upload.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "manual.docx",
+                            "markdown": (
+                                "Huong dan su dung HoLiLiHu LMS\n"
+                                "Muc tieu hoc tap: giao vien tao khoa hoc dung quy trinh.\n"
+                            ),
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    objectives_section = params["content"].split("## Checklist", 1)[0]
+    objective_lines = [
+        line for line in objectives_section.splitlines() if line.startswith("- ")
+    ]
+    assert len(objective_lines) >= 3
+    assert "giao vien tao khoa hoc dung quy trinh" in objectives_section
+    assert "diff, citation" in objectives_section
+    assert "trạng thái nháp" in objectives_section
+
+
 @pytest.mark.asyncio
 async def test_execute_direct_tool_rounds_forwards_runtime_tier_to_failover_helper():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
