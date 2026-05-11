@@ -32,6 +32,31 @@ from app.engine.multi_agent.visual_intent_resolver import resolve_visual_intent
 logger = logging.getLogger(__name__)
 
 
+def _effective_host_user_role(state: dict, ctx: dict, host_ctx: Any) -> str | None:
+    """Resolve host role without silently downgrading embedded teacher flows.
+
+    LMS embeds can send the role in the shared chat context while the nested
+    `host_context.user_role` is absent. Capability filtering must honor the
+    explicit turn role in that case; otherwise authoring preview tools are
+    filtered as if the teacher were a student.
+    """
+
+    candidates = [
+        getattr(host_ctx, "user_role", None),
+        ctx.get("host_role"),
+        ctx.get("user_role"),
+        state.get("host_role"),
+        state.get("user_role"),
+        state.get("role"),
+    ]
+    for candidate in candidates:
+        value = getattr(candidate, "value", candidate)
+        role = str(value or "").strip().lower()
+        if role:
+            return role
+    return None
+
+
 def _inject_host_context(state: dict) -> str:
     """Graph-level host context injection.
 
@@ -49,9 +74,12 @@ def _inject_host_context(state: dict) -> str:
             from app.engine.context.adapters import get_host_adapter
 
             host_ctx = HostContext(**raw_host) if isinstance(raw_host, dict) else raw_host
+            effective_user_role = _effective_host_user_role(state, ctx, host_ctx)
+            if effective_user_role and not host_ctx.user_role:
+                host_ctx = host_ctx.model_copy(update={"user_role": effective_user_role})
             filtered_host_actions = filter_host_actions_for_org(
                 host_ctx.available_actions or [],
-                user_role=host_ctx.user_role,
+                user_role=effective_user_role,
                 organization_id=state.get("organization_id") or ctx.get("organization_id"),
                 user_id=str(state.get("user_id") or ""),
             )
@@ -66,7 +94,7 @@ def _inject_host_context(state: dict) -> str:
                 try:
                     filtered_caps = filter_host_capabilities_for_org(
                         raw_caps,
-                        user_role=host_ctx.user_role,
+                        user_role=effective_user_role,
                         organization_id=state.get("organization_id") or ctx.get("organization_id"),
                         user_id=str(state.get("user_id") or ""),
                     )
@@ -74,7 +102,7 @@ def _inject_host_context(state: dict) -> str:
                     ctx["host_capabilities"] = filtered_caps
                     state["host_capabilities_prompt"] = format_host_capabilities_for_prompt(
                         filtered_caps,
-                        user_role=host_ctx.user_role,
+                        user_role=effective_user_role,
                     )
                 except Exception as exc:
                     logger.warning("[GRAPH] host capabilities format failed: %s", exc)
@@ -91,7 +119,7 @@ def _inject_host_context(state: dict) -> str:
                     skills = loader.load_skills(
                         host_ctx.host_type,
                         page_type,
-                        user_role=host_ctx.user_role,
+                        user_role=effective_user_role,
                         workflow_stage=host_ctx.workflow_stage,
                     )
                     skill_prompt = loader.get_prompt_addition(skills)
@@ -118,9 +146,12 @@ def _inject_host_context(state: dict) -> str:
                 student_state=ctx.get("student_state"),
                 available_actions=ctx.get("available_actions"),
             )
+            effective_user_role = _effective_host_user_role(state, ctx, host_ctx)
+            if effective_user_role and not host_ctx.user_role:
+                host_ctx = host_ctx.model_copy(update={"user_role": effective_user_role})
             filtered_host_actions = filter_host_actions_for_org(
                 host_ctx.available_actions or [],
-                user_role=host_ctx.user_role,
+                user_role=effective_user_role,
                 organization_id=state.get("organization_id") or ctx.get("organization_id"),
                 user_id=str(state.get("user_id") or ""),
             )
@@ -135,7 +166,7 @@ def _inject_host_context(state: dict) -> str:
                 try:
                     filtered_caps = filter_host_capabilities_for_org(
                         raw_caps,
-                        user_role=host_ctx.user_role,
+                        user_role=effective_user_role,
                         organization_id=state.get("organization_id") or ctx.get("organization_id"),
                         user_id=str(state.get("user_id") or ""),
                     )
@@ -143,7 +174,7 @@ def _inject_host_context(state: dict) -> str:
                     ctx["host_capabilities"] = filtered_caps
                     state["host_capabilities_prompt"] = format_host_capabilities_for_prompt(
                         filtered_caps,
-                        user_role=host_ctx.user_role,
+                        user_role=effective_user_role,
                     )
                 except Exception as exc:
                     logger.warning("[GRAPH] legacy host capabilities format failed: %s", exc)
@@ -160,7 +191,7 @@ def _inject_host_context(state: dict) -> str:
                     skills = loader.load_skills(
                         host_ctx.host_type,
                         page_type,
-                        user_role=host_ctx.user_role,
+                        user_role=effective_user_role,
                         workflow_stage=host_ctx.workflow_stage,
                     )
                     skill_prompt = loader.get_prompt_addition(skills)

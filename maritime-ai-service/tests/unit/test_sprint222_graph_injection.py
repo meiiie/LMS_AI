@@ -88,6 +88,45 @@ def test_inject_host_context_populates_host_capabilities_prompt():
     assert "authoring.generate_lesson" in state["host_capabilities_prompt"]
 
 
+def test_inject_host_context_uses_turn_role_when_host_role_missing():
+    from app.engine.multi_agent.graph import _inject_host_context
+
+    state = {
+        "organization_id": "maritime-lms",
+        "user_id": "teacher-1",
+        "context": {
+            "user_role": "teacher",
+            "host_context": {
+                "host_type": "lms",
+                "page": {"type": "course_editor", "title": "Curriculum"},
+            },
+            "host_capabilities": {
+                "host_type": "lms",
+                "host_name": "Maritime LMS",
+                "resources": ["current-page"],
+                "surfaces": ["ai_sidebar"],
+                "tools": [
+                    {
+                        "name": "authoring.preview_lesson_patch",
+                        "description": "Preview lesson patch",
+                        "roles": ["teacher", "admin"],
+                        "permission": "manage:courses",
+                        "requires_confirmation": False,
+                        "mutates_state": False,
+                    }
+                ],
+            },
+        },
+    }
+
+    result = _inject_host_context(state)
+    assert "<host_context" in result
+    assert state["host_context"]["user_role"] == "teacher"
+    assert "host_capabilities_prompt" in state
+    assert "authoring.preview_lesson_patch" in state["host_capabilities_prompt"]
+    assert state["host_capabilities"]["tools"][0]["name"] == "authoring.preview_lesson_patch"
+
+
 def test_inject_host_context_filters_disallowed_capabilities_for_student():
     from app.engine.multi_agent.graph import _inject_host_context
 
