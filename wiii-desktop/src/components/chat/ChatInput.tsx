@@ -17,7 +17,7 @@ import {
   toDisplayDocumentAttachment,
   type ParsedDocumentForContext,
 } from "@/lib/document-context";
-import type { DocumentContextExtractedImage } from "@/api/document-context";
+import type { DocumentContextExtractedImage, DocumentContextSectionSnippet } from "@/api/document-context";
 import {
   parseSkillMentions,
   detectMentionTyping,
@@ -93,6 +93,7 @@ interface AttachedDocument {
   truncated?: boolean;
   extracted_images?: DocumentContextExtractedImage[];
   extracted_image_count?: number;
+  section_snippets?: DocumentContextSectionSnippet[];
   markdown?: string;
   status: "parsing" | "ready" | "error";
   error?: string;
@@ -159,6 +160,7 @@ function toParsedDocumentForContext(doc: AttachedDocument): ParsedDocumentForCon
     char_count: doc.char_count,
     extracted_images: doc.extracted_images,
     extracted_image_count: doc.extracted_image_count,
+    section_snippets: doc.section_snippets,
     truncated: doc.truncated,
     markdown: doc.markdown,
   };
@@ -484,6 +486,7 @@ export function ChatInput({ onSend, onCancel, editingMessage, onClearEdit, cente
                   char_count: parsed.char_count,
                   extracted_images: parsed.extracted_images || [],
                   extracted_image_count: parsed.extracted_image_count || 0,
+                  section_snippets: parsed.section_snippets || [],
                   truncated: parsed.truncated,
                   markdown: parsed.markdown,
                   status: "ready",

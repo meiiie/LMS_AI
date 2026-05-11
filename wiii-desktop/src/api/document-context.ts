@@ -9,6 +9,16 @@ export interface DocumentContextExtractedImage {
   detail?: "auto" | "low" | "high";
 }
 
+export interface DocumentContextSectionSnippet {
+  title: string;
+  markdown: string;
+  char_start: number;
+  char_end: number;
+  source_pages?: number[];
+  page_start?: number | null;
+  page_end?: number | null;
+}
+
 export interface DocumentContextParseResponse {
   file_name: string;
   mime_type?: string | null;
@@ -18,6 +28,7 @@ export interface DocumentContextParseResponse {
   title?: string | null;
   page_count?: number | null;
   section_titles: string[];
+  section_snippets?: DocumentContextSectionSnippet[];
   markdown: string;
   char_count: number;
   truncated: boolean;

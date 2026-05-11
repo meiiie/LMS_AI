@@ -25,6 +25,31 @@ class FakeMarkItDownParser:
         )
 
 
+class FakeLongManualParser:
+    is_available = True
+
+    async def parse(self, file_path: str, options=None):
+        early = "# 1. Tong Quan\n\n" + ("Gioi thieu he thong LMS.\n" * 500)
+        filler = "# 2. Noi Dung Nen\n\n" + ("Dong dem truoc section quan trong.\n" * 1400)
+        late_teacher = (
+            "# 9. Huong Dan Cho Giang Vien\n\n"
+            "Giang vien tao khoa hoc, soan chuong va bai, them video tuong tac, "
+            "tao cau hoi va gui duyet truoc khi xuat ban.\n"
+        )
+        markdown = early + filler + late_teacher
+        return ParsedDocument(
+            markdown=markdown,
+            page_count=12,
+            metadata={"title": "Long LMS Manual", "parser": "markitdown"},
+            section_map={
+                "1. Tong Quan": [1],
+                "2. Noi Dung Nen": [2],
+                "9. Huong Dan Cho Giang Vien": [9, 10],
+            },
+            images=[],
+        )
+
+
 class FakeVideoParser:
     is_available = True
 
@@ -112,6 +137,31 @@ def test_parse_document_context_uses_markitdown(monkeypatch):
     assert response.section_titles == ["Safety Brief"]
     assert "Rule 5" in response.markdown
     assert response.char_count == len("# Safety Brief\n\nRule 5: keep a proper lookout.")
+
+
+def test_parse_document_context_keeps_late_sections_as_snippets(monkeypatch):
+    from app.api.v1 import document_context as module
+
+    monkeypatch.setattr(module, "_build_parser", lambda: FakeLongManualParser())
+
+    response = asyncio.run(
+        module.parse_document_context(
+            SimpleNamespace(user_id="u"),
+            _upload_file("long-manual.docx", b"docx-bytes"),
+        )
+    )
+
+    assert response.truncated is True
+    assert "Huong Dan Cho Giang Vien" not in response.markdown
+    late_snippet = next(
+        snippet
+        for snippet in response.section_snippets
+        if snippet.title == "9. Huong Dan Cho Giang Vien"
+    )
+    assert late_snippet.source_pages == [9, 10]
+    assert late_snippet.page_start == 9
+    assert late_snippet.page_end == 10
+    assert "them video tuong tac" in late_snippet.markdown
 
 
 def test_document_context_prompt_block_bounds_and_labels():

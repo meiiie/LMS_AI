@@ -58,6 +58,46 @@ describe("document context helpers", () => {
     expect(bounded).not.toContain("data:image");
   });
 
+  it("retrieves important sections from backend snippets beyond the truncated markdown", () => {
+    const truncatedMarkdown = [
+      "# HoLiLiHu LMS",
+      "Phan dau tai lieu ".repeat(900),
+      "# 2. Noi dung nen",
+      "Doan dem khong lien quan ".repeat(900),
+    ].join("\n\n");
+
+    const context = buildChatDocumentContext([
+      makeDoc({
+        markdown: truncatedMarkdown,
+        char_count: truncatedMarkdown.length + 18_000,
+        truncated: true,
+        section_snippets: [
+          {
+            title: "2. Noi dung nen",
+            markdown: "# 2. Noi dung nen\n\nDoan dem khong lien quan.",
+            char_start: 10_000,
+            char_end: 13_000,
+            source_pages: [2],
+          },
+          {
+            title: "9. Hướng Dẫn Cho Giảng Viên",
+            markdown:
+              "# 9. Hướng Dẫn Cho Giảng Viên\n\nGiảng viên tạo khóa học, soạn chương và bài, thêm video tương tác, tạo câu hỏi và gửi duyệt.",
+            char_start: 45_000,
+            char_end: 48_000,
+            source_pages: [9, 10],
+          },
+        ],
+      }),
+    ], 2_800);
+    const bounded = context?.attachments[0].markdown || "";
+
+    expect(bounded.length).toBeLessThanOrEqual(2_800);
+    expect(bounded).toContain("Hướng Dẫn Cho Giảng Viên");
+    expect(bounded).toContain("Nguồn section: 9. Hướng Dẫn Cho Giảng Viên (trang 9-10)");
+    expect(bounded).toContain("thêm video tương tác");
+  });
+
   it("strips markdown from display attachments", () => {
     const display = toDisplayDocumentAttachment(makeDoc());
 
