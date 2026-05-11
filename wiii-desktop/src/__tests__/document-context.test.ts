@@ -98,6 +98,42 @@ describe("document context helpers", () => {
     expect(bounded).toContain("thêm video tương tác");
   });
 
+  it("prioritizes teacher authoring sections over incidental admin teacher mentions", () => {
+    const snippets = [
+      ["4. Huong Dan Cho Giang Vien", "Tong quan quy trinh tao va van hanh khoa hoc."],
+      ["4.2. Tao khoa hoc moi", "Nhap thong tin khoa hoc, muc tieu va mo ta cho hoc vien."],
+      ["4.4. Soan cau truc chuong va bai", "Sap xep chuong, bai, tai lieu va thu tu hoc."],
+      ["4.5. Them bai video va video tuong tac", "Them video, diem dung, cau hoi va phan hoi."],
+      ["4.6. Tao cau hoi trong ngan hang", "Tao cau hoi, dap an, giai thich va gan vao quiz."],
+      ["4.9. Doc phan tich giang vien", "Theo doi hieu qua khoa va noi dung hoc vien dang vuong."],
+      ["6.2. Quan ly giang vien", "Admin tim va ho tro tai khoan giang vien."],
+      ["9.2. Checklist giang vien truoc khi gui duyet", "Kiem tra thong tin, video, cau hoi va trang thai gui duyet."],
+    ].map(([title, body], index) => ({
+      title,
+      markdown: `# ${title}\n\n${body}`,
+      char_start: 10_000 + index * 1000,
+      char_end: 10_800 + index * 1000,
+      source_pages: [index + 1],
+    }));
+
+    const context = buildChatDocumentContext([
+      makeDoc({
+        markdown: "# Manual\n\n" + "Mo dau tai lieu ".repeat(900),
+        char_count: 80_000,
+        truncated: true,
+        section_snippets: snippets,
+      }),
+    ], 5_200);
+    const bounded = context?.attachments[0].markdown || "";
+
+    expect(bounded).toContain("Nguồn section: 4.2. Tao khoa hoc moi");
+    expect(bounded).toContain("Nguồn section: 4.4. Soan cau truc chuong va bai");
+    expect(bounded).toContain("Nguồn section: 4.5. Them bai video va video tuong tac");
+    expect(bounded).toContain("Nguồn section: 4.6. Tao cau hoi trong ngan hang");
+    expect(bounded).not.toContain("Nguồn section: 6.2. Quan ly giang vien");
+    expect(bounded).not.toContain("Nguồn section: 4.9. Doc phan tich giang vien");
+  });
+
   it("strips markdown from display attachments", () => {
     const display = toDisplayDocumentAttachment(makeDoc());
 

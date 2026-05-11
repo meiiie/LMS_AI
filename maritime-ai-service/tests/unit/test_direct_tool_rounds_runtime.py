@@ -526,6 +526,16 @@ def test_uploaded_doc_preview_prefers_real_teacher_heading_over_smart_excerpt_ou
     assert "- 4. Huong Dan Cho Giang Vien" not in content
     assert "Nhap thong tin khoa" in content
     assert "Checklist trien khai" in content
+    assert "HoLiLiHu LMS" in params["description"]
+    assert "OOW" not in params["description"]
+
+
+def test_doc_preview_clean_line_drops_checkbox_table_markers():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import _clean_doc_preview_line
+
+    assert _clean_doc_preview_line(
+        "| **□** | Thong tin khoa hoan chinh. | Co tieu de va muc tieu hoc tap. |"
+    ) == "Thong tin khoa hoan chinh. - Co tieu de va muc tieu hoc tap."
 
 
 @pytest.mark.asyncio
