@@ -165,7 +165,7 @@ describe("PreviewPanel — Selected Preview", () => {
       makePreviewItem({
         preview_id: "host-preview-1",
         preview_type: "host_action",
-        title: "Preview quiz publish",
+        title: "Xem trước phát hành bài kiểm tra",
         snippet: "Quiz publish preview ready.",
         metadata: {
           preview_kind: "quiz_publish",
@@ -191,7 +191,7 @@ describe("PreviewPanel — Selected Preview", () => {
       makePreviewItem({
         preview_id: "host-preview-diff-1",
         preview_type: "host_action",
-        title: "Preview cap nhat bai hoc",
+        title: "Xem trước cập nhật bài học",
         snippet: "Lesson patch preview ready.",
         metadata: {
           preview_kind: "lesson_patch",

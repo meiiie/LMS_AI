@@ -283,12 +283,12 @@ export function buildHostActionPreviewItem(
 
   const title =
     previewKind === "lesson_patch"
-      ? `Preview cap nhat bai hoc: ${targetLabel}`
+      ? `Xem trước cập nhật bài học: ${targetLabel}`
       : previewKind === "quiz_commit"
-        ? `Preview quiz: ${targetLabel}`
+        ? `Xem trước bài kiểm tra: ${targetLabel}`
         : previewKind === "quiz_publish"
-          ? `Preview publish quiz: ${targetLabel}`
-          : `Preview host action: ${targetLabel}`;
+          ? `Xem trước phát hành bài kiểm tra: ${targetLabel}`
+          : `Xem trước thao tác LMS: ${targetLabel}`;
 
   return {
     preview_id: `host-action-${requestId}`,
@@ -336,7 +336,7 @@ export function buildHostActionPreviewItem(
       requires_confirmation: true,
       workflow_stage: hostContext?.workflow_stage,
       page_type: hostContext?.page?.type,
-      next_step: "Xem preview roi xac nhan ro rang neu ban muon Wiii ap dung thay doi nay vao LMS.",
+      next_step: "Xem bản xem trước rồi xác nhận rõ ràng nếu bạn muốn Wiii áp dụng thay đổi này vào LMS.",
     },
   };
 }
