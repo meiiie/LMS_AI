@@ -1,0 +1,8 @@
+# Production precision document parsing profile.
+#
+# Keep the base test/dev install on requirements.txt. Production images opt into
+# this file through Docker build arg INSTALL_PRECISION_DOCS=true so Docling's
+# heavier ML/runtime footprint only lands where document provenance is required.
+-r requirements.txt
+
+docling>=2.93.0,<3.0.0

@@ -66,8 +66,8 @@ Pillow>=10.0.0  # CHỈ THỊ 26: Image processing
 # Install: pip install docling  (requires 3-4GB for DocLayNet + TableFormer models)
 # Or use Docling Serve: docker pull doclingproject/docling-serve
 # Feature-gated: USE_DOCLING_FOR_COURSE_GEN=true or DOCUMENT_CONTEXT_PARSER_MODE=precision
-# Optional package extra: pip install -e ".[precision-docs]"
-# docling>=2.30.0  # Uncomment when ready to deploy Docling
+# Local opt-in: pip install -e ".[precision-docs]"
+# Production opt-in: install requirements-precision.txt via INSTALL_PRECISION_DOCS=true
 markitdown[pdf,docx,pptx,xlsx,audio-transcription]>=0.1.5  # Lightweight Office/PDF/audio-to-Markdown parser
 
 # Object Storage (MinIO SDK)

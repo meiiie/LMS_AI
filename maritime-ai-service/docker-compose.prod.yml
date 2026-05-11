@@ -99,6 +99,16 @@ services:
       - CORS_ORIGIN_REGEX=${CORS_ORIGIN_REGEX:-}
       - ENABLE_MULTI_TENANT=${ENABLE_MULTI_TENANT:-false}
       - ASYNC_POOL_MAX_SIZE=${ASYNC_POOL_MAX_SIZE:-20}
+      # Teacher document-to-course precision lane. Production images install
+      # Docling through requirements-precision.txt; these envs keep the runtime
+      # explicit and surface parser warnings if precision cannot be honored.
+      - DOCUMENT_CONTEXT_PARSER_MODE=${DOCUMENT_CONTEXT_PARSER_MODE:-precision}
+      - USE_DOCLING_FOR_COURSE_GEN=${USE_DOCLING_FOR_COURSE_GEN:-true}
+      - DOCLING_VLM_BACKEND=${DOCLING_VLM_BACKEND:-none}
+      - DOCLING_VLM_API_URL=${DOCLING_VLM_API_URL:-}
+      - DOCLING_VLM_API_KEY=${DOCLING_VLM_API_KEY:-}
+      - DOCLING_VLM_MODEL=${DOCLING_VLM_MODEL:-gemini-3.1-flash-lite}
+      - DOCLING_LIBREOFFICE_CMD=${DOCLING_LIBREOFFICE_CMD:-/usr/bin/soffice}
     depends_on:
       postgres:
         condition: service_healthy
@@ -109,7 +119,7 @@ services:
     command: >
       gunicorn app.main:app
       --bind 0.0.0.0:8000
-      --workers ${GUNICORN_WORKERS:-4}
+      --workers ${GUNICORN_WORKERS:-2}
       --worker-class uvicorn.workers.UvicornWorker
       --timeout 120
       --graceful-timeout 30
@@ -121,7 +131,7 @@ services:
       - wiii-network
     restart: unless-stopped
     cpus: "${APP_CPU_LIMIT:-1.5}"
-    mem_limit: "${APP_MEM_LIMIT:-2G}"
+    mem_limit: "${APP_MEM_LIMIT:-4G}"
     deploy:
       # Single-node default: keep replicas/workers conservative. Increase only
       # after moving database/cache/object storage off this VM.
@@ -129,10 +139,10 @@ services:
       resources:
         limits:
           cpus: "${APP_CPU_LIMIT:-1.5}"
-          memory: "${APP_MEM_LIMIT:-2G}"
+          memory: "${APP_MEM_LIMIT:-4G}"
         reservations:
           cpus: "0.5"
-          memory: "512M"
+          memory: "1G"
     # Phase 35 — healthcheck tuned for slow LLM provider paths.
     # NVIDIA NIM free tier can hold a worker thread for 60-120s on complex
     # synthesis. With prior settings (interval=30s, retries=5, timeout=10s)

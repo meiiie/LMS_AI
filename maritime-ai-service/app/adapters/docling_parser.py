@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -18,6 +20,8 @@ from typing import Optional
 from app.ports.document_parser import DocumentParserPort, ParsedDocument
 
 logger = logging.getLogger(__name__)
+
+OFFICE_EXTENSIONS = {"docx", "pptx", "xlsx"}
 
 
 @dataclass
@@ -118,21 +122,35 @@ class DoclingParserAdapter(DocumentParserPort):
                 if asset.get("kind") in {"image", "figure", "picture"}
             ]
             page_count = len(doc.pages) if hasattr(doc, "pages") else 0
+            has_page_provenance = page_count > 0 or any(section_map.values()) or any(
+                asset.get("page") for asset in assets
+            )
             markdown = self._inject_page_markers(raw_markdown, section_map)
 
+            source_extension = Path(file_path).suffix.lower().lstrip(".")
+            office_layout_converter = self._office_layout_converter()
             metadata = {
                 "title": getattr(doc, "name", "") or Path(file_path).name,
                 "language": self._detect_language(markdown),
                 "parser": "docling",
                 "parser_chain": ["docling"],
-                "provenance_level": "page_layout" if page_count > 0 else "structured_text",
-                "source_extension": Path(file_path).suffix.lower().lstrip("."),
+                "provenance_level": "page_layout" if has_page_provenance else "structured_text",
+                "has_page_provenance": has_page_provenance,
+                "source_extension": source_extension,
+                "office_layout_converter": office_layout_converter or "",
+                "section_count": len(section_map),
                 "embedded_asset_count": len(assets),
                 "figure_count": sum(
                     1 for item in assets if item.get("kind") in {"image", "figure", "picture"}
                 ),
                 "table_count": sum(1 for item in assets if item.get("kind") == "table"),
             }
+            if source_extension in OFFICE_EXTENSIONS and not office_layout_converter:
+                metadata["parser_warning"] = (
+                    "Docling parsed Office structure, but no LibreOffice converter "
+                    "is available for page/layout and embedded image export. "
+                    "Set DOCLING_LIBREOFFICE_CMD or use the production precision image."
+                )
 
             logger.info(
                 "Docling: parsed %d pages, %d sections, %d assets, %d chars markdown",
@@ -157,7 +175,7 @@ class DoclingParserAdapter(DocumentParserPort):
         """Map generic headings and maritime aliases to page numbers."""
         section_map: dict[str, list[int]] = {}
         try:
-            for item in doc.iterate_items():
+            for item in self._iter_doc_items(doc):
                 label = self._label_name(item)
                 if label not in {"section_header", "title"}:
                     continue
@@ -188,7 +206,7 @@ class DoclingParserAdapter(DocumentParserPort):
         assets: list[dict] = []
         try:
             index = 1
-            for item in doc.iterate_items():
+            for item in self._iter_doc_items(doc):
                 label = self._label_name(item)
                 if label not in {"picture", "figure", "table"}:
                     continue
@@ -209,6 +227,22 @@ class DoclingParserAdapter(DocumentParserPort):
         except Exception as exc:  # noqa: BLE001
             logger.warning("Docling: asset extraction failed: %s", exc)
         return assets
+
+    @staticmethod
+    def _iter_doc_items(doc):
+        """Yield Docling items across both pre- and post-2.x iterate APIs."""
+        for entry in doc.iterate_items():
+            if isinstance(entry, tuple) and entry:
+                yield entry[0]
+            else:
+                yield entry
+
+    @staticmethod
+    def _office_layout_converter() -> str:
+        configured = str(os.getenv("DOCLING_LIBREOFFICE_CMD") or "").strip()
+        if configured and Path(configured).exists():
+            return configured
+        return shutil.which("soffice") or shutil.which("libreoffice") or ""
 
     @staticmethod
     def _label_name(item) -> str:

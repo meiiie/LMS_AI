@@ -69,6 +69,8 @@ jobs:
           context: .
           file: maritime-ai-service/Dockerfile.prod
           push: false
+          build-args: |
+            INSTALL_PRECISION_DOCS=true
           tags: |
             ghcr.io/${{ steps.owner.outputs.value }}/wiii-app:pr-${{ github.sha }}
           cache-from: type=gha
@@ -142,6 +144,8 @@ jobs:
           context: .
           file: maritime-ai-service/Dockerfile.prod
           push: true
+          build-args: |
+            INSTALL_PRECISION_DOCS=true
           tags: |
             ghcr.io/${{ steps.owner.outputs.value }}/wiii-app:main
             ghcr.io/${{ steps.owner.outputs.value }}/wiii-app:sha-${{ github.sha }}

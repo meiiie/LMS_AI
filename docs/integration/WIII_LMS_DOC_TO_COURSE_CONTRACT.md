@@ -113,16 +113,24 @@ The parse response should be treated as a source contract, not just text:
 - `embedded_asset_count`, `figure_count`, `table_count`: signals that the source
   had visual/table material that may require citation or vision review.
 
-`page_layout` is the preferred level for LMS citations. `text_only` is usable for
-drafting, but LMS should avoid presenting exact page/figure claims as verified
-unless the preview carries source references that the teacher can inspect.
+`page_layout` is the preferred level for LMS citations. `structured_text` is
+valid for DOCX/PPTX files when the parser can see headings, tables, and figures
+but the source format does not expose stable page numbers. `text_only` is usable
+for drafting, but LMS should avoid presenting exact page/figure claims as
+verified unless the preview carries source references that the teacher can
+inspect.
 
 Operational note: Docling is intentionally optional because it can add several GB
-of model/runtime footprint. Production deployments can enable it with
-`pip install -e ".[precision-docs]"` and `DOCUMENT_CONTEXT_PARSER_MODE=precision`
-or `USE_DOCLING_FOR_COURSE_GEN=true`. If Docling is unavailable, Wiii must fall
-back to MarkItDown and surface a parser warning rather than silently pretending
-the citation precision is higher than it is.
+of model/runtime footprint. Local development can enable it with
+`pip install -e ".[precision-docs]"`. Production app images enable it by building
+`maritime-ai-service/Dockerfile.prod` with `INSTALL_PRECISION_DOCS=true`, then
+setting `DOCUMENT_CONTEXT_PARSER_MODE=precision` and
+`USE_DOCLING_FOR_COURSE_GEN=true`. The production precision image also installs
+LibreOffice and sets `DOCLING_LIBREOFFICE_CMD=/usr/bin/soffice` so Office files
+can expose richer layout/image signals where Docling supports them. If Docling or
+the Office converter is unavailable, Wiii must fall back or surface a parser
+warning rather than silently pretending the citation precision is higher than it
+is.
 
 ## LMS-Side Requirements
 

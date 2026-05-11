@@ -133,10 +133,10 @@ async def test_docling_adapter_extracts_generic_sections_and_assets(monkeypatch,
         def iterate_items(self):
             return iter(
                 [
-                    FakeItem("title", "Bridge manual", 1),
-                    FakeItem("section_header", "Chuong 2", 2),
-                    FakeItem("picture", "Bridge console diagram", 2),
-                    FakeItem("table", "Watchkeeping checklist", 2),
+                    (FakeItem("title", "Bridge manual", 1), 1),
+                    (FakeItem("section_header", "Chuong 2", 2), 2),
+                    (FakeItem("picture", "Bridge console diagram", 2), 2),
+                    (FakeItem("table", "Watchkeeping checklist", 2), 2),
                 ]
             )
 
@@ -173,3 +173,66 @@ async def test_docling_adapter_extracts_generic_sections_and_assets(monkeypatch,
     assert parsed.metadata["figure_count"] == 1
     assert parsed.metadata["table_count"] == 1
     assert parsed.assets[0]["bbox"]["l"] == 1
+
+
+@pytest.mark.asyncio
+async def test_docling_adapter_keeps_structured_text_when_docx_has_no_pages(
+    monkeypatch,
+    tmp_path,
+):
+    import sys
+    import types
+
+    from app.adapters.docling_parser import DoclingParserAdapter
+
+    class FakeItem:
+        def __init__(self, label: str, text: str):
+            self.label = label
+            self.text = text
+            self.prov = []
+
+    class FakeDoc:
+        name = "manual.docx"
+        pages = {}
+
+        def export_to_markdown(self):
+            return "# Manual\n\n## 1. Course setup\n\nSee the screenshot and table."
+
+        def iterate_items(self):
+            return iter(
+                [
+                    (FakeItem("section_header", "1. Course setup"), 2),
+                    (FakeItem("picture", ""), 3),
+                    (FakeItem("table", ""), 3),
+                ]
+            )
+
+    class FakeDocumentConverter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def convert(self, file_path: str):
+            return SimpleNamespace(document=FakeDoc())
+
+    fake_converter_module = types.ModuleType("docling.document_converter")
+    fake_converter_module.DocumentConverter = FakeDocumentConverter
+    fake_converter_module.PdfFormatOption = object
+    fake_base_models = types.ModuleType("docling.datamodel.base_models")
+    fake_base_models.InputFormat = SimpleNamespace(PDF="pdf")
+    monkeypatch.setitem(sys.modules, "docling", types.ModuleType("docling"))
+    monkeypatch.setitem(sys.modules, "docling.datamodel", types.ModuleType("docling.datamodel"))
+    monkeypatch.setitem(sys.modules, "docling.document_converter", fake_converter_module)
+    monkeypatch.setitem(sys.modules, "docling.datamodel.base_models", fake_base_models)
+
+    source = tmp_path / "manual.docx"
+    source.write_bytes(b"fake")
+
+    parser = DoclingParserAdapter()
+    parsed = await parser.parse(str(source))
+
+    assert parsed.metadata["provenance_level"] == "structured_text"
+    assert parsed.metadata["has_page_provenance"] is False
+    assert parsed.metadata["section_count"] == 1
+    assert parsed.section_map["1. Course setup"] == []
+    assert parsed.assets[0]["page"] is None
+    assert "<!-- page " not in parsed.markdown
