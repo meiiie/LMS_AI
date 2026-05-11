@@ -255,6 +255,8 @@ export function buildHostActionPreviewItem(
 ): PreviewItemData | null {
   const previewToken = typeof data.preview_token === "string" ? data.preview_token.trim() : "";
   if (!previewToken) return null;
+  const approvalToken =
+    typeof data.approval_token === "string" ? data.approval_token.trim() : "";
 
   const previewKind = typeof data.preview_kind === "string" ? data.preview_kind : "";
   const summary = typeof data.summary === "string" ? data.summary.trim() : "Preview is ready.";
@@ -301,6 +303,7 @@ export function buildHostActionPreviewItem(
       summary,
       preview_kind: previewKind || undefined,
       preview_token: previewToken,
+      approval_token: approvalToken || undefined,
       apply_action: typeof data.apply_action === "string" ? data.apply_action : undefined,
       target_label: targetLabel,
       lesson_id: typeof data.lesson_id === "string" ? data.lesson_id : undefined,

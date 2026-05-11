@@ -27,6 +27,10 @@ Use the host action preview/apply lane for LMS authoring:
 - Apply action: `authoring.apply_lesson_patch`
 - Preview kind: `lesson_patch`
 - Apply input must include the preview token returned by the preview action.
+- If the LMS preview dialog performs the teacher confirmation itself, the
+  preview response may also return an opaque, short-lived `approval_token`.
+  Wiii may forward that token with `preview_token` to the apply action, but
+  should not log it in audit metadata.
 - The preview payload must carry source references from the uploaded document.
 - The apply action must fail closed when the preview token is missing, expired, or
   does not match the patch being applied.
@@ -38,6 +42,7 @@ Expected preview metadata:
   "preview_kind": "lesson_patch",
   "apply_action": "authoring.apply_lesson_patch",
   "preview_token": "opaque-host-token",
+  "approval_token": "opaque-teacher-approval-token",
   "source_references": [
     {
       "kind": "chapter",
