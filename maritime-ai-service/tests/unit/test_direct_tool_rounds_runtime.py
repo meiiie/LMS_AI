@@ -586,6 +586,21 @@ def test_uploaded_doc_course_plan_builder_creates_full_lms_architecture():
     assert "không publish tự động" in " ".join(plan["implementation_checklist"])
 
 
+def test_uploaded_doc_course_request_matches_real_teacher_curriculum_wording():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _looks_uploaded_doc_course_request,
+    )
+
+    assert _looks_uploaded_doc_course_request(
+        "Tu file Word vua upload, lap chuong trinh dao tao hoan chinh, "
+        "de cuong khoa, lo trinh hoc va chia thanh chuong/bai co citation."
+    )
+    assert _looks_uploaded_doc_course_request(
+        "Hay bien tai lieu nay thanh curriculum/syllabus gom nhieu chuong "
+        "va nhieu bai hoc cho giao vien."
+    )
+
+
 def test_uploaded_doc_preview_skips_logo_data_uri_and_focuses_teacher_manual():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         _build_uploaded_doc_preview_params,
