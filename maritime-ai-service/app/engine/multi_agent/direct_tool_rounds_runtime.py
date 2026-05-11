@@ -811,6 +811,8 @@ def _build_lms_manual_course_plan(
             }
         )
 
+    lesson_count = sum(len(chapter.get("lessons", [])) for chapter in chapters)
+
     return {
         "title": "Khai thác HoLiLiHu LMS từ tài liệu hướng dẫn",
         "description": (
@@ -819,7 +821,7 @@ def _build_lms_manual_course_plan(
             "kiểm tra chất lượng và citation để giáo viên xác minh trước khi áp dụng."
         ),
         "audience": "Giảng viên, trợ giảng, quản lý đào tạo và học viên cần sử dụng HoLiLiHu LMS.",
-        "duration": "5 chương, 16 bài, triển khai trong 3-5 buổi thực hành.",
+        "duration": f"{len(chapters)} chương, {lesson_count} bài, triển khai trong 3-5 buổi thực hành.",
         "chapters": chapters,
         "assessment_plan": [
             "Mỗi chương có câu hỏi kiểm tra nhanh gắn với thao tác thật.",

@@ -583,6 +583,7 @@ def test_uploaded_doc_course_plan_builder_creates_full_lms_architecture():
     assert any("Tác nghiệp giảng viên" in title for title in titles)
     assert any("Quản lý" in title for title in titles)
     assert plan["chapters"][2]["lessons"][0]["source_references"][0]["page_start"] == 23
+    assert f"{sum(len(chapter['lessons']) for chapter in plan['chapters'])} bài" in plan["duration"]
     assert "không publish tự động" in " ".join(plan["implementation_checklist"])
 
 
