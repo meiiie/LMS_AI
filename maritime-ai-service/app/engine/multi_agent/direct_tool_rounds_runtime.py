@@ -360,6 +360,37 @@ def _shape_doc_preview_learning_goal(value: str, *, is_lms_manual: bool) -> str:
     return cleaned
 
 
+def _supplement_doc_preview_learning_goals(
+    goals: list[str],
+    *,
+    is_lms_manual: bool,
+) -> list[str]:
+    supplements = (
+        [
+            "Giáo viên kiểm tra diff, citation và nguồn tài liệu trước khi áp dụng thay đổi vào LMS.",
+            "Giáo viên tạo hoặc cập nhật bài học ở trạng thái nháp, không xuất bản khi chưa rà soát nội dung.",
+            "Giáo viên xác nhận nội dung, tài liệu, video hoặc câu hỏi liên quan trước khi bấm Apply.",
+        ]
+        if is_lms_manual
+        else [
+            "Người học xác định ý chính, bằng chứng nguồn và tình huống áp dụng từ tài liệu.",
+            "Người học chuyển nội dung nguồn thành checklist thực hành có thể kiểm chứng.",
+            "Người học trả lời câu hỏi nhanh dựa trên citation thay vì ghi nhớ rời rạc.",
+        ]
+    )
+    normalized_seen = {_normalize_doc_preview_text(goal) for goal in goals}
+    completed = list(goals)
+    for supplement in supplements:
+        if len(completed) >= 3:
+            break
+        normalized = _normalize_doc_preview_text(supplement)
+        if normalized in normalized_seen:
+            continue
+        completed.append(supplement)
+        normalized_seen.add(normalized)
+    return completed
+
+
 def _extract_relevant_lines(markdown: str, markers: tuple[str, ...], *, limit: int) -> list[str]:
     normalized_markers = tuple(_normalize_doc_preview_text(marker) for marker in markers)
     selected: list[str] = []
@@ -1912,6 +1943,10 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
                 else "Người học xác định nội dung trọng tâm, bằng chứng nguồn và bước thực hành an toàn."
             )
         ]
+    clean_goals = _supplement_doc_preview_learning_goals(
+        clean_goals,
+        is_lms_manual=is_lms_manual,
+    )
 
     clean_checklist: list[str] = []
     for line in checklist[:5]:
