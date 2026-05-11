@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
+import unicodedata
 from pathlib import Path
 from typing import Any, Literal
 
@@ -28,6 +30,9 @@ MAX_DOCUMENT_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_VIDEO_UPLOAD_BYTES = 80 * 1024 * 1024
 MAX_MARKDOWN_CHARS = 30_000
 MAX_SECTION_TITLES = 24
+MAX_SECTION_SNIPPETS = 80
+MAX_SECTION_SNIPPET_CHARS = 1_500
+MAX_SECTION_SNIPPET_TOTAL_CHARS = 80_000
 MAX_EXTRACTED_IMAGES = 5
 
 DOCUMENT_EXTENSIONS = {
@@ -61,6 +66,16 @@ class DocumentContextExtractedImage(BaseModel):
     detail: Literal["auto", "low", "high"] = "low"
 
 
+class DocumentContextSectionSnippet(BaseModel):
+    title: str
+    markdown: str
+    char_start: int
+    char_end: int
+    source_pages: list[int] = Field(default_factory=list)
+    page_start: int | None = None
+    page_end: int | None = None
+
+
 class DocumentContextParseResponse(BaseModel):
     file_name: str
     mime_type: str | None = None
@@ -70,6 +85,7 @@ class DocumentContextParseResponse(BaseModel):
     title: str | None = None
     page_count: int | None = None
     section_titles: list[str] = Field(default_factory=list)
+    section_snippets: list[DocumentContextSectionSnippet] = Field(default_factory=list)
     markdown: str
     char_count: int
     truncated: bool = False
@@ -147,6 +163,133 @@ def _build_video_parser():
     return parser
 
 
+def _clean_section_title(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip(" #\t\r\n"))[:180]
+
+
+def _score_section_title(value: str) -> int:
+    normalized = (
+        re.sub(r"[\u0300-\u036f]", "", unicodedata.normalize("NFD", str(value or "").lower()))
+        .replace("đ", "d")
+        .replace("Đ", "D")
+    )
+    if re.search(r"\b(giang vien|giao vien|teacher|instructor)\b", normalized):
+        return 100
+    if re.search(
+        r"(tao khoa|soan|chuong va bai|cau hoi|bai tap|xuat ban|quiz|video tuong tac)",
+        normalized,
+    ):
+        return 85
+    if re.search(r"\b(hoc vien|student|learner)\b", normalized):
+        return 65
+    if re.search(r"\b(quan ly|admin|manager)\b", normalized):
+        return 55
+    if re.search(r"(checklist|quy trinh|van hanh|troubleshoot|xu ly loi)", normalized):
+        return 45
+    return 0
+
+
+def _section_pages(section_map: dict[str, list[int]], title: str) -> list[int]:
+    pages = section_map.get(title) or section_map.get(_clean_section_title(title)) or []
+    clean_pages: list[int] = []
+    for page in pages:
+        try:
+            parsed_page = int(page)
+        except (TypeError, ValueError):
+            continue
+        if parsed_page > 0 and parsed_page not in clean_pages:
+            clean_pages.append(parsed_page)
+    return clean_pages
+
+
+def _select_section_indices(candidates: list[dict[str, Any]]) -> list[int]:
+    if len(candidates) <= MAX_SECTION_SNIPPETS:
+        return list(range(len(candidates)))
+
+    selected: set[int] = set(range(min(8, len(candidates))))
+    selected.update(range(max(0, len(candidates) - 8), len(candidates)))
+
+    priority_indices = sorted(
+        range(len(candidates)),
+        key=lambda idx: (
+            -int(candidates[idx].get("priority") or 0),
+            int(candidates[idx].get("start") or 0),
+        ),
+    )
+    for index in priority_indices:
+        if len(selected) >= MAX_SECTION_SNIPPETS:
+            break
+        if int(candidates[index].get("priority") or 0) <= 0:
+            break
+        selected.add(index)
+
+    if len(selected) < MAX_SECTION_SNIPPETS:
+        stride = max(1, len(candidates) // MAX_SECTION_SNIPPETS)
+        for index in range(0, len(candidates), stride):
+            selected.add(index)
+            if len(selected) >= MAX_SECTION_SNIPPETS:
+                break
+
+    return sorted(selected)
+
+
+def _build_section_snippets(
+    *,
+    raw_markdown: str,
+    section_map: dict[str, list[int]],
+) -> list[DocumentContextSectionSnippet]:
+    headings: list[dict[str, Any]] = []
+    for match in re.finditer(r"(?m)^\s{0,3}#{1,6}\s+(.+?)\s*$", raw_markdown):
+        title = _clean_section_title(match.group(1))
+        if title:
+            headings.append(
+                {
+                    "title": title,
+                    "start": match.start(),
+                    "priority": _score_section_title(title),
+                }
+            )
+    if not headings:
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    for index, heading in enumerate(headings):
+        start = int(heading["start"])
+        end = int(headings[index + 1]["start"]) if index + 1 < len(headings) else len(raw_markdown)
+        section_text = raw_markdown[start:end].strip()
+        if not section_text:
+            continue
+        candidates.append({**heading, "end": end, "markdown": section_text})
+
+    snippets: list[DocumentContextSectionSnippet] = []
+    total_chars = 0
+    for index in _select_section_indices(candidates):
+        candidate = candidates[index]
+        section_text = str(candidate["markdown"]).strip()
+        snippet_text = section_text[:MAX_SECTION_SNIPPET_CHARS].rstrip()
+        if len(snippet_text) < len(section_text):
+            snippet_text = f"{snippet_text}\n\n[Section excerpt truncated]"
+        if not snippet_text:
+            continue
+        if total_chars + len(snippet_text) > MAX_SECTION_SNIPPET_TOTAL_CHARS:
+            break
+        title = str(candidate["title"])
+        pages = _section_pages(section_map, title)
+        snippets.append(
+            DocumentContextSectionSnippet(
+                title=title,
+                markdown=snippet_text,
+                char_start=int(candidate["start"]),
+                char_end=int(candidate["end"]),
+                source_pages=pages,
+                page_start=min(pages) if pages else None,
+                page_end=max(pages) if pages else None,
+            )
+        )
+        total_chars += len(snippet_text)
+    return snippets
+
+
 def _response_from_parsed(
     *,
     parsed: ParsedDocument,
@@ -168,6 +311,10 @@ def _response_from_parsed(
         for title in (parsed.section_map or {}).keys()
         if str(title).strip()
     ][:MAX_SECTION_TITLES]
+    section_snippets = _build_section_snippets(
+        raw_markdown=raw_markdown,
+        section_map=parsed.section_map or {},
+    )
     extracted_images: list[DocumentContextExtractedImage] = []
     for index, image in enumerate(parsed.images[:MAX_EXTRACTED_IMAGES], start=1):
         if not isinstance(image, dict):
@@ -195,6 +342,7 @@ def _response_from_parsed(
         title=str(metadata.get("title") or file_name),
         page_count=parsed.page_count,
         section_titles=section_titles,
+        section_snippets=section_snippets,
         markdown=markdown,
         char_count=len(raw_markdown),
         truncated=truncated,

@@ -4,7 +4,10 @@ import type {
   ChatDocumentContextAttachment,
   ImageInput,
 } from "@/api/types";
-import type { DocumentContextExtractedImage } from "@/api/document-context";
+import type {
+  DocumentContextExtractedImage,
+  DocumentContextSectionSnippet,
+} from "@/api/document-context";
 
 export const MAX_DOCUMENT_CONTEXT_CHARS = 8_000;
 const SECTION_CONTEXT_TITLE_LIMIT = 28;
@@ -18,9 +21,18 @@ interface MarkdownSection {
   priority: number;
 }
 
+interface ContextSection {
+  title: string;
+  markdown: string;
+  start: number;
+  priority: number;
+  sourcePages: number[];
+}
+
 export interface ParsedDocumentForContext extends ChatDocumentContextAttachment {
   id: string;
   extracted_images?: DocumentContextExtractedImage[];
+  section_snippets?: DocumentContextSectionSnippet[];
 }
 
 export function toDisplayDocumentAttachment(
@@ -105,18 +117,18 @@ function buildBoundedDocumentMarkdown(
   const markdown = normalizeDocumentMarkdown(doc.markdown);
   if (markdown.length <= maxChars) return markdown.trim();
 
-  const sections = extractMarkdownSections(markdown);
+  const sections = buildContextSections(doc, markdown);
   if (sections.length === 0 || maxChars < 1_200) {
     return markdown.slice(0, maxChars).trim();
   }
 
-  const title = `# Tai lieu upload: ${doc.file_name}`;
+  const title = `# Tài liệu upload: ${doc.file_name}`;
   const outline = renderSectionOutline(sections);
   const headBudget = Math.min(1_500, Math.max(700, Math.floor(maxChars * 0.22)));
   const chunks: string[] = [
     title,
     outline,
-    "## Trich doan dau tai lieu",
+    "## Trích đoạn đầu tài liệu",
     markdown.slice(0, headBudget).trim(),
   ];
 
@@ -126,16 +138,13 @@ function buildBoundedDocumentMarkdown(
     .slice(0, PRIORITY_SECTION_LIMIT);
 
   if (prioritySections.length > 0) {
-    chunks.push("## Trich doan uu tien theo vai tro/chu de");
+    chunks.push("## Trích đoạn ưu tiên theo vai trò/chủ đề");
     for (const section of prioritySections) {
       chunks.push(
         [
           `### ${section.title}`,
-          markdown
-            .slice(section.start, section.end)
-            .trim()
-            .slice(0, PRIORITY_SECTION_CHARS)
-            .trim(),
+          formatSectionSourceLine(section),
+          section.markdown.slice(0, PRIORITY_SECTION_CHARS).trim(),
         ]
           .filter(Boolean)
           .join("\n"),
@@ -144,7 +153,7 @@ function buildBoundedDocumentMarkdown(
   }
 
   const tailBudget = Math.min(900, Math.max(350, Math.floor(maxChars * 0.12)));
-  chunks.push("## Trich doan cuoi tai lieu", markdown.slice(-tailBudget).trim());
+  chunks.push("## Trích đoạn cuối tài liệu", markdown.slice(-tailBudget).trim());
 
   return compactToBudget(chunks.join("\n\n"), maxChars);
 }
@@ -175,6 +184,69 @@ function extractMarkdownSections(markdown: string): MarkdownSection[] {
   }));
 }
 
+function buildContextSections(
+  doc: ParsedDocumentForContext,
+  fallbackMarkdown: string,
+): ContextSection[] {
+  const snippetSections = (doc.section_snippets || [])
+    .map((snippet, index) => {
+      const markdown = normalizeDocumentMarkdown(snippet.markdown || "");
+      const title = snippet.title?.trim() || firstMarkdownHeading(markdown) || `Section ${index + 1}`;
+      if (!markdown.trim()) return null;
+      const sourcePages = normalizeSourcePages(snippet);
+      return {
+        title,
+        markdown,
+        start: Number.isFinite(snippet.char_start) ? snippet.char_start : index,
+        priority: scoreSectionTitle(title),
+        sourcePages,
+      };
+    })
+    .filter((section): section is ContextSection => section !== null);
+
+  if (snippetSections.length > 0) return snippetSections;
+
+  return extractMarkdownSections(fallbackMarkdown).map((section) => ({
+    title: section.title,
+    markdown: fallbackMarkdown.slice(section.start, section.end).trim(),
+    start: section.start,
+    priority: section.priority,
+    sourcePages: [],
+  }));
+}
+
+function firstMarkdownHeading(markdown: string): string {
+  const match = /^#{1,6}\s+(.+?)\s*$/m.exec(markdown);
+  return match?.[1]?.trim() || "";
+}
+
+function normalizeSourcePages(snippet: DocumentContextSectionSnippet): number[] {
+  const pages = Array.isArray(snippet.source_pages) ? snippet.source_pages : [];
+  const explicit = pages
+    .map((page) => Number(page))
+    .filter((page) => Number.isFinite(page) && page > 0);
+  if (explicit.length > 0) return [...new Set(explicit)];
+  const start = Number(snippet.page_start);
+  const end = Number(snippet.page_end);
+  if (!Number.isFinite(start) || start <= 0) return [];
+  if (!Number.isFinite(end) || end <= start) return [start];
+  const range: number[] = [];
+  for (let page = start; page <= end && range.length < 12; page += 1) {
+    range.push(page);
+  }
+  return range;
+}
+
+function formatSectionSourceLine(section: ContextSection): string {
+  const pages = section.sourcePages || [];
+  if (pages.length === 0) return "";
+  const pageText =
+    pages.length === 1
+      ? `trang ${pages[0]}`
+      : `trang ${Math.min(...pages)}-${Math.max(...pages)}`;
+  return `Nguồn section: ${section.title} (${pageText})`;
+}
+
 function scoreSectionTitle(title: string): number {
   const normalized = stripVietnameseDiacritics(title).toLowerCase();
   if (/\b(giang vien|giao vien|teacher|instructor)\b/.test(normalized)) return 100;
@@ -195,12 +267,12 @@ function stripVietnameseDiacritics(value: string): string {
     .replace(/Đ/g, "D");
 }
 
-function renderSectionOutline(sections: MarkdownSection[]): string {
+function renderSectionOutline(sections: Array<{ title: string }>): string {
   const titles = sections
     .slice(0, SECTION_CONTEXT_TITLE_LIMIT)
     .map((section) => `- ${section.title}`)
     .join("\n");
-  return `## Muc luc phat hien\n${titles}`;
+  return `## Mục lục phát hiện\n${titles}`;
 }
 
 function compactToBudget(text: string, maxChars: number): string {
