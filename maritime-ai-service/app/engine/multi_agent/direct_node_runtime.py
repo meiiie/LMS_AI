@@ -1072,30 +1072,34 @@ def _image_payload_attr(image: Any, key: str, default: Any = None) -> Any:
 
 
 def _has_uploaded_document_context(ctx: dict[str, Any]) -> bool:
-    document_context = ctx.get("document_context")
+    ctx = _as_plain_direct_mapping(ctx)
+    document_context = _as_plain_direct_mapping(ctx.get("document_context"))
     if not isinstance(document_context, dict):
         return False
     attachments = document_context.get("attachments")
     if not isinstance(attachments, list):
         return False
-    return any(
-        isinstance(item, dict) and str(item.get("markdown") or "").strip()
-        for item in attachments
-    )
+    for item in attachments:
+        attachment = _as_plain_direct_mapping(item)
+        if attachment and str(attachment.get("markdown") or "").strip():
+            return True
+    return False
 
 
 def _uploaded_document_attachments(ctx: dict[str, Any]) -> list[dict[str, Any]]:
-    document_context = ctx.get("document_context")
+    ctx = _as_plain_direct_mapping(ctx)
+    document_context = _as_plain_direct_mapping(ctx.get("document_context"))
     if not isinstance(document_context, dict):
         return []
     attachments = document_context.get("attachments")
     if not isinstance(attachments, list):
         return []
-    return [
-        item
-        for item in attachments
-        if isinstance(item, dict) and str(item.get("markdown") or "").strip()
-    ]
+    parsed: list[dict[str, Any]] = []
+    for item in attachments:
+        attachment = _as_plain_direct_mapping(item)
+        if attachment and str(attachment.get("markdown") or "").strip():
+            parsed.append(attachment)
+    return parsed
 
 
 def _first_markdown_line(markdown: str, label: str) -> str:
@@ -2103,6 +2107,108 @@ async def direct_response_node_impl(
             node="direct",
             provenance="document_context_plan",
         )
+    if (
+        not response
+        and has_uploaded_document_context
+        and _looks_uploaded_document_preview_request(query)
+    ):
+        routing_meta = state.get("routing_metadata")
+        if not isinstance(routing_meta, dict):
+            routing_meta = {}
+            state["routing_metadata"] = routing_meta
+        preview_tools, preview_force_tools, doc_preview_debug = (
+            _rebind_document_preview_host_action_tool(
+                tools=[],
+                force_tools=False,
+                query=query,
+                state=state,
+                ctx=ctx_for_preflight,
+            )
+        )
+        routing_meta["doc_preview_preflight"] = doc_preview_debug
+        if _has_document_preview_host_action_tool(preview_tools):
+            try:
+                preview_runtime_context = build_tool_runtime_context(
+                    event_bus_id=bus_id,
+                    request_id=ctx_for_preflight.get("request_id"),
+                    session_id=state.get("session_id"),
+                    organization_id=state.get("organization_id"),
+                    user_id=state.get("user_id"),
+                    user_role=ctx_for_preflight.get("user_role", "student"),
+                    node="direct",
+                    source="agentic_loop",
+                    metadata=build_visual_tool_runtime_metadata(state, query),
+                )
+                (
+                    preview_llm_response,
+                    preview_messages,
+                    preview_tool_call_events,
+                ) = await execute_direct_tool_rounds(
+                    object(),
+                    object(),
+                    [],
+                    preview_tools,
+                    push_event,
+                    runtime_context_base=preview_runtime_context,
+                    max_rounds=1,
+                    query=query,
+                    state=state,
+                    forced_tool_choice=_DOC_PREVIEW_HOST_ACTION_TOOL,
+                    llm_base=None,
+                    native_tool_messages=False,
+                )
+                if preview_tool_call_events:
+                    state["tool_call_events"] = preview_tool_call_events
+
+                response, _preview_thinking, tools_used = extract_direct_response(
+                    preview_llm_response,
+                    preview_messages,
+                )
+                response = sanitize_structured_visual_answer_text(
+                    response,
+                    tool_call_events=preview_tool_call_events,
+                )
+                response = sanitize_wiii_house_text(response, query=query)
+                response = _strip_direct_inline_private_asides(response)
+                response = _strip_dsml_residue(response).strip()
+                if not response:
+                    response = (
+                        "Mình đã gửi bản preview bài học sang LMS. "
+                        "Giáo viên cần xem diff/citation rồi bấm Apply để cấp approval_token."
+                    )
+                if not tools_used:
+                    preview_tool_names = sorted({
+                        str(event.get("name") or "")
+                        for event in preview_tool_call_events
+                        if event.get("name")
+                    })
+                    tools_used = [
+                        {"name": name}
+                        for name in preview_tool_names
+                        if name
+                    ]
+                if tools_used:
+                    state["tools_used"] = tools_used
+                response_type = "document_preview_host_action"
+                routing_meta["doc_preview_preflight"] = {
+                    **doc_preview_debug,
+                    "status": "executed",
+                    "tool_count": len(preview_tools),
+                    "force_tools": preview_force_tools,
+                }
+                logger.info(
+                    "[DIRECT] Executed LMS document preview host action before planner LLM"
+                )
+            except Exception as preview_error:
+                routing_meta["doc_preview_preflight"] = {
+                    **doc_preview_debug,
+                    "status": "execution_failed",
+                    "error": type(preview_error).__name__,
+                }
+                logger.warning(
+                    "[DIRECT] Early document preview host action failed: %s",
+                    preview_error,
+                )
     if ctx_for_preflight.get("image_input_error") and has_uploaded_document_context:
         ctx_for_preflight["images"] = []
     if (
