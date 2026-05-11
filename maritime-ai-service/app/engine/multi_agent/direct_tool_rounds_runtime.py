@@ -320,6 +320,16 @@ def _strip_doc_preview_goal_label(line: str) -> str:
     return cleaned
 
 
+def _is_doc_preview_ordered_action_line(value: str) -> bool:
+    normalized = _normalize_doc_preview_text(value).strip()
+    return bool(re.match(r"^\d+\s*[-.)]\s+\S+", normalized))
+
+
+def _strip_doc_preview_ordered_action_prefix(value: str) -> str:
+    cleaned = str(value or "").strip()
+    return re.sub(r"^\s*\d+\s*[-.)]\s*", "", cleaned).strip()
+
+
 def _extract_relevant_lines(markdown: str, markers: tuple[str, ...], *, limit: int) -> list[str]:
     normalized_markers = tuple(_normalize_doc_preview_text(marker) for marker in markers)
     selected: list[str] = []
@@ -1837,16 +1847,35 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
             "- Khi có nguy cơ va chạm, quy trình báo cáo và ghi log nên diễn ra như thế nào?",
         ]
     )
-    clean_goals = [
-        cleaned
-        for line in goals[:4]
-        if (cleaned := _strip_doc_preview_goal_label(line))
-    ]
-    clean_checklist = [
-        line
-        for line in checklist[:5]
-        if line and not _is_doc_preview_low_value_line(line)
-    ]
+    clean_goals: list[str] = []
+    for line in goals[:4]:
+        cleaned = _strip_doc_preview_goal_label(line)
+        if not cleaned or _is_doc_preview_ordered_action_line(cleaned):
+            continue
+        clean_goals.append(cleaned)
+
+    if not clean_goals:
+        fallback_goal = _strip_doc_preview_goal_label(
+            _first_nonempty_line(focused_markdown) or _first_nonempty_line(combined_markdown)
+        )
+        if fallback_goal and not _is_doc_preview_ordered_action_line(fallback_goal):
+            clean_goals.append(fallback_goal)
+    if not clean_goals:
+        clean_goals = [
+            (
+                "Giáo viên xác định đúng thao tác cần làm trong LMS và kiểm tra nguồn trước khi lưu."
+                if is_lms_manual
+                else "Người học xác định nội dung trọng tâm, bằng chứng nguồn và bước thực hành an toàn."
+            )
+        ]
+
+    clean_checklist: list[str] = []
+    for line in checklist[:5]:
+        if not line or _is_doc_preview_low_value_line(line):
+            continue
+        cleaned = _strip_doc_preview_ordered_action_prefix(line)
+        if cleaned and not _is_doc_preview_low_value_line(cleaned):
+            clean_checklist.append(cleaned)
     content_lines = [
         f"# Bản nháp bài học từ tài liệu: {title_source}",
         "",
