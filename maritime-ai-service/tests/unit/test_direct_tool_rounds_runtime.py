@@ -1084,6 +1084,39 @@ def test_uploaded_doc_preview_excludes_admonitions_from_learning_goals():
     assert "Giáo viên xác định đúng thao tác cần làm trong LMS" in objectives_section
 
 
+def test_uploaded_doc_preview_shapes_descriptive_excerpt_into_learning_goal():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_preview_params,
+    )
+
+    params = _build_uploaded_doc_preview_params(
+        "Tao preview_lesson_patch cho giao vien tu tai lieu vua upload.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "manual.docx",
+                            "markdown": (
+                                "Huong dan su dung HoLiLiHu LMS\n"
+                                "Phan nay tap trung vao tac vu tao va van hanh khoa hoc: "
+                                "lap khoa, soan noi dung, tao cau hoi va cau hinh video.\n"
+                            ),
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    objectives_section = params["content"].split("## Checklist", 1)[0]
+    assert "Phan nay tap trung vao" not in objectives_section
+    assert (
+        "Giáo viên thực hiện được tac vu tao va van hanh khoa hoc"
+        in objectives_section
+    )
+
+
 @pytest.mark.asyncio
 async def test_execute_direct_tool_rounds_forwards_runtime_tier_to_failover_helper():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
