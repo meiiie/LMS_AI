@@ -477,6 +477,57 @@ def test_uploaded_doc_preview_skips_logo_data_uri_and_focuses_teacher_manual():
     assert "WIII_DOC_GOAL_REAL_MANUAL" in content
 
 
+def test_uploaded_doc_preview_prefers_real_teacher_heading_over_smart_excerpt_outline():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_preview_params,
+    )
+
+    markdown = (
+        "# Tai lieu upload: manual.docx\n\n"
+        "## Muc luc phat hien\n"
+        "- 3. Huong Dan Cho Hoc Vien\n"
+        "- 4. Huong Dan Cho Giang Vien\n"
+        "- 4.2. Tao khoa hoc moi\n\n"
+        "## Trich doan dau tai lieu\n"
+        "Vai tro: Hoc vien, Giang vien, Quan ly.\n\n"
+        "## Trich doan uu tien theo vai tro/chu de\n"
+        "### 4. Huong Dan Cho Giang Vien\n"
+        "# 4. Huong Dan Cho Giang Vien\n"
+        "Phan nay tap trung vao tac vu tao va van hanh khoa hoc.\n\n"
+        "## 4.2. Tao khoa hoc moi\n"
+        "**Giang vien**\n\n"
+        "| **Muc tieu** | Nhap thong tin khoa theo cach du dung cho duyet va cho hoc vien hieu. |\n"
+        "| --- | --- |\n"
+        "| **Buoc** | **Thao tac** | **Ket qua dung** |\n"
+        "| **1** | Bam Tao khoa hoc. | Form co cac nhom thong tin tach ro. |\n"
+        "| **2** | Nhap tieu de ro rang. | Truong bat buoc bao loi neu thieu. |\n"
+        "Checklist trien khai: tieu de, noi dung, video tuong tac, cau hoi va trang thai xuat ban.\n"
+    )
+
+    params = _build_uploaded_doc_preview_params(
+        "Tao preview_lesson_patch cho giao vien voi source_references tu tai lieu LMS nay.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "manual.docx",
+                            "markdown": markdown,
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    content = params["content"]
+    assert "Tai lieu upload" not in content
+    assert "Muc luc phat hien" not in content
+    assert "- 4. Huong Dan Cho Giang Vien" not in content
+    assert "Nhap thong tin khoa" in content
+    assert "Checklist trien khai" in content
+
+
 @pytest.mark.asyncio
 async def test_execute_direct_tool_rounds_forwards_runtime_tier_to_failover_helper():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
