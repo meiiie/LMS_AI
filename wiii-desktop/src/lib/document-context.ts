@@ -9,10 +9,10 @@ import type {
   DocumentContextSectionSnippet,
 } from "@/api/document-context";
 
-export const MAX_DOCUMENT_CONTEXT_CHARS = 8_000;
-const SECTION_CONTEXT_TITLE_LIMIT = 28;
+export const MAX_DOCUMENT_CONTEXT_CHARS = 24_000;
+const SECTION_CONTEXT_TITLE_LIMIT = 80;
 const PRIORITY_SECTION_LIMIT = 6;
-const PRIORITY_SECTION_CHARS = 1_050;
+const PRIORITY_SECTION_CHARS = 1_400;
 const TEACHER_AUTHORING_TOKENS = [
   "tao khoa",
   "hoan thien thong tin khoa",
@@ -297,12 +297,17 @@ function stripVietnameseDiacritics(value: string): string {
     .replace(/Đ/g, "D");
 }
 
-function renderSectionOutline(sections: Array<{ title: string }>): string {
-  const titles = sections
+function renderSectionOutline(sections: ContextSection[]): string {
+  const lines = sections
     .slice(0, SECTION_CONTEXT_TITLE_LIMIT)
-    .map((section) => `- ${section.title}`)
-    .join("\n");
-  return `## Mục lục phát hiện\n${titles}`;
+    .flatMap((section) => {
+      const sourceLine = formatSectionSourceLine(section);
+      return sourceLine ? [`- ${section.title}`, sourceLine] : [`- ${section.title}`];
+    });
+  if (sections.length > SECTION_CONTEXT_TITLE_LIMIT) {
+    lines.push(`- ... còn ${sections.length - SECTION_CONTEXT_TITLE_LIMIT} mục khác trong tài liệu`);
+  }
+  return `## Mục lục phát hiện\n${lines.join("\n")}`;
 }
 
 function compactToBudget(text: string, maxChars: number): string {
