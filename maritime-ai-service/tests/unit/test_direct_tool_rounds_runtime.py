@@ -1051,6 +1051,39 @@ def test_uploaded_doc_preview_keeps_ordered_actions_out_of_learning_goals():
     assert "Them anh dai dien va nhap muc tieu bai hoc" in checklist_section
 
 
+def test_uploaded_doc_preview_excludes_admonitions_from_learning_goals():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_preview_params,
+    )
+
+    params = _build_uploaded_doc_preview_params(
+        "Tao preview_lesson_patch cho giao vien tu tai lieu vua upload.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "manual.docx",
+                            "markdown": (
+                                "Huong dan su dung HoLiLiHu LMS\n"
+                                "Khong nen dan van ban qua dai mot doan. "
+                                "Chia thanh muc tieu, doi tuong, yeu cau dau vao.\n"
+                                "Luu y: giao vien kiem tra citation truoc khi luu.\n"
+                            ),
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    content = params["content"]
+    objectives_section = content.split("## Checklist", 1)[0]
+    assert "Khong nen dan van ban qua dai" not in objectives_section
+    assert "Luu y: giao vien kiem tra citation" not in objectives_section
+    assert "Giáo viên xác định đúng thao tác cần làm trong LMS" in objectives_section
+
+
 @pytest.mark.asyncio
 async def test_execute_direct_tool_rounds_forwards_runtime_tier_to_failover_helper():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (

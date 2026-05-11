@@ -330,6 +330,19 @@ def _strip_doc_preview_ordered_action_prefix(value: str) -> str:
     return re.sub(r"^\s*\d+\s*[-.)]\s*", "", cleaned).strip()
 
 
+def _is_doc_preview_admonition_line(value: str) -> bool:
+    normalized = _normalize_doc_preview_text(value).strip(" -:\t\r\n")
+    return normalized.startswith(
+        (
+            "can luu y",
+            "khong duoc",
+            "khong nen",
+            "luu y",
+            "tranh ",
+        )
+    )
+
+
 def _extract_relevant_lines(markdown: str, markers: tuple[str, ...], *, limit: int) -> list[str]:
     normalized_markers = tuple(_normalize_doc_preview_text(marker) for marker in markers)
     selected: list[str] = []
@@ -1850,7 +1863,11 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
     clean_goals: list[str] = []
     for line in goals[:4]:
         cleaned = _strip_doc_preview_goal_label(line)
-        if not cleaned or _is_doc_preview_ordered_action_line(cleaned):
+        if (
+            not cleaned
+            or _is_doc_preview_ordered_action_line(cleaned)
+            or _is_doc_preview_admonition_line(cleaned)
+        ):
             continue
         clean_goals.append(cleaned)
 
@@ -1858,7 +1875,13 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
         fallback_goal = _strip_doc_preview_goal_label(
             _first_nonempty_line(focused_markdown) or _first_nonempty_line(combined_markdown)
         )
-        if fallback_goal and not _is_doc_preview_ordered_action_line(fallback_goal):
+        if (
+            fallback_goal
+            and not _is_doc_preview_ordered_action_line(fallback_goal)
+            and not _is_doc_preview_admonition_line(fallback_goal)
+            and _normalize_doc_preview_text(fallback_goal)
+            != _normalize_doc_preview_text(title_source)
+        ):
             clean_goals.append(fallback_goal)
     if not clean_goals:
         clean_goals = [
