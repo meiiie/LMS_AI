@@ -318,6 +318,19 @@ def _extract_doc_preview_title_from_query(query: str) -> str:
     return ""
 
 
+def _is_low_value_doc_preview_title(value: str) -> bool:
+    normalized = _normalize_doc_preview_text(value)
+    if not normalized:
+        return True
+    return normalized in {
+        "parser provenance",
+        "document context",
+        "uploaded document context",
+        "uploaded source",
+        "tai lieu da tai len",
+    } or normalized.startswith("parser ")
+
+
 def _focus_doc_preview_markdown(query: str, markdown: str) -> str:
     normalized_query = _normalize_doc_preview_text(query)
     role_markers: tuple[str, ...] = ()
@@ -1709,10 +1722,16 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
     )
     first_attachment = attachments[0] if attachments else {}
     query_title = _extract_doc_preview_title_from_query(query)
+    attachment_title = str(first_attachment.get("title") or "").strip()
+    if _is_low_value_doc_preview_title(attachment_title):
+        attachment_title = ""
+    fallback_title = _first_nonempty_line(combined_markdown)
+    if _is_low_value_doc_preview_title(fallback_title):
+        fallback_title = ""
     title_source = (
-        str(first_attachment.get("title") or "").strip()
-        or query_title
-        or _first_nonempty_line(combined_markdown)
+        query_title
+        or attachment_title
+        or fallback_title
         or str(first_attachment.get("file_name") or "").strip()
         or "Tài liệu đã tải lên"
     )
