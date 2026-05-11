@@ -64,7 +64,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Validate precision Dockerfile profile
-        run: docker buildx build --check --build-arg INSTALL_PRECISION_DOCS=true -f maritime-ai-service/Dockerfile.prod .
+        run: docker buildx build --check --build-arg INSTALL_PRECISION_DOCS=true --build-arg UV_TORCH_BACKEND=cpu -f maritime-ai-service/Dockerfile.prod .
 
       - name: Build app image
         uses: docker/build-push-action@v7
@@ -74,6 +74,8 @@ jobs:
           push: false
           tags: |
             ghcr.io/${{ steps.owner.outputs.value }}/wiii-app:pr-${{ github.sha }}
+          build-args: |
+            UV_TORCH_BACKEND=cpu
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -147,6 +149,7 @@ jobs:
           push: true
           build-args: |
             INSTALL_PRECISION_DOCS=true
+            UV_TORCH_BACKEND=cpu
           tags: |
             ghcr.io/${{ steps.owner.outputs.value }}/wiii-app:main
             ghcr.io/${{ steps.owner.outputs.value }}/wiii-app:sha-${{ github.sha }}

@@ -440,6 +440,10 @@ docker stats --no-stream
 # GUNICORN_WORKERS=2
 # DOCUMENT_CONTEXT_PARSER_MODE=fast
 # USE_DOCLING_FOR_COURSE_GEN=false
+
+# If deploy pulls are slow or disk pressure appears, verify production images
+# are still CPU-only on the current non-GPU VM:
+# docker compose exec app python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
 ---

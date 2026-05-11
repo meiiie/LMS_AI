@@ -66,6 +66,11 @@ Important guardrail:
   Docling parser without slowing every regular unit-test install. The production
   runtime image also includes LibreOffice for Office layout conversion and
   `ffmpeg`/`ffprobe` for bounded video upload context.
+- Production app images intentionally build PyTorch with `UV_TORCH_BACKEND=cpu`
+  on the current `e2-standard-4` CPU-only VM. Do not switch to a CUDA backend
+  unless the target host, budget, and rollback plan explicitly include GPU
+  capacity; otherwise unused CUDA wheels add several GB to the image and slow
+  deploys without improving parsing quality.
 
 Production `.env.production` is secret-bearing and must stay on the VM. For the current NVIDIA-backed product lane, apply these non-secret shape requirements there rather than committing a changed `.env` template:
 
