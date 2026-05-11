@@ -316,6 +316,30 @@ def test_uploaded_document_preview_binds_safe_preview_when_global_host_actions_d
     assert force_tools is True
 
 
+def test_uploaded_document_course_wording_prefers_course_plan_host_action():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {
+        "context": {
+            "document_context": {
+                "attachments": [
+                    {
+                        "file_name": "manual.docx",
+                        "markdown": "# Huong dan LMS\n## Soan cau truc chuong va bai",
+                    }
+                ]
+            }
+        }
+    }
+    query = (
+        "Tu file Word nay, lap chuong trinh dao tao hoan chinh: de cuong khoa, "
+        "lo trinh hoc, chia thanh chuong va nhieu bai hoc co citation."
+    )
+
+    assert module._looks_like_document_preview_request(query, state)
+    assert module._looks_like_document_course_preview_request(query, state)
+
+
 def test_force_skills_reads_from_state_context_dict():
     """v3.0 F3 fix: state['context']['force_skills'] is the canonical
     location (NOT state['force_skills']) per graph_stream_runtime
