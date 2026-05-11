@@ -86,9 +86,15 @@ class BasicPdfParser:
                 return ParsedDocument(
                     markdown=markdown,
                     page_count=len(pages),
-                    metadata={"title": os.path.basename(file_path)},
+                    metadata={
+                        "title": os.path.basename(file_path),
+                        "parser": "pymupdf_basic",
+                        "parser_chain": ["pymupdf_basic"],
+                        "provenance_level": "page_marker",
+                    },
                     section_map={},
                     images=[],
+                    assets=[],
                 )
             except ImportError:
                 with open(file_path, "r", errors="ignore", encoding="utf-8") as handle:
@@ -96,9 +102,15 @@ class BasicPdfParser:
                 return ParsedDocument(
                     markdown=text,
                     page_count=1,
-                    metadata={"title": os.path.basename(file_path)},
+                    metadata={
+                        "title": os.path.basename(file_path),
+                        "parser": "text_fallback",
+                        "parser_chain": ["text_fallback"],
+                        "provenance_level": "text_only",
+                    },
                     section_map={},
                     images=[],
+                    assets=[],
                 )
 
         return await asyncio.to_thread(_extract)
@@ -116,6 +128,11 @@ def get_parser(file_path: str, *, settings_obj, logger):
         ".xlsx",
     }
     if should_use_rich_parser:
+        if getattr(settings_obj, "use_docling_for_course_gen", False):
+            parser = try_build_docling_parser(settings_obj=settings_obj, logger=logger)
+            if parser is not None:
+                return parser
+
         markitdown_parser = try_build_markitdown_parser(
             settings_obj=settings_obj,
             logger=logger,

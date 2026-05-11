@@ -9,6 +9,22 @@ export interface DocumentContextExtractedImage {
   detail?: "auto" | "low" | "high";
 }
 
+export type DocumentContextProvenanceLevel =
+  | "text_only"
+  | "structured_text"
+  | "page_marker"
+  | "page_layout";
+
+export interface DocumentContextEmbeddedAsset {
+  id: string;
+  kind: "image" | "figure" | "picture" | "table";
+  label?: string | null;
+  page?: number | null;
+  text?: string | null;
+  bbox?: Record<string, number> | null;
+  has_data?: boolean;
+}
+
 export interface DocumentContextSectionSnippet {
   title: string;
   markdown: string;
@@ -25,6 +41,9 @@ export interface DocumentContextParseResponse {
   media_kind?: "document" | "video";
   size_bytes: number;
   parser: string;
+  parser_chain?: string[];
+  parser_warning?: string | null;
+  provenance_level?: DocumentContextProvenanceLevel;
   title?: string | null;
   page_count?: number | null;
   section_titles: string[];
@@ -34,13 +53,21 @@ export interface DocumentContextParseResponse {
   truncated: boolean;
   extracted_images?: DocumentContextExtractedImage[];
   extracted_image_count?: number;
+  embedded_assets?: DocumentContextEmbeddedAsset[];
+  embedded_asset_count?: number;
+  figure_count?: number;
+  table_count?: number;
 }
 
 export async function parseDocumentContext(
   file: File,
+  options?: { parserMode?: "auto" | "fast" | "precision" },
 ): Promise<DocumentContextParseResponse> {
   const formData = new FormData();
   formData.append("file", file);
+  if (options?.parserMode) {
+    formData.append("parser_mode", options.parserMode);
+  }
   return getClient().postFormData<DocumentContextParseResponse>(
     "/api/v1/document-context/parse",
     formData,

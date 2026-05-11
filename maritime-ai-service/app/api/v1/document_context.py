@@ -15,7 +15,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import RequireAuth
@@ -34,6 +34,7 @@ MAX_SECTION_SNIPPETS = 80
 MAX_SECTION_SNIPPET_CHARS = 1_500
 MAX_SECTION_SNIPPET_TOTAL_CHARS = 80_000
 MAX_EXTRACTED_IMAGES = 5
+MAX_EMBEDDED_ASSETS = 20
 
 DOCUMENT_EXTENSIONS = {
     ".pdf",
@@ -66,6 +67,16 @@ class DocumentContextExtractedImage(BaseModel):
     detail: Literal["auto", "low", "high"] = "low"
 
 
+class DocumentContextEmbeddedAsset(BaseModel):
+    id: str
+    kind: Literal["image", "figure", "picture", "table"] = "image"
+    label: str | None = None
+    page: int | None = None
+    text: str | None = None
+    bbox: dict[str, float] | None = None
+    has_data: bool = False
+
+
 class DocumentContextSectionSnippet(BaseModel):
     title: str
     markdown: str
@@ -82,6 +93,14 @@ class DocumentContextParseResponse(BaseModel):
     media_kind: Literal["document", "video"] = "document"
     size_bytes: int
     parser: str = "markitdown"
+    parser_chain: list[str] = Field(default_factory=list)
+    parser_warning: str | None = None
+    provenance_level: Literal[
+        "text_only",
+        "structured_text",
+        "page_marker",
+        "page_layout",
+    ] = "text_only"
     title: str | None = None
     page_count: int | None = None
     section_titles: list[str] = Field(default_factory=list)
@@ -91,6 +110,10 @@ class DocumentContextParseResponse(BaseModel):
     truncated: bool = False
     extracted_images: list[DocumentContextExtractedImage] = Field(default_factory=list)
     extracted_image_count: int = 0
+    embedded_assets: list[DocumentContextEmbeddedAsset] = Field(default_factory=list)
+    embedded_asset_count: int = 0
+    figure_count: int = 0
+    table_count: int = 0
 
 
 def _safe_upload_name(file: UploadFile) -> str:
@@ -113,17 +136,15 @@ def _validate_extension(file_name: str) -> str:
     return ext
 
 
-def _build_parser():
+def _build_markitdown_parser():
     try:
         from app.adapters.markitdown_parser import (
             MarkItDownConfig,
             MarkItDownParserAdapter,
         )
     except ImportError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MarkItDown is not installed on this backend.",
-        ) from exc
+        logger.warning("MarkItDown import failed: %s", exc)
+        return None
 
     parser = MarkItDownParserAdapter(
         MarkItDownConfig(
@@ -131,9 +152,48 @@ def _build_parser():
         )
     )
     if not getattr(parser, "is_available", False):
+        return None
+    return parser
+
+
+def _build_docling_parser():
+    try:
+        from app.adapters.docling_parser import DoclingConfig, DoclingParserAdapter
+    except ImportError as exc:
+        logger.warning("Docling import failed: %s", exc)
+        return None
+
+    parser = DoclingParserAdapter(
+        DoclingConfig(
+            vlm_backend=getattr(settings, "docling_vlm_backend", "none"),
+            vlm_api_url=getattr(settings, "docling_vlm_api_url", "") or "",
+            vlm_api_key=getattr(settings, "docling_vlm_api_key", "") or "",
+            vlm_model=getattr(settings, "docling_vlm_model", "gemini-3.1-flash-lite"),
+        )
+    )
+    if not getattr(parser, "is_available", False):
+        return None
+    return parser
+
+
+def _build_parser(parser_mode: str | None = None):
+    from app.adapters.document_parser_router import (
+        DocumentParserRouter,
+        normalize_parser_mode,
+    )
+
+    configured_mode = parser_mode or getattr(settings, "document_context_parser_mode", "auto")
+    mode = normalize_parser_mode(configured_mode)
+    parser = DocumentParserRouter(
+        markitdown_parser=_build_markitdown_parser(),
+        docling_parser=_build_docling_parser(),
+        mode=mode,
+        logger_obj=logger,
+    )
+    if not parser.is_available:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MarkItDown parser is not available on this backend.",
+            detail="No document parser is available on this backend.",
         )
     return parser
 
@@ -233,6 +293,13 @@ def _select_section_indices(candidates: list[dict[str, Any]]) -> list[int]:
     return sorted(selected)
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _build_section_snippets(
     *,
     raw_markdown: str,
@@ -306,6 +373,19 @@ def _response_from_parsed(
 
     metadata: dict[str, Any] = parsed.metadata or {}
     media_kind = "video" if str(metadata.get("media_kind") or "").lower() == "video" else "document"
+    parser = str(metadata.get("parser") or "markitdown")
+    parser_chain = metadata.get("parser_chain")
+    if not isinstance(parser_chain, list) or not parser_chain:
+        parser_chain = [parser]
+    parser_chain = [str(item) for item in parser_chain if str(item).strip()]
+    provenance_level = str(metadata.get("provenance_level") or "text_only")
+    if provenance_level not in {
+        "text_only",
+        "structured_text",
+        "page_marker",
+        "page_layout",
+    }:
+        provenance_level = "text_only"
     section_titles = [
         str(title).strip()
         for title in (parsed.section_map or {}).keys()
@@ -332,13 +412,49 @@ def _response_from_parsed(
                 detail=image.get("detail") if image.get("detail") in {"auto", "low", "high"} else "low",
             )
         )
+    embedded_assets: list[DocumentContextEmbeddedAsset] = []
+    raw_assets = parsed.assets or parsed.images or []
+    for index, asset in enumerate(raw_assets[:MAX_EMBEDDED_ASSETS], start=1):
+        if not isinstance(asset, dict):
+            continue
+        kind = str(asset.get("kind") or asset.get("label") or "image").lower()
+        if kind == "picture":
+            kind = "image"
+        if kind not in {"image", "figure", "picture", "table"}:
+            kind = "image"
+        page_value = asset.get("page")
+        try:
+            page = int(page_value) if page_value is not None else None
+        except (TypeError, ValueError):
+            page = None
+        bbox = asset.get("bbox")
+        embedded_assets.append(
+            DocumentContextEmbeddedAsset(
+                id=str(asset.get("id") or f"embedded-asset-{index}"),
+                kind=kind,
+                label=str(asset.get("label") or kind),
+                page=page if page and page > 0 else None,
+                text=str(asset.get("text") or "")[:500] or None,
+                bbox=bbox if isinstance(bbox, dict) else None,
+                has_data=bool(str(asset.get("data") or "").strip()),
+            )
+        )
+    figure_count = _safe_int(metadata.get("figure_count"))
+    table_count = _safe_int(metadata.get("table_count"))
+    if figure_count <= 0:
+        figure_count = sum(1 for asset in embedded_assets if asset.kind in {"image", "figure", "picture"})
+    if table_count <= 0:
+        table_count = sum(1 for asset in embedded_assets if asset.kind == "table")
 
     return DocumentContextParseResponse(
         file_name=file_name,
         mime_type=mime_type,
         media_kind=media_kind,
         size_bytes=size_bytes,
-        parser=str(metadata.get("parser") or "markitdown"),
+        parser=parser,
+        parser_chain=parser_chain,
+        parser_warning=str(metadata.get("parser_warning") or "") or None,
+        provenance_level=provenance_level,
         title=str(metadata.get("title") or file_name),
         page_count=parsed.page_count,
         section_titles=section_titles,
@@ -348,6 +464,13 @@ def _response_from_parsed(
         truncated=truncated,
         extracted_images=extracted_images,
         extracted_image_count=len(extracted_images),
+        embedded_assets=embedded_assets,
+        embedded_asset_count=_safe_int(
+            metadata.get("embedded_asset_count"),
+            len(embedded_assets),
+        ),
+        figure_count=figure_count,
+        table_count=table_count,
     )
 
 
@@ -355,6 +478,7 @@ def _response_from_parsed(
 async def parse_document_context(
     auth: RequireAuth,
     file: UploadFile = File(..., description="PDF, Word, PowerPoint, Excel, CSV, TXT, Markdown, or video file"),
+    parser_mode: str = Form("auto", description="auto, fast, or precision"),
 ) -> DocumentContextParseResponse:
     """Parse an uploaded document into Markdown for the next chat turn."""
     file_name = _safe_upload_name(file)
@@ -374,7 +498,8 @@ async def parse_document_context(
             detail=f"File too large. Maximum size is {max_upload_bytes // 1024 // 1024}MB.",
         )
 
-    parser = _build_video_parser() if ext in VIDEO_EXTENSIONS else _build_parser()
+    parser_mode_value = parser_mode if isinstance(parser_mode, str) else "auto"
+    parser = _build_video_parser() if ext in VIDEO_EXTENSIONS else _build_parser(parser_mode_value)
     tmp_path = ""
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_file:

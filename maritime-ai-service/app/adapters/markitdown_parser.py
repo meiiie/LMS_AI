@@ -107,17 +107,26 @@ class MarkItDownParserAdapter(DocumentParserPort):
             )
             title = getattr(result, "title", None) or os.path.basename(file_path)
             section_map = self._extract_section_map(markdown)
+            page_count = self._estimate_page_count(markdown)
+            provenance_level = (
+                "page_marker"
+                if re.search(r"<!--\s*page\s+\d+\s*-->", markdown, re.IGNORECASE)
+                else "text_only"
+            )
 
             return ParsedDocument(
                 markdown=markdown,
-                page_count=self._estimate_page_count(markdown),
+                page_count=page_count,
                 metadata={
                     "title": title,
                     "parser": "markitdown",
+                    "parser_chain": ["markitdown"],
+                    "provenance_level": provenance_level,
                     "source_extension": ext,
                 },
                 section_map=section_map,
                 images=[],
+                assets=[],
             )
 
         return await asyncio.to_thread(_convert)

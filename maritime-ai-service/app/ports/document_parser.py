@@ -31,6 +31,9 @@ class ParsedDocument:
     images: list[dict] = field(default_factory=list)
     """Extracted images with metadata (page, bounding box, URL)."""
 
+    assets: list[dict] = field(default_factory=list)
+    """Structured embedded assets such as figures, pictures, and tables."""
+
 
 class DocumentParserPort(ABC):
     """Parse any document format into structured markdown.

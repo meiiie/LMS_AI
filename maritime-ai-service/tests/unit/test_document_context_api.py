@@ -50,6 +50,45 @@ class FakeLongManualParser:
         )
 
 
+class FakeDoclingAssetParser:
+    is_available = True
+
+    async def parse(self, file_path: str, options=None):
+        return ParsedDocument(
+            markdown="# Lesson\n\n![figure](ignored)\n\n| A | B |\n|---|---|",
+            page_count=4,
+            metadata={
+                "title": "Asset Manual",
+                "parser": "docling",
+                "parser_chain": ["markitdown", "docling"],
+                "parser_warning": "Auto mode promoted to Docling.",
+                "provenance_level": "page_layout",
+                "embedded_asset_count": 2,
+                "figure_count": 1,
+                "table_count": 1,
+            },
+            section_map={"Lesson": [2]},
+            images=[],
+            assets=[
+                {
+                    "id": "fig-1",
+                    "kind": "image",
+                    "page": 2,
+                    "label": "picture",
+                    "text": "Bridge diagram",
+                    "bbox": {"l": 1.0, "t": 2.0, "r": 3.0, "b": 4.0},
+                },
+                {
+                    "id": "table-1",
+                    "kind": "table",
+                    "page": 3,
+                    "label": "table",
+                    "text": "Checklist",
+                },
+            ],
+        )
+
+
 class FakeVideoParser:
     is_available = True
 
@@ -121,7 +160,7 @@ def test_parse_document_context_accepts_video_with_keyframes(monkeypatch):
 def test_parse_document_context_uses_markitdown(monkeypatch):
     from app.api.v1 import document_context as module
 
-    monkeypatch.setattr(module, "_build_parser", lambda: FakeMarkItDownParser())
+    monkeypatch.setattr(module, "_build_parser", lambda parser_mode=None: FakeMarkItDownParser())
 
     response = asyncio.run(
         module.parse_document_context(
@@ -136,13 +175,15 @@ def test_parse_document_context_uses_markitdown(monkeypatch):
     assert response.page_count == 2
     assert response.section_titles == ["Safety Brief"]
     assert "Rule 5" in response.markdown
+    assert response.provenance_level == "text_only"
+    assert response.parser_chain == ["markitdown"]
     assert response.char_count == len("# Safety Brief\n\nRule 5: keep a proper lookout.")
 
 
 def test_parse_document_context_keeps_late_sections_as_snippets(monkeypatch):
     from app.api.v1 import document_context as module
 
-    monkeypatch.setattr(module, "_build_parser", lambda: FakeLongManualParser())
+    monkeypatch.setattr(module, "_build_parser", lambda parser_mode=None: FakeLongManualParser())
 
     response = asyncio.run(
         module.parse_document_context(
@@ -162,6 +203,30 @@ def test_parse_document_context_keeps_late_sections_as_snippets(monkeypatch):
     assert late_snippet.page_start == 9
     assert late_snippet.page_end == 10
     assert "them video tuong tac" in late_snippet.markdown
+
+
+def test_parse_document_context_surfaces_docling_assets(monkeypatch):
+    from app.api.v1 import document_context as module
+
+    monkeypatch.setattr(module, "_build_parser", lambda parser_mode=None: FakeDoclingAssetParser())
+
+    response = asyncio.run(
+        module.parse_document_context(
+            SimpleNamespace(user_id="u"),
+            _upload_file("asset-manual.docx", b"docx-bytes"),
+            parser_mode="precision",
+        )
+    )
+
+    assert response.parser == "docling"
+    assert response.parser_chain == ["markitdown", "docling"]
+    assert response.provenance_level == "page_layout"
+    assert response.parser_warning == "Auto mode promoted to Docling."
+    assert response.embedded_asset_count == 2
+    assert response.figure_count == 1
+    assert response.table_count == 1
+    assert response.embedded_assets[0].page == 2
+    assert response.embedded_assets[0].bbox == {"l": 1.0, "t": 2.0, "r": 3.0, "b": 4.0}
 
 
 def test_document_context_prompt_block_bounds_and_labels():

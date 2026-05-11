@@ -144,6 +144,7 @@ class BaseSettingsFieldsMixin:
 
     # Course Generation (design spec v2.0, 2026-03-22)
     use_docling_for_course_gen: bool = Field(default=False, description="Use Docling for document conversion (requires pip install docling)")
+    document_context_parser_mode: str = Field(default="auto", description="Document upload parser mode: auto, fast, or precision")
     markitdown_enable_plugins: bool = Field(default=False, description="Enable MarkItDown third-party plugins for document conversion")
     docling_vlm_backend: str = Field(default="none", description="VLM backend for scanned pages: 'gemini', 'ollama', 'none'")
     docling_vlm_api_url: Optional[str] = Field(default=None, description="VLM API URL for Docling scanned page extraction")

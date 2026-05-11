@@ -201,6 +201,37 @@ describe("document context helpers", () => {
     expect(frames[0].media_type).toBe("image/jpeg");
   });
 
+  it("carries parser provenance and embedded asset counts into bounded context", () => {
+    const markdown = [
+      "# Maritime report",
+      "Opening ".repeat(900),
+      "# Findings",
+      "Operational findings ".repeat(200),
+    ].join("\n\n");
+
+    const context = buildChatDocumentContext([
+      makeDoc({
+        file_name: "asset-report.docx",
+        parser: "docling",
+        parser_chain: ["markitdown", "docling"],
+        provenance_level: "page_layout",
+        embedded_asset_count: 3,
+        figure_count: 2,
+        table_count: 1,
+        markdown,
+        char_count: markdown.length,
+        truncated: true,
+      }),
+    ], 2_400);
+    const bounded = context?.attachments[0].markdown || "";
+
+    expect(context?.attachments[0].provenance_level).toBe("page_layout");
+    expect(context?.attachments[0].embedded_asset_count).toBe(3);
+    expect(bounded).toContain("Parser provenance");
+    expect(bounded).toContain("parser_chain: markitdown -> docling");
+    expect(bounded).toContain("Embedded asset signals");
+  });
+
   it("formats attachment sizes compactly", () => {
     expect(formatBytes(512)).toBe("512 B");
     expect(formatBytes(2048)).toBe("2.0 KB");
