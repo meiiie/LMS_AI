@@ -73,6 +73,142 @@ def _has_document_preview_host_action_tool(tools: list[Any]) -> bool:
         for tool in tools
     )
 
+
+def _as_plain_direct_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if hasattr(value, "model_dump"):
+        try:
+            dumped = value.model_dump(exclude_none=True)
+            return dumped if isinstance(dumped, dict) else {}
+        except Exception:
+            return {}
+    if hasattr(value, "dict"):
+        try:
+            dumped = value.dict(exclude_none=True)
+            return dumped if isinstance(dumped, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _extract_document_preview_capabilities(
+    state: dict[str, Any],
+    ctx: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Recover the preview capability from raw runtime state if collection misses it."""
+
+    state_context = state.get("context") if isinstance(state.get("context"), dict) else {}
+    raw_sources = [
+        state.get("host_capabilities"),
+        ctx.get("host_capabilities"),
+        state_context.get("host_capabilities") if isinstance(state_context, dict) else None,
+    ]
+    preview_capabilities: list[dict[str, Any]] = []
+    for raw_caps in raw_sources:
+        caps = _as_plain_direct_mapping(raw_caps)
+        raw_tools = caps.get("tools")
+        if not isinstance(raw_tools, list):
+            continue
+        for raw_tool in raw_tools:
+            tool_def = _as_plain_direct_mapping(raw_tool)
+            if (
+                str(tool_def.get("name") or "").strip().lower()
+                == "authoring.preview_lesson_patch"
+            ):
+                preview_capabilities.append(tool_def)
+    return preview_capabilities
+
+
+def _direct_role_candidates(state: dict[str, Any], ctx: dict[str, Any]) -> list[str]:
+    state_context = state.get("context") if isinstance(state.get("context"), dict) else {}
+    host_context = _as_plain_direct_mapping(
+        ctx.get("host_context")
+        or (state_context.get("host_context") if isinstance(state_context, dict) else None)
+        or state.get("host_context")
+    )
+    candidates = [
+        ctx.get("user_role"),
+        state_context.get("user_role") if isinstance(state_context, dict) else None,
+        state.get("user_role"),
+        state.get("role"),
+        host_context.get("user_role"),
+        host_context.get("host_role"),
+    ]
+    roles: list[str] = []
+    for candidate in candidates:
+        value = getattr(candidate, "value", candidate)
+        role = str(value or "").strip().lower()
+        if role and role not in roles:
+            roles.append(role)
+    return roles
+
+
+def _rebind_document_preview_host_action_tool(
+    *,
+    tools: list[Any],
+    force_tools: bool,
+    query: str,
+    state: dict[str, Any],
+    ctx: dict[str, Any],
+) -> tuple[list[Any], bool, dict[str, Any]]:
+    """Bind only the declared, non-mutating LMS preview action if collection lost it."""
+
+    if _has_document_preview_host_action_tool(tools):
+        return tools, True, {
+            "status": "already_bound",
+            "tool_count": len(tools),
+        }
+
+    preview_capabilities = _extract_document_preview_capabilities(state, ctx)
+    debug: dict[str, Any] = {
+        "status": "missing_capability",
+        "tool_count": len(tools),
+        "preview_capability_count": len(preview_capabilities),
+    }
+    if not preview_capabilities:
+        return tools, force_tools, debug
+
+    roles = _direct_role_candidates(state, ctx)
+    debug["role_candidates"] = roles[:4]
+    for role in roles or ["student"]:
+        try:
+            from app.engine.context.action_tools import generate_host_action_tools
+
+            generated = generate_host_action_tools(
+                preview_capabilities,
+                role,
+                event_bus_id=state.get("_event_bus_id") or state.get("session_id") or "",
+                approval_context={
+                    "query": query,
+                    "host_action_feedback": (ctx.get("host_action_feedback") or {}),
+                },
+            )
+        except Exception as exc:
+            debug.update({"status": "generation_failed", "error": type(exc).__name__})
+            logger.debug("[DIRECT] Document preview host action rebind failed: %s", exc)
+            return tools, force_tools, debug
+
+        preview_tools = [
+            tool
+            for tool in generated
+            if str(getattr(tool, "name", "") or getattr(tool, "__name__", "")).strip().lower()
+            == _DOC_PREVIEW_HOST_ACTION_TOOL
+        ]
+        if preview_tools:
+            debug.update({
+                "status": "rebound",
+                "role": role,
+                "tool_count": len(preview_tools),
+            })
+            logger.info(
+                "[DIRECT] Rebound LMS document preview host action from runtime capabilities"
+            )
+            return preview_tools[:1], True, debug
+
+    debug["status"] = "role_filtered"
+    return tools, force_tools, debug
+
 _HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS = 45.0  # Phase F3 (2026-05-06): bumped 24→45s. NVIDIA DeepSeek tool-heavy pointy turns (inventory + show + synthesis) regularly hit 25-35s; 24s caused canned fallback even when LLM was actively succeeding.
 
 # DSML tool-call markup that NVIDIA DeepSeek occasionally leaks into prose
@@ -2422,6 +2558,17 @@ async def direct_response_node_impl(
                         )
                 except Exception as selection_error:
                     logger.debug("[DIRECT] Runtime tool selection skipped: %s", selection_error)
+
+                if has_uploaded_document_context and _looks_uploaded_document_preview_request(query):
+                    tools, force_tools, doc_preview_debug = _rebind_document_preview_host_action_tool(
+                        tools=tools,
+                        force_tools=force_tools,
+                        query=query,
+                        state=state,
+                        ctx=ctx,
+                    )
+                    if isinstance(state.get("routing_metadata"), dict):
+                        state["routing_metadata"]["doc_preview_runtime"] = doc_preview_debug
 
             if (
                 not response
