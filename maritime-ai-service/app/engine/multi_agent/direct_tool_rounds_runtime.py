@@ -48,6 +48,7 @@ _FORCED_WEB_SEARCH_TOOL_NAMES = (
 )
 _RICH_SEARCH_RESULT_CHAR_FLOOR = 1200
 _DOC_PREVIEW_HOST_ACTION_TOOL = "host_action__authoring__preview_lesson_patch"
+_DOC_COURSE_HOST_ACTION_TOOL = "host_action__authoring__generate_course_from_document"
 
 
 def _normalize_doc_preview_text(value: Any) -> str:
@@ -109,6 +110,60 @@ def _find_doc_preview_host_action_tool(tools: list[Any]) -> Any | None:
         if _tool_name(tool).lower() == _DOC_PREVIEW_HOST_ACTION_TOOL:
             return tool
     return None
+
+
+def _find_doc_course_host_action_tool(tools: list[Any]) -> Any | None:
+    for tool in tools or []:
+        if _tool_name(tool).lower() == _DOC_COURSE_HOST_ACTION_TOOL:
+            return tool
+    return None
+
+
+def _looks_uploaded_doc_course_request(query: str) -> bool:
+    normalized = _normalize_doc_preview_text(query)
+    if any(
+        marker in normalized
+        for marker in (
+            "preview_lesson_patch",
+            "lesson patch",
+            "bai hoc hien tai",
+            "cap nhat bai hoc",
+        )
+    ):
+        return False
+    return any(
+        marker in normalized
+        for marker in (
+            "generate_course_from_document",
+            "course architect",
+            "course plan",
+            "course outline",
+            "full course",
+            "toan bo khoa",
+            "cay khoa",
+            "chia khoa",
+            "tao khoa hoc",
+            "thiet ke khoa hoc",
+            "cau truc khoa hoc",
+            "chuong/bai",
+            "chuong bai",
+            "module",
+            "outline",
+        )
+    )
+
+
+def _should_request_uploaded_doc_course_preview(
+    *,
+    query: str,
+    state: AgentState | None,
+    tools: list[Any],
+) -> bool:
+    if _find_doc_course_host_action_tool(tools) is None:
+        return False
+    if not _uploaded_document_attachments_from_state(state):
+        return False
+    return _looks_uploaded_doc_course_request(query)
 
 
 def _should_request_uploaded_doc_preview(
@@ -297,6 +352,623 @@ def _resolve_doc_preview_lesson_id(state: AgentState | None) -> str:
         if normalized:
             return normalized
     return ""
+
+
+def _resolve_doc_preview_course_id(state: AgentState | None) -> str:
+    if not isinstance(state, dict):
+        return ""
+    ctx = state.get("context")
+    candidates: list[Any] = []
+    if isinstance(ctx, dict):
+        candidates.extend([ctx.get("course_id"), ctx.get("courseId")])
+        for key in ("page_context", "host_context"):
+            value = ctx.get(key)
+            if isinstance(value, dict):
+                candidates.extend([value.get("course_id"), value.get("courseId")])
+    for candidate in candidates:
+        normalized = str(candidate or "").strip()
+        if normalized:
+            return normalized
+    return ""
+
+
+def _extract_doc_course_title_from_query(query: str) -> str:
+    match = re.search(
+        r"(?:course title|ten khoa hoc|tên khóa học|title)\s*(?:la|là|is|:)\s*[\"“”']([^\"“”']{3,140})[\"“”']",
+        str(query or ""),
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return _clean_doc_preview_line(match.group(1))
+    return ""
+
+
+def _doc_source_reference(
+    *,
+    title: str,
+    excerpt: str = "",
+    page_start: int | None = None,
+    page_end: int | None = None,
+    chapter_index: int | None = None,
+    lesson_index: int | None = None,
+    kind: str = "document_section",
+) -> dict[str, Any]:
+    ref: dict[str, Any] = {
+        "kind": kind,
+        "title": title[:160] if title else "Tài liệu đã tải lên",
+    }
+    if excerpt:
+        ref["excerpt"] = excerpt[:360]
+    if page_start is not None:
+        ref["page_start"] = page_start
+    if page_end is not None:
+        ref["page_end"] = page_end
+    if chapter_index is not None:
+        ref["chapter_index"] = chapter_index
+    if lesson_index is not None:
+        ref["lesson_index"] = lesson_index
+    return ref
+
+
+def _extract_doc_section_references(markdown: str, fallback_title: str) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    current_heading = ""
+    for raw_line in str(markdown or "").replace("\\_", "_").splitlines():
+        stripped = raw_line.strip()
+        heading_match = re.match(r"^#{1,4}\s+(.+)$", stripped)
+        if heading_match:
+            heading = _clean_doc_preview_line(heading_match.group(1))
+            if heading and not _is_doc_preview_scaffold_line(heading):
+                current_heading = heading
+            continue
+        source_match = re.search(
+            r"Nguồn section:\s*(.+?)\s*\(trang\s*(\d{1,4})(?:\s*[-–]\s*(\d{1,4}))?\)",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+        if not source_match:
+            source_match = re.search(
+                r"Nguon section:\s*(.+?)\s*\(trang\s*(\d{1,4})(?:\s*[-–]\s*(\d{1,4}))?\)",
+                stripped,
+                flags=re.IGNORECASE,
+            )
+        if source_match:
+            title = _clean_doc_preview_line(source_match.group(1)) or current_heading or fallback_title
+            page_start = int(source_match.group(2))
+            page_end = int(source_match.group(3) or source_match.group(2))
+            refs.append(
+                _doc_source_reference(
+                    title=title,
+                    excerpt=title,
+                    page_start=page_start,
+                    page_end=page_end,
+                )
+            )
+    if refs:
+        return refs[:16]
+
+    heading_refs: list[dict[str, Any]] = []
+    for heading in _extract_doc_headings(markdown)[:80]:
+        heading_refs.append(
+            _doc_source_reference(
+                title=heading,
+                excerpt=heading,
+            )
+        )
+    if heading_refs:
+        return heading_refs
+
+    page_start, page_end = _extract_source_pages("", markdown)
+    return [
+        _doc_source_reference(
+            title=fallback_title,
+            excerpt=_first_nonempty_line(markdown),
+            page_start=page_start,
+            page_end=page_end,
+            kind="document",
+        )
+    ]
+
+
+def _match_doc_refs(
+    refs: list[dict[str, Any]],
+    markers: tuple[str, ...],
+    *,
+    fallback_title: str,
+    chapter_index: int | None = None,
+    lesson_index: int | None = None,
+) -> list[dict[str, Any]]:
+    normalized_markers = tuple(_normalize_doc_preview_text(marker) for marker in markers)
+    matches: list[dict[str, Any]] = []
+    for ref in refs:
+        ref_text = _normalize_doc_preview_text(
+            f"{ref.get('title', '')} {ref.get('excerpt', '')}"
+        )
+        if any(marker and marker in ref_text for marker in normalized_markers):
+            next_ref = dict(ref)
+            if chapter_index is not None:
+                next_ref["chapter_index"] = chapter_index
+            if lesson_index is not None:
+                next_ref["lesson_index"] = lesson_index
+            matches.append(next_ref)
+    if matches:
+        return matches[:3]
+    base = dict(refs[0]) if refs else _doc_source_reference(title=fallback_title)
+    if chapter_index is not None:
+        base["chapter_index"] = chapter_index
+    if lesson_index is not None:
+        base["lesson_index"] = lesson_index
+    return [base]
+
+
+def _dedupe_doc_refs(refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str, str, str]] = set()
+    deduped: list[dict[str, Any]] = []
+    for ref in refs:
+        key = (
+            str(ref.get("kind") or ""),
+            str(ref.get("title") or ""),
+            str(ref.get("page_start") or ref.get("page") or ""),
+            str(ref.get("page_end") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(ref)
+    return deduped
+
+
+def _top_course_source_references(
+    refs: list[dict[str, Any]],
+    *,
+    title_source: str,
+    is_lms_manual: bool,
+) -> list[dict[str, Any]]:
+    if not is_lms_manual:
+        return _dedupe_doc_refs(refs)[:12]
+    marker_groups = (
+        ("dang nhap", "truy cap"),
+        ("hoc vien",),
+        ("giang vien",),
+        ("tao khoa", "4.2"),
+        ("video", "quiz", "4.5"),
+        ("quan ly", "duyet"),
+        ("su co", "troubleshooting", "xu ly loi"),
+    )
+    selected: list[dict[str, Any]] = []
+    for markers in marker_groups:
+        selected.extend(
+            _match_doc_refs(
+                refs,
+                markers,
+                fallback_title=title_source,
+            )
+        )
+    selected.extend(refs)
+    return _dedupe_doc_refs(selected)[:12]
+
+
+def _lms_manual_lesson(
+    *,
+    title: str,
+    summary: str,
+    activity: str,
+    quick_check: str,
+    refs: list[dict[str, Any]],
+    duration_minutes: int = 18,
+) -> dict[str, Any]:
+    return {
+        "title": title,
+        "summary": summary,
+        "activity": activity,
+        "quick_check": quick_check,
+        "duration_minutes": duration_minutes,
+        "source_references": refs,
+    }
+
+
+def _build_lms_manual_course_plan(
+    *,
+    title_source: str,
+    refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    chapter_specs = [
+        {
+            "title": "Khởi động: truy cập, đăng nhập và định hướng vai trò",
+            "summary": "Giúp người học hiểu bản đồ hệ thống HoLiLiHu LMS trước khi đi vào từng vai trò.",
+            "markers": ("dang nhap", "vai tro", "trang chu", "tong quan", "lms"),
+            "objectives": [
+                "Phân biệt luồng công khai, học viên, giảng viên và quản lý.",
+                "Đăng nhập đúng tài khoản và nhận diện workspace theo vai trò.",
+                "Biết nơi cần kiểm tra khi không thấy khóa học hoặc chức năng.",
+            ],
+            "lessons": [
+                (
+                    "Bản đồ HoLiLiHu LMS và các vai trò chính",
+                    "Đọc hệ thống như một bản đồ: trang công khai, khu học viên, khu giảng viên và khu quản lý.",
+                    "Cho học viên nối từng vai trò với 3 tác vụ thường gặp.",
+                    "Khi một người dùng không thấy nút tạo khóa, cần kiểm tra điều gì trước?",
+                    ("vai tro", "tong quan", "lms"),
+                ),
+                (
+                    "Đăng nhập, xác thực và xử lý lỗi truy cập",
+                    "Chuẩn hóa thao tác đăng nhập, xác minh tài khoản và nhận biết lỗi phiên đăng nhập.",
+                    "Thực hành checklist: email, mật khẩu, trạng thái tài khoản, tổ chức.",
+                    "Cần thu thập bằng chứng nào trước khi báo lỗi đăng nhập?",
+                    ("dang nhap", "xac thuc", "tai khoan"),
+                ),
+                (
+                    "Điều hướng theo vai trò sau khi vào hệ thống",
+                    "Nhận diện đúng menu, sidebar, khóa học hiện tại và các điểm vào nhanh.",
+                    "Mỗi nhóm chụp lại một đường đi đến khóa học và giải thích vì sao chọn đường đó.",
+                    "Dấu hiệu nào cho thấy người dùng đang ở sai vai trò?",
+                    ("menu", "sidebar", "vai tro", "dieu huong"),
+                ),
+            ],
+        },
+        {
+            "title": "Hành trình học viên: học bài, video tương tác và tiến độ",
+            "summary": "Biến phần hướng dẫn học viên thành kịch bản học thật: vào khóa, học bài, làm quiz và theo dõi tiến độ.",
+            "markers": ("hoc vien", "video", "quiz", "tien do", "offline"),
+            "objectives": [
+                "Mở khóa học và đi qua một bài học có nhiều loại nội dung.",
+                "Sử dụng video tương tác, tài liệu, quiz và ghi chú đúng ngữ cảnh.",
+                "Tự kiểm tra tiến độ, lỗi thường gặp và chế độ học trên thiết bị di động.",
+            ],
+            "lessons": [
+                (
+                    "Từ danh sách khóa học đến bài học đầu tiên",
+                    "Học viên tìm khóa học, đọc mô tả, vào chương và chọn bài học cần học.",
+                    "Mô phỏng một học viên mới nhận lớp và cần tìm bài đầu tiên trong 2 phút.",
+                    "Nếu học viên đã ghi danh nhưng không thấy khóa, cần kiểm tra những điểm nào?",
+                    ("hoc vien", "khoa hoc", "ghi danh"),
+                ),
+                (
+                    "Học với video, tài liệu và nội dung tương tác",
+                    "Khai thác video tương tác, tài liệu đính kèm và các khối nội dung trong một bài học.",
+                    "Đánh dấu các điểm cần dừng video để hỏi hoặc kiểm tra nhanh.",
+                    "Video tương tác khác video thường ở điểm nào trong trải nghiệm học?",
+                    ("video", "tuong tac", "tai lieu"),
+                ),
+                (
+                    "Quiz, bài tập và phản hồi sau khi học",
+                    "Hoàn thành kiểm tra, đọc phản hồi và dùng kết quả để quay lại đúng bài học.",
+                    "Thiết kế một câu hỏi kiểm tra nhanh cho cuối bài.",
+                    "Khi kết quả quiz thấp, học viên nên quay lại thông tin nào?",
+                    ("quiz", "bai tap", "kiem tra"),
+                ),
+                (
+                    "Theo dõi tiến độ, học offline và xử lý sự cố học tập",
+                    "Đọc thanh tiến độ, trạng thái hoàn thành và các vấn đề thường gặp trên mobile/offline.",
+                    "Lập checklist tự xử lý trước khi gửi hỗ trợ.",
+                    "Cần gửi ảnh chụp màn hình nào để hỗ trợ kiểm tra nhanh hơn?",
+                    ("tien do", "offline", "mobile", "su co"),
+                ),
+            ],
+        },
+        {
+            "title": "Tác nghiệp giảng viên: thiết kế và soạn khóa học",
+            "summary": "Đây là trục trọng tâm cho giáo viên: từ ý tưởng khóa học đến chương, bài, tài liệu, video và quiz.",
+            "markers": ("giang vien", "tao khoa", "chuong", "bai hoc", "xuat ban"),
+            "objectives": [
+                "Tạo khóa học có tiêu đề, mô tả và mục tiêu đủ rõ để duyệt.",
+                "Chia nội dung thành chương/bài theo logic học tập thay vì chỉ chép mục lục.",
+                "Thêm video, tài liệu và quiz với checklist kiểm tra trước khi gửi duyệt.",
+            ],
+            "lessons": [
+                (
+                    "Tạo khóa học mới và viết thông tin khóa học",
+                    "Giảng viên nhập tiêu đề, mô tả, mục tiêu, đối tượng và thông tin cần thiết trước khi soạn bài.",
+                    "Biến một mô tả mơ hồ thành mô tả khóa học có kết quả học tập đo được.",
+                    "Một mô tả khóa học đủ duyệt cần trả lời những câu hỏi nào?",
+                    ("tao khoa", "thong tin khoa", "muc tieu"),
+                ),
+                (
+                    "Chia chương/bài theo năng lực cần đạt",
+                    "Sắp xếp chương và bài theo hành trình học, tránh bê nguyên mục lục nếu không tạo được tiến trình.",
+                    "Từ một tài liệu dài, nhóm thành 4-6 chương có nhịp học rõ.",
+                    "Dấu hiệu nào cho thấy một chương đang quá rộng?",
+                    ("chuong", "bai hoc", "cau truc"),
+                ),
+                (
+                    "Thêm video, tài liệu và nội dung tương tác",
+                    "Gắn đúng loại tài nguyên vào bài học, đặt tên rõ và kiểm tra khả năng xem lại của học viên.",
+                    "Soạn checklist trước khi upload video/tài liệu vào bài.",
+                    "Tài liệu đính kèm cần có tên và mô tả như thế nào để học viên không bị lạc?",
+                    ("video", "tai lieu", "upload", "tuong tac"),
+                ),
+                (
+                    "Soạn quiz và kiểm tra chất lượng trước khi gửi duyệt",
+                    "Thiết kế kiểm tra nhanh, câu hỏi tổng kết và kiểm tra trạng thái xuất bản một cách an toàn.",
+                    "Viết 3 câu hỏi đo đúng mục tiêu học tập của bài.",
+                    "Vì sao quiz không nên được publish trực tiếp khi chưa xem preview?",
+                    ("quiz", "kiem tra", "xuat ban", "duyet"),
+                ),
+            ],
+        },
+        {
+            "title": "Quản lý và vận hành: duyệt khóa, người dùng và chất lượng",
+            "summary": "Dành cho người quản lý hoặc tổ chuyên trách vận hành LMS để đảm bảo khóa học lên production an toàn.",
+            "markers": ("quan ly", "admin", "duyet", "nguoi dung", "bao cao"),
+            "objectives": [
+                "Hiểu trách nhiệm duyệt khóa và kiểm tra trước khi mở cho học viên.",
+                "Theo dõi người dùng, vai trò, tiến độ và báo cáo vận hành.",
+                "Biết khi nào cần trả khóa về cho giảng viên chỉnh sửa.",
+            ],
+            "lessons": [
+                (
+                    "Duyệt khóa học theo checklist chất lượng",
+                    "Quản lý kiểm tra mục tiêu, chương/bài, nội dung, quiz, tài liệu và khả năng học thật.",
+                    "Chấm một khóa mẫu theo checklist duyệt.",
+                    "Ba lỗi nào nên trả về cho giảng viên thay vì duyệt ngay?",
+                    ("duyet", "chat luong", "xuat ban"),
+                ),
+                (
+                    "Quản lý người dùng, vai trò và quyền truy cập",
+                    "Xác minh vai trò, lớp/khóa, tổ chức và phạm vi truy cập để tránh nhầm quyền.",
+                    "Vẽ ma trận vai trò - quyền cho một lớp học mẫu.",
+                    "Vì sao đổi vai trò cần kiểm tra lại ngay trên phiên kế tiếp?",
+                    ("nguoi dung", "vai tro", "quyen"),
+                ),
+                (
+                    "Theo dõi tiến độ, báo cáo và tín hiệu rủi ro",
+                    "Đọc tiến độ học tập, phát hiện bài bị bỏ qua, quiz bất thường hoặc lớp ít tương tác.",
+                    "Tạo 3 tín hiệu cần theo dõi hằng tuần cho một khóa mới.",
+                    "Tín hiệu nào cho thấy nội dung cần được chỉnh lại chứ không phải chỉ nhắc học viên?",
+                    ("tien do", "bao cao", "analytics"),
+                ),
+            ],
+        },
+        {
+            "title": "Triển khai lớp học thật và xử lý sự cố",
+            "summary": "Khóa lại bằng checklist vận hành: chuẩn bị trước lớp, hỗ trợ trong lớp và cải tiến sau lớp.",
+            "markers": ("troubleshooting", "su co", "checklist", "ho tro", "offline"),
+            "objectives": [
+                "Chuẩn bị khóa học trước ngày mở lớp bằng checklist có thể kiểm chứng.",
+                "Xử lý các lỗi phổ biến: đăng nhập, không thấy khóa, video/tài liệu, quiz và tiến độ.",
+                "Thu thập bằng chứng hỗ trợ và cải tiến khóa sau khi chạy thật.",
+            ],
+            "lessons": [
+                (
+                    "Checklist trước khi mở lớp",
+                    "Kiểm tra người học, nội dung, tài liệu, quiz, quyền truy cập và kênh hỗ trợ trước ngày học.",
+                    "Chạy thử một học viên mẫu từ đăng nhập đến hoàn thành bài đầu tiên.",
+                    "Điểm nào phải kiểm tra trên tài khoản học viên thật, không chỉ trên tài khoản giảng viên?",
+                    ("checklist", "mo lop", "hoc vien"),
+                ),
+                (
+                    "Xử lý lỗi đăng nhập, video, tài liệu và quiz",
+                    "Chuẩn hóa cách thu thập thông tin lỗi để hỗ trợ nhanh và không đoán mò.",
+                    "Viết mẫu ticket hỗ trợ có đủ bằng chứng.",
+                    "Một ticket thiếu ảnh/video lỗi sẽ làm chậm hỗ trợ ở bước nào?",
+                    ("su co", "dang nhap", "video", "quiz"),
+                ),
+                (
+                    "Đánh giá sau lớp và cải tiến khóa học",
+                    "Dùng phản hồi, tiến độ và lỗi phát sinh để cập nhật tài liệu, quiz và hướng dẫn.",
+                    "Chọn 3 cải tiến sau buổi học đầu tiên và gắn với bằng chứng.",
+                    "Khi nào nên sửa nội dung bài học thay vì chỉ thêm thông báo?",
+                    ("phan hoi", "cai tien", "bao cao"),
+                ),
+            ],
+        },
+    ]
+
+    chapters: list[dict[str, Any]] = []
+    for chapter_index, chapter in enumerate(chapter_specs, start=1):
+        chapter_refs = _match_doc_refs(
+            refs,
+            chapter["markers"],
+            fallback_title=title_source,
+            chapter_index=chapter_index,
+        )
+        lessons = []
+        for lesson_index, (title, summary, activity, quick_check, markers) in enumerate(
+            chapter["lessons"],
+            start=1,
+        ):
+            lessons.append(
+                _lms_manual_lesson(
+                    title=title,
+                    summary=summary,
+                    activity=activity,
+                    quick_check=quick_check,
+                    refs=_match_doc_refs(
+                        refs,
+                        markers,
+                        fallback_title=title_source,
+                        chapter_index=chapter_index,
+                        lesson_index=lesson_index,
+                    ),
+                )
+            )
+        chapters.append(
+            {
+                "title": chapter["title"],
+                "summary": chapter["summary"],
+                "learning_objectives": chapter["objectives"],
+                "lessons": lessons,
+                "source_references": chapter_refs,
+            }
+        )
+
+    return {
+        "title": "Khai thác HoLiLiHu LMS từ tài liệu hướng dẫn",
+        "description": (
+            "Khóa học chuyển tài liệu hướng dẫn HoLiLiHu LMS thành lộ trình thực hành "
+            "cho học viên, giảng viên và quản lý. Cấu trúc ưu tiên thao tác thật, "
+            "kiểm tra chất lượng và citation để giáo viên xác minh trước khi áp dụng."
+        ),
+        "audience": "Giảng viên, trợ giảng, quản lý đào tạo và học viên cần sử dụng HoLiLiHu LMS.",
+        "duration": "5 chương, 16 bài, triển khai trong 3-5 buổi thực hành.",
+        "chapters": chapters,
+        "assessment_plan": [
+            "Mỗi chương có câu hỏi kiểm tra nhanh gắn với thao tác thật.",
+            "Cuối khóa yêu cầu người học hoàn thành một kịch bản: tạo/hoặc tham gia một khóa mẫu, học bài, kiểm tra tiến độ và xử lý một lỗi giả lập.",
+            "Giảng viên dùng citation trong preview để đối chiếu từng chương trước khi apply vào LMS.",
+        ],
+        "implementation_checklist": [
+            "Xác minh tên khóa, mô tả, mục tiêu và đối tượng trước khi tạo dữ liệu LMS.",
+            "Giữ mọi thay đổi ở trạng thái draft; không publish tự động.",
+            "Sau khi apply, giáo viên rà lại từng chapter/lesson, thêm tài nguyên thật và gửi duyệt theo quy trình LMS.",
+        ],
+        "source_document_title": title_source,
+    }
+
+
+def _extract_doc_headings(markdown: str) -> list[str]:
+    headings: list[str] = []
+    for raw_line in str(markdown or "").replace("\\_", "_").splitlines():
+        stripped = raw_line.strip()
+        match = re.match(r"^#{1,4}\s+(.+)$", stripped) or re.match(
+            r"^(\d+(?:\.\d+)*\.\s+.{4,120})$",
+            stripped,
+        )
+        if not match:
+            continue
+        heading = _clean_doc_preview_line(match.group(1))
+        if (
+            heading
+            and not _is_doc_preview_scaffold_line(heading)
+            and heading not in headings
+        ):
+            headings.append(heading[:120])
+        if len(headings) >= 80:
+            break
+    return headings
+
+
+def _build_generic_document_course_plan(
+    *,
+    title_source: str,
+    markdown: str,
+    refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    headings = _extract_doc_headings(markdown)
+    if not headings:
+        headings = [
+            "Tổng quan tài liệu và mục tiêu học tập",
+            "Quy trình chính và khái niệm nền tảng",
+            "Thực hành theo tình huống",
+            "Kiểm tra, phản hồi và cải tiến",
+        ]
+    chapter_titles = headings[:6]
+    chapters: list[dict[str, Any]] = []
+    for chapter_index, heading in enumerate(chapter_titles, start=1):
+        chapter_refs = _match_doc_refs(
+            refs,
+            (heading,),
+            fallback_title=title_source,
+            chapter_index=chapter_index,
+        )
+        lessons = [
+            _lms_manual_lesson(
+                title=f"Nắm bối cảnh: {heading}",
+                summary=f"Rút ra khái niệm, mục tiêu và phạm vi cần học từ phần {heading}.",
+                activity="Người học đánh dấu 3 ý chính và 1 điểm còn mơ hồ cần hỏi lại.",
+                quick_check="Ý nào trong tài liệu là bằng chứng mạnh nhất cho phần này?",
+                refs=chapter_refs,
+                duration_minutes=15,
+            ),
+            _lms_manual_lesson(
+                title=f"Thực hành áp dụng: {heading}",
+                summary=f"Chuyển nội dung {heading} thành thao tác, checklist hoặc quyết định thực tế.",
+                activity="Làm một tình huống ngắn, ghi quyết định và nguồn đối chiếu.",
+                quick_check="Nếu áp dụng sai phần này, rủi ro rõ nhất là gì?",
+                refs=chapter_refs,
+                duration_minutes=20,
+            ),
+        ]
+        chapters.append(
+            {
+                "title": heading,
+                "summary": f"Chương này biến phần {heading} thành nội dung học có mục tiêu, hoạt động và kiểm tra.",
+                "learning_objectives": [
+                    f"Giải thích được ý chính của {heading}.",
+                    "Đối chiếu thao tác với nguồn tài liệu thay vì học thuộc rời rạc.",
+                    "Hoàn thành một kiểm tra nhanh dựa trên bằng chứng trong tài liệu.",
+                ],
+                "lessons": lessons,
+                "source_references": chapter_refs,
+            }
+        )
+    return {
+        "title": f"Khóa học từ tài liệu: {title_source[:90]}",
+        "description": "Bản thiết kế khóa học được tạo từ tài liệu upload, có cấu trúc chương/bài và nguồn để giáo viên kiểm chứng trước khi áp dụng.",
+        "audience": "Người học cần chuyển tài liệu nguồn thành năng lực thực hành.",
+        "duration": f"{len(chapters)} chương, {sum(len(ch.get('lessons', [])) for ch in chapters)} bài.",
+        "chapters": chapters,
+        "assessment_plan": [
+            "Mỗi chương có kiểm tra nhanh gắn với citation.",
+            "Cuối khóa dùng một tình huống tổng hợp để xác nhận khả năng áp dụng.",
+        ],
+        "implementation_checklist": [
+            "Giáo viên rà lại tiêu đề chương/bài trước khi apply.",
+            "Không publish tự động; mọi nội dung sinh ra ở trạng thái draft.",
+        ],
+        "source_document_title": title_source,
+    }
+
+
+def _build_uploaded_doc_course_params(query: str, state: AgentState | None) -> dict[str, Any]:
+    attachments = _uploaded_document_attachments_from_state(state)
+    combined_markdown = "\n\n".join(
+        str(item.get("markdown") or "").strip()
+        for item in attachments
+        if str(item.get("markdown") or "").strip()
+    )
+    first_attachment = attachments[0] if attachments else {}
+    query_title = _extract_doc_course_title_from_query(query)
+    title_source = (
+        query_title
+        or str(first_attachment.get("title") or "").strip()
+        or _first_nonempty_line(combined_markdown)
+        or str(first_attachment.get("file_name") or "").strip()
+        or "Tài liệu đã tải lên"
+    )
+    refs = _extract_doc_section_references(combined_markdown, title_source)
+    domain_text = _normalize_doc_preview_text(
+        f"{query}\n{title_source}\n{combined_markdown[:5000]}"
+    )
+    is_lms_manual = any(
+        marker in domain_text
+        for marker in ("holilihu", "lms", "giang vien", "hoc vien", "quan ly")
+    )
+    if is_lms_manual:
+        course_plan = _build_lms_manual_course_plan(title_source=title_source, refs=refs)
+    else:
+        course_plan = _build_generic_document_course_plan(
+            title_source=title_source,
+            markdown=combined_markdown,
+            refs=refs,
+        )
+
+    chapters = course_plan.get("chapters") if isinstance(course_plan, dict) else []
+    lesson_count = sum(
+        len(chapter.get("lessons") or [])
+        for chapter in chapters
+        if isinstance(chapter, dict)
+    )
+    params: dict[str, Any] = {
+        "action": "preview_course_plan_from_document",
+        "title": course_plan.get("title") or title_source,
+        "summary": (
+            f"Wiii đã dựng cây khóa học nháp gồm {len(chapters)} chương và "
+            f"{lesson_count} bài từ tài liệu upload. Giáo viên cần xem citation "
+            "trước khi áp dụng vào LMS."
+        ),
+        "course_plan": course_plan,
+        "changed_fields": ["course_structure"],
+        "source_references": _top_course_source_references(
+            refs,
+            title_source=title_source,
+            is_lms_manual=is_lms_manual,
+        ),
+    }
+    course_id = _resolve_doc_preview_course_id(state)
+    if course_id:
+        params["course_id"] = course_id
+    return params
 
 
 def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> dict[str, Any]:
@@ -1161,6 +1833,133 @@ async def execute_direct_tool_rounds_impl(
                 return (
                     _build_assistant_message(
                         template_response,
+                        native_tool_messages=native_tool_messages,
+                    ),
+                    messages,
+                    tool_call_events,
+                )
+
+        if _should_request_uploaded_doc_course_preview(query=query, state=state, tools=tools):
+            forced_course_tool = _find_doc_course_host_action_tool(tools)
+            if forced_course_tool is not None:
+                tc_id = "forced_doc_course_preview_0"
+                tc_args = _build_uploaded_doc_course_params(query, state)
+                await push_event(
+                    {
+                        "type": "tool_call",
+                        "content": {
+                            "name": _DOC_COURSE_HOST_ACTION_TOOL,
+                            "args": tc_args,
+                            "id": tc_id,
+                        },
+                        "node": "direct",
+                    }
+                )
+                tool_call_events.append(
+                    {
+                        "type": "call",
+                        "name": _DOC_COURSE_HOST_ACTION_TOOL,
+                        "args": tc_args,
+                        "id": tc_id,
+                    }
+                )
+                try:
+                    result = await graph_invoke_tool_with_runtime(
+                        forced_course_tool,
+                        tc_args,
+                        tool_name=_DOC_COURSE_HOST_ACTION_TOOL,
+                        runtime_context_base=runtime_context_base,
+                        tool_call_id=tc_id,
+                        query_snippet=str(tc_args.get("title", ""))[:100],
+                        prefer_async=False,
+                        run_sync_in_thread=True,
+                    )
+                except Exception as tool_error:
+                    logger.warning(
+                        "[DIRECT] Deterministic document course host action failed: %s",
+                        tool_error,
+                    )
+                    result = "Tool unavailable"
+
+                await push_event(
+                    {
+                        "type": "tool_result",
+                        "content": {
+                            "name": _DOC_COURSE_HOST_ACTION_TOOL,
+                            "result": _summarize_tool_result_for_stream(
+                                _DOC_COURSE_HOST_ACTION_TOOL,
+                                result,
+                            ),
+                            "id": tc_id,
+                        },
+                        "node": "direct",
+                    }
+                )
+                await graph_maybe_emit_host_action_event(
+                    push_event=push_event,
+                    tool_name=_DOC_COURSE_HOST_ACTION_TOOL,
+                    result=result,
+                    node="direct",
+                    tool_call_events=tool_call_events,
+                )
+                tool_call_events.append(
+                    {
+                        "type": "result",
+                        "name": _DOC_COURSE_HOST_ACTION_TOOL,
+                        "result": str(result),
+                        "id": tc_id,
+                    }
+                )
+                doc_course_thinking = (
+                    "Mình nhận đây là flow tạo cấu trúc khóa học từ tài liệu upload. "
+                    "Vì thao tác này có thể sinh nhiều chương/bài trong LMS, mình dựng "
+                    "course_plan có citation trước và chỉ gửi host action preview; LMS sẽ "
+                    "yêu cầu giáo viên bấm Apply để cấp approval_token trước khi ghi dữ liệu."
+                )
+                state["thinking"] = doc_course_thinking
+                state["thinking_content"] = doc_course_thinking
+                record_thinking_snapshot(
+                    state,
+                    doc_course_thinking,
+                    node="direct",
+                    provenance="deterministic_document_course_host_action",
+                )
+                await push_event(
+                    {
+                        "type": "thinking_start",
+                        "content": "",
+                        "node": "direct",
+                        "summary": "Tạo cây khóa học từ tài liệu",
+                    }
+                )
+                await push_event(
+                    {
+                        "type": "thinking_delta",
+                        "content": doc_course_thinking,
+                        "node": "direct",
+                    }
+                )
+                await push_event(
+                    {
+                        "type": "thinking_end",
+                        "content": "",
+                        "node": "direct",
+                    }
+                )
+                response = (
+                    "Mình đã gửi bản thiết kế khóa học từ tài liệu sang LMS. "
+                    "Bạn xem cây chương/bài và citation trong hộp preview, rồi chỉ bấm Apply "
+                    "nếu muốn LMS tạo các chương/bài draft tương ứng."
+                )
+                logger.info(
+                    "[DIRECT] Deterministic document course host action requested "
+                    "(attachments=%d, source_refs=%d)",
+                    len(_uploaded_document_attachments_from_state(state)),
+                    len(tc_args.get("source_references") or []),
+                )
+                return (
+                    _build_assistant_message(
+                        response,
                         native_tool_messages=native_tool_messages,
                     ),
                     messages,
