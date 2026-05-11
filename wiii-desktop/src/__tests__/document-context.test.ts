@@ -34,6 +34,30 @@ describe("document context helpers", () => {
     expect(context?.attachments[0].truncated).toBe(true);
   });
 
+  it("keeps teacher sections from long LMS manuals before trimming", () => {
+    const markdown = [
+      "![Logo](data:image/png;base64...)",
+      "# HoLiLiHu LMS",
+      "Mo dau ".repeat(300),
+      "# 3. Huong Dan Cho Hoc Vien",
+      "Noi dung hoc vien ".repeat(260),
+      "# 4. Huong Dan Cho Giang Vien",
+      "Giang vien tao khoa hoc, soan chuong va bai, them video tuong tac, tao cau hoi va gui duyet. ".repeat(45),
+      "# 6. Huong Dan Cho Quan Ly",
+      "Noi dung quan ly ".repeat(120),
+    ].join("\n\n");
+
+    const context = buildChatDocumentContext([
+      makeDoc({ markdown, char_count: markdown.length, truncated: true }),
+    ], 3_200);
+    const bounded = context?.attachments[0].markdown || "";
+
+    expect(bounded.length).toBeLessThanOrEqual(3_200);
+    expect(bounded).toContain("Huong Dan Cho Giang Vien");
+    expect(bounded).toContain("tao khoa hoc");
+    expect(bounded).not.toContain("data:image");
+  });
+
   it("strips markdown from display attachments", () => {
     const display = toDisplayDocumentAttachment(makeDoc());
 
