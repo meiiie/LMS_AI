@@ -256,9 +256,11 @@ function scoreSectionTitle(title: string): number {
   const normalized = stripVietnameseDiacritics(title).toLowerCase();
   const isTeacher = /\b(giang vien|giao vien|teacher|instructor)\b/.test(normalized);
   const isAdminManagement = /\b(quan ly|org_admin|admin|manager)\b/.test(normalized);
+  const isStudentLearningSection = /^\s*3\./.test(normalized) || /(hoc video|xem bai|ket qua hoc tap)/.test(normalized);
   if (/(huong dan cho giang vien|danh cho giang vien|teacher guide)/.test(normalized)) return 100;
   if (
-    /(tao khoa|hoan thien thong tin khoa|soan|chuong va bai|them bai video|video tuong tac|tao cau hoi|ngan hang cau hoi|bai tap|cai dat khoa|gui duyet|xuat ban)/.test(normalized)
+    !isStudentLearningSection
+    && /(tao khoa|hoan thien thong tin khoa|soan|chuong va bai|them bai video|thiet ke diem dung|tao noi dung tuong tac|kiem tra truoc khi xuat ban|tao cau hoi|ngan hang cau hoi|bai tap|cai dat khoa|gui duyet|xuat ban)/.test(normalized)
   ) {
     return 95;
   }
