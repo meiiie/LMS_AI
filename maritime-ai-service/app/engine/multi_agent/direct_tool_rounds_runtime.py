@@ -262,8 +262,23 @@ def _clean_doc_preview_line(value: str) -> str:
 
 def _extract_marker(text: str) -> str:
     cleaned = str(text or "").replace("\\_", "_")
-    match = re.search(r"\bWIII_DOC_GOAL_[0-9A-Za-z_-]+\b", cleaned)
-    return match.group(0) if match else ""
+    direct_match = re.search(r"\bWIII_[0-9A-Za-z][0-9A-Za-z_-]{2,140}\b", cleaned)
+    if direct_match:
+        return direct_match.group(0)
+
+    label_match = re.search(
+        r"(?:marker|test marker|exact marker|ma kiem thu|chuoi kiem thu)"
+        r"[^0-9A-Za-z_]{0,60}"
+        r"([0-9A-Za-z][0-9A-Za-z_.:-]{2,140})",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if not label_match:
+        return ""
+    marker = label_match.group(1).strip("`'\".,;:()[]{}<>")
+    if len(marker) < 3 or re.fullmatch(r"(?:kiem|thu|chinh|xac|exact|marker|test)", marker, flags=re.IGNORECASE):
+        return ""
+    return marker
 
 
 def _strip_doc_preview_goal_label(line: str) -> str:
