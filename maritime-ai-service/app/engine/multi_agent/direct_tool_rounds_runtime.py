@@ -56,6 +56,35 @@ def _normalize_doc_preview_text(value: Any) -> str:
     return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
 
 
+def _is_doc_preview_scaffold_line(value: str) -> bool:
+    line = str(value or "").strip()
+    if not line:
+        return True
+    normalized = _normalize_doc_preview_text(line).strip(" #-:\t\r\n|")
+    if normalized.startswith(
+        (
+            "tai lieu upload",
+            "muc luc phat hien",
+            "trich doan dau tai lieu",
+            "trich doan uu tien",
+            "trich doan uu tien theo vai tro",
+            "trich doan cuoi tai lieu",
+        )
+    ):
+        return True
+    return bool(re.match(r"^-\s*\d+(?:\.\d+)*\.\s+\S+", line))
+
+
+def _is_doc_preview_low_value_line(value: str) -> bool:
+    line = str(value or "").strip()
+    if not line:
+        return True
+    normalized = _normalize_doc_preview_text(line).strip()
+    if normalized.startswith(("buoc - thao tac", "hinh ", "vai tro -")):
+        return True
+    return bool(re.match(r"^\d+(?:\.\d+)*\.\s+\S+", line))
+
+
 def _uploaded_document_attachments_from_state(state: AgentState | None) -> list[dict[str, Any]]:
     if not isinstance(state, dict):
         return []
@@ -116,7 +145,11 @@ def _should_request_uploaded_doc_preview(
 def _first_nonempty_line(text: str) -> str:
     for line in str(text or "").replace("\\_", "_").splitlines():
         line = _clean_doc_preview_line(line)
-        if line:
+        if (
+            line
+            and not _is_doc_preview_scaffold_line(line)
+            and not _is_doc_preview_low_value_line(line)
+        ):
             return line[:140]
     return "Tài liệu đã tải lên"
 
@@ -131,7 +164,15 @@ def _clean_doc_preview_line(value: str) -> str:
     if "<w:" in lowered or "</w:" in lowered:
         return ""
     if line.startswith("|") and line.endswith("|"):
-        return ""
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        cells = [
+            re.sub(r"[*_`]+", "", cell).strip()
+            for cell in cells
+            if cell.strip()
+        ]
+        if not cells or all(set(cell) <= {"-", " ", ":"} for cell in cells):
+            return ""
+        line = " - ".join(cells)
     line = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", line)
     line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
     line = re.sub(r"[*_`]+", "", line)
@@ -149,12 +190,23 @@ def _extract_marker(text: str) -> str:
     return match.group(0) if match else ""
 
 
+def _strip_doc_preview_goal_label(line: str) -> str:
+    cleaned = str(line or "").strip()
+    if _normalize_doc_preview_text(cleaned).startswith("muc tieu "):
+        cleaned = re.sub(r"^(?:Mục tiêu|Muc tieu)\s*[-:–]?\s*", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip() or str(line or "").strip()
+
+
 def _extract_relevant_lines(markdown: str, markers: tuple[str, ...], *, limit: int) -> list[str]:
     normalized_markers = tuple(_normalize_doc_preview_text(marker) for marker in markers)
     selected: list[str] = []
     for raw_line in str(markdown or "").replace("\\_", "_").splitlines():
         line = _clean_doc_preview_line(raw_line)
-        if not line:
+        if (
+            not line
+            or _is_doc_preview_scaffold_line(line)
+            or _is_doc_preview_low_value_line(line)
+        ):
             continue
         normalized_line = _normalize_doc_preview_text(line)
         if any(marker in normalized_line for marker in normalized_markers):
@@ -178,8 +230,8 @@ def _extract_doc_preview_title_from_query(query: str) -> str:
 def _focus_doc_preview_markdown(query: str, markdown: str) -> str:
     normalized_query = _normalize_doc_preview_text(query)
     role_markers: tuple[str, ...] = ()
-    if any(marker in normalized_query for marker in ("giang vien", "teacher")):
-        role_markers = ("huong dan cho giang vien", "danh cho giang vien")
+    if any(marker in normalized_query for marker in ("giang vien", "giao vien", "teacher")):
+        role_markers = ("huong dan cho giang vien", "danh cho giang vien", "giang vien")
     elif any(marker in normalized_query for marker in ("hoc vien", "student")):
         role_markers = ("huong dan cho hoc vien", "danh cho hoc vien")
     elif any(marker in normalized_query for marker in ("quan ly", "manager", "admin")):
@@ -189,15 +241,29 @@ def _focus_doc_preview_markdown(query: str, markdown: str) -> str:
 
     lines = str(markdown or "").replace("\\_", "_").splitlines()
     normalized_markers = tuple(_normalize_doc_preview_text(marker) for marker in role_markers)
+    best_match: tuple[int, int] | None = None
     for index, raw_line in enumerate(lines):
         cleaned = _clean_doc_preview_line(raw_line)
         if not cleaned:
             continue
         normalized_line = _normalize_doc_preview_text(cleaned)
         if any(marker in normalized_line for marker in normalized_markers):
-            start = max(0, index - 2)
-            end = min(len(lines), index + 140)
-            return "\n".join(lines[start:end])
+            raw_stripped = raw_line.strip()
+            score = 10
+            if raw_stripped.startswith("#"):
+                score += 120
+            if raw_stripped.startswith("-") or _is_doc_preview_scaffold_line(cleaned):
+                score -= 80
+            if normalized_line.startswith(tuple(normalized_markers)):
+                score += 20
+            if best_match is None or score > best_match[0]:
+                best_match = (score, index)
+    if best_match is not None:
+        _score, index = best_match
+        raw_stripped = lines[index].strip()
+        start = index if raw_stripped.startswith("#") else max(0, index - 2)
+        end = min(len(lines), index + 140)
+        return "\n".join(lines[start:end])
     return markdown
 
 
@@ -318,7 +384,7 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
         f"# Bản nháp bài học từ tài liệu: {title_source}",
         "",
         "## Mục tiêu học tập",
-        *[f"- {line}" for line in goals[:4]],
+        *[f"- {_strip_doc_preview_goal_label(line)}" for line in goals[:4]],
         "",
         checklist_heading,
         *[f"- {line}" for line in checklist[:5]],
