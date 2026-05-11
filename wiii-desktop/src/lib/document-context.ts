@@ -7,6 +7,16 @@ import type {
 import type { DocumentContextExtractedImage } from "@/api/document-context";
 
 export const MAX_DOCUMENT_CONTEXT_CHARS = 8_000;
+const SECTION_CONTEXT_TITLE_LIMIT = 28;
+const PRIORITY_SECTION_LIMIT = 4;
+const PRIORITY_SECTION_CHARS = 1_300;
+
+interface MarkdownSection {
+  title: string;
+  start: number;
+  end: number;
+  priority: number;
+}
 
 export interface ParsedDocumentForContext extends ChatDocumentContextAttachment {
   id: string;
@@ -64,7 +74,7 @@ export function buildChatDocumentContext(
   for (const doc of readyDocs) {
     if (remaining <= 0) break;
     const budget = Math.min(perDocBudget, remaining);
-    const markdown = doc.markdown.slice(0, budget).trim();
+    const markdown = buildBoundedDocumentMarkdown(doc, budget);
     if (!markdown) continue;
     remaining -= markdown.length;
     attachments.push({
@@ -86,6 +96,122 @@ export function buildChatDocumentContext(
     source: "desktop_upload",
     attachments,
   };
+}
+
+function buildBoundedDocumentMarkdown(
+  doc: ParsedDocumentForContext,
+  maxChars: number,
+): string {
+  const markdown = normalizeDocumentMarkdown(doc.markdown);
+  if (markdown.length <= maxChars) return markdown.trim();
+
+  const sections = extractMarkdownSections(markdown);
+  if (sections.length === 0 || maxChars < 1_200) {
+    return markdown.slice(0, maxChars).trim();
+  }
+
+  const title = `# Tai lieu upload: ${doc.file_name}`;
+  const outline = renderSectionOutline(sections);
+  const headBudget = Math.min(1_500, Math.max(700, Math.floor(maxChars * 0.22)));
+  const chunks: string[] = [
+    title,
+    outline,
+    "## Trich doan dau tai lieu",
+    markdown.slice(0, headBudget).trim(),
+  ];
+
+  const prioritySections = sections
+    .filter((section) => section.priority > 0)
+    .sort((left, right) => right.priority - left.priority || left.start - right.start)
+    .slice(0, PRIORITY_SECTION_LIMIT);
+
+  if (prioritySections.length > 0) {
+    chunks.push("## Trich doan uu tien theo vai tro/chu de");
+    for (const section of prioritySections) {
+      chunks.push(
+        [
+          `### ${section.title}`,
+          markdown
+            .slice(section.start, section.end)
+            .trim()
+            .slice(0, PRIORITY_SECTION_CHARS)
+            .trim(),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    }
+  }
+
+  const tailBudget = Math.min(900, Math.max(350, Math.floor(maxChars * 0.12)));
+  chunks.push("## Trich doan cuoi tai lieu", markdown.slice(-tailBudget).trim());
+
+  return compactToBudget(chunks.join("\n\n"), maxChars);
+}
+
+function normalizeDocumentMarkdown(markdown: string): string {
+  return markdown
+    .replace(/!\[[^\]]*]\(data:image\/[^)]+\)/gi, "")
+    .replace(/data:image\/[^\s)]+/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function extractMarkdownSections(markdown: string): MarkdownSection[] {
+  const headings: Array<{ title: string; start: number }> = [];
+  const headingPattern = /^#{1,6}\s+(.+?)\s*$/gm;
+  let match: RegExpExecArray | null;
+  while ((match = headingPattern.exec(markdown)) !== null) {
+    const title = match[1]?.trim();
+    if (!title) continue;
+    headings.push({ title, start: match.index });
+  }
+
+  return headings.map((heading, index) => ({
+    title: heading.title,
+    start: heading.start,
+    end: headings[index + 1]?.start ?? markdown.length,
+    priority: scoreSectionTitle(heading.title),
+  }));
+}
+
+function scoreSectionTitle(title: string): number {
+  const normalized = stripVietnameseDiacritics(title).toLowerCase();
+  if (/\b(giang vien|giao vien|teacher|instructor)\b/.test(normalized)) return 100;
+  if (/(tao khoa|soan|chuong va bai|cau hoi|bai tap|xuat ban|phan tich giang vien)/.test(normalized)) {
+    return 85;
+  }
+  if (/\b(hoc vien|student|learner)\b/.test(normalized)) return 65;
+  if (/\b(quan ly|org_admin|admin|manager)\b/.test(normalized)) return 55;
+  if (/(checklist|quy trinh|video tuong tac|van hanh)/.test(normalized)) return 45;
+  return 0;
+}
+
+function stripVietnameseDiacritics(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+}
+
+function renderSectionOutline(sections: MarkdownSection[]): string {
+  const titles = sections
+    .slice(0, SECTION_CONTEXT_TITLE_LIMIT)
+    .map((section) => `- ${section.title}`)
+    .join("\n");
+  return `## Muc luc phat hien\n${titles}`;
+}
+
+function compactToBudget(text: string, maxChars: number): string {
+  const compacted = text.replace(/\n{3,}/g, "\n\n").trim();
+  if (compacted.length <= maxChars) return compacted;
+  const sliced = compacted.slice(0, maxChars).trimEnd();
+  const lastBreak = sliced.lastIndexOf("\n## ");
+  if (lastBreak > maxChars * 0.7) {
+    return sliced.slice(0, lastBreak).trimEnd();
+  }
+  return sliced;
 }
 
 export function formatBytes(bytes: number): string {
