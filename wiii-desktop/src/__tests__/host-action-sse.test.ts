@@ -108,4 +108,31 @@ describe("Host Action SSE + PostMessage Integration (Sprint 222b)", () => {
       "Xem bản xem trước rồi xác nhận rõ ràng nếu bạn muốn Wiii áp dụng thay đổi này vào LMS.",
     );
   });
+
+  it("preserves LMS approval tokens from host preview responses", () => {
+    const hostContext = {
+      host_type: "lms",
+      page: { type: "course_editor", title: "Course editor" },
+      workflow_stage: "editing",
+    } satisfies HostContext;
+
+    const item = buildHostActionPreviewItem(
+      "authoring.preview_lesson_patch",
+      "req-approval-1",
+      {},
+      {
+        preview_token: "lesson-preview-123",
+        approval_token: "approval-from-lms-dialog",
+        preview_kind: "lesson_patch",
+        apply_action: "authoring.apply_lesson_patch",
+        summary: "Teacher approved the LMS preview dialog.",
+        lesson_title: "Bài học đã duyệt",
+      },
+      hostContext,
+    );
+
+    expect(item?.metadata?.preview_token).toBe("lesson-preview-123");
+    expect(item?.metadata?.approval_token).toBe("approval-from-lms-dialog");
+    expect(item?.metadata?.apply_action).toBe("authoring.apply_lesson_patch");
+  });
 });

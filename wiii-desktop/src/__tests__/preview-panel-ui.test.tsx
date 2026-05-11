@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PreviewPanel } from "@/components/layout/PreviewPanel";
+import { buildHostActionPreviewItem } from "@/hooks/useSSEStream";
 import { useChatStore } from "@/stores/chat-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useHostContextStore } from "@/stores/host-context-store";
@@ -333,6 +334,85 @@ describe("PreviewPanel host action operator flow", () => {
       );
     });
     expect(await screen.findByText("Applied with LMS approval.")).toBeTruthy();
+  });
+
+  it("forwards approval tokens that arrive through the host-action SSE preview item", async () => {
+    const preview = buildHostActionPreviewItem(
+      "authoring.preview_lesson_patch",
+      "req-preview-from-lms-dialog",
+      {},
+      {
+        preview_token: "preview-lesson-from-sse",
+        approval_token: "approval-from-lms-dialog",
+        preview_kind: "lesson_patch",
+        apply_action: "authoring.apply_lesson_patch",
+        summary: "LMS preview dialog approved.",
+        lesson_id: "lesson-1",
+        lesson_title: "Bài học đã duyệt",
+      },
+      {
+        host_type: "lms",
+        page: { type: "course_editor", title: "Course editor" },
+        workflow_stage: "editing",
+      },
+    );
+    expect(preview).not.toBeNull();
+
+    const requestAction = vi.fn().mockResolvedValue({
+      success: true,
+      data: {
+        summary: "Applied with LMS approval from SSE.",
+      },
+    });
+    useHostContextStore.setState({
+      capabilities: {
+        host_type: "lms",
+        host_name: "LMS",
+        version: "1",
+        resources: ["course"],
+        surfaces: ["right_sidebar"],
+        tools: [
+          {
+            name: "authoring.apply_lesson_patch",
+            description: "Apply a teacher-approved lesson patch.",
+            input_schema: {
+              type: "object",
+              properties: {
+                preview_token: { type: "string" },
+                approval_token: { type: "string" },
+              },
+              required: ["preview_token", "approval_token"],
+            },
+            requires_confirmation: true,
+            mutates_state: true,
+          },
+        ],
+      },
+      requestAction,
+    } as never);
+
+    seedConversation([preview as PreviewItemData]);
+    useUIStore.getState().openPreview("host-action-req-preview-from-lms-dialog");
+
+    render(<PreviewPanel inline />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Xác nhận áp dụng vào bài học" }),
+    );
+
+    await waitFor(() => {
+      expect(requestAction).toHaveBeenCalledWith(
+        "authoring.apply_lesson_patch",
+        {
+          preview_token: "preview-lesson-from-sse",
+          approval_token: "approval-from-lms-dialog",
+        },
+        expect.stringMatching(/^req-preview-apply-/),
+      );
+    });
+    expect(
+      await screen.findByText("Applied with LMS approval from SSE."),
+    ).toBeTruthy();
   });
 
   it("treats host_preview_approval_required as the expected LMS safety gate", async () => {
