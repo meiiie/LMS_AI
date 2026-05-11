@@ -51,7 +51,7 @@ function makeLessonPatchPreview(
   return {
     preview_type: "host_action",
     preview_id: "host-preview-lesson-1",
-    title: "Preview cap nhat bai hoc: Bai hoc goc",
+    title: "Xem trước cập nhật bài học: Bài học gốc",
     snippet:
       "Lesson patch preview ready. Confirm explicitly when you want me to apply it.",
     metadata: {
@@ -192,7 +192,7 @@ describe("PreviewPanel host action operator flow", () => {
     const diffQueries = within(blockDiffSection as HTMLElement);
     expect(diffQueries.getByText("Noi dung cu")).toBeTruthy();
     expect(diffQueries.getByText("Noi dung moi")).toBeTruthy();
-    expect(screen.getByText("Nguon tai lieu")).toBeTruthy();
+    expect(screen.getByText("Nguồn tài liệu")).toBeTruthy();
     expect(screen.getByText("Doc chuong 1")).toBeTruthy();
     expect(screen.getByText("Trang 4, 5")).toBeTruthy();
     expect(screen.getByText("Noi dung goc tu tai lieu.")).toBeTruthy();

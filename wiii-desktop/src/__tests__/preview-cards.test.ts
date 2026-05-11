@@ -135,7 +135,7 @@ describe("PreviewItemData — Type Shape", () => {
     const item: PreviewItemData = {
       preview_type: "host_action",
       preview_id: "host-action-1",
-      title: "Preview cap nhat bai hoc",
+      title: "Xem trước cập nhật bài học",
       snippet: "Preview ready. Confirm explicitly when you want me to apply it.",
       metadata: {
         preview_kind: "lesson_patch",

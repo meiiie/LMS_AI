@@ -86,10 +86,10 @@ export function sourceReferenceLabel(ref: PreviewSourceReference): string {
   if (ref.title) return ref.title;
   if (ref.chapter_title) return ref.chapter_title;
   if (typeof ref.chapter_index === "number" && typeof ref.lesson_index === "number") {
-    return `Chuong ${ref.chapter_index + 1}, bai ${ref.lesson_index + 1}`;
+    return `Chương ${ref.chapter_index + 1}, bài ${ref.lesson_index + 1}`;
   }
   if (typeof ref.chapter_index === "number") {
-    return `Chuong ${ref.chapter_index + 1}`;
+    return `Chương ${ref.chapter_index + 1}`;
   }
-  return ref.kind || "Nguon";
+  return ref.kind || "Nguồn";
 }

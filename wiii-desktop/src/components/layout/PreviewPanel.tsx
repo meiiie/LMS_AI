@@ -682,12 +682,12 @@ function HostActionSourceReferences({
 }) {
   return (
     <section
-      aria-label="Nguon tai lieu"
+      aria-label="Nguồn tài liệu"
       className="rounded-lg border border-border bg-surface px-3 py-3"
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="text-[11px] uppercase tracking-wider text-text-tertiary">
-          Nguon tai lieu
+          Nguồn tài liệu
         </div>
         <span className="rounded-full bg-surface-secondary px-2 py-0.5 text-[11px] text-text-secondary">
           {references.length}

@@ -118,7 +118,7 @@ def _first_nonempty_line(text: str) -> str:
         line = line.strip(" #\t\r\n")
         if line:
             return line[:140]
-    return "Tai lieu da tai len"
+    return "Tài liệu đã tải lên"
 
 
 def _extract_marker(text: str) -> str:
@@ -184,7 +184,7 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
         str(first_attachment.get("title") or "").strip()
         or _first_nonempty_line(combined_markdown)
         or str(first_attachment.get("file_name") or "").strip()
-        or "Tai lieu da tai len"
+        or "Tài liệu đã tải lên"
     )
     marker = _extract_marker(query) or _extract_marker(combined_markdown)
     goals = _extract_relevant_lines(
@@ -207,27 +207,27 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
     source_excerpt = " ".join(checklist[:2])[:360] or _first_nonempty_line(combined_markdown)
     page_start, page_end = _extract_source_pages(query, combined_markdown)
     content_lines = [
-        f"# Ban nhap bai hoc tu tai lieu: {title_source}",
+        f"# Bản nháp bài học từ tài liệu: {title_source}",
         "",
-        "## Muc tieu hoc tap",
+        "## Mục tiêu học tập",
         *[f"- {line}" for line in goals[:4]],
         "",
-        "## Checklist truc ca / noi dung can nam",
+        "## Checklist trực ca / nội dung cần nắm",
         *[f"- {line}" for line in checklist[:5]],
         "",
-        "## Hoat dong thao luan",
-        "- Hoc vien doi chieu checklist trong tai lieu voi mot tinh huong truc ca thuc te.",
-        "- Nhom nho xac dinh rui ro, nguoi can bao cao, va bang chung can ghi vao nhat ky.",
+        "## Hoạt động thảo luận",
+        "- Học viên đối chiếu checklist trong tài liệu với một tình huống trực ca thực tế.",
+        "- Nhóm nhỏ xác định rủi ro, người cần báo cáo và bằng chứng cần ghi vào nhật ký.",
         "",
-        "## Cau hoi kiem tra nhanh",
-        "- Khi tam nhin han che, nguoi truc ca can xac nhan nhung nguon thong tin nao truoc khi doi huong?",
-        "- Khi co nguy co va cham, quy trinh bao cao va ghi log nen dien ra nhu the nao?",
+        "## Câu hỏi kiểm tra nhanh",
+        "- Khi tầm nhìn hạn chế, người trực ca cần xác nhận những nguồn thông tin nào trước khi đổi hướng?",
+        "- Khi có nguy cơ va chạm, quy trình báo cáo và ghi log nên diễn ra như thế nào?",
     ]
     if marker:
-        content_lines.extend(["", f"Marker kiem thu: {marker}"])
+        content_lines.extend(["", f"Marker kiểm thử: {marker}"])
 
     params: dict[str, Any] = {
-        "title": f"Ban nhap: {title_source[:90]}",
+        "title": f"Bản nháp: {title_source[:90]}",
         "content": "\n".join(content_lines),
         "source_references": [
             {

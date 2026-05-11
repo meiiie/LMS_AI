@@ -80,13 +80,13 @@ describe("Host Action SSE + PostMessage Integration (Sprint 222b)", () => {
         preview_token: "lesson-preview-123",
         preview_kind: "lesson_patch",
         summary: "Lesson patch preview ready.",
-        lesson_title: "Bai hoc nguon",
+        lesson_title: "Bài học nguồn",
         source_references: [
           {
             kind: "lesson",
             chapter_index: 1,
             lesson_index: 0,
-            title: "Muc tai lieu",
+            title: "Mục tài liệu",
             source_pages: [7, "8-9"],
           },
         ],
@@ -99,9 +99,13 @@ describe("Host Action SSE + PostMessage Integration (Sprint 222b)", () => {
         kind: "lesson",
         chapter_index: 1,
         lesson_index: 0,
-        title: "Muc tai lieu",
+        title: "Mục tài liệu",
         source_pages: [7, "8-9"],
       },
     ]);
+    expect(item?.title).toBe("Xem trước cập nhật bài học: Bài học nguồn");
+    expect(item?.metadata?.next_step).toBe(
+      "Xem bản xem trước rồi xác nhận rõ ràng nếu bạn muốn Wiii áp dụng thay đổi này vào LMS.",
+    );
   });
 });

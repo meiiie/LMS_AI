@@ -364,11 +364,11 @@ async def test_uploaded_document_preview_runs_host_action_without_planner_llm():
         return None
 
     markdown = (
-        "So tay truc ca buong lai\n"
-        "Marker kiem thu: WIII_DOC_GOAL_123\n"
-        "Muc tieu hoc tap 1: giai thich quy trinh truc ca khi tam nhin han che.\n"
-        "Checklist nguon trang 4: xac nhan nguoi truc ca, kiem tra thiet bi dinh vi.\n"
-        "Checklist nguon trang 5: bao thuyen truong, giam toc an toan, ghi nhat ky.\n"
+        "Sổ tay trực ca buồng lái\n"
+        "Marker kiểm thử: WIII_DOC_GOAL_123\n"
+        "Mục tiêu học tập 1: giải thích quy trình trực ca khi tầm nhìn hạn chế.\n"
+        "Checklist nguồn trang 4: xác nhận người trực ca, kiểm tra thiết bị định vị.\n"
+        "Checklist nguồn trang 5: báo thuyền trưởng, giảm tốc an toàn, ghi nhật ký.\n"
     )
     state = {
         "context": {
@@ -411,6 +411,13 @@ async def test_uploaded_document_preview_runs_host_action_without_planner_llm():
 
     preview_args = captured["args"]
     assert preview_args["lesson_id"] == "lesson-from-url"
+    assert preview_args["title"].startswith("Bản nháp:")
+    assert "# Bản nháp bài học từ tài liệu:" in preview_args["content"]
+    assert "## Mục tiêu học tập" in preview_args["content"]
+    assert "## Hoạt động thảo luận" in preview_args["content"]
+    assert "Marker kiểm thử: WIII_DOC_GOAL_123" in preview_args["content"]
+    assert "Ban nhap" not in preview_args["content"]
+    assert "Muc tieu hoc tap" not in preview_args["content"]
     assert "WIII_DOC_GOAL_123" in preview_args["content"]
     assert preview_args["source_references"][0]["page_start"] == 4
     assert preview_args["source_references"][0]["page_end"] == 5
