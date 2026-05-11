@@ -426,6 +426,57 @@ async def test_uploaded_document_preview_runs_host_action_without_planner_llm():
     assert "preview" in llm_response.content.lower()
 
 
+def test_uploaded_doc_preview_skips_logo_data_uri_and_focuses_teacher_manual():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_preview_params,
+    )
+
+    markdown = (
+        "![Logo Trường Đại học Hàng hải Việt Nam](data:image/png;base64...)\n\n"
+        "**HƯỚNG DẪN SỬ DỤNG\n"
+        "HOLILIHU ONLINE LMS**\n\n"
+        "| **Vai trò** | **Nên đọc trước** | **Mục tiêu sau khi đọc** |\n"
+        "| --- | --- | --- |\n"
+        "| **Giảng viên** | Phần 4 và 5 | Biết tạo khóa, soạn nội dung và xuất bản. |\n\n"
+        "# 4. Hướng Dẫn Cho Giảng Viên\n"
+        "Mục tiêu học tập: giảng viên biết tạo khóa học, soạn bài học và kiểm tra trước khi xuất bản.\n"
+        "Quy trình thao tác: mở trang quản lý khóa học, cập nhật bài học, thêm tài liệu và kiểm tra quiz.\n"
+        "Checklist triển khai: xác nhận tiêu đề, nội dung, tài liệu đính kèm, trạng thái xuất bản và quyền truy cập học viên.\n"
+    )
+    params = _build_uploaded_doc_preview_params(
+        (
+            'Dựa trên tài liệu Word, tạo preview cho giáo viên. '
+            'Trong preview gửi source_references title là "Hướng dẫn sử dụng HoLiLiHu LMS". '
+            'Marker WIII_DOC_GOAL_REAL_MANUAL.'
+        ),
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "Huong_dan_su_dung_HoLiLiHu_LMS_Chi_tiet_2026-05-10.docx",
+                            "markdown": markdown,
+                        }
+                    ]
+                },
+                "page_context": {"lesson_id": "lesson-manual"},
+            }
+        },
+    )
+
+    content = params["content"]
+    assert params["title"] == "Bản nháp: Hướng dẫn sử dụng HoLiLiHu LMS"
+    assert params["lesson_id"] == "lesson-manual"
+    assert params["source_references"][0]["title"] == "Hướng dẫn sử dụng HoLiLiHu LMS"
+    assert "Logo Trường Đại học Hàng hải" not in params["title"]
+    assert "data:image" not in content
+    assert "| **Vai trò**" not in content
+    assert "## Checklist thao tác / nội dung cần nắm" in content
+    assert "giảng viên biết tạo khóa học" in content
+    assert "trực ca" not in content.lower()
+    assert "WIII_DOC_GOAL_REAL_MANUAL" in content
+
+
 @pytest.mark.asyncio
 async def test_execute_direct_tool_rounds_forwards_runtime_tier_to_failover_helper():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
