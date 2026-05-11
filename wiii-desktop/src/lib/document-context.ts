@@ -13,6 +13,22 @@ export const MAX_DOCUMENT_CONTEXT_CHARS = 8_000;
 const SECTION_CONTEXT_TITLE_LIMIT = 28;
 const PRIORITY_SECTION_LIMIT = 6;
 const PRIORITY_SECTION_CHARS = 1_050;
+const TEACHER_AUTHORING_TOKENS = [
+  "tao khoa",
+  "hoan thien thong tin khoa",
+  "soan",
+  "chuong va bai",
+  "them bai video",
+  "thiet ke diem dung",
+  "tao noi dung tuong tac",
+  "kiem tra truoc khi xuat ban",
+  "tao cau hoi",
+  "ngan hang cau hoi",
+  "bai tap",
+  "cai dat khoa",
+  "gui duyet",
+  "xuat ban",
+];
 
 interface MarkdownSection {
   title: string;
@@ -260,7 +276,7 @@ function scoreSectionTitle(title: string): number {
   if (/(huong dan cho giang vien|danh cho giang vien|teacher guide)/.test(normalized)) return 100;
   if (
     !isStudentLearningSection
-    && /(tao khoa|hoan thien thong tin khoa|soan|chuong va bai|them bai video|thiet ke diem dung|tao noi dung tuong tac|kiem tra truoc khi xuat ban|tao cau hoi|ngan hang cau hoi|bai tap|cai dat khoa|gui duyet|xuat ban)/.test(normalized)
+    && TEACHER_AUTHORING_TOKENS.some((token) => normalized.includes(token))
   ) {
     return 95;
   }
