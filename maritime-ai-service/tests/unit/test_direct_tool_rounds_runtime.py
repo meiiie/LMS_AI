@@ -587,6 +587,76 @@ def test_uploaded_doc_course_plan_builder_creates_full_lms_architecture():
     assert "không publish tự động" in " ".join(plan["implementation_checklist"])
 
 
+def test_uploaded_doc_course_plan_builder_keeps_maritime_research_out_of_lms_manual():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_course_params,
+        _normalize_doc_preview_text,
+    )
+
+    markdown = (
+        "# NGHIEN CUU XAY DUNG HE THONG QUAN LY VAN HANH VA HO SO TAU THUY\n"
+        "Nguon section: GIOI THIEU (trang 1-4)\n"
+        "# GIOI THIEU\n"
+        "Gioi thieu bai toan xay dung he thong quan ly van hanh va ho so tau thuy.\n"
+        "Nguon section: Gioi thieu bai toan xay dung he thong quan ly van hanh va ho so tau thuy (trang 5-8)\n"
+        "# KHAO SAT BAI TOAN VAN HANH VA HO SO TAU THUY\n"
+        "Nguon section: Khao sat bai toan van hanh va ho so tau thuy (trang 9-20)\n"
+        "## Nghiep vu quan ly van hanh va ho so tau thuy\n"
+        "Nguon section: Nghiep vu quan ly van hanh va ho so tau thuy (trang 18-28)\n"
+        "# PHAN TICH VA THIET KE HE THONG\n"
+        "Nguon section: Phan tich va thiet ke he thong (trang 29-40)\n"
+        "## Phan tich chuc nang cua he thong tau\n"
+        "Nguon section: Phan tich chuc nang cua he thong tau (trang 41-50)\n"
+        "## So do luong du lieu muc ngu canh\n"
+        "Nguon section: So do luong du lieu muc ngu canh (trang 51-60)\n"
+        "## Thiet ke co so du lieu tau\n"
+        "Nguon section: Thiet ke co so du lieu tau (trang 61-80)\n"
+        "## Cac bang du lieu\n"
+        "Nguon section: Cac bang du lieu (trang 81-95)\n"
+        "## Phan tich chuc nang cua he thong bo\n"
+        "Nguon section: Phan tich chuc nang cua he thong bo (trang 96-110)\n"
+        "# KET LUAN VA HUONG PHAT TRIEN\n"
+        "Nguon section: Ket luan va huong phat trien (trang 111-120)\n"
+    )
+    params = _build_uploaded_doc_course_params(
+        (
+            "Lap chuong trinh dao tao cho giao vien tu tai lieu Word nay. "
+            "Khong bien thanh huong dan HoLiLiHu LMS; hay bam vao van hanh, "
+            "ho so tau thuy va doanh nghiep van tai bien."
+        ),
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "40 - GV.25-26.01.31 - Nghien cuu he thong quan ly van hanh va ho so tau thuy.docx",
+                            "markdown": markdown,
+                        }
+                    ]
+                },
+                "page_context": {"course_id": "course-vessel"},
+            }
+        },
+    )
+
+    plan = params["course_plan"]
+    normalized_plan = _normalize_doc_preview_text(json.dumps(plan, ensure_ascii=False))
+    assert params["course_id"] == "course-vessel"
+    assert len(plan["chapters"]) == 6
+    assert sum(len(chapter["lessons"]) for chapter in plan["chapters"]) == 18
+    assert "holilihu" not in normalized_plan
+    assert "dang nhap" not in normalized_plan
+    assert "video tuong tac" not in normalized_plan
+    assert "ho so tau" in normalized_plan
+    assert "van tai bien" in normalized_plan
+    assert "co so du lieu" in normalized_plan or "du lieu" in normalized_plan
+    assert all(
+        lesson.get("source_references")
+        for chapter in plan["chapters"]
+        for lesson in chapter["lessons"]
+    )
+
+
 def test_uploaded_doc_course_request_matches_real_teacher_curriculum_wording():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         _looks_uploaded_doc_course_request,

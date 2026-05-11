@@ -520,6 +520,54 @@ def _match_doc_refs(
     return [base]
 
 
+def _looks_holilihu_lms_manual_document(
+    *,
+    title_source: str,
+    markdown: str,
+    query: str = "",
+) -> bool:
+    document_text = _normalize_doc_preview_text(
+        f"{title_source}\n{str(markdown or '')[:8000]}"
+    )
+    manual_markers = (
+        "huong dan su dung",
+        "huong dan cho hoc vien",
+        "huong dan cho giang vien",
+        "huong dan cho quan ly",
+        "tao khoa hoc",
+        "them video",
+        "video tuong tac",
+        "dang nhap",
+        "xuat ban",
+        "quiz",
+    )
+    if "holilihu" in document_text:
+        return True
+    if re.search(r"(^|[^a-z0-9])lms([^a-z0-9]|$)", document_text):
+        return any(marker in document_text for marker in manual_markers)
+    query_text = _normalize_doc_preview_text(query)
+    query_says_lms = "holilihu" in query_text or re.search(r"(^|[^a-z0-9])lms([^a-z0-9]|$)", query_text)
+    if query_says_lms and any(marker in document_text for marker in manual_markers):
+        return True
+    return False
+
+
+def _looks_maritime_vessel_management_document(*, title_source: str, markdown: str) -> bool:
+    document_text = _normalize_doc_preview_text(
+        f"{title_source}\n{str(markdown or '')[:12000]}"
+    )
+    markers = (
+        "tau thuy",
+        "ho so tau",
+        "van tai bien",
+        "quan ly van hanh",
+        "doanh nghiep van tai",
+        "he thong tau",
+        "he thong bo",
+    )
+    return sum(1 for marker in markers if marker in document_text) >= 2
+
+
 def _dedupe_doc_refs(refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[tuple[str, str, str, str]] = set()
     deduped: list[dict[str, Any]] = []
@@ -837,6 +885,261 @@ def _build_lms_manual_course_plan(
     }
 
 
+def _build_maritime_vessel_management_course_plan(
+    *,
+    title_source: str,
+    refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    chapter_specs = [
+        {
+            "title": "Bối cảnh số hóa vận hành và hồ sơ tàu thủy",
+            "summary": "Đặt vấn đề quản lý vận hành và hồ sơ tàu trong doanh nghiệp vận tải biển.",
+            "markers": ("gioi thieu", "bai toan", "qpec", "van tai bien", "ho so tau"),
+            "objectives": [
+                "Giải thích được vì sao doanh nghiệp vận tải biển cần số hóa hồ sơ tàu.",
+                "Nhận diện các nhóm người dùng và điểm đau trong quản lý vận hành.",
+                "Xác định phạm vi khóa học dựa trên tài liệu nghiên cứu.",
+            ],
+            "lessons": [
+                (
+                    "Bài toán quản lý vận hành trong doanh nghiệp vận tải biển",
+                    "Tổng hợp bối cảnh, mục tiêu nghiên cứu và nhu cầu quản lý đội tàu.",
+                    "Người học lập bản đồ vấn đề: ai dùng hệ thống, dùng để giải quyết việc gì.",
+                    "Nếu không số hóa hồ sơ tàu, rủi ro vận hành lớn nhất là gì?",
+                ),
+                (
+                    "Phạm vi hồ sơ tàu và luồng thông tin cần quản lý",
+                    "Nhận diện hồ sơ, giấy tờ, chứng chỉ, nhật ký và dữ liệu vận hành liên quan đến tàu.",
+                    "Tạo checklist 10 loại thông tin cần có trong hồ sơ tàu.",
+                    "Một hồ sơ tàu đủ tốt cần trả lời được những câu hỏi nào?",
+                ),
+                (
+                    "Các bên liên quan: doanh nghiệp, tàu, bờ và người khai thác",
+                    "Phân tích vai trò của bộ phận bờ, tàu, quản lý và người vận hành hệ thống.",
+                    "Vẽ sơ đồ stakeholder và quyền truy cập dữ liệu tối thiểu.",
+                    "Vai trò nào cần được phân quyền chặt nhất, vì sao?",
+                ),
+            ],
+        },
+        {
+            "title": "Khảo sát nghiệp vụ và yêu cầu hệ thống",
+            "summary": "Chuyển khảo sát hiện trạng thành yêu cầu chức năng và phi chức năng.",
+            "markers": ("khao sat", "yeu cau", "nghiep vu", "bieu mau", "co cau to chuc"),
+            "objectives": [
+                "Tách được yêu cầu nghiệp vụ khỏi mô tả hiện trạng.",
+                "Mô hình hóa các quy trình chính trong vận hành và hồ sơ tàu.",
+                "Viết được yêu cầu kiểm chứng được cho hệ thống.",
+            ],
+            "lessons": [
+                (
+                    "Đọc khảo sát hiện trạng như một bản yêu cầu nghiệp vụ",
+                    "Rút ra quy trình, biểu mẫu và vấn đề đang tồn tại từ phần khảo sát.",
+                    "Đánh dấu các câu trong tài liệu có thể chuyển thành requirement.",
+                    "Một yêu cầu tốt khác một mô tả hiện trạng ở điểm nào?",
+                ),
+                (
+                    "Quy trình nghiệp vụ quản lý vận hành và hồ sơ tàu",
+                    "Mô tả các bước nghiệp vụ từ cập nhật hồ sơ đến theo dõi tình trạng vận hành.",
+                    "Dựng flow ngắn cho một nghiệp vụ: thêm hồ sơ tàu hoặc cập nhật chứng chỉ.",
+                    "Bước nào trong quy trình cần kiểm soát/audit rõ nhất?",
+                ),
+                (
+                    "Từ biểu mẫu giấy sang dữ liệu có cấu trúc",
+                    "Chuyển các giấy tờ và biểu mẫu thành trường dữ liệu, ràng buộc và trạng thái.",
+                    "Chọn một biểu mẫu trong tài liệu và thiết kế schema tối thiểu.",
+                    "Trường dữ liệu nào bắt buộc phải chuẩn hóa để tìm kiếm/báo cáo?",
+                ),
+            ],
+        },
+        {
+            "title": "Phân tích chức năng và luồng dữ liệu",
+            "summary": "Biến nghiệp vụ thành chức năng hệ thống, sơ đồ phân rã và luồng dữ liệu.",
+            "markers": ("phan tich chuc nang", "so do phan ra", "luong du lieu", "muc ngu canh", "muc dinh"),
+            "objectives": [
+                "Đọc được sơ đồ phân rã chức năng và sơ đồ luồng dữ liệu.",
+                "Liên kết chức năng với tác nhân và dữ liệu đầu vào/đầu ra.",
+                "Phát hiện điểm thiếu trong luồng dữ liệu trước khi thiết kế giao diện.",
+            ],
+            "lessons": [
+                (
+                    "Sơ đồ phân rã chức năng cho hệ thống quản lý tàu",
+                    "Tổ chức các chức năng lớn thành nhóm dễ triển khai và kiểm thử.",
+                    "So sánh cây chức năng trong tài liệu với một backlog sản phẩm.",
+                    "Chức năng nào là lõi vận hành, chức năng nào là hỗ trợ?",
+                ),
+                (
+                    "Sơ đồ luồng dữ liệu mức ngữ cảnh và mức đỉnh",
+                    "Giải thích dữ liệu đi qua hệ thống giữa người dùng, kho dữ liệu và báo cáo.",
+                    "Vẽ lại một luồng dữ liệu bằng ngôn ngữ người dùng cuối.",
+                    "Một luồng dữ liệu thiếu kho lưu trữ sẽ gây lỗi thiết kế nào?",
+                ),
+                (
+                    "Kiểm tra nhất quán giữa nghiệp vụ và chức năng",
+                    "Đối chiếu yêu cầu, chức năng, dữ liệu và báo cáo để tránh bỏ sót.",
+                    "Tạo ma trận traceability từ yêu cầu sang chức năng.",
+                    "Khi nào cần tách một chức năng thành hai module riêng?",
+                ),
+            ],
+        },
+        {
+            "title": "Thiết kế dữ liệu và hồ sơ tàu",
+            "summary": "Thiết kế thực thể, thuộc tính, quan hệ và bảng dữ liệu cho hồ sơ tàu.",
+            "markers": ("thiet ke co so du lieu", "thuc the", "thuoc tinh", "lien ket thuc the", "bang du lieu"),
+            "objectives": [
+                "Nhận diện được các thực thể cốt lõi trong hồ sơ tàu.",
+                "Thiết kế quan hệ dữ liệu phục vụ vận hành và truy xuất hồ sơ.",
+                "Kiểm tra dữ liệu theo tiêu chí toàn vẹn, tìm kiếm và báo cáo.",
+            ],
+            "lessons": [
+                (
+                    "Thực thể cốt lõi: tàu, hồ sơ, chứng chỉ, thiết bị và chuyến biển",
+                    "Tách các khái niệm nghiệp vụ thành thực thể dữ liệu có quan hệ rõ ràng.",
+                    "Lập danh sách entity và thuộc tính bắt buộc cho một tàu.",
+                    "Entity nào nên là trung tâm của mô hình dữ liệu, vì sao?",
+                ),
+                (
+                    "Sơ đồ liên kết thực thể và ràng buộc dữ liệu",
+                    "Đọc ERD và xác định quan hệ một-nhiều, nhiều-nhiều, bắt buộc/tùy chọn.",
+                    "Kiểm tra một quan hệ dữ liệu bằng ví dụ tàu có nhiều chứng chỉ.",
+                    "Ràng buộc nào giúp ngăn nhập hồ sơ tàu sai?",
+                ),
+                (
+                    "Bảng dữ liệu và khả năng báo cáo vận hành",
+                    "Đánh giá bảng dữ liệu theo nhu cầu lọc, cảnh báo, thống kê và truy xuất.",
+                    "Thiết kế một truy vấn báo cáo hết hạn giấy tờ/chứng chỉ.",
+                    "Nếu muốn cảnh báo tự động, bảng nào cần trường ngày hiệu lực?",
+                ),
+            ],
+        },
+        {
+            "title": "Thiết kế hệ thống tàu, hệ thống bờ và trải nghiệm người dùng",
+            "summary": "Kết nối dữ liệu, chức năng, phân quyền và giao diện theo bối cảnh tàu/bờ.",
+            "markers": ("he thong tau", "he thong bo", "giao dien", "phan quyen", "quan tri"),
+            "objectives": [
+                "Phân biệt nhu cầu sử dụng trên tàu và trên bờ.",
+                "Thiết kế giao diện theo vai trò và quy trình nghiệp vụ.",
+                "Đặt nguyên tắc phân quyền, audit và an toàn dữ liệu.",
+            ],
+            "lessons": [
+                (
+                    "Luồng làm việc giữa hệ thống tàu và hệ thống bờ",
+                    "Mô tả cách dữ liệu vận hành được nhập, đồng bộ, kiểm tra và khai thác.",
+                    "Phác thảo một workflow từ tàu gửi cập nhật đến bờ xác nhận.",
+                    "Điểm nào trong workflow cần xử lý offline hoặc chậm mạng?",
+                ),
+                (
+                    "Giao diện theo vai trò và tác vụ",
+                    "Biến chức năng thành màn hình, menu, form và trạng thái dễ dùng.",
+                    "Thiết kế wireframe nhanh cho màn hình hồ sơ tàu.",
+                    "Giao diện nào cần ưu tiên giảm lỗi nhập liệu?",
+                ),
+                (
+                    "Phân quyền, audit và bảo vệ hồ sơ tàu",
+                    "Xác định quyền xem/sửa/xóa/xuất báo cáo theo vai trò.",
+                    "Tạo bảng phân quyền tối thiểu cho quản lý, nhân viên bờ và người trên tàu.",
+                    "Vì sao xóa hồ sơ tàu cần cơ chế audit hoặc soft delete?",
+                ),
+            ],
+        },
+        {
+            "title": "Triển khai, kiểm thử và đánh giá hiệu quả",
+            "summary": "Đưa thiết kế vào môi trường doanh nghiệp, kiểm thử và đo giá trị vận hành.",
+            "markers": ("trien khai", "kiem thu", "danh gia", "ket qua", "ket luan", "huong phat trien"),
+            "objectives": [
+                "Lập kế hoạch triển khai hệ thống theo giai đoạn an toàn.",
+                "Thiết kế kiểm thử dựa trên nghiệp vụ và dữ liệu thật.",
+                "Đánh giá hiệu quả bằng chỉ số vận hành và chất lượng hồ sơ.",
+            ],
+            "lessons": [
+                (
+                    "Kế hoạch triển khai trong doanh nghiệp vận tải biển",
+                    "Chia triển khai thành các bước: chuẩn hóa dữ liệu, đào tạo, chạy thử và chuyển đổi.",
+                    "Lập checklist trước khi đưa hệ thống vào dùng thật.",
+                    "Rủi ro chuyển đổi dữ liệu nào cần kiểm soát đầu tiên?",
+                ),
+                (
+                    "Kiểm thử nghiệp vụ và dữ liệu hồ sơ tàu",
+                    "Xây dựng test case từ quy trình, biểu mẫu, phân quyền và báo cáo.",
+                    "Viết 3 test case cho nhập hồ sơ tàu, cập nhật chứng chỉ và xuất báo cáo.",
+                    "Test nào chứng minh hệ thống không chỉ đúng giao diện mà đúng nghiệp vụ?",
+                ),
+                (
+                    "Đánh giá hiệu quả và hướng phát triển",
+                    "Đo thời gian xử lý, mức đầy đủ hồ sơ, khả năng truy xuất và chất lượng báo cáo.",
+                    "Đề xuất 3 KPI để so sánh trước/sau khi số hóa.",
+                    "Một hệ thống quản lý hồ sơ tàu tốt nên cải tiến tiếp theo hướng nào?",
+                ),
+            ],
+        },
+    ]
+
+    chapters: list[dict[str, Any]] = []
+    for chapter_index, spec in enumerate(chapter_specs, start=1):
+        chapter_refs = _match_doc_refs(
+            refs,
+            tuple(spec["markers"]),
+            fallback_title=title_source,
+            chapter_index=chapter_index,
+        )
+        lessons = []
+        for lesson_index, (title, summary, activity, quick_check) in enumerate(
+            spec["lessons"],
+            start=1,
+        ):
+            lesson_refs = _match_doc_refs(
+                refs,
+                tuple(spec["markers"]) + tuple(title.lower().split()[:4]),
+                fallback_title=title_source,
+                chapter_index=chapter_index,
+                lesson_index=lesson_index,
+            )
+            lessons.append(
+                _lms_manual_lesson(
+                    title=title,
+                    summary=summary,
+                    activity=activity,
+                    quick_check=quick_check,
+                    refs=lesson_refs,
+                    duration_minutes=22,
+                )
+            )
+        chapters.append(
+            {
+                "title": spec["title"],
+                "summary": spec["summary"],
+                "learning_objectives": spec["objectives"],
+                "lessons": lessons,
+                "source_references": chapter_refs,
+            }
+        )
+
+    lesson_count = sum(len(chapter["lessons"]) for chapter in chapters)
+    return {
+        "title": "Quản lý vận hành và hồ sơ tàu thủy cho doanh nghiệp vận tải biển",
+        "description": (
+            "Khóa học chuyển tài liệu nghiên cứu về hệ thống quản lý vận hành và hồ sơ "
+            "tàu thủy thành lộ trình học thực hành cho doanh nghiệp vận tải biển."
+        ),
+        "audience": (
+            "Cán bộ quản lý vận hành, nhân sự phụ trách hồ sơ tàu, nhóm triển khai phần "
+            "mềm và người học ngành vận tải biển."
+        ),
+        "duration": f"{len(chapters)} chương, {lesson_count} bài, triển khai trong 4-6 buổi workshop.",
+        "chapters": chapters,
+        "assessment_plan": [
+            "Mỗi chương có bài kiểm tra nhanh dựa trên citation từ tài liệu nghiên cứu.",
+            "Cuối khóa làm case study: thiết kế module hồ sơ tàu và quy trình vận hành cho một doanh nghiệp mẫu.",
+            "Đánh giá bằng rubric gồm: đúng nghiệp vụ, đúng dữ liệu, an toàn phân quyền và khả năng triển khai.",
+        ],
+        "implementation_checklist": [
+            "Giáo viên kiểm tra citation trước khi áp dụng vào LMS.",
+            "Các chương/bài được tạo ở trạng thái draft; không publish tự động.",
+            "Nên bổ sung tài liệu mẫu hoặc biểu mẫu thật của doanh nghiệp trước buổi thực hành.",
+        ],
+        "source_document_title": title_source,
+    }
+
+
 def _extract_doc_headings(markdown: str) -> list[str]:
     headings: list[str] = []
     for raw_line in str(markdown or "").replace("\\_", "_").splitlines():
@@ -948,15 +1251,20 @@ def _build_uploaded_doc_course_params(query: str, state: AgentState | None) -> d
         or "Tài liệu đã tải lên"
     )
     refs = _extract_doc_section_references(combined_markdown, title_source)
-    domain_text = _normalize_doc_preview_text(
-        f"{query}\n{title_source}\n{combined_markdown[:5000]}"
-    )
-    is_lms_manual = any(
-        marker in domain_text
-        for marker in ("holilihu", "lms", "giang vien", "hoc vien", "quan ly")
+    is_lms_manual = _looks_holilihu_lms_manual_document(
+        title_source=title_source,
+        markdown=combined_markdown,
     )
     if is_lms_manual:
         course_plan = _build_lms_manual_course_plan(title_source=title_source, refs=refs)
+    elif _looks_maritime_vessel_management_document(
+        title_source=title_source,
+        markdown=combined_markdown,
+    ):
+        course_plan = _build_maritime_vessel_management_course_plan(
+            title_source=title_source,
+            refs=refs,
+        )
     else:
         course_plan = _build_generic_document_course_plan(
             title_source=title_source,
@@ -1046,8 +1354,11 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
 
     source_excerpt = " ".join(checklist[:2])[:360] or _first_nonempty_line(focused_markdown) or _first_nonempty_line(combined_markdown)
     page_start, page_end = _extract_source_pages(query, combined_markdown)
-    domain_text = _normalize_doc_preview_text(f"{query}\n{title_source}\n{combined_markdown[:2000]}")
-    is_lms_manual = any(marker in domain_text for marker in ("lms", "holilihu", "giang vien", "hoc vien", "quan ly"))
+    is_lms_manual = _looks_holilihu_lms_manual_document(
+        title_source=title_source,
+        markdown=combined_markdown,
+        query=query,
+    )
     checklist_heading = (
         "## Checklist thao tác / nội dung cần nắm"
         if is_lms_manual
