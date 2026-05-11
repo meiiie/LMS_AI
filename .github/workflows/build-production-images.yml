@@ -63,14 +63,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Validate precision Dockerfile profile
+        run: docker buildx build --check --build-arg INSTALL_PRECISION_DOCS=true -f maritime-ai-service/Dockerfile.prod .
+
       - name: Build app image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: maritime-ai-service/Dockerfile.prod
           push: false
-          build-args: |
-            INSTALL_PRECISION_DOCS=true
           tags: |
             ghcr.io/${{ steps.owner.outputs.value }}/wiii-app:pr-${{ github.sha }}
           cache-from: type=gha
