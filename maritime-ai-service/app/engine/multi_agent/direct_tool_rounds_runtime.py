@@ -49,6 +49,19 @@ _FORCED_WEB_SEARCH_TOOL_NAMES = (
 _RICH_SEARCH_RESULT_CHAR_FLOOR = 1200
 _DOC_PREVIEW_HOST_ACTION_TOOL = "host_action__authoring__preview_lesson_patch"
 _DOC_COURSE_HOST_ACTION_TOOL = "host_action__authoring__generate_course_from_document"
+_DOC_PREVIEW_LOW_VALUE_LABELS = {
+    "buoc",
+    "checkpoint",
+    "ket qua",
+    "ket qua dung",
+    "ket qua mong doi",
+    "muc tieu",
+    "muc tieu hoc tap",
+    "muc tieu sau khi doc",
+    "noi dung",
+    "thao tac",
+    "vai tro",
+}
 
 
 def _normalize_doc_preview_text(value: Any) -> str:
@@ -80,10 +93,19 @@ def _is_doc_preview_low_value_line(value: str) -> bool:
     line = str(value or "").strip()
     if not line:
         return True
-    normalized = _normalize_doc_preview_text(line).strip()
+    normalized = _normalize_doc_preview_text(line).strip(" #-:\t\r\n|")
+    if normalized in _DOC_PREVIEW_LOW_VALUE_LABELS:
+        return True
+    parts = [
+        part.strip(" #-:\t\r\n|")
+        for part in re.split(r"\s+-\s+|\s*[|:]\s*", normalized)
+        if part.strip(" #-:\t\r\n|")
+    ]
+    if parts and all(part in _DOC_PREVIEW_LOW_VALUE_LABELS for part in parts):
+        return True
     if normalized.startswith(("buoc - thao tac", "hinh ", "vai tro -")):
         return True
-    return bool(re.match(r"^\d+(?:\.\d+)*\.\s+\S+", line))
+    return bool(re.match(r"^\d+(?:\.\d+)*[.)]\s+\S+", line))
 
 
 def _uploaded_document_attachments_from_state(state: AgentState | None) -> list[dict[str, Any]]:
@@ -283,9 +305,19 @@ def _extract_marker(text: str) -> str:
 
 def _strip_doc_preview_goal_label(line: str) -> str:
     cleaned = str(line or "").strip()
-    if _normalize_doc_preview_text(cleaned).startswith("muc tieu "):
-        cleaned = re.sub(r"^(?:Mục tiêu|Muc tieu)\s*[-:–]?\s*", "", cleaned, flags=re.IGNORECASE)
-    return cleaned.strip() or str(line or "").strip()
+    if _is_doc_preview_low_value_line(cleaned):
+        return ""
+    if _normalize_doc_preview_text(cleaned).startswith("muc tieu"):
+        cleaned = re.sub(
+            r"^(?:Mục tiêu(?: học tập)?|Muc tieu(?: hoc tap)?)\s*[-:–]?\s*",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+    cleaned = cleaned.strip()
+    if _is_doc_preview_low_value_line(cleaned):
+        return ""
+    return cleaned
 
 
 def _extract_relevant_lines(markdown: str, markers: tuple[str, ...], *, limit: int) -> list[str]:
@@ -1805,15 +1837,25 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
             "- Khi có nguy cơ va chạm, quy trình báo cáo và ghi log nên diễn ra như thế nào?",
         ]
     )
+    clean_goals = [
+        cleaned
+        for line in goals[:4]
+        if (cleaned := _strip_doc_preview_goal_label(line))
+    ]
+    clean_checklist = [
+        line
+        for line in checklist[:5]
+        if line and not _is_doc_preview_low_value_line(line)
+    ]
     content_lines = [
         f"# Bản nháp bài học từ tài liệu: {title_source}",
         "",
         *([f"Marker kiểm thử: {marker}", ""] if marker else []),
         "## Mục tiêu học tập",
-        *[f"- {_strip_doc_preview_goal_label(line)}" for line in goals[:4]],
+        *[f"- {line}" for line in clean_goals],
         "",
         checklist_heading,
-        *[f"- {line}" for line in checklist[:5]],
+        *[f"- {line}" for line in clean_checklist],
         "",
         "## Hoạt động thảo luận",
         *discussion_lines,

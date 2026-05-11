@@ -977,6 +977,43 @@ def test_doc_preview_clean_line_drops_checkbox_table_markers():
     ) == "Thong tin khoa hoan chinh. - Co tieu de va muc tieu hoc tap."
 
 
+def test_uploaded_doc_preview_filters_bare_table_labels_from_goals():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_preview_params,
+    )
+
+    params = _build_uploaded_doc_preview_params(
+        "Tao preview_lesson_patch cho giao vien tu tai lieu vua upload.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "manual.docx",
+                            "markdown": (
+                                "Huong dan su dung HoLiLiHu LMS\n"
+                                "| **Muc tieu** |\n"
+                                "| **Muc tieu hoc tap** |\n"
+                                "| **Buoc** | **Thao tac** | **Ket qua dung** |\n"
+                                "Muc tieu hoc tap: giao vien cap nhat bai hoc va kiem tra nguon truoc khi luu.\n"
+                                "Checklist: xac nhan tieu de, noi dung, nguon va trang thai xuat ban.\n"
+                            ),
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    content = params["content"]
+    assert "- Muc tieu\n" not in content
+    assert "- Muc tieu hoc tap\n" not in content
+    assert "- Buoc" not in content
+    assert "- Thao tac" not in content
+    assert "giao vien cap nhat bai hoc" in content
+    assert "xac nhan tieu de" in content
+
+
 @pytest.mark.asyncio
 async def test_execute_direct_tool_rounds_forwards_runtime_tier_to_failover_helper():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
