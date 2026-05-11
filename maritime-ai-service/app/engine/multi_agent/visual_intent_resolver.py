@@ -413,6 +413,48 @@ def _resolve_visual_intent_core(query: str) -> VisualIntentDecision:
             critic_policy="premium",
         )
 
+    explicit_inline_visual = _contains_any(
+        normalized,
+        (
+            "article figure",
+            "comparison visual",
+            "compare visually",
+            "explain visually",
+            "inline diagram",
+            "inline figure",
+            "inline visual",
+            "minh hoa",
+            "minh hoa truc quan",
+            "structured visual",
+            "truc quan hoa",
+            "visual comparison",
+            "visual explanation",
+            "visual inline",
+            "with an inline visual",
+            "with visual",
+        ),
+    )
+    if explicit_inline_visual:
+        is_comparison = _contains_any(
+            normalized,
+            (
+                "compare",
+                "comparing",
+                "comparison",
+                "khac nhau",
+                "so sanh",
+                "trade off",
+                "vs ",
+            ),
+        )
+        return build_article_figure_decision_impl(
+            decision_cls=VisualIntentDecision,
+            visual_type="comparison" if is_comparison else "concept",
+            reason="explicit-inline-visual",
+            figure_budget=2,
+            living_expression_mode="expressive",
+        )
+
     if _contains_any(
         normalized,
         (
@@ -453,7 +495,18 @@ def _resolve_visual_intent_core(query: str) -> VisualIntentDecision:
             living_expression_mode="subtle",
         )
 
-    if _contains_any(normalized, ("so sanh", "compare", "vs ", "khac nhau", "uu nhuoc diem")):
+    if _contains_any(
+        normalized,
+        (
+            "comparison",
+            "compare",
+            "comparing",
+            "so sanh",
+            "vs ",
+            "khac nhau",
+            "uu nhuoc diem",
+        ),
+    ):
         return build_article_figure_decision_impl(
             decision_cls=VisualIntentDecision,
             visual_type="comparison",

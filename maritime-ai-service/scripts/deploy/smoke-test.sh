@@ -103,7 +103,7 @@ if [ -n "$API_KEY" ]; then
         -H "Content-Type: application/json" \
         -H "X-API-Key: ${API_KEY}" \
         -H "X-Session-ID: smoke-test-visual" \
-        -d '{"user_id":"api-client","message":"So sánh attention mềm và linear attention bằng visual inline","role":"student","session_id":"smoke-test-visual","domain_id":"maritime"}' \
+        -d '{"user_id":"api-client","message":"Create a compact inline visual comparing soft attention and linear attention. Use structured visual lifecycle.","role":"student","session_id":"smoke-test-visual","domain_id":"maritime"}' \
         --max-time 90 \
         2>/dev/null || true)
     check "Structured visual SSE opens visual lifecycle" "$(echo "$STREAM_BODY" | grep -q '^event: visual_open$' && echo true || echo false)"
