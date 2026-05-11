@@ -343,6 +343,23 @@ def _is_doc_preview_admonition_line(value: str) -> bool:
     )
 
 
+def _shape_doc_preview_learning_goal(value: str, *, is_lms_manual: bool) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned or not is_lms_manual:
+        return cleaned
+    normalized = _normalize_doc_preview_text(cleaned)
+    if normalized.startswith("phan nay tap trung vao"):
+        detail = re.sub(
+            r"^(?:Phần|Phan)\s+(?:này|nay)\s+(?:tập trung|tap trung)\s+(?:vào|vao)\s*",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        ).strip(" .")
+        if detail:
+            return f"Giáo viên thực hiện được {detail} trong LMS."
+    return cleaned
+
+
 def _extract_relevant_lines(markdown: str, markers: tuple[str, ...], *, limit: int) -> list[str]:
     normalized_markers = tuple(_normalize_doc_preview_text(marker) for marker in markers)
     selected: list[str] = []
@@ -1869,7 +1886,9 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
             or _is_doc_preview_admonition_line(cleaned)
         ):
             continue
-        clean_goals.append(cleaned)
+        clean_goals.append(
+            _shape_doc_preview_learning_goal(cleaned, is_lms_manual=is_lms_manual)
+        )
 
     if not clean_goals:
         fallback_goal = _strip_doc_preview_goal_label(
@@ -1882,7 +1901,9 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
             and _normalize_doc_preview_text(fallback_goal)
             != _normalize_doc_preview_text(title_source)
         ):
-            clean_goals.append(fallback_goal)
+            clean_goals.append(
+                _shape_doc_preview_learning_goal(fallback_goal, is_lms_manual=is_lms_manual)
+            )
     if not clean_goals:
         clean_goals = [
             (
