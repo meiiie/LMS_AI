@@ -63,7 +63,9 @@ Important guardrail:
   `GUNICORN_WORKERS=2`, `ASYNC_POOL_MAX_SIZE=20`, `APP_MEM_LIMIT=4G`.
 - Production app images are built with `INSTALL_PRECISION_DOCS=true`, which
   installs `maritime-ai-service/requirements-precision.txt` and enables the
-  Docling parser without slowing every regular unit-test install.
+  Docling parser without slowing every regular unit-test install. The production
+  runtime image also includes LibreOffice for Office layout conversion and
+  `ffmpeg`/`ffprobe` for bounded video upload context.
 
 Production `.env.production` is secret-bearing and must stay on the VM. For the current NVIDIA-backed product lane, apply these non-secret shape requirements there rather than committing a changed `.env` template:
 

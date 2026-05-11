@@ -85,6 +85,7 @@ ARG INSTALL_PRECISION_DOCS=false
 # Runtime libs for Playwright Chromium (no build tools needed).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
+        ffmpeg \
         libgomp1 \
         libgl1 \
         libpq5 \

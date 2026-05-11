@@ -95,7 +95,9 @@ Prefer the provision helper above so the VM, static IP, firewall tags, and SSH s
 The setup script assumes this single-node profile by default: 4G swap,
 conservative Docker resource limits, one app replica until Postgres/cache/object
 storage move off-host, and enough RAM headroom for the Docling precision parser
-plus LibreOffice-based Office layout/image conversion.
+plus LibreOffice-based Office layout/image conversion. Production images also
+include `ffmpeg`/`ffprobe` so bounded video upload context can extract metadata
+and representative keyframes.
 
 ---
 
