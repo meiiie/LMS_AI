@@ -23,6 +23,29 @@ def test_resolves_comparison_visual():
     assert decision.critic_policy == "standard"
 
 
+def test_resolves_explicit_inline_visual_comparison_request():
+    decision = resolve_visual_intent(
+        "Create a compact inline visual comparing soft attention and linear attention. "
+        "Use structured visual lifecycle."
+    )
+    assert decision.mode == "inline_html"
+    assert decision.force_tool is True
+    assert decision.visual_type == "comparison"
+    assert decision.reason == "explicit-inline-visual"
+    assert decision.presentation_intent == "article_figure"
+    assert decision.preferred_tool == "tool_generate_visual"
+
+
+def test_resolves_mojibake_smoke_prompt_from_deploy_script():
+    decision = resolve_visual_intent(
+        "So sÃ¡nh attention má»m vÃ  linear attention báº±ng visual inline"
+    )
+    assert decision.mode == "inline_html"
+    assert decision.force_tool is True
+    assert decision.presentation_intent == "article_figure"
+    assert decision.preferred_tool == "tool_generate_visual"
+
+
 def test_resolves_process_visual():
     decision = resolve_visual_intent("Giai thich quy trinh docking step by step")
     assert decision.mode == "inline_html"
