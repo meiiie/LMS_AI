@@ -1117,6 +1117,37 @@ def test_uploaded_doc_preview_shapes_descriptive_excerpt_into_learning_goal():
     )
 
 
+def test_uploaded_doc_preview_repairs_truncated_publish_word_in_learning_goal():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_preview_params,
+    )
+
+    params = _build_uploaded_doc_preview_params(
+        "Tao preview_lesson_patch cho giao vien tu tai lieu vua upload.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "manual.docx",
+                            "markdown": (
+                                "Huong dan su dung HoLiLiHu LMS\n"
+                                "Phan nay tap trung vao tac vu tao va van hanh khoa hoc: "
+                                "lap khoa, soan noi dung, tao cau hoi, cau hinh video, "
+                                "kiem tra roi xuat ba\n"
+                            ),
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    objectives_section = params["content"].split("## Checklist", 1)[0]
+    assert "xuat ba trong LMS" not in objectives_section
+    assert "xuất bản trong LMS" in objectives_section
+
+
 def test_uploaded_doc_preview_supplements_sparse_lms_learning_goals():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         _build_uploaded_doc_preview_params,

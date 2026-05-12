@@ -343,10 +343,28 @@ def _is_doc_preview_admonition_line(value: str) -> bool:
     )
 
 
+def _repair_doc_preview_common_truncations(value: str) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return ""
+    return re.sub(r"(?:xuất|xuat)\s+b[ảa]\s*$", "xuất bản", cleaned, flags=re.IGNORECASE)
+
+
+def _clip_doc_preview_line(value: str, *, limit: int = 260) -> str:
+    cleaned = str(value or "").strip()
+    if len(cleaned) <= limit:
+        return _repair_doc_preview_common_truncations(cleaned)
+    clipped = cleaned[:limit].rstrip()
+    boundary = max(clipped.rfind(" "), clipped.rfind("\t"))
+    if boundary >= int(limit * 0.72):
+        clipped = clipped[:boundary].rstrip()
+    return _repair_doc_preview_common_truncations(clipped.rstrip(" ,;:-"))
+
+
 def _shape_doc_preview_learning_goal(value: str, *, is_lms_manual: bool) -> str:
     cleaned = str(value or "").strip()
     if not cleaned or not is_lms_manual:
-        return cleaned
+        return _repair_doc_preview_common_truncations(cleaned)
     normalized = _normalize_doc_preview_text(cleaned)
     if normalized.startswith("phan nay tap trung vao"):
         detail = re.sub(
@@ -356,8 +374,10 @@ def _shape_doc_preview_learning_goal(value: str, *, is_lms_manual: bool) -> str:
             flags=re.IGNORECASE,
         ).strip(" .")
         if detail:
-            return f"Giáo viên thực hiện được {detail} trong LMS."
-    return cleaned
+            repaired = _repair_doc_preview_common_truncations(detail)
+            return f"Giáo viên thực hiện được {repaired} trong LMS."
+    return _repair_doc_preview_common_truncations(cleaned)
+
 
 
 def _supplement_doc_preview_learning_goals(
@@ -404,7 +424,7 @@ def _extract_relevant_lines(markdown: str, markers: tuple[str, ...], *, limit: i
             continue
         normalized_line = _normalize_doc_preview_text(line)
         if any(marker in normalized_line for marker in normalized_markers):
-            selected.append(line[:220])
+            selected.append(_clip_doc_preview_line(line))
         if len(selected) >= limit:
             break
     return selected
