@@ -235,8 +235,10 @@ precision_docs_enabled() {
     local parser_mode
     local use_docling
 
-    parser_mode="$(clean_value "${DOCUMENT_CONTEXT_PARSER_MODE:-$(env_value DOCUMENT_CONTEXT_PARSER_MODE || true)}")"
-    use_docling="$(clean_value "${USE_DOCLING_FOR_COURSE_GEN:-$(env_value USE_DOCLING_FOR_COURSE_GEN || true)}")"
+    # Mirror docker-compose.prod.yml defaults. Production enables the precision
+    # parser lane unless the operator explicitly opts out in the environment.
+    parser_mode="$(clean_value "${DOCUMENT_CONTEXT_PARSER_MODE:-$(env_value DOCUMENT_CONTEXT_PARSER_MODE || echo precision)}")"
+    use_docling="$(clean_value "${USE_DOCLING_FOR_COURSE_GEN:-$(env_value USE_DOCLING_FOR_COURSE_GEN || echo true)}")"
     parser_mode="$(printf '%s' "${parser_mode:-}" | tr '[:upper:]' '[:lower:]')"
 
     [ "$parser_mode" = "precision" ] || is_truthy "$use_docling"

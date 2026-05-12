@@ -291,6 +291,8 @@ class TestProductionOperationalScripts:
         assert "MIN_PRECISION_DOCKER_FREE_GIB" in script
         assert "ALLOW_LOW_MEMORY_PRECISION" in script
         assert "/proc/meminfo" in script
+        assert "echo precision" in script
+        assert "echo true" in script
         assert "DOCUMENT_CONTEXT_PARSER_MODE" in script
         assert "USE_DOCLING_FOR_COURSE_GEN" in script
 
