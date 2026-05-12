@@ -52,6 +52,8 @@ _DOC_COURSE_HOST_ACTION_TOOL = "host_action__authoring__generate_course_from_doc
 _DOC_PREVIEW_LOW_VALUE_LABELS = {
     "buoc",
     "checkpoint",
+    "cong trinh",
+    "de tai",
     "ket qua",
     "ket qua dung",
     "ket qua mong doi",
@@ -473,7 +475,11 @@ def _is_low_value_doc_preview_title(value: str) -> bool:
     normalized = _normalize_doc_preview_text(value)
     if not normalized:
         return True
+    if re.fullmatch(r"tmp[a-z0-9_-]{4,}", normalized):
+        return True
     return normalized in {
+        "cong trinh",
+        "de tai",
         "parser provenance",
         "document context",
         "uploaded document context",
@@ -732,13 +738,21 @@ def _looks_holilihu_lms_manual_document(
         "xuat ban",
         "quiz",
     )
+    guide_markers = (
+        "huong dan",
+        "huong dan su dung",
+        "huong dan chi tiet",
+        "manual",
+        "user guide",
+    )
     if "holilihu" in document_text:
-        return True
+        return any(marker in document_text for marker in guide_markers + manual_markers)
+    has_manual_frame = any(marker in document_text for marker in guide_markers)
     if re.search(r"(^|[^a-z0-9])lms([^a-z0-9]|$)", document_text):
-        return any(marker in document_text for marker in manual_markers)
+        return has_manual_frame and any(marker in document_text for marker in manual_markers)
     query_text = _normalize_doc_preview_text(query)
     query_says_lms = "holilihu" in query_text or re.search(r"(^|[^a-z0-9])lms([^a-z0-9]|$)", query_text)
-    if query_says_lms and any(marker in document_text for marker in manual_markers):
+    if query_says_lms and has_manual_frame and any(marker in document_text for marker in manual_markers):
         return True
     return False
 
@@ -1784,9 +1798,12 @@ def _build_uploaded_doc_course_params(query: str, state: AgentState | None) -> d
     )
     first_attachment = attachments[0] if attachments else {}
     query_title = _extract_doc_course_title_from_query(query)
+    attachment_title = str(first_attachment.get("title") or "").strip()
+    if _is_low_value_doc_preview_title(attachment_title):
+        attachment_title = ""
     title_source = (
         query_title
-        or str(first_attachment.get("title") or "").strip()
+        or attachment_title
         or _first_nonempty_line(combined_markdown)
         or str(first_attachment.get("file_name") or "").strip()
         or "Tài liệu đã tải lên"
