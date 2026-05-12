@@ -766,6 +766,61 @@ def test_uploaded_doc_course_plan_research_title_overrides_manual_markers_in_bod
     assert "khai thac holilihu lms" not in normalized_title
 
 
+def test_uploaded_doc_course_title_skips_cover_metadata_for_long_thesis_doc():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_course_params,
+        _normalize_doc_preview_text,
+    )
+
+    title = (
+        "NGHIEN CUU XAY DUNG HE THONG QUAN LY VAN HANH VA HO SO TAU THUY "
+        "PHUC VU DOANH NGHIEP VAN TAI BIEN"
+    )
+    markdown = (
+        "| BO XAY DUNG | BO GIAO DUC VA DAO TAO |\n"
+        "|-------------|-------------------------|\n\n"
+        "**TRUONG DAI HOC HANG HAI VIET NAM**\n\n"
+        "<!-- image -->\n\n"
+        "**VU DUC TINH - 97658 - CNT63CL**\n\n"
+        "**BUI TRUNG HIEU - 95457 - CNT63CL**\n\n"
+        "**THUC TAP TOT NGHIEP**\n\n"
+        f"**{title}**\n\n"
+        "HAI PHONG - 2026\n\n"
+        "# MO DAU\n"
+        "Tai lieu trinh bay bai toan quan ly van hanh, ho so tau thuy va doanh nghiep van tai bien.\n"
+        "Nguon section: Mo dau bai toan quan ly ho so tau (trang 1-4)\n"
+        "# PHAN TICH HE THONG\n"
+        "Mo ta chuc nang quan ly tau, ho so, thuyen vien, bao tri va van hanh.\n"
+        "Nguon section: Phan tich he thong quan ly tau (trang 5-20)\n"
+    )
+
+    params = _build_uploaded_doc_course_params(
+        "Tao bai giang di.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "40 - GV.25-26.01.31.docx",
+                            "markdown": markdown,
+                        }
+                    ]
+                },
+                "page_context": {"course_id": "course-thesis"},
+            }
+        },
+    )
+
+    plan = params["course_plan"]
+    normalized_source = _normalize_doc_preview_text(plan["source_document_title"])
+    assert params["course_id"] == "course-thesis"
+    assert plan["document_domain"]["id"] == "maritime_vessel_management"
+    assert "bo xay dung" not in normalized_source
+    assert "truong dai hoc" not in normalized_source
+    assert "nghien cuu xay dung he thong quan ly van hanh" in normalized_source
+    assert "doanh nghiep van tai bien" in normalized_source
+
+
 def test_generic_uploaded_doc_course_clusters_full_long_document_map():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         _build_uploaded_doc_course_params,
