@@ -48,6 +48,7 @@ SKIP_IMAGE_MANIFEST_CHECK="${SKIP_IMAGE_MANIFEST_CHECK:-false}"
 SKIP_PREDEPLOY_BACKUP="${SKIP_PREDEPLOY_BACKUP:-false}"
 RUN_EXTERNAL_SMOKE="${RUN_EXTERNAL_SMOKE:-false}"
 SKIP_PRE_PULL_DOCKER_CLEANUP="${SKIP_PRE_PULL_DOCKER_CLEANUP:-false}"
+SKIP_PRECISION_HOST_CAPACITY_CHECK="${SKIP_PRECISION_HOST_CAPACITY_CHECK:-false}"
 ALLOW_LOW_MEMORY_PRECISION="${ALLOW_LOW_MEMORY_PRECISION:-false}"
 MIN_PRECISION_HOST_MEM_GIB="${MIN_PRECISION_HOST_MEM_GIB:-12}"
 MIN_PRECISION_DOCKER_FREE_GIB="${MIN_PRECISION_DOCKER_FREE_GIB:-12}"
@@ -231,19 +232,6 @@ is_truthy() {
     esac
 }
 
-precision_docs_enabled() {
-    local parser_mode
-    local use_docling
-
-    # Mirror docker-compose.prod.yml defaults. Production enables the precision
-    # parser lane unless the operator explicitly opts out in the environment.
-    parser_mode="$(clean_value "${DOCUMENT_CONTEXT_PARSER_MODE:-$(env_value DOCUMENT_CONTEXT_PARSER_MODE || echo precision)}")"
-    use_docling="$(clean_value "${USE_DOCLING_FOR_COURSE_GEN:-$(env_value USE_DOCLING_FOR_COURSE_GEN || echo true)}")"
-    parser_mode="$(printf '%s' "${parser_mode:-}" | tr '[:upper:]' '[:lower:]')"
-
-    [ "$parser_mode" = "precision" ] || is_truthy "$use_docling"
-}
-
 capacity_failure() {
     local message="$1"
     if is_truthy "$ALLOW_LOW_MEMORY_PRECISION"; then
@@ -258,10 +246,17 @@ capacity_failure() {
 }
 
 validate_host_capacity() {
-    info "Step 4/11: Validating host capacity for the selected parser profile..."
+    info "Step 4/11: Validating host capacity for precision document parsing..."
 
-    if ! precision_docs_enabled; then
-        info "Precision document parsing is disabled; skipping precision-docs capacity guard."
+    local parser_mode
+    local use_docling
+    parser_mode="$(clean_value "${DOCUMENT_CONTEXT_PARSER_MODE:-$(env_value DOCUMENT_CONTEXT_PARSER_MODE || echo precision)}")"
+    use_docling="$(clean_value "${USE_DOCLING_FOR_COURSE_GEN:-$(env_value USE_DOCLING_FOR_COURSE_GEN || echo true)}")"
+    info "Configured parser profile: DOCUMENT_CONTEXT_PARSER_MODE=${parser_mode:-unset}, USE_DOCLING_FOR_COURSE_GEN=${use_docling:-unset}."
+
+    if is_truthy "$SKIP_PRECISION_HOST_CAPACITY_CHECK"; then
+        warn "Skipping precision-docs capacity guard because SKIP_PRECISION_HOST_CAPACITY_CHECK=true."
+        warn "Use this only for an emergency deploy or a verified fast-only host that cannot accept per-request precision parsing."
         return 0
     fi
 

@@ -61,14 +61,15 @@ Important guardrail:
   headroom.
 - Docker defaults are tuned for single-node production: `APP_REPLICAS=1`,
   `GUNICORN_WORKERS=2`, `ASYNC_POOL_MAX_SIZE=20`, `APP_MEM_LIMIT=4G`.
-- Deploys with `DOCUMENT_CONTEXT_PARSER_MODE=precision` or
-  `USE_DOCLING_FOR_COURSE_GEN=true` fail early when the host has less than
-  `12GiB` physical RAM or less than `12GiB` free Docker/root disk. This is a
-  guardrail, not a performance target: the recommended product profile remains
-  `e2-standard-4` with an `80GB` boot disk. Use
+- Deploys fail early when the host has less than `12GiB` physical RAM or less
+  than `12GiB` free Docker/root disk because production images include the
+  precision document parser and teacher uploads can request precision parsing
+  per document. This is a guardrail, not a performance target: the recommended
+  product profile remains `e2-standard-4` with an `80GB` boot disk. Use
   `ALLOW_LOW_MEMORY_PRECISION=true` only for an explicit emergency deploy where
-  the operator accepts the risk, or temporarily switch to the fast parser lane
-  until the VM is resized.
+  the operator accepts the risk. Use
+  `SKIP_PRECISION_HOST_CAPACITY_CHECK=true` only for a verified fast-only host
+  that cannot accept per-request precision parsing.
 - Production app images are built with `INSTALL_PRECISION_DOCS=true`, which
   installs `maritime-ai-service/requirements-precision.txt` and enables the
   Docling parser without slowing every regular unit-test install. The production
