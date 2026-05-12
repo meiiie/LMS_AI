@@ -1,11 +1,26 @@
 # Wiii Memory Index
 
 Status: Active
-Last updated: 2026-05-08
+Last updated: 2026-05-12
 
 This directory stores high-signal handoff notes for future Wiii Agentic sessions. Keep entries short, source-backed, and linked to the deeper handoff file.
 
 ## Project Status (Current)
+
+### 2026-05-12 - Product doc-to-course hardening deployed
+
+Read when continuing Wiii x Maritime LMS production readiness, precision document parsing, doc-to-course preview/apply, deployment smoke, or Pointy product E2E:
+
+- [handoff-product-doc-to-course-2026-05-12.md](handoff-product-doc-to-course-2026-05-12.md)
+
+Key anchors:
+
+- Latest production Wiii SHA: `df0d226d3e6f3b7d15fe2fcc611cf26374f99212`.
+- Deploy run `25729067217` passed: pinned image validation, precision capacity guard, structured visual lifecycle, public Pointy bundle, and `19 passed, 0 failed`.
+- Long maritime research DOCX product smoke passed with Docling: `225491` characters, `168` assets, `6` chapters, `18` lessons, `12` sources, no HoLiLiHu/manual leakage.
+- Verified apply smoke passed: LMS preview/diff/citation shown, teacher approval apply succeeded, authenticated API found marker, stale section title absent.
+- Merged hardening PRs: `#358`, `#360`, `#362`, `#364`, `#366`, `#368`.
+- Remaining true debt: committed Pointy product E2E smoke, page/layout citation fidelity, video pipeline revalidation, vision-provider revalidation, and embed chunk-size performance.
 
 ### 2026-05-08 - Realistic Wiii field test and core fixes
 
