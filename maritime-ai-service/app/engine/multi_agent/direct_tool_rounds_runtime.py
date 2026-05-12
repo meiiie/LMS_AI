@@ -548,9 +548,12 @@ def _resolve_doc_preview_lesson_id(state: AgentState | None) -> str:
     if isinstance(ctx, dict):
         candidates.extend([ctx.get("lesson_id"), ctx.get("lessonId")])
         for key in ("page_context", "host_context"):
-            value = ctx.get(key)
-            if isinstance(value, dict):
-                candidates.extend([value.get("lesson_id"), value.get("lessonId")])
+            _extend_doc_context_id_candidates(
+                candidates,
+                ctx.get(key),
+                snake_key="lesson_id",
+                camel_key="lessonId",
+            )
     for candidate in candidates:
         normalized = str(candidate or "").strip()
         if normalized:
@@ -566,14 +569,47 @@ def _resolve_doc_preview_course_id(state: AgentState | None) -> str:
     if isinstance(ctx, dict):
         candidates.extend([ctx.get("course_id"), ctx.get("courseId")])
         for key in ("page_context", "host_context"):
-            value = ctx.get(key)
-            if isinstance(value, dict):
-                candidates.extend([value.get("course_id"), value.get("courseId")])
+            _extend_doc_context_id_candidates(
+                candidates,
+                ctx.get(key),
+                snake_key="course_id",
+                camel_key="courseId",
+            )
     for candidate in candidates:
         normalized = str(candidate or "").strip()
         if normalized:
             return normalized
     return ""
+
+
+def _extend_doc_context_id_candidates(
+    candidates: list[Any],
+    value: Any,
+    *,
+    snake_key: str,
+    camel_key: str,
+    depth: int = 0,
+) -> None:
+    if not isinstance(value, dict) or depth > 3:
+        return
+    candidates.extend([value.get(snake_key), value.get(camel_key)])
+    for nested_key in (
+        "metadata",
+        "entity_refs",
+        "page",
+        "page_context",
+        "selection",
+        "editable_scope",
+    ):
+        nested = value.get(nested_key)
+        if isinstance(nested, dict):
+            _extend_doc_context_id_candidates(
+                candidates,
+                nested,
+                snake_key=snake_key,
+                camel_key=camel_key,
+                depth=depth + 1,
+            )
 
 
 def _extract_doc_course_title_from_query(query: str) -> str:
@@ -723,9 +759,6 @@ def _looks_holilihu_lms_manual_document(
     markdown: str,
     query: str = "",
 ) -> bool:
-    document_text = _normalize_doc_preview_text(
-        f"{title_source}\n{str(markdown or '')[:8000]}"
-    )
     manual_markers = (
         "huong dan su dung",
         "huong dan cho hoc vien",
@@ -745,12 +778,56 @@ def _looks_holilihu_lms_manual_document(
         "manual",
         "user guide",
     )
+    title_text = _normalize_doc_preview_text(title_source)
+    query_text = _normalize_doc_preview_text(query)
+    title_has_guide_frame = any(marker in title_text for marker in guide_markers)
+    title_has_holilihu = "holilihu" in title_text
+    query_explicitly_requests_holilihu_manual = (
+        "holilihu" in query_text and any(marker in query_text for marker in guide_markers)
+    )
+    research_title_markers = (
+        "nghien cuu",
+        "cong trinh",
+        "de tai",
+        "bao cao",
+        "luan van",
+        "khoa luan",
+        "xay dung he thong",
+        "thiet ke he thong",
+    )
+    maritime_training_title_markers = (
+        "thuy thu",
+        "hang hai",
+        "nghiep vu chuyen mon",
+        "van tai bien",
+        "tau thuy",
+    )
+    title_is_research_lms = bool(
+        title_text
+        and re.search(r"(^|[^a-z0-9])lms([^a-z0-9]|$)", title_text)
+        and any(marker in title_text for marker in research_title_markers)
+    )
+    title_is_maritime_training_research = bool(
+        title_text
+        and any(marker in title_text for marker in research_title_markers)
+        and any(marker in title_text for marker in maritime_training_title_markers)
+    )
+    if (
+        (title_is_research_lms or title_is_maritime_training_research)
+        and not title_has_holilihu
+        and not title_has_guide_frame
+        and not query_explicitly_requests_holilihu_manual
+    ):
+        return False
+
+    document_text = _normalize_doc_preview_text(
+        f"{title_source}\n{str(markdown or '')[:8000]}"
+    )
     if "holilihu" in document_text:
         return any(marker in document_text for marker in guide_markers + manual_markers)
     has_manual_frame = any(marker in document_text for marker in guide_markers)
     if re.search(r"(^|[^a-z0-9])lms([^a-z0-9]|$)", document_text):
         return has_manual_frame and any(marker in document_text for marker in manual_markers)
-    query_text = _normalize_doc_preview_text(query)
     query_says_lms = "holilihu" in query_text or re.search(r"(^|[^a-z0-9])lms([^a-z0-9]|$)", query_text)
     if query_says_lms and has_manual_frame and any(marker in document_text for marker in manual_markers):
         return True

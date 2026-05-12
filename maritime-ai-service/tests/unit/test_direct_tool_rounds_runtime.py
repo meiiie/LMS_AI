@@ -714,6 +714,58 @@ def test_uploaded_doc_course_plan_builder_keeps_maritime_lms_research_out_of_hol
     assert "thuy thu" in normalized_plan
 
 
+def test_uploaded_doc_course_plan_research_title_overrides_manual_markers_in_body():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_course_params,
+        _normalize_doc_preview_text,
+    )
+
+    markdown = (
+        "CONG TRINH\n\n"
+        "**NGHIEN CUU XAY DUNG HE THONG LMS NANG CAO NGHIEP VU CHUYEN MON CHO CAC THUY THU**\n"
+        "# GIOI THIEU\n"
+        "Tai lieu phan tich nhu cau boi duong nghiep vu chuyen mon cho thuy thu bang he thong LMS.\n"
+        "Nguon section: Gioi thieu nhu cau dao tao thuy thu (trang 1-5)\n"
+        "# HUONG DAN SU DUNG HE THONG LMS\n"
+        "Noi dung minh hoa co cac marker dang nhap, tao khoa hoc, them video va quiz.\n"
+        "HoLiLiHu LMS duoc nhac den nhu mot vi du san pham trong qua trinh nghien cuu.\n"
+        "Nguon section: Phan tich chuc nang LMS va quy trinh su dung (trang 19-36)\n"
+        "# THU NGHIEM VA DANH GIA\n"
+        "Danh gia kha nang ung dung he thong trong dao tao nghiep vu chuyen mon cho thuy thu.\n"
+        "Nguon section: Thu nghiem va danh gia (trang 37-48)\n"
+    )
+
+    params = _build_uploaded_doc_course_params(
+        "Tao bai giang di.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "SV25-26.43_KH-KT.docx",
+                            "title": "tmpg98c_ocp",
+                            "markdown": markdown,
+                        }
+                    ]
+                },
+                "host_context": {
+                    "page": {
+                        "metadata": {
+                            "course_id": "course-from-nested-host-metadata",
+                        }
+                    }
+                },
+            }
+        },
+    )
+
+    plan = params["course_plan"]
+    normalized_title = _normalize_doc_preview_text(plan["title"])
+    assert params["course_id"] == "course-from-nested-host-metadata"
+    assert plan["document_domain"]["id"] != "holilihu_lms_manual"
+    assert "khai thac holilihu lms" not in normalized_title
+
+
 def test_generic_uploaded_doc_course_clusters_full_long_document_map():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         _build_uploaded_doc_course_params,
