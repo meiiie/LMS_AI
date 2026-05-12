@@ -758,6 +758,8 @@ def test_uploaded_doc_course_request_matches_real_teacher_curriculum_wording():
         _looks_uploaded_doc_course_request,
     )
 
+    assert _looks_uploaded_doc_course_request("Tạo bài giảng đi.")
+    assert _looks_uploaded_doc_course_request("Soạn giáo án từ tài liệu vừa upload.")
     assert _looks_uploaded_doc_course_request(
         "Tu file Word vua upload, lap chuong trinh dao tao hoan chinh, "
         "de cuong khoa, lo trinh hoc va chia thanh chuong/bai co citation."
