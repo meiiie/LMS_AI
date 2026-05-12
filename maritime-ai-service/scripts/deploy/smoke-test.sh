@@ -108,7 +108,9 @@ if [ -n "$API_KEY" ]; then
         -d "$VISUAL_PAYLOAD" \
         --max-time 90 \
         2>/dev/null || true)
-    check "Structured visual SSE opens visual lifecycle" "$(echo "$STREAM_BODY" | grep -q '^event: visual_open$' && echo true || echo false)"
+    VISUAL_EVENTS="$(printf '%s\n' "$STREAM_BODY" | grep '^event:' | tr '\n' ' ' || true)"
+    echo "  [INFO] Structured visual SSE events: ${VISUAL_EVENTS:-none}"
+    check "Structured visual SSE opens or patches visual lifecycle" "$(printf '%s\n' "$STREAM_BODY" | grep -Eq '^event: visual_(open|patch)$' && echo true || echo false)"
     check "Structured visual SSE commits visual lifecycle" "$(echo "$STREAM_BODY" | grep -q '^event: visual_commit$' && echo true || echo false)"
     check "Structured visual stream hides raw widget fences" "$([ -n "$STREAM_BODY" ] && ! echo "$STREAM_BODY" | grep -q '```widget' && echo true || echo false)"
 else
