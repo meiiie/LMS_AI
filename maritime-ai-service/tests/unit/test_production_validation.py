@@ -203,8 +203,18 @@ class TestProductionSmokeTestDocs:
         import pathlib
 
         script = pathlib.Path("scripts/deploy/smoke-test.sh").read_text(encoding="utf-8")
-        assert '"user_id": "api-client"' in script
+        assert '"user_id":"api-client"' in script
         assert '-H "X-User-ID:' not in script
+
+    def test_smoke_test_script_uses_fast_sync_chat_probe(self):
+        """Sync /chat deploy smoke should avoid ambiguous prompts that hit slow LLM paths."""
+        import pathlib
+
+        script = pathlib.Path("scripts/deploy/smoke-test.sh").read_text(encoding="utf-8")
+        assert '"message":"doi phet"' in script
+        assert 'CHAT_SESSION_ID="smoke-test-chat-' in script
+        assert "%{time_total}" in script
+        assert '"message": "test"' not in script
 
     def test_smoke_test_script_matches_sse_v3_visual_lifecycle(self):
         """Production visual smoke test should assert current SSE V3 lifecycle events."""
