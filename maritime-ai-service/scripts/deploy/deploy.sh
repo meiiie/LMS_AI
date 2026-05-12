@@ -226,21 +226,34 @@ validate_compose_config() {
 inspect_image_manifest_with_retry() {
     local image="$1"
     local attempt=1
+    local inspect_output=""
+    local inspect_status=0
 
     while [ "$attempt" -le "$IMAGE_MANIFEST_RETRIES" ]; do
-        if docker manifest inspect "$image" >/dev/null; then
+        set +e
+        inspect_output="$(docker manifest inspect "$image" 2>&1 >/dev/null)"
+        inspect_status=$?
+        set -e
+
+        if [ "$inspect_status" -eq 0 ]; then
             info "Validated image manifest: ${image}"
             return 0
         fi
 
+        if [ -n "$inspect_output" ]; then
+            inspect_output="$(printf '%s\n' "$inspect_output" | tail -n 1)"
+        else
+            inspect_output="unknown image manifest failure"
+        fi
+
         if [ "$attempt" -lt "$IMAGE_MANIFEST_RETRIES" ]; then
-            warn "Image manifest check failed for ${image} (attempt ${attempt}/${IMAGE_MANIFEST_RETRIES}); retrying in ${IMAGE_MANIFEST_RETRY_DELAY_SECONDS}s."
+            warn "Image manifest check failed for ${image} (attempt ${attempt}/${IMAGE_MANIFEST_RETRIES}); retrying in ${IMAGE_MANIFEST_RETRY_DELAY_SECONDS}s. Last error: ${inspect_output}"
             sleep "$IMAGE_MANIFEST_RETRY_DELAY_SECONDS"
         fi
         attempt=$((attempt + 1))
     done
 
-    error "Image manifest check failed after ${IMAGE_MANIFEST_RETRIES} attempts: ${image}"
+    error "Image manifest check failed after ${IMAGE_MANIFEST_RETRIES} attempts: ${image}. Last error: ${inspect_output}"
     return 1
 }
 

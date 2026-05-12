@@ -308,12 +308,18 @@ class TestProductionOperationalScripts:
 
         assert "inspect_image_manifest_with_retry" in deploy_script
         assert "IMAGE_MANIFEST_RETRIES" in deploy_script
+        assert "inspect_output=\"$(docker manifest inspect" in deploy_script
+        assert "inspect_status=$?" in deploy_script
         assert "Image manifest check failed after" in deploy_script
+        assert "Last error:" in deploy_script
         assert deploy_script.count("docker manifest inspect") == 1
 
         assert "inspect_manifest_with_retry" in deploy_workflow
         assert "max_attempts=4" in deploy_workflow
+        assert "inspect_output=\"$(docker manifest inspect" in deploy_workflow
+        assert "inspect_status=$?" in deploy_workflow
         assert "::warning::Image manifest check failed" in deploy_workflow
+        assert "Last error:" in deploy_workflow
         assert deploy_workflow.count("docker manifest inspect") == 1
 
     def test_status_dashboard_surfaces_docker_disk_usage(self):
