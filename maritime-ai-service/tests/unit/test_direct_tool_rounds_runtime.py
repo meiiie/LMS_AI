@@ -660,6 +660,60 @@ def test_uploaded_doc_course_plan_builder_keeps_maritime_research_out_of_lms_man
     )
 
 
+def test_uploaded_doc_course_plan_builder_keeps_maritime_lms_research_out_of_holilihu_manual():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_course_params,
+        _normalize_doc_preview_text,
+    )
+
+    markdown = (
+        "CONG TRINH\n\n"
+        "**NGHIEN CUU XAY DUNG HE THONG LMS NANG CAO NGHIEP VU CHUYEN MON CHO CAC THUY THU**\n"
+        "# GIOI THIEU\n"
+        "Tai lieu phan tich nhu cau boi duong nghiep vu chuyen mon cho thuy thu bang he thong LMS.\n"
+        "Nguon section: Gioi thieu nhu cau dao tao thuy thu (trang 1-5)\n"
+        "# CO SO LY LUAN VA THUC TIEN\n"
+        "Trinh bay co so e-learning, quan ly hoc tap va dac thu dao tao hang hai.\n"
+        "Nguon section: Co so ly luan va thuc tien (trang 6-18)\n"
+        "# PHAN TICH VA THIET KE HE THONG LMS\n"
+        "Mo ta cac chuc nang quan ly khoa hoc, nguoi hoc, bai giang va danh gia nang luc.\n"
+        "Nguon section: Phan tich va thiet ke he thong LMS (trang 19-36)\n"
+        "# THU NGHIEM VA DANH GIA\n"
+        "Danh gia kha nang ung dung he thong trong dao tao nghiep vu chuyen mon cho thuy thu.\n"
+        "Nguon section: Thu nghiem va danh gia (trang 37-48)\n"
+    )
+
+    params = _build_uploaded_doc_course_params(
+        "Tao bai giang di.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "SV25-26.43_KH-KT.docx",
+                            "title": "tmpg98c_ocp",
+                            "markdown": markdown,
+                        }
+                    ]
+                },
+                "page_context": {"course_id": "course-maritime-lms"},
+            }
+        },
+    )
+
+    plan = params["course_plan"]
+    normalized_plan = _normalize_doc_preview_text(json.dumps(plan, ensure_ascii=False))
+    assert params["course_id"] == "course-maritime-lms"
+    assert plan["document_domain"]["id"] != "holilihu_lms_manual"
+    assert "holilihu" not in normalized_plan
+    assert "khai thac holilihu lms" not in normalized_plan
+    assert "nghien cuu xay dung he thong lms" in _normalize_doc_preview_text(
+        plan["source_document_title"]
+    )
+    assert "nghiep vu" in normalized_plan
+    assert "thuy thu" in normalized_plan
+
+
 def test_generic_uploaded_doc_course_clusters_full_long_document_map():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         _build_uploaded_doc_course_params,
