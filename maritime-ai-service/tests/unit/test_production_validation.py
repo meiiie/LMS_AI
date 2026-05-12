@@ -299,6 +299,23 @@ class TestProductionOperationalScripts:
         assert "Configured parser profile:" in script
         assert "Precision document parsing is disabled; skipping" not in script
 
+    def test_deploy_manifest_checks_retry_transient_ghcr_errors(self):
+        """Pinned image validation should tolerate short GHCR token timeouts."""
+        import pathlib
+
+        deploy_script = pathlib.Path("scripts/deploy/deploy.sh").read_text(encoding="utf-8")
+        deploy_workflow = pathlib.Path("../.github/workflows/deploy-production.yml").read_text(encoding="utf-8")
+
+        assert "inspect_image_manifest_with_retry" in deploy_script
+        assert "IMAGE_MANIFEST_RETRIES" in deploy_script
+        assert "Image manifest check failed after" in deploy_script
+        assert deploy_script.count("docker manifest inspect") == 1
+
+        assert "inspect_manifest_with_retry" in deploy_workflow
+        assert "max_attempts=4" in deploy_workflow
+        assert "::warning::Image manifest check failed" in deploy_workflow
+        assert deploy_workflow.count("docker manifest inspect") == 1
+
     def test_status_dashboard_surfaces_docker_disk_usage(self):
         """Production status should show Docker disk pressure next to RAM/disk."""
         import pathlib

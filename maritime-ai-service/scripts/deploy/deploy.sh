@@ -45,6 +45,8 @@ DEPLOY_SHA="${DEPLOY_SHA:-}"
 ALLOW_PLACEHOLDERS="${ALLOW_PLACEHOLDERS:-false}"
 REQUIRE_PINNED_IMAGES="${REQUIRE_PINNED_IMAGES:-false}"
 SKIP_IMAGE_MANIFEST_CHECK="${SKIP_IMAGE_MANIFEST_CHECK:-false}"
+IMAGE_MANIFEST_RETRIES="${IMAGE_MANIFEST_RETRIES:-4}"
+IMAGE_MANIFEST_RETRY_DELAY_SECONDS="${IMAGE_MANIFEST_RETRY_DELAY_SECONDS:-5}"
 SKIP_PREDEPLOY_BACKUP="${SKIP_PREDEPLOY_BACKUP:-false}"
 RUN_EXTERNAL_SMOKE="${RUN_EXTERNAL_SMOKE:-false}"
 SKIP_PRE_PULL_DOCKER_CLEANUP="${SKIP_PRE_PULL_DOCKER_CLEANUP:-false}"
@@ -206,8 +208,8 @@ validate_images() {
     fi
 
     if [ "$SKIP_IMAGE_MANIFEST_CHECK" != "true" ]; then
-        docker manifest inspect "$APP_IMAGE" >/dev/null
-        docker manifest inspect "$NGINX_IMAGE" >/dev/null
+        inspect_image_manifest_with_retry "$APP_IMAGE"
+        inspect_image_manifest_with_retry "$NGINX_IMAGE"
     else
         warn "Skipping docker manifest validation."
     fi
@@ -219,6 +221,27 @@ validate_images() {
 validate_compose_config() {
     info "Step 3/11: Validating docker compose configuration..."
     compose config --quiet
+}
+
+inspect_image_manifest_with_retry() {
+    local image="$1"
+    local attempt=1
+
+    while [ "$attempt" -le "$IMAGE_MANIFEST_RETRIES" ]; do
+        if docker manifest inspect "$image" >/dev/null; then
+            info "Validated image manifest: ${image}"
+            return 0
+        fi
+
+        if [ "$attempt" -lt "$IMAGE_MANIFEST_RETRIES" ]; then
+            warn "Image manifest check failed for ${image} (attempt ${attempt}/${IMAGE_MANIFEST_RETRIES}); retrying in ${IMAGE_MANIFEST_RETRY_DELAY_SECONDS}s."
+            sleep "$IMAGE_MANIFEST_RETRY_DELAY_SECONDS"
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    error "Image manifest check failed after ${IMAGE_MANIFEST_RETRIES} attempts: ${image}"
+    return 1
 }
 
 is_truthy() {
