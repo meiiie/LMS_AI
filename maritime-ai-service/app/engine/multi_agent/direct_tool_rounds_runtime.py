@@ -256,8 +256,98 @@ def _first_nonempty_line(text: str) -> str:
             and not _is_doc_preview_scaffold_line(line)
             and not _is_doc_preview_low_value_line(line)
         ):
-            return line[:140]
+            selected = _select_doc_preview_title_line(text)
+            return selected or line[:140]
     return "Tài liệu đã tải lên"
+
+
+def _select_doc_preview_title_line(text: str) -> str:
+    fallback = ""
+    best_line = ""
+    best_score = -10_000
+    for raw_line in str(text or "").replace("\\_", "_").splitlines()[:120]:
+        line = _clean_doc_preview_line(raw_line)
+        if (
+            not line
+            or _is_doc_preview_scaffold_line(line)
+            or _is_doc_preview_low_value_line(line)
+            or _is_low_value_doc_preview_title(line)
+            or _is_doc_preview_cover_metadata_line(line)
+        ):
+            continue
+        if not fallback:
+            fallback = line[:140]
+        score = _score_doc_preview_title_candidate(line)
+        if score > best_score:
+            best_score = score
+            best_line = line[:140]
+        if best_score >= 150:
+            break
+    if best_line and best_score >= 120:
+        return best_line
+    return fallback
+
+
+def _score_doc_preview_title_candidate(value: str) -> int:
+    cleaned = _clean_doc_preview_line(value)
+    normalized = _normalize_doc_preview_text(cleaned)
+    if not cleaned or _is_doc_preview_cover_metadata_line(cleaned):
+        return -10_000
+    score = min(len(cleaned), 160) // 4
+    word_count = len(re.findall(r"\w+", cleaned, flags=re.IGNORECASE))
+    if word_count >= 6:
+        score += 25
+    if word_count >= 12:
+        score += 25
+    for marker in (
+        "nghien cuu",
+        "xay dung he thong",
+        "thiet ke he thong",
+        "quan ly van hanh",
+        "ho so tau",
+        "tau thuy",
+        "van tai bien",
+        "nghiep vu chuyen mon",
+        "thuy thu",
+    ):
+        if marker in normalized:
+            score += 40
+    if normalized in {"loi cam on", "muc luc", "danh muc bang", "danh muc hinh"}:
+        score -= 100
+    return score
+
+
+def _is_doc_preview_cover_metadata_line(value: str) -> bool:
+    normalized = _normalize_doc_preview_text(value).strip(" #-:\t\r\n|")
+    if not normalized:
+        return True
+    if normalized in {
+        "bo xay dung",
+        "bo giao duc va dao tao",
+        "bo xay dung - bo giao duc va dao tao",
+        "truong dai hoc hang hai viet nam",
+        "truong dai hoc",
+        "thuc tap tot nghiep",
+        "do an tot nghiep",
+        "khoa luan tot nghiep",
+        "bao cao thuc tap",
+        "hai phong - 2026",
+        "hai phong 2026",
+    }:
+        return True
+    if any(
+        marker in normalized
+        for marker in (
+            "giang vien huong dan",
+            "sinh vien thuc hien",
+            "nguoi huong dan",
+            "giao vien huong dan",
+        )
+    ):
+        return True
+    if re.search(r"\b\d{5,}\b", normalized) and re.search(r"\b[a-z]{2,}\d{2}", normalized):
+        return True
+    return bool(re.fullmatch(r"(?:hai phong|ha noi|tp\.? ho chi minh)\s*[-–]?\s*\d{4}", normalized))
 
 
 def _clean_doc_preview_line(value: str) -> str:
