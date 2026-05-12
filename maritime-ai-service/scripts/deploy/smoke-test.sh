@@ -98,12 +98,14 @@ if [ -n "$API_KEY" ]; then
     check "Pointy voice status reports ElevenLabs provider" "$([ "$VOICE_HTTP" = "200" ] && grep -q '"provider":"elevenlabs"' "$VOICE_BODY" && echo true || echo false)"
     rm -f "$VOICE_BODY"
 
+    VISUAL_SESSION_ID="smoke-test-visual-$(date -u +%Y%m%d%H%M%S)-$$"
+    VISUAL_PAYLOAD=$(printf '{"user_id":"api-client","message":"Create a compact inline visual comparing soft attention and linear attention. Use structured visual lifecycle.","role":"student","session_id":"%s","domain_id":"maritime"}' "$VISUAL_SESSION_ID")
     STREAM_BODY=$(curl -sN \
         -X POST "${BASE_URL}/api/v1/chat/stream/v3" \
         -H "Content-Type: application/json" \
         -H "X-API-Key: ${API_KEY}" \
-        -H "X-Session-ID: smoke-test-visual" \
-        -d '{"user_id":"api-client","message":"Create a compact inline visual comparing soft attention and linear attention. Use structured visual lifecycle.","role":"student","session_id":"smoke-test-visual","domain_id":"maritime"}' \
+        -H "X-Session-ID: ${VISUAL_SESSION_ID}" \
+        -d "$VISUAL_PAYLOAD" \
         --max-time 90 \
         2>/dev/null || true)
     check "Structured visual SSE opens visual lifecycle" "$(echo "$STREAM_BODY" | grep -q '^event: visual_open$' && echo true || echo false)"
