@@ -213,6 +213,8 @@ class TestProductionSmokeTestDocs:
         script = pathlib.Path("scripts/deploy/smoke-test.sh").read_text(encoding="utf-8")
         assert "event: visual_open" in script
         assert "event: visual_commit" in script
+        assert 'VISUAL_SESSION_ID="smoke-test-visual-' in script
+        assert 'session_id":"smoke-test-visual"' not in script
         assert "```widget" in script
 
     def test_smoke_test_script_checks_llm_model_health_visibility(self):
