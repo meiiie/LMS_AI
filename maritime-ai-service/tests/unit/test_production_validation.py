@@ -280,13 +280,13 @@ class TestProductionOperationalScripts:
         assert "maritime-ai-service/logs/" in dockerignore
 
     def test_deploy_script_guards_precision_docs_host_capacity(self):
-        """Precision-docs deploys should fail early on undersized hosts."""
+        """Precision-docs capability should fail early on undersized hosts."""
         import pathlib
 
         script = pathlib.Path("scripts/deploy/deploy.sh").read_text(encoding="utf-8")
 
         assert "validate_host_capacity" in script
-        assert "precision_docs_enabled" in script
+        assert "SKIP_PRECISION_HOST_CAPACITY_CHECK" in script
         assert "MIN_PRECISION_HOST_MEM_GIB" in script
         assert "MIN_PRECISION_DOCKER_FREE_GIB" in script
         assert "ALLOW_LOW_MEMORY_PRECISION" in script
@@ -295,6 +295,8 @@ class TestProductionOperationalScripts:
         assert "echo true" in script
         assert "DOCUMENT_CONTEXT_PARSER_MODE" in script
         assert "USE_DOCLING_FOR_COURSE_GEN" in script
+        assert "Configured parser profile:" in script
+        assert "Precision document parsing is disabled; skipping" not in script
 
     def test_status_dashboard_surfaces_docker_disk_usage(self):
         """Production status should show Docker disk pressure next to RAM/disk."""

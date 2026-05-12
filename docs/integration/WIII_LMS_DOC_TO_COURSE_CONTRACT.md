@@ -135,7 +135,9 @@ LibreOffice and sets `DOCLING_LIBREOFFICE_CMD=/usr/bin/soffice` so Office files
 can expose richer layout/image signals where Docling supports them. If Docling or
 the Office converter is unavailable, Wiii must fall back or surface a parser
 warning rather than silently pretending the citation precision is higher than it
-is.
+is. Because the upload API can request `parser_mode=precision` per document, the
+production deploy capacity guard treats precision parsing as an installed
+product capability, not only as a global default setting.
 
 ## LMS-Side Requirements
 
