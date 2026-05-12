@@ -940,6 +940,49 @@ def _looks_maritime_vessel_management_document(*, title_source: str, markdown: s
     return sum(1 for marker in markers if marker in document_text) >= 2
 
 
+def _looks_maritime_training_lms_document(*, title_source: str, markdown: str) -> bool:
+    document_text = _normalize_doc_preview_text(
+        f"{title_source}\n{str(markdown or '')[:12000]}"
+    )
+    has_lms_frame = bool(
+        re.search(r"(^|[^a-z0-9])lms([^a-z0-9]|$)", document_text)
+        or any(
+            marker in document_text
+            for marker in (
+                "learning management",
+                "quan ly hoc tap",
+                "e-learning",
+                "elearning",
+                "dao tao truc tuyen",
+            )
+        )
+    )
+    training_markers = (
+        "thuy thu",
+        "thuyen vien",
+        "hang hai",
+        "nghiep vu chuyen mon",
+        "dao tao hang hai",
+        "boi duong nghiep vu",
+        "stcw",
+    )
+    research_markers = (
+        "nghien cuu",
+        "xay dung he thong",
+        "thiet ke he thong",
+        "cong trinh",
+        "de tai",
+        "bao cao",
+        "luan van",
+        "khoa luan",
+    )
+    training_score = sum(1 for marker in training_markers if marker in document_text)
+    research_score = sum(1 for marker in research_markers if marker in document_text)
+    return has_lms_frame and training_score >= 1 and (
+        research_score >= 1 or "dao tao" in document_text or "boi duong" in document_text
+    )
+
+
 def _dedupe_doc_refs(refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[tuple[str, str, str, str]] = set()
     deduped: list[dict[str, Any]] = []
@@ -1512,6 +1555,230 @@ def _build_maritime_vessel_management_course_plan(
     }
 
 
+def _build_maritime_training_lms_course_plan(
+    *,
+    title_source: str,
+    refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    chapter_specs = [
+        {
+            "title": "Bối cảnh đào tạo nghiệp vụ hàng hải bằng LMS",
+            "summary": "Đặt vấn đề chuyển hoạt động bồi dưỡng nghiệp vụ thủy thủ sang môi trường học tập số.",
+            "markers": ("gioi thieu", "lms", "thuy thu", "nghiep vu chuyen mon", "dao tao"),
+            "objectives": [
+                "Giải thích được nhu cầu đào tạo nghiệp vụ chuyên môn cho thủy thủ bằng LMS.",
+                "Nhận diện người học, giáo viên và đơn vị quản lý trong bối cảnh hàng hải.",
+                "Phân biệt tài liệu nghiên cứu hệ thống LMS với tài liệu hướng dẫn sử dụng một sản phẩm cụ thể.",
+            ],
+            "lessons": [
+                (
+                    "Nhu cầu số hóa đào tạo nghiệp vụ cho thủy thủ",
+                    "Tổng hợp bối cảnh, mục tiêu và vấn đề đào tạo nghiệp vụ chuyên môn trong ngành hàng hải.",
+                    "Người học lập bản đồ vấn đề: thủy thủ cần học gì, học ở đâu và vì sao cần LMS.",
+                    "Yếu tố nào khiến đào tạo nghiệp vụ hàng hải khó quản lý nếu chỉ dùng tài liệu rời?",
+                ),
+                (
+                    "Vai trò người học, giảng viên và quản lý đào tạo",
+                    "Phân tích các vai trò tham gia hệ thống LMS và trách nhiệm của từng nhóm.",
+                    "Tạo bảng vai trò/quyền hạn tối thiểu cho người học, giảng viên và quản trị đào tạo.",
+                    "Vai trò nào cần được hỗ trợ nhiều nhất để khóa học vận hành ổn định?",
+                ),
+                (
+                    "Mục tiêu năng lực và chuẩn đầu ra của khóa học",
+                    "Chuyển mục tiêu nghiên cứu thành năng lực có thể dạy, luyện tập và đánh giá.",
+                    "Viết 3 chuẩn đầu ra theo dạng: hành động, điều kiện, tiêu chí đánh giá.",
+                    "Một chuẩn đầu ra tốt khác một mô tả nội dung ở điểm nào?",
+                ),
+            ],
+        },
+        {
+            "title": "Phân tích yêu cầu hệ thống LMS cho đào tạo thủy thủ",
+            "summary": "Biến nhu cầu đào tạo thành yêu cầu chức năng, dữ liệu và quy trình học tập.",
+            "markers": ("phan tich", "yeu cau", "chuc nang", "nguoi hoc", "khoa hoc", "bai giang"),
+            "objectives": [
+                "Tách được yêu cầu nghiệp vụ đào tạo khỏi mô tả giải pháp kỹ thuật.",
+                "Liên kết chức năng LMS với quy trình học, kiểm tra và theo dõi tiến độ.",
+                "Ưu tiên yêu cầu theo giá trị vận hành và khả năng kiểm chứng.",
+            ],
+            "lessons": [
+                (
+                    "Từ nhu cầu đào tạo sang yêu cầu chức năng",
+                    "Đọc tài liệu để rút ra các chức năng như khóa học, bài giảng, kiểm tra và theo dõi học viên.",
+                    "Đánh dấu các câu có thể chuyển thành user story cho hệ thống LMS.",
+                    "Yêu cầu nào là lõi của đào tạo thủy thủ, yêu cầu nào chỉ là tiện ích?",
+                ),
+                (
+                    "Luồng học tập: đăng ký, học, kiểm tra và phản hồi",
+                    "Mô tả hành trình người học từ lúc vào khóa đến khi hoàn thành đánh giá.",
+                    "Vẽ flow ngắn cho một thủy thủ học bài, làm quiz và nhận phản hồi.",
+                    "Điểm nào trong luồng cần lưu vết để giáo viên theo dõi tiến bộ?",
+                ),
+                (
+                    "Yêu cầu dữ liệu và báo cáo đào tạo",
+                    "Xác định dữ liệu cần cho hồ sơ học tập, tiến độ, điểm số và báo cáo năng lực.",
+                    "Thiết kế một bảng thông tin tối thiểu cho tiến độ học của học viên.",
+                    "Báo cáo nào giúp quản lý biết khóa học có hiệu quả hay không?",
+                ),
+            ],
+        },
+        {
+            "title": "Thiết kế học liệu, hoạt động và kiểm tra trên LMS",
+            "summary": "Chuyển nội dung chuyên môn thành bài học số có tương tác, bài tập và đánh giá.",
+            "markers": ("hoc lieu", "bai giang", "video", "quiz", "danh gia", "tuong tac"),
+            "objectives": [
+                "Thiết kế bài học số bám sát mục tiêu năng lực.",
+                "Chọn dạng học liệu phù hợp cho kiến thức, quy trình và tình huống hàng hải.",
+                "Xây dựng kiểm tra nhanh có nguồn trích dẫn để giáo viên xác minh.",
+            ],
+            "lessons": [
+                (
+                    "Cấu trúc một bài học nghiệp vụ trên LMS",
+                    "Tổ chức bài học thành mục tiêu, nội dung cốt lõi, ví dụ, hoạt động và kiểm tra.",
+                    "Biến một phần tài liệu thành khung bài học 20 phút cho thủy thủ.",
+                    "Bài học cần có thành phần nào để người học không chỉ đọc mà còn luyện tập?",
+                ),
+                (
+                    "Học liệu đa phương tiện và tình huống thực hành",
+                    "Xác định khi nào dùng văn bản, hình ảnh, video, mô phỏng hoặc checklist nghiệp vụ.",
+                    "Đề xuất một tình huống hàng hải và loại học liệu phù hợp để dạy tình huống đó.",
+                    "Loại học liệu nào dễ tạo cảm giác hiểu nhầm nếu thiếu bối cảnh?",
+                ),
+                (
+                    "Quiz, rubric và phản hồi năng lực",
+                    "Thiết kế câu hỏi kiểm tra, rubric và phản hồi giúp đo năng lực chuyên môn.",
+                    "Viết 3 câu hỏi: nhận biết, áp dụng và xử lý tình huống.",
+                    "Một quiz tốt cần đo điều gì ngoài việc nhớ lại nội dung?",
+                ),
+            ],
+        },
+        {
+            "title": "Thiết kế vận hành, phân quyền và theo dõi chất lượng",
+            "summary": "Đưa khóa học vào quy trình quản lý có phân quyền, dữ liệu tiến độ và kiểm soát chất lượng.",
+            "markers": ("phan quyen", "quan ly", "tien do", "bao cao", "chat luong", "du lieu"),
+            "objectives": [
+                "Thiết kế phân quyền an toàn cho người học, giảng viên và quản trị.",
+                "Theo dõi tiến độ học tập bằng dữ liệu có thể kiểm chứng.",
+                "Xây dựng vòng phản hồi để cải tiến khóa học sau mỗi đợt triển khai.",
+            ],
+            "lessons": [
+                (
+                    "Phân quyền và an toàn dữ liệu đào tạo",
+                    "Xác định quyền xem, sửa, chấm, xuất báo cáo và quản trị nội dung trong LMS.",
+                    "Lập ma trận quyền hạn cho giáo viên, học viên và quản lý đào tạo.",
+                    "Quyền nào nếu cấp sai sẽ ảnh hưởng lớn nhất tới độ tin cậy của khóa học?",
+                ),
+                (
+                    "Theo dõi tiến độ và cảnh báo học tập",
+                    "Thiết kế chỉ số theo dõi tiến độ, mức hoàn thành và điểm cần hỗ trợ.",
+                    "Đề xuất 5 chỉ số dashboard giúp giáo viên biết lớp đang học ra sao.",
+                    "Chỉ số nào dễ gây hiểu nhầm nếu không kèm ngữ cảnh?",
+                ),
+                (
+                    "Quy trình cải tiến nội dung sau triển khai",
+                    "Dùng dữ liệu học tập, phản hồi và kết quả kiểm tra để chỉnh bài học.",
+                    "Viết checklist rà soát khóa học sau một vòng chạy thử.",
+                    "Khi nào nên sửa nội dung, khi nào nên sửa hoạt động học?",
+                ),
+            ],
+        },
+        {
+            "title": "Triển khai thử nghiệm và đánh giá hiệu quả đào tạo",
+            "summary": "Lập kế hoạch pilot, kiểm thử và đo hiệu quả của hệ thống LMS trong đào tạo hàng hải.",
+            "markers": ("trien khai", "thu nghiem", "kiem thu", "danh gia", "ket qua", "huong phat trien"),
+            "objectives": [
+                "Lập kế hoạch triển khai thử nghiệm LMS theo giai đoạn an toàn.",
+                "Thiết kế kiểm thử theo nghiệp vụ đào tạo thay vì chỉ kiểm tra giao diện.",
+                "Đánh giá hiệu quả bằng dữ liệu học tập và phản hồi từ người dùng.",
+            ],
+            "lessons": [
+                (
+                    "Kế hoạch pilot cho khóa học nghiệp vụ thủy thủ",
+                    "Chia triển khai thành các bước: chuẩn hóa học liệu, tạo lớp, chạy thử và thu phản hồi.",
+                    "Lập checklist trước khi mở khóa học cho nhóm học viên đầu tiên.",
+                    "Rủi ro nào cần kiểm soát trước khi pilot trên người học thật?",
+                ),
+                (
+                    "Kiểm thử chức năng và kiểm thử trải nghiệm học",
+                    "Xây dựng test case cho học liệu, quiz, tiến độ, phân quyền và báo cáo.",
+                    "Viết 3 test case chứng minh khóa học vừa đúng hệ thống vừa đúng nghiệp vụ.",
+                    "Một test UI thành công có đủ để kết luận khóa học tốt chưa?",
+                ),
+                (
+                    "Đánh giá hiệu quả và hướng phát triển",
+                    "Đo mức hoàn thành, chất lượng câu trả lời, phản hồi người học và khả năng mở rộng.",
+                    "Đề xuất 3 KPI so sánh trước/sau khi áp dụng LMS vào đào tạo thủy thủ.",
+                    "Nếu mở rộng hệ thống, ưu tiên cải tiến nội dung, dữ liệu hay trải nghiệm trước?",
+                ),
+            ],
+        },
+    ]
+
+    chapters: list[dict[str, Any]] = []
+    for chapter_index, spec in enumerate(chapter_specs, start=1):
+        chapter_refs = _match_doc_refs(
+            refs,
+            tuple(spec["markers"]),
+            fallback_title=title_source,
+            chapter_index=chapter_index,
+        )
+        lessons = []
+        for lesson_index, (title, summary, activity, quick_check) in enumerate(
+            spec["lessons"],
+            start=1,
+        ):
+            lesson_refs = _match_doc_refs(
+                refs,
+                tuple(spec["markers"]) + tuple(title.lower().split()[:4]),
+                fallback_title=title_source,
+                chapter_index=chapter_index,
+                lesson_index=lesson_index,
+            )
+            lessons.append(
+                _lms_manual_lesson(
+                    title=title,
+                    summary=summary,
+                    activity=activity,
+                    quick_check=quick_check,
+                    refs=lesson_refs,
+                    duration_minutes=22,
+                )
+            )
+        chapters.append(
+            {
+                "title": spec["title"],
+                "summary": spec["summary"],
+                "learning_objectives": spec["objectives"],
+                "lessons": lessons,
+                "source_references": chapter_refs,
+            }
+        )
+
+    lesson_count = sum(len(chapter["lessons"]) for chapter in chapters)
+    return {
+        "title": "LMS nâng cao nghiệp vụ chuyên môn cho thủy thủ",
+        "description": (
+            "Khóa học chuyển tài liệu nghiên cứu về hệ thống LMS phục vụ đào tạo "
+            "nghiệp vụ hàng hải thành cây chương/bài có hoạt động, đánh giá và nguồn trích dẫn."
+        ),
+        "audience": (
+            "Giảng viên hàng hải, người quản lý đào tạo, thủy thủ/học viên và nhóm triển khai LMS."
+        ),
+        "duration": f"{len(chapters)} chương, {lesson_count} bài, triển khai trong 4-6 buổi học/workshop.",
+        "chapters": chapters,
+        "assessment_plan": [
+            "Mỗi chương có kiểm tra nhanh gắn với nguồn trích dẫn từ tài liệu nghiên cứu.",
+            "Cuối khóa làm project nhỏ: thiết kế một module/bài học LMS cho nghiệp vụ hàng hải cụ thể.",
+            "Đánh giá bằng rubric gồm: đúng mục tiêu năng lực, phù hợp người học, có dữ liệu theo dõi và khả năng triển khai.",
+        ],
+        "implementation_checklist": [
+            "Giáo viên kiểm tra title, chương/bài và citation trước khi áp dụng vào LMS.",
+            "Các chương/bài được tạo ở trạng thái draft; không publish tự động.",
+            "Nên bổ sung tài liệu nghiệp vụ, rubric hoặc ví dụ tình huống thật trước buổi thực hành.",
+        ],
+        "source_document_title": title_source,
+    }
+
+
 def _extract_doc_headings(markdown: str) -> list[str]:
     headings: list[str] = []
     for raw_line in str(markdown or "").replace("\\_", "_").splitlines():
@@ -1723,6 +1990,10 @@ def _classify_uploaded_document_course_domain(
         markdown=markdown,
         query=query,
     )
+    maritime_training_lms = _looks_maritime_training_lms_document(
+        title_source=title_source,
+        markdown=markdown,
+    )
     maritime_vessel = _looks_maritime_vessel_management_document(
         title_source=title_source,
         markdown=markdown,
@@ -1730,6 +2001,9 @@ def _classify_uploaded_document_course_domain(
     if lms_manual:
         domain_id = "holilihu_lms_manual"
         confidence = 0.86
+    elif maritime_training_lms:
+        domain_id = "maritime_training_lms"
+        confidence = 0.84
     elif maritime_vessel:
         domain_id = "maritime_vessel_management"
         confidence = 0.82
@@ -1745,6 +2019,7 @@ def _classify_uploaded_document_course_domain(
             "heading_count": len(headings),
             "source_reference_count": len(refs),
             "document_chars": len(markdown or ""),
+            "maritime_training_lms": maritime_training_lms,
             "query_lms_mention": bool(
                 re.search(
                     r"(^|[^a-z0-9])(lms|holilihu)([^a-z0-9]|$)",
@@ -1986,6 +2261,11 @@ def _build_uploaded_doc_course_params(query: str, state: AgentState | None) -> d
     is_lms_manual = domain_id == "holilihu_lms_manual"
     if domain_id == "holilihu_lms_manual":
         course_plan = _build_lms_manual_course_plan(title_source=title_source, refs=refs)
+    elif domain_id == "maritime_training_lms":
+        course_plan = _build_maritime_training_lms_course_plan(
+            title_source=title_source,
+            refs=refs,
+        )
     elif domain_id == "maritime_vessel_management":
         course_plan = _build_maritime_vessel_management_course_plan(
             title_source=title_source,

@@ -704,9 +704,10 @@ def test_uploaded_doc_course_plan_builder_keeps_maritime_lms_research_out_of_hol
     plan = params["course_plan"]
     normalized_plan = _normalize_doc_preview_text(json.dumps(plan, ensure_ascii=False))
     assert params["course_id"] == "course-maritime-lms"
-    assert plan["document_domain"]["id"] != "holilihu_lms_manual"
+    assert plan["document_domain"]["id"] == "maritime_training_lms"
     assert "holilihu" not in normalized_plan
     assert "khai thac holilihu lms" not in normalized_plan
+    assert "quan ly van hanh va ho so tau" not in normalized_plan
     assert "nghien cuu xay dung he thong lms" in _normalize_doc_preview_text(
         plan["source_document_title"]
     )
@@ -762,8 +763,63 @@ def test_uploaded_doc_course_plan_research_title_overrides_manual_markers_in_bod
     plan = params["course_plan"]
     normalized_title = _normalize_doc_preview_text(plan["title"])
     assert params["course_id"] == "course-from-nested-host-metadata"
-    assert plan["document_domain"]["id"] != "holilihu_lms_manual"
+    assert plan["document_domain"]["id"] == "maritime_training_lms"
     assert "khai thac holilihu lms" not in normalized_title
+
+
+def test_uploaded_doc_course_plan_maritime_lms_does_not_use_vessel_template():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        _build_uploaded_doc_course_params,
+        _normalize_doc_preview_text,
+    )
+
+    markdown = (
+        "CONG TRINH\n\n"
+        "**NGHIEN CUU XAY DUNG HE THONG LMS NANG CAO NGHIEP VU CHUYEN MON CHO CAC THUY THU**\n"
+        "| Sinh vien thuc hien chinh | PHAM THI MINH HONG |\n"
+        "| Sinh vien thuc hien | NGUYEN THUY LINH |\n"
+        "2. San pham cong nghe\n"
+        "He thong LMS ho tro dao tao truc tuyen cho thuy thu va hoc vien hang hai.\n"
+        "San pham duoc dinh huong phuc vu boi duong nghiep vu chuyen mon, theo doi tien do, "
+        "quan ly bai giang, quiz va danh gia nang luc trong moi truong van tai bien.\n"
+        "Noi dung co nhac den tau thuy va boi canh hang hai nhung trong tam la he thong LMS dao tao.\n"
+        "Nguon section: 2. San pham cong nghe (trang 1-4)\n"
+    )
+
+    params = _build_uploaded_doc_course_params(
+        "Tao bai giang di. Chia thanh chuong/bai co nguon trich dan.",
+        {
+            "context": {
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "SV25-26.43_KH-KT.docx",
+                            "title": "tmpqd4k3n0b",
+                            "markdown": markdown,
+                        }
+                    ]
+                },
+                "page_context": {"course_id": "course-prod-like-maritime-lms"},
+            }
+        },
+    )
+
+    plan = params["course_plan"]
+    normalized_plan = _normalize_doc_preview_text(json.dumps(plan, ensure_ascii=False))
+    assert params["course_id"] == "course-prod-like-maritime-lms"
+    assert plan["document_domain"]["id"] == "maritime_training_lms"
+    assert "nghien cuu xay dung he thong lms" in _normalize_doc_preview_text(
+        plan["source_document_title"]
+    )
+    assert "lms nang cao nghiep vu" in normalized_plan
+    assert "thuy thu" in normalized_plan
+    assert "quan ly van hanh va ho so tau" not in normalized_plan
+    assert "doanh nghiep van tai bien" not in normalized_plan
+    assert all(
+        lesson.get("source_references")
+        for chapter in plan["chapters"]
+        for lesson in chapter["lessons"]
+    )
 
 
 def test_uploaded_doc_course_title_skips_cover_metadata_for_long_thesis_doc():
