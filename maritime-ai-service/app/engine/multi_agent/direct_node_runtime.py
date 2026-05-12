@@ -2271,7 +2271,7 @@ async def direct_response_node_impl(
                 if not response:
                     response = (
                         "Mình đã gửi bản preview bài học sang LMS. "
-                        "Giáo viên cần xem diff/citation rồi bấm Apply để cấp approval_token."
+                        "Giáo viên cần xem phần so sánh thay đổi và nguồn trích dẫn rồi bấm Áp dụng để cấp approval_token."
                     )
                 if not tools_used:
                     preview_tool_names = sorted({

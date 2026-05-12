@@ -387,15 +387,15 @@ def _supplement_doc_preview_learning_goals(
 ) -> list[str]:
     supplements = (
         [
-            "Giáo viên kiểm tra diff, citation và nguồn tài liệu trước khi áp dụng thay đổi vào LMS.",
+            "Giáo viên kiểm tra phần so sánh thay đổi và nguồn trích dẫn trước khi áp dụng thay đổi vào LMS.",
             "Giáo viên tạo hoặc cập nhật bài học ở trạng thái nháp, không xuất bản khi chưa rà soát nội dung.",
-            "Giáo viên xác nhận nội dung, tài liệu, video hoặc câu hỏi liên quan trước khi bấm Apply.",
+            "Giáo viên xác nhận nội dung, tài liệu, video hoặc câu hỏi liên quan trước khi bấm Áp dụng.",
         ]
         if is_lms_manual
         else [
             "Người học xác định ý chính, bằng chứng nguồn và tình huống áp dụng từ tài liệu.",
             "Người học chuyển nội dung nguồn thành checklist thực hành có thể kiểm chứng.",
-            "Người học trả lời câu hỏi nhanh dựa trên citation thay vì ghi nhớ rời rạc.",
+            "Người học trả lời câu hỏi nhanh dựa trên nguồn trích dẫn thay vì ghi nhớ rời rạc.",
         ]
     )
     normalized_seen = {_normalize_doc_preview_text(goal) for goal in goals}
@@ -1049,7 +1049,7 @@ def _build_lms_manual_course_plan(
         "description": (
             "Khóa học chuyển tài liệu hướng dẫn HoLiLiHu LMS thành lộ trình thực hành "
             "cho học viên, giảng viên và quản lý. Cấu trúc ưu tiên thao tác thật, "
-            "kiểm tra chất lượng và citation để giáo viên xác minh trước khi áp dụng."
+            "kiểm tra chất lượng và nguồn trích dẫn để giáo viên xác minh trước khi áp dụng."
         ),
         "audience": "Giảng viên, trợ giảng, quản lý đào tạo và học viên cần sử dụng HoLiLiHu LMS.",
         "duration": f"{len(chapters)} chương, {lesson_count} bài, triển khai trong 3-5 buổi thực hành.",
@@ -1057,7 +1057,7 @@ def _build_lms_manual_course_plan(
         "assessment_plan": [
             "Mỗi chương có câu hỏi kiểm tra nhanh gắn với thao tác thật.",
             "Cuối khóa yêu cầu người học hoàn thành một kịch bản: tạo/hoặc tham gia một khóa mẫu, học bài, kiểm tra tiến độ và xử lý một lỗi giả lập.",
-            "Giảng viên dùng citation trong preview để đối chiếu từng chương trước khi apply vào LMS.",
+            "Giảng viên dùng nguồn trích dẫn trong bản xem trước để đối chiếu từng chương trước khi áp dụng vào LMS.",
         ],
         "implementation_checklist": [
             "Xác minh tên khóa, mô tả, mục tiêu và đối tượng trước khi tạo dữ liệu LMS.",
@@ -1310,12 +1310,12 @@ def _build_maritime_vessel_management_course_plan(
         "duration": f"{len(chapters)} chương, {lesson_count} bài, triển khai trong 4-6 buổi workshop.",
         "chapters": chapters,
         "assessment_plan": [
-            "Mỗi chương có bài kiểm tra nhanh dựa trên citation từ tài liệu nghiên cứu.",
+            "Mỗi chương có bài kiểm tra nhanh dựa trên nguồn trích dẫn từ tài liệu nghiên cứu.",
             "Cuối khóa làm case study: thiết kế module hồ sơ tàu và quy trình vận hành cho một doanh nghiệp mẫu.",
             "Đánh giá bằng rubric gồm: đúng nghiệp vụ, đúng dữ liệu, an toàn phân quyền và khả năng triển khai.",
         ],
         "implementation_checklist": [
-            "Giáo viên kiểm tra citation trước khi áp dụng vào LMS.",
+            "Giáo viên kiểm tra nguồn trích dẫn trước khi áp dụng vào LMS.",
             "Các chương/bài được tạo ở trạng thái draft; không publish tự động.",
             "Nên bổ sung tài liệu mẫu hoặc biểu mẫu thật của doanh nghiệp trước buổi thực hành.",
         ],
@@ -1677,7 +1677,7 @@ def _build_generic_document_course_plan(
                     f"Chuyển nội dung {section_title} thành bài tập, checklist hoặc quyết định có thể đánh giá."
                 )
                 activity = (
-                    "Làm một tình huống ngắn, nộp câu trả lời kèm citation chứng minh lựa chọn."
+                    "Làm một tình huống ngắn, nộp câu trả lời kèm nguồn trích dẫn chứng minh lựa chọn."
                 )
                 quick_check = "Nếu áp dụng sai phần này, rủi ro hoặc hệ quả dễ thấy nhất là gì?"
                 duration = 24
@@ -1689,7 +1689,7 @@ def _build_generic_document_course_plan(
                 activity = (
                     "Theo nhóm, dựng một sơ đồ/quy trình nhỏ rồi đối chiếu lại với nguồn tài liệu."
                 )
-                quick_check = "Hoạt động này đo được năng lực nào, và citation nào hỗ trợ?"
+                quick_check = "Hoạt động này đo được năng lực nào, và nguồn trích dẫn nào hỗ trợ?"
                 duration = 22
             lessons.append(
                 _lms_manual_lesson(
@@ -1733,7 +1733,7 @@ def _build_generic_document_course_plan(
                 "learning_objectives": [
                     f"Giải thích được trọng tâm của {focus_titles[0] if focus_titles else title_source}.",
                     "Kết nối các mục liên quan trong tài liệu thành một luồng học có thứ tự.",
-                    "Hoàn thành hoạt động/kiểm tra nhanh có citation để giáo viên xác minh.",
+                    "Hoàn thành hoạt động/kiểm tra nhanh có nguồn trích dẫn để giáo viên xác minh.",
                 ],
                 "lessons": lessons,
                 "source_references": chapter_refs,
@@ -1744,13 +1744,13 @@ def _build_generic_document_course_plan(
         "title": f"Khóa học từ tài liệu: {title_source[:90]}",
         "description": (
             "Bản thiết kế khóa học được tạo từ tài liệu upload, có cấu trúc chương/bài, "
-            "hoạt động học và citation để giáo viên kiểm chứng trước khi áp dụng."
+            "hoạt động học và nguồn trích dẫn để giáo viên kiểm chứng trước khi áp dụng."
         ),
         "audience": "Người học cần chuyển tài liệu nguồn thành năng lực thực hành.",
         "duration": f"{len(chapters)} chương, {lesson_count} bài.",
         "chapters": chapters,
         "assessment_plan": [
-            "Mỗi chương có kiểm tra nhanh gắn với citation.",
+            "Mỗi chương có kiểm tra nhanh gắn với nguồn trích dẫn.",
             "Cuối khóa dùng một tình huống tổng hợp để xác nhận khả năng áp dụng.",
         ],
         "implementation_checklist": [
@@ -1837,7 +1837,7 @@ def _build_uploaded_doc_course_params(query: str, state: AgentState | None) -> d
         "title": course_plan.get("title") or title_source,
         "summary": (
             f"Wiii đã dựng cây khóa học nháp gồm {len(chapters)} chương và "
-            f"{lesson_count} bài từ tài liệu upload. Giáo viên cần xem citation "
+            f"{lesson_count} bài từ tài liệu upload. Giáo viên cần xem nguồn trích dẫn "
             "trước khi áp dụng vào LMS."
         ),
         "course_plan": course_plan,
@@ -2855,8 +2855,8 @@ async def execute_direct_tool_rounds_impl(
                 doc_course_thinking = (
                     "Mình nhận đây là flow tạo cấu trúc khóa học từ tài liệu upload. "
                     "Vì thao tác này có thể sinh nhiều chương/bài trong LMS, mình dựng "
-                    "course_plan có citation trước và chỉ gửi host action preview; LMS sẽ "
-                    "yêu cầu giáo viên bấm Apply để cấp approval_token trước khi ghi dữ liệu."
+                    "course_plan có nguồn trích dẫn trước và chỉ gửi host action preview; LMS sẽ "
+                    "yêu cầu giáo viên bấm Áp dụng để cấp approval_token trước khi ghi dữ liệu."
                 )
                 state["thinking"] = doc_course_thinking
                 state["thinking_content"] = doc_course_thinking
@@ -2890,7 +2890,7 @@ async def execute_direct_tool_rounds_impl(
                 )
                 response = (
                     "Mình đã gửi bản thiết kế khóa học từ tài liệu sang LMS. "
-                    "Bạn xem cây chương/bài và citation trong hộp preview, rồi chỉ bấm Apply "
+                    "Bạn xem cây chương/bài và nguồn trích dẫn trong hộp xem trước, rồi chỉ bấm Áp dụng "
                     "nếu muốn LMS tạo các chương/bài draft tương ứng."
                 )
                 logger.info(
@@ -2982,7 +2982,7 @@ async def execute_direct_tool_rounds_impl(
                 doc_preview_thinking = (
                     "Mình nhận đây là flow upload tài liệu -> tạo preview bài học. "
                     "Vì đây là đường ghi LMS có ràng buộc an toàn, mình không chờ model tự gọi tool; "
-                    "mình dựng payload preview từ document_context và gửi host action preview-only để LMS mở diff/citation trước."
+                    "mình dựng payload preview từ document_context và gửi host action preview-only để LMS mở phần so sánh thay đổi và nguồn trích dẫn trước."
                 )
                 state["thinking"] = doc_preview_thinking
                 state["thinking_content"] = doc_preview_thinking
@@ -3016,7 +3016,7 @@ async def execute_direct_tool_rounds_impl(
                 )
                 response = (
                     "Mình đã gửi bản preview từ tài liệu sang LMS. "
-                    "Bạn kiểm tra diff và citation trong hộp xem trước, rồi chỉ bấm Apply nếu nội dung đúng."
+                    "Bạn kiểm tra phần so sánh thay đổi và nguồn trích dẫn trong hộp xem trước, rồi chỉ bấm Áp dụng nếu nội dung đúng."
                 )
                 logger.info(
                     "[DIRECT] Deterministic document preview host action requested "
