@@ -16,7 +16,7 @@ const PROVIDER_ICONS: Record<string, typeof Cpu> = {
 };
 
 const PROVIDER_LABELS: Record<string, string> = {
-  auto: "Tu dong",
+  auto: "Tự động",
   google: "Gemini",
   zhipu: "Zhipu GLM",
   openai: "OpenAI",
