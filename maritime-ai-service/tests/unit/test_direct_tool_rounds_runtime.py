@@ -1179,7 +1179,9 @@ def test_uploaded_doc_preview_supplements_sparse_lms_learning_goals():
     ]
     assert len(objective_lines) >= 3
     assert "giao vien tao khoa hoc dung quy trinh" in objectives_section
-    assert "diff, citation" in objectives_section
+    assert "phần so sánh thay đổi và nguồn trích dẫn" in objectives_section
+    assert "diff, citation" not in objectives_section
+    assert "bấm Apply" not in objectives_section
     assert "trạng thái nháp" in objectives_section
 
 
