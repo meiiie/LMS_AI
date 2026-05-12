@@ -441,6 +441,10 @@ docker stats --no-stream
 # DOCUMENT_CONTEXT_PARSER_MODE=fast
 # USE_DOCLING_FOR_COURSE_GEN=false
 
+# Deploy has a precision-docs capacity guard. If it blocks a real emergency
+# rollback, either resize the VM or set ALLOW_LOW_MEMORY_PRECISION=true with an
+# explicit operator note. Do not treat the override as a steady-state fix.
+
 # If deploy pulls are slow or disk pressure appears, verify production images
 # are still CPU-only on the current non-GPU VM:
 # docker compose exec app python -c "import torch; print(torch.__version__, torch.cuda.is_available())"

@@ -266,6 +266,43 @@ class TestProductionBackupScheduling:
 class TestProductionOperationalScripts:
     """Verify deploy-time operational scripts fail closed on prod issues."""
 
+    def test_root_dockerignore_excludes_local_scratch_from_image_context(self):
+        """Production image builds should not ingest local artifacts or agent scratch."""
+        import pathlib
+
+        repo_root = pathlib.Path(__file__).resolve().parents[3]
+        dockerignore = (repo_root / ".dockerignore").read_text(encoding="utf-8")
+
+        assert "artifacts/" in dockerignore
+        assert "memory/" in dockerignore
+        assert ".agents/" in dockerignore
+        assert "wiii-desktop/src/" in dockerignore
+        assert "maritime-ai-service/logs/" in dockerignore
+
+    def test_deploy_script_guards_precision_docs_host_capacity(self):
+        """Precision-docs deploys should fail early on undersized hosts."""
+        import pathlib
+
+        script = pathlib.Path("scripts/deploy/deploy.sh").read_text(encoding="utf-8")
+
+        assert "validate_host_capacity" in script
+        assert "precision_docs_enabled" in script
+        assert "MIN_PRECISION_HOST_MEM_GIB" in script
+        assert "MIN_PRECISION_DOCKER_FREE_GIB" in script
+        assert "ALLOW_LOW_MEMORY_PRECISION" in script
+        assert "/proc/meminfo" in script
+        assert "DOCUMENT_CONTEXT_PARSER_MODE" in script
+        assert "USE_DOCLING_FOR_COURSE_GEN" in script
+
+    def test_status_dashboard_surfaces_docker_disk_usage(self):
+        """Production status should show Docker disk pressure next to RAM/disk."""
+        import pathlib
+
+        script = pathlib.Path("scripts/deploy/status.sh").read_text(encoding="utf-8")
+
+        assert "--- Docker Disk ---" in script
+        assert "docker system df" in script
+
     def test_health_check_verifies_required_services_are_running(self):
         """Health check should catch crashed services, not only unhealthy ones."""
         import pathlib
