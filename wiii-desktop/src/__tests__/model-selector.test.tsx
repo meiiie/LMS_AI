@@ -91,8 +91,11 @@ describe("ModelSelector", () => {
       expect(useModelStore.getState().providers.length).toBe(3);
     });
 
+    expect(screen.getByText("Tự động")).not.toBeNull();
+
     fireEvent.click(screen.getByTestId("model-selector-trigger"));
 
+    expect(screen.getAllByText("Tự động").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("OpenAI")).toBeNull();
     expect(screen.getByText("Provider tam thoi ban hoac da cham gioi han.")).not.toBeNull();
 
