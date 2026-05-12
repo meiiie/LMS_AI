@@ -78,15 +78,29 @@ echo "4. API Endpoints"
 if [ -n "$API_KEY" ]; then
     # Production API key auth is a service-client path.
     # Do not send X-User-ID here; auth resolves to api-client.
-    HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+    #
+    # Keep this sync smoke deterministic. The generic "test" prompt can route
+    # through the legacy sync LLM path and exceed the deploy budget even when
+    # the product-critical SSE path below is healthy. "doi phet" intentionally
+    # exercises Wiii's conservative fast social route without depending on LLM
+    # latency, while the visual SSE smoke remains the end-to-end LLM check.
+    CHAT_SESSION_ID="smoke-test-chat-$(date -u +%Y%m%d%H%M%S)-$$"
+    CHAT_BODY="$(mktemp)"
+    CHAT_METRICS=$(curl -s -o "$CHAT_BODY" -w "%{http_code} %{time_total}" \
         -X POST "${BASE_URL}/api/v1/chat" \
         -H "Content-Type: application/json" \
         -H "X-API-Key: ${API_KEY}" \
-        -H "X-Session-ID: smoke-test-session" \
-        -d '{"user_id": "api-client", "message": "test", "role": "student", "session_id": "smoke-test-session", "domain_id": "maritime"}' \
+        -H "X-Session-ID: ${CHAT_SESSION_ID}" \
+        -d "$(printf '{"user_id":"api-client","message":"doi phet","role":"student","session_id":"%s","domain_id":"maritime"}' "$CHAT_SESSION_ID")" \
         --max-time 30 \
-        2>/dev/null || echo "000")
-    check "Chat API (POST /chat)" "$([ "$HTTP" = "200" ] && echo true || echo false)"
+        2>/dev/null || true)
+    CHAT_HTTP="$(printf '%s' "$CHAT_METRICS" | awk '{print $1}')"
+    CHAT_SECONDS="$(printf '%s' "$CHAT_METRICS" | awk '{print $2}')"
+    CHAT_HTTP="${CHAT_HTTP:-000}"
+    CHAT_SECONDS="${CHAT_SECONDS:-0}"
+    echo "  [INFO] Chat API HTTP ${CHAT_HTTP} in ${CHAT_SECONDS}s"
+    check "Chat API (POST /chat)" "$([ "$CHAT_HTTP" = "200" ] && [ -s "$CHAT_BODY" ] && echo true || echo false)"
+    rm -f "$CHAT_BODY"
 
     VOICE_BODY="$(mktemp)"
     VOICE_HTTP=$(curl -s -o "$VOICE_BODY" -w "%{http_code}" \
