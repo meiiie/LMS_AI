@@ -10,7 +10,7 @@ const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 /** Default request timeout in milliseconds (60 seconds) */
-const DEFAULT_TIMEOUT_MS = 60_000;
+export const DEFAULT_TIMEOUT_MS = 60_000;
 
 export class ApiHttpError extends Error {
   status: number;
@@ -378,7 +378,11 @@ export class WiiiClient {
   }
 
   /** POST request with multipart/form-data (e.g., file uploads) */
-  async postFormData<T>(path: string, formData: FormData): Promise<T> {
+  async postFormData<T>(
+    path: string,
+    formData: FormData,
+    timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  ): Promise<T> {
     const url = new URL(path, this.baseUrl).toString();
 
     // Do NOT set Content-Type — browser sets it with boundary automatically
@@ -388,7 +392,7 @@ export class WiiiClient {
       method: "POST",
       headers: headersWithoutCT,
       body: formData,
-    });
+    }, timeoutMs);
 
     if (response.status === 401 && this.onUnauthorized) {
       const refreshed = await this.onUnauthorized();
@@ -398,7 +402,7 @@ export class WiiiClient {
           method: "POST",
           headers: retryHeaders,
           body: formData,
-        });
+        }, timeoutMs);
       }
     }
 
