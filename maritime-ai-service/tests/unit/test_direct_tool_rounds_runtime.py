@@ -911,8 +911,9 @@ def test_uploaded_doc_preview_prefers_explicit_query_title_over_parser_metadata(
         },
     )
 
-    assert params["title"] == "Bản nháp: Huong dan su dung HoLiLiHu LMS"
-    assert params["source_references"][0]["title"] == "Huong dan su dung HoLiLiHu LMS"
+    assert params["title"] == "Bản nháp: Hướng dẫn sử dụng HoLiLiHu LMS"
+    assert params["source_references"][0]["title"] == "Hướng dẫn sử dụng HoLiLiHu LMS"
+    assert "# Bản nháp bài học từ tài liệu: Hướng dẫn sử dụng HoLiLiHu LMS" in params["content"]
     assert "Parser provenance" not in params["title"]
 
 

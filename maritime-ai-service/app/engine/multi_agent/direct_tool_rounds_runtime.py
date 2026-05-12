@@ -441,6 +441,26 @@ def _extract_doc_preview_title_from_query(query: str) -> str:
     return ""
 
 
+def _polish_doc_preview_vietnamese_title(value: str) -> str:
+    title = _clean_doc_preview_line(value)
+    if not title:
+        return ""
+    replacements = (
+        (r"\bHuong\s+dan\s+su\s+dung\b", "Hướng dẫn sử dụng"),
+        (r"\bcho\s+giao\s+vien\b", "cho giáo viên"),
+        (r"\bgiao\s+vien\b", "giáo viên"),
+        (r"\bgiang\s+vien\b", "giảng viên"),
+        (r"\bhoc\s+vien\b", "học viên"),
+        (r"\bquan\s+ly\b", "quản lý"),
+        (r"\bkhoa\s+hoc\b", "khóa học"),
+        (r"\bbai\s+hoc\b", "bài học"),
+    )
+    polished = title
+    for pattern, replacement in replacements:
+        polished = re.sub(pattern, replacement, polished, flags=re.IGNORECASE)
+    return polished
+
+
 def _is_low_value_doc_preview_title(value: str) -> bool:
     normalized = _normalize_doc_preview_text(value)
     if not normalized:
@@ -1858,6 +1878,7 @@ def _build_uploaded_doc_preview_params(query: str, state: AgentState | None) -> 
         or str(first_attachment.get("file_name") or "").strip()
         or "Tài liệu đã tải lên"
     )
+    title_source = _polish_doc_preview_vietnamese_title(title_source)
     focused_markdown = _focus_doc_preview_markdown(query, combined_markdown)
     marker = _extract_marker(query) or _extract_marker(combined_markdown)
     goals = _extract_relevant_lines(
