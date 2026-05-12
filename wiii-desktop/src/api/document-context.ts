@@ -1,5 +1,14 @@
 import { getClient } from "./client";
 
+const ONE_MIB = 1024 * 1024;
+const DOCUMENT_PARSE_BASE_TIMEOUT_MS = 120_000;
+const DOCUMENT_PARSE_PER_MIB_TIMEOUT_MS = 15_000;
+const DOCUMENT_PARSE_MAX_TIMEOUT_MS = 360_000;
+const VIDEO_PARSE_BASE_TIMEOUT_MS = 240_000;
+const VIDEO_PARSE_PER_MIB_TIMEOUT_MS = 30_000;
+const VIDEO_PARSE_MAX_TIMEOUT_MS = 900_000;
+const VIDEO_EXTENSIONS = new Set(["mp4", "m4v", "mov", "webm", "mkv"]);
+
 export interface DocumentContextExtractedImage {
   id: string;
   label?: string | null;
@@ -59,6 +68,29 @@ export interface DocumentContextParseResponse {
   table_count?: number;
 }
 
+function clampTimeout(value: number, max: number): number {
+  return Math.min(max, Math.max(DOCUMENT_PARSE_BASE_TIMEOUT_MS, value));
+}
+
+function isVideoFile(file: File): boolean {
+  const extension = file.name.split(".").pop()?.toLowerCase() || "";
+  return file.type.startsWith("video/") || VIDEO_EXTENSIONS.has(extension);
+}
+
+export function getDocumentContextParseTimeoutMs(file: File): number {
+  const sizeMiB = Math.max(1, Math.ceil((file.size || 0) / ONE_MIB));
+  if (isVideoFile(file)) {
+    return clampTimeout(
+      VIDEO_PARSE_BASE_TIMEOUT_MS + sizeMiB * VIDEO_PARSE_PER_MIB_TIMEOUT_MS,
+      VIDEO_PARSE_MAX_TIMEOUT_MS,
+    );
+  }
+  return clampTimeout(
+    DOCUMENT_PARSE_BASE_TIMEOUT_MS + sizeMiB * DOCUMENT_PARSE_PER_MIB_TIMEOUT_MS,
+    DOCUMENT_PARSE_MAX_TIMEOUT_MS,
+  );
+}
+
 export async function parseDocumentContext(
   file: File,
   options?: { parserMode?: "auto" | "fast" | "precision" },
@@ -71,5 +103,6 @@ export async function parseDocumentContext(
   return getClient().postFormData<DocumentContextParseResponse>(
     "/api/v1/document-context/parse",
     formData,
+    getDocumentContextParseTimeoutMs(file),
   );
 }
