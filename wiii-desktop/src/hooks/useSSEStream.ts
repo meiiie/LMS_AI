@@ -33,6 +33,7 @@ import {
 } from "@/lib/pointy-fast-path";
 import { pointAt } from "@/pointy-host/api";
 import { trackVisualTelemetry } from "@/lib/visual-telemetry";
+import { looksDocumentContextFollowupIntent } from "@/lib/document-followup-intent";
 import type { SSEEventHandler } from "@/api/sse";
 import type {
   AggregationSummary,
@@ -617,6 +618,8 @@ export function useSSEStream() {
   // Track whether code_open was emitted this turn — used to suppress
   // duplicate ToolExecutionStrip for tool_create_visual_code.
   const codeOpenActiveRef = useRef(false);
+  const recentDocumentContextRef = useRef<ChatDocumentContext | undefined>(undefined);
+  const recentDocumentContextConversationRef = useRef<string | undefined>(undefined);
 
   const clearIdleGuard = useCallback(() => {
     if (idleTimerRef.current) {
@@ -771,6 +774,18 @@ export function useSSEStream() {
       // Sprint 220c: Pass embed session_id for session resumption
       const embedSessionId = (window as any).__WIII_EMBED_CONFIG__?.session_id;
       conversationId = chatStore.createConversation(domainId, undefined, embedSessionId);
+    }
+    const effectiveDocumentContext =
+      documentContext
+      || (
+        looksDocumentContextFollowupIntent(content)
+        && recentDocumentContextConversationRef.current === conversationId
+          ? recentDocumentContextRef.current
+          : undefined
+      );
+    if (documentContext?.attachments?.length) {
+      recentDocumentContextRef.current = documentContext;
+      recentDocumentContextConversationRef.current = conversationId;
     }
 
     // Add user message (Sprint 179 images + per-turn document chips)
@@ -1558,7 +1573,7 @@ export function useSSEStream() {
           visual_context: visualContext,
           widget_feedback: widgetFeedback,
           code_studio_context: codeStudioContext,
-          document_context: documentContext,
+          document_context: effectiveDocumentContext,
         };
       }
       if (pageData) {
@@ -1569,17 +1584,17 @@ export function useSSEStream() {
           visual_context: visualContext,
           widget_feedback: widgetFeedback,
           code_studio_context: codeStudioContext,
-          document_context: documentContext,
+          document_context: effectiveDocumentContext,
         };
       }
-      if (visualContext || widgetFeedback || codeStudioContext || documentContext) {
+      if (visualContext || widgetFeedback || codeStudioContext || effectiveDocumentContext) {
         return {
           display_name: displayName,
           role: compatibilityRole,
           visual_context: visualContext,
           widget_feedback: widgetFeedback,
           code_studio_context: codeStudioContext,
-          document_context: documentContext,
+          document_context: effectiveDocumentContext,
         };
       }
       return undefined;

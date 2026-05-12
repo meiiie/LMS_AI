@@ -535,6 +535,108 @@ async def test_direct_response_node_preflights_document_course_plan_for_real_tea
 
 
 @pytest.mark.asyncio
+async def test_direct_response_node_preflights_short_teacher_bai_giang_request():
+    state = _base_state()
+    state.update(
+        {
+            "query": "Tạo bài giảng đi.",
+            "session_id": "session-doc-course-short",
+            "routing_metadata": {
+                "method": "deterministic_document_context_guard",
+                "intent": "uploaded_file_context",
+            },
+            "context": {
+                "response_language": "vi",
+                "user_role": "teacher",
+                "document_context": {
+                    "attachments": [
+                        {
+                            "file_name": "SV25-26.43_KH-KT.docx",
+                            "markdown": (
+                                "# Nghiên cứu xây dựng hệ thống quản lý vận hành và hồ sơ tàu thủy\n"
+                                "## Mục tiêu nghiên cứu\n"
+                                "Tài liệu mô tả bài toán doanh nghiệp vận tải biển."
+                            ),
+                        }
+                    ]
+                },
+                "host_capabilities": {
+                    "tools": [
+                        {
+                            "name": "authoring.generate_course_from_document",
+                            "description": "Preview course plan from document",
+                            "roles": ["teacher"],
+                            "permission": "manage:courses",
+                            "mutates_state": False,
+                            "requires_confirmation": False,
+                        }
+                    ]
+                },
+            },
+        }
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_direct_tool_rounds(*args, **kwargs):
+        captured["forced_tool_choice"] = kwargs.get("forced_tool_choice")
+        captured["tool_names"] = [
+            getattr(tool, "name", getattr(tool, "__name__", ""))
+            for tool in args[3]
+        ]
+        return (
+            SimpleNamespace(content="Course plan preview sent to LMS."),
+            [],
+            [
+                {
+                    "type": "call",
+                    "name": "host_action__authoring__generate_course_from_document",
+                },
+                {
+                    "type": "host_action",
+                    "name": "host_action__authoring__generate_course_from_document",
+                },
+            ],
+        )
+
+    kwargs = _base_direct_kwargs()
+    kwargs.update(
+        {
+            "looks_identity_selfhood_turn": lambda *_args, **_kwargs: False,
+            "get_effective_provider": lambda *_args, **_kwargs: None,
+            "get_explicit_user_provider": lambda *_args, **_kwargs: None,
+            "collect_direct_tools": lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("short document course request must preflight before tool collection")
+            ),
+            "execute_direct_tool_rounds": fake_execute_direct_tool_rounds,
+            "extract_direct_response": lambda *_args, **_kwargs: (
+                "Course plan preview sent to LMS.",
+                "Course plan was created from uploaded document context.",
+                [],
+            ),
+        }
+    )
+
+    with (
+        patch(
+            "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_native_llm",
+            side_effect=AssertionError("short course plan preview should not need native LLM"),
+        ),
+        patch(
+            "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+            side_effect=AssertionError("short course plan preview should not need planner LLM"),
+        ),
+    ):
+        result = await direct_response_node_impl(state, **kwargs)
+
+    assert result["final_response"] == "Course plan preview sent to LMS."
+    assert captured["forced_tool_choice"] == "host_action__authoring__generate_course_from_document"
+    assert captured["tool_names"] == ["host_action__authoring__generate_course_from_document"]
+    assert result["routing_metadata"]["doc_preview_preflight"]["status"] == "executed"
+    assert result["tool_call_events"][1]["type"] == "host_action"
+
+
+@pytest.mark.asyncio
 async def test_direct_response_node_handles_image_input_with_vision_before_llm():
     async def fake_analyze_image_for_query(**kwargs):
         assert kwargs["image_base64"] == "iVBORw0KGgo="
