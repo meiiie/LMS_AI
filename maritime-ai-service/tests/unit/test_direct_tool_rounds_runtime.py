@@ -577,6 +577,9 @@ def test_uploaded_doc_course_plan_builder_creates_full_lms_architecture():
     plan = params["course_plan"]
     assert params["course_id"] == "course-1"
     assert params["changed_fields"] == ["course_structure"]
+    assert params["summary"].endswith("tài liệu upload.")
+    assert "trích dẫn" not in params["summary"]
+    assert "LMS" not in params["summary"]
     assert len(plan["chapters"]) == 5
     titles = [chapter["title"] for chapter in plan["chapters"]]
     assert any("Hành trình học viên" in title for title in titles)

@@ -1837,8 +1837,7 @@ def _build_uploaded_doc_course_params(query: str, state: AgentState | None) -> d
         "title": course_plan.get("title") or title_source,
         "summary": (
             f"Wiii đã dựng cây khóa học nháp gồm {len(chapters)} chương và "
-            f"{lesson_count} bài từ tài liệu upload. Giáo viên cần xem nguồn trích dẫn "
-            "trước khi áp dụng vào LMS."
+            f"{lesson_count} bài từ tài liệu upload."
         ),
         "course_plan": course_plan,
         "changed_fields": ["course_structure"],
