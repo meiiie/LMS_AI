@@ -30,6 +30,7 @@ ENV/
 htmlcov/
 .hypothesis/
 .ruff_cache/
+artifacts/
 
 # === IDE ===
 .idea/

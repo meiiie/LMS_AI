@@ -271,12 +271,31 @@ curl -fsS \
   https://wiii.holilihu.online/api/v1/voice/status
 ```
 
+For Wiii x LMS releases that touch Pointy, host actions, or LMS DOM targets,
+run the product Pointy contract smoke from a local machine with Playwright:
+
+```bash
+LMS_TEACHER_EMAIL=<teacher-email> \
+LMS_TEACHER_PASSWORD=<teacher-password> \
+LMS_COURSE_ID=<course-id> \
+LMS_CHAPTER_ID=<chapter-id> \
+LMS_LESSON_ID=<lesson-id> \
+python scripts/product_smoke/lms_pointy_contract_smoke.py
+```
+
+This smoke logs into the LMS, audits `data-wiii-id` inventory, verifies safe
+navigation targets, ensures publish/save/delete targets are not safe-clickable,
+then sends real Pointy `wiii:action-request` messages through the embedded Wiii
+iframe to validate highlight, tour, fail-closed unsafe clicks, and one safe
+navigation click.
+
 Minimum product smoke criteria:
 
 - public health returns `200`
 - `/embed/` returns `200` and has the expected frame policy
 - `/pointy/wiii-pointy.umd.js` returns JavaScript content and never falls through to the SPA shell
 - `/api/v1/voice/status` is registered and returns provider `elevenlabs` when authenticated
+- Pointy LMS contract smoke passes if Pointy, host actions, or LMS DOM targets changed
 - SSE V3 smoke reaches metadata and done events
 - a normal short chat returns without a long silent period
 - LMS iframe loads Wiii without cross-origin console errors beyond known sandbox limitations
