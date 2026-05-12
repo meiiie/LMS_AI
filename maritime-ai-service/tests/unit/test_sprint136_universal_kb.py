@@ -398,3 +398,19 @@ class TestTextIngestionEndpoint:
         )
         assert resp.domain_breakdown["maritime"] == 70
         assert resp.domain_breakdown["traffic_law"] == 30
+
+    def test_knowledge_stats_warning_for_empty_kb(self):
+        """Empty KB should be visible as degraded for source-backed RAG readiness."""
+        from app.api.v1.knowledge import (
+            EMPTY_KNOWLEDGE_BASE_WARNING,
+            build_knowledge_stats_warning,
+        )
+
+        assert build_knowledge_stats_warning(0, 0) == EMPTY_KNOWLEDGE_BASE_WARNING
+        assert build_knowledge_stats_warning(10, 0) == EMPTY_KNOWLEDGE_BASE_WARNING
+
+    def test_knowledge_stats_no_warning_for_indexed_kb(self):
+        """Non-empty indexed KB should not emit the empty-KB warning."""
+        from app.api.v1.knowledge import build_knowledge_stats_warning
+
+        assert build_knowledge_stats_warning(10, 2) is None

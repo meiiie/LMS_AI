@@ -196,6 +196,18 @@ class KnowledgeStatsResponse(BaseModel):
     warning: Optional[str] = None
 
 
+EMPTY_KNOWLEDGE_BASE_WARNING = (
+    "Knowledge base is empty; ingest documents before relying on source-backed RAG."
+)
+
+
+def build_knowledge_stats_warning(total_chunks: int, total_documents: int) -> Optional[str]:
+    """Surface empty-KB readiness gaps without treating DB connectivity as failed."""
+    if total_chunks <= 0 or total_documents <= 0:
+        return EMPTY_KNOWLEDGE_BASE_WARNING
+    return None
+
+
 @router.get("/stats", response_model=KnowledgeStatsResponse)
 @limiter.limit("60/minute")
 async def get_statistics(request: Request) -> KnowledgeStatsResponse:
@@ -252,7 +264,10 @@ async def get_statistics(request: Request) -> KnowledgeStatsResponse:
                 content_types=content_types,
                 avg_confidence=round(float(avg_confidence), 3),
                 domain_breakdown=domain_breakdown,
-                warning=None
+                warning=build_knowledge_stats_warning(
+                    total_chunks=total_chunks or 0,
+                    total_documents=total_documents or 0,
+                )
             )
         finally:
             await conn.close()
