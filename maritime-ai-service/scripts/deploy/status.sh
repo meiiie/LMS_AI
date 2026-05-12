@@ -99,6 +99,10 @@ echo "  Swap:    $(free -h | awk 'NR==3 {printf "%s used / %s total", $3, $2}')"
 echo "  Disk:    $(df -h / | awk 'NR==2 {printf "%s used / %s total (%s free, %s)", $3, $2, $4, $5}')"
 
 echo ""
+echo -e "${GREEN}--- Docker Disk ---${NC}"
+docker system df 2>/dev/null || echo "  Docker disk usage unavailable"
+
+echo ""
 echo -e "${GREEN}--- PostgreSQL ---${NC}"
 compose exec -T postgres psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -t -c \
     "SELECT 'Active connections: ' || count(*) FROM pg_stat_activity WHERE state = 'active';" 2>/dev/null || echo "  PostgreSQL not reachable"

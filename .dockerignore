@@ -6,8 +6,16 @@
 .idea/
 .claude/
 .Codex/
+.agents/
+.specify/
 Documents/
+artifacts/
+chaos/
 docs/
+loadtest/
+memory/
+plans/
+scripts/
 tools/
 wiii-assets/
 
@@ -21,14 +29,22 @@ wiii-assets/
 **/node_modules/
 **/dist/
 **/build/
+**/coverage/
 **/*.log
 **/.DS_Store
+**/*.tmp
+**/*.bak
 
+wiii-desktop/src/
+wiii-desktop/src-tauri/
 wiii-desktop/src-tauri/target/
+wiii-desktop/e2e/
 
 maritime-ai-service/tests/
 maritime-ai-service/backups/
 maritime-ai-service/data/
+maritime-ai-service/logs/
 maritime-ai-service/secrets/
+maritime-ai-service/wiii_service.egg-info/
 maritime-ai-service/.env
 maritime-ai-service/.env.*

@@ -48,6 +48,9 @@ SKIP_IMAGE_MANIFEST_CHECK="${SKIP_IMAGE_MANIFEST_CHECK:-false}"
 SKIP_PREDEPLOY_BACKUP="${SKIP_PREDEPLOY_BACKUP:-false}"
 RUN_EXTERNAL_SMOKE="${RUN_EXTERNAL_SMOKE:-false}"
 SKIP_PRE_PULL_DOCKER_CLEANUP="${SKIP_PRE_PULL_DOCKER_CLEANUP:-false}"
+ALLOW_LOW_MEMORY_PRECISION="${ALLOW_LOW_MEMORY_PRECISION:-false}"
+MIN_PRECISION_HOST_MEM_GIB="${MIN_PRECISION_HOST_MEM_GIB:-12}"
+MIN_PRECISION_DOCKER_FREE_GIB="${MIN_PRECISION_DOCKER_FREE_GIB:-12}"
 
 case "$ENV_FILE" in
     /*)
@@ -155,7 +158,7 @@ validate_environment() {
 }
 
 sync_release_code() {
-    info "Step 1/10: Syncing release code..."
+    info "Step 1/11: Syncing release code..."
     require_clean_checkout
 
     cd "$APP_DIR"
@@ -182,7 +185,7 @@ sync_release_code() {
 }
 
 validate_images() {
-    info "Step 2/10: Validating image tags..."
+    info "Step 2/11: Validating image tags..."
 
     APP_IMAGE="$(clean_value "${WIII_APP_IMAGE:-$(env_value WIII_APP_IMAGE || true)}")"
     NGINX_IMAGE="$(clean_value "${WIII_NGINX_IMAGE:-$(env_value WIII_NGINX_IMAGE || true)}")"
@@ -213,8 +216,83 @@ validate_images() {
 }
 
 validate_compose_config() {
-    info "Step 3/10: Validating docker compose configuration..."
+    info "Step 3/11: Validating docker compose configuration..."
     compose config --quiet
+}
+
+is_truthy() {
+    case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|y|on)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+precision_docs_enabled() {
+    local parser_mode
+    local use_docling
+
+    parser_mode="$(clean_value "${DOCUMENT_CONTEXT_PARSER_MODE:-$(env_value DOCUMENT_CONTEXT_PARSER_MODE || true)}")"
+    use_docling="$(clean_value "${USE_DOCLING_FOR_COURSE_GEN:-$(env_value USE_DOCLING_FOR_COURSE_GEN || true)}")"
+    parser_mode="$(printf '%s' "${parser_mode:-}" | tr '[:upper:]' '[:lower:]')"
+
+    [ "$parser_mode" = "precision" ] || is_truthy "$use_docling"
+}
+
+capacity_failure() {
+    local message="$1"
+    if is_truthy "$ALLOW_LOW_MEMORY_PRECISION"; then
+        warn "${message}"
+        warn "Continuing because ALLOW_LOW_MEMORY_PRECISION=true."
+        return 0
+    fi
+
+    error "${message}"
+    error "Resize the VM, disable precision temporarily, or set ALLOW_LOW_MEMORY_PRECISION=true for an explicit emergency deploy."
+    exit 1
+}
+
+validate_host_capacity() {
+    info "Step 4/11: Validating host capacity for the selected parser profile..."
+
+    if ! precision_docs_enabled; then
+        info "Precision document parsing is disabled; skipping precision-docs capacity guard."
+        return 0
+    fi
+
+    local mem_total_kb=0
+    local swap_total_kb=0
+    local docker_path="/var/lib/docker"
+    local docker_free_kb=0
+    local min_mem_kb
+    local min_docker_free_kb
+
+    if [ -r /proc/meminfo ]; then
+        mem_total_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+        swap_total_kb="$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)"
+    fi
+    mem_total_kb="${mem_total_kb:-0}"
+    swap_total_kb="${swap_total_kb:-0}"
+
+    [ -d "$docker_path" ] || docker_path="/"
+    docker_free_kb="$(df -Pk "$docker_path" | awk 'NR==2 {print $4}')"
+    docker_free_kb="${docker_free_kb:-0}"
+
+    min_mem_kb=$((MIN_PRECISION_HOST_MEM_GIB * 1024 * 1024))
+    min_docker_free_kb=$((MIN_PRECISION_DOCKER_FREE_GIB * 1024 * 1024))
+
+    info "Precision-docs host profile: RAM=$((mem_total_kb / 1024 / 1024))GiB, swap=$((swap_total_kb / 1024 / 1024))GiB, docker-free=$((docker_free_kb / 1024 / 1024))GiB."
+
+    if [ "$mem_total_kb" -lt "$min_mem_kb" ]; then
+        capacity_failure "Precision document parsing needs at least ${MIN_PRECISION_HOST_MEM_GIB}GiB physical RAM on this single-node profile; detected $((mem_total_kb / 1024 / 1024))GiB."
+    fi
+
+    if [ "$docker_free_kb" -lt "$min_docker_free_kb" ]; then
+        capacity_failure "Precision document parsing needs at least ${MIN_PRECISION_DOCKER_FREE_GIB}GiB free Docker/root disk before pulling images; detected $((docker_free_kb / 1024 / 1024))GiB at ${docker_path}."
+    fi
 }
 
 cleanup_docker_before_pull() {
@@ -223,7 +301,7 @@ cleanup_docker_before_pull() {
         return 0
     fi
 
-    info "Step 4/10: Reclaiming unused Docker image/build cache before pulling images..."
+    info "Step 5/11: Reclaiming unused Docker image/build cache before pulling images..."
     docker system df || true
 
     # Do not prune volumes: production data lives in Docker volumes.
@@ -236,7 +314,7 @@ cleanup_docker_before_pull() {
 }
 
 pull_images() {
-    info "Step 5/10: Pulling production images..."
+    info "Step 6/11: Pulling production images..."
     compose pull app nginx
 }
 
@@ -269,14 +347,14 @@ wait_for_health() {
 }
 
 start_data_services() {
-    info "Step 6/10: Starting data services..."
+    info "Step 7/11: Starting data services..."
     compose up -d postgres minio minio-init valkey
     info "Waiting for PostgreSQL..."
     wait_for_health postgres 90 3
 }
 
 create_predeploy_backup() {
-    info "Step 7/10: Creating pre-deploy database backup..."
+    info "Step 8/11: Creating pre-deploy database backup..."
 
     if [ "$SKIP_PREDEPLOY_BACKUP" = "true" ]; then
         warn "Skipping pre-deploy backup because SKIP_PREDEPLOY_BACKUP=true."
@@ -305,13 +383,13 @@ create_predeploy_backup() {
 }
 
 run_migrations() {
-    info "Step 8/10: Running Alembic migrations..."
+    info "Step 9/11: Running Alembic migrations..."
     compose run --rm app alembic upgrade head
     info "Migrations complete."
 }
 
 start_runtime() {
-    info "Step 9/10: Starting application and nginx..."
+    info "Step 10/11: Starting application and nginx..."
     compose up -d app
     wait_for_health app 150 3
 
@@ -328,7 +406,7 @@ reload_caddy() {
 }
 
 run_final_smoke() {
-    info "Step 10/10: Running local release smoke checks..."
+    info "Step 11/11: Running local release smoke checks..."
 
     local nginx_port
     nginx_port="$(clean_value "${NGINX_HTTP_PORT:-$(env_value NGINX_HTTP_PORT || true)}")"
@@ -404,6 +482,7 @@ main() {
     sync_release_code
     validate_images
     validate_compose_config
+    validate_host_capacity
     cleanup_docker_before_pull
     pull_images
     start_data_services
