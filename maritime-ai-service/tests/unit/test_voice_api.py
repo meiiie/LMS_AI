@@ -180,3 +180,55 @@ def test_synthesize_pointy_speech_proxies_to_elevenlabs(monkeypatch):
     assert captured["params"] == {"output_format": "mp3_22050_32"}
     assert captured["headers"]["xi-api-key"] == "test-key"
     assert captured["json"]["model_id"] == "eleven_flash_v2_5"
+
+
+def test_synthesize_pointy_speech_uses_persisted_model_config(monkeypatch):
+    from app.api.v1 import voice as module
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        content = b"mp3-bytes"
+        text = ""
+        headers = {"content-type": "audio/mpeg"}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, **kwargs):
+            captured.update(kwargs)
+            return FakeResponse()
+
+    _install_voice_repo(
+        monkeypatch,
+        module,
+        {
+            "enabled": True,
+            "elevenlabs_api_key": "test-key",
+            "voice_id": "voice-id",
+            "model_id": "eleven_multilingual_v2",
+            "output_format": "mp3_44100_128",
+        },
+    )
+    monkeypatch.setattr(module.settings, "elevenlabs_model_id", "eleven_flash_v2_5", raising=False)
+    monkeypatch.setattr(module.httpx, "AsyncClient", FakeClient)
+
+    response = asyncio.run(
+        module.synthesize_pointy_speech(
+            SimpleNamespace(client=SimpleNamespace(host="127.0.0.1")),
+            module.PointySpeechRequest(text="Xin chao"),
+            SimpleNamespace(user_id="u"),
+        )
+    )
+
+    assert response.body == b"mp3-bytes"
+    assert captured["params"] == {"output_format": "mp3_44100_128"}
+    assert captured["json"]["model_id"] == "eleven_multilingual_v2"

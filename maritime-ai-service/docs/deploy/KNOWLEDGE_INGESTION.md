@@ -20,6 +20,24 @@
 6. Check stats: `curl localhost:8000/api/v1/knowledge/stats -H "X-API-Key: your-key"`
 7. Test RAG: Ask a maritime question → should cite ingested documents
 
+## Fast Seed For Empty KB
+
+If production stats show `total_chunks=0`, seed the small COLREGs teaching
+corpus first so source-backed RAG is not silently empty while larger PDFs are
+being prepared:
+
+```bash
+cd maritime-ai-service
+WIII_BASE_URL=https://wiii.holilihu.online \
+WIII_ADMIN_JWT=<platform-admin-jwt> \
+python scripts/seed_maritime_text_kb.py
+```
+
+The seed is idempotent. It writes `document_id=maritime-colregs-teaching-seed-v1`
+through `POST /api/v1/knowledge/ingest-text`, then prints before/after stats
+without printing credentials. Use `--dry-run` to inspect the target and payload
+size without writing.
+
 ## Alternative: Admin UI Upload
 
 The Org Admin panel has drag-drop PDF upload at:

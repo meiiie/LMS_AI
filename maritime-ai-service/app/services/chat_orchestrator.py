@@ -95,6 +95,55 @@ _AGENT_TYPE_MAP = {
 }
 
 
+def _has_sync_fast_path_blocking_context(context: ChatContext | None) -> bool:
+    """Keep deterministic sync replies away from tool/file/action turns."""
+    if context is None:
+        return True
+    return any(
+        bool(getattr(context, field_name, None))
+        for field_name in (
+            "images",
+            "image_input_error",
+            "document_context",
+            "force_skills",
+            "pointy_mode",
+            "host_action_feedback",
+        )
+    )
+
+
+def _build_sync_social_chatter_answer(message: str, shape: str) -> tuple[str, str]:
+    from app.engine.multi_agent.supervisor_hint_runtime import (
+        _normalize_router_text_impl,
+    )
+
+    normalized = _normalize_router_text_impl(message)
+    if shape == "reaction":
+        return (
+            "Mình nghe thấy rồi. Nếu cậu muốn, cứ ném phần tiếp theo qua đây, mình bắt nhịp cùng cậu.",
+            "Đây chỉ là một phản ứng ngắn, không phải lượt cần tra cứu hay dùng tool. Mình nên đáp lại có mặt, gọn, và mở đường để cậu nói tiếp.",
+        )
+    if any(marker in normalized for marker in ("cam on", "thanks", "thank you", "thank")):
+        return (
+            "Không có gì đâu, mình ở đây mà. Cần mình phụ tiếp đoạn nào thì cứ nói nhé.",
+            "Cậu đang cảm ơn, nên câu trả lời tốt nhất là ấm, ngắn, không kéo pipeline LLM chỉ để tạo thêm chữ.",
+        )
+    if any(marker in normalized for marker in ("tam biet", "bye", "goodbye", "hen gap lai")):
+        return (
+            "Ừ, mình tạm gác ở đây nha. Khi cậu quay lại, mình tiếp tục cùng cậu từ mạch đang làm.",
+            "Đây là lượt kết thúc nhẹ, nên Wiii nên giữ cảm giác liên tục thay vì route sang RAG hoặc tool.",
+        )
+    if "alo" in normalized:
+        return (
+            "Mình nghe đây. Cậu cần mình phụ phần nào trước?",
+            "Câu này là tín hiệu gọi Wiii, không có yêu cầu tri thức hay hành động. Mình đáp nhanh để cuộc trò chuyện không bị khựng.",
+        )
+    return (
+        "Chào cậu, mình đây. Cậu muốn mình cùng xử lý phần nào trước?",
+        "Đây là lời chào rất rõ, không cần RAG, web hay tool. Mình nên phản hồi ngay để tạo nhịp tự nhiên rồi chờ yêu cầu thật sự của cậu.",
+    )
+
+
 @dataclass(frozen=True)
 class RequestScope:
     """Resolved organization and domain for a chat request."""
@@ -239,6 +288,64 @@ class ChatOrchestrator:
             domain_id=domain_id,
             title=title,
             organization_id=organization_id,
+        )
+
+    def _build_sync_fast_chatter_result(
+        self,
+        context: ChatContext | None,
+    ) -> ProcessingResult | None:
+        """Return a deterministic result for obvious sync-only chatter."""
+        if _has_sync_fast_path_blocking_context(context):
+            return None
+
+        message = getattr(context, "message", "") or ""
+        from app.engine.multi_agent.supervisor_hint_runtime import (
+            classify_fast_chatter_turn_impl,
+        )
+
+        classification = classify_fast_chatter_turn_impl(message)
+        if not classification:
+            return None
+
+        intent, shape = classification
+        if intent != "social":
+            return None
+
+        if shape == "hunger_chatter":
+            from app.engine.multi_agent.direct_node_runtime import (
+                _build_hunger_chatter_answer,
+                _build_hunger_chatter_thinking,
+            )
+
+            answer = _build_hunger_chatter_answer(message)
+            thinking = _build_hunger_chatter_thinking(message)
+        elif shape in {"social", "reaction"}:
+            answer, thinking = _build_sync_social_chatter_answer(message, shape)
+        else:
+            return None
+
+        return ProcessingResult(
+            message=answer,
+            agent_type=AgentType.DIRECT,
+            sources=None,
+            metadata={
+                "multi_agent": False,
+                "provider": "deterministic",
+                "model": "wiii-sync-fast-chatter-v1",
+                "runtime_authoritative": True,
+                "current_agent": "direct",
+                "tools_used": [],
+                "reasoning_trace": None,
+                "thinking": thinking,
+                "thinking_content": thinking,
+                "routing_metadata": {
+                    "method": "sync_fast_chatter",
+                    "intent": intent,
+                    "shape": shape,
+                    "reason": "obvious_short_social_turn_without_tool_context",
+                },
+            },
+            thinking=thinking,
         )
 
     def finalize_response_turn(
@@ -474,8 +581,14 @@ class ChatOrchestrator:
         # STAGE 4: AGENT PROCESSING
         # ================================================================
         
-        # Option A: Multi-Agent System (SOTA 2025)
-        if self._use_multi_agent:
+        fast_result = self._build_sync_fast_chatter_result(context)
+
+        # Option A: Deterministic fast path for obvious sync-only chatter.
+        if fast_result is not None:
+            result = fast_result
+
+        # Option B: Multi-Agent System (SOTA 2025)
+        elif self._use_multi_agent:
             result = await self._process_with_multi_agent(
                 context,
                 session,
@@ -485,7 +598,7 @@ class ChatOrchestrator:
                 model,
             )
 
-        # Option B: Fallback to direct RAG mode
+        # Option C: Fallback to direct RAG mode
         else:
             result = await self.process_without_multi_agent(context)
         
