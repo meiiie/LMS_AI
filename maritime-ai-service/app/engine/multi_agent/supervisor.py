@@ -55,6 +55,7 @@ from app.engine.multi_agent.supervisor_runtime_support import (
     is_complex_query_impl,
     rule_based_route_impl,
     resolve_house_routing_provider_impl,
+    _looks_source_backed_domain_lookup_turn,
     validate_domain_routing_impl,
 )
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
@@ -290,6 +291,30 @@ class SupervisorAgent:
             return agent
 
         _apply_routing_hint(state, query)
+
+        normalized_query = _normalize_router_text(query)
+        if _looks_source_backed_domain_lookup_turn(normalized_query):
+            agent = AgentType.RAG.value
+            intent = "lookup"
+            method = "deterministic_source_backed_lookup_guard"
+            state["routing_metadata"] = {
+                "intent": intent,
+                "confidence": 1.0,
+                "reasoning": _finalize_routing_reasoning(
+                    raw_reasoning=(
+                        "user asked for a source-backed domain answer; use RAG "
+                        "before direct model synthesis so citations can surface"
+                    ),
+                    method=method,
+                    chosen_agent=agent,
+                    intent=intent,
+                    query=query,
+                ),
+                "llm_reasoning": "",
+                "method": method,
+                "final_agent": agent,
+            }
+            return agent
 
         routing_hint = state.get("_routing_hint") or {}
         if (

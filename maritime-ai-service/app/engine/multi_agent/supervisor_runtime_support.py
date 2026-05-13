@@ -121,6 +121,29 @@ _OBVIOUS_MARITIME_LOOKUP_BLOCKERS = (
     "web search",
 )
 
+_SOURCE_BACKED_LOOKUP_MARKERS = (
+    "according to",
+    "can cu",
+    "cite",
+    "citation",
+    "citations",
+    "co dan nguon",
+    "co nguon",
+    "dan nguon",
+    "dua tren tai lieu",
+    "knowledge source",
+    "nguon",
+    "reference",
+    "references",
+    "source",
+    "sources",
+    "source-backed",
+    "tai lieu noi gi",
+    "theo nguon",
+    "theo tai lieu",
+    "trich dan",
+)
+
 _EXPLICIT_WEB_SEARCH_MARKERS = (
     "@web-search",
     "@web_search",
@@ -195,6 +218,34 @@ def _looks_colreg_rule_explanation_turn(normalized_query: str) -> bool:
         query,
     ) is not None
     return has_colreg and has_rule_number
+
+
+def _looks_source_backed_domain_lookup_turn(normalized_query: str) -> bool:
+    """Route citation/source-backed domain questions to RAG before LLM routing.
+
+    This guard is intentionally narrower than the generic maritime lookup
+    heuristic: it only catches prompts that explicitly ask Wiii to ground the
+    answer in a source/citation and that contain a maritime regulation marker.
+    Web/latest requests stay out so the web-search lane can handle them.
+    """
+    query = normalized_query or ""
+    if not query:
+        return False
+    if _looks_explicit_web_search_turn(query):
+        return False
+    if _contains_any_marker(query, ("latest", "moi nhat", "news", "tin moi", "tin tuc")):
+        return False
+
+    has_domain_marker = _contains_any_marker(
+        query,
+        _OBVIOUS_MARITIME_LOOKUP_MARKERS,
+    ) or re.search(r"\brule\s+\d+[a-z]?\b", query) is not None or re.search(
+        r"\bquy\s*tac\s+\d+[a-z]?\b",
+        query,
+    ) is not None
+    if not has_domain_marker:
+        return False
+    return _contains_any_marker(query, _SOURCE_BACKED_LOOKUP_MARKERS)
 
 
 def _looks_explicit_web_search_turn(normalized_query: str) -> bool:
