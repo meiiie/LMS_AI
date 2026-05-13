@@ -1,0 +1,185 @@
+name: Seed Production Knowledge Base
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Public Wiii API base URL."
+        required: true
+        default: "https://wiii.holilihu.online"
+        type: string
+      document_id:
+        description: "Idempotent document_id to upsert into RAG."
+        required: true
+        default: "maritime-colregs-teaching-seed-v1"
+        type: string
+      domain_id:
+        description: "Domain tag for the ingested chunks."
+        required: true
+        default: "maritime"
+        type: string
+      title:
+        description: "Human-readable document title."
+        required: true
+        default: "COLREGs teaching seed corpus v1"
+        type: string
+      corpus_path:
+        description: "Path under maritime-ai-service/ on the production checkout."
+        required: true
+        default: "scripts/data/maritime_seed_corpus/colregs_teaching_seed_v1.md"
+        type: string
+      dry_run:
+        description: "Check stats and print planned ingest without writing."
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-kb-seed
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    name: Seed production RAG via VM API key
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ inputs.base_url }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Configure SSH
+        shell: bash
+        env:
+          PROD_HOST: ${{ secrets.WIII_PRODUCTION_HOST }}
+          PROD_USER: ${{ secrets.WIII_PRODUCTION_USER }}
+          PROD_SSH_KEY: ${{ secrets.WIII_PRODUCTION_SSH_KEY }}
+          PROD_KNOWN_HOSTS: ${{ secrets.WIII_PRODUCTION_KNOWN_HOSTS }}
+          PROD_SSH_PORT: ${{ vars.WIII_PRODUCTION_SSH_PORT }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PROD_HOST:-}" ] || [ -z "${PROD_USER:-}" ] || [ -z "${PROD_SSH_KEY:-}" ]; then
+            echo "Missing required production SSH secrets: WIII_PRODUCTION_HOST, WIII_PRODUCTION_USER, WIII_PRODUCTION_SSH_KEY." >&2
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$PROD_SSH_KEY" > ~/.ssh/wiii_production_key
+          chmod 600 ~/.ssh/wiii_production_key
+          if [ -n "${PROD_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$PROD_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "${PROD_SSH_PORT:-22}" "$PROD_HOST" >> ~/.ssh/known_hosts
+          fi
+
+      - name: Seed production knowledge base
+        shell: bash
+        env:
+          PROD_HOST: ${{ secrets.WIII_PRODUCTION_HOST }}
+          PROD_USER: ${{ secrets.WIII_PRODUCTION_USER }}
+          PROD_SSH_PORT: ${{ vars.WIII_PRODUCTION_SSH_PORT }}
+          PROD_APP_DIR: ${{ vars.WIII_PRODUCTION_APP_DIR }}
+          BASE_URL: ${{ inputs.base_url }}
+          DOCUMENT_ID: ${{ inputs.document_id }}
+          DOMAIN_ID: ${{ inputs.domain_id }}
+          TITLE: ${{ inputs.title }}
+          CORPUS_PATH: ${{ inputs.corpus_path }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          encode() { printf '%s' "$1" | base64 -w0; }
+
+          APP_DIR="${PROD_APP_DIR:-/opt/wiii}"
+          SSH_TARGET="${PROD_USER}@${PROD_HOST}"
+          SSH_PORT="${PROD_SSH_PORT:-22}"
+          BASE_URL_B64="$(encode "$BASE_URL")"
+          DOCUMENT_ID_B64="$(encode "$DOCUMENT_ID")"
+          DOMAIN_ID_B64="$(encode "$DOMAIN_ID")"
+          TITLE_B64="$(encode "$TITLE")"
+          CORPUS_PATH_B64="$(encode "$CORPUS_PATH")"
+
+          ssh -i ~/.ssh/wiii_production_key -p "$SSH_PORT" "$SSH_TARGET" \
+            "APP_DIR='$APP_DIR' BASE_URL_B64='$BASE_URL_B64' DOCUMENT_ID_B64='$DOCUMENT_ID_B64' DOMAIN_ID_B64='$DOMAIN_ID_B64' TITLE_B64='$TITLE_B64' CORPUS_PATH_B64='$CORPUS_PATH_B64' DRY_RUN='$DRY_RUN' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          decode() { printf '%s' "$1" | base64 -d; }
+          clean_value() {
+            local value="${1:-}"
+            value="${value%$'\r'}"
+            value="${value#\"}"
+            value="${value%\"}"
+            value="${value#\'}"
+            value="${value%\'}"
+            printf '%s' "$value"
+          }
+          env_value() {
+            local key="$1"
+            awk -v key="$key" '
+              BEGIN { FS = "="; found = 0 }
+              $0 !~ /^[[:space:]]*#/ && $1 == key {
+                sub(/^[^=]*=/, "")
+                print
+                found = 1
+              }
+              END { exit found ? 0 : 1 }
+            ' "$ENV_PATH" | tail -n 1
+          }
+
+          BASE_URL="$(decode "$BASE_URL_B64")"
+          DOCUMENT_ID="$(decode "$DOCUMENT_ID_B64")"
+          DOMAIN_ID="$(decode "$DOMAIN_ID_B64")"
+          TITLE="$(decode "$TITLE_B64")"
+          CORPUS_PATH="$(decode "$CORPUS_PATH_B64")"
+
+          cd "$APP_DIR"
+          git fetch --prune origin main
+          git switch main
+          git pull --ff-only origin main
+
+          SERVICE_DIR="${APP_DIR}/maritime-ai-service"
+          ENV_PATH="${SERVICE_DIR}/.env.production"
+          if [ ! -f "$ENV_PATH" ]; then
+            echo "Missing production env file: $ENV_PATH" >&2
+            exit 1
+          fi
+
+          API_KEY_VALUE="$(clean_value "$(env_value API_KEY || true)")"
+          if [ -z "$API_KEY_VALUE" ]; then
+            echo "Missing API_KEY in production env file." >&2
+            exit 1
+          fi
+
+          cd "$SERVICE_DIR"
+          if [ ! -f "$CORPUS_PATH" ]; then
+            echo "Corpus path not found under maritime-ai-service: $CORPUS_PATH" >&2
+            exit 1
+          fi
+
+          args=(
+            scripts/seed_maritime_text_kb.py
+            --base-url "$BASE_URL"
+            --corpus "$CORPUS_PATH"
+            --document-id "$DOCUMENT_ID"
+            --domain-id "$DOMAIN_ID"
+            --title "$TITLE"
+            --api-key-env API_KEY
+          )
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
+
+          if command -v python3 >/dev/null 2>&1; then
+            API_KEY="$API_KEY_VALUE" python3 "${args[@]}"
+          elif command -v python >/dev/null 2>&1; then
+            API_KEY="$API_KEY_VALUE" python "${args[@]}"
+          else
+            echo "Python is not available on the production VM host." >&2
+            exit 1
+          fi
+          REMOTE
