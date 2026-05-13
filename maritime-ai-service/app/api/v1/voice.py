@@ -233,10 +233,10 @@ def _clean_pointy_speech_text(text: str) -> str:
     return cleaned
 
 
-def _build_elevenlabs_payload(text: str) -> dict[str, Any]:
+def _build_elevenlabs_payload(text: str, *, model_id: str | None = None) -> dict[str, Any]:
     return {
         "text": text,
-        "model_id": getattr(settings, "elevenlabs_model_id", "eleven_flash_v2_5"),
+        "model_id": model_id or getattr(settings, "elevenlabs_model_id", "eleven_flash_v2_5"),
         "voice_settings": {
             "stability": 0.42,
             "similarity_boost": 0.82,
@@ -358,7 +358,7 @@ async def synthesize_pointy_speech(
                     "Content-Type": "application/json",
                     "Accept": "audio/mpeg",
                 },
-                json=_build_elevenlabs_payload(text),
+                json=_build_elevenlabs_payload(text, model_id=config.model_id),
             )
     except httpx.HTTPError as exc:
         logger.warning("ElevenLabs Pointy TTS request failed: %s", exc)

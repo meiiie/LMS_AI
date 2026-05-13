@@ -136,6 +136,86 @@ def test_normalize_thread_id_treats_new_as_none():
     assert ChatOrchestrator.normalize_thread_id(request) == "session-1"
 
 
+def test_sync_fast_chatter_handles_unicode_hunger_without_llm():
+    orchestrator = _make_orchestrator()
+    context = _make_chat_context()
+    context.message = "\u0111\u00f3i ph\u1ebft"
+    context.images = None
+
+    result = orchestrator._build_sync_fast_chatter_result(context)
+
+    assert result is not None
+    assert result.agent_type.value == "direct"
+    assert "\u0110\u00f3i ph\u1ebft" in result.message
+    assert result.metadata["provider"] == "deterministic"
+    assert result.metadata["routing_metadata"] == {
+        "method": "sync_fast_chatter",
+        "intent": "social",
+        "shape": "hunger_chatter",
+        "reason": "obvious_short_social_turn_without_tool_context",
+    }
+
+
+def test_sync_fast_chatter_handles_plain_greeting_without_llm():
+    orchestrator = _make_orchestrator()
+    context = _make_chat_context()
+    context.message = "chao"
+    context.images = None
+
+    result = orchestrator._build_sync_fast_chatter_result(context)
+
+    assert result is not None
+    assert "Ch\u00e0o c\u1eadu" in result.message
+    assert result.metadata["routing_metadata"]["shape"] == "social"
+
+
+def test_sync_fast_chatter_does_not_bypass_document_context():
+    orchestrator = _make_orchestrator()
+    context = _make_chat_context()
+    context.message = "chao"
+    context.images = None
+    context.document_context = {"file_name": "manual.docx"}
+
+    assert orchestrator._build_sync_fast_chatter_result(context) is None
+
+
+@pytest.mark.asyncio
+async def test_process_uses_sync_fast_chatter_before_multi_agent():
+    orchestrator = _make_orchestrator()
+    request = _make_request(message="\u0111\u00f3i ph\u1ebft")
+    context = _make_chat_context()
+    context.message = request.message
+    context.images = None
+    session = _make_session()
+    session.session_id = context.session_id
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope(organization_id="org-1", domain_id="maritime"),
+        session=session,
+        session_id=context.session_id,
+        validation=SimpleNamespace(blocked=False, blocked_response=None),
+        chat_context=context,
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator._process_with_multi_agent = AsyncMock(
+        side_effect=AssertionError("multi-agent should not run for fast chatter")
+    )
+    orchestrator._output_processor.validate_and_format = AsyncMock(
+        side_effect=lambda *, result, session_id, user_name, user_role: SimpleNamespace(
+            message=result.message,
+            metadata=result.metadata,
+            agent_type=result.agent_type,
+            sources=result.sources,
+        )
+    )
+    orchestrator.finalize_response_turn = MagicMock()
+
+    response = await orchestrator.process(request)
+
+    assert "\u0110\u00f3i ph\u1ebft" in response.message
+    assert response.metadata["routing_metadata"]["method"] == "sync_fast_chatter"
+    orchestrator._process_with_multi_agent.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_resolve_request_scope_uses_request_and_router():
     orchestrator = _make_orchestrator()
