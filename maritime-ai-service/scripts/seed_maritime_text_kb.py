@@ -27,6 +27,7 @@ DEFAULT_CORPUS = (
 )
 DEFAULT_DOCUMENT_ID = "maritime-colregs-teaching-seed-v1"
 DEFAULT_TITLE = "COLREGs teaching seed corpus v1"
+DEFAULT_USER_AGENT = "Wiii-KB-Seed/1.0"
 
 
 def _json_request(
@@ -39,7 +40,13 @@ def _json_request(
     timeout: float = 60.0,
 ) -> tuple[int, dict[str, Any]]:
     body = None
-    headers = {"Accept": "application/json"}
+    headers = {
+        "Accept": "application/json",
+        # Cloudflare can block Python's default urllib user agent with 1010.
+        # Keep this explicit so production dry-runs behave like curl/browser
+        # probes without weakening auth on write endpoints.
+        "User-Agent": DEFAULT_USER_AGENT,
+    }
     if payload is not None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"

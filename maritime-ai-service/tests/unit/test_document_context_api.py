@@ -89,6 +89,19 @@ class FakeDoclingAssetParser:
         )
 
 
+class FakeTempTitleParser:
+    is_available = True
+
+    async def parse(self, file_path: str, options=None):
+        return ParsedDocument(
+            markdown="# Uploaded Research\n\nNội dung tài liệu.",
+            page_count=1,
+            metadata={"title": "tmpabcdef123", "parser": "docling"},
+            section_map={"Uploaded Research": [1]},
+            images=[],
+        )
+
+
 class FakeVideoParser:
     is_available = True
 
@@ -227,6 +240,21 @@ def test_parse_document_context_surfaces_docling_assets(monkeypatch):
     assert response.table_count == 1
     assert response.embedded_assets[0].page == 2
     assert response.embedded_assets[0].bbox == {"l": 1.0, "t": 2.0, "r": 3.0, "b": 4.0}
+
+
+def test_parse_document_context_uses_upload_name_for_temp_parser_title(monkeypatch):
+    from app.api.v1 import document_context as module
+
+    monkeypatch.setattr(module, "_build_parser", lambda parser_mode=None: FakeTempTitleParser())
+
+    response = asyncio.run(
+        module.parse_document_context(
+            SimpleNamespace(user_id="u"),
+            _upload_file("research-proposal.docx", b"docx-bytes"),
+        )
+    )
+
+    assert response.title == "research-proposal.docx"
 
 
 def test_document_context_prompt_block_bounds_and_labels():
