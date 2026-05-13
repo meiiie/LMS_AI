@@ -411,111 +411,105 @@ async def store_document_chunk_impl(
             inline_embedding_str = (
                 _embedding_to_pgvector(inline_embedding) if inline_embedding else None
             )
-            if eff_org_id and await repo._has_column(conn, "knowledge_embeddings", "organization_id"):
-                storage_id = await conn.fetchval(
-                    f"""
-                    INSERT INTO knowledge_embeddings (
-                        {key_column}, content, embedding, document_id, page_number,
-                        chunk_index, content_type, confidence_score, image_url, metadata,
-                        organization_id, bounding_boxes
-                    )
-                    VALUES ($1, $2, {('$3::vector' if inline_embedding_str else 'NULL')}, $4, $5, $6, $7, $8, $9, ${10 if inline_embedding_str else 9}::jsonb, ${11 if inline_embedding_str else 10}, ${12 if inline_embedding_str else 11}::jsonb)
-                    ON CONFLICT ({key_column})
-                    DO UPDATE SET
-                        content = EXCLUDED.content,
-                        embedding = COALESCE(EXCLUDED.embedding, knowledge_embeddings.embedding),
-                        document_id = EXCLUDED.document_id,
-                        page_number = EXCLUDED.page_number,
-                        chunk_index = EXCLUDED.chunk_index,
-                        content_type = EXCLUDED.content_type,
-                        confidence_score = EXCLUDED.confidence_score,
-                        image_url = EXCLUDED.image_url,
-                        metadata = EXCLUDED.metadata,
-                        organization_id = COALESCE(EXCLUDED.organization_id, knowledge_embeddings.organization_id),
-                        bounding_boxes = EXCLUDED.bounding_boxes,
-                        updated_at = NOW()
-                    RETURNING id::text
-                    """,
-                    key_value,
-                    content[:2000],
-                    *(
-                        (
-                            inline_embedding_str,
-                            document_id,
-                            page_number,
-                            chunk_index,
-                            content_type,
-                            confidence_score,
-                            image_url,
-                            metadata_json,
-                            eff_org_id,
-                            bounding_boxes_json,
-                        )
-                        if inline_embedding_str
-                        else (
-                            document_id,
-                            page_number,
-                            chunk_index,
-                            content_type,
-                            confidence_score,
-                            image_url,
-                            metadata_json,
-                            eff_org_id,
-                            bounding_boxes_json,
-                        )
-                    ),
-                )
+            has_org_column = bool(
+                eff_org_id
+                and await repo._has_column(conn, "knowledge_embeddings", "organization_id")
+            )
+            has_domain_column = await repo._has_column(
+                conn,
+                "knowledge_embeddings",
+                "domain_id",
+            )
+            domain_id = metadata.get("domain_id") if isinstance(metadata, dict) else None
+
+            columns = [
+                key_column,
+                "content",
+                "embedding",
+                "document_id",
+                "page_number",
+                "chunk_index",
+                "content_type",
+                "confidence_score",
+                "image_url",
+                "metadata",
+            ]
+            params: list[object] = [key_value, content[:2000]]
+            values = ["$1", "$2"]
+            if inline_embedding_str:
+                params.append(inline_embedding_str)
+                values.append("$3::vector")
             else:
-                storage_id = await conn.fetchval(
-                    f"""
-                    INSERT INTO knowledge_embeddings (
-                        {key_column}, content, embedding, document_id, page_number,
-                        chunk_index, content_type, confidence_score, image_url, metadata,
-                        bounding_boxes
-                    )
-                    VALUES ($1, $2, {('$3::vector' if inline_embedding_str else 'NULL')}, $4, $5, $6, $7, $8, $9, ${10 if inline_embedding_str else 9}::jsonb, ${11 if inline_embedding_str else 10}::jsonb)
-                    ON CONFLICT ({key_column})
-                    DO UPDATE SET
-                        content = EXCLUDED.content,
-                        embedding = COALESCE(EXCLUDED.embedding, knowledge_embeddings.embedding),
-                        document_id = EXCLUDED.document_id,
-                        page_number = EXCLUDED.page_number,
-                        chunk_index = EXCLUDED.chunk_index,
-                        content_type = EXCLUDED.content_type,
-                        confidence_score = EXCLUDED.confidence_score,
-                        image_url = EXCLUDED.image_url,
-                        metadata = EXCLUDED.metadata,
-                        bounding_boxes = EXCLUDED.bounding_boxes,
-                        updated_at = NOW()
-                    RETURNING id::text
-                    """,
-                    key_value,
-                    content[:2000],
-                    *(
-                        (
-                            inline_embedding_str,
-                            document_id,
-                            page_number,
-                            chunk_index,
-                            content_type,
-                            confidence_score,
-                            image_url,
-                            metadata_json,
-                            bounding_boxes_json,
-                        )
-                        if inline_embedding_str
-                        else (
-                            document_id,
-                            page_number,
-                            chunk_index,
-                            content_type,
-                            confidence_score,
-                            image_url,
-                            metadata_json,
-                            bounding_boxes_json,
-                        )
-                    ),
+                values.append("NULL")
+
+            for value, cast_jsonb in (
+                (document_id, False),
+                (page_number, False),
+                (chunk_index, False),
+                (content_type, False),
+                (confidence_score, False),
+                (image_url, False),
+                (metadata_json, True),
+            ):
+                params.append(value)
+                placeholder = f"${len(params)}"
+                if cast_jsonb:
+                    placeholder += "::jsonb"
+                values.append(placeholder)
+
+            if has_org_column:
+                columns.append("organization_id")
+                params.append(eff_org_id)
+                values.append(f"${len(params)}")
+
+            if has_domain_column:
+                columns.append("domain_id")
+                params.append(domain_id)
+                values.append(f"${len(params)}")
+
+            columns.append("bounding_boxes")
+            params.append(bounding_boxes_json)
+            values.append(f"${len(params)}::jsonb")
+
+            update_lines = [
+                "content = EXCLUDED.content",
+                "embedding = COALESCE(EXCLUDED.embedding, knowledge_embeddings.embedding)",
+                "document_id = EXCLUDED.document_id",
+                "page_number = EXCLUDED.page_number",
+                "chunk_index = EXCLUDED.chunk_index",
+                "content_type = EXCLUDED.content_type",
+                "confidence_score = EXCLUDED.confidence_score",
+                "image_url = EXCLUDED.image_url",
+                "metadata = EXCLUDED.metadata",
+            ]
+            if has_org_column:
+                update_lines.append(
+                    "organization_id = COALESCE(EXCLUDED.organization_id, knowledge_embeddings.organization_id)"
                 )
+            if has_domain_column:
+                update_lines.append(
+                    "domain_id = COALESCE(EXCLUDED.domain_id, knowledge_embeddings.domain_id)"
+                )
+            update_lines.extend(
+                [
+                    "bounding_boxes = EXCLUDED.bounding_boxes",
+                    "updated_at = NOW()",
+                ]
+            )
+
+            storage_id = await conn.fetchval(
+                f"""
+                INSERT INTO knowledge_embeddings (
+                    {", ".join(columns)}
+                )
+                VALUES ({", ".join(values)})
+                ON CONFLICT ({key_column})
+                DO UPDATE SET
+                    {", ".join(update_lines)}
+                RETURNING id::text
+                """,
+                *params,
+            )
 
             if storage_id:
                 await _write_shadow_vectors_async(
