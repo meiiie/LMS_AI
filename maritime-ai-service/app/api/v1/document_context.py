@@ -300,6 +300,19 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _document_title_from_metadata(metadata: dict[str, Any], file_name: str) -> str:
+    """Prefer the user's upload name when parsers only saw a temp file path."""
+    title = str(metadata.get("title") or "").strip()
+    if not title:
+        return file_name
+
+    stem = Path(title).stem
+    suffix = Path(title).suffix
+    if re.fullmatch(r"tmp[a-zA-Z0-9_-]{6,}", stem) and not suffix:
+        return file_name
+    return title
+
+
 def _build_section_snippets(
     *,
     raw_markdown: str,
@@ -455,7 +468,7 @@ def _response_from_parsed(
         parser_chain=parser_chain,
         parser_warning=str(metadata.get("parser_warning") or "") or None,
         provenance_level=provenance_level,
-        title=str(metadata.get("title") or file_name),
+        title=_document_title_from_metadata(metadata, file_name),
         page_count=parsed.page_count,
         section_titles=section_titles,
         section_snippets=section_snippets,
