@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   seed:
-    name: Seed production RAG via VM API key
+    name: Seed production RAG via short-lived admin JWT
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -149,15 +149,80 @@ jobs:
             exit 1
           fi
 
-          API_KEY_VALUE="$(clean_value "$(env_value API_KEY || true)")"
-          if [ -z "$API_KEY_VALUE" ]; then
-            echo "Missing API_KEY in production env file." >&2
-            exit 1
-          fi
-
           cd "$SERVICE_DIR"
           if [ ! -f "$CORPUS_PATH" ]; then
             echo "Corpus path not found under maritime-ai-service: $CORPUS_PATH" >&2
+            exit 1
+          fi
+
+          if command -v python3 >/dev/null 2>&1; then
+            PYTHON_BIN="python3"
+          elif command -v python >/dev/null 2>&1; then
+            PYTHON_BIN="python"
+          else
+            echo "Python is not available on the production VM host." >&2
+            exit 1
+          fi
+
+          JWT_SECRET_VALUE="$(clean_value "$(env_value JWT_SECRET_KEY || true)")"
+          JWT_AUDIENCE_VALUE="$(clean_value "$(env_value JWT_AUDIENCE || true)")"
+          JWT_ALGORITHM_VALUE="$(clean_value "$(env_value JWT_ALGORITHM || true)")"
+          JWT_AUDIENCE_VALUE="${JWT_AUDIENCE_VALUE:-wiii}"
+          JWT_ALGORITHM_VALUE="${JWT_ALGORITHM_VALUE:-HS256}"
+
+          if [ -z "$JWT_SECRET_VALUE" ]; then
+            echo "Missing JWT_SECRET_KEY in production env file." >&2
+            exit 1
+          fi
+          if [ "$JWT_ALGORITHM_VALUE" != "HS256" ]; then
+            echo "Unsupported JWT_ALGORITHM for operational seed workflow: $JWT_ALGORITHM_VALUE" >&2
+            exit 1
+          fi
+
+          ADMIN_JWT="$(
+            JWT_SECRET_KEY="$JWT_SECRET_VALUE" JWT_AUDIENCE="$JWT_AUDIENCE_VALUE" "$PYTHON_BIN" - <<'PY'
+          import base64
+          import hashlib
+          import hmac
+          import json
+          import os
+          import time
+          import uuid
+
+          def encode_json(value: dict) -> str:
+              raw = json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+              return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+          now = int(time.time())
+          header = {"alg": "HS256", "typ": "JWT"}
+          payload = {
+              "sub": "github-actions-kb-seed",
+              "email": "ops@wiii.local",
+              "name": "GitHub Actions KB Seed",
+              "role": "admin",
+              "platform_role": "platform_admin",
+              "role_source": "platform",
+              "identity_version": "2",
+              "auth_method": "ops",
+              "type": "access",
+              "iss": "wiii",
+              "aud": os.environ.get("JWT_AUDIENCE", "wiii"),
+              "iat": now,
+              "exp": now + 900,
+              "jti": str(uuid.uuid4()),
+          }
+          signing_input = f"{encode_json(header)}.{encode_json(payload)}".encode("ascii")
+          signature = hmac.new(
+              os.environ["JWT_SECRET_KEY"].encode("utf-8"),
+              signing_input,
+              hashlib.sha256,
+          ).digest()
+          encoded_signature = base64.urlsafe_b64encode(signature).rstrip(b"=").decode("ascii")
+          print(f"{signing_input.decode('ascii')}.{encoded_signature}")
+          PY
+          )"
+          if [ -z "$ADMIN_JWT" ]; then
+            echo "Failed to create operational admin JWT." >&2
             exit 1
           fi
 
@@ -168,18 +233,11 @@ jobs:
             --document-id "$DOCUMENT_ID"
             --domain-id "$DOMAIN_ID"
             --title "$TITLE"
-            --api-key-env API_KEY
+            --bearer-token-env WIII_ADMIN_JWT
           )
           if [ "$DRY_RUN" = "true" ]; then
             args+=(--dry-run)
           fi
 
-          if command -v python3 >/dev/null 2>&1; then
-            API_KEY="$API_KEY_VALUE" python3 "${args[@]}"
-          elif command -v python >/dev/null 2>&1; then
-            API_KEY="$API_KEY_VALUE" python "${args[@]}"
-          else
-            echo "Python is not available on the production VM host." >&2
-            exit 1
-          fi
+          WIII_ADMIN_JWT="$ADMIN_JWT" "$PYTHON_BIN" "${args[@]}"
           REMOTE
