@@ -1257,6 +1257,45 @@ class TestConservativeFastRouting:
         mock_llm.with_structured_output.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_source_backed_colregs_lookup_routes_rag_without_fast_flag(self):
+        from app.engine.multi_agent import supervisor as supervisor_module
+
+        mock_llm = MagicMock()
+        mock_llm.with_structured_output = MagicMock()
+        supervisor = _make_supervisor(mock_llm)
+        state = {
+            "query": (
+                "According to COLREGs, in a crossing situation between two "
+                "power-driven vessels with risk of collision, which vessel "
+                "should give way? Cite the knowledge source if available."
+            ),
+            "context": {},
+            "domain_config": {"routing_keywords": ["colregs", "solas", "rule"]},
+        }
+
+        with patch.object(supervisor_module.settings, "enable_conservative_fast_routing", False):
+            result = await supervisor.route(state)
+
+        assert result == "rag_agent"
+        assert state["routing_metadata"]["method"] == "deterministic_source_backed_lookup_guard"
+        assert state["routing_metadata"]["intent"] == "lookup"
+        mock_llm.with_structured_output.assert_not_called()
+
+    def test_source_backed_guard_does_not_steal_web_or_latest_requests(self):
+        from app.engine.multi_agent.supervisor_runtime_support import (
+            _looks_source_backed_domain_lookup_turn,
+        )
+        from app.engine.multi_agent.supervisor_hint_runtime import (
+            _normalize_router_text_impl,
+        )
+
+        normalized = _normalize_router_text_impl(
+            "Search the web for latest COLREGs amendments and cite sources."
+        )
+
+        assert _looks_source_backed_domain_lookup_turn(normalized) is False
+
+    @pytest.mark.asyncio
     async def test_codebase_schema_jwt_skips_llm_and_routes_direct(self):
         from app.engine.multi_agent import supervisor as supervisor_module
 
