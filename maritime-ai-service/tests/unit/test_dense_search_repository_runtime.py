@@ -44,10 +44,11 @@ class _FakeConn:
 
 
 class _FakeRepo:
-    def __init__(self, *, has_node_id: bool):
+    def __init__(self, *, has_node_id: bool, has_domain_id: bool = False):
         self._available = True
         self._pool = None
         self._has_node_id = has_node_id
+        self._has_domain_id = has_domain_id
         self.conn = _FakeConn()
 
     async def _get_pool(self):
@@ -58,7 +59,18 @@ class _FakeRepo:
             return self._has_node_id
         if column == "organization_id":
             return True
+        if column == "domain_id":
+            return self._has_domain_id
         return False
+
+
+def _metadata_payload_from_params(params: tuple[object, ...]) -> dict:
+    for param in params:
+        if isinstance(param, str) and param.startswith("{"):
+            parsed = json.loads(param)
+            if "legacy_node_id" in parsed:
+                return parsed
+    raise AssertionError("Metadata JSON param was not captured")
 
 
 @pytest.mark.asyncio
@@ -83,15 +95,43 @@ async def test_store_document_chunk_uses_uuid_id_when_schema_lacks_node_id():
 
     assert ok is True
     query, params = repo.conn.calls[0]
-    assert "INSERT INTO knowledge_embeddings (\n                        id," in query
+    assert "INSERT INTO knowledge_embeddings" in query
+    assert "id, content, embedding, document_id" in query
     assert "ON CONFLICT (id)" in query
     assert params[0] == _derive_storage_uuid("legacy-node-123")
-    metadata_payload = json.loads(params[9])
+    metadata_payload = _metadata_payload_from_params(params)
     assert metadata_payload["legacy_node_id"] == "legacy-node-123"
     assert (
         metadata_payload["embedding_space_fingerprint"]
         == metadata_payload["_embedding_space"]["fingerprint"]
     )
+
+
+@pytest.mark.asyncio
+async def test_store_document_chunk_persists_domain_column_when_available():
+    repo = _FakeRepo(has_node_id=True, has_domain_id=True)
+
+    ok = await store_document_chunk_impl(
+        repo,
+        node_id="domain-node-123",
+        content="Rule 15 crossing situation chunk",
+        embedding=[0.1] * 768,
+        document_id="doc-1",
+        page_number=1,
+        chunk_index=0,
+        content_type="text",
+        confidence_score=0.9,
+        image_url="",
+        metadata={"domain_id": "maritime"},
+        organization_id=None,
+        bounding_boxes=None,
+    )
+
+    assert ok is True
+    query, params = repo.conn.calls[0]
+    assert "domain_id" in query
+    assert "domain_id = COALESCE(EXCLUDED.domain_id, knowledge_embeddings.domain_id)" in query
+    assert "maritime" in params
 
 
 @pytest.mark.asyncio
