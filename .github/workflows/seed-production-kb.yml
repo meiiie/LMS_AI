@@ -33,6 +33,16 @@ on:
         required: true
         default: false
         type: boolean
+      run_rag_smoke:
+        description: "After ingest, run an authenticated chat query that must return source evidence."
+        required: true
+        default: false
+        type: boolean
+      smoke_query:
+        description: "RAG smoke query to send to /api/v1/chat when run_rag_smoke is true."
+        required: true
+        default: "According to COLREGs, in a crossing situation between two power-driven vessels with risk of collision, which vessel should give way? Cite the knowledge source if available."
+        type: string
 
 permissions:
   contents: read
@@ -90,6 +100,8 @@ jobs:
           TITLE: ${{ inputs.title }}
           CORPUS_PATH: ${{ inputs.corpus_path }}
           DRY_RUN: ${{ inputs.dry_run }}
+          RUN_RAG_SMOKE: ${{ inputs.run_rag_smoke }}
+          SMOKE_QUERY: ${{ inputs.smoke_query }}
         run: |
           set -euo pipefail
 
@@ -103,9 +115,10 @@ jobs:
           DOMAIN_ID_B64="$(encode "$DOMAIN_ID")"
           TITLE_B64="$(encode "$TITLE")"
           CORPUS_PATH_B64="$(encode "$CORPUS_PATH")"
+          SMOKE_QUERY_B64="$(encode "$SMOKE_QUERY")"
 
           ssh -i ~/.ssh/wiii_production_key -p "$SSH_PORT" "$SSH_TARGET" \
-            "APP_DIR='$APP_DIR' BASE_URL_B64='$BASE_URL_B64' DOCUMENT_ID_B64='$DOCUMENT_ID_B64' DOMAIN_ID_B64='$DOMAIN_ID_B64' TITLE_B64='$TITLE_B64' CORPUS_PATH_B64='$CORPUS_PATH_B64' DRY_RUN='$DRY_RUN' bash -s" <<'REMOTE'
+            "APP_DIR='$APP_DIR' BASE_URL_B64='$BASE_URL_B64' DOCUMENT_ID_B64='$DOCUMENT_ID_B64' DOMAIN_ID_B64='$DOMAIN_ID_B64' TITLE_B64='$TITLE_B64' CORPUS_PATH_B64='$CORPUS_PATH_B64' SMOKE_QUERY_B64='$SMOKE_QUERY_B64' DRY_RUN='$DRY_RUN' RUN_RAG_SMOKE='$RUN_RAG_SMOKE' bash -s" <<'REMOTE'
           set -euo pipefail
 
           decode() { printf '%s' "$1" | base64 -d; }
@@ -136,6 +149,7 @@ jobs:
           DOMAIN_ID="$(decode "$DOMAIN_ID_B64")"
           TITLE="$(decode "$TITLE_B64")"
           CORPUS_PATH="$(decode "$CORPUS_PATH_B64")"
+          SMOKE_QUERY="$(decode "$SMOKE_QUERY_B64")"
 
           cd "$APP_DIR"
           git fetch --prune origin main
@@ -240,4 +254,12 @@ jobs:
           fi
 
           WIII_ADMIN_JWT="$ADMIN_JWT" "$PYTHON_BIN" "${args[@]}"
+          if [ "$RUN_RAG_SMOKE" = "true" ]; then
+            WIII_ADMIN_JWT="$ADMIN_JWT" "$PYTHON_BIN" scripts/smoke_production_rag_chat.py \
+              --base-url "$BASE_URL" \
+              --query "$SMOKE_QUERY" \
+              --domain-id "$DOMAIN_ID" \
+              --bearer-token-env WIII_ADMIN_JWT \
+              --require-source
+          fi
           REMOTE
