@@ -101,37 +101,24 @@ import html
 import json
 import unicodedata
 
+from app.engine.multi_agent.code_studio_scaffold_contract import (
+    PRIMITIVE_DATA_BAND,
+    PRIMITIVE_FUNCTION_PLOT,
+    PRIMITIVE_OSCILLATION,
+    PRIMITIVE_PARTICLE_FIELD,
+    PRIMITIVE_SCENE,
+    PRIMITIVE_TIMELINE,
+    legacy_kind_for_primitive,
+    primitive_for_legacy_kind,
+)
 
 # ============================================================================
-# Primitive identifiers + legacy kind mapping
+# Primitive identifiers + legacy kind mapping contract
 # ============================================================================
 
-PRIMITIVE_PARTICLE_FIELD = "particle_field"
-PRIMITIVE_OSCILLATION = "oscillation"
-PRIMITIVE_TIMELINE = "timeline"
-PRIMITIVE_FUNCTION_PLOT = "function_plot"
-PRIMITIVE_SCENE = "scene"
-PRIMITIVE_DATA_BAND = "data_band"
-
-# Legacy kind → primitive default (used by ``detect_scaffold_kind`` callers
-# and by the public ``kind`` override in ``build_code_studio_scaffold``).
-_LEGACY_KIND_TO_PRIMITIVE = {
-    "literary": PRIMITIVE_SCENE,
-    "physics": PRIMITIVE_OSCILLATION,
-    "math": PRIMITIVE_FUNCTION_PLOT,
-    "history": PRIMITIVE_TIMELINE,
-    "celestial": PRIMITIVE_PARTICLE_FIELD,
-    "default": PRIMITIVE_DATA_BAND,
-}
-
-_PRIMITIVE_TO_LEGACY_KIND = {
-    PRIMITIVE_SCENE: "literary",
-    PRIMITIVE_OSCILLATION: "physics",
-    PRIMITIVE_FUNCTION_PLOT: "math",
-    PRIMITIVE_TIMELINE: "history",
-    PRIMITIVE_PARTICLE_FIELD: "celestial",
-    PRIMITIVE_DATA_BAND: "default",
-}
+# Primitive and legacy-kind names live in ``code_studio_scaffold_contract``.
+# This renderer imports them so public routing/metrics code can depend on the
+# contract without importing the full HTML scaffold module.
 
 # ============================================================================
 # Palette library (CSS variable-aware, host theme-overridable)
@@ -692,7 +679,7 @@ def _short_title(query: str, max_len: int = 60) -> str:
 
 def _legacy_kind_for(spec: dict) -> str:
     primitive = spec.get("primitive", PRIMITIVE_DATA_BAND)
-    return _PRIMITIVE_TO_LEGACY_KIND.get(primitive, "default")
+    return legacy_kind_for_primitive(primitive)
 
 
 def _aria_label(spec: dict, title: str) -> str:
@@ -1800,7 +1787,7 @@ def build_code_studio_scaffold(query: str, *, kind: str | None = None) -> str:
     """
     spec = extract_scaffold_spec(query)
     if kind:
-        forced_primitive = _LEGACY_KIND_TO_PRIMITIVE.get(kind)
+        forced_primitive = primitive_for_legacy_kind(kind)
         if forced_primitive:
             spec = {**spec, "primitive": forced_primitive}
     primitive = spec.get("primitive", PRIMITIVE_DATA_BAND)
@@ -1812,7 +1799,7 @@ def build_scaffold_visible_caption(query: str, *, kind: str | None = None) -> st
     """Short Vietnamese caption shown above the canvas in the chat thread."""
     spec = extract_scaffold_spec(query)
     if kind:
-        forced_primitive = _LEGACY_KIND_TO_PRIMITIVE.get(kind)
+        forced_primitive = primitive_for_legacy_kind(kind)
         if forced_primitive:
             spec["primitive"] = forced_primitive
     primitive = spec.get("primitive", PRIMITIVE_DATA_BAND)

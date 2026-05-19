@@ -1,6 +1,9 @@
-"""Tutor subgraph — analysis → generation → refinement pipeline."""
+"""Tutor native helpers.
+
+LangGraph builders were removed; use ``runtime`` helpers for WiiiRunner-native
+execution.
+"""
 
 from app.engine.multi_agent.subagents.tutor.state import TutorSubgraphState
-# build_tutor_subgraph removed (De-LangGraphing Phase 3) — pipeline runs via WiiiRunner
 
 __all__ = ["TutorSubgraphState"]

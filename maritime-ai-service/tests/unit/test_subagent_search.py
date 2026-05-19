@@ -681,7 +681,7 @@ class TestRouteToPlatforms:
     """route_to_platforms dict creation tests (updated for De-LangGraphing Phase 3)."""
 
     def test_creates_task_per_platform(self):
-        from app.engine.multi_agent.subagents.search.graph import route_to_platforms
+        from app.engine.multi_agent.subagents.search.runtime import route_to_platforms
 
         tasks = route_to_platforms({
             "platforms_to_search": ["shopee", "lazada", "google_shopping"],
@@ -692,7 +692,7 @@ class TestRouteToPlatforms:
         assert all(isinstance(t, dict) for t in tasks)
 
     def test_tasks_contain_correct_platform_ids(self):
-        from app.engine.multi_agent.subagents.search.graph import route_to_platforms
+        from app.engine.multi_agent.subagents.search.runtime import route_to_platforms
 
         tasks = route_to_platforms({
             "platforms_to_search": ["shopee", "lazada"],
@@ -704,7 +704,7 @@ class TestRouteToPlatforms:
         assert "lazada" in platform_ids
 
     def test_empty_platforms_fallback(self):
-        from app.engine.multi_agent.subagents.search.graph import route_to_platforms
+        from app.engine.multi_agent.subagents.search.runtime import route_to_platforms
 
         tasks = route_to_platforms({
             "platforms_to_search": [],
@@ -715,7 +715,7 @@ class TestRouteToPlatforms:
         assert tasks[0]["platform_id"] == "google_shopping"
 
     def test_org_id_propagated(self):
-        from app.engine.multi_agent.subagents.search.graph import route_to_platforms
+        from app.engine.multi_agent.subagents.search.runtime import route_to_platforms
 
         tasks = route_to_platforms({
             "platforms_to_search": ["shopee"],
@@ -726,7 +726,7 @@ class TestRouteToPlatforms:
         assert tasks[0]["organization_id"] == "org_abc"
 
     def test_bus_id_propagated(self):
-        from app.engine.multi_agent.subagents.search.graph import route_to_platforms
+        from app.engine.multi_agent.subagents.search.runtime import route_to_platforms
 
         tasks = route_to_platforms({
             "platforms_to_search": ["shopee"],
@@ -737,7 +737,7 @@ class TestRouteToPlatforms:
         assert tasks[0]["_event_bus_id"] == "bus_xyz"
 
     def test_default_max_results_and_page(self):
-        from app.engine.multi_agent.subagents.search.graph import route_to_platforms
+        from app.engine.multi_agent.subagents.search.runtime import route_to_platforms
 
         tasks = route_to_platforms({
             "platforms_to_search": ["shopee"],
@@ -968,7 +968,7 @@ class TestOrganizationPropagation:
     """Organization ID flows through the subgraph."""
 
     def test_send_carries_org_id(self):
-        from app.engine.multi_agent.subagents.search.graph import route_to_platforms
+        from app.engine.multi_agent.subagents.search.runtime import route_to_platforms
 
         tasks = route_to_platforms({
             "platforms_to_search": ["shopee", "lazada"],
@@ -980,7 +980,7 @@ class TestOrganizationPropagation:
             assert task["organization_id"] == "org_maritime_uni"
 
     def test_send_carries_none_org_id(self):
-        from app.engine.multi_agent.subagents.search.graph import route_to_platforms
+        from app.engine.multi_agent.subagents.search.runtime import route_to_platforms
 
         tasks = route_to_platforms({
             "platforms_to_search": ["shopee"],

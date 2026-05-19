@@ -267,7 +267,7 @@ class TestRAGNodes:
 
     @pytest.mark.asyncio
     async def test_retrieve_returns_docs(self):
-        from app.engine.multi_agent.subagents.rag.graph import retrieve_node
+        from app.engine.multi_agent.subagents.rag.runtime import retrieve_node
 
         mock_search = AsyncMock()
         mock_search.search.return_value = [
@@ -286,7 +286,7 @@ class TestRAGNodes:
 
     @pytest.mark.asyncio
     async def test_retrieve_handles_failure(self):
-        from app.engine.multi_agent.subagents.rag.graph import retrieve_node
+        from app.engine.multi_agent.subagents.rag.runtime import retrieve_node
 
         with patch(
             "app.services.hybrid_search_service.get_hybrid_search_service",
@@ -298,7 +298,7 @@ class TestRAGNodes:
 
     @pytest.mark.asyncio
     async def test_grade_calculates_confidence(self):
-        from app.engine.multi_agent.subagents.rag.graph import grade_node
+        from app.engine.multi_agent.subagents.rag.runtime import grade_node
 
         result = await grade_node({
             "retrieval_docs": [{"content": "A"}, {"content": "B"}],
@@ -311,7 +311,7 @@ class TestRAGNodes:
 
     @pytest.mark.asyncio
     async def test_grade_empty_docs(self):
-        from app.engine.multi_agent.subagents.rag.graph import grade_node
+        from app.engine.multi_agent.subagents.rag.runtime import grade_node
 
         result = await grade_node({
             "retrieval_docs": [],
@@ -322,17 +322,17 @@ class TestRAGNodes:
         assert result["retrieval_confidence"] == 0.0
 
     def test_should_correct_high_confidence(self):
-        from app.engine.multi_agent.subagents.rag.graph import should_correct
+        from app.engine.multi_agent.subagents.rag.runtime import should_correct
 
         assert should_correct({"retrieval_confidence": 0.9, "correction_round": 0}) == "generate"
 
     def test_should_correct_low_confidence(self):
-        from app.engine.multi_agent.subagents.rag.graph import should_correct
+        from app.engine.multi_agent.subagents.rag.runtime import should_correct
 
         assert should_correct({"retrieval_confidence": 0.3, "correction_round": 0}) == "correct"
 
     def test_should_correct_max_rounds(self):
-        from app.engine.multi_agent.subagents.rag.graph import should_correct
+        from app.engine.multi_agent.subagents.rag.runtime import should_correct
 
         assert should_correct({
             "retrieval_confidence": 0.3,
@@ -342,14 +342,14 @@ class TestRAGNodes:
 
     @pytest.mark.asyncio
     async def test_correct_increments_round(self):
-        from app.engine.multi_agent.subagents.rag.graph import correct_node
+        from app.engine.multi_agent.subagents.rag.runtime import correct_node
 
         result = await correct_node({"correction_round": 1})
         assert result["correction_round"] == 2
 
     @pytest.mark.asyncio
     async def test_generate_with_docs(self):
-        from app.engine.multi_agent.subagents.rag.graph import generate_node
+        from app.engine.multi_agent.subagents.rag.runtime import generate_node
 
         result = await generate_node({
             "retrieval_docs": [{"content": "Important fact"}],
@@ -364,7 +364,7 @@ class TestRAGNodes:
     @pytest.mark.asyncio
     async def test_generate_no_docs(self):
         """Sprint 165: Empty KB now uses LLM fallback instead of hardcoded error."""
-        from app.engine.multi_agent.subagents.rag.graph import generate_node
+        from app.engine.multi_agent.subagents.rag.runtime import generate_node
 
         result = await generate_node({
             "retrieval_docs": [],
@@ -419,28 +419,28 @@ class TestTutorNodes:
 
     @pytest.mark.asyncio
     async def test_analyze_explain_approach(self):
-        from app.engine.multi_agent.subagents.tutor.graph import analyze_node
+        from app.engine.multi_agent.subagents.tutor.runtime import analyze_node
 
         result = await analyze_node({"query": "Giải thích quy tắc COLREG", "context": {}})
         assert result["pedagogical_approach"] == "explain"
 
     @pytest.mark.asyncio
     async def test_analyze_socratic_approach(self):
-        from app.engine.multi_agent.subagents.tutor.graph import analyze_node
+        from app.engine.multi_agent.subagents.tutor.runtime import analyze_node
 
         result = await analyze_node({"query": "Tại sao tàu phải nhường?", "context": {}})
         assert result["pedagogical_approach"] == "socratic"
 
     @pytest.mark.asyncio
     async def test_analyze_example_approach(self):
-        from app.engine.multi_agent.subagents.tutor.graph import analyze_node
+        from app.engine.multi_agent.subagents.tutor.runtime import analyze_node
 
         result = await analyze_node({"query": "Cho ví dụ về SOLAS", "context": {}})
         assert result["pedagogical_approach"] == "example"
 
     @pytest.mark.asyncio
     async def test_generate_produces_draft(self):
-        from app.engine.multi_agent.subagents.tutor.graph import generate_node
+        from app.engine.multi_agent.subagents.tutor.runtime import generate_node
 
         result = await generate_node({
             "query": "Test query",
@@ -450,19 +450,19 @@ class TestTutorNodes:
         assert result["phase"] == "generation"
 
     def test_should_refine_short_query(self):
-        from app.engine.multi_agent.subagents.tutor.graph import should_refine
+        from app.engine.multi_agent.subagents.tutor.runtime import should_refine
 
         assert should_refine({"query": "COLREG là gì?"}) == "output"
 
     def test_should_refine_long_query(self):
-        from app.engine.multi_agent.subagents.tutor.graph import should_refine
+        from app.engine.multi_agent.subagents.tutor.runtime import should_refine
 
         long_query = "Giải thích chi tiết về quy tắc tránh va trên biển theo COLREG 72 trong trường hợp hai tàu đi ngược chiều nhau"
         assert should_refine({"query": long_query}) == "refine"
 
     @pytest.mark.asyncio
     async def test_refine_sets_output(self):
-        from app.engine.multi_agent.subagents.tutor.graph import refine_node
+        from app.engine.multi_agent.subagents.tutor.runtime import refine_node
 
         result = await refine_node({
             "explanation_draft": "Draft text",
@@ -473,7 +473,7 @@ class TestTutorNodes:
 
     @pytest.mark.asyncio
     async def test_output_node(self):
-        from app.engine.multi_agent.subagents.tutor.graph import output_node
+        from app.engine.multi_agent.subagents.tutor.runtime import output_node
 
         result = await output_node({"explanation_draft": "Quick answer"})
         assert result["final_response"] == "Quick answer"
