@@ -17,6 +17,16 @@ from __future__ import annotations
 
 import pytest
 
+from app.engine.multi_agent.code_studio_scaffold_contract import (
+    PRIMITIVE_DATA_BAND,
+    PRIMITIVE_FUNCTION_PLOT,
+    PRIMITIVE_OSCILLATION,
+    PRIMITIVE_PARTICLE_FIELD,
+    PRIMITIVE_SCENE,
+    PRIMITIVE_TIMELINE,
+    legacy_kind_for_primitive,
+    primitive_for_legacy_kind,
+)
 from app.engine.multi_agent.code_studio_template_scaffold import (
     build_code_studio_scaffold,
     build_scaffold_visible_caption,
@@ -27,6 +37,19 @@ from app.engine.multi_agent.code_studio_template_scaffold import (
 # ---------------------------------------------------------------------------
 # detect_scaffold_kind — mapping queries to the right scaffold family
 # ---------------------------------------------------------------------------
+
+
+def test_scaffold_contract_maps_legacy_kinds_without_renderer_imports() -> None:
+    """Routing code can depend on the typed scaffold contract directly."""
+    assert primitive_for_legacy_kind("literary") == PRIMITIVE_SCENE
+    assert primitive_for_legacy_kind("physics") == PRIMITIVE_OSCILLATION
+    assert primitive_for_legacy_kind("math") == PRIMITIVE_FUNCTION_PLOT
+    assert primitive_for_legacy_kind("history") == PRIMITIVE_TIMELINE
+    assert primitive_for_legacy_kind("celestial") == PRIMITIVE_PARTICLE_FIELD
+    assert primitive_for_legacy_kind("default") == PRIMITIVE_DATA_BAND
+    assert primitive_for_legacy_kind("unknown") is None
+    assert legacy_kind_for_primitive(PRIMITIVE_SCENE) == "literary"
+    assert legacy_kind_for_primitive("unknown") == "default"
 
 
 @pytest.mark.parametrize(

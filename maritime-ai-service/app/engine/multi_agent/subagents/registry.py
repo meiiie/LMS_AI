@@ -18,7 +18,7 @@ class SubagentRegistry:
         registry = SubagentRegistry.get_instance()
         registry.register(
             "deep_search",
-            builder=build_search_subgraph,
+            builder=run_product_search,
             config=SubagentConfig(name="deep_search", timeout_seconds=90),
             description="Parallel product search across platforms",
         )

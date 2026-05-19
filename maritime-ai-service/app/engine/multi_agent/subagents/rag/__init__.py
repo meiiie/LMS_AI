@@ -1,6 +1,9 @@
-"""RAG subgraph — retriever → grader → generator → corrector pipeline."""
+"""RAG native helpers.
+
+LangGraph builders were removed; use ``runtime`` helpers for WiiiRunner-native
+execution.
+"""
 
 from app.engine.multi_agent.subagents.rag.state import RAGSubgraphState
-# build_rag_subgraph removed (De-LangGraphing Phase 3) — pipeline runs via WiiiRunner
 
 __all__ = ["RAGSubgraphState"]

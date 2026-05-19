@@ -1052,7 +1052,7 @@ class TestRAGSubgraphFallback:
     @pytest.mark.asyncio
     async def test_rag_subgraph_fallback_empty_kb(self):
         """When no docs found, generate_node calls LLM fallback instead of hardcoded error."""
-        from app.engine.multi_agent.subagents.rag.graph import generate_node
+        from app.engine.multi_agent.subagents.rag.runtime import generate_node
 
         state = {
             "retrieval_docs": [],
@@ -1079,7 +1079,7 @@ class TestRAGSubgraphFallback:
     @pytest.mark.asyncio
     async def test_rag_subgraph_fallback_confidence_scale(self):
         """Fallback response gets capped confidence on 0-1 scale."""
-        from app.engine.multi_agent.subagents.rag.graph import generate_node
+        from app.engine.multi_agent.subagents.rag.runtime import generate_node
 
         state = {
             "retrieval_docs": [],
@@ -1104,7 +1104,7 @@ class TestRAGSubgraphFallback:
     @pytest.mark.asyncio
     async def test_rag_subgraph_fallback_failure_returns_static(self):
         """When LLM fallback fails, returns static error message."""
-        from app.engine.multi_agent.subagents.rag.graph import generate_node
+        from app.engine.multi_agent.subagents.rag.runtime import generate_node
 
         state = {
             "retrieval_docs": [],
@@ -1204,7 +1204,7 @@ class TestAggregatorEmptyKBFallback:
     @pytest.mark.asyncio
     async def test_confidence_scale_consistency(self):
         """Confidence values throughout pipeline stay on 0-1 scale."""
-        from app.engine.multi_agent.subagents.rag.graph import grade_node
+        from app.engine.multi_agent.subagents.rag.runtime import grade_node
 
         # Simulating retrieval scores (already 0-1 from search service)
         state = {
