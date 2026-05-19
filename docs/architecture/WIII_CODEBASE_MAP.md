@@ -1,0 +1,112 @@
+# Wiii Codebase Map
+
+Status: Active
+
+Owner: Architecture Maintainers (CODEOWNERS; track drift through `area:docs` GitHub issues)
+
+Last updated: 2026-05-19
+
+This is the short navigational map for humans and coding agents working in the
+Wiii repository. It complements `AGENTS.md`, the operation docs, and deeper
+architecture references.
+
+## One Sentence
+
+Wiii is a multi-surface agentic AI platform with a FastAPI backend, a React/Tauri
+desktop and embed frontend, organization-aware data boundaries, retrieval and
+memory, LMS host actions, visual artifacts, and voice.
+
+## Top-Level Folders
+
+| Path | Purpose | Notes |
+|---|---|---|
+| `maritime-ai-service/` | FastAPI backend, orchestration, RAG, tools, memory, LMS, deploy assets | Highest-risk runtime surface |
+| `wiii-desktop/` | React 18, Tauri v2, embed app, chat UX, Pointy, voice controls | User-visible behavior and stream rendering |
+| `docs/` | Architecture, operations, integration, release, governance | Durable knowledge belongs here |
+| `specs/` | Spec Kit artifacts for architecture-sensitive work | Use for multi-phase or contract changes |
+| `.github/` | GitHub Actions, templates, CodeRabbit, CODEOWNERS | Merge safety and review automation |
+| `.agents/skills/` | Repo-local Codex skills | Skills should be focused and loaded on demand |
+| `memory/` | Historical handoffs and field notes | Useful context, not canonical governance |
+| `scripts/` | Repository-level helper scripts | Avoid adding one-off local probes here |
+| `chaos/`, `loadtest/` | Stress and load tooling | Run only when task requires it |
+
+## Five-Layer Product Model
+
+| Layer | Meaning | Main code areas |
+|---|---|---|
+| Core | Decide and execute the current turn | chat services, multi-agent runtime, tool loop |
+| Living | Maintain continuity and identity over time | memory, emotion, reflection, post-turn hooks |
+| Host | Understand where Wiii is operating | desktop, embed, LMS, Pointy, host actions |
+| Org | Enforce ownership and tenant boundaries | auth, org middleware, settings, repositories |
+| Data | Preserve durable state and retrieval substrate | PostgreSQL, pgvector, repositories, migrations |
+
+## Main Runtime Flow
+
+The normal chat turn should be read in this order:
+
+1. FastAPI route receives request and auth context.
+2. `ChatOrchestrator` prepares the turn.
+3. Context, org, host, history, document, and memory state are assembled.
+4. Multi-agent runtime chooses direct, RAG, tool, visual, LMS, or other lanes.
+5. Tools and retrieval execute with tenant and host constraints.
+6. Backend emits sync response or SSE V3 events.
+7. Frontend assembles visible answer, previews, sources, and artifacts.
+8. Post-turn hooks update continuity outside the critical response path.
+
+## Backend Navigation
+
+| Need | Start here |
+|---|---|
+| Sync chat behavior | `maritime-ai-service/app/api/v1/chat.py`, then `maritime-ai-service/app/services/chat_orchestrator.py` |
+| Streaming behavior | `maritime-ai-service/app/api/v1/chat_stream.py`, then `maritime-ai-service/app/services/chat_stream_coordinator.py` |
+| Direct tool loop | `maritime-ai-service/app/engine/multi_agent/direct_tool_rounds_runtime.py` |
+| Native stream/provider quirks | `maritime-ai-service/app/engine/multi_agent/openai_stream_runtime.py` |
+| Routing and supervisor behavior | `maritime-ai-service/app/engine/multi_agent/supervisor*.py` |
+| Tool registry | `maritime-ai-service/app/engine/tools/registry.py` and `maritime-ai-service/app/engine/multi_agent/tool_collection.py` |
+| LMS host actions | `maritime-ai-service/app/engine/context/action_tools.py`, `maritime-ai-service/app/engine/tools/lms_tools.py` |
+| Document context | `maritime-ai-service/app/api/v1/document_context.py`, document runtime helpers |
+| Config | `maritime-ai-service/app/core/config/_settings*.py` |
+| Voice | `maritime-ai-service/app/api/v1/voice.py` |
+
+## Frontend Navigation
+
+| Need | Start here |
+|---|---|
+| Chat UI | `wiii-desktop/src/EmbedApp.tsx` |
+| User input | `wiii-desktop/src/components/chat/ChatInput.tsx` |
+| SSE assembly | `wiii-desktop/src/hooks/useSSEStream.ts` |
+| Markdown | `wiii-desktop/src/components/common/MarkdownRenderer.tsx`, `wiii-desktop/src/styles/markdown.css` |
+| Preview/apply UI | `wiii-desktop/src/components/layout/PreviewPanel.tsx` |
+| Source references | `wiii-desktop/src/lib/source-references.ts` |
+| Host bridge | `wiii-desktop/src/lib/embed-bridge.ts`, `wiii-desktop/src/lib/context-bridge.ts` |
+| Pointy | `wiii-desktop/src/pointy-host/**` and `wiii-desktop/src/components/chat/PointyModeToggle.tsx` |
+| Voice | `wiii-desktop/src/api/voice.ts`, voice mode/toggle components |
+| Visual artifacts | `wiii-desktop/src/components/chat/VisualArtifactCard.tsx`, `wiii-desktop/src/components/common/InlineVisualFrame.tsx` |
+
+## Canonical Contracts
+
+Keep these contracts explicit and tested:
+
+- agent turn lifecycle
+- native provider stream lifecycle
+- tool call dispatch and result handling
+- document context provenance and source references
+- host action preview/apply approval
+- SSE V3 event names and order
+- frontend Markdown repair and rendering
+- voice listening/speaking state
+- visual artifact sandbox and frame sizing
+
+## Where Not To Put Durable Knowledge
+
+Avoid using these as canonical documentation:
+
+- chat transcripts
+- temporary local screenshots
+- one-off script output
+- stale branch names
+- provider-specific debugging notes without date or owner
+- untracked local scratch files
+
+Promote durable findings into `docs/`, `specs/`, or an approved path-specific
+`AGENTS.md`.
