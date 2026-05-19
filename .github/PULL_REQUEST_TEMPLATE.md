@@ -6,6 +6,13 @@ Describe the change in 2-5 sentences. State the user/system outcome, not only th
 
 Refs #
 
+## Naming and Traceability
+
+- Branch name:
+- Branch follows `docs/operations/WIII_GITHUB_GOVERNANCE.md`: yes/no
+- PR title follows Conventional Commit style and is suitable for squash merge: yes/no
+- Issue id is present in branch name or documented reason for exception:
+
 ## Scope
 
 - In scope:

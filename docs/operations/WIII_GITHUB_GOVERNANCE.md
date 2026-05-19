@@ -4,7 +4,7 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-05-10
+Last updated: 2026-05-19
 
 Applies to: issues, pull requests, branch protection, reviews, CodeRabbit, labels, merge readiness, release hygiene
 
@@ -19,11 +19,41 @@ For multi-agent work, also follow `WIII_MULTI_AGENT_MAINTAINER_PROTOCOL.md`.
 ## Required Flow
 
 1. Open or link an issue for non-trivial work.
-2. Create a branch from `main` using an explicit prefix.
+2. Create a branch from `main` using the naming standard below.
 3. Keep commits scoped and reviewable.
 4. Open a draft PR early for visibility.
 5. Move to ready-for-review only after verification evidence is present.
 6. Merge only when branch protection, review, and risk gates pass.
+
+## Naming Standard
+
+Names are operational metadata. They must let a maintainer understand owner,
+issue, risk, and outcome without opening five tabs.
+
+Use lowercase ASCII, hyphen-separated words, and stable product/domain terms.
+Avoid spaces, underscores, emoji, personal jokes, vague suffixes such as
+`final`, `new`, `tmp`, `fix2`, or date-only names. Keep names short enough to
+read in GitHub, terminal output, and deployment logs.
+
+## Issue Naming
+
+Issue titles describe the problem or outcome, not the implementation guess.
+
+Good:
+
+- `Guard raw provider tool-call JSON from rendering as chat text`
+- `Document professional branch, PR, and naming standards`
+- `Preserve LMS approval tokens through preview apply`
+
+Avoid:
+
+- `Fix bug`
+- `Wiii broken again`
+- `Do cleanup`
+- `Try new agent architecture`
+
+Issue titles may include a product area when it improves routing, but labels
+remain the authoritative area/risk metadata.
 
 ## Branch Naming
 
@@ -31,14 +61,75 @@ Use these prefixes:
 
 | Prefix | Use |
 |---|---|
-| `codex/` | Codex-authored implementation, docs, cleanup, or analysis work. |
+| `codex/` | Codex-authored implementation, docs, cleanup, or analysis work. Preferred for AI-assisted branches. |
 | `fix/` | Human-authored production bug fix. |
 | `feature/` | Product feature work. |
 | `chore/` | Tooling, dependencies, cleanup, or build maintenance. |
 | `docs/` | Documentation-only work. |
+| `test/` | Test coverage, harnesses, fixtures, or smoke checks. |
+| `ci/` | CI, GitHub Actions, deploy automation, or repository automation. |
+| `refactor/` | Behavior-preserving code structure changes. |
 | `hotfix/` | Urgent production repair. Requires explicit issue and rollback note. |
 
-Branch names should be short and outcome-based, for example `codex/docs-governance-cleanup`.
+Canonical format:
+
+```text
+<prefix>/<issue-number>-<change-kind>-<outcome-slug>
+```
+
+For non-Codex human branches where the prefix already states the change kind,
+the shorter form is allowed:
+
+```text
+<prefix>/<issue-number>-<outcome-slug>
+```
+
+Allowed change kinds:
+
+| Kind | Use |
+|---|---|
+| `fix` | User-visible or operational defect repair. |
+| `feat` | New product capability. |
+| `docs` | Documentation and governance. |
+| `test` | Tests, fixtures, smoke checks, or harnesses. |
+| `refactor` | No intentional behavior change. |
+| `chore` | Maintenance, dependency, generated config cleanup. |
+| `ci` | GitHub Actions, deploy automation, release plumbing. |
+| `perf` | Performance improvement with measurable target. |
+| `security` | Security/privacy hardening. |
+| `audit` | Investigation, inventory, recovery, or traceability work. |
+
+Good:
+
+- `codex/401-docs-github-naming-standard`
+- `codex/399-fix-raw-tool-call-json`
+- `fix/399-raw-tool-call-json`
+- `feature/428-lms-course-preview`
+- `hotfix/512-auth-refresh-loop`
+
+Avoid:
+
+- `codex/wiii-next`
+- `fixbug`
+- `final-cleanup`
+- `new-ui-test`
+- `codex/2026-05-19`
+
+Use `noissue` only for genuinely trivial repository hygiene that cannot justify
+an issue, for example `docs/noissue-readme-typo`. Do not use `noissue` for
+runtime, auth, data, deployment, memory, LMS, provider, or governance changes.
+
+## Branch Lifecycle
+
+- Create branches from current `main`.
+- Keep one objective per branch.
+- Open a draft PR early when work is non-trivial.
+- Delete remote and local branches after merge once the product worktree is
+  synced.
+- Before deleting old local branches, verify either the PR is merged or
+  `git cherry origin/main <branch>` has no `+` commits.
+- Keep named stashes only when they preserve valuable WIP; include date and
+  reason in the stash message.
 
 ## Issue Rules
 
@@ -66,6 +157,58 @@ Every PR must include:
 - Exact verification commands and results.
 - Rollback or recovery notes.
 - Reviewer focus areas.
+
+PR titles must be suitable as squash commit titles. Use Conventional Commit
+style:
+
+```text
+<type>(<scope>): <imperative outcome>
+```
+
+The scope is optional for small changes:
+
+```text
+<type>: <imperative outcome>
+```
+
+Allowed PR title types:
+
+| Type | Use |
+|---|---|
+| `fix` | Bug or regression repair. |
+| `feat` | New product capability. |
+| `docs` | Documentation-only change. |
+| `test` | Test-only or harness change. |
+| `refactor` | Behavior-preserving code movement. |
+| `chore` | Maintenance with no product behavior change. |
+| `ci` | CI/deploy automation. |
+| `build` | Build system or dependency packaging. |
+| `perf` | Performance improvement. |
+| `revert` | Revert a previous change. |
+| `security` | Security/privacy hardening. |
+
+Preferred scopes are stable subsystem names such as `backend`, `desktop`,
+`embed`, `lms`, `rag`, `voice`, `pointy`, `memory`, `auth`, `deploy`, `docs`,
+`governance`, or `ci`.
+
+Good:
+
+- `fix(backend): route raw provider tool-call JSON`
+- `docs(governance): add GitHub naming standard`
+- `feat(lms): preview course drafts before approval apply`
+- `ci(deploy): pin production image smoke checks`
+
+Avoid:
+
+- `Update files`
+- `big cleanup`
+- `WIP`
+- `final fix`
+- `[codex] stuff`
+
+Use GitHub draft state for unfinished PRs; do not encode WIP state in the
+title. PR titles may include the issue number only through GitHub metadata,
+not as noisy title prefixes.
 
 Every PR must avoid:
 
@@ -241,6 +384,45 @@ Recommended labels:
 
 Labels should clarify routing and risk. Avoid label sprawl.
 
+Label naming rules:
+
+- `area:<name>` labels identify ownership and routing.
+- `risk:<name>` labels mark review hazards.
+- `priority:P0`, `priority:P1`, and `priority:P2` labels communicate urgency.
+- General labels use short lowercase nouns such as `bug`, `enhancement`, and
+  `maintenance`.
+- One-off labels for a single PR, agent, or experiment are not allowed.
+
+## Documentation, Release, and Artifact Names
+
+Operational documentation should use stable, searchable names:
+
+- Runbooks: `WIII_<AREA>_RUNBOOK.md`
+- Governance docs: `WIII_<AREA>_GOVERNANCE.md`
+- Durable standards: `WIII_<AREA>_STANDARD.md`
+- Temporary dated audits: `WIII_<AREA>_AUDIT_YYYY-MM-DD.md`
+
+Examples:
+
+- `WIII_GITHUB_GOVERNANCE.md`
+- `WIII_AGENTIC_CODEBASE_HARNESS.md`
+- `WIII_REPO_RECOVERY_AUDIT_2026-05-19.md`
+
+Local scratch artifacts must stay ignored unless explicitly promoted:
+
+- Use `artifacts/YYYYMMDD-<purpose>/` for local evidence bundles.
+- Use `docs/assets/screenshots/<issue>-<purpose>.png` only when the image is
+  durable PR evidence.
+- Do not commit `tmp`, `final`, `new`, or personal desktop export names.
+
+Release and deploy identifiers must be traceable to git:
+
+- Human release notes: `YYYY-MM-DD <scope> release`.
+- Git tags, when used: `wiii-vYYYY.MM.DD.N`.
+- Container/deploy references must include an immutable commit SHA or digest.
+- Smoke sessions should include issue or PR context when practical, for example
+  `smoke-pr400-raw-tool-call-json`.
+
 ## Commit Standard
 
 Use concise conventional-style subjects:
@@ -257,6 +439,10 @@ Commit rules:
 - Do not commit generated caches or local dependency folders.
 - Do not commit unrelated worktree changes.
 - Do not amend shared commits unless explicitly agreed.
+- The final squash title should match the PR title unless the maintainer
+  intentionally sharpens it at merge time.
+- Commit bodies should explain why and how verification was done when risk is
+  non-obvious.
 
 ## Merge Strategy
 
