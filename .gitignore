@@ -109,7 +109,8 @@ wiii-desktop/dist-embed/
 wiii-desktop/dist-web/
 wiii-desktop/dist-pointy/
 pytest-cache-files-*
-# Keep local nested agent configs ignored, but track root Codex review guidance.
+# Keep local nested agent configs ignored, but track approved Codex review and
+# subsystem guidance files.
 .agents/*
 !.agents/skills/
 .agents/skills/*
@@ -117,3 +118,5 @@ pytest-cache-files-*
 !.agents/skills/speckit-*/SKILL.md
 **/AGENTS.md
 !/AGENTS.md
+!/maritime-ai-service/AGENTS.md
+!/wiii-desktop/AGENTS.md

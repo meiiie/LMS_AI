@@ -6,8 +6,10 @@ Use this folder for repository-level documentation that explains the product, th
 
 - `../README.md`: repository overview and deployment model
 - `WIII_PROJECT_MENTAL_MODEL.md`: one-page product and system mental model
+- `architecture/WIII_CODEBASE_MAP.md`: concise codebase map for maintainers and coding agents
 - `WIII_ARCHITECTURE_AUDIT.md`: opinionated audit of architectural center, strengths, and risk areas
 - `WIII_TECHNICAL_SIMPLIFICATION_ROADMAP.md`: phased simplification plan and first landed slice
+- `operations/WIII_AGENTIC_CODEBASE_HARNESS.md`: large-codebase agent workflow, context layering, and WIP recovery pattern
 - `plans/2026-04-27-wiii-native-orchestration-rfc.md`: phased RFC for replacing remaining LangGraph assumptions with Wiii-owned runtime contracts
 - `plans/2026-04-28-wiii-pipeline-simplification-plan.md`: current request/auth/memory/router/agent/tool/RAG/stream lifecycle and safe LangGraph/history/compat cleanup plan
 - `operations/WIII_DOCUMENTATION_GOVERNANCE.md`: documentation lifecycle, cleanup controls, and issue/PR standards
@@ -27,7 +29,12 @@ Use this folder for repository-level documentation that explains the product, th
 
 - `plans/`: reviewed design notes and active implementation plans
 - `operations/`: reviewed governance, release, auth, and runtime operation documents
+- `architecture/`: current maps and contracts for navigating the system
 - `assets/`: committed documentation assets that are referenced by canonical docs
+
+## Archive / Audit Log
+
+- `operations/WIII_REPO_RECOVERY_AUDIT_2026-05-19.md`: temporary/history recovery record for issue #397; durable process guidance lives in `operations/WIII_AGENTIC_CODEBASE_HARNESS.md`.
 
 ## Rules
 

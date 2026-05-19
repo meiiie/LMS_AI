@@ -18,6 +18,8 @@ Operational docs are different from exploratory reports:
 - `WIII_PRODUCTION_AUTH_RUNBOOK.md`: production Magic Link and Google OAuth enablement, fail-closed behavior, smoke tests, and rollback.
 - `WIII_PRODUCT_RELEASE_RUNBOOK.md`: production deploy lane, pinned-image rollout, smoke gates, rollback, and parallel-team safety.
 - `WIII_MULTI_AGENT_MAINTAINER_PROTOCOL.md`: multi-agent ownership, maintainer review, CodeRabbit, conflict, and merge protocol.
+- `WIII_AGENTIC_CODEBASE_HARNESS.md`: layered context, scoped exploration, WIP recovery, and deterministic checks for large-codebase agent work.
+- `WIII_REPO_RECOVERY_AUDIT_2026-05-19.md`: temporary/history recovery record for the large WIP snapshot preserved before repository cleanup; durable guidance lives in `WIII_AGENTIC_CODEBASE_HARNESS.md` and follow-up tracking lives in issue #397.
 - `BYPASS_LOG.md`: audited record of branch-protection bypasses, rationale, and restored controls.
 
 ## Promotion Rule
