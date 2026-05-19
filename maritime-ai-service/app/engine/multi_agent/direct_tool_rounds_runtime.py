@@ -10,6 +10,14 @@ import unicodedata
 from typing import Any, Optional
 
 from app.core.config import settings
+from app.engine.multi_agent.document_preview_contract import (
+    DOC_COURSE_HOST_ACTION_TOOL as _DOC_COURSE_HOST_ACTION_TOOL,
+    DOC_PREVIEW_HOST_ACTION_TOOL as _DOC_PREVIEW_HOST_ACTION_TOOL,
+    find_document_host_action_tool,
+    looks_uploaded_document_course_request as _looks_uploaded_doc_course_request,
+    normalize_document_contract_text as _normalize_doc_preview_text,
+    uploaded_document_attachments_from_state as _uploaded_document_attachments_from_state,
+)
 from app.engine.multi_agent.direct_opening_runtime import (
     finalize_direct_opening_phase_impl,
     start_direct_opening_phase_impl,
@@ -51,8 +59,6 @@ _FORCED_WEB_SEARCH_TOOL_NAMES = (
     "web_search",
 )
 _RICH_SEARCH_RESULT_CHAR_FLOOR = 1200
-_DOC_PREVIEW_HOST_ACTION_TOOL = "host_action__authoring__preview_lesson_patch"
-_DOC_COURSE_HOST_ACTION_TOOL = "host_action__authoring__generate_course_from_document"
 _DOC_PREVIEW_LOW_VALUE_LABELS = {
     "buoc",
     "checkpoint",
@@ -68,12 +74,6 @@ _DOC_PREVIEW_LOW_VALUE_LABELS = {
     "thao tac",
     "vai tro",
 }
-
-
-def _normalize_doc_preview_text(value: Any) -> str:
-    text = str(value or "").replace("\\_", "_")
-    normalized = unicodedata.normalize("NFKD", text)
-    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
 
 
 def _is_doc_preview_scaffold_line(value: str) -> bool:
@@ -114,97 +114,19 @@ def _is_doc_preview_low_value_line(value: str) -> bool:
     return bool(re.match(r"^\d+(?:\.\d+)*[.)]\s+\S+", line))
 
 
-def _uploaded_document_attachments_from_state(state: AgentState | None) -> list[dict[str, Any]]:
-    if not isinstance(state, dict):
-        return []
-    ctx = state.get("context")
-    if not isinstance(ctx, dict):
-        return []
-    document_context = ctx.get("document_context")
-    if not isinstance(document_context, dict):
-        return []
-    attachments = document_context.get("attachments")
-    if not isinstance(attachments, list):
-        return []
-    return [
-        item
-        for item in attachments
-        if isinstance(item, dict) and str(item.get("markdown") or "").strip()
-    ]
-
-
 def _find_doc_preview_host_action_tool(tools: list[Any]) -> Any | None:
-    for tool in tools or []:
-        if _tool_name(tool).lower() == _DOC_PREVIEW_HOST_ACTION_TOOL:
-            return tool
-    return None
+    return find_document_host_action_tool(
+        tools,
+        _DOC_PREVIEW_HOST_ACTION_TOOL,
+        tool_name_resolver=_tool_name,
+    )
 
 
 def _find_doc_course_host_action_tool(tools: list[Any]) -> Any | None:
-    for tool in tools or []:
-        if _tool_name(tool).lower() == _DOC_COURSE_HOST_ACTION_TOOL:
-            return tool
-    return None
-
-
-def _looks_uploaded_doc_course_request(query: str) -> bool:
-    normalized = _normalize_doc_preview_text(query)
-    if any(
-        marker in normalized
-        for marker in (
-            "preview_lesson_patch",
-            "lesson patch",
-            "bai hoc hien tai",
-            "cap nhat bai hoc",
-        )
-    ):
-        return False
-    return any(
-        marker in normalized
-        for marker in (
-            "generate_course_from_document",
-            "course architect",
-            "course plan",
-            "course outline",
-            "course syllabus",
-            "curriculum",
-            "full course",
-            "lap bai giang",
-            "soan bai giang",
-            "soan giao an",
-            "tao bai giang",
-            "tao giao an",
-            "tao hoc lieu",
-            "toan bo khoa",
-            "cay khoa",
-            "chia khoa",
-            "chia thanh bai",
-            "chia thanh chuong",
-            "chuong trinh dao tao",
-            "de cuong khoa",
-            "de cuong mon",
-            "giao trinh",
-            "ke hoach giang day",
-            "khoa dao tao",
-            "khoa day du",
-            "khoa hoan chinh",
-            "learning path",
-            "lo trinh hoc",
-            "lo trinh khoa",
-            "nhieu bai hoc",
-            "nhieu chuong",
-            "phan chia bai hoc",
-            "syllabus",
-            "tao khoa hoc",
-            "thiet ke bai giang",
-            "thiet ke khoa hoc",
-            "xay dung bai giang",
-            "cau truc khoa hoc",
-            "chuong/bai",
-            "chuong bai",
-            "module",
-            "outline",
-        )
+    return find_document_host_action_tool(
+        tools,
+        _DOC_COURSE_HOST_ACTION_TOOL,
+        tool_name_resolver=_tool_name,
     )
 
 
