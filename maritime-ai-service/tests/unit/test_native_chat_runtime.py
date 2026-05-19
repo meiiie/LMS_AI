@@ -206,6 +206,8 @@ def test_make_assistant_message_preserves_langchain_like_surface_without_langcha
 
 
 def test_agent_config_can_resolve_native_nvidia_handle(monkeypatch):
+    from app.core.config import settings
+    from app.engine.openai_compatible_credentials import resolve_nvidia_model
     from app.engine.multi_agent.agent_config import AgentConfigRegistry, AgentNodeConfig
 
     def _fake_runtime(cls, node_id, *, provider_override=None):
@@ -231,12 +233,12 @@ def test_agent_config_can_resolve_native_nvidia_handle(monkeypatch):
     assert handle is not None
     assert handle._wiii_native_route is True
     assert handle._wiii_provider_name == "nvidia"
-    assert handle._wiii_model_name == "deepseek-ai/deepseek-v4-flash"
+    assert handle._wiii_model_name == resolve_nvidia_model(settings)
     assert handle._wiii_tier_key == "light"
     assert handle.temperature == 0.25
 
 
-def test_agent_config_native_nvidia_handle_skips_degraded_flash(monkeypatch):
+def test_agent_config_native_nvidia_handle_skips_degraded_primary(monkeypatch):
     from app.engine.llm_model_health import record_model_failure, reset_model_health_state
     from app.core.config import settings
     from app.engine.openai_compatible_credentials import (

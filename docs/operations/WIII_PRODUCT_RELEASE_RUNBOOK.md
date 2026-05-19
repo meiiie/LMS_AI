@@ -35,7 +35,7 @@ On 2026-05-10, production was verified on `wiii-production` in project
 
 - `https://wiii.holilihu.online/api/v1/health/llm-models` was reachable
 - the active model pool contained primary `qwen/qwen3-next-80b-a3b-instruct`
-  and advanced fallback `deepseek-ai/deepseek-v4-pro`
+  and advanced fallback `qwen/qwen3-next-80b-a3b-thinking`
 - model-level health may temporarily mark the advanced model degraded after a
   timeout; routing should keep normal chat on the healthy primary model
 - `ENABLE_MAGIC_LINK_AUTH=true` was enabled after Resend API validation and
@@ -87,10 +87,10 @@ Production `.env.production` is secret-bearing and must stay on the VM. For the 
 LLM_PROVIDER=nvidia
 NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
 NVIDIA_MODEL=qwen/qwen3-next-80b-a3b-instruct
-NVIDIA_MODEL_ADVANCED=deepseek-ai/deepseek-v4-pro
+NVIDIA_MODEL_ADVANCED=qwen/qwen3-next-80b-a3b-thinking
 ENABLE_LLM_MODEL_HEALTH_PROBES=true
 LLM_MODEL_HEALTH_PROBE_TIMEOUT_SECONDS=45
-AGENT_PROVIDER_CONFIGS={"code_studio_agent":{"tier":"deep","provider":"nvidia","model":"deepseek-ai/deepseek-v4-pro"}}
+AGENT_PROVIDER_CONFIGS={"code_studio_agent":{"tier":"deep","provider":"nvidia","model":"qwen/qwen3-next-80b-a3b-thinking"}}
 
 # Required while production embeddings use models/gemini-embedding-001.
 # Use only the minimum Gemini/API permissions needed for embeddings, track its

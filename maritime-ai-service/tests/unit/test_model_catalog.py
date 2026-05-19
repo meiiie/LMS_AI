@@ -2,10 +2,13 @@ from app.engine.model_catalog import (
     DEFAULT_EMBEDDING_MODEL,
     EMBEDDING_BENCHMARK_CANDIDATE,
     GOOGLE_DEFAULT_MODEL,
+    NVIDIA_DEFAULT_MODEL,
+    NVIDIA_DEFAULT_MODEL_ADVANCED,
     get_chat_model_metadata,
     get_current_google_chat_models,
     get_embedding_dimensions,
     get_embedding_model_metadata,
+    get_provider_chat_model_metadata,
     is_legacy_google_model,
 )
 from app.engine.model_catalog_runtime_support import hash_secret, sanitize_exception_for_log
@@ -17,6 +20,23 @@ def test_google_default_model_is_current():
     assert metadata is not None
     assert metadata.model_name == GOOGLE_DEFAULT_MODEL
     assert metadata.status == "current"
+
+
+def test_nvidia_defaults_are_qwen_models():
+    default_metadata = get_provider_chat_model_metadata("nvidia", NVIDIA_DEFAULT_MODEL)
+    advanced_metadata = get_provider_chat_model_metadata(
+        "nvidia",
+        NVIDIA_DEFAULT_MODEL_ADVANCED,
+    )
+
+    assert NVIDIA_DEFAULT_MODEL == "qwen/qwen3-next-80b-a3b-instruct"
+    assert NVIDIA_DEFAULT_MODEL_ADVANCED == "qwen/qwen3-next-80b-a3b-thinking"
+    assert default_metadata is not None
+    assert default_metadata.status == "current"
+    assert "Qwen" in default_metadata.display_name
+    assert advanced_metadata is not None
+    assert advanced_metadata.status == "current"
+    assert "Qwen" in advanced_metadata.display_name
 
 
 def test_legacy_google_model_is_marked_legacy():
