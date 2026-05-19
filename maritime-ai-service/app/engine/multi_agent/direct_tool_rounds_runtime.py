@@ -26,6 +26,10 @@ from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
 )
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.tool_call_text_parser import (
+    extract_raw_tool_calls_from_text,
+    tool_names_from_tools,
+)
 from app.engine.multi_agent.visual_events import (
     _collect_active_visual_session_ids,
     _emit_visual_commit_events,
@@ -2819,6 +2823,33 @@ def _build_assistant_message(
     return Message(role="assistant", content=content)
 
 
+def _build_assistant_tool_call_message(
+    tool_calls: list[dict[str, Any]],
+    *,
+    native_tool_messages: bool,
+) -> Any:
+    if native_tool_messages:
+        from app.engine.native_chat_runtime import make_assistant_message
+
+        return make_assistant_message("", tool_calls=tool_calls)
+
+    from app.engine.messages import Message, ToolCall
+
+    return Message(
+        role="assistant",
+        content="",
+        tool_calls=[
+            ToolCall(
+                id=str(call.get("id") or f"raw_tool_call_{index}"),
+                name=str(call.get("name") or ""),
+                arguments=dict(call.get("args") or call.get("arguments") or {}),
+            )
+            for index, call in enumerate(tool_calls)
+            if str(call.get("name") or "").strip()
+        ],
+    )
+
+
 def _force_skills_for_turn(state: AgentState | None) -> set[str]:
     if not isinstance(state, dict):
         return set()
@@ -3553,6 +3584,22 @@ async def execute_direct_tool_rounds_impl(
         )
 
     tool_calls = getattr(llm_response, "tool_calls", [])
+    if tools and not tool_calls:
+        raw_tool_calls = extract_raw_tool_calls_from_text(
+            getattr(llm_response, "content", ""),
+            allowed_tool_names=tool_names_from_tools(tools) or None,
+        )
+        if raw_tool_calls:
+            logger.warning(
+                "[DIRECT] Converted raw JSON assistant content into %d structured tool call(s): %s",
+                len(raw_tool_calls),
+                [call.get("name") for call in raw_tool_calls],
+            )
+            llm_response = _build_assistant_tool_call_message(
+                raw_tool_calls,
+                native_tool_messages=native_tool_messages,
+            )
+            tool_calls = getattr(llm_response, "tool_calls", raw_tool_calls)
     logger.warning(
         "[DIRECT] LLM response: tool_calls=%d, content_len=%d",
         len(tool_calls) if tool_calls else 0,

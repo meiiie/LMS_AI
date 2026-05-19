@@ -26,6 +26,10 @@ from app.engine.native_chat_runtime import (
     normalize_tool_choice,
     openai_response_to_assistant_message,
 )
+from app.engine.multi_agent.tool_call_text_parser import (
+    extract_raw_tool_calls_from_text,
+    tool_names_from_tools,
+)
 from app.engine.reasoning import sanitize_visible_reasoning_text
 
 logger = logging.getLogger(__name__)
@@ -416,6 +420,7 @@ async def _stream_openai_compatible_answer_with_route_impl(
         request_kwargs["temperature"] = temperature
 
     bound_tools = list(getattr(route.llm, "_wiii_bound_tools", []) or [])
+    allowed_raw_tool_names = tool_names_from_tools(bound_tools)
     if bound_tools:
         request_kwargs["tools"] = bound_tools
     tool_choice = normalize_tool_choice(getattr(route.llm, "_wiii_tool_choice", None))
@@ -435,6 +440,8 @@ async def _stream_openai_compatible_answer_with_route_impl(
     google_tag_state = {"inside_thinking": False, "pending": ""}
     reasoning_started = False
     tool_call_chunks: dict[int, dict[str, str]] = {}
+    raw_tool_answer_candidate: bool | None = None
+    raw_tool_answer_chunks: list[str] = []
 
     # Phase 34 (#207): boundary-aware token batching. When the
     # ``enable_stream_smoother`` flag is on, we route every answer_delta
@@ -467,6 +474,35 @@ async def _stream_openai_compatible_answer_with_route_impl(
                 "node": node,
             })
         thinking_closed = True
+
+    async def _emit_visible_answer_delta(answer_text: str) -> None:
+        nonlocal emitted_answer, thinking_closed
+        if not answer_text:
+            return
+        if not thinking_closed:
+            if thinking_stop_signal is not None:
+                thinking_stop_signal.set()
+            if reasoning_started:
+                await push_event({
+                    "type": "thinking_end",
+                    "content": "",
+                    "node": node,
+                })
+            thinking_closed = True
+        if answer_smoother is not None:
+            for flushed in answer_smoother.feed(answer_text):
+                await push_event({
+                    "type": "answer_delta",
+                    "content": flushed,
+                    "node": node,
+                })
+        else:
+            await push_event({
+                "type": "answer_delta",
+                "content": answer_text,
+                "node": node,
+            })
+        emitted_answer += answer_text
 
     try:
         stream = await client.chat.completions.create(**request_kwargs)
@@ -527,35 +563,45 @@ async def _stream_openai_compatible_answer_with_route_impl(
                     })
                 if not answer_delta:
                     continue
-                if not thinking_closed:
-                    if thinking_stop_signal is not None:
-                        thinking_stop_signal.set()
-                    if reasoning_started:
-                        await push_event({
-                            "type": "thinking_end",
-                            "content": "",
-                            "node": node,
-                        })
-                    thinking_closed = True
+                if raw_tool_answer_candidate is not False:
+                    probe_text = "".join(raw_tool_answer_chunks) + answer_delta
+                    stripped_probe = probe_text.lstrip()
+                    if raw_tool_answer_candidate is None:
+                        if not stripped_probe:
+                            raw_tool_answer_chunks.append(answer_delta)
+                            continue
+                        raw_tool_answer_candidate = stripped_probe[0] in "{["
+                    if raw_tool_answer_candidate:
+                        raw_tool_answer_chunks.append(answer_delta)
+                        continue
+                    if raw_tool_answer_chunks:
+                        answer_delta = "".join(raw_tool_answer_chunks) + answer_delta
+                        raw_tool_answer_chunks.clear()
                 # Phase 34: route through StreamSmoother when enabled.
                 # Smoother yields 0+ flushed strings per chunk based on
                 # punctuation / length / time-watchdog boundaries, so
                 # the UI sees even-cadence repaints instead of provider-
                 # burst flicker. When disabled, single direct emit.
-                if answer_smoother is not None:
-                    for flushed in answer_smoother.feed(answer_delta):
-                        await push_event({
-                            "type": "answer_delta",
-                            "content": flushed,
-                            "node": node,
-                        })
-                else:
-                    await push_event({
-                        "type": "answer_delta",
-                        "content": answer_delta,
-                        "node": node,
-                    })
-                emitted_answer += answer_delta
+                await _emit_visible_answer_delta(answer_delta)
+        if raw_tool_answer_chunks:
+            raw_tool_text = "".join(raw_tool_answer_chunks)
+            raw_tool_calls = extract_raw_tool_calls_from_text(
+                raw_tool_text,
+                allowed_tool_names=allowed_raw_tool_names or None,
+            )
+            if raw_tool_calls:
+                from app.engine.llm_model_health import record_model_success
+
+                record_model_success(provider_name, model_name)
+                await _close_thinking_for_non_answer()
+                logger.info(
+                    "[%s] Converted raw JSON assistant text into %d structured tool call(s)",
+                    node.upper(),
+                    len(raw_tool_calls),
+                )
+                return make_assistant_message("", tool_calls=raw_tool_calls), False
+            await _emit_visible_answer_delta(raw_tool_text)
+            raw_tool_answer_chunks.clear()
         tool_calls = _finalize_tool_call_chunks(tool_call_chunks)
         if tool_calls:
             from app.engine.llm_model_health import record_model_success

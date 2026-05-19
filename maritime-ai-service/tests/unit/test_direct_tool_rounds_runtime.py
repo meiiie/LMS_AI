@@ -243,6 +243,95 @@ async def test_execute_direct_tool_rounds_does_not_emit_authored_public_thinking
 
 
 @pytest.mark.asyncio
+async def test_execute_direct_tool_rounds_converts_raw_json_tool_call_text():
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        execute_direct_tool_rounds_impl,
+    )
+
+    class FakeKnowledgeTool:
+        name = "tool_knowledge_search"
+
+        async def ainvoke(self, args):
+            return f"Nguon nhap mon hang hai cho {args['query']}"
+
+    events = []
+
+    async def push_event(event):
+        events.append(event)
+
+    async def fake_stream_direct_answer_with_fallback(*_args, **_kwargs):
+        return (
+            SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "name": "tool_knowledge_search",
+                        "arguments": {
+                            "query": "gioi thieu nganh hang hai cho nguoi moi bat dau",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                tool_calls=[],
+            ),
+            True,
+        )
+
+    async def fake_ainvoke_with_fallback(_llm, _messages, **_kwargs):
+        return SimpleNamespace(
+            content=(
+                "Được chứ. Nếu mới bắt đầu học Hàng hải, mình sẽ đi từ bức tranh lớn: "
+                "tàu, cảng, an toàn, luật biển và nghiệp vụ vận hành."
+            ),
+            tool_calls=[],
+        )
+
+    async def fake_stream_direct_wait_heartbeats(*args, **kwargs):
+        stop_signal = kwargs.get("stop_signal")
+        if stop_signal is not None:
+            await stop_signal.wait()
+            return
+        await asyncio.Future()
+
+    async def push_status_only_progress(*args, **kwargs):
+        return None
+
+    with patch(
+        "app.engine.multi_agent.graph._ainvoke_with_fallback",
+        new=fake_ainvoke_with_fallback,
+    ), patch(
+        "app.engine.multi_agent.graph._stream_direct_answer_with_fallback",
+        new=fake_stream_direct_answer_with_fallback,
+    ), patch(
+        "app.engine.multi_agent.graph._stream_direct_wait_heartbeats",
+        new=fake_stream_direct_wait_heartbeats,
+    ):
+        llm_response, _messages, tool_call_events = await execute_direct_tool_rounds_impl(
+            llm_with_tools=object(),
+            llm_auto=object(),
+            messages=[],
+            tools=[FakeKnowledgeTool()],
+            push_event=push_event,
+            query="Mình đang muốn học về lĩnh vực Hàng Hải các bạn có thể giúp mình được không",
+            state={},
+            ainvoke_with_fallback=fake_ainvoke_with_fallback,
+            stream_direct_answer_with_fallback=fake_stream_direct_answer_with_fallback,
+            stream_direct_wait_heartbeats=fake_stream_direct_wait_heartbeats,
+            push_status_only_progress=push_status_only_progress,
+        )
+
+    assert "tool_knowledge_search" not in llm_response.content
+    assert "mới bắt đầu học Hàng hải" in llm_response.content
+    assert [event["type"] for event in tool_call_events] == ["call", "result"]
+    assert tool_call_events[0]["name"] == "tool_knowledge_search"
+    assert tool_call_events[0]["args"]["query"] == "gioi thieu nganh hang hai cho nguoi moi bat dau"
+    assert any(event["type"] == "tool_call" for event in events)
+    assert not any(
+        event["type"] == "answer_delta" and "tool_knowledge_search" in str(event.get("content", ""))
+        for event in events
+    )
+
+
+@pytest.mark.asyncio
 async def test_forced_web_search_runs_tool_without_planner_or_synthesis_llm():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         execute_direct_tool_rounds_impl,
