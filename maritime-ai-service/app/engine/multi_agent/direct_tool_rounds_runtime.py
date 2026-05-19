@@ -32,6 +32,10 @@ from app.engine.multi_agent.direct_reasoning import (
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
 )
+from app.engine.multi_agent.direct_document_host_action_runtime import (
+    DocumentHostActionShortcut,
+    execute_document_host_action_shortcut,
+)
 from app.engine.multi_agent.direct_pointy_runtime import (
     _format_pointy_inventory,
     _validate_pointy_selector,
@@ -66,6 +70,42 @@ from app.engine.reasoning import record_thinking_snapshot
 
 
 logger = logging.getLogger(__name__)
+
+_DOC_COURSE_HOST_ACTION_SHORTCUT = DocumentHostActionShortcut(
+    tool_name=_DOC_COURSE_HOST_ACTION_TOOL,
+    tool_call_id="forced_doc_course_preview_0",
+    thinking=(
+        "Mình nhận đây là flow tạo cấu trúc khóa học từ tài liệu upload. "
+        "Vì thao tác này có thể sinh nhiều chương/bài trong LMS, mình dựng "
+        "course_plan có nguồn trích dẫn trước và chỉ gửi host action preview; LMS sẽ "
+        "yêu cầu giáo viên bấm Áp dụng để cấp approval_token trước khi ghi dữ liệu."
+    ),
+    thinking_summary="Tạo cây khóa học từ tài liệu",
+    thinking_provenance="deterministic_document_course_host_action",
+    response=(
+        "Mình đã gửi bản thiết kế khóa học từ tài liệu sang LMS. "
+        "Bạn xem cây chương/bài và nguồn trích dẫn trong hộp xem trước, rồi chỉ bấm Áp dụng "
+        "nếu muốn LMS tạo các chương/bài draft tương ứng."
+    ),
+    failure_log_message="[DIRECT] Deterministic document course host action failed: %s",
+)
+
+_DOC_PREVIEW_HOST_ACTION_SHORTCUT = DocumentHostActionShortcut(
+    tool_name=_DOC_PREVIEW_HOST_ACTION_TOOL,
+    tool_call_id="forced_doc_preview_0",
+    thinking=(
+        "Mình nhận đây là flow upload tài liệu -> tạo preview bài học. "
+        "Vì đây là đường ghi LMS có ràng buộc an toàn, mình không chờ model tự gọi tool; "
+        "mình dựng payload preview từ document_context và gửi host action preview-only để LMS mở phần so sánh thay đổi và nguồn trích dẫn trước."
+    ),
+    thinking_summary="Tao preview bai hoc tu tai lieu",
+    thinking_provenance="deterministic_document_preview_host_action",
+    response=(
+        "Mình đã gửi bản preview từ tài liệu sang LMS. "
+        "Bạn kiểm tra phần so sánh thay đổi và nguồn trích dẫn trong hộp xem trước, rồi chỉ bấm Áp dụng nếu nội dung đúng."
+    ),
+    failure_log_message="[DIRECT] Deterministic document preview host action failed: %s",
+)
 
 _DOC_PREVIEW_LOW_VALUE_LABELS = {
     "buoc",
@@ -2865,114 +2905,20 @@ async def execute_direct_tool_rounds_impl(
         if _should_request_uploaded_doc_course_preview(query=query, state=state, tools=tools):
             forced_course_tool = _find_doc_course_host_action_tool(tools)
             if forced_course_tool is not None:
-                tc_id = "forced_doc_course_preview_0"
                 tc_args = _build_uploaded_doc_course_params(query, state)
-                await push_event(
-                    {
-                        "type": "tool_call",
-                        "content": {
-                            "name": _DOC_COURSE_HOST_ACTION_TOOL,
-                            "args": tc_args,
-                            "id": tc_id,
-                        },
-                        "node": "direct",
-                    }
-                )
-                tool_call_events.append(
-                    {
-                        "type": "call",
-                        "name": _DOC_COURSE_HOST_ACTION_TOOL,
-                        "args": tc_args,
-                        "id": tc_id,
-                    }
-                )
-                try:
-                    result = await graph_invoke_tool_with_runtime(
-                        forced_course_tool,
-                        tc_args,
-                        tool_name=_DOC_COURSE_HOST_ACTION_TOOL,
-                        runtime_context_base=runtime_context_base,
-                        tool_call_id=tc_id,
-                        query_snippet=str(tc_args.get("title", ""))[:100],
-                        prefer_async=False,
-                        run_sync_in_thread=True,
-                    )
-                except Exception as tool_error:
-                    logger.warning(
-                        "[DIRECT] Deterministic document course host action failed: %s",
-                        tool_error,
-                    )
-                    result = "Tool unavailable"
-
-                await push_event(
-                    {
-                        "type": "tool_result",
-                        "content": {
-                            "name": _DOC_COURSE_HOST_ACTION_TOOL,
-                            "result": _summarize_tool_result_for_stream(
-                                _DOC_COURSE_HOST_ACTION_TOOL,
-                                result,
-                            ),
-                            "id": tc_id,
-                        },
-                        "node": "direct",
-                    }
-                )
-                await graph_maybe_emit_host_action_event(
-                    push_event=push_event,
-                    tool_name=_DOC_COURSE_HOST_ACTION_TOOL,
-                    result=result,
-                    node="direct",
+                response = await execute_document_host_action_shortcut(
+                    shortcut=_DOC_COURSE_HOST_ACTION_SHORTCUT,
+                    tool=forced_course_tool,
+                    args=tc_args,
+                    state=state,
                     tool_call_events=tool_call_events,
-                )
-                tool_call_events.append(
-                    {
-                        "type": "result",
-                        "name": _DOC_COURSE_HOST_ACTION_TOOL,
-                        "result": str(result),
-                        "id": tc_id,
-                    }
-                )
-                doc_course_thinking = (
-                    "Mình nhận đây là flow tạo cấu trúc khóa học từ tài liệu upload. "
-                    "Vì thao tác này có thể sinh nhiều chương/bài trong LMS, mình dựng "
-                    "course_plan có nguồn trích dẫn trước và chỉ gửi host action preview; LMS sẽ "
-                    "yêu cầu giáo viên bấm Áp dụng để cấp approval_token trước khi ghi dữ liệu."
-                )
-                state["thinking"] = doc_course_thinking
-                state["thinking_content"] = doc_course_thinking
-                record_thinking_snapshot(
-                    state,
-                    doc_course_thinking,
-                    node="direct",
-                    provenance="deterministic_document_course_host_action",
-                )
-                await push_event(
-                    {
-                        "type": "thinking_start",
-                        "content": "",
-                        "node": "direct",
-                        "summary": "Tạo cây khóa học từ tài liệu",
-                    }
-                )
-                await push_event(
-                    {
-                        "type": "thinking_delta",
-                        "content": doc_course_thinking,
-                        "node": "direct",
-                    }
-                )
-                await push_event(
-                    {
-                        "type": "thinking_end",
-                        "content": "",
-                        "node": "direct",
-                    }
-                )
-                response = (
-                    "Mình đã gửi bản thiết kế khóa học từ tài liệu sang LMS. "
-                    "Bạn xem cây chương/bài và nguồn trích dẫn trong hộp xem trước, rồi chỉ bấm Áp dụng "
-                    "nếu muốn LMS tạo các chương/bài draft tương ứng."
+                    push_event=push_event,
+                    invoke_tool_with_runtime=graph_invoke_tool_with_runtime,
+                    maybe_emit_host_action_event=graph_maybe_emit_host_action_event,
+                    summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
+                    runtime_context_base=runtime_context_base,
+                    query_snippet=str(tc_args.get("title", ""))[:100],
+                    logger_obj=logger,
                 )
                 logger.info(
                     "[DIRECT] Deterministic document course host action requested "
@@ -2992,112 +2938,20 @@ async def execute_direct_tool_rounds_impl(
         if _should_request_uploaded_doc_preview(query=query, state=state, tools=tools):
             forced_preview_tool = _find_doc_preview_host_action_tool(tools)
             if forced_preview_tool is not None:
-                tc_id = "forced_doc_preview_0"
                 tc_args = _build_uploaded_doc_preview_params(query, state)
-                await push_event(
-                    {
-                        "type": "tool_call",
-                        "content": {
-                            "name": _DOC_PREVIEW_HOST_ACTION_TOOL,
-                            "args": tc_args,
-                            "id": tc_id,
-                        },
-                        "node": "direct",
-                    }
-                )
-                tool_call_events.append(
-                    {
-                        "type": "call",
-                        "name": _DOC_PREVIEW_HOST_ACTION_TOOL,
-                        "args": tc_args,
-                        "id": tc_id,
-                    }
-                )
-                try:
-                    result = await graph_invoke_tool_with_runtime(
-                        forced_preview_tool,
-                        tc_args,
-                        tool_name=_DOC_PREVIEW_HOST_ACTION_TOOL,
-                        runtime_context_base=runtime_context_base,
-                        tool_call_id=tc_id,
-                        query_snippet=str(tc_args.get("title", ""))[:100],
-                        prefer_async=False,
-                        run_sync_in_thread=True,
-                    )
-                except Exception as tool_error:
-                    logger.warning(
-                        "[DIRECT] Deterministic document preview host action failed: %s",
-                        tool_error,
-                    )
-                    result = "Tool unavailable"
-
-                await push_event(
-                    {
-                        "type": "tool_result",
-                        "content": {
-                            "name": _DOC_PREVIEW_HOST_ACTION_TOOL,
-                            "result": _summarize_tool_result_for_stream(
-                                _DOC_PREVIEW_HOST_ACTION_TOOL,
-                                result,
-                            ),
-                            "id": tc_id,
-                        },
-                        "node": "direct",
-                    }
-                )
-                await graph_maybe_emit_host_action_event(
-                    push_event=push_event,
-                    tool_name=_DOC_PREVIEW_HOST_ACTION_TOOL,
-                    result=result,
-                    node="direct",
+                response = await execute_document_host_action_shortcut(
+                    shortcut=_DOC_PREVIEW_HOST_ACTION_SHORTCUT,
+                    tool=forced_preview_tool,
+                    args=tc_args,
+                    state=state,
                     tool_call_events=tool_call_events,
-                )
-                tool_call_events.append(
-                    {
-                        "type": "result",
-                        "name": _DOC_PREVIEW_HOST_ACTION_TOOL,
-                        "result": str(result),
-                        "id": tc_id,
-                    }
-                )
-                doc_preview_thinking = (
-                    "Mình nhận đây là flow upload tài liệu -> tạo preview bài học. "
-                    "Vì đây là đường ghi LMS có ràng buộc an toàn, mình không chờ model tự gọi tool; "
-                    "mình dựng payload preview từ document_context và gửi host action preview-only để LMS mở phần so sánh thay đổi và nguồn trích dẫn trước."
-                )
-                state["thinking"] = doc_preview_thinking
-                state["thinking_content"] = doc_preview_thinking
-                record_thinking_snapshot(
-                    state,
-                    doc_preview_thinking,
-                    node="direct",
-                    provenance="deterministic_document_preview_host_action",
-                )
-                await push_event(
-                    {
-                        "type": "thinking_start",
-                        "content": "",
-                        "node": "direct",
-                        "summary": "Tao preview bai hoc tu tai lieu",
-                    }
-                )
-                await push_event(
-                    {
-                        "type": "thinking_delta",
-                        "content": doc_preview_thinking,
-                        "node": "direct",
-                    }
-                )
-                await push_event(
-                    {
-                        "type": "thinking_end",
-                        "content": "",
-                        "node": "direct",
-                    }
-                )
-                response = (
-                    "Mình đã gửi bản preview từ tài liệu sang LMS. "
-                    "Bạn kiểm tra phần so sánh thay đổi và nguồn trích dẫn trong hộp xem trước, rồi chỉ bấm Áp dụng nếu nội dung đúng."
+                    push_event=push_event,
+                    invoke_tool_with_runtime=graph_invoke_tool_with_runtime,
+                    maybe_emit_host_action_event=graph_maybe_emit_host_action_event,
+                    summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
+                    runtime_context_base=runtime_context_base,
+                    query_snippet=str(tc_args.get("title", ""))[:100],
+                    logger_obj=logger,
                 )
                 logger.info(
                     "[DIRECT] Deterministic document preview host action requested "

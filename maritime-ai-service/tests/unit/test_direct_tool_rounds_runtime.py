@@ -5,6 +5,11 @@ from unittest.mock import patch
 
 import pytest
 
+from app.engine.multi_agent.direct_document_host_action_runtime import (
+    DocumentHostActionShortcut,
+    execute_document_host_action_shortcut,
+)
+
 
 def test_build_direct_final_synthesis_instruction_is_mode_aware_for_market_turn():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
@@ -1996,3 +2001,70 @@ def test_extract_inventory_ids_from_state_nested_context():
     }
     ids = extract_inventory_ids_from_state(state)
     assert ids == ["btn-x"]
+@pytest.mark.asyncio
+async def test_document_host_action_shortcut_emits_preview_event_contract() -> None:
+    pushed_events: list[dict] = []
+    tool_call_events: list[dict] = []
+    invoke_kwargs: dict = {}
+    state: dict = {}
+
+    shortcut = DocumentHostActionShortcut(
+        tool_name="tool_preview_lesson_patch",
+        tool_call_id="forced_doc_preview_0",
+        thinking="Preview only; wait for approval_token before apply.",
+        thinking_summary="Preview document lesson",
+        thinking_provenance="test_document_preview",
+        response="Preview sent.",
+        failure_log_message="failed: %s",
+    )
+
+    async def push_event(event: dict) -> None:
+        pushed_events.append(event)
+
+    async def invoke_tool(tool, args, **kwargs):
+        invoke_kwargs.update(kwargs)
+        return {"host_action": "preview", "approval_required": True}
+
+    async def emit_host_action(**kwargs) -> None:
+        pushed_events.append(
+            {
+                "type": "host_action",
+                "content": kwargs["result"],
+                "node": kwargs["node"],
+            }
+        )
+
+    response = await execute_document_host_action_shortcut(
+        shortcut=shortcut,
+        tool=object(),
+        args={"title": "Bản nháp"},
+        state=state,
+        tool_call_events=tool_call_events,
+        push_event=push_event,
+        invoke_tool_with_runtime=invoke_tool,
+        maybe_emit_host_action_event=emit_host_action,
+        summarize_tool_result_for_stream=lambda name, result: "summary",
+        runtime_context_base={"request_id": "req-1"},
+        query_snippet="Bản nháp",
+        logger_obj=__import__("logging").getLogger(__name__),
+    )
+
+    assert response == "Preview sent."
+    assert state["thinking_content"] == shortcut.thinking
+    assert invoke_kwargs["tool_name"] == shortcut.tool_name
+    assert invoke_kwargs["tool_call_id"] == shortcut.tool_call_id
+    assert invoke_kwargs["prefer_async"] is False
+    assert invoke_kwargs["run_sync_in_thread"] is True
+    assert [event["type"] for event in pushed_events] == [
+        "tool_call",
+        "tool_result",
+        "host_action",
+        "thinking_start",
+        "thinking_delta",
+        "thinking_end",
+    ]
+    assert [event["type"] for event in tool_call_events] == ["call", "result"]
+    assert tool_call_events[0]["name"] == shortcut.tool_name
+    assert tool_call_events[1]["result"] == str(
+        {"host_action": "preview", "approval_required": True}
+    )

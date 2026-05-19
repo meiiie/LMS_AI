@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issue: #413
+Follow-up issues: #413, #415
 
 ## Purpose
 
@@ -33,6 +33,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #413 moved Code Studio scaffold renderer dispatch into
   `code_studio_scaffold_registry.py` and visible Vietnamese fallback copy into
   `code_studio_scaffold_captions.py`.
+- Follow-up #415 moved deterministic uploaded-document host-action execution
+  into `direct_document_host_action_runtime.py`, keeping preview-only
+  tool-call/result, host-action emission, thinking trace, and user response as
+  one tested contract.
 
 ## Preserved Intentionally
 
@@ -64,8 +68,9 @@ backups, data PDFs, or local skill folders.
   has moved out. The long-term cleanup direction is lifecycle,
   response-finalization, and SSE V3 parity modules with narrow contract tests.
 - `direct_tool_rounds_runtime.py` remains large, but Pointy and explicit
-  web-search policy have moved out. The next durable step is separating
-  tool-dispatch execution from deterministic host-action shortcuts.
+  web-search policy plus deterministic document host-action execution have
+  moved out. The next durable step is separating generic tool-dispatch
+  execution from final synthesis.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, and caption copy are no longer embedded in
   the renderer body. The next durable step is scaffold-quality gates that
@@ -90,3 +95,5 @@ tests after adding the required `pytest-asyncio` test plugin to the temporary
 uv environment. In follow-up #413, the Code Studio scaffold command passed
 with 54 tests, the direct tool-round command passed with 56 tests, and the
 combined direct-runtime regression set passed with 205 tests.
+In follow-up #415, the direct tool-round command passed with 57 tests after
+adding the document host-action shortcut contract test.
