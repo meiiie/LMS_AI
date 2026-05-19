@@ -38,6 +38,8 @@ def test_uploaded_document_attachment_contract_accepts_mapping_like_values():
 
 def test_uploaded_document_course_intent_is_shared_by_preview_and_tool_rounds():
     assert looks_uploaded_document_course_request("tao bai giang di")
+    assert looks_uploaded_document_course_request("lap de cuong khoa hoc tu tai lieu")
+    assert looks_uploaded_document_course_request("lập đề cương khóa học từ tài liệu")
     assert looks_uploaded_document_course_request("turn this document into a course plan")
     assert not looks_uploaded_document_course_request("cap nhat bai hoc hien tai")
 

@@ -69,6 +69,7 @@ _COURSE_REQUEST_MARKERS = (
 
 def normalize_document_contract_text(value: Any) -> str:
     text = str(value or "").replace("\\_", "_")
+    text = text.replace("đ", "d").replace("Đ", "D")
     normalized = unicodedata.normalize("NFKD", text)
     return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
 
