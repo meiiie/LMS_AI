@@ -260,6 +260,89 @@ async def test_native_direct_stream_returns_tool_call_chunks_with_bound_tools():
 
 
 @pytest.mark.asyncio
+async def test_native_direct_stream_buffers_raw_json_tool_call_text():
+    events = []
+
+    async def _push_event(event):
+        events.append(event)
+
+    class _FakeStream:
+        def __aiter__(self):
+            async def _gen():
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                content='{"name":"tool_knowledge_search",',
+                            )
+                        )
+                    ]
+                )
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                content='"arguments":{"query":"gioi thieu hang hai"}}',
+                            )
+                        )
+                    ]
+                )
+
+            return _gen()
+
+    class _FakeChatCompletions:
+        async def create(self, **_kwargs):
+            return _FakeStream()
+
+    class _FakeChat:
+        completions = _FakeChatCompletions()
+
+    class _FakeClient:
+        chat = _FakeChat()
+
+    route = SimpleNamespace(
+        provider="nvidia",
+        llm=SimpleNamespace(
+            _wiii_tier_key="light",
+            _wiii_model_name="qwen/qwen3-next-80b-a3b-thinking",
+            _wiii_bound_tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "tool_knowledge_search",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+        ),
+    )
+
+    response, streamed = await _stream_openai_compatible_answer_with_route_impl(
+        route,
+        messages=[{"role": "user", "content": "Hoc hang hai duoc khong?"}],
+        push_event=_push_event,
+        node="direct",
+        thinking_stop_signal=None,
+        supports_native_answer_streaming=lambda provider: provider == "nvidia",
+        create_openai_compatible_stream_client=lambda _provider: _FakeClient(),
+        resolve_openai_stream_model_name=lambda *_args: "qwen/qwen3-next-80b-a3b-thinking",
+        langchain_message_to_openai_payload=lambda message: message,
+        extract_openai_delta_text=lambda delta: ("", str(getattr(delta, "content", "") or "")),
+    )
+
+    assert streamed is False
+    assert response.content == ""
+    assert response.tool_calls == [
+        {
+            "id": "raw_tool_call_0",
+            "name": "tool_knowledge_search",
+            "args": {"query": "gioi thieu hang hai"},
+        }
+    ]
+    assert events == []
+
+
+@pytest.mark.asyncio
 async def test_native_direct_stream_timeout_marks_model_degraded():
     from app.engine.llm_model_health import is_model_degraded, reset_model_health_state
 
