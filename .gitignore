@@ -88,6 +88,8 @@ Documents/
 maritime-ai-service/.tmp-workspace/
 maritime-ai-service/.env.soul-agi
 maritime-ai-service/.env.production.bak-*
+wiii-desktop/playwright/*.png
+wiii-desktop/public/labs/
 wiii-desktop/scripts/screenshots/
 
 # === Local agent scratch artifacts ===
