@@ -65,6 +65,7 @@ The normal chat turn should be read in this order:
 | Tool registry | `maritime-ai-service/app/engine/tools/registry.py` and `maritime-ai-service/app/engine/multi_agent/tool_collection.py` |
 | LMS host actions | `maritime-ai-service/app/engine/context/action_tools.py`, `maritime-ai-service/app/engine/tools/lms_tools.py` |
 | Document context | `maritime-ai-service/app/api/v1/document_context.py`, document runtime helpers |
+| Uploaded-document preview/course contract | `maritime-ai-service/app/engine/multi_agent/document_preview_contract.py` |
 | Config | `maritime-ai-service/app/core/config/_settings*.py` |
 | Voice | `maritime-ai-service/app/api/v1/voice.py` |
 

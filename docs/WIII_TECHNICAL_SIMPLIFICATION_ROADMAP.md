@@ -218,6 +218,11 @@ Expected result:
 ## Immediate Execution Slice
 
 The first executed slices of this roadmap are feature-tier classification and the Core-to-Living post-response contract.
+Issue #407 adds the next Core/Host cleanup slice by moving uploaded-document
+preview/course intent, attachment parsing, and LMS host-action tool selection
+into `maritime-ai-service/app/engine/multi_agent/document_preview_contract.py`.
+The direct node and tool-round runtimes keep compatibility aliases, but no
+longer own separate copies of that contract.
 
 They are intentionally modest.
 The point is to establish durable simplification mechanisms, not to do a risky refactor in one move.
