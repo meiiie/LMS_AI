@@ -27,6 +27,12 @@ from app.engine.multi_agent.code_studio_scaffold_contract import (
     legacy_kind_for_primitive,
     primitive_for_legacy_kind,
 )
+from app.engine.multi_agent.code_studio_scaffold_captions import (
+    caption_for_scaffold_primitive,
+)
+from app.engine.multi_agent.code_studio_scaffold_registry import (
+    ScaffoldRendererRegistry,
+)
 from app.engine.multi_agent.code_studio_template_scaffold import (
     build_code_studio_scaffold,
     build_scaffold_visible_caption,
@@ -50,6 +56,33 @@ def test_scaffold_contract_maps_legacy_kinds_without_renderer_imports() -> None:
     assert primitive_for_legacy_kind("unknown") is None
     assert legacy_kind_for_primitive(PRIMITIVE_SCENE) == "literary"
     assert legacy_kind_for_primitive("unknown") == "default"
+
+
+def test_scaffold_renderer_registry_falls_back_to_data_band_renderer() -> None:
+    """Unknown primitive names must have exactly one safe fallback path."""
+    calls: list[dict] = []
+
+    def fallback_renderer(spec: dict) -> str:
+        calls.append(spec)
+        return "fallback-html"
+
+    registry = ScaffoldRendererRegistry(
+        renderers={},
+        fallback_renderer=fallback_renderer,
+    )
+
+    spec = {"primitive": "unknown"}
+    assert registry.render(spec) == "fallback-html"
+    assert calls == [spec]
+
+
+def test_scaffold_caption_contract_is_primitive_based() -> None:
+    """Caption copy can be audited without importing the large renderer."""
+    scene_caption = caption_for_scaffold_primitive(PRIMITIVE_SCENE)
+    fallback_caption = caption_for_scaffold_primitive("unknown")
+
+    assert "scene" in scene_caption.lower()
+    assert "canvas" in fallback_caption.lower()
 
 
 @pytest.mark.parametrize(

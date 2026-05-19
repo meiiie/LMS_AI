@@ -6,6 +6,8 @@ Owner: Project leadership
 
 Issue: #411
 
+Follow-up issue: #413
+
 ## Purpose
 
 This audit records the cleanup boundary for the May 2026 runtime hygiene pass.
@@ -21,6 +23,16 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Code Studio scaffold primitive and legacy-kind mapping moved into
   `code_studio_scaffold_contract.py`, so routing and tests can depend on a
   small typed contract instead of importing the full HTML renderer.
+- Follow-up #413 moved direct Pointy selector/inventory policy into
+  `direct_pointy_runtime.py`.
+- Follow-up #413 moved explicit web-search forcing and fallback-selection
+  policy into `direct_web_search_policy.py`.
+- Follow-up #413 moved current-session memory fast-path parsing/recall into
+  `direct_session_memory_runtime.py` and shared direct text folding into
+  `direct_text_utils.py`.
+- Follow-up #413 moved Code Studio scaffold renderer dispatch into
+  `code_studio_scaffold_registry.py` and visible Vietnamese fallback copy into
+  `code_studio_scaffold_captions.py`.
 
 ## Preserved Intentionally
 
@@ -48,12 +60,16 @@ backups, data PDFs, or local skill folders.
 
 ## Remaining Debt
 
-- `direct_node_runtime.py` and `direct_tool_rounds_runtime.py` remain large.
-  The long-term cleanup direction is lifecycle, tool-loop, tool-dispatch, and
-  response-finalization modules with contract tests around SSE V3 parity.
-- `code_studio_template_scaffold.py` is still a large deterministic fallback.
-  The next durable step is a renderer registry plus scaffold-quality gates
-  that reject generic templates for simulation requests.
+- `direct_node_runtime.py` remains large, but session-memory parsing/recall
+  has moved out. The long-term cleanup direction is lifecycle,
+  response-finalization, and SSE V3 parity modules with narrow contract tests.
+- `direct_tool_rounds_runtime.py` remains large, but Pointy and explicit
+  web-search policy have moved out. The next durable step is separating
+  tool-dispatch execution from deterministic host-action shortcuts.
+- `code_studio_template_scaffold.py` is still a large deterministic fallback,
+  but contract, renderer dispatch, and caption copy are no longer embedded in
+  the renderer body. The next durable step is scaffold-quality gates that
+  reject generic templates for simulation requests.
 - Some tests still import compatibility `graph.py` modules. Move tests toward
   `runtime.py` imports when the external import window can close.
 
@@ -65,8 +81,12 @@ Targeted commands used during this pass:
 cd maritime-ai-service
 uv run --with pytest --with hypothesis --with pytest-asyncio pytest tests/unit/test_code_studio_template_scaffold.py -q --tb=short
 uv run --with pytest --with hypothesis --with pytest-asyncio pytest tests/unit/test_subagent_phase3.py tests/unit/test_subagent_search.py tests/unit/test_sprint202_curated_cards.py -q --tb=short
+uv run --with pytest --with hypothesis --with pytest-asyncio pytest tests/unit/test_direct_tool_rounds_runtime.py -q --tb=short
+uv run --with pytest --with hypothesis --with pytest-asyncio pytest tests/unit/test_conservative_evolution.py tests/unit/test_direct_node_provider_errors.py -q --tb=short
 ```
 
 The first command passed with 52 tests. The second command passed with 140
 tests after adding the required `pytest-asyncio` test plugin to the temporary
-uv environment.
+uv environment. In follow-up #413, the Code Studio scaffold command passed
+with 54 tests, the direct tool-round command passed with 56 tests, and the
+combined direct-runtime regression set passed with 205 tests.

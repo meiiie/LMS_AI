@@ -111,6 +111,12 @@ from app.engine.multi_agent.code_studio_scaffold_contract import (
     legacy_kind_for_primitive,
     primitive_for_legacy_kind,
 )
+from app.engine.multi_agent.code_studio_scaffold_captions import (
+    caption_for_scaffold_primitive,
+)
+from app.engine.multi_agent.code_studio_scaffold_registry import (
+    ScaffoldRendererRegistry,
+)
 
 # ============================================================================
 # Primitive identifiers + legacy kind mapping contract
@@ -1766,6 +1772,11 @@ _PRIMITIVE_RENDERERS = {
     PRIMITIVE_DATA_BAND: _render_data_band,
 }
 
+_RENDERER_REGISTRY = ScaffoldRendererRegistry(
+    renderers=_PRIMITIVE_RENDERERS,
+    fallback_renderer=_render_data_band,
+)
+
 
 def build_code_studio_scaffold(query: str, *, kind: str | None = None) -> str:
     """Return Canvas-first HTML scaffold satisfying tool_create_visual_code.
@@ -1790,9 +1801,7 @@ def build_code_studio_scaffold(query: str, *, kind: str | None = None) -> str:
         forced_primitive = primitive_for_legacy_kind(kind)
         if forced_primitive:
             spec = {**spec, "primitive": forced_primitive}
-    primitive = spec.get("primitive", PRIMITIVE_DATA_BAND)
-    renderer = _PRIMITIVE_RENDERERS.get(primitive, _render_data_band)
-    return renderer(spec)
+    return _RENDERER_REGISTRY.render(spec)
 
 
 def build_scaffold_visible_caption(query: str, *, kind: str | None = None) -> str:
@@ -1803,34 +1812,4 @@ def build_scaffold_visible_caption(query: str, *, kind: str | None = None) -> st
         if forced_primitive:
             spec["primitive"] = forced_primitive
     primitive = spec.get("primitive", PRIMITIVE_DATA_BAND)
-    captions = {
-        PRIMITIVE_PARTICLE_FIELD: (
-            "Mình đã dựng khung hạt tương tác. Kéo thanh trượt để thay đổi "
-            "mật độ. Cho mình biết bạn muốn thêm hiệu ứng/khung cảnh gì để "
-            "mở rộng nhé."
-        ),
-        PRIMITIVE_OSCILLATION: (
-            "Mình đã dựng khung mô phỏng dao động đầu tiên. Cho mình biết "
-            "tham số (chiều dài, ma sát, trọng trường) hoặc hiện tượng cụ "
-            "thể để thay phần lõi bằng vật lý chính xác."
-        ),
-        PRIMITIVE_FUNCTION_PLOT: (
-            "Mình đã mở canvas với khung lưới toạ độ. Cho mình biết hàm số "
-            "hoặc phạm vi trục để vẽ đúng đồ thị bạn cần."
-        ),
-        PRIMITIVE_TIMELINE: (
-            "Mình đã dựng khung dòng thời gian. Cho mình biết bạn quan tâm "
-            "tới mặt trận/nhân vật/chiến dịch nào để mở rộng cảnh."
-        ),
-        PRIMITIVE_SCENE: (
-            "Mình đã mở canvas và dựng khung scene đầu tiên. Hãy mô tả thêm "
-            "về tâm trạng, bối cảnh, hoặc đoạn thơ trích dẫn để mình mở rộng "
-            "cảnh đúng hướng nhé."
-        ),
-        PRIMITIVE_DATA_BAND: (
-            "Mình đã mở canvas và dựng khung tạm để bạn không phải chờ. "
-            "Hãy mô tả cụ thể hơn về nội dung bạn muốn dựng — Wiii sẽ mở rộng "
-            "đúng hướng."
-        ),
-    }
-    return captions.get(primitive, captions[PRIMITIVE_DATA_BAND])
+    return caption_for_scaffold_primitive(primitive)
