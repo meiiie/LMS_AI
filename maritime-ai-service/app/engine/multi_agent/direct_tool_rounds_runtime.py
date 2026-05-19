@@ -6,7 +6,6 @@ import asyncio
 import logging
 import re
 import sys
-import unicodedata
 from typing import Any, Optional
 
 from app.core.config import settings
@@ -33,10 +32,24 @@ from app.engine.multi_agent.direct_reasoning import (
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
 )
+from app.engine.multi_agent.direct_pointy_runtime import (
+    _format_pointy_inventory,
+    _validate_pointy_selector,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.tool_call_text_parser import (
     extract_raw_tool_calls_from_text,
     tool_names_from_tools,
+)
+from app.engine.multi_agent.direct_web_search_policy import (
+    FORCED_WEB_SEARCH_TOOL_NAMES as _FORCED_WEB_SEARCH_TOOL_NAMES,
+    _clean_forced_web_search_query,
+    _force_skills_for_turn,
+    _has_search_tool_result,
+    _is_search_tool_name,
+    _prefer_official_query_for_known_docs,
+    _should_return_search_template_after_tool_round,
+    _should_use_search_template_for_empty_response,
 )
 from app.engine.multi_agent.visual_events import (
     _collect_active_visual_session_ids,
@@ -54,11 +67,6 @@ from app.engine.reasoning import record_thinking_snapshot
 
 logger = logging.getLogger(__name__)
 
-_FORCED_WEB_SEARCH_TOOL_NAMES = (
-    "tool_web_search",
-    "web_search",
-)
-_RICH_SEARCH_RESULT_CHAR_FLOOR = 1200
 _DOC_PREVIEW_LOW_VALUE_LABELS = {
     "buoc",
     "checkpoint",
@@ -2514,206 +2522,6 @@ def _build_tool_result_message(
     return Message(role="tool", content=content, tool_call_id=tool_call_id)
 
 
-def _validate_pointy_selector(selector: str, state: Any) -> str | None:
-    """Validate LLM-provided pointy selector vs available_targets.
-
-    Returns None khi selector OK, hoặc error message string khi hallucinated.
-    Error message được trả về như tool_result để LLM thấy + correct round
-    tiếp với exact id từ inventory.
-
-    v3.0 anti-hallucination defense (server-side). Compound CSS, aria-label
-    patterns, .class selectors đều bị reject vì:
-
-    1. Bypass Wiii's data-wiii-id stable handle priority (architectural)
-    2. Brittle vs UI refactors (Tailwind classes, BEM names change)
-    3. Silent fail mode trên frontend khi không match real DOM
-    """
-    if not selector:
-        return (
-            "ERROR: Empty selector. Required: exact `id` from "
-            "tool_pointy_inventory. Example: tool_pointy_show("
-            'selector="chat-send-button", caption="..."). Call '
-            "tool_pointy_inventory first if unsure."
-        )
-
-    # Exact Wiii ids include annotated handles (chat-send-button) and
-    # scanner-generated synthetic ids (auto:button:gui-tin-nhan).
-    import re
-    wiii_id_re = re.compile(
-        r"^(?:[a-zA-Z][a-zA-Z0-9_-]*|auto:[a-z0-9_-]+:[a-z0-9_-]+(?:-\d+)?)$"
-    )
-    is_wiii_id = bool(wiii_id_re.match(selector))
-
-    # Verbose [data-wiii-id="..."] form cũng OK (Wiii's documented selector form).
-    is_data_wiii_id_form = bool(
-        re.match(r'^\[data-wiii-id=("[\w-]+"|\'[\w-]+\'|[\w-]+)\]$', selector)
-    )
-
-    # v9.0 F18: read inventory from BOTH state forms (dict + attr).
-    # state can be plain dict (graph_stream_runtime) OR SimpleNamespace.
-    def _read_inventory_ids(s: Any) -> list[str]:
-        host = None
-        if isinstance(s, dict):
-            host = s.get("host_context") or (s.get("context") or {}).get("host_context")
-        else:
-            host = getattr(s, "host_context", None)
-        if not isinstance(host, dict):
-            return []
-        page = host.get("page") or {}
-        metadata = page.get("metadata") or {} if isinstance(page, dict) else {}
-        targets = metadata.get("available_targets") or []
-        if not isinstance(targets, list):
-            return []
-        return [str(t.get("id")) for t in targets if isinstance(t, dict) and t.get("id")]
-
-    inventory_ids = _read_inventory_ids(state)
-    if inventory_ids and selector in inventory_ids:
-        return None
-
-    # Bất kỳ form nào KHÔNG phải Wiii id và KHÔNG phải data-wiii-id form
-    # → likely hallucination (compound CSS, aria-label, .class, ...).
-    if not (is_wiii_id or is_data_wiii_id_form):
-        examples = ", ".join(f'"{i}"' for i in inventory_ids[:3]) if inventory_ids else '"chat-send-button"'
-        return (
-            f"ERROR: Selector {selector!r} is NOT a valid Wiii Pointy id.\n"
-            f"DO NOT generate CSS selectors, aria-label patterns, or .class selectors.\n"
-            f"REQUIRED: exact id from current inventory. Synthetic auto ids like "
-            f"`auto:button:gui-tin-nhan` are valid when they appear in inventory.\n"
-            f"Available ids on this page: {inventory_ids[:10]}\n"
-            f"Correct form: tool_pointy_show(selector={examples.split(',')[0] if examples else '...'}, caption=\"...\")"
-        )
-
-    # Wiii id form: verify exists trong available_targets if inventory available.
-    if is_wiii_id and inventory_ids:
-        available_list = sorted(set(inventory_ids))[:10]
-        return (
-            f"ERROR: id {selector!r} không có trong available_targets trên page hiện tại.\n"
-            f"Available ids: {available_list}\n"
-            f"Re-call tool_pointy_show với một id chính xác từ list trên, "
-            f"hoặc nói prose nếu element không tồn tại."
-        )
-
-    return None
-
-
-def _format_pointy_inventory(state: Any) -> str:
-    """Format pointable elements + cursor state cho LLM.
-
-    Reads ``state.host_context.page.metadata.available_targets`` (set
-    bởi frontend qua HostContextStore Sprint 222 mechanism) plus
-    ``state.host_context.page.metadata.cursor_state`` nếu có.
-
-    v3.0 (Battleship): inventory text là PRESCRIPTIVE — mỗi item include
-    inline directive ``→ call: tool_pointy_show(selector="<id>")`` để
-    LLM khó ignore và không hallucinate compound CSS selectors.
-    """
-    if state is None:
-        return "Pointy inventory unavailable (no chat state)."
-    host_context = getattr(state, "host_context", None) or {}
-    page = host_context.get("page", {}) if isinstance(host_context, dict) else {}
-    metadata = page.get("metadata", {}) if isinstance(page, dict) else {}
-    targets = metadata.get("available_targets") or []
-    cursor_state = metadata.get("cursor_state")
-
-    lines: list[str] = []
-    if not targets:
-        lines.append(
-            "No pointable elements published by the host. The frontend "
-            "may not have integrated PageScanner yet, or this turn ran "
-            "without host_context. Use prose to describe locations."
-        )
-    else:
-        visible = [t for t in targets if t.get("visible")]
-        offscreen = [t for t in targets if not t.get("visible")]
-        lines.append(
-            f"Pointable elements ({len(visible)} visible, "
-            f"{len(offscreen)} off-screen). USE EXACT id BELOW — DO NOT "
-            f"generate CSS / compound / aria-label selectors:"
-        )
-        display = visible if visible else targets
-        for t in display[:30]:
-            tid = t.get("id") or t.get("selector") or "?"
-            role = t.get("role", "other")
-            label = t.get("label") or ""
-            click_safe = " (click_safe)" if t.get("click_safe") else ""
-            label_part = f' "{label}"' if label else ""
-            offscreen_tag = " [offscreen]" if not t.get("visible") else ""
-            # v3.0: prescriptive directive — LLM khó ignore inline call hint.
-            lines.append(
-                f'- id="{tid}" ({role}){label_part}{click_safe}{offscreen_tag}\n'
-                f'  → call: tool_pointy_show(selector="{tid}", caption="...")'
-            )
-        if len(display) > 30:
-            lines.append(f"… {len(display) - 30} more elements omitted.")
-
-    if isinstance(cursor_state, dict):
-        pos = cursor_state.get("position") or {}
-        x = pos.get("x", "?")
-        y = pos.get("y", "?")
-        state_name = cursor_state.get("awarenessState", "?")
-        last = cursor_state.get("currentSelector")
-        last_part = f' last_target="{last}"' if last else ""
-        lines.append(
-            f"Wiii cursor: pos=({x}, {y}) state={state_name}{last_part}"
-        )
-
-    # User's real OS cursor (Wiii Pointy v2.5).
-    user_cursor = metadata.get("user_cursor_state")
-    if isinstance(user_cursor, dict):
-        upos = user_cursor.get("position")
-        if isinstance(upos, dict):
-            ux = upos.get("x", "?")
-            uy = upos.get("y", "?")
-            idle = user_cursor.get("idle_ms", 0)
-            hovered = user_cursor.get("hovered_id")
-            hovered_label = user_cursor.get("hovered_label")
-            clicked = user_cursor.get("recently_clicked", False)
-            parts = [f"User cursor: pos=({ux}, {uy}) idle={idle}ms"]
-            if hovered:
-                hover_part = f' hovering="{hovered}"'
-                if hovered_label:
-                    hover_part += f' (label="{hovered_label}")'
-                parts.append(hover_part)
-            if clicked:
-                parts.append("recently_clicked=true")
-            lines.append(" ".join(parts))
-        else:
-            lines.append("User cursor: not yet tracked.")
-
-    # User's attention/presence (Wiii Pointy v2.6 — tab visibility, blur, idle
-    # + v2.7 behavior counters: copy/paste/right-click + selected text).
-    attention = metadata.get("user_attention")
-    if isinstance(attention, dict):
-        status = attention.get("status", "?")
-        blurs = attention.get("blur_count", 0)
-        tab_switches = attention.get("tab_switch_count", 0)
-        away_ms = attention.get("total_away_ms", 0)
-        last_away = attention.get("last_away_duration_ms", 0)
-        parts = [f"User attention: status={status}"]
-        if blurs > 0 or tab_switches > 0:
-            parts.append(f"blurs={blurs} tab_switches={tab_switches}")
-        if away_ms > 0:
-            parts.append(f"total_away={away_ms // 1000}s")
-        if last_away > 0 and status == "active":
-            parts.append(f"just_returned (was away {last_away // 1000}s)")
-        # v2.7 behavior counters
-        copies = attention.get("copy_count", 0)
-        pastes = attention.get("paste_count", 0)
-        right_clicks = attention.get("context_menu_count", 0)
-        if copies or pastes or right_clicks:
-            parts.append(
-                f"behaviour: copies={copies} pastes={pastes} right_clicks={right_clicks}"
-            )
-        lines.append(" ".join(parts))
-        # Last selected text on its own line for readability.
-        selected = attention.get("last_selected_text")
-        if isinstance(selected, str) and selected.strip():
-            preview = selected[:60].replace("\n", " ")
-            lines.append(f'User selected text: "{preview}"')
-
-    return "\n".join(lines)
-
-
 def _build_user_instruction_message(
     content: str,
     *,
@@ -2770,157 +2578,6 @@ def _build_assistant_tool_call_message(
             if str(call.get("name") or "").strip()
         ],
     )
-
-
-def _force_skills_for_turn(state: AgentState | None) -> set[str]:
-    if not isinstance(state, dict):
-        return set()
-    force_skills = state.get("force_skills")
-    if not force_skills:
-        ctx = state.get("context")
-        if isinstance(ctx, dict):
-            force_skills = ctx.get("force_skills")
-    if isinstance(force_skills, (list, tuple, set)):
-        return {str(skill).strip().lower() for skill in force_skills if skill}
-    return set()
-
-
-def _has_search_tool_result(tool_call_events: list[dict]) -> bool:
-    search_tool_names = {
-        "tool_web_search",
-        "web_search",
-        "tool_search_news",
-        "search_news",
-        "tool_search_legal",
-        "search_legal",
-        "tool_search_maritime",
-        "search_maritime",
-    }
-    return any(
-        event.get("type") == "result"
-        and str(event.get("name") or "").strip().lower() in search_tool_names
-        and str(event.get("result") or "").strip()
-        for event in tool_call_events or []
-    )
-
-
-def _has_fetch_tool_result(tool_call_events: list[dict]) -> bool:
-    return any(
-        event.get("type") == "result"
-        and str(event.get("name") or "").strip().lower() in {"tool_fetch_url", "fetch_url"}
-        and str(event.get("result") or "").strip()
-        for event in tool_call_events or []
-    )
-
-
-def _fold_tool_round_text(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", str(value or ""))
-    stripped = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-    return " ".join(stripped.lower().replace("đ", "d").split())
-
-
-def _looks_explicit_web_search_query(query: str) -> bool:
-    folded = _fold_tool_round_text(query)
-    if not folded:
-        return False
-    if "@web-search" in folded or "@web_search" in folded:
-        return True
-    if "web" in folded and any(marker in folded for marker in ("tim", "search", "tra cuu")):
-        return True
-    return any(
-        marker in folded
-        for marker in (
-            "tim tren mang",
-            "tim kiem tren mang",
-            "search the web",
-            "look up online",
-        )
-    )
-
-
-def _is_search_tool_name(name: str) -> bool:
-    return str(name or "").strip().lower() in {
-        "tool_web_search",
-        "web_search",
-        "tool_search_news",
-        "search_news",
-        "tool_search_legal",
-        "search_legal",
-        "tool_search_maritime",
-        "search_maritime",
-    }
-
-
-def _prefer_official_query_for_known_docs(args: Any, user_query: str) -> dict:
-    normalized_args = dict(args or {}) if isinstance(args, dict) else {}
-    current_query = str(normalized_args.get("query") or normalized_args.get("q") or "")
-    folded = _fold_tool_round_text(f"{user_query} {current_query}")
-    if "openai" in folded and "responses api" in folded:
-        normalized_args["query"] = (
-            "OpenAI API Reference Responses POST /v1/responses platform.openai.com"
-        )
-    return normalized_args
-
-
-def _should_return_search_template_after_tool_round(
-    *,
-    query: str,
-    state: AgentState | None,
-    tool_call_events: list[dict],
-    tool_round: int,
-) -> bool:
-    if not _has_search_tool_result(tool_call_events):
-        return False
-    routing_meta = state.get("routing_metadata") if isinstance(state, dict) else {}
-    routing_intent = str((routing_meta or {}).get("intent") or "").strip().lower()
-    explicit_web = routing_intent == "web_search" or _looks_explicit_web_search_query(query)
-    if not explicit_web:
-        return False
-    search_result_chars = sum(
-        len(str(event.get("result") or ""))
-        for event in tool_call_events or []
-        if event.get("type") == "result" and _is_search_tool_name(str(event.get("name") or ""))
-    )
-    return (
-        _has_fetch_tool_result(tool_call_events)
-        or tool_round >= 1
-        or search_result_chars >= _RICH_SEARCH_RESULT_CHAR_FLOOR
-    )
-
-
-def _is_explicit_web_search_turn(query: str, state: AgentState | None) -> bool:
-    routing_meta = state.get("routing_metadata") if isinstance(state, dict) else {}
-    routing_intent = str((routing_meta or {}).get("intent") or "").strip().lower()
-    return (
-        "web-search" in _force_skills_for_turn(state)
-        or routing_intent == "web_search"
-        or _looks_explicit_web_search_query(query)
-    )
-
-
-def _should_use_search_template_for_empty_response(
-    *,
-    query: str,
-    state: AgentState | None,
-    tool_call_events: list[dict],
-) -> bool:
-    return (
-        _is_explicit_web_search_turn(query, state)
-        and _has_search_tool_result(tool_call_events)
-    )
-
-
-def _clean_forced_web_search_query(query: str) -> str:
-    """Convert an explicit @web-search turn into a clean tool query."""
-    text = str(query or "").strip()
-    text = re.sub(r"(?i)@web-search\b", "", text).strip()
-    text = re.split(
-        r"(?i)\b(?:trả\s+lời|tra\s+loi|answer|respond|reply)\b",
-        text,
-        maxsplit=1,
-    )[0].strip()
-    text = text.strip(" .:-–—")
-    return text or str(query or "").strip()
 
 
 async def execute_direct_tool_rounds_impl(

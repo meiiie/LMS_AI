@@ -59,7 +59,7 @@ The normal chat turn should be read in this order:
 |---|---|
 | Sync chat behavior | `maritime-ai-service/app/api/v1/chat.py`, then `maritime-ai-service/app/services/chat_orchestrator.py` |
 | Streaming behavior | `maritime-ai-service/app/api/v1/chat_stream.py`, then `maritime-ai-service/app/services/chat_stream_coordinator.py` |
-| Direct tool loop | `maritime-ai-service/app/engine/multi_agent/direct_tool_rounds_runtime.py` |
+| Direct tool loop | `maritime-ai-service/app/engine/multi_agent/direct_tool_rounds_runtime.py`; Pointy policy lives in `direct_pointy_runtime.py`; explicit web-search policy lives in `direct_web_search_policy.py`; current-session memory fast paths live in `direct_session_memory_runtime.py` |
 | Native stream/provider quirks | `maritime-ai-service/app/engine/multi_agent/openai_stream_runtime.py` |
 | Routing and supervisor behavior | `maritime-ai-service/app/engine/multi_agent/supervisor*.py` |
 | Tool registry | `maritime-ai-service/app/engine/tools/registry.py` and `maritime-ai-service/app/engine/multi_agent/tool_collection.py` |
@@ -82,7 +82,7 @@ The normal chat turn should be read in this order:
 | Host bridge | `wiii-desktop/src/lib/embed-bridge.ts`, `wiii-desktop/src/lib/context-bridge.ts` |
 | Pointy | `wiii-desktop/src/pointy-host/**` and `wiii-desktop/src/components/chat/PointyModeToggle.tsx` |
 | Voice | `wiii-desktop/src/api/voice.ts`, voice mode/toggle components |
-| Visual artifacts | `wiii-desktop/src/components/chat/VisualArtifactCard.tsx`, `wiii-desktop/src/components/common/InlineVisualFrame.tsx` |
+| Visual artifacts | `wiii-desktop/src/components/chat/VisualArtifactCard.tsx`, `wiii-desktop/src/components/common/InlineVisualFrame.tsx`; deterministic Code Studio fallback contracts live in backend `code_studio_scaffold_*` modules |
 
 ## Canonical Contracts
 
