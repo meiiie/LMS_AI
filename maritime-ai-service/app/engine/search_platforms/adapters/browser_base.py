@@ -1,5 +1,5 @@
 ﻿"""
-Playwright + LLM Extraction â€” Base Class for Browser-Based Adapters
+Playwright + LLM Extraction - Base Class for Browser-Based Adapters
 
 Sprint 152: "Trinh Duyet Thong Minh"
 Sprint 154b: Dedicated worker thread (fixes greenlet "Cannot switch" errors)
@@ -10,7 +10,7 @@ then Gemini Flash LLM to extract structured product data from visible text.
 Advantages over CSS selectors:
 - Self-healing: LLM reads semantics, not brittle class names
 - Works on any website without per-site selector maintenance
-- Facebook/Instagram change CSS frequently â€” LLM adapts automatically
+- Facebook/Instagram change CSS frequently - LLM adapts automatically
 
 Subclasses implement:
 - get_config() -> PlatformConfig
@@ -61,7 +61,7 @@ from app.engine.search_platforms.base import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Legacy browser singleton â€” used in non-asyncio path (tests, CLI).
+# Legacy browser singleton - used in non-asyncio path (tests, CLI).
 # Production asyncio path uses the dedicated worker thread instead.
 # ---------------------------------------------------------------------------
 _browser = None
@@ -70,21 +70,21 @@ _browser_lock = threading.Lock()
 
 # Max page text sent to LLM (chars)
 _MAX_PAGE_TEXT = 50000
-# Max text in LLM prompt (chars) â€” leave room for prompt template
+# Max text in LLM prompt (chars) - leave room for prompt template
 _MAX_PROMPT_TEXT = 30000
 # Sprint 153: Max screenshots per search
 _MAX_SCREENSHOTS = 5
 
 # ---------------------------------------------------------------------------
-# Sprint 156: Network Interception â€” GraphQL structured data capture
+# Sprint 156: Network Interception - GraphQL structured data capture
 # ---------------------------------------------------------------------------
 _FOR_LOOP_PREFIX = "for (;;);"
 _GRAPHQL_ENDPOINT = "/api/graphql/"
 _INTERCEPTION_FALLBACK_THRESHOLD = 3
 
-# Sprint 157b: Group post indicator fields â€” distinct from marketplace
+# Sprint 157b: Group post indicator fields - distinct from marketplace
 
-# Sprint 157b: Enhanced scroll JS â€” extracts post links (pfbid + /posts/ + /permalink/)
+# Sprint 157b: Enhanced scroll JS - extracts post links (pfbid + /posts/ + /permalink/)
 # and first product image from each article element.
 _SCROLL_EXTRACT_JS = """() => {
     const els = document.querySelectorAll('div[role="article"]');
@@ -147,7 +147,7 @@ def _pw_worker_loop(task_queue: _queue_mod.Queue) -> None:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        # Playwright not installed â€” drain tasks with ImportError
+        # Playwright not installed - drain tasks with ImportError
         while True:
             item = task_queue.get()
             if item is None:
@@ -232,7 +232,7 @@ def _get_browser():
     """Get or create shared headless Chromium browser (thread-safe singleton).
 
     Used in non-asyncio path (tests, CLI). Production asyncio path uses
-    the dedicated worker thread instead â€” see _submit_to_pw_worker().
+    the dedicated worker thread instead - see _submit_to_pw_worker().
     """
     global _browser, _playwright_instance
     with _browser_lock:
@@ -251,7 +251,7 @@ def _get_browser():
 
 
 def close_browser():
-    """Cleanup browser and worker thread â€” call at app shutdown."""
+    """Cleanup browser and worker thread - call at app shutdown."""
     global _browser, _playwright_instance, _pw_worker_thread, _pw_task_queue
     # Legacy singleton cleanup (tests, non-asyncio path)
     with _browser_lock:
@@ -410,7 +410,7 @@ class PlaywrightLLMAdapter(SearchPlatformAdapter):
         )
 
     # ------------------------------------------------------------------
-    # Sprint 156: Network Interception â€” GraphQL structured data
+    # Sprint 156: Network Interception - GraphQL structured data
     # ------------------------------------------------------------------
 
     _scan_for_products = staticmethod(_scan_for_products_impl)
@@ -528,7 +528,7 @@ class PlaywrightLLMAdapter(SearchPlatformAdapter):
                 return []
             return self._llm_extract(text, max_results)
         except ImportError:
-            logger.warning("[BROWSER] playwright not installed â€” cannot scrape")
+            logger.warning("[BROWSER] playwright not installed - cannot scrape")
             return []
         except Exception as e:
             logger.warning("[BROWSER] Error scraping %s: %s", url, e)
@@ -561,4 +561,3 @@ class PlaywrightLLMAdapter(SearchPlatformAdapter):
             return get_settings().browser_scraping_timeout
         except Exception:
             return 15
-

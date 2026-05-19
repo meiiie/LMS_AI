@@ -381,7 +381,7 @@ graph LR
 
 | Folder | Purpose | Files | Key Contents |
 |--------|---------|-------|--------------|
-| `archive/` | Legacy/backup code | 10 | Old implementations |
+| `docs/archive/` | Historical backend notes | 1 | Archived semantic memory V0.5 guide |
 | `scripts/` | Dev utilities | 50+ | test_*.py, migrations, ingestion |
 | `tests/` | Automated tests (329+ files, 6731+ tests) | 4 dirs | unit/, integration/, property/, e2e/ |
 | `alembic/` | DB migrations | 15 | Schema evolution (011: org_id, 010: auth_method, 025-027: auth hardening) |
