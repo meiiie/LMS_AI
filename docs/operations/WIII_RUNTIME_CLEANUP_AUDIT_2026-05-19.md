@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -43,6 +43,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #419 moved scene and data-band renderer bodies into
   `code_studio_scaffold_scene_renderers.py`, leaving the main scaffold module
   to select specs, own shared shell helpers, and register render functions.
+- Follow-up #421 moved particle-field, oscillation, function-plot, and
+  timeline renderer bodies into `code_studio_scaffold_core_renderers.py`,
+  completing the Code Studio primitive renderer split behind the registry.
 
 ## Preserved Intentionally
 
@@ -80,9 +83,10 @@ backups, data PDFs, or local skill folders.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, caption copy, and explicit-simulation
   quality policy are no longer embedded in the renderer body. Scene and
-  data-band bodies have also moved behind the registry boundary. The next
-  durable step is moving particle, oscillation, timeline, and function-plot
-  renderer bodies into the same focused-module pattern.
+  data-band bodies plus particle, oscillation, timeline, and function-plot
+  bodies have moved behind the registry boundary. The next durable step is
+  shrinking topic/spec extraction data and helpers if product quality evidence
+  shows that the deterministic fallback remains too broad.
 - Some tests still import compatibility `graph.py` modules. Move tests toward
   `runtime.py` imports when the external import window can close.
 
@@ -109,3 +113,5 @@ In follow-up #417, the Code Studio scaffold command passed with 56 tests after
 adding the explicit-simulation quality gate.
 In follow-up #419, the same scaffold command passed with 56 tests after moving
 scene and data-band renderer bodies out of the monolithic scaffold module.
+In follow-up #421, the same scaffold command passed with 57 tests after moving
+the remaining primitive renderer bodies out of the monolithic scaffold module.

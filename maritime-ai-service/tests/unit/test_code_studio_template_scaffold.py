@@ -35,7 +35,11 @@ from app.engine.multi_agent.code_studio_scaffold_registry import (
 )
 from app.engine.multi_agent.code_studio_template_scaffold import (
     _render_data_band,
+    _render_function_plot,
+    _render_oscillation,
+    _render_particle_field,
     _render_scene,
+    _render_timeline,
     build_code_studio_scaffold,
     build_scaffold_visible_caption,
     detect_scaffold_kind,
@@ -198,8 +202,40 @@ def test_unknown_non_simulation_still_uses_data_band() -> None:
     assert "quality_gate" not in spec
 
 
-def test_extracted_scene_and_data_band_renderers_keep_wrapper_contract() -> None:
+def test_extracted_renderers_keep_wrapper_contract() -> None:
     """Private wrapper names remain the registry boundary after extraction."""
+    particle_html = _render_particle_field(
+        {
+            "primitive": PRIMITIVE_PARTICLE_FIELD,
+            "title": "Bầu trời thử",
+            "particle_label": "ngôi sao",
+        }
+    )
+    oscillation_html = _render_oscillation(
+        {
+            "primitive": PRIMITIVE_OSCILLATION,
+            "title": "Con lắc thử",
+            "slider_label": "Góc lệch",
+        }
+    )
+    plot_html = _render_function_plot(
+        {
+            "primitive": PRIMITIVE_FUNCTION_PLOT,
+            "title": "Hàm thử",
+            "slider_label": "x",
+        }
+    )
+    timeline_html = _render_timeline(
+        {
+            "primitive": PRIMITIVE_TIMELINE,
+            "title": "Mốc thử",
+            "slider_label": "Năm",
+            "events": [
+                {"year": 1, "title": "Mở", "text": "Bắt đầu"},
+                {"year": 2, "title": "Kết", "text": "Hoàn tất"},
+            ],
+        }
+    )
     scene_html = _render_scene(
         {
             "primitive": PRIMITIVE_SCENE,
@@ -219,6 +255,18 @@ def test_extracted_scene_and_data_band_renderers_keep_wrapper_contract() -> None
         }
     )
 
+    assert 'data-scaffold-primitive="particle_field"' in particle_html
+    assert "wiii-pf-stage" in particle_html
+    assert "WiiiVisualBridge" in particle_html
+    assert 'data-scaffold-primitive="oscillation"' in oscillation_html
+    assert "wiii-osc-stage" in oscillation_html
+    assert "WiiiVisualBridge" in oscillation_html
+    assert 'data-scaffold-primitive="function_plot"' in plot_html
+    assert "wiii-fp-stage" in plot_html
+    assert "WiiiVisualBridge" in plot_html
+    assert 'data-scaffold-primitive="timeline"' in timeline_html
+    assert "wiii-tl-stage" in timeline_html
+    assert "WiiiVisualBridge" in timeline_html
     assert 'data-scaffold-primitive="scene"' in scene_html
     assert "wiii-sc-stage" in scene_html
     assert "WiiiVisualBridge" in scene_html
