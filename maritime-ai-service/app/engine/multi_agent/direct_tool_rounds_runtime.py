@@ -32,6 +32,9 @@ from app.engine.multi_agent.direct_tool_post_dispatch_runtime import (
 from app.engine.multi_agent.direct_tool_call_response_runtime import (
     prepare_direct_tool_call_response,
 )
+from app.engine.multi_agent.direct_tool_round_execution_runtime import (
+    execute_direct_tool_round,
+)
 from app.engine.multi_agent.direct_tool_dispatch_runtime import (
     dispatch_direct_tool_call,
     normalize_tool_call as _normalize_tool_call,
@@ -2765,66 +2768,40 @@ async def execute_direct_tool_rounds_impl(
     for tool_round in range(max_rounds):
         if not (tools and hasattr(llm_response, "tool_calls") and llm_response.tool_calls):
             break
-        normalized_tool_calls = [
-            _normalize_tool_call(tc) for tc in llm_response.tool_calls
-        ]
-        round_tool_names = [
-            str(tc.get("name", "unknown"))
-            for tc in normalized_tool_calls
-            if tc.get("name")
-        ]
-        round_cue = _infer_direct_reasoning_cue(query, state, round_tool_names)
-        messages.append(llm_response)
-        visual_session_ids: list[str] = []
-        active_visual_session_ids = _collect_active_visual_session_ids(state)
-        for tc in normalized_tool_calls:
-            dispatch_result = await dispatch_direct_tool_call(
-                tool_call=tc,
-                tool_round=tool_round,
-                tools=tools,
-                query=query,
-                push_event=push_event,
-                tool_call_events=tool_call_events,
-                get_tool_by_name=graph_get_tool_by_name,
-                invoke_tool_with_runtime=graph_invoke_tool_with_runtime,
-                runtime_context_base=runtime_context_base,
-                is_search_tool_name=_is_search_tool_name,
-                prefer_official_query_for_known_docs=_prefer_official_query_for_known_docs,
-                summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
-                logger_obj=logger,
-            )
-            tc_id = dispatch_result.tool_call_id
-            tc_name = dispatch_result.tool_name
-            tc_args = dispatch_result.tool_args
-            post_dispatch = await process_direct_tool_post_dispatch(
-                tool_name=tc_name,
-                tool_args=tc_args or {},
-                tool_call_id=tc_id,
-                result=dispatch_result.result,
-                state=state,
-                messages=messages,
-                tool_call_events=tool_call_events,
-                push_event=push_event,
-                native_tool_messages=native_tool_messages,
-                active_visual_session_ids=active_visual_session_ids,
-                visual_session_ids=visual_session_ids,
-                visual_emitted_any=visual_emitted_any,
-                handoffs_enabled=settings.enable_agent_handoffs,
-                maybe_emit_host_action_event=graph_maybe_emit_host_action_event,
-                maybe_emit_visual_event=graph_maybe_emit_visual_event,
-                build_direct_tool_reflection=graph_build_direct_tool_reflection,
-                push_status_only_progress=push_status_only_progress,
-                build_tool_result_message=_build_tool_result_message,
-                logger_obj=logger,
-            )
-            active_visual_session_ids = post_dispatch.active_visual_session_ids
-            visual_emitted_any = post_dispatch.visual_emitted_any
-        await graph_emit_visual_commit_events(
-            push_event=push_event,
-            node="direct",
-            visual_session_ids=visual_session_ids,
+        round_execution = await execute_direct_tool_round(
+            llm_response=llm_response,
+            tool_round=tool_round,
+            tools=tools,
+            query=query,
+            state=state,
+            messages=messages,
             tool_call_events=tool_call_events,
+            push_event=push_event,
+            native_tool_messages=native_tool_messages,
+            visual_emitted_any=visual_emitted_any,
+            runtime_context_base=runtime_context_base,
+            handoffs_enabled=settings.enable_agent_handoffs,
+            get_tool_by_name=graph_get_tool_by_name,
+            invoke_tool_with_runtime=graph_invoke_tool_with_runtime,
+            is_search_tool_name=_is_search_tool_name,
+            prefer_official_query_for_known_docs=_prefer_official_query_for_known_docs,
+            summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
+            maybe_emit_host_action_event=graph_maybe_emit_host_action_event,
+            maybe_emit_visual_event=graph_maybe_emit_visual_event,
+            emit_visual_commit_events=graph_emit_visual_commit_events,
+            build_direct_tool_reflection=graph_build_direct_tool_reflection,
+            push_status_only_progress=push_status_only_progress,
+            build_tool_result_message=_build_tool_result_message,
+            normalize_tool_call=_normalize_tool_call,
+            infer_direct_reasoning_cue=_infer_direct_reasoning_cue,
+            collect_active_visual_session_ids=_collect_active_visual_session_ids,
+            dispatch_direct_tool_call=dispatch_direct_tool_call,
+            process_direct_tool_post_dispatch=process_direct_tool_post_dispatch,
+            logger_obj=logger,
         )
+        round_tool_names = round_execution.round_tool_names
+        round_cue = round_execution.round_cue
+        visual_emitted_any = round_execution.visual_emitted_any
 
         search_template_response = build_direct_post_tool_search_template_response(
             query=query,
