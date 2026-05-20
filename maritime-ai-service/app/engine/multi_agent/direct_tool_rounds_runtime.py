@@ -47,11 +47,11 @@ from app.engine.multi_agent.direct_reasoning import (
 from app.engine.multi_agent.direct_final_synthesis_runtime import (
     build_direct_final_synthesis_instruction,
 )
-from app.engine.multi_agent.direct_search_synthesis_fallback import (
-    build_search_template_fallback,
-)
 from app.engine.multi_agent.direct_search_template_runtime import (
     build_direct_post_tool_search_template_response,
+)
+from app.engine.multi_agent.direct_forced_web_search_runtime import (
+    execute_forced_web_search_shortcut,
 )
 from app.engine.multi_agent.direct_document_host_action_runtime import (
     DocumentHostActionShortcut,
@@ -67,9 +67,6 @@ from app.engine.multi_agent.tool_call_text_parser import (
     tool_names_from_tools,
 )
 from app.engine.multi_agent.direct_web_search_policy import (
-    FORCED_WEB_SEARCH_TOOL_NAMES as _FORCED_WEB_SEARCH_TOOL_NAMES,
-    _clean_forced_web_search_query,
-    _force_skills_for_turn,
     _has_search_tool_result,  # noqa: F401 - compatibility alias
     _is_search_tool_name,
     _prefer_official_query_for_known_docs,
@@ -86,8 +83,6 @@ from app.engine.multi_agent.visual_events import (
 from app.engine.multi_agent.visual_intent_resolver import (
     resolve_visual_intent,
 )
-from app.engine.reasoning import record_thinking_snapshot
-
 
 logger = logging.getLogger(__name__)
 
@@ -2652,144 +2647,22 @@ async def execute_direct_tool_rounds_impl(
     )
     streamed_direct_answer = False
     try:
-        if tools and "web-search" in _force_skills_for_turn(state):
-            forced_search_tool = None
-            forced_search_tool_name = ""
-            for candidate_name in _FORCED_WEB_SEARCH_TOOL_NAMES:
-                forced_search_tool = graph_get_tool_by_name(tools, candidate_name)
-                if forced_search_tool:
-                    forced_search_tool_name = candidate_name
-                    break
-
-            if forced_search_tool is not None:
-                tc_id = "forced_web_search_0"
-                tc_args = {"query": _clean_forced_web_search_query(query)}
-                await push_event(
-                    {
-                        "type": "tool_call",
-                        "content": {
-                            "name": forced_search_tool_name,
-                            "args": tc_args,
-                            "id": tc_id,
-                        },
-                        "node": "direct",
-                    }
-                )
-                tool_call_events.append(
-                    {
-                        "type": "call",
-                        "name": forced_search_tool_name,
-                        "args": tc_args,
-                        "id": tc_id,
-                    }
-                )
-                try:
-                    result = await graph_invoke_tool_with_runtime(
-                        forced_search_tool,
-                        tc_args,
-                        tool_name=forced_search_tool_name,
-                        runtime_context_base=runtime_context_base,
-                        tool_call_id=tc_id,
-                        query_snippet=str(tc_args.get("query", ""))[:100],
-                        prefer_async=False,
-                        run_sync_in_thread=True,
-                    )
-                except Exception as tool_error:
-                    logger.warning(
-                        "[DIRECT] Forced @web-search tool failed: %s",
-                        tool_error,
-                    )
-                    result = "Tool unavailable"
-
-                await push_event(
-                    {
-                        "type": "tool_result",
-                        "content": {
-                            "name": forced_search_tool_name,
-                            "result": _summarize_tool_result_for_stream(
-                                forced_search_tool_name,
-                                result,
-                            ),
-                            "id": tc_id,
-                        },
-                        "node": "direct",
-                    }
-                )
-                tool_call_events.append(
-                    {
-                        "type": "result",
-                        "name": forced_search_tool_name,
-                        "result": result,
-                        "id": tc_id,
-                    }
-                )
-                template_response = ""
-                try:
-                    template_response = build_search_template_fallback(
-                        query=query,
-                        tool_call_events=tool_call_events,
-                    )
-                except Exception as template_error:  # noqa: BLE001
-                    logger.warning(
-                        "[DIRECT] Forced @web-search template synthesis failed: %s",
-                        template_error,
-                    )
-                if not template_response:
-                    template_response = (
-                        "Mình đã gọi web-search, nhưng chưa lấy được nguồn đủ rõ "
-                        "để tổng hợp chắc tay cho lượt này. Cậu thử đổi từ khóa "
-                        "hẹp hơn một chút nhé."
-                    )
-                web_thinking = (
-                    "Mình nhận đây là lượt @web-search rõ ràng, nên ưu tiên gọi "
-                    "tool_web_search trước khi viết câu trả lời. Mình chỉ tổng hợp "
-                    "từ URL/snippet tool trả về; nếu synthesizer chậm hoặc rỗng thì "
-                    "dùng fallback có nguồn thay vì trả lời bằng lời xin lỗi rỗng."
-                )
-                state["thinking"] = web_thinking
-                state["thinking_content"] = web_thinking
-                record_thinking_snapshot(
-                    state,
-                    web_thinking,
-                    node="direct",
-                    provenance="deterministic_forced_web_search",
-                )
-                await push_event(
-                    {
-                        "type": "thinking_start",
-                        "content": "",
-                        "node": "direct",
-                        "summary": "Tra cứu web có nguồn",
-                    }
-                )
-                await push_event(
-                    {
-                        "type": "thinking_delta",
-                        "content": web_thinking,
-                        "node": "direct",
-                    }
-                )
-                await push_event(
-                    {
-                        "type": "thinking_end",
-                        "content": "",
-                        "node": "direct",
-                    }
-                )
-                logger.info(
-                    "[DIRECT] Forced @web-search executed deterministically "
-                    "without planner LLM (events=%d, len=%d)",
-                    len(tool_call_events),
-                    len(template_response),
-                )
-                return (
-                    _build_assistant_message(
-                        template_response,
-                        native_tool_messages=native_tool_messages,
-                    ),
-                    messages,
-                    tool_call_events,
-                )
+        forced_web_response = await execute_forced_web_search_shortcut(
+            query=query,
+            state=state,
+            tools=tools,
+            messages=messages,
+            tool_call_events=tool_call_events,
+            push_event=push_event,
+            native_tool_messages=native_tool_messages,
+            runtime_context_base=runtime_context_base,
+            get_tool_by_name=graph_get_tool_by_name,
+            invoke_tool_with_runtime=graph_invoke_tool_with_runtime,
+            summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
+            logger_obj=logger,
+        )
+        if forced_web_response is not None:
+            return forced_web_response, messages, tool_call_events
 
         if _should_request_uploaded_doc_course_preview(query=query, state=state, tools=tools):
             forced_course_tool = _find_doc_course_host_action_tool(tools)
