@@ -29,6 +29,9 @@ from app.engine.multi_agent.direct_tool_message_runtime import (
 from app.engine.multi_agent.direct_tool_post_dispatch_runtime import (
     process_direct_tool_post_dispatch,
 )
+from app.engine.multi_agent.direct_tool_call_response_runtime import (
+    prepare_direct_tool_call_response,
+)
 from app.engine.multi_agent.direct_tool_dispatch_runtime import (
     dispatch_direct_tool_call,
     normalize_tool_call as _normalize_tool_call,
@@ -2741,28 +2744,16 @@ async def execute_direct_tool_rounds_impl(
             logger_obj=logger,
         )
 
-    tool_calls = getattr(llm_response, "tool_calls", [])
-    if tools and not tool_calls:
-        raw_tool_calls = extract_raw_tool_calls_from_text(
-            getattr(llm_response, "content", ""),
-            allowed_tool_names=tool_names_from_tools(tools) or None,
-        )
-        if raw_tool_calls:
-            logger.warning(
-                "[DIRECT] Converted raw JSON assistant content into %d structured tool call(s): %s",
-                len(raw_tool_calls),
-                [call.get("name") for call in raw_tool_calls],
-            )
-            llm_response = _build_assistant_tool_call_message(
-                raw_tool_calls,
-                native_tool_messages=native_tool_messages,
-            )
-            tool_calls = getattr(llm_response, "tool_calls", raw_tool_calls)
-    logger.warning(
-        "[DIRECT] LLM response: tool_calls=%d, content_len=%d",
-        len(tool_calls) if tool_calls else 0,
-        len(str(llm_response.content)),
+    tool_call_response = prepare_direct_tool_call_response(
+        llm_response=llm_response,
+        tools=tools,
+        native_tool_messages=native_tool_messages,
+        extract_raw_tool_calls_from_text=extract_raw_tool_calls_from_text,
+        tool_names_from_tools=tool_names_from_tools,
+        build_assistant_tool_call_message=_build_assistant_tool_call_message,
+        logger_obj=logger,
     )
+    llm_response = tool_call_response.llm_response
     if not streamed_direct_answer and opening_thinking_started:
         await push_event({"type": "thinking_end", "content": "", "node": "direct"})
 
