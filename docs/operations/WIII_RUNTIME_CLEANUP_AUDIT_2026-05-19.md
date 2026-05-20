@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417
+Follow-up issues: #413, #415, #417, #419 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -40,6 +40,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #417 added `code_studio_scaffold_quality.py` so explicit
   simulation/canvas requests cannot silently fall back to generic data-band
   templates when no topic classifier matches.
+- Follow-up #419 moved scene and data-band renderer bodies into
+  `code_studio_scaffold_scene_renderers.py`, leaving the main scaffold module
+  to select specs, own shared shell helpers, and register render functions.
 
 ## Preserved Intentionally
 
@@ -76,9 +79,10 @@ backups, data PDFs, or local skill folders.
   execution from final synthesis.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, caption copy, and explicit-simulation
-  quality policy are no longer embedded in the renderer body. The next durable
-  step is splitting large primitive renderer bodies into focused modules behind
-  the existing registry.
+  quality policy are no longer embedded in the renderer body. Scene and
+  data-band bodies have also moved behind the registry boundary. The next
+  durable step is moving particle, oscillation, timeline, and function-plot
+  renderer bodies into the same focused-module pattern.
 - Some tests still import compatibility `graph.py` modules. Move tests toward
   `runtime.py` imports when the external import window can close.
 
@@ -103,3 +107,5 @@ In follow-up #415, the direct tool-round command passed with 57 tests after
 adding the document host-action shortcut contract test.
 In follow-up #417, the Code Studio scaffold command passed with 56 tests after
 adding the explicit-simulation quality gate.
+In follow-up #419, the same scaffold command passed with 56 tests after moving
+scene and data-band renderer bodies out of the monolithic scaffold module.
