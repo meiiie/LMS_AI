@@ -53,6 +53,7 @@ from app.engine.multi_agent.direct_search_template_runtime import (
 from app.engine.multi_agent.direct_forced_web_search_runtime import (
     execute_forced_web_search_shortcut,
 )
+from app.engine.multi_agent.direct_handoff_runtime import record_direct_handoff_request
 from app.engine.multi_agent.direct_document_host_action_runtime import (
     DocumentHostActionShortcut,
     execute_requested_document_host_action_shortcut,
@@ -2864,16 +2865,13 @@ async def execute_direct_tool_rounds_impl(
                 )
             )
 
-            # Phase 3: Detect handoff tool call and set state signal
-            if state is not None and tc_name == "handoff_to_agent" and settings.enable_agent_handoffs:
-                try:
-                    from app.engine.multi_agent.handoff_tools import extract_handoff_target
-                    target = extract_handoff_target(tc.get("args", {}))
-                    if target:
-                        state["_handoff_target"] = target
-                        logger.info("[DIRECT] Agent handoff requested → %s", target)
-                except Exception:
-                    pass
+            record_direct_handoff_request(
+                state=state,
+                tool_name=tc_name,
+                tool_args=tc_args or {},
+                enabled=settings.enable_agent_handoffs,
+                logger_obj=logger,
+            )
         await graph_emit_visual_commit_events(
             push_event=push_event,
             node="direct",
