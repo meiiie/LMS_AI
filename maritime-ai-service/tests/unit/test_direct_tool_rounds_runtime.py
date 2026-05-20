@@ -438,6 +438,54 @@ def test_select_direct_tool_followup_rebinds_visual_only_tools():
     assert llm_base.calls[0]["tool_choice"] == "tool_generate_visual"
 
 
+def test_select_direct_tool_followup_skips_non_bindable_base_llm():
+    from app.engine.multi_agent.direct_tool_followup_runtime import (
+        select_direct_tool_followup,
+    )
+    from app.engine.multi_agent.visual_intent_resolver import VisualIntentDecision
+
+    bound_llm = object()
+
+    class FakeAutoLLM:
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        def bind_tools(self, tools, tool_choice=None):
+            self.calls.append({"tools": list(tools), "tool_choice": tool_choice})
+            return bound_llm
+
+    llm_auto = FakeAutoLLM()
+    llm_base = object()
+    tools = [
+        SimpleNamespace(name="tool_web_search"),
+        SimpleNamespace(name="tool_generate_visual"),
+    ]
+
+    selection = select_direct_tool_followup(
+        llm_auto=llm_auto,
+        llm_base=llm_base,
+        llm_with_tools=object(),
+        tools=tools,
+        requires_visual_commit=True,
+        visual_emitted_any=False,
+        visual_decision=VisualIntentDecision(
+            mode="template",
+            force_tool=True,
+            presentation_intent="article_figure",
+        ),
+        resolved_provider="zhipu",
+        provider="auto",
+    )
+
+    assert selection.llm is bound_llm
+    assert [tool.name for tool in selection.tools] == ["tool_generate_visual"]
+    assert selection.tool_choice == "tool_generate_visual"
+    assert selection.fallback_source is llm_auto
+    assert len(llm_auto.calls) == 1
+    assert [tool.name for tool in llm_auto.calls[0]["tools"]] == ["tool_generate_visual"]
+    assert llm_auto.calls[0]["tool_choice"] == "tool_generate_visual"
+
+
 def test_select_direct_tool_followup_keeps_auto_llm_after_visual_emits():
     from app.engine.multi_agent.direct_tool_followup_runtime import (
         select_direct_tool_followup,

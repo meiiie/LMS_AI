@@ -45,7 +45,7 @@ def select_direct_tool_followup(
             tool for tool in tools if _tool_name(tool) in required_visual_tool_name_set
         ]
         bind_source = (
-            llm_base
+            (llm_base if hasattr(llm_base, "bind_tools") else None)
             or (llm_auto if hasattr(llm_auto, "bind_tools") else None)
             or (llm_with_tools if hasattr(llm_with_tools, "bind_tools") else None)
         )
