@@ -27,6 +27,10 @@ from app.engine.multi_agent.direct_tool_message_runtime import (
     build_tool_result_message as _build_tool_result_message,
     build_user_instruction_message as _build_user_instruction_message,
 )
+from app.engine.multi_agent.direct_tool_dispatch_runtime import (
+    dispatch_direct_tool_call,
+    normalize_tool_call as _normalize_tool_call,
+)
 from app.engine.multi_agent.direct_prompts import _resolve_tool_choice, _tool_name
 from app.engine.multi_agent.direct_reasoning import (
     _build_direct_analytical_axes,
@@ -2977,21 +2981,12 @@ async def execute_direct_tool_rounds_impl(
     # `from_openai_response` → pydantic `ToolCall(id, name, arguments)`.
     # Existing loop body assumes dict access (`tc.get("args")`). Normalize
     # here so both shapes work without rewriting 50+ lines downstream.
-    def _normalize_tc(tc) -> dict:
-        if isinstance(tc, dict):
-            return tc
-        return {
-            "id": getattr(tc, "id", "") or "",
-            "name": getattr(tc, "name", "") or "",
-            "args": getattr(tc, "arguments", None)
-                    or getattr(tc, "args", None)
-                    or {},
-        }
-
     for tool_round in range(max_rounds):
         if not (tools and hasattr(llm_response, "tool_calls") and llm_response.tool_calls):
             break
-        normalized_tool_calls = [_normalize_tc(tc) for tc in llm_response.tool_calls]
+        normalized_tool_calls = [
+            _normalize_tool_call(tc) for tc in llm_response.tool_calls
+        ]
         round_tool_names = [
             str(tc.get("name", "unknown"))
             for tc in normalized_tool_calls
@@ -3002,67 +2997,25 @@ async def execute_direct_tool_rounds_impl(
         visual_session_ids: list[str] = []
         active_visual_session_ids = _collect_active_visual_session_ids(state)
         for tc in normalized_tool_calls:
-            tc_id = tc.get("id", f"tc_{tool_round}")
-            tc_name = tc.get("name", "unknown")
-            tc_args = tc.get("args", {}) or {}
-            if _is_search_tool_name(str(tc_name)):
-                tc_args = _prefer_official_query_for_known_docs(tc_args, query)
-                tc["args"] = tc_args
-            await push_event(
-                {
-                    "type": "tool_call",
-                    "content": {"name": tc_name, "args": tc_args, "id": tc_id},
-                    "node": "direct",
-                }
+            dispatch_result = await dispatch_direct_tool_call(
+                tool_call=tc,
+                tool_round=tool_round,
+                tools=tools,
+                query=query,
+                push_event=push_event,
+                tool_call_events=tool_call_events,
+                get_tool_by_name=graph_get_tool_by_name,
+                invoke_tool_with_runtime=graph_invoke_tool_with_runtime,
+                runtime_context_base=runtime_context_base,
+                is_search_tool_name=_is_search_tool_name,
+                prefer_official_query_for_known_docs=_prefer_official_query_for_known_docs,
+                summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
+                logger_obj=logger,
             )
-            tool_call_events.append(
-                {
-                    "type": "call",
-                    "name": tc_name,
-                    "args": tc_args,
-                    "id": tc_id,
-                }
-            )
-            matched = graph_get_tool_by_name(tools, str(tc_name).strip())
-            try:
-                if matched:
-                    result = await graph_invoke_tool_with_runtime(
-                        matched,
-                        tc_args,
-                        tool_name=tc_name,
-                        runtime_context_base=runtime_context_base,
-                        tool_call_id=tc_id,
-                        query_snippet=str(tc_args.get("query", ""))[:100],
-                        prefer_async=False,
-                        run_sync_in_thread=True,
-                    )
-                else:
-                    # Phase 35 — when LLM hallucinates a tool name (or DSML
-                    # parser extracts a bad name), don't surface "Unknown tool"
-                    # to the user's source list. Log warning + return a
-                    # structured error result so the model can recover.
-                    logger.warning(
-                        "[DIRECT] LLM called unknown tool name=%r — skipping",
-                        tc_name,
-                    )
-                    result = (
-                        f"Lỗi: không tìm thấy tool `{tc_name}` trong registry. "
-                        "Hãy gọi đúng tên tool có sẵn."
-                    )
-            except Exception as tool_error:
-                logger.warning("[DIRECT] Tool %s failed: %s", tc_name, tool_error)
-                result = "Tool unavailable"
-            await push_event(
-                {
-                    "type": "tool_result",
-                    "content": {
-                        "name": tc_name,
-                        "result": _summarize_tool_result_for_stream(tc_name, result),
-                        "id": tc_id,
-                    },
-                    "node": "direct",
-                }
-            )
+            tc_id = dispatch_result.tool_call_id
+            tc_name = dispatch_result.tool_name
+            tc_args = dispatch_result.tool_args
+            result = dispatch_result.result
             # Wiii Pointy — agent invoked tool_pointy_show / clear.
             #
             # v3.0 anti-hallucination: validate selector vs available_targets

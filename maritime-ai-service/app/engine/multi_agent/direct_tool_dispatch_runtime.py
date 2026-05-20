@@ -1,0 +1,121 @@
+"""Generic tool dispatch helpers for direct tool-round execution."""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass(slots=True)
+class DirectToolDispatchResult:
+    """Result of one normalized direct tool call dispatch."""
+
+    tool_call_id: str
+    tool_name: str
+    tool_args: dict[str, Any]
+    result: Any
+    matched: bool
+
+
+def normalize_tool_call(tool_call: Any) -> dict[str, Any]:
+    """Normalize provider-specific tool call objects to Wiii's dict shape."""
+    if isinstance(tool_call, dict):
+        return tool_call
+    return {
+        "id": getattr(tool_call, "id", "") or "",
+        "name": getattr(tool_call, "name", "") or "",
+        "args": getattr(tool_call, "arguments", None)
+        or getattr(tool_call, "args", None)
+        or {},
+    }
+
+
+async def dispatch_direct_tool_call(
+    *,
+    tool_call: dict[str, Any],
+    tool_round: int,
+    tools: list[Any],
+    query: str,
+    push_event,
+    tool_call_events: list[dict[str, Any]],
+    get_tool_by_name,
+    invoke_tool_with_runtime,
+    runtime_context_base: Any,
+    is_search_tool_name,
+    prefer_official_query_for_known_docs,
+    summarize_tool_result_for_stream,
+    logger_obj: logging.Logger,
+) -> DirectToolDispatchResult:
+    """Run one tool call and emit the stable SSE call/result event pair."""
+    tool_call_id = str(tool_call.get("id", f"tc_{tool_round}"))
+    tool_name = str(tool_call.get("name", "unknown"))
+    tool_args = tool_call.get("args", {}) or {}
+    if not isinstance(tool_args, dict):
+        tool_args = {"value": tool_args}
+        tool_call["args"] = tool_args
+
+    if is_search_tool_name(tool_name):
+        tool_args = prefer_official_query_for_known_docs(tool_args, query)
+        tool_call["args"] = tool_args
+
+    await push_event(
+        {
+            "type": "tool_call",
+            "content": {"name": tool_name, "args": tool_args, "id": tool_call_id},
+            "node": "direct",
+        }
+    )
+    tool_call_events.append(
+        {
+            "type": "call",
+            "name": tool_name,
+            "args": tool_args,
+            "id": tool_call_id,
+        }
+    )
+
+    matched = get_tool_by_name(tools, tool_name.strip())
+    try:
+        if matched:
+            result = await invoke_tool_with_runtime(
+                matched,
+                tool_args,
+                tool_name=tool_name,
+                runtime_context_base=runtime_context_base,
+                tool_call_id=tool_call_id,
+                query_snippet=str(tool_args.get("query", ""))[:100],
+                prefer_async=False,
+                run_sync_in_thread=True,
+            )
+        else:
+            logger_obj.warning(
+                "[DIRECT] LLM called unknown tool name=%r - skipping",
+                tool_name,
+            )
+            result = (
+                f"Lỗi: không tìm thấy tool `{tool_name}` trong registry. "
+                "Hãy gọi đúng tên tool có sẵn."
+            )
+    except Exception as tool_error:  # noqa: BLE001
+        logger_obj.warning("[DIRECT] Tool %s failed: %s", tool_name, tool_error)
+        result = "Tool unavailable"
+
+    await push_event(
+        {
+            "type": "tool_result",
+            "content": {
+                "name": tool_name,
+                "result": summarize_tool_result_for_stream(tool_name, result),
+                "id": tool_call_id,
+            },
+            "node": "direct",
+        }
+    )
+    return DirectToolDispatchResult(
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        tool_args=tool_args,
+        result=result,
+        matched=bool(matched),
+    )
