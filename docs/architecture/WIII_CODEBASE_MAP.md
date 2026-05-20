@@ -59,7 +59,7 @@ The normal chat turn should be read in this order:
 |---|---|
 | Sync chat behavior | `maritime-ai-service/app/api/v1/chat.py`, then `maritime-ai-service/app/services/chat_orchestrator.py` |
 | Streaming behavior | `maritime-ai-service/app/api/v1/chat_stream.py`, then `maritime-ai-service/app/services/chat_stream_coordinator.py` |
-| Direct tool loop | `maritime-ai-service/app/engine/multi_agent/direct_tool_rounds_runtime.py`; Pointy policy lives in `direct_pointy_runtime.py`; explicit web-search policy lives in `direct_web_search_policy.py`; uploaded-document host-action shortcuts live in `direct_document_host_action_runtime.py`; direct message builders live in `direct_tool_message_runtime.py`; current-session memory fast paths live in `direct_session_memory_runtime.py` |
+| Direct tool loop | `maritime-ai-service/app/engine/multi_agent/direct_tool_rounds_runtime.py` (main orchestration)<br>Generic dispatch: `direct_tool_dispatch_runtime.py`<br>Pointy policy: `direct_pointy_runtime.py`<br>Web-search policy: `direct_web_search_policy.py`<br>Document host-action shortcuts: `direct_document_host_action_runtime.py`<br>Message builders: `direct_tool_message_runtime.py`<br>Session-memory fast paths: `direct_session_memory_runtime.py` |
 | Native stream/provider quirks | `maritime-ai-service/app/engine/multi_agent/openai_stream_runtime.py` |
 | Routing and supervisor behavior | `maritime-ai-service/app/engine/multi_agent/supervisor*.py` |
 | Tool registry | `maritime-ai-service/app/engine/tools/registry.py` and `maritime-ai-service/app/engine/multi_agent/tool_collection.py` |
