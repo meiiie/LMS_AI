@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -62,6 +62,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_final_synthesis_runtime.py`, keeping the no-tool synthesis pass,
   heartbeat lifecycle, provider resolution, moderate timeout profile, and
   message insertion behind a focused helper.
+- Follow-up #431 moved round-0 search convergence hint policy into
+  `direct_tool_convergence_runtime.py`, keeping sparse-result self-eval,
+  rich-result stop hints, native message handling, and log metadata behind a
+  focused helper.
 
 ## Preserved Intentionally
 
@@ -95,8 +99,8 @@ backups, data PDFs, or local skill folders.
 - `direct_tool_rounds_runtime.py` remains large, but Pointy and explicit
   web-search policy plus deterministic document host-action execution, message
   builders, generic tool dispatch, final synthesis helper construction, and
-  final synthesis execution have moved out. The next durable step is separating
-  post-tool convergence policy.
+  final synthesis execution plus post-tool convergence policy have moved out.
+  The next durable step is separating follow-up LLM selection from the main loop.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, caption copy, and explicit-simulation
   quality policy are no longer embedded in the renderer body. Scene and
@@ -144,3 +148,8 @@ moving direct final synthesis execution into
 `direct_final_synthesis_runtime.py`. Targeted ruff checks, repository
 `ruff check app/ --select=E9,F63,F7`, and `git diff --check` also passed for
 the no-tool synthesis, heartbeat, provider-resolution helper refactor.
+In follow-up #431, the direct tool-round command passed with 64 tests after
+moving post-tool convergence hint policy into
+`direct_tool_convergence_runtime.py`. Targeted ruff checks, repository
+`ruff check app/ --select=E9,F63,F7`, and `git diff --check` also passed for
+the convergence policy extraction.

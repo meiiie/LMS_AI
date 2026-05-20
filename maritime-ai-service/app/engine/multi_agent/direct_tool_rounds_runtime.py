@@ -25,11 +25,13 @@ from app.engine.multi_agent.direct_tool_message_runtime import (
     build_assistant_message as _build_assistant_message,
     build_assistant_tool_call_message as _build_assistant_tool_call_message,
     build_tool_result_message as _build_tool_result_message,
-    build_user_instruction_message as _build_user_instruction_message,
 )
 from app.engine.multi_agent.direct_tool_dispatch_runtime import (
     dispatch_direct_tool_call,
     normalize_tool_call as _normalize_tool_call,
+)
+from app.engine.multi_agent.direct_tool_convergence_runtime import (
+    append_direct_tool_convergence_hint,
 )
 from app.engine.multi_agent.direct_prompts import _resolve_tool_choice, _tool_name
 from app.engine.multi_agent.direct_reasoning import (
@@ -3167,57 +3169,14 @@ async def execute_direct_tool_rounds_impl(
                     tool_call_events,
                 )
 
-        if tool_round == 0 and tool_call_events and not requires_visual_commit:
-            search_tool_names = {
-                "tool_web_search", "tool_search_news",
-                "tool_search_legal", "tool_search_maritime", "tool_fetch_url",
-            }
-            had_search_tool = any(
-                str(ev.get("name") or "").strip() in search_tool_names
-                for ev in tool_call_events
-                if ev.get("type") == "call"
-            )
-            # Compute total content volume from this round's tool results.
-            total_result_chars = sum(
-                len(str(ev.get("result") or ""))
-                for ev in tool_call_events
-                if ev.get("type") == "result"
-            )
-            if had_search_tool and total_result_chars < 2500:
-                messages.append(
-                    _build_user_instruction_message(
-                        "Đánh giá nhanh kết quả vừa rồi:\n"
-                        "- Số liệu cụ thể (giá / con số / ngày): ĐỦ hay THIẾU?\n"
-                        "- Bối cảnh / lý do biến động: ĐỦ hay THIẾU?\n"
-                        "- Tin nóng địa chính trị (Iran, OPEC+, Hormuz, Fed) "
-                        "có liên quan: đã search chưa?\n\n"
-                        "Nếu THIẾU mục nào → gọi 1 tool bổ sung (tool_search_news "
-                        "với query KHÁC, hoặc tool_fetch_url trên URL hứa hẹn nhất).\n"
-                        "Nếu ĐỦ → trả lời NGAY với cấu trúc: số liệu chính (bold) + "
-                        "bối cảnh 2-3 câu + takeaway 1-2 câu. KHÔNG search lại.\n\n"
-                        "Định dạng số: '110.01' KHÔNG '110, 01'; '13:18' KHÔNG '13: 18'.",
-                        native_tool_messages=native_tool_messages,
-                    )
-                )
-                logger.info(
-                    "[DIRECT] Convergence self-eval injected (round 0 sparse: %d chars)",
-                    total_result_chars,
-                )
-            elif had_search_tool:
-                # Round 0 already rich → hint LLM to STOP and synthesize.
-                messages.append(
-                    _build_user_instruction_message(
-                        "Kết quả search đã đủ phong phú. Trả lời NGAY (KHÔNG gọi "
-                        "thêm tool) với cấu trúc: số liệu chính (bold) + bối cảnh "
-                        "2-3 câu + takeaway 1-2 câu.\n"
-                        "Định dạng số: '110.01' KHÔNG '110, 01'; '13:18' KHÔNG '13: 18'.",
-                        native_tool_messages=native_tool_messages,
-                    )
-                )
-                logger.info(
-                    "[DIRECT] Convergence STOP-hint injected (round 0 rich: %d chars)",
-                    total_result_chars,
-                )
+        append_direct_tool_convergence_hint(
+            messages=messages,
+            tool_round=tool_round,
+            tool_call_events=tool_call_events,
+            requires_visual_commit=requires_visual_commit,
+            native_tool_messages=native_tool_messages,
+            logger_obj=logger,
+        )
         post_tool_heartbeat = asyncio.create_task(
             graph_stream_direct_wait_heartbeats(
                 push_event,
