@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from app.engine.multi_agent.direct_reasoning import (
@@ -9,7 +13,21 @@ from app.engine.multi_agent.direct_reasoning import (
     _build_direct_evidence_plan,
     _infer_direct_thinking_mode,
 )
+from app.engine.multi_agent.direct_tool_message_runtime import (
+    build_user_instruction_message,
+)
 from app.engine.multi_agent.state import AgentState
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class DirectFinalSynthesisRunResult:
+    """Result of forcing one no-tool synthesis pass after tool execution."""
+
+    llm_response: Any
+    messages: list[Any]
+    resolved_provider: str | None
 
 
 def extract_direct_visible_text(content: Any) -> str:
@@ -73,3 +91,93 @@ def build_direct_final_synthesis_instruction(
             + "KHONG dung heading Markdown nhu #, ##, ###."
         )
     return base
+
+
+async def run_direct_final_synthesis(
+    *,
+    messages: list[Any],
+    query: str,
+    state: AgentState,
+    tool_call_events: list[dict[str, Any]],
+    push_event,
+    native_tool_messages: bool,
+    llm_base: Any,
+    llm_auto: Any,
+    llm_with_tools: Any,
+    provider: str | None,
+    resolved_provider: str | None,
+    request_failover_mode: Any,
+    allowed_fallback_providers: tuple[str, ...] | list[str] | set[str] | None,
+    ainvoke_with_fallback: Callable[..., Any],
+    stream_direct_wait_heartbeats: Callable[..., Any],
+    remember_execution_target: Callable[..., tuple[str | None, str | None]],
+    runtime_tier_for: Callable[..., str],
+) -> DirectFinalSynthesisRunResult:
+    """Force a final prose answer after tool rounds without exposing tools again."""
+    synthesis_tool_names = [
+        str(event.get("name", ""))
+        for event in tool_call_events
+        if event.get("type") == "call"
+    ]
+    synthesis_messages = list(messages)
+    synthesis_messages.append(
+        build_user_instruction_message(
+            build_direct_final_synthesis_instruction(
+                query,
+                state,
+                synthesis_tool_names,
+            ),
+            native_tool_messages=native_tool_messages,
+        )
+    )
+    synthesis_llm = llm_base
+    if synthesis_llm is None:
+        raise RuntimeError(
+            "run_direct_final_synthesis requires an unbound LLM for the final no-tool pass"
+        )
+    synthesis_heartbeat = asyncio.create_task(
+        stream_direct_wait_heartbeats(
+            push_event,
+            query=query,
+            phase="synthesize",
+            cue="synthesis",
+            tool_names=synthesis_tool_names,
+        )
+    )
+    try:
+        candidate_provider, _candidate_model = remember_execution_target(
+            synthesis_llm,
+            fallback_source=llm_base,
+        )
+        resolved_provider = candidate_provider or resolved_provider
+        # Synthesis after a successful tool round needs a longer timeout than
+        # tool-bound planning: context is larger and the model must produce
+        # grounded prose from already-collected evidence.
+        llm_response = await ainvoke_with_fallback(
+            synthesis_llm,
+            synthesis_messages,
+            tier=runtime_tier_for(synthesis_llm, llm_base),
+            provider=provider,
+            resolved_provider=resolved_provider,
+            failover_mode=request_failover_mode,
+            push_event=push_event,
+            timeout_profile="moderate",
+            state=state,
+            allowed_fallback_providers=allowed_fallback_providers,
+        )
+        return DirectFinalSynthesisRunResult(
+            llm_response=llm_response,
+            messages=synthesis_messages,
+            resolved_provider=resolved_provider,
+        )
+    finally:
+        synthesis_heartbeat.cancel()
+        try:
+            await synthesis_heartbeat
+        except asyncio.CancelledError:
+            pass
+        except Exception as heartbeat_error:
+            logger.debug(
+                "[DIRECT] Final synthesis heartbeat shutdown skipped: %s",
+                heartbeat_error,
+            )

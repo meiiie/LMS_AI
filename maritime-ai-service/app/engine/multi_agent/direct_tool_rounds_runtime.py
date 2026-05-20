@@ -37,8 +37,9 @@ from app.engine.multi_agent.direct_reasoning import (
     _infer_direct_reasoning_cue,
 )
 from app.engine.multi_agent.direct_final_synthesis_runtime import (
-    build_direct_final_synthesis_instruction as _build_direct_final_synthesis_instruction,
+    build_direct_final_synthesis_instruction,
     extract_direct_visible_text as _extract_direct_visible_text,
+    run_direct_final_synthesis,
 )
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
@@ -81,6 +82,9 @@ from app.engine.reasoning import record_thinking_snapshot
 
 
 logger = logging.getLogger(__name__)
+
+# Compatibility alias for older tests and graph imports while synthesis helpers move out.
+_build_direct_final_synthesis_instruction = build_direct_final_synthesis_instruction
 
 _DOC_COURSE_HOST_ACTION_SHORTCUT = DocumentHostActionShortcut(
     tool_name=_DOC_COURSE_HOST_ACTION_TOOL,
@@ -3340,68 +3344,28 @@ async def execute_direct_tool_rounds_impl(
             remaining_tool_calls,
             len(visible_response_text),
         )
-        synthesis_tool_names = [
-            str(event.get("name", ""))
-            for event in tool_call_events
-            if event.get("type") == "call"
-        ]
-        synthesis_messages = list(messages)
-        synthesis_messages.append(
-            _build_user_instruction_message(
-                _build_direct_final_synthesis_instruction(
-                    query,
-                    state,
-                    synthesis_tool_names,
-                ),
-                native_tool_messages=native_tool_messages,
-            )
+        synthesis_result = await run_direct_final_synthesis(
+            messages=messages,
+            query=query,
+            state=state,
+            tool_call_events=tool_call_events,
+            push_event=push_event,
+            native_tool_messages=native_tool_messages,
+            llm_base=llm_base,
+            llm_auto=llm_auto,
+            llm_with_tools=llm_with_tools,
+            provider=provider,
+            resolved_provider=resolved_provider,
+            request_failover_mode=request_failover_mode,
+            allowed_fallback_providers=allowed_fallback_providers,
+            ainvoke_with_fallback=graph_ainvoke_with_fallback,
+            stream_direct_wait_heartbeats=graph_stream_direct_wait_heartbeats,
+            remember_execution_target=remember_execution_target,
+            runtime_tier_for=runtime_tier_for,
         )
-        synthesis_llm = llm_base or llm_auto or llm_with_tools
-        synthesis_heartbeat = asyncio.create_task(
-            graph_stream_direct_wait_heartbeats(
-                push_event,
-                query=query,
-                phase="synthesize",
-                cue=synthesis_cue if "synthesis_cue" in locals() else "synthesis",
-                tool_names=synthesis_tool_names if "synthesis_tool_names" in locals() else None,
-            )
-        )
-        try:
-            candidate_provider, _candidate_model = remember_execution_target(
-                synthesis_llm,
-                fallback_source=llm_base,
-            )
-            resolved_provider = candidate_provider or resolved_provider
-            # Synthesis after a successful tool round needs a longer timeout
-            # than a tool-bound planning call: context is larger (full search
-            # results + fetched URL bodies) and the model must produce prose
-            # that obeys the SKILL Step 4 structure. The "moderate" profile
-            # gives DeepSeek-light enough headroom on long prompts without
-            # needing a full deep-tier model.
-            llm_response = await graph_ainvoke_with_fallback(
-                synthesis_llm,
-                synthesis_messages,
-                tier=runtime_tier_for(synthesis_llm, llm_base),
-                provider=provider,
-                resolved_provider=resolved_provider,
-                failover_mode=request_failover_mode,
-                push_event=push_event,
-                timeout_profile="moderate",
-                state=state,
-                allowed_fallback_providers=allowed_fallback_providers,
-            )
-            messages = synthesis_messages
-        finally:
-            synthesis_heartbeat.cancel()
-            try:
-                await synthesis_heartbeat
-            except asyncio.CancelledError:
-                pass
-            except Exception as heartbeat_error:
-                logger.debug(
-                    "[DIRECT] Final synthesis heartbeat shutdown skipped: %s",
-                    heartbeat_error,
-                )
+        llm_response = synthesis_result.llm_response
+        messages = synthesis_result.messages
+        resolved_provider = synthesis_result.resolved_provider
 
     llm_response = _inject_widget_blocks_from_tool_results(
         llm_response,

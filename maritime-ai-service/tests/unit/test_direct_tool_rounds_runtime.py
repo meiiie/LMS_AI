@@ -165,6 +165,124 @@ def test_build_direct_final_synthesis_instruction_is_mode_aware_for_math_turn():
 
 
 @pytest.mark.asyncio
+async def test_run_direct_final_synthesis_uses_no_tool_binding_and_moderate_timeout():
+    from app.engine.multi_agent.direct_final_synthesis_runtime import (
+        run_direct_final_synthesis,
+    )
+
+    llm_base = object()
+    llm_auto = object()
+    llm_with_tools = object()
+    final_response = SimpleNamespace(
+        content="Day la cau tra loi tong hop cuoi cung.",
+        tool_calls=[],
+    )
+    calls: list[dict] = []
+    heartbeat_kwargs: list[dict] = []
+
+    async def push_event(_event):
+        return None
+
+    async def fake_ainvoke_with_fallback(llm, messages, **kwargs):
+        await asyncio.sleep(0)
+        calls.append(
+            {
+                "llm": llm,
+                "messages": list(messages),
+                "kwargs": dict(kwargs),
+            }
+        )
+        return final_response
+
+    async def fake_stream_direct_wait_heartbeats(*_args, **kwargs):
+        heartbeat_kwargs.append(dict(kwargs))
+        await asyncio.Future()
+
+    def remember_execution_target(candidate_llm, fallback_source=None):
+        assert candidate_llm is llm_base
+        assert fallback_source is llm_base
+        return "qwen", "qwen3-next"
+
+    def runtime_tier_for(candidate_llm, fallback_source=None):
+        assert candidate_llm is llm_base
+        assert fallback_source is llm_base
+        return "base-tier"
+
+    result = await run_direct_final_synthesis(
+        messages=[],
+        query="phan tich gia dau",
+        state={},
+        tool_call_events=[
+            {"type": "call", "name": "tool_web_search", "id": "tc-1"},
+            {"type": "result", "name": "tool_web_search", "id": "tc-1"},
+        ],
+        push_event=push_event,
+        native_tool_messages=False,
+        llm_base=llm_base,
+        llm_auto=llm_auto,
+        llm_with_tools=llm_with_tools,
+        provider="auto",
+        resolved_provider=None,
+        request_failover_mode="auto",
+        allowed_fallback_providers=("qwen",),
+        ainvoke_with_fallback=fake_ainvoke_with_fallback,
+        stream_direct_wait_heartbeats=fake_stream_direct_wait_heartbeats,
+        remember_execution_target=remember_execution_target,
+        runtime_tier_for=runtime_tier_for,
+    )
+
+    assert result.llm_response is final_response
+    assert result.resolved_provider == "qwen"
+    assert len(result.messages) == 1
+    assert "Khong goi them cong cu" in result.messages[-1].content
+    assert calls[0]["llm"] is llm_base
+    assert "tools" not in calls[0]["kwargs"]
+    assert calls[0]["kwargs"]["timeout_profile"] == "moderate"
+    assert calls[0]["kwargs"]["tier"] == "base-tier"
+    assert calls[0]["kwargs"]["allowed_fallback_providers"] == ("qwen",)
+    assert heartbeat_kwargs[0]["phase"] == "synthesize"
+    assert heartbeat_kwargs[0]["cue"] == "synthesis"
+    assert heartbeat_kwargs[0]["tool_names"] == ["tool_web_search"]
+
+
+@pytest.mark.asyncio
+async def test_run_direct_final_synthesis_requires_unbound_base_llm():
+    from app.engine.multi_agent.direct_final_synthesis_runtime import (
+        run_direct_final_synthesis,
+    )
+
+    async def push_event(_event):
+        return None
+
+    async def fake_ainvoke_with_fallback(*_args, **_kwargs):
+        raise AssertionError("synthesis should fail before invoking a tool-bound model")
+
+    async def fake_stream_direct_wait_heartbeats(*_args, **_kwargs):
+        raise AssertionError("heartbeat should not start without an unbound model")
+
+    with pytest.raises(RuntimeError, match="requires an unbound LLM"):
+        await run_direct_final_synthesis(
+            messages=[],
+            query="phan tich gia dau",
+            state={},
+            tool_call_events=[{"type": "call", "name": "tool_web_search"}],
+            push_event=push_event,
+            native_tool_messages=False,
+            llm_base=None,
+            llm_auto=object(),
+            llm_with_tools=object(),
+            provider="auto",
+            resolved_provider=None,
+            request_failover_mode="auto",
+            allowed_fallback_providers=None,
+            ainvoke_with_fallback=fake_ainvoke_with_fallback,
+            stream_direct_wait_heartbeats=fake_stream_direct_wait_heartbeats,
+            remember_execution_target=lambda *_args, **_kwargs: (None, None),
+            runtime_tier_for=lambda *_args, **_kwargs: "moderate",
+        )
+
+
+@pytest.mark.asyncio
 async def test_execute_direct_tool_rounds_does_not_emit_authored_public_thinking_for_tool_rounds():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         execute_direct_tool_rounds_impl,
@@ -1626,6 +1744,7 @@ async def test_execute_direct_tool_rounds_can_use_native_tool_messages():
             push_event=push_event,
             query="Tim du kien roi tong hop lai",
             state={},
+            llm_base=object(),
             forced_tool_choice="tool_demo",
             native_tool_messages=True,
             ainvoke_with_fallback=fake_ainvoke_with_fallback,
