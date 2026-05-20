@@ -187,6 +187,93 @@ def test_build_direct_post_tool_search_template_response_skips_empty_template(
     assert response is None
 
 
+@pytest.mark.asyncio
+async def test_execute_forced_web_search_shortcut_emits_events(monkeypatch):
+    from app.engine.multi_agent import direct_forced_web_search_runtime as runtime
+
+    tool = object()
+    emitted: list[dict] = []
+    tool_events: list[dict] = []
+    invoke_call: dict = {}
+
+    monkeypatch.setattr(
+        runtime,
+        "build_search_template_fallback",
+        lambda **_kwargs: "Tổng hợp nhanh có nguồn.",
+    )
+
+    async def push_event(event):
+        emitted.append(event)
+
+    def get_tool_by_name(tools, name):
+        assert tools == [tool]
+        return tool if name == "tool_web_search" else None
+
+    async def invoke_tool_with_runtime(tool_arg, args, **kwargs):
+        invoke_call["tool"] = tool_arg
+        invoke_call["args"] = args
+        invoke_call.update(kwargs)
+        return "URL: https://example.test\nTin mới."
+
+    response = await runtime.execute_forced_web_search_shortcut(
+        query="@web-search giá dầu hôm nay",
+        state={"force_skills": ["web-search"]},
+        tools=[tool],
+        messages=[],
+        tool_call_events=tool_events,
+        push_event=push_event,
+        native_tool_messages=False,
+        runtime_context_base={"tenant": "demo"},
+        get_tool_by_name=get_tool_by_name,
+        invoke_tool_with_runtime=invoke_tool_with_runtime,
+        summarize_tool_result_for_stream=lambda _name, result: f"summary:{result}",
+    )
+
+    assert response is not None
+    assert response.content == "Tổng hợp nhanh có nguồn."
+    assert [event["type"] for event in emitted] == [
+        "tool_call",
+        "tool_result",
+        "thinking_start",
+        "thinking_delta",
+        "thinking_end",
+    ]
+    assert tool_events[0]["type"] == "call"
+    assert tool_events[0]["name"] == "tool_web_search"
+    assert tool_events[1]["type"] == "result"
+    assert tool_events[1]["result"] == "URL: https://example.test\nTin mới."
+    assert invoke_call["tool"] is tool
+    assert invoke_call["args"]["query"] == "giá dầu hôm nay"
+    assert invoke_call["tool_name"] == "tool_web_search"
+    assert invoke_call["runtime_context_base"] == {"tenant": "demo"}
+    assert invoke_call["tool_call_id"] == "forced_web_search_0"
+    assert invoke_call["prefer_async"] is False
+    assert invoke_call["run_sync_in_thread"] is True
+
+
+@pytest.mark.asyncio
+async def test_execute_forced_web_search_shortcut_skips_when_not_forced():
+    from app.engine.multi_agent.direct_forced_web_search_runtime import (
+        execute_forced_web_search_shortcut,
+    )
+
+    response = await execute_forced_web_search_shortcut(
+        query="giá dầu hôm nay",
+        state={},
+        tools=[object()],
+        messages=[],
+        tool_call_events=[],
+        push_event=lambda _event: None,
+        native_tool_messages=False,
+        runtime_context_base=None,
+        get_tool_by_name=lambda _tools, _name: object(),
+        invoke_tool_with_runtime=lambda *_args, **_kwargs: None,
+        summarize_tool_result_for_stream=lambda _name, result: result,
+    )
+
+    assert response is None
+
+
 def test_direct_public_thinking_dedupe_detects_identical_blocks():
     from app.engine.multi_agent.direct_public_thinking_runtime import (
         remember_direct_public_thinking_chunks,

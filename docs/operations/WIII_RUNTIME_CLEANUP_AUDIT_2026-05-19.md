@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -81,6 +81,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #439 moved post-tool source-backed search-template early returns
   into `direct_search_template_runtime.py`, keeping forced `@web-search` and
   explicit web-search evidence exits behind a focused helper.
+- Follow-up #441 moved the initial deterministic forced `@web-search`
+  shortcut into `direct_forced_web_search_runtime.py`, keeping tool-call/result
+  SSE events, runtime invocation options, thinking trace emission, and fallback
+  response construction behind a focused helper.
 
 ## Preserved Intentionally
 
@@ -116,8 +120,9 @@ backups, data PDFs, or local skill folders.
   builders, generic tool dispatch, final synthesis helper construction, and
   final synthesis execution plus post-tool convergence policy have moved out.
   Follow-up LLM selection, invocation, response finalization, and post-tool
-  search-template returns have also moved out. The next durable step is
-  separating remaining deterministic shortcut branches from the main loop.
+  search-template returns and forced web-search shortcuts have also moved out.
+  The next durable step is separating remaining deterministic document/visual
+  shortcut branches from the main loop.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, caption copy, and explicit-simulation
   quality policy are no longer embedded in the renderer body. Scene and
@@ -185,3 +190,7 @@ In follow-up #439, the direct tool-round command passed with 74 tests after
 moving post-tool source-backed search-template returns into
 `direct_search_template_runtime.py`. Targeted ruff checks also passed for the
 search-template return extraction.
+In follow-up #441, the direct tool-round command passed with 76 tests after
+moving the deterministic forced web-search shortcut into
+`direct_forced_web_search_runtime.py`. Targeted ruff checks also passed for the
+forced web-search shortcut extraction.
