@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -70,6 +70,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_tool_followup_runtime.py`, keeping default `llm_auto` continuation,
   visual-only rebinding, forced visual tool choice, and fallback source metadata
   behind a focused helper.
+- Follow-up #435 moved post-tool follow-up invocation into
+  `direct_tool_followup_runtime.py`, keeping heartbeat lifecycle,
+  provider-target propagation, runtime-tier resolution, fallback invocation, and
+  shutdown logging behind a focused helper.
 
 ## Preserved Intentionally
 
@@ -104,9 +108,9 @@ backups, data PDFs, or local skill folders.
   web-search policy plus deterministic document host-action execution, message
   builders, generic tool dispatch, final synthesis helper construction, and
   final synthesis execution plus post-tool convergence policy have moved out.
-  Follow-up LLM selection has also moved out. The next durable step is
-  separating post-tool heartbeat/follow-up invocation execution from the main
-  loop.
+  Follow-up LLM selection and invocation have also moved out. The next durable
+  step is separating remaining round-completion/search-template response
+  finalization from the main loop.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, caption copy, and explicit-simulation
   quality policy are no longer embedded in the renderer body. Scene and
@@ -163,3 +167,6 @@ In follow-up #433, the direct tool-round command passed with 67 tests after
 moving follow-up LLM/tool selection into `direct_tool_followup_runtime.py`.
 Targeted ruff checks, repository `ruff check app/ --select=E9,F63,F7`, and
 `git diff --check` also passed for the follow-up selection extraction.
+In follow-up #435, the direct tool-round command passed with 69 tests after
+moving post-tool follow-up invocation into `direct_tool_followup_runtime.py`.
+Targeted ruff checks also passed for the follow-up invocation extraction.

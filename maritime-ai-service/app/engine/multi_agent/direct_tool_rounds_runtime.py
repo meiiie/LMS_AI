@@ -34,7 +34,7 @@ from app.engine.multi_agent.direct_tool_convergence_runtime import (
     append_direct_tool_convergence_hint,
 )
 from app.engine.multi_agent.direct_tool_followup_runtime import (
-    select_direct_tool_followup,
+    invoke_direct_tool_followup,
 )
 from app.engine.multi_agent.direct_prompts import _tool_name
 from app.engine.multi_agent.direct_reasoning import (
@@ -3179,60 +3179,33 @@ async def execute_direct_tool_rounds_impl(
             native_tool_messages=native_tool_messages,
             logger_obj=logger,
         )
-        post_tool_heartbeat = asyncio.create_task(
-            graph_stream_direct_wait_heartbeats(
-                push_event,
-                query=query,
-                phase="ground",
-                cue=round_cue,
-                tool_names=round_tool_names,
-            )
+        followup_invocation = await invoke_direct_tool_followup(
+            llm_auto=llm_auto,
+            llm_base=llm_base,
+            llm_with_tools=llm_with_tools,
+            tools=tools,
+            messages=messages,
+            query=query,
+            push_event=push_event,
+            requires_visual_commit=requires_visual_commit,
+            visual_emitted_any=visual_emitted_any,
+            visual_decision=visual_decision,
+            resolved_provider=resolved_provider,
+            provider=provider,
+            request_failover_mode=request_failover_mode,
+            followup_timeout_profile=followup_timeout_profile,
+            state=state,
+            allowed_fallback_providers=allowed_fallback_providers,
+            ainvoke_with_fallback=graph_ainvoke_with_fallback,
+            stream_direct_wait_heartbeats=graph_stream_direct_wait_heartbeats,
+            remember_execution_target=remember_execution_target,
+            runtime_tier_for=runtime_tier_for,
+            round_cue=round_cue,
+            round_tool_names=round_tool_names,
+            logger_obj=logger,
         )
-        try:
-            followup_selection = select_direct_tool_followup(
-                llm_auto=llm_auto,
-                llm_base=llm_base,
-                llm_with_tools=llm_with_tools,
-                tools=tools,
-                requires_visual_commit=requires_visual_commit,
-                visual_emitted_any=visual_emitted_any,
-                visual_decision=visual_decision,
-                resolved_provider=resolved_provider,
-                provider=provider,
-            )
-            candidate_provider, _candidate_model = remember_execution_target(
-                followup_selection.llm,
-                fallback_source=followup_selection.fallback_source,
-            )
-            resolved_provider = candidate_provider or resolved_provider
-            llm_response = await graph_ainvoke_with_fallback(
-                followup_selection.llm,
-                messages,
-                tools=followup_selection.tools,
-                tool_choice=followup_selection.tool_choice,
-                tier=runtime_tier_for(
-                    followup_selection.llm,
-                    followup_selection.fallback_source,
-                ),
-                provider=provider,
-                resolved_provider=resolved_provider,
-                failover_mode=request_failover_mode,
-                push_event=push_event,
-                timeout_profile=followup_timeout_profile,
-                state=state,
-                allowed_fallback_providers=allowed_fallback_providers,
-            )
-        finally:
-            post_tool_heartbeat.cancel()
-            try:
-                await post_tool_heartbeat
-            except asyncio.CancelledError:
-                pass
-            except Exception as heartbeat_error:
-                logger.debug(
-                    "[DIRECT] Post-tool heartbeat shutdown skipped: %s",
-                    heartbeat_error,
-                )
+        llm_response = followup_invocation.llm_response
+        resolved_provider = followup_invocation.resolved_provider
     if streamed_direct_answer and not tool_call_events:
         state["_answer_streamed_via_bus"] = True
         return llm_response, messages, tool_call_events
