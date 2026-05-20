@@ -282,6 +282,85 @@ async def test_run_direct_final_synthesis_requires_unbound_base_llm():
         )
 
 
+def test_append_direct_tool_convergence_hint_inserts_sparse_self_eval():
+    from app.engine.multi_agent.direct_tool_convergence_runtime import (
+        append_direct_tool_convergence_hint,
+    )
+
+    messages = []
+    result = append_direct_tool_convergence_hint(
+        messages=messages,
+        tool_round=0,
+        tool_call_events=[
+            {"type": "call", "name": "tool_web_search", "id": "tc-1"},
+            {"type": "result", "name": "tool_web_search", "result": "short"},
+        ],
+        requires_visual_commit=False,
+        native_tool_messages=False,
+    )
+
+    assert result.inserted is True
+    assert result.kind == "sparse_self_eval"
+    assert result.total_result_chars == len("short")
+    assert len(messages) == 1
+    assert "tool_search_news" in messages[0].content
+    assert "110.01" in messages[0].content
+
+
+def test_append_direct_tool_convergence_hint_inserts_rich_stop_hint():
+    from app.engine.multi_agent.direct_tool_convergence_runtime import (
+        append_direct_tool_convergence_hint,
+    )
+
+    messages = []
+    result = append_direct_tool_convergence_hint(
+        messages=messages,
+        tool_round=0,
+        tool_call_events=[
+            {"type": "call", "name": "tool_fetch_url", "id": "tc-1"},
+            {"type": "result", "name": "tool_fetch_url", "result": "x" * 2500},
+        ],
+        requires_visual_commit=False,
+        native_tool_messages=False,
+    )
+
+    assert result.inserted is True
+    assert result.kind == "rich_stop_hint"
+    assert result.total_result_chars == 2500
+    assert len(messages) == 1
+    assert "110.01" in messages[0].content
+
+
+@pytest.mark.parametrize(
+    ("tool_round", "events", "requires_visual_commit"),
+    [
+        (1, [{"type": "call", "name": "tool_web_search"}], False),
+        (0, [{"type": "call", "name": "tool_demo"}], False),
+        (0, [{"type": "call", "name": "tool_web_search"}], True),
+    ],
+)
+def test_append_direct_tool_convergence_hint_skips_non_convergence_cases(
+    tool_round,
+    events,
+    requires_visual_commit,
+):
+    from app.engine.multi_agent.direct_tool_convergence_runtime import (
+        append_direct_tool_convergence_hint,
+    )
+
+    messages = []
+    result = append_direct_tool_convergence_hint(
+        messages=messages,
+        tool_round=tool_round,
+        tool_call_events=events,
+        requires_visual_commit=requires_visual_commit,
+        native_tool_messages=False,
+    )
+
+    assert result.inserted is False
+    assert messages == []
+
+
 @pytest.mark.asyncio
 async def test_execute_direct_tool_rounds_does_not_emit_authored_public_thinking_for_tool_rounds():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
