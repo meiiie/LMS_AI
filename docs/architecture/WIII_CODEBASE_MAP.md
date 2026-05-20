@@ -82,7 +82,7 @@ The normal chat turn should be read in this order:
 | Host bridge | `wiii-desktop/src/lib/embed-bridge.ts`, `wiii-desktop/src/lib/context-bridge.ts` |
 | Pointy | `wiii-desktop/src/pointy-host/**` and `wiii-desktop/src/components/chat/PointyModeToggle.tsx` |
 | Voice | `wiii-desktop/src/api/voice.ts`, voice mode/toggle components |
-| Visual artifacts | `wiii-desktop/src/components/chat/VisualArtifactCard.tsx`, `wiii-desktop/src/components/common/InlineVisualFrame.tsx`; deterministic Code Studio fallback contracts live in backend `code_studio_scaffold_*` modules |
+| Visual artifacts | `wiii-desktop/src/components/chat/VisualArtifactCard.tsx`, `wiii-desktop/src/components/common/InlineVisualFrame.tsx`; deterministic Code Studio fallback contracts, captions, registry, and quality gates live in backend `code_studio_scaffold_*` modules |
 
 ## Canonical Contracts
 

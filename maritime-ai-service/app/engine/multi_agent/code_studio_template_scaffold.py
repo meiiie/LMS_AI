@@ -114,6 +114,9 @@ from app.engine.multi_agent.code_studio_scaffold_contract import (
 from app.engine.multi_agent.code_studio_scaffold_captions import (
     caption_for_scaffold_primitive,
 )
+from app.engine.multi_agent.code_studio_scaffold_quality import (
+    apply_scaffold_quality_gate,
+)
 from app.engine.multi_agent.code_studio_scaffold_registry import (
     ScaffoldRendererRegistry,
 )
@@ -893,13 +896,13 @@ def _build_default_spec(query: str) -> dict:
             "primitive": PRIMITIVE_PARTICLE_FIELD,
             "drift_direction": inferred_drift,
         }, query)
-    return _enrich_spec({
+    return apply_scaffold_quality_gate(query, _enrich_spec({
         "primitive": PRIMITIVE_DATA_BAND,
         "slider_label": "Tham số chính",
         "slider_min": 10,
         "slider_max": 100,
         "slider_default": 50,
-    }, query)
+    }, query))
 
 
 def extract_scaffold_spec(query: str) -> dict:

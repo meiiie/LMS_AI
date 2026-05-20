@@ -37,6 +37,7 @@ from app.engine.multi_agent.code_studio_template_scaffold import (
     build_code_studio_scaffold,
     build_scaffold_visible_caption,
     detect_scaffold_kind,
+    extract_scaffold_spec,
 )
 
 
@@ -166,6 +167,33 @@ def test_scaffold_kind_override() -> None:
 
     literary_html = build_code_studio_scaffold("anything", kind="literary")
     assert "wiii-scene-stage" in literary_html
+
+
+def test_explicit_unknown_simulation_avoids_generic_data_band() -> None:
+    """Unmatched simulation prompts should still render a real scene surface.
+
+    This is the long-term guard against the "slop template" failure mode:
+    when Wiii cannot classify a novel simulation topic, the deterministic
+    fallback must not degrade to a generic data dashboard.
+    """
+    query = "tạo mô phỏng hảo hán đối ẩm xem"
+
+    spec = extract_scaffold_spec(query)
+
+    assert spec["primitive"] == PRIMITIVE_SCENE
+    assert spec["quality_gate"]["name"] == "explicit_simulation_not_generic_data_band"
+    html = build_code_studio_scaffold(query)
+    assert 'data-scaffold-primitive="scene"' in html
+    assert "wiii-scene-stage" in html
+    assert "wiii-default-stage" not in html
+
+
+def test_unknown_non_simulation_still_uses_data_band() -> None:
+    """The quality gate should not over-route ordinary widget requests."""
+    spec = extract_scaffold_spec("widget bất kỳ")
+
+    assert spec["primitive"] == PRIMITIVE_DATA_BAND
+    assert "quality_gate" not in spec
 
 
 def test_scaffold_renders_distinct_html_per_kind() -> None:

@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415
+Follow-up issues: #413, #415, #417
 
 ## Purpose
 
@@ -37,6 +37,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   into `direct_document_host_action_runtime.py`, keeping preview-only
   tool-call/result, host-action emission, thinking trace, and user response as
   one tested contract.
+- Follow-up #417 added `code_studio_scaffold_quality.py` so explicit
+  simulation/canvas requests cannot silently fall back to generic data-band
+  templates when no topic classifier matches.
 
 ## Preserved Intentionally
 
@@ -72,9 +75,10 @@ backups, data PDFs, or local skill folders.
   moved out. The next durable step is separating generic tool-dispatch
   execution from final synthesis.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
-  but contract, renderer dispatch, and caption copy are no longer embedded in
-  the renderer body. The next durable step is scaffold-quality gates that
-  reject generic templates for simulation requests.
+  but contract, renderer dispatch, caption copy, and explicit-simulation
+  quality policy are no longer embedded in the renderer body. The next durable
+  step is splitting large primitive renderer bodies into focused modules behind
+  the existing registry.
 - Some tests still import compatibility `graph.py` modules. Move tests toward
   `runtime.py` imports when the external import window can close.
 
@@ -97,3 +101,5 @@ with 54 tests, the direct tool-round command passed with 56 tests, and the
 combined direct-runtime regression set passed with 205 tests.
 In follow-up #415, the direct tool-round command passed with 57 tests after
 adding the document host-action shortcut contract test.
+In follow-up #417, the Code Studio scaffold command passed with 56 tests after
+adding the explicit-simulation quality gate.
