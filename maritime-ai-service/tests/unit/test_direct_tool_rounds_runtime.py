@@ -615,6 +615,134 @@ async def test_invoke_direct_tool_followup_cancels_heartbeat_and_updates_provide
 
 
 @pytest.mark.asyncio
+async def test_finalize_direct_tool_response_uses_empty_search_template(monkeypatch):
+    from app.engine.multi_agent import direct_tool_response_finalization_runtime as runtime
+
+    messages = [{"role": "user", "content": "gia dau"}]
+    tool_events = [{"type": "result", "name": "tool_web_search", "content": "evidence"}]
+    inject_call: dict = {}
+
+    monkeypatch.setattr(
+        runtime,
+        "_should_use_search_template_for_empty_response",
+        lambda **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "build_search_template_fallback",
+        lambda **_kwargs: "Bản tổng hợp có nguồn.",
+    )
+
+    async def fail_synthesis(**_kwargs):
+        raise AssertionError("final synthesis should not run after template fallback")
+
+    def inject_widget_blocks(response, events, **kwargs):
+        inject_call["response"] = response
+        inject_call["events"] = events
+        inject_call.update(kwargs)
+        return response
+
+    monkeypatch.setattr(runtime, "run_direct_final_synthesis", fail_synthesis)
+
+    result = await runtime.finalize_direct_tool_response(
+        llm_response=SimpleNamespace(content=""),
+        messages=messages,
+        tools=[SimpleNamespace(name="tool_web_search")],
+        tool_call_events=tool_events,
+        query="giá dầu hôm nay",
+        state={"force_search": True},
+        push_event=lambda _event: None,
+        native_tool_messages=False,
+        llm_base=object(),
+        llm_auto=object(),
+        llm_with_tools=object(),
+        provider="auto",
+        resolved_provider="zhipu",
+        request_failover_mode="auto",
+        allowed_fallback_providers=("zhipu",),
+        ainvoke_with_fallback=lambda *_args, **_kwargs: None,
+        stream_direct_wait_heartbeats=lambda *_args, **_kwargs: None,
+        remember_execution_target=lambda *_args, **_kwargs: (None, None),
+        runtime_tier_for=lambda *_args, **_kwargs: "moderate",
+        inject_widget_blocks_from_tool_results=inject_widget_blocks,
+        structured_visuals_enabled=True,
+    )
+
+    assert result.llm_response.content == "Bản tổng hợp có nguồn."
+    assert result.messages is messages
+    assert result.resolved_provider == "zhipu"
+    assert inject_call["response"] is result.llm_response
+    assert inject_call["events"] is tool_events
+    assert inject_call["query"] == "giá dầu hôm nay"
+    assert inject_call["structured_visuals_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_finalize_direct_tool_response_forces_no_tool_synthesis(monkeypatch):
+    from app.engine.multi_agent import direct_tool_response_finalization_runtime as runtime
+
+    response = SimpleNamespace(content="final")
+    messages = [{"role": "user", "content": "hoc hang hai"}]
+    synthesized_messages = [*messages, {"role": "assistant", "content": "final"}]
+    tool_events = [{"type": "call", "name": "tool_knowledge_search"}]
+    synthesis_call: dict = {}
+
+    monkeypatch.setattr(
+        runtime,
+        "_should_use_search_template_for_empty_response",
+        lambda **_kwargs: False,
+    )
+
+    async def fake_synthesis(**kwargs):
+        synthesis_call.update(kwargs)
+        return SimpleNamespace(
+            llm_response=response,
+            messages=synthesized_messages,
+            resolved_provider="qwen",
+        )
+
+    def inject_widget_blocks(response_arg, events, **kwargs):
+        assert response_arg is response
+        assert events is tool_events
+        assert kwargs["structured_visuals_enabled"] is False
+        return response_arg
+
+    monkeypatch.setattr(runtime, "run_direct_final_synthesis", fake_synthesis)
+
+    result = await runtime.finalize_direct_tool_response(
+        llm_response=SimpleNamespace(content="", tool_calls=[{"name": "tool_demo"}]),
+        messages=messages,
+        tools=[SimpleNamespace(name="tool_demo")],
+        tool_call_events=tool_events,
+        query="mình muốn học hàng hải",
+        state={"request_id": "req-2"},
+        push_event=lambda _event: None,
+        native_tool_messages=False,
+        llm_base="base",
+        llm_auto="auto",
+        llm_with_tools="with_tools",
+        provider="auto",
+        resolved_provider="zhipu",
+        request_failover_mode="auto",
+        allowed_fallback_providers=("zhipu",),
+        ainvoke_with_fallback=lambda *_args, **_kwargs: None,
+        stream_direct_wait_heartbeats=lambda *_args, **_kwargs: None,
+        remember_execution_target=lambda *_args, **_kwargs: (None, None),
+        runtime_tier_for=lambda *_args, **_kwargs: "moderate",
+        inject_widget_blocks_from_tool_results=inject_widget_blocks,
+        structured_visuals_enabled=False,
+    )
+
+    assert result.llm_response is response
+    assert result.messages is synthesized_messages
+    assert result.resolved_provider == "qwen"
+    assert synthesis_call["messages"] is messages
+    assert synthesis_call["query"] == "mình muốn học hàng hải"
+    assert synthesis_call["tool_call_events"] is tool_events
+    assert synthesis_call["resolved_provider"] == "zhipu"
+
+
+@pytest.mark.asyncio
 async def test_execute_direct_tool_rounds_does_not_emit_authored_public_thinking_for_tool_rounds():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         execute_direct_tool_rounds_impl,

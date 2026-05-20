@@ -36,6 +36,9 @@ from app.engine.multi_agent.direct_tool_convergence_runtime import (
 from app.engine.multi_agent.direct_tool_followup_runtime import (
     invoke_direct_tool_followup,
 )
+from app.engine.multi_agent.direct_tool_response_finalization_runtime import (
+    finalize_direct_tool_response,
+)
 from app.engine.multi_agent.direct_prompts import _tool_name
 from app.engine.multi_agent.direct_reasoning import (
     _build_direct_tool_reflection,
@@ -43,8 +46,6 @@ from app.engine.multi_agent.direct_reasoning import (
 )
 from app.engine.multi_agent.direct_final_synthesis_runtime import (
     build_direct_final_synthesis_instruction,
-    extract_direct_visible_text as _extract_direct_visible_text,
-    run_direct_final_synthesis,
 )
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
@@ -70,7 +71,7 @@ from app.engine.multi_agent.direct_web_search_policy import (
     _is_search_tool_name,
     _prefer_official_query_for_known_docs,
     _should_return_search_template_after_tool_round,
-    _should_use_search_template_for_empty_response,
+    _should_use_search_template_for_empty_response,  # noqa: F401 - compatibility alias
 )
 from app.engine.multi_agent.visual_events import (
     _collect_active_visual_session_ids,
@@ -3210,81 +3211,29 @@ async def execute_direct_tool_rounds_impl(
         state["_answer_streamed_via_bus"] = True
         return llm_response, messages, tool_call_events
 
-    remaining_tool_calls = bool(
-        tools and hasattr(llm_response, "tool_calls") and llm_response.tool_calls
-    )
-    visible_response_text = _extract_direct_visible_text(
-        getattr(llm_response, "content", "")
-    )
-    if (
-        tool_call_events
-        and not visible_response_text
-        and _should_use_search_template_for_empty_response(
-            query=query,
-            state=state,
-            tool_call_events=tool_call_events,
-        )
-    ):
-        template_response = ""
-        try:
-            template_response = build_search_template_fallback(
-                query=query,
-                tool_call_events=tool_call_events,
-            )
-        except Exception as template_error:  # noqa: BLE001
-            logger.warning(
-                "[DIRECT] Web-search empty-response template synthesis failed: %s",
-                template_error,
-            )
-        if template_response:
-            logger.info(
-                "[DIRECT] Web-search returning source-backed template "
-                "without slow synthesis LLM (events=%d, len=%d)",
-                len(tool_call_events),
-                len(template_response),
-            )
-            llm_response = _build_assistant_message(
-                template_response,
-                native_tool_messages=native_tool_messages,
-            )
-            visible_response_text = template_response
-            remaining_tool_calls = False
-
-    if tool_call_events and (remaining_tool_calls or not visible_response_text):
-        logger.warning(
-            "[DIRECT] Tool loop ended without final prose "
-            "(remaining_tool_calls=%s, visible_len=%d) -> forcing no-tool synthesis",
-            remaining_tool_calls,
-            len(visible_response_text),
-        )
-        synthesis_result = await run_direct_final_synthesis(
-            messages=messages,
-            query=query,
-            state=state,
-            tool_call_events=tool_call_events,
-            push_event=push_event,
-            native_tool_messages=native_tool_messages,
-            llm_base=llm_base,
-            llm_auto=llm_auto,
-            llm_with_tools=llm_with_tools,
-            provider=provider,
-            resolved_provider=resolved_provider,
-            request_failover_mode=request_failover_mode,
-            allowed_fallback_providers=allowed_fallback_providers,
-            ainvoke_with_fallback=graph_ainvoke_with_fallback,
-            stream_direct_wait_heartbeats=graph_stream_direct_wait_heartbeats,
-            remember_execution_target=remember_execution_target,
-            runtime_tier_for=runtime_tier_for,
-        )
-        llm_response = synthesis_result.llm_response
-        messages = synthesis_result.messages
-        resolved_provider = synthesis_result.resolved_provider
-
-    llm_response = _inject_widget_blocks_from_tool_results(
-        llm_response,
-        tool_call_events,
+    finalization = await finalize_direct_tool_response(
+        llm_response=llm_response,
+        messages=messages,
+        tools=tools,
+        tool_call_events=tool_call_events,
         query=query,
+        state=state,
+        push_event=push_event,
+        native_tool_messages=native_tool_messages,
+        llm_base=llm_base,
+        llm_auto=llm_auto,
+        llm_with_tools=llm_with_tools,
+        provider=provider,
+        resolved_provider=resolved_provider,
+        request_failover_mode=request_failover_mode,
+        allowed_fallback_providers=allowed_fallback_providers,
+        ainvoke_with_fallback=graph_ainvoke_with_fallback,
+        stream_direct_wait_heartbeats=graph_stream_direct_wait_heartbeats,
+        remember_execution_target=remember_execution_target,
+        runtime_tier_for=runtime_tier_for,
+        inject_widget_blocks_from_tool_results=_inject_widget_blocks_from_tool_results,
         structured_visuals_enabled=getattr(settings, "enable_structured_visuals", False),
+        logger_obj=logger,
     )
 
-    return llm_response, messages, tool_call_events
+    return finalization.llm_response, finalization.messages, tool_call_events
