@@ -34,6 +34,8 @@ from app.engine.multi_agent.code_studio_scaffold_registry import (
     ScaffoldRendererRegistry,
 )
 from app.engine.multi_agent.code_studio_template_scaffold import (
+    _render_data_band,
+    _render_scene,
     build_code_studio_scaffold,
     build_scaffold_visible_caption,
     detect_scaffold_kind,
@@ -194,6 +196,35 @@ def test_unknown_non_simulation_still_uses_data_band() -> None:
 
     assert spec["primitive"] == PRIMITIVE_DATA_BAND
     assert "quality_gate" not in spec
+
+
+def test_extracted_scene_and_data_band_renderers_keep_wrapper_contract() -> None:
+    """Private wrapper names remain the registry boundary after extraction."""
+    scene_html = _render_scene(
+        {
+            "primitive": PRIMITIVE_SCENE,
+            "title": "Cảnh thử",
+            "slider_label": "Nhịp cảnh",
+            "moments": [
+                {"key": "Mở", "quote": "Bắt đầu", "sky_blend": 0.0},
+                {"key": "Kết", "quote": "Hoàn tất", "sky_blend": 1.0},
+            ],
+        }
+    )
+    data_band_html = _render_data_band(
+        {
+            "primitive": PRIMITIVE_DATA_BAND,
+            "title": "Dữ liệu thử",
+            "slider_label": "Tham số",
+        }
+    )
+
+    assert 'data-scaffold-primitive="scene"' in scene_html
+    assert "wiii-sc-stage" in scene_html
+    assert "WiiiVisualBridge" in scene_html
+    assert 'data-scaffold-primitive="data_band"' in data_band_html
+    assert "wiii-db-stage" in data_band_html
+    assert "WiiiVisualBridge" in data_band_html
 
 
 def test_scaffold_renders_distinct_html_per_kind() -> None:

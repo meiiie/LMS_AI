@@ -1593,6 +1593,8 @@ def _render_timeline(spec: dict) -> str:
                         controls_html=controls_html, script_html=script_html)
 
 
+# Extraction boundary: user-visible fallback HTML parity is the risk; rollback
+# is a straight revert of the renderer-split commit if scene/data-band drifts.
 def _render_scene(spec: dict) -> str:
     return render_scene_scaffold(
         spec,

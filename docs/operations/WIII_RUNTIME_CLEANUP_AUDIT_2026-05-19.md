@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419
+Follow-up issues: #413, #415, #417, #419 (owner: Architecture Maintainers)
 
 ## Purpose
 
