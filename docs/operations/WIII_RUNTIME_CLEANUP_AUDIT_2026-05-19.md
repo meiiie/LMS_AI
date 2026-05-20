@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -58,6 +58,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   instruction construction into `direct_final_synthesis_runtime.py`, preserving
   compatibility aliases in the main tool-round module while leaving final
   synthesis execution and provider fallback unchanged.
+- Follow-up #429 moved direct final synthesis execution into
+  `direct_final_synthesis_runtime.py`, keeping the no-tool synthesis pass,
+  heartbeat lifecycle, provider resolution, moderate timeout profile, and
+  message insertion behind a focused helper.
 
 ## Preserved Intentionally
 
@@ -90,8 +94,8 @@ backups, data PDFs, or local skill folders.
   response-finalization, and SSE V3 parity modules with narrow contract tests.
 - `direct_tool_rounds_runtime.py` remains large, but Pointy and explicit
   web-search policy plus deterministic document host-action execution, message
-  builders, generic tool dispatch, and final synthesis helper construction have
-  moved out. The next durable step is separating final synthesis execution and
+  builders, generic tool dispatch, final synthesis helper construction, and
+  final synthesis execution have moved out. The next durable step is separating
   post-tool convergence policy.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, caption copy, and explicit-simulation
