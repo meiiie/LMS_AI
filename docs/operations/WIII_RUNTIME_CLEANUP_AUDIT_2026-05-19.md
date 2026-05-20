@@ -139,3 +139,8 @@ moving generic dispatch out of the main tool loop and adding focused
 `direct_tool_dispatch_runtime.py` tests.
 In follow-up #427, the direct tool-round command passed with 57 tests after
 moving final synthesis helper bodies out of the main tool loop.
+In follow-up #429, the direct tool-round command passed with 59 tests after
+moving direct final synthesis execution into
+`direct_final_synthesis_runtime.py`. Targeted ruff checks, repository
+`ruff check app/ --select=E9,F63,F7`, and `git diff --check` also passed for
+the no-tool synthesis, heartbeat, provider-resolution helper refactor.

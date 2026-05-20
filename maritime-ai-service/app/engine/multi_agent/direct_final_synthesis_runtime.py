@@ -130,7 +130,11 @@ async def run_direct_final_synthesis(
             native_tool_messages=native_tool_messages,
         )
     )
-    synthesis_llm = llm_base or llm_auto or llm_with_tools
+    synthesis_llm = llm_base
+    if synthesis_llm is None:
+        raise RuntimeError(
+            "run_direct_final_synthesis requires an unbound LLM for the final no-tool pass"
+        )
     synthesis_heartbeat = asyncio.create_task(
         stream_direct_wait_heartbeats(
             push_event,

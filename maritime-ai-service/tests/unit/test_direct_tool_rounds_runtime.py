@@ -246,6 +246,43 @@ async def test_run_direct_final_synthesis_uses_no_tool_binding_and_moderate_time
 
 
 @pytest.mark.asyncio
+async def test_run_direct_final_synthesis_requires_unbound_base_llm():
+    from app.engine.multi_agent.direct_final_synthesis_runtime import (
+        run_direct_final_synthesis,
+    )
+
+    async def push_event(_event):
+        return None
+
+    async def fake_ainvoke_with_fallback(*_args, **_kwargs):
+        raise AssertionError("synthesis should fail before invoking a tool-bound model")
+
+    async def fake_stream_direct_wait_heartbeats(*_args, **_kwargs):
+        raise AssertionError("heartbeat should not start without an unbound model")
+
+    with pytest.raises(RuntimeError, match="requires an unbound LLM"):
+        await run_direct_final_synthesis(
+            messages=[],
+            query="phan tich gia dau",
+            state={},
+            tool_call_events=[{"type": "call", "name": "tool_web_search"}],
+            push_event=push_event,
+            native_tool_messages=False,
+            llm_base=None,
+            llm_auto=object(),
+            llm_with_tools=object(),
+            provider="auto",
+            resolved_provider=None,
+            request_failover_mode="auto",
+            allowed_fallback_providers=None,
+            ainvoke_with_fallback=fake_ainvoke_with_fallback,
+            stream_direct_wait_heartbeats=fake_stream_direct_wait_heartbeats,
+            remember_execution_target=lambda *_args, **_kwargs: (None, None),
+            runtime_tier_for=lambda *_args, **_kwargs: "moderate",
+        )
+
+
+@pytest.mark.asyncio
 async def test_execute_direct_tool_rounds_does_not_emit_authored_public_thinking_for_tool_rounds():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         execute_direct_tool_rounds_impl,
@@ -1707,6 +1744,7 @@ async def test_execute_direct_tool_rounds_can_use_native_tool_messages():
             push_event=push_event,
             query="Tim du kien roi tong hop lai",
             state={},
+            llm_base=object(),
             forced_tool_choice="tool_demo",
             native_tool_messages=True,
             ainvoke_with_fallback=fake_ainvoke_with_fallback,
