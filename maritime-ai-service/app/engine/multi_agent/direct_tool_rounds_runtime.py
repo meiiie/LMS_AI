@@ -58,8 +58,9 @@ from app.engine.multi_agent.direct_document_host_action_runtime import (
     execute_requested_document_host_action_shortcut,
 )
 from app.engine.multi_agent.direct_pointy_runtime import (
-    _format_pointy_inventory,
-    _validate_pointy_selector,
+    _format_pointy_inventory,  # noqa: F401 - compatibility alias
+    _validate_pointy_selector,  # noqa: F401 - compatibility alias
+    handle_direct_pointy_post_dispatch,
 )
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.tool_call_text_parser import (
@@ -2803,73 +2804,15 @@ async def execute_direct_tool_rounds_impl(
             tc_name = dispatch_result.tool_name
             tc_args = dispatch_result.tool_args
             result = dispatch_result.result
-            # Wiii Pointy — agent invoked tool_pointy_show / clear.
-            #
-            # v3.0 anti-hallucination: validate selector vs available_targets
-            # BEFORE emit SSE. Khi LLM hallucinate (compound CSS, aria-label
-            # patterns, .class selectors) → return structured error trong
-            # tool_result. AI nhận error message → tự correct round tiếp với
-            # exact id từ inventory.
-            if tc_name in ("tool_pointy_show", "tool_pointy_clear"):
-                try:
-                    from app.engine.tools.pointy_tools import build_pointy_event
-                    if tc_name == "tool_pointy_clear":
-                        pointy_payload = build_pointy_event(mode="clear")
-                        validation_error = None
-                    else:
-                        pointy_args = tc_args or {}
-                        raw_selector = str(pointy_args.get("selector", "")).strip()
-                        # Validate selector vs inventory.
-                        validation_error = _validate_pointy_selector(
-                            raw_selector, state
-                        )
-                        if validation_error:
-                            # Hallucinated → override result với error message
-                            # cho LLM thấy. Skip SSE dispatch.
-                            result = validation_error
-                            logger.warning(
-                                "[POINTY] selector validation FAILED: %s | raw=%r",
-                                validation_error[:120],
-                                raw_selector[:80],
-                            )
-                            pointy_payload = None
-                        else:
-                            pointy_payload = build_pointy_event(
-                                selector=raw_selector,
-                                caption=str(pointy_args.get("caption", "")),
-                                duration_ms=int(pointy_args.get("duration_ms", 4500) or 4500),
-                                mode=str(pointy_args.get("mode", "highlight") or "highlight"),
-                            )
-                    if pointy_payload is not None:
-                        await push_event({
-                            "type": "pointy_action",
-                            "content": pointy_payload,
-                            "node": "direct",
-                        })
-                        logger.info(
-                            "[POINTY] dispatched action=%s selector=%r (direct)",
-                            pointy_payload.get("action"),
-                            pointy_payload.get("params", {}).get("selector"),
-                        )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("[POINTY] direct emit failed: %s", exc)
-
-            # Wiii Pointy inventory query — replace the tool's [POINTY:
-            # inventory] ack with the actual list of available_targets
-            # from host context so the LLM has something useful to read
-            # in its next round.
-            if tc_name == "tool_pointy_inventory":
-                try:
-                    inventory_text = _format_pointy_inventory(state)
-                    # Replace the result the LLM will see with the
-                    # actual inventory (overwrite the ack string).
-                    result = inventory_text
-                    logger.info(
-                        "[POINTY] inventory served (%d chars)",
-                        len(inventory_text),
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("[POINTY] inventory format failed: %s", exc)
+            pointy_post_dispatch = await handle_direct_pointy_post_dispatch(
+                tool_name=tc_name,
+                tool_args=tc_args or {},
+                result=result,
+                state=state,
+                push_event=push_event,
+                logger_obj=logger,
+            )
+            result = pointy_post_dispatch.result
             await graph_maybe_emit_host_action_event(
                 push_event=push_event,
                 tool_name=tc_name,
