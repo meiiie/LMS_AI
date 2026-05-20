@@ -107,6 +107,86 @@ def test_explicit_web_search_returns_template_after_fetch_evidence():
     ) is False
 
 
+def test_build_direct_post_tool_search_template_response_for_forced_web(monkeypatch):
+    from app.engine.multi_agent import direct_search_template_runtime as runtime
+
+    monkeypatch.setattr(
+        runtime,
+        "build_search_template_fallback",
+        lambda **_kwargs: "Tổng hợp từ web có nguồn.",
+    )
+
+    response = runtime.build_direct_post_tool_search_template_response(
+        query="giá dầu hôm nay",
+        state={"force_skills": ["web-search"]},
+        tool_call_events=[
+            {
+                "type": "result",
+                "name": "tool_web_search",
+                "result": "URL: https://example.test/oil\nGiá dầu tăng.",
+            }
+        ],
+        tool_round=0,
+        native_tool_messages=False,
+    )
+
+    assert response is not None
+    assert response.content == "Tổng hợp từ web có nguồn."
+
+
+def test_build_direct_post_tool_search_template_response_for_explicit_round(
+    monkeypatch,
+):
+    from app.engine.multi_agent import direct_search_template_runtime as runtime
+
+    monkeypatch.setattr(runtime, "_force_skills_for_turn", lambda _state: set())
+    monkeypatch.setattr(
+        runtime,
+        "_should_return_search_template_after_tool_round",
+        lambda **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "build_search_template_fallback",
+        lambda **_kwargs: "Tổng hợp sau vòng công cụ.",
+    )
+
+    response = runtime.build_direct_post_tool_search_template_response(
+        query="tìm web về responses api",
+        state={"routing_metadata": {"intent": "unknown"}},
+        tool_call_events=[{"type": "result", "name": "tool_fetch_url", "result": "ok"}],
+        tool_round=1,
+        native_tool_messages=False,
+    )
+
+    assert response is not None
+    assert response.content == "Tổng hợp sau vòng công cụ."
+
+
+def test_build_direct_post_tool_search_template_response_skips_empty_template(
+    monkeypatch,
+):
+    from app.engine.multi_agent import direct_search_template_runtime as runtime
+
+    monkeypatch.setattr(
+        runtime,
+        "build_search_template_fallback",
+        lambda **_kwargs: "",
+    )
+
+    response = runtime.build_direct_post_tool_search_template_response(
+        query="giá dầu hôm nay",
+        state={"force_skills": ["web-search"]},
+        tool_call_events=[
+            {"type": "result", "name": "tool_web_search", "result": "source"}
+        ],
+        tool_round=0,
+        native_tool_messages=False,
+    )
+
+    assert response is None
+
+
 def test_direct_public_thinking_dedupe_detects_identical_blocks():
     from app.engine.multi_agent.direct_public_thinking_runtime import (
         remember_direct_public_thinking_chunks,
