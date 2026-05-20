@@ -26,6 +26,9 @@ from app.engine.multi_agent.direct_tool_message_runtime import (
     build_assistant_tool_call_message as _build_assistant_tool_call_message,
     build_tool_result_message as _build_tool_result_message,
 )
+from app.engine.multi_agent.direct_tool_post_dispatch_runtime import (
+    process_direct_tool_post_dispatch,
+)
 from app.engine.multi_agent.direct_tool_dispatch_runtime import (
     dispatch_direct_tool_call,
     normalize_tool_call as _normalize_tool_call,
@@ -53,7 +56,6 @@ from app.engine.multi_agent.direct_search_template_runtime import (
 from app.engine.multi_agent.direct_forced_web_search_runtime import (
     execute_forced_web_search_shortcut,
 )
-from app.engine.multi_agent.direct_handoff_runtime import record_direct_handoff_request
 from app.engine.multi_agent.direct_document_host_action_runtime import (
     DocumentHostActionShortcut,
     execute_requested_document_host_action_shortcut,
@@ -61,7 +63,6 @@ from app.engine.multi_agent.direct_document_host_action_runtime import (
 from app.engine.multi_agent.direct_pointy_runtime import (
     _format_pointy_inventory,  # noqa: F401 - compatibility alias
     _validate_pointy_selector,  # noqa: F401 - compatibility alias
-    handle_direct_pointy_post_dispatch,
 )
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.tool_call_text_parser import (
@@ -2804,74 +2805,29 @@ async def execute_direct_tool_rounds_impl(
             tc_id = dispatch_result.tool_call_id
             tc_name = dispatch_result.tool_name
             tc_args = dispatch_result.tool_args
-            result = dispatch_result.result
-            pointy_post_dispatch = await handle_direct_pointy_post_dispatch(
+            post_dispatch = await process_direct_tool_post_dispatch(
                 tool_name=tc_name,
                 tool_args=tc_args or {},
-                result=result,
-                state=state,
-                push_event=push_event,
-                logger_obj=logger,
-            )
-            result = pointy_post_dispatch.result
-            await graph_maybe_emit_host_action_event(
-                push_event=push_event,
-                tool_name=tc_name,
-                result=result,
-                node="direct",
-                tool_call_events=tool_call_events,
-            )
-            emitted_visual_session_ids, disposed_visual_session_ids = await graph_maybe_emit_visual_event(
-                push_event=push_event,
-                tool_name=tc_name,
                 tool_call_id=tc_id,
-                result=result,
-                node="direct",
-                tool_call_events=tool_call_events,
-                previous_visual_session_ids=active_visual_session_ids,
-            )
-            if emitted_visual_session_ids:
-                visual_session_ids.extend(emitted_visual_session_ids)
-                active_visual_session_ids = list(dict.fromkeys(emitted_visual_session_ids))
-                visual_emitted_any = True
-            elif disposed_visual_session_ids:
-                disposed = set(disposed_visual_session_ids)
-                active_visual_session_ids = [
-                    session_id
-                    for session_id in active_visual_session_ids
-                    if session_id not in disposed
-                ]
-            reflection = await graph_build_direct_tool_reflection(state, tc_name, result)
-            if reflection:
-                await push_status_only_progress(
-                    push_event,
-                    node="direct",
-                    content=reflection,
-                    subtype="tool_reflection",
-                )
-            tool_call_events.append(
-                {
-                    "type": "result",
-                    "name": tc_name,
-                    "result": str(result),
-                    "id": tc_id,
-                }
-            )
-            messages.append(
-                _build_tool_result_message(
-                    str(result),
-                    tool_call_id=tc_id,
-                    native_tool_messages=native_tool_messages,
-                )
-            )
-
-            record_direct_handoff_request(
+                result=dispatch_result.result,
                 state=state,
-                tool_name=tc_name,
-                tool_args=tc_args or {},
-                enabled=settings.enable_agent_handoffs,
+                messages=messages,
+                tool_call_events=tool_call_events,
+                push_event=push_event,
+                native_tool_messages=native_tool_messages,
+                active_visual_session_ids=active_visual_session_ids,
+                visual_session_ids=visual_session_ids,
+                visual_emitted_any=visual_emitted_any,
+                handoffs_enabled=settings.enable_agent_handoffs,
+                maybe_emit_host_action_event=graph_maybe_emit_host_action_event,
+                maybe_emit_visual_event=graph_maybe_emit_visual_event,
+                build_direct_tool_reflection=graph_build_direct_tool_reflection,
+                push_status_only_progress=push_status_only_progress,
+                build_tool_result_message=_build_tool_result_message,
                 logger_obj=logger,
             )
+            active_visual_session_ids = post_dispatch.active_visual_session_ids
+            visual_emitted_any = post_dispatch.visual_emitted_any
         await graph_emit_visual_commit_events(
             push_event=push_event,
             node="direct",
