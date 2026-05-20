@@ -109,7 +109,7 @@ async def test_dispatch_direct_tool_call_returns_structured_unknown_tool_error()
         raise AssertionError("Unknown tools must not be invoked")
 
     result = await dispatch_direct_tool_call(
-        tool_call={"name": "tool_missing", "args": {"query": "abc"}},
+        tool_call={"id": "", "name": "tool_missing", "args": {"query": "abc"}},
         tool_round=3,
         tools=[],
         query="abc",

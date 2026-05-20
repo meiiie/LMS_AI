@@ -48,7 +48,7 @@ async def dispatch_direct_tool_call(
     logger_obj: logging.Logger,
 ) -> DirectToolDispatchResult:
     """Run one tool call and emit the stable SSE call/result event pair."""
-    tool_call_id = str(tool_call.get("id", f"tc_{tool_round}"))
+    tool_call_id = str(tool_call.get("id") or f"tc_{tool_round}")
     tool_name = str(tool_call.get("name", "unknown"))
     tool_args = tool_call.get("args", {}) or {}
     if not isinstance(tool_args, dict):

@@ -125,6 +125,6 @@ In follow-up #421, the same scaffold command passed with 57 tests after moving
 the remaining primitive renderer bodies out of the monolithic scaffold module.
 In follow-up #423, the direct tool-round command passed with 57 tests after
 moving direct message builders out of the main tool loop.
-In follow-up #425, the direct dispatch focused tests were added alongside the
-direct tool-round command after moving generic dispatch out of the main tool
-loop.
+In follow-up #425, the direct tool-round command passed with 60 tests after
+moving generic dispatch out of the main tool loop and adding focused
+`direct_tool_dispatch_runtime.py` tests.
