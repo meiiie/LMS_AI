@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -66,6 +66,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_tool_convergence_runtime.py`, keeping sparse-result self-eval,
   rich-result stop hints, native message handling, and log metadata behind a
   focused helper.
+- Follow-up #433 moved post-tool follow-up LLM/tool selection into
+  `direct_tool_followup_runtime.py`, keeping default `llm_auto` continuation,
+  visual-only rebinding, forced visual tool choice, and fallback source metadata
+  behind a focused helper.
 
 ## Preserved Intentionally
 
@@ -100,7 +104,9 @@ backups, data PDFs, or local skill folders.
   web-search policy plus deterministic document host-action execution, message
   builders, generic tool dispatch, final synthesis helper construction, and
   final synthesis execution plus post-tool convergence policy have moved out.
-  The next durable step is separating follow-up LLM selection from the main loop.
+  Follow-up LLM selection has also moved out. The next durable step is
+  separating post-tool heartbeat/follow-up invocation execution from the main
+  loop.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, caption copy, and explicit-simulation
   quality policy are no longer embedded in the renderer body. Scene and
@@ -153,3 +159,7 @@ moving post-tool convergence hint policy into
 `direct_tool_convergence_runtime.py`. Targeted ruff checks, repository
 `ruff check app/ --select=E9,F63,F7`, and `git diff --check` also passed for
 the convergence policy extraction.
+In follow-up #433, the direct tool-round command passed with 67 tests after
+moving follow-up LLM/tool selection into `direct_tool_followup_runtime.py`.
+Targeted ruff checks, repository `ruff check app/ --select=E9,F63,F7`, and
+`git diff --check` also passed for the follow-up selection extraction.

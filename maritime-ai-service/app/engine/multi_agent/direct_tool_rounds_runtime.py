@@ -33,7 +33,10 @@ from app.engine.multi_agent.direct_tool_dispatch_runtime import (
 from app.engine.multi_agent.direct_tool_convergence_runtime import (
     append_direct_tool_convergence_hint,
 )
-from app.engine.multi_agent.direct_prompts import _resolve_tool_choice, _tool_name
+from app.engine.multi_agent.direct_tool_followup_runtime import (
+    select_direct_tool_followup,
+)
+from app.engine.multi_agent.direct_prompts import _tool_name
 from app.engine.multi_agent.direct_reasoning import (
     _build_direct_tool_reflection,
     _infer_direct_reasoning_cue,
@@ -77,7 +80,6 @@ from app.engine.multi_agent.visual_events import (
     _summarize_tool_result_for_stream,
 )
 from app.engine.multi_agent.visual_intent_resolver import (
-    required_visual_tool_names,
     resolve_visual_intent,
 )
 from app.engine.reasoning import record_thinking_snapshot
@@ -3187,52 +3189,31 @@ async def execute_direct_tool_rounds_impl(
             )
         )
         try:
-            # After the first forced call, keep tool declarations via llm_auto
-            # but do not force another tool call; otherwise current/news turns
-            # can loop through tools until max_rounds before synthesizing.
-            followup_llm = llm_auto
-            followup_tool_choice = None
-            followup_tools = tools
-            bind_source = None
-            if requires_visual_commit and not visual_emitted_any:
-                required_visual_tool_name_set = set(
-                    required_visual_tool_names(visual_decision)
-                )
-                visual_only_tools = [
-                    tool
-                    for tool in tools
-                    if _tool_name(tool) in required_visual_tool_name_set
-                ]
-                bind_source = (
-                    llm_base
-                    or (llm_auto if hasattr(llm_auto, "bind_tools") else None)
-                    or (llm_with_tools if hasattr(llm_with_tools, "bind_tools") else None)
-                )
-                if bind_source is not None and visual_only_tools:
-                    followup_tools = visual_only_tools
-                    followup_tool_choice = _resolve_tool_choice(
-                        True,
-                        visual_only_tools,
-                        resolved_provider or provider,
-                    )
-                    if followup_tool_choice:
-                        followup_llm = bind_source.bind_tools(
-                            visual_only_tools,
-                            tool_choice=followup_tool_choice,
-                        )
-                    else:
-                        followup_llm = bind_source.bind_tools(visual_only_tools)
+            followup_selection = select_direct_tool_followup(
+                llm_auto=llm_auto,
+                llm_base=llm_base,
+                llm_with_tools=llm_with_tools,
+                tools=tools,
+                requires_visual_commit=requires_visual_commit,
+                visual_emitted_any=visual_emitted_any,
+                visual_decision=visual_decision,
+                resolved_provider=resolved_provider,
+                provider=provider,
+            )
             candidate_provider, _candidate_model = remember_execution_target(
-                followup_llm,
-                fallback_source=bind_source or llm_base,
+                followup_selection.llm,
+                fallback_source=followup_selection.fallback_source,
             )
             resolved_provider = candidate_provider or resolved_provider
             llm_response = await graph_ainvoke_with_fallback(
-                followup_llm,
+                followup_selection.llm,
                 messages,
-                tools=followup_tools,
-                tool_choice=followup_tool_choice,
-                tier=runtime_tier_for(followup_llm, bind_source or llm_base),
+                tools=followup_selection.tools,
+                tool_choice=followup_selection.tool_choice,
+                tier=runtime_tier_for(
+                    followup_selection.llm,
+                    followup_selection.fallback_source,
+                ),
                 provider=provider,
                 resolved_provider=resolved_provider,
                 failover_mode=request_failover_mode,

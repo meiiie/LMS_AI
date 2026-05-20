@@ -361,6 +361,115 @@ def test_append_direct_tool_convergence_hint_skips_non_convergence_cases(
     assert messages == []
 
 
+def test_select_direct_tool_followup_uses_auto_llm_for_non_visual_turn():
+    from app.engine.multi_agent.direct_tool_followup_runtime import (
+        select_direct_tool_followup,
+    )
+    from app.engine.multi_agent.visual_intent_resolver import VisualIntentDecision
+
+    llm_auto = object()
+    llm_base = object()
+    llm_with_tools = object()
+    tools = [SimpleNamespace(name="tool_web_search")]
+
+    selection = select_direct_tool_followup(
+        llm_auto=llm_auto,
+        llm_base=llm_base,
+        llm_with_tools=llm_with_tools,
+        tools=tools,
+        requires_visual_commit=False,
+        visual_emitted_any=False,
+        visual_decision=VisualIntentDecision(mode="text"),
+        resolved_provider="zhipu",
+        provider="auto",
+    )
+
+    assert selection.llm is llm_auto
+    assert selection.tools is tools
+    assert selection.tool_choice is None
+    assert selection.fallback_source is llm_base
+
+
+def test_select_direct_tool_followup_rebinds_visual_only_tools():
+    from app.engine.multi_agent.direct_tool_followup_runtime import (
+        select_direct_tool_followup,
+    )
+    from app.engine.multi_agent.visual_intent_resolver import VisualIntentDecision
+
+    bound_llm = object()
+
+    class FakeBaseLLM:
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        def bind_tools(self, tools, tool_choice=None):
+            self.calls.append({"tools": list(tools), "tool_choice": tool_choice})
+            return bound_llm
+
+    llm_base = FakeBaseLLM()
+    tools = [
+        SimpleNamespace(name="tool_web_search"),
+        SimpleNamespace(name="tool_generate_visual"),
+        SimpleNamespace(name="tool_generate_mermaid"),
+    ]
+
+    selection = select_direct_tool_followup(
+        llm_auto=object(),
+        llm_base=llm_base,
+        llm_with_tools=object(),
+        tools=tools,
+        requires_visual_commit=True,
+        visual_emitted_any=False,
+        visual_decision=VisualIntentDecision(
+            mode="template",
+            force_tool=True,
+            presentation_intent="article_figure",
+        ),
+        resolved_provider="zhipu",
+        provider="auto",
+    )
+
+    assert selection.llm is bound_llm
+    assert [tool.name for tool in selection.tools] == ["tool_generate_visual"]
+    assert selection.tool_choice == "tool_generate_visual"
+    assert selection.fallback_source is llm_base
+    assert len(llm_base.calls) == 1
+    assert [tool.name for tool in llm_base.calls[0]["tools"]] == ["tool_generate_visual"]
+    assert llm_base.calls[0]["tool_choice"] == "tool_generate_visual"
+
+
+def test_select_direct_tool_followup_keeps_auto_llm_after_visual_emits():
+    from app.engine.multi_agent.direct_tool_followup_runtime import (
+        select_direct_tool_followup,
+    )
+    from app.engine.multi_agent.visual_intent_resolver import VisualIntentDecision
+
+    llm_auto = object()
+    llm_base = object()
+    tools = [SimpleNamespace(name="tool_generate_visual")]
+
+    selection = select_direct_tool_followup(
+        llm_auto=llm_auto,
+        llm_base=llm_base,
+        llm_with_tools=object(),
+        tools=tools,
+        requires_visual_commit=True,
+        visual_emitted_any=True,
+        visual_decision=VisualIntentDecision(
+            mode="template",
+            force_tool=True,
+            presentation_intent="article_figure",
+        ),
+        resolved_provider="zhipu",
+        provider="auto",
+    )
+
+    assert selection.llm is llm_auto
+    assert selection.tools is tools
+    assert selection.tool_choice is None
+    assert selection.fallback_source is llm_base
+
+
 @pytest.mark.asyncio
 async def test_execute_direct_tool_rounds_does_not_emit_authored_public_thinking_for_tool_rounds():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
