@@ -51,6 +51,11 @@ from app.engine.multi_agent.direct_session_memory_runtime import (
     _with_requested_response_marker,
 )
 from app.engine.multi_agent.direct_text_utils import _fold_direct_text
+from app.engine.multi_agent.direct_node_chatter_runtime import (
+    _build_hunger_chatter_answer,
+    _build_hunger_chatter_thinking,
+    _looks_hunger_chatter_turn,
+)
 from app.engine.runtime.runtime_metrics import inc_counter
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.visual_events import _summarize_tool_result_for_stream
@@ -1012,94 +1017,6 @@ async def _build_image_input_answer(query: str, images: list[Any]) -> str:
             "Mình đã nhận được ảnh, nhưng hiện chưa có provider vision khả dụng để đọc ảnh này. "
             "Mình sẽ không đoán nội dung ảnh; hãy bật Vision runtime/provider vision rồi thử lại nhé."
         ),
-    )
-
-
-_HUNGER_CHATTER_MARKERS = (
-    "doi phet",
-    "doi qua",
-    "hoi doi",
-    "minh doi",
-    "dang doi",
-    "buong doi",
-    "bung doi",
-    "hungry",
-    "starving",
-)
-
-_HUNGER_CHATTER_TASK_BLOCKERS = (
-    "bao nhieu",
-    "canvas",
-    "chart",
-    "code",
-    "css",
-    "excel",
-    "file",
-    "giai thich",
-    "html",
-    "huong dan",
-    "javascript",
-    "la gi",
-    "mo phong",
-    "pdf",
-    "phan tich",
-    "python",
-    "quy dinh",
-    "react",
-    "search",
-    "so sanh",
-    "tao anh",
-    "the nao",
-    "thay doi",
-    "tim",
-    "tin tuc",
-    "tra cuu",
-    "video",
-    "viet",
-    "word",
-)
-
-
-def _looks_hunger_chatter_turn(normalized_query: str) -> bool:
-    folded = _fold_direct_text(normalized_query)
-    if not folded:
-        return False
-    if any(marker in folded for marker in ("hay nho", "ghi nho", "nho rang", "luu lai")):
-        return False
-    if any(marker in folded for marker in _HUNGER_CHATTER_TASK_BLOCKERS):
-        return False
-    tokens = [token for token in folded.split() if token]
-    # Field-test markers and "answer naturally, no tool" instructions should
-    # not push a clearly casual hunger turn onto the slow LLM path.
-    if len(tokens) > 40:
-        return False
-    return any(marker in folded for marker in _HUNGER_CHATTER_MARKERS)
-
-
-def _build_hunger_chatter_answer(_query: str) -> str:
-    folded = _fold_direct_text(_query)
-    if "bung doi" in folded:
-        opener = "Bụng đói thì não tụt pin thật đó."
-    elif "hoi doi" in folded:
-        opener = "Hơi đói cũng nên lót bụng trước khi cố làm tiếp nha."
-    else:
-        opener = "Đói phết là não tụt pin thật đó."
-    if "bao cao" in folded or "cang" in folded or "ap luc" in folded:
-        return (
-            f"{opener} Lót bụng trước đi cậu: bắt lấy thứ gì nhanh và ấm như bánh mì, "
-            "trứng, súp, sữa chua hoặc chuối; uống thêm nước nữa. Báo cáo thì mình "
-            "một bước một bước, không cần gồng quá ngay lúc bụng đang réo."
-        )
-    return (
-        f"{opener} Kiếm gì dễ ăn trong 5-10 phút trước nha: cơm, mì, bánh mì, trứng, "
-        "sữa chua hoặc chuối đều được; uống thêm nước, ăn xong mình ngồi đây tính tiếp cùng cậu."
-    )
-
-
-def _build_hunger_chatter_thinking(_query: str) -> str:
-    return (
-        "Cậu nói rất ngắn, nhưng mình nghe được một nhu cầu rất thật: bụng đói thì mọi thứ cũng tụt pin theo. "
-        "Mình không cần làm màu ở đây; chỉ cần kéo cậu về một việc nhỏ có ích ngay, rồi ở lại cùng cậu tính tiếp."
     )
 
 
