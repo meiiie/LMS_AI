@@ -55,7 +55,7 @@ from app.engine.multi_agent.direct_forced_web_search_runtime import (
 )
 from app.engine.multi_agent.direct_document_host_action_runtime import (
     DocumentHostActionShortcut,
-    execute_document_host_action_shortcut,
+    execute_requested_document_host_action_shortcut,
 )
 from app.engine.multi_agent.direct_pointy_runtime import (
     _format_pointy_inventory,
@@ -2664,71 +2664,31 @@ async def execute_direct_tool_rounds_impl(
         if forced_web_response is not None:
             return forced_web_response, messages, tool_call_events
 
-        if _should_request_uploaded_doc_course_preview(query=query, state=state, tools=tools):
-            forced_course_tool = _find_doc_course_host_action_tool(tools)
-            if forced_course_tool is not None:
-                tc_args = _build_uploaded_doc_course_params(query, state)
-                response = await execute_document_host_action_shortcut(
-                    shortcut=_DOC_COURSE_HOST_ACTION_SHORTCUT,
-                    tool=forced_course_tool,
-                    args=tc_args,
-                    state=state,
-                    tool_call_events=tool_call_events,
-                    push_event=push_event,
-                    invoke_tool_with_runtime=graph_invoke_tool_with_runtime,
-                    maybe_emit_host_action_event=graph_maybe_emit_host_action_event,
-                    summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
-                    runtime_context_base=runtime_context_base,
-                    query_snippet=str(tc_args.get("title", ""))[:100],
-                    logger_obj=logger,
-                )
-                logger.info(
-                    "[DIRECT] Deterministic document course host action requested "
-                    "(attachments=%d, source_refs=%d)",
-                    len(_uploaded_document_attachments_from_state(state)),
-                    len(tc_args.get("source_references") or []),
-                )
-                return (
-                    _build_assistant_message(
-                        response,
-                        native_tool_messages=native_tool_messages,
-                    ),
-                    messages,
-                    tool_call_events,
-                )
-
-        if _should_request_uploaded_doc_preview(query=query, state=state, tools=tools):
-            forced_preview_tool = _find_doc_preview_host_action_tool(tools)
-            if forced_preview_tool is not None:
-                tc_args = _build_uploaded_doc_preview_params(query, state)
-                response = await execute_document_host_action_shortcut(
-                    shortcut=_DOC_PREVIEW_HOST_ACTION_SHORTCUT,
-                    tool=forced_preview_tool,
-                    args=tc_args,
-                    state=state,
-                    tool_call_events=tool_call_events,
-                    push_event=push_event,
-                    invoke_tool_with_runtime=graph_invoke_tool_with_runtime,
-                    maybe_emit_host_action_event=graph_maybe_emit_host_action_event,
-                    summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
-                    runtime_context_base=runtime_context_base,
-                    query_snippet=str(tc_args.get("title", ""))[:100],
-                    logger_obj=logger,
-                )
-                logger.info(
-                    "[DIRECT] Deterministic document preview host action requested "
-                    "(attachments=%d, source_refs=%d)",
-                    len(_uploaded_document_attachments_from_state(state)),
-                    len(tc_args.get("source_references") or []),
-                )
-                return (
-                    _build_assistant_message(
-                        response,
-                        native_tool_messages=native_tool_messages,
-                    ),
-                    messages,
-                    tool_call_events,
-                )
+        document_shortcut_response = await execute_requested_document_host_action_shortcut(
+            query=query,
+            state=state,
+            tools=tools,
+            tool_call_events=tool_call_events,
+            push_event=push_event,
+            native_tool_messages=native_tool_messages,
+            runtime_context_base=runtime_context_base,
+            invoke_tool_with_runtime=graph_invoke_tool_with_runtime,
+            maybe_emit_host_action_event=graph_maybe_emit_host_action_event,
+            summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
+            should_request_course_preview=_should_request_uploaded_doc_course_preview,
+            find_course_host_action_tool=_find_doc_course_host_action_tool,
+            build_course_params=_build_uploaded_doc_course_params,
+            course_shortcut=_DOC_COURSE_HOST_ACTION_SHORTCUT,
+            should_request_lesson_preview=_should_request_uploaded_doc_preview,
+            find_lesson_host_action_tool=_find_doc_preview_host_action_tool,
+            build_lesson_params=_build_uploaded_doc_preview_params,
+            lesson_shortcut=_DOC_PREVIEW_HOST_ACTION_SHORTCUT,
+            build_assistant_message=_build_assistant_message,
+            uploaded_document_attachments_from_state=_uploaded_document_attachments_from_state,
+            logger_obj=logger,
+        )
+        if document_shortcut_response is not None:
+            return document_shortcut_response, messages, tool_call_events
 
         if tools and forced_tool_choice:
             # Forced tool choice — use ainvoke to ensure tool calls happen
@@ -2857,7 +2817,7 @@ async def execute_direct_tool_rounds_impl(
                         pointy_payload = build_pointy_event(mode="clear")
                         validation_error = None
                     else:
-                        pointy_args = tc.get("args", {}) or {}
+                        pointy_args = tc_args or {}
                         raw_selector = str(pointy_args.get("selector", "")).strip()
                         # Validate selector vs inventory.
                         validation_error = _validate_pointy_selector(
