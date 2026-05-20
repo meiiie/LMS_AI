@@ -14,6 +14,11 @@ PushEvent = Callable[[dict[str, Any]], Awaitable[None]]
 InvokeTool = Callable[..., Awaitable[Any]]
 EmitHostAction = Callable[..., Awaitable[None]]
 SummarizeToolResult = Callable[[str, Any], Any]
+ShouldRequestPreview = Callable[..., bool]
+FindHostActionTool = Callable[[list[Any]], Any | None]
+BuildHostActionParams = Callable[[str, AgentState | None], dict[str, Any]]
+BuildAssistantMessage = Callable[..., Any]
+UploadedDocumentAttachments = Callable[[AgentState | None], list[Any]]
 
 
 @dataclass(frozen=True)
@@ -27,6 +32,61 @@ class DocumentHostActionShortcut:
     thinking_provenance: str
     response: str
     failure_log_message: str
+
+
+@dataclass(frozen=True)
+class RequestedDocumentHostActionShortcut:
+    """Resolved preview-only shortcut selected for the current user turn."""
+
+    shortcut: DocumentHostActionShortcut
+    tool: Any
+    args: dict[str, Any]
+    log_message: str
+
+
+def resolve_requested_document_host_action_shortcut(
+    *,
+    query: str,
+    state: AgentState,
+    tools: list[Any],
+    should_request_course_preview: ShouldRequestPreview,
+    find_course_host_action_tool: FindHostActionTool,
+    build_course_params: BuildHostActionParams,
+    course_shortcut: DocumentHostActionShortcut,
+    should_request_lesson_preview: ShouldRequestPreview,
+    find_lesson_host_action_tool: FindHostActionTool,
+    build_lesson_params: BuildHostActionParams,
+    lesson_shortcut: DocumentHostActionShortcut,
+) -> RequestedDocumentHostActionShortcut | None:
+    """Resolve the deterministic uploaded-document preview shortcut for a turn."""
+
+    if should_request_course_preview(query=query, state=state, tools=tools):
+        course_tool = find_course_host_action_tool(tools)
+        if course_tool is not None:
+            return RequestedDocumentHostActionShortcut(
+                shortcut=course_shortcut,
+                tool=course_tool,
+                args=build_course_params(query, state),
+                log_message=(
+                    "[DIRECT] Deterministic document course host action requested "
+                    "(attachments=%d, source_refs=%d)"
+                ),
+            )
+
+    if should_request_lesson_preview(query=query, state=state, tools=tools):
+        preview_tool = find_lesson_host_action_tool(tools)
+        if preview_tool is not None:
+            return RequestedDocumentHostActionShortcut(
+                shortcut=lesson_shortcut,
+                tool=preview_tool,
+                args=build_lesson_params(query, state),
+                log_message=(
+                    "[DIRECT] Deterministic document preview host action requested "
+                    "(attachments=%d, source_refs=%d)"
+                ),
+            )
+
+    return None
 
 
 async def execute_document_host_action_shortcut(
@@ -139,3 +199,70 @@ async def execute_document_host_action_shortcut(
         }
     )
     return shortcut.response
+
+
+async def execute_requested_document_host_action_shortcut(
+    *,
+    query: str,
+    state: AgentState,
+    tools: list[Any],
+    tool_call_events: list[dict[str, Any]],
+    push_event: PushEvent,
+    native_tool_messages: bool,
+    runtime_context_base: Any,
+    invoke_tool_with_runtime: InvokeTool,
+    maybe_emit_host_action_event: EmitHostAction,
+    summarize_tool_result_for_stream: SummarizeToolResult,
+    should_request_course_preview: ShouldRequestPreview,
+    find_course_host_action_tool: FindHostActionTool,
+    build_course_params: BuildHostActionParams,
+    course_shortcut: DocumentHostActionShortcut,
+    should_request_lesson_preview: ShouldRequestPreview,
+    find_lesson_host_action_tool: FindHostActionTool,
+    build_lesson_params: BuildHostActionParams,
+    lesson_shortcut: DocumentHostActionShortcut,
+    build_assistant_message: BuildAssistantMessage,
+    uploaded_document_attachments_from_state: UploadedDocumentAttachments,
+    logger_obj: logging.Logger,
+) -> Any | None:
+    """Execute the requested uploaded-document preview shortcut, if any."""
+
+    request = resolve_requested_document_host_action_shortcut(
+        query=query,
+        state=state,
+        tools=tools,
+        should_request_course_preview=should_request_course_preview,
+        find_course_host_action_tool=find_course_host_action_tool,
+        build_course_params=build_course_params,
+        course_shortcut=course_shortcut,
+        should_request_lesson_preview=should_request_lesson_preview,
+        find_lesson_host_action_tool=find_lesson_host_action_tool,
+        build_lesson_params=build_lesson_params,
+        lesson_shortcut=lesson_shortcut,
+    )
+    if request is None:
+        return None
+
+    response = await execute_document_host_action_shortcut(
+        shortcut=request.shortcut,
+        tool=request.tool,
+        args=request.args,
+        state=state,
+        tool_call_events=tool_call_events,
+        push_event=push_event,
+        invoke_tool_with_runtime=invoke_tool_with_runtime,
+        maybe_emit_host_action_event=maybe_emit_host_action_event,
+        summarize_tool_result_for_stream=summarize_tool_result_for_stream,
+        runtime_context_base=runtime_context_base,
+        query_snippet=str(request.args.get("title", ""))[:100],
+        logger_obj=logger_obj,
+    )
+    logger_obj.info(
+        request.log_message,
+        len(uploaded_document_attachments_from_state(state)),
+        len(request.args.get("source_references") or []),
+    )
+    return build_assistant_message(
+        response,
+        native_tool_messages=native_tool_messages,
+    )
