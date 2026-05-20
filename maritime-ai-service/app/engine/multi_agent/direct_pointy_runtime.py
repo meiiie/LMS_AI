@@ -7,7 +7,21 @@ carrying Pointy policy inline.
 
 from __future__ import annotations
 
-from typing import Any
+import logging
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable
+
+
+PushEvent = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class DirectPointyPostDispatchResult:
+    """Result after Pointy-specific post-dispatch handling."""
+
+    result: Any
+    pointy_action_emitted: bool = False
+    inventory_served: bool = False
 
 
 def _validate_pointy_selector(selector: str, state: Any) -> str | None:
@@ -208,3 +222,78 @@ def _format_pointy_inventory(state: Any) -> str:
             lines.append(f'User selected text: "{preview}"')
 
     return "\n".join(lines)
+
+
+async def handle_direct_pointy_post_dispatch(
+    *,
+    tool_name: str,
+    tool_args: dict[str, Any],
+    result: Any,
+    state: Any,
+    push_event: PushEvent,
+    logger_obj: logging.Logger,
+) -> DirectPointyPostDispatchResult:
+    """Apply Pointy post-dispatch side effects and result rewriting."""
+
+    updated_result = result
+    pointy_action_emitted = False
+    inventory_served = False
+
+    if tool_name in ("tool_pointy_show", "tool_pointy_clear"):
+        try:
+            from app.engine.tools.pointy_tools import build_pointy_event
+
+            if tool_name == "tool_pointy_clear":
+                pointy_payload = build_pointy_event(mode="clear")
+            else:
+                raw_selector = str((tool_args or {}).get("selector", "")).strip()
+                validation_error = _validate_pointy_selector(raw_selector, state)
+                if validation_error:
+                    updated_result = validation_error
+                    logger_obj.warning(
+                        "[POINTY] selector validation FAILED: %s | raw=%r",
+                        validation_error[:120],
+                        raw_selector[:80],
+                    )
+                    pointy_payload = None
+                else:
+                    pointy_payload = build_pointy_event(
+                        selector=raw_selector,
+                        caption=str((tool_args or {}).get("caption", "")),
+                        duration_ms=int((tool_args or {}).get("duration_ms", 4500) or 4500),
+                        mode=str((tool_args or {}).get("mode", "highlight") or "highlight"),
+                    )
+            if pointy_payload is not None:
+                await push_event(
+                    {
+                        "type": "pointy_action",
+                        "content": pointy_payload,
+                        "node": "direct",
+                    }
+                )
+                pointy_action_emitted = True
+                logger_obj.info(
+                    "[POINTY] dispatched action=%s selector=%r (direct)",
+                    pointy_payload.get("action"),
+                    pointy_payload.get("params", {}).get("selector"),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger_obj.warning("[POINTY] direct emit failed: %s", exc)
+
+    if tool_name == "tool_pointy_inventory":
+        try:
+            inventory_text = _format_pointy_inventory(state)
+            updated_result = inventory_text
+            inventory_served = True
+            logger_obj.info(
+                "[POINTY] inventory served (%d chars)",
+                len(inventory_text),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger_obj.warning("[POINTY] inventory format failed: %s", exc)
+
+    return DirectPointyPostDispatchResult(
+        result=updated_result,
+        pointy_action_emitted=pointy_action_emitted,
+        inventory_served=inventory_served,
+    )

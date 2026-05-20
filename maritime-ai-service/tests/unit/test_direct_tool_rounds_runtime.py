@@ -2470,6 +2470,86 @@ def test_pointy_validator_accepts_bare_id_in_inventory():
     assert _validate_pointy_selector("chat-send-button", state) is None
 
 
+@pytest.mark.asyncio
+async def test_direct_pointy_post_dispatch_emits_show_action() -> None:
+    from app.engine.multi_agent.direct_pointy_runtime import (
+        handle_direct_pointy_post_dispatch,
+    )
+
+    pushed_events: list[dict] = []
+
+    async def push_event(event: dict) -> None:
+        pushed_events.append(event)
+
+    result = await handle_direct_pointy_post_dispatch(
+        tool_name="tool_pointy_show",
+        tool_args={
+            "selector": "chat-send-button",
+            "caption": "Nút gửi",
+            "duration_ms": 3000,
+        },
+        result="[POINTY:highlight]",
+        state=_state_with_targets("chat-send-button"),
+        push_event=push_event,
+        logger_obj=__import__("logging").getLogger(__name__),
+    )
+
+    assert result.result == "[POINTY:highlight]"
+    assert result.pointy_action_emitted is True
+    assert result.inventory_served is False
+    assert [event["type"] for event in pushed_events] == ["pointy_action"]
+    assert pushed_events[0]["content"]["action"] == "ui.highlight"
+    assert pushed_events[0]["content"]["params"]["selector"] == "chat-send-button"
+
+
+@pytest.mark.asyncio
+async def test_direct_pointy_post_dispatch_rewrites_invalid_selector_result() -> None:
+    from app.engine.multi_agent.direct_pointy_runtime import (
+        handle_direct_pointy_post_dispatch,
+    )
+
+    pushed_events: list[dict] = []
+
+    async def push_event(event: dict) -> None:
+        pushed_events.append(event)
+
+    result = await handle_direct_pointy_post_dispatch(
+        tool_name="tool_pointy_show",
+        tool_args={"selector": ".send-button"},
+        result="[POINTY:highlight]",
+        state=_state_with_targets("chat-send-button"),
+        push_event=push_event,
+        logger_obj=__import__("logging").getLogger(__name__),
+    )
+
+    assert "NOT a valid Wiii Pointy id" in result.result
+    assert result.pointy_action_emitted is False
+    assert pushed_events == []
+
+
+@pytest.mark.asyncio
+async def test_direct_pointy_post_dispatch_rewrites_inventory_result() -> None:
+    from app.engine.multi_agent.direct_pointy_runtime import (
+        handle_direct_pointy_post_dispatch,
+    )
+
+    async def push_event(event: dict) -> None:
+        return None
+
+    result = await handle_direct_pointy_post_dispatch(
+        tool_name="tool_pointy_inventory",
+        tool_args={},
+        result="[POINTY:inventory]",
+        state=_state_with_targets("chat-send-button"),
+        push_event=push_event,
+        logger_obj=__import__("logging").getLogger(__name__),
+    )
+
+    assert result.inventory_served is True
+    assert "Pointable elements" in result.result
+    assert 'tool_pointy_show(selector="chat-send-button"' in result.result
+
+
 def test_pointy_validator_accepts_auto_id_in_inventory():
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         _validate_pointy_selector,
