@@ -50,6 +50,9 @@ from app.engine.multi_agent.direct_final_synthesis_runtime import (
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
 )
+from app.engine.multi_agent.direct_search_template_runtime import (
+    build_direct_post_tool_search_template_response,
+)
 from app.engine.multi_agent.direct_document_host_action_runtime import (
     DocumentHostActionShortcut,
     execute_document_host_action_shortcut,
@@ -67,10 +70,10 @@ from app.engine.multi_agent.direct_web_search_policy import (
     FORCED_WEB_SEARCH_TOOL_NAMES as _FORCED_WEB_SEARCH_TOOL_NAMES,
     _clean_forced_web_search_query,
     _force_skills_for_turn,
-    _has_search_tool_result,
+    _has_search_tool_result,  # noqa: F401 - compatibility alias
     _is_search_tool_name,
     _prefer_official_query_for_known_docs,
-    _should_return_search_template_after_tool_round,
+    _should_return_search_template_after_tool_round,  # noqa: F401 - compatibility alias
     _should_use_search_template_for_empty_response,  # noqa: F401 - compatibility alias
 )
 from app.engine.multi_agent.visual_events import (
@@ -3102,76 +3105,22 @@ async def execute_direct_tool_rounds_impl(
             tool_call_events=tool_call_events,
         )
 
-        if (
-            "web-search" in _force_skills_for_turn(state)
-            and _has_search_tool_result(tool_call_events)
-        ):
-            template_response = ""
-            try:
-                template_response = build_search_template_fallback(
-                    query=query,
-                    tool_call_events=tool_call_events,
-                )
-            except Exception as template_error:  # noqa: BLE001
-                logger.warning(
-                    "[DIRECT] Forced @web-search template synthesis failed: %s",
-                    template_error,
-                )
-            if template_response:
-                logger.info(
-                    "[DIRECT] Forced @web-search returning source-backed template "
-                    "immediately after tool result (events=%d, len=%d)",
-                    len(tool_call_events),
-                    len(template_response),
-                )
-                return (
-                    _build_assistant_message(
-                        template_response,
-                        native_tool_messages=native_tool_messages,
-                    ),
-                    messages,
-                    tool_call_events,
-                )
+        search_template_response = build_direct_post_tool_search_template_response(
+            query=query,
+            state=state,
+            tool_call_events=tool_call_events,
+            tool_round=tool_round,
+            native_tool_messages=native_tool_messages,
+            logger_obj=logger,
+        )
+        if search_template_response is not None:
+            return search_template_response, messages, tool_call_events
 
         # Phase 35 — convergence self-eval rubric injected after round 0.
         # SOTA Anthropic Claude tool-use pattern: explicit "is info sufficient?"
         # check between rounds. ONLY inject when round 0 returned sparse content
         # (< 2500 chars) — when search already rich, avoid extra NVIDIA round
         # (each round adds 30-60s on free tier).
-        if _should_return_search_template_after_tool_round(
-            query=query,
-            state=state,
-            tool_call_events=tool_call_events,
-            tool_round=tool_round,
-        ):
-            template_response = ""
-            try:
-                template_response = build_search_template_fallback(
-                    query=query,
-                    tool_call_events=tool_call_events,
-                )
-            except Exception as template_error:  # noqa: BLE001
-                logger.warning(
-                    "[DIRECT] Explicit web-search template synthesis failed: %s",
-                    template_error,
-                )
-            if template_response:
-                logger.info(
-                    "[DIRECT] Explicit web-search returning source-backed template "
-                    "after tool evidence (round=%d, events=%d, len=%d)",
-                    tool_round,
-                    len(tool_call_events),
-                    len(template_response),
-                )
-                return (
-                    _build_assistant_message(
-                        template_response,
-                        native_tool_messages=native_tool_messages,
-                    ),
-                    messages,
-                    tool_call_events,
-                )
-
         append_direct_tool_convergence_hint(
             messages=messages,
             tool_round=tool_round,

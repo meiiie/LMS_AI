@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -78,6 +78,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_tool_response_finalization_runtime.py`, keeping empty-response
   search-template fallback, forced no-tool synthesis, provider propagation, and
   widget injection behind a focused helper.
+- Follow-up #439 moved post-tool source-backed search-template early returns
+  into `direct_search_template_runtime.py`, keeping forced `@web-search` and
+  explicit web-search evidence exits behind a focused helper.
 
 ## Preserved Intentionally
 
@@ -112,9 +115,9 @@ backups, data PDFs, or local skill folders.
   web-search policy plus deterministic document host-action execution, message
   builders, generic tool dispatch, final synthesis helper construction, and
   final synthesis execution plus post-tool convergence policy have moved out.
-  Follow-up LLM selection, invocation, and response finalization have also
-  moved out. The next durable step is separating remaining round-loop branch
-  decisions and early-return shortcuts from the main loop.
+  Follow-up LLM selection, invocation, response finalization, and post-tool
+  search-template returns have also moved out. The next durable step is
+  separating remaining deterministic shortcut branches from the main loop.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, caption copy, and explicit-simulation
   quality policy are no longer embedded in the renderer body. Scene and
@@ -178,3 +181,7 @@ In follow-up #437, the direct tool-round command passed with 71 tests after
 moving post-tool response finalization into
 `direct_tool_response_finalization_runtime.py`. Targeted ruff checks also
 passed for the response finalization extraction.
+In follow-up #439, the direct tool-round command passed with 74 tests after
+moving post-tool source-backed search-template returns into
+`direct_search_template_runtime.py`. Targeted ruff checks also passed for the
+search-template return extraction.
