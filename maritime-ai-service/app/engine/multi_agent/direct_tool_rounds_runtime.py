@@ -21,6 +21,12 @@ from app.engine.multi_agent.direct_opening_runtime import (
     finalize_direct_opening_phase_impl,
     start_direct_opening_phase_impl,
 )
+from app.engine.multi_agent.direct_tool_message_runtime import (
+    build_assistant_message as _build_assistant_message,
+    build_assistant_tool_call_message as _build_assistant_tool_call_message,
+    build_tool_result_message as _build_tool_result_message,
+    build_user_instruction_message as _build_user_instruction_message,
+)
 from app.engine.multi_agent.direct_prompts import _resolve_tool_choice, _tool_name
 from app.engine.multi_agent.direct_reasoning import (
     _build_direct_analytical_axes,
@@ -2543,81 +2549,6 @@ def _build_direct_final_synthesis_instruction(
             + "KHONG dung heading Markdown nhu #, ##, ###."
         )
     return base
-
-
-def _build_tool_result_message(
-    content: str,
-    *,
-    tool_call_id: str,
-    native_tool_messages: bool,
-) -> Any:
-    """Create the post-tool message without depending on LangChain."""
-    if native_tool_messages:
-        from app.engine.native_chat_runtime import make_tool_message
-
-        return make_tool_message(content, tool_call_id=tool_call_id)
-
-    from app.engine.messages import Message
-
-    return Message(role="tool", content=content, tool_call_id=tool_call_id)
-
-
-def _build_user_instruction_message(
-    content: str,
-    *,
-    native_tool_messages: bool,
-) -> Any:
-    """Create a user instruction message for final synthesis."""
-    if native_tool_messages:
-        from app.engine.native_chat_runtime import make_user_message
-
-        return make_user_message(content)
-
-    from app.engine.messages import Message
-
-    return Message(role="user", content=content)
-
-
-def _build_assistant_message(
-    content: str,
-    *,
-    native_tool_messages: bool,
-) -> Any:
-    if native_tool_messages:
-        from app.engine.native_chat_runtime import make_assistant_message
-
-        return make_assistant_message(content)
-
-    from app.engine.messages import Message
-
-    return Message(role="assistant", content=content)
-
-
-def _build_assistant_tool_call_message(
-    tool_calls: list[dict[str, Any]],
-    *,
-    native_tool_messages: bool,
-) -> Any:
-    if native_tool_messages:
-        from app.engine.native_chat_runtime import make_assistant_message
-
-        return make_assistant_message("", tool_calls=tool_calls)
-
-    from app.engine.messages import Message, ToolCall
-
-    return Message(
-        role="assistant",
-        content="",
-        tool_calls=[
-            ToolCall(
-                id=str(call.get("id") or f"raw_tool_call_{index}"),
-                name=str(call.get("name") or ""),
-                arguments=dict(call.get("args") or call.get("arguments") or {}),
-            )
-            for index, call in enumerate(tool_calls)
-            if str(call.get("name") or "").strip()
-        ],
-    )
 
 
 async def execute_direct_tool_rounds_impl(

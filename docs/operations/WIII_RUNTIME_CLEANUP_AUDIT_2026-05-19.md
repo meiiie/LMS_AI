@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -46,6 +46,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #421 moved particle-field, oscillation, function-plot, and
   timeline renderer bodies into `code_studio_scaffold_core_renderers.py`,
   completing the Code Studio primitive renderer split behind the registry.
+- Follow-up #423 moved direct tool-round message construction into
+  `direct_tool_message_runtime.py`, reducing provider/tool message-shape logic
+  inside the main tool loop before larger dispatch/synthesis extraction.
 
 ## Preserved Intentionally
 
@@ -77,9 +80,9 @@ backups, data PDFs, or local skill folders.
   has moved out. The long-term cleanup direction is lifecycle,
   response-finalization, and SSE V3 parity modules with narrow contract tests.
 - `direct_tool_rounds_runtime.py` remains large, but Pointy and explicit
-  web-search policy plus deterministic document host-action execution have
-  moved out. The next durable step is separating generic tool-dispatch
-  execution from final synthesis.
+  web-search policy plus deterministic document host-action execution and
+  message builders have moved out. The next durable step is separating generic
+  tool-dispatch execution from final synthesis.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, caption copy, and explicit-simulation
   quality policy are no longer embedded in the renderer body. Scene and
@@ -115,3 +118,5 @@ In follow-up #419, the same scaffold command passed with 56 tests after moving
 scene and data-band renderer bodies out of the monolithic scaffold module.
 In follow-up #421, the same scaffold command passed with 57 tests after moving
 the remaining primitive renderer bodies out of the monolithic scaffold module.
+In follow-up #423, the direct tool-round command passed with 57 tests after
+moving direct message builders out of the main tool loop.
