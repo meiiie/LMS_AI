@@ -115,14 +115,14 @@ backups, data PDFs, or local skill folders.
 - `direct_node_runtime.py` remains large, but session-memory parsing/recall
   has moved out. The long-term cleanup direction is lifecycle,
   response-finalization, and SSE V3 parity modules with narrow contract tests.
-- `direct_tool_rounds_runtime.py` remains large, but Pointy and explicit
-  web-search policy plus deterministic document host-action execution, message
-  builders, generic tool dispatch, final synthesis helper construction, and
-  final synthesis execution plus post-tool convergence policy have moved out.
-  Follow-up LLM selection, invocation, response finalization, and post-tool
-  search-template returns and forced web-search shortcuts have also moved out.
-  The next durable step is separating remaining deterministic document/visual
-  shortcut branches from the main loop.
+- `direct_tool_rounds_runtime.py` is now a smaller orchestration shell. Pointy,
+  explicit web-search policy, deterministic document host-action execution,
+  uploaded-document preview/course payload builders, message builders, generic
+  tool dispatch, final synthesis helper construction, final synthesis
+  execution, post-tool convergence policy, follow-up LLM selection/invocation,
+  response finalization, post-tool search-template returns, and forced
+  web-search shortcuts have moved out. The next durable step is separating the
+  remaining visual shortcut branch from the main loop.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, caption copy, and explicit-simulation
   quality policy are no longer embedded in the renderer body. Scene and
@@ -194,3 +194,7 @@ In follow-up #441, the direct tool-round command passed with 76 tests after
 moving the deterministic forced web-search shortcut into
 `direct_forced_web_search_runtime.py`. Targeted ruff checks also passed for the
 forced web-search shortcut extraction.
+In follow-up #469, the direct tool-round command passed with 81 tests after
+moving uploaded-document preview/course payload builders into
+`direct_document_preview_payloads.py`. Targeted ruff checks also passed for the
+payload extraction.
