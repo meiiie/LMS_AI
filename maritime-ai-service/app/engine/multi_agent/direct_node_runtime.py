@@ -24,7 +24,6 @@ from app.engine.multi_agent.direct_intent import (
     _normalize_for_intent,
 )
 from app.engine.multi_agent.direct_reasoning import (
-    _infer_direct_thinking_mode,
     _is_codebase_analysis_query,
 )
 from app.engine.multi_agent.direct_response_runtime import (
@@ -81,6 +80,12 @@ from app.engine.multi_agent.direct_node_operational_fast_paths import (
     _should_use_codebase_source_note_fast_answer,
     _strip_dsml_residue,
 )
+from app.engine.multi_agent.direct_node_thinking_effort import (
+    _DIRECT_ANALYTICAL_THINKING_MODES,
+    _DIRECT_CANONICAL_THINKING_EFFORT_ALIASES,
+    _canonicalize_direct_thinking_effort,
+    _resolve_direct_thinking_effort,
+)
 from app.engine.multi_agent.direct_node_uploaded_context import (
     _build_image_input_answer,
     _build_uploaded_document_context_fallback_answer,
@@ -117,7 +122,6 @@ from app.engine.multi_agent.direct_node_visible_thought import (
 from app.engine.runtime.runtime_metrics import inc_counter
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.visual_events import _summarize_tool_result_for_stream
-from app.engine.multi_agent.visual_intent_resolver import merge_thinking_effort
 from app.engine.reasoning import (
     align_visible_thinking_language,
     record_thinking_snapshot,
@@ -180,6 +184,13 @@ _DIRECT_OPERATIONAL_FAST_PATH_COMPAT_EXPORTS = (
     _clean_emergency_web_search_query,
     _extract_pointy_fast_path_answer,
     _strip_dsml_residue,
+)
+
+_DIRECT_THINKING_EFFORT_COMPAT_EXPORTS = (
+    _DIRECT_ANALYTICAL_THINKING_MODES,
+    _DIRECT_CANONICAL_THINKING_EFFORT_ALIASES,
+    _IDENTITY_ORIGIN_QUERY_MARKERS,
+    _canonicalize_direct_thinking_effort,
 )
 
 
@@ -274,63 +285,6 @@ def _rebind_document_preview_host_action_tool(
     return tools, force_tools, debug
 
 _HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS = 45.0  # Phase F3 (2026-05-06): bumped 24→45s. NVIDIA DeepSeek tool-heavy pointy turns (inventory + show + synthesis) regularly hit 25-35s; 24s caused canned fallback even when LLM was actively succeeding.
-
-_DIRECT_CANONICAL_THINKING_EFFORT_ALIASES = {
-    "light": "low",
-    "low": "low",
-    "moderate": "medium",
-    "medium": "medium",
-    "deep": "high",
-    "high": "high",
-    "max": "max",
-}
-_DIRECT_ANALYTICAL_THINKING_MODES = {
-    "analytical_general",
-    "analytical_market",
-    "analytical_math",
-}
-
-
-def _canonicalize_direct_thinking_effort(value: str | None) -> str | None:
-    candidate = str(value or "").strip().lower()
-    if not candidate:
-        return None
-    return _DIRECT_CANONICAL_THINKING_EFFORT_ALIASES.get(candidate)
-
-
-def _resolve_direct_thinking_effort(
-    *,
-    query: str,
-    state: AgentState,
-    current_effort: str | None,
-    is_identity_turn: bool,
-    is_short_house_chatter: bool,
-) -> str | None:
-    canonical_effort = _canonicalize_direct_thinking_effort(current_effort)
-    local_effort: str | None = None
-
-    if is_short_house_chatter:
-        local_effort = "low"
-    else:
-        folded_query = _fold_direct_text(query)
-        if is_identity_turn:
-            if any(marker in folded_query for marker in _IDENTITY_ORIGIN_QUERY_MARKERS):
-                local_effort = "max"
-            else:
-                local_effort = "high"
-        else:
-            thinking_mode = _infer_direct_thinking_mode(query, state, [])
-            if thinking_mode in _DIRECT_ANALYTICAL_THINKING_MODES:
-                local_effort = "high"
-
-    # Direct lane should be allowed to override generic routing defaults such as
-    # medium/moderate, while still preserving explicit higher asks like max.
-    if canonical_effort in {"high", "max"}:
-        return merge_thinking_effort(local_effort, canonical_effort)
-    if local_effort:
-        return local_effort
-    return canonical_effort
-
 
 async def _emergency_search_fallback(
     *,
