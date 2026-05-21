@@ -112,9 +112,15 @@ backups, data PDFs, or local skill folders.
 
 ## Remaining Debt
 
-- `direct_node_runtime.py` remains large, but session-memory parsing/recall
-  has moved out. The long-term cleanup direction is lifecycle,
-  response-finalization, and SSE V3 parity modules with narrow contract tests.
+- `direct_node_runtime.py` remains large, but session-memory parsing/recall,
+  thinking-effort policy, emergency fallback/salvage helpers, uploaded-context
+  guards, operational fast paths, meta fast paths, chatter fast paths, visible
+  thought helpers, and document-preview host-action rebinding have moved out.
+  The long-term cleanup direction is lifecycle, response-finalization, and SSE
+  V3 parity modules with narrow contract tests.
+- `direct_prompts.py` remains the main direct prompt assembly surface, but
+  force-bound skill directives, Pointy inventory prompt injection, and the
+  direct turn contract now live in `direct_prompt_turn_contracts.py`.
 - `direct_tool_rounds_runtime.py` is now a smaller orchestration shell. Pointy,
   explicit web-search policy, deterministic document host-action execution,
   uploaded-document preview/course payload builders, message builders, generic
@@ -194,7 +200,18 @@ In follow-up #441, the direct tool-round command passed with 76 tests after
 moving the deterministic forced web-search shortcut into
 `direct_forced_web_search_runtime.py`. Targeted ruff checks also passed for the
 forced web-search shortcut extraction.
+In follow-up #466, targeted direct-node reasoning tests passed after moving
+direct thinking-effort policy into `direct_node_thinking_effort.py`.
+In follow-up #468, targeted direct-node provider error tests passed after
+moving emergency search fallback, synthetic tool event emission, and salvage
+helpers into `direct_node_emergency_fallbacks.py`.
 In follow-up #469, the direct tool-round command passed with 81 tests after
 moving uploaded-document preview/course payload builders into
 `direct_document_preview_payloads.py`. Targeted ruff checks also passed for the
 payload extraction.
+In follow-up #471, targeted direct-node document preview/provider tests passed
+after moving LMS document-preview host-action rebinding into
+`direct_node_document_preview_rebind.py`.
+In follow-up #473, direct prompt contract tests passed after moving
+force-bound skill directives, Pointy inventory prompt injection, and direct
+turn-contract helpers into `direct_prompt_turn_contracts.py`.

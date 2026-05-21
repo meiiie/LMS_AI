@@ -62,6 +62,7 @@ The normal chat turn should be read in this order:
 | Direct tool loop | `maritime-ai-service/app/engine/multi_agent/direct_tool_rounds_runtime.py` (main orchestration)<br>Generic dispatch: `direct_tool_dispatch_runtime.py`<br>Final synthesis helpers: `direct_final_synthesis_runtime.py`<br>Pointy policy: `direct_pointy_runtime.py`<br>Web-search policy: `direct_web_search_policy.py`<br>Document host-action shortcuts: `direct_document_host_action_runtime.py`<br>Uploaded-document preview/course payloads: `direct_document_preview_payloads.py`<br>Message builders: `direct_tool_message_runtime.py`<br>Session-memory fast paths: `direct_session_memory_runtime.py` |
 | Native stream/provider quirks | `maritime-ai-service/app/engine/multi_agent/openai_stream_runtime.py` |
 | Routing and supervisor behavior | `maritime-ai-service/app/engine/multi_agent/supervisor*.py` |
+| Direct prompt assembly | `maritime-ai-service/app/engine/multi_agent/direct_prompts.py` (main assembly)<br>Turn contract and forced-skill prompt helpers: `direct_prompt_turn_contracts.py` |
 | Tool registry | `maritime-ai-service/app/engine/tools/registry.py` and `maritime-ai-service/app/engine/multi_agent/tool_collection.py` |
 | LMS host actions | `maritime-ai-service/app/engine/context/action_tools.py`, `maritime-ai-service/app/engine/tools/lms_tools.py` |
 | Document context | `maritime-ai-service/app/api/v1/document_context.py`, document runtime helpers |
