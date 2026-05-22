@@ -513,13 +513,13 @@ _build_visual_tool_runtime_metadata = _load_attr(
     "_build_visual_tool_runtime_metadata",
 )
 
-_tool_name = _load_attr("app.engine.multi_agent.direct_prompts", "_tool_name")
+_tool_name = _load_attr("app.engine.multi_agent.direct_prompt_tool_binding", "_tool_name")
 _resolve_tool_choice = _load_attr(
-    "app.engine.multi_agent.direct_prompts",
+    "app.engine.multi_agent.direct_prompt_tool_binding",
     "_resolve_tool_choice",
 )
 _bind_direct_tools_impl = _load_attr(
-    "app.engine.multi_agent.direct_prompts",
+    "app.engine.multi_agent.direct_prompt_tool_binding",
     "_bind_direct_tools",
 )
 _build_code_studio_delivery_contract = _load_attr(
@@ -527,11 +527,11 @@ _build_code_studio_delivery_contract = _load_attr(
     "_build_code_studio_delivery_contract",
 )
 _build_direct_tools_context = _load_attr(
-    "app.engine.multi_agent.direct_prompts",
+    "app.engine.multi_agent.direct_prompt_tool_context",
     "_build_direct_tools_context",
 )
 _build_code_studio_tools_context = _load_attr(
-    "app.engine.multi_agent.direct_prompts",
+    "app.engine.multi_agent.direct_prompt_tool_context",
     "_build_code_studio_tools_context",
 )
 _build_direct_chatter_system_prompt = _load_attr(

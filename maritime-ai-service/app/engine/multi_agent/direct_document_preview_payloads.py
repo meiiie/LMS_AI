@@ -12,7 +12,7 @@ from app.engine.multi_agent.document_preview_contract import (
     normalize_document_contract_text as _normalize_doc_preview_text,
     uploaded_document_attachments_from_state as _uploaded_document_attachments_from_state,
 )
-from app.engine.multi_agent.direct_prompts import _tool_name
+from app.engine.multi_agent.direct_prompt_tool_binding import _tool_name
 from app.engine.multi_agent.direct_document_preview_text import (
     _DOC_PREVIEW_LOW_VALUE_LABELS,
     _clean_doc_preview_line,

@@ -8,7 +8,7 @@ from typing import Any, Optional
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.code_studio_surface import _extract_code_studio_artifact_names
 from app.engine.multi_agent.direct_intent import _normalize_for_intent
-from app.engine.multi_agent.direct_prompts import _tool_name
+from app.engine.multi_agent.direct_prompt_tool_binding import _tool_name
 from app.engine.multi_agent.visual_intent_resolver import resolve_visual_intent
 
 

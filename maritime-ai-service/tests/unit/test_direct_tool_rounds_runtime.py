@@ -2690,7 +2690,7 @@ def test_build_force_skill_directive_pointy_inlines_inventory():
     """v3.0 F5: when @-mention force-binds wiii-pointy, system prompt
     directive must inline the available_targets so LLM picks right id
     without round-tripping tool_pointy_inventory."""
-    from app.engine.multi_agent.direct_prompts import _build_force_skill_directive
+    from app.engine.multi_agent.direct_prompt_turn_contracts import _build_force_skill_directive
 
     state = {
         'context': {
@@ -2722,14 +2722,14 @@ def test_build_force_skill_directive_pointy_inlines_inventory():
 
 
 def test_build_force_skill_directive_empty_when_no_force_skills():
-    from app.engine.multi_agent.direct_prompts import _build_force_skill_directive
+    from app.engine.multi_agent.direct_prompt_turn_contracts import _build_force_skill_directive
 
     assert _build_force_skill_directive({'context': {}}) == ''
     assert _build_force_skill_directive({}) == ''
 
 
 def test_build_force_skill_directive_web_search_branch():
-    from app.engine.multi_agent.direct_prompts import _build_force_skill_directive
+    from app.engine.multi_agent.direct_prompt_turn_contracts import _build_force_skill_directive
 
     state = {'context': {'force_skills': ['web-search']}}
     result = _build_force_skill_directive(state)

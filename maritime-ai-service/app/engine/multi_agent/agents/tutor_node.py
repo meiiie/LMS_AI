@@ -56,7 +56,7 @@ from app.engine.multi_agent.agents.tutor_tool_dispatch_runtime import (
 from app.engine.multi_agent.graph_surface_runtime import (
     get_effective_provider_impl as _get_effective_provider,
 )
-from app.engine.multi_agent.direct_prompts import (
+from app.engine.multi_agent.direct_prompt_tool_binding import (
     _resolve_tool_choice,
 )
 from app.engine.reasoning import (
@@ -68,15 +68,11 @@ from app.engine.reasoning import (
 )
 from app.prompts.prompt_context_utils import build_response_language_instruction
 from app.engine.multi_agent.agents.tutor_surface import (
-    LLM_CODE_GEN_VISUAL_INSTRUCTION,
-    STRUCTURED_VISUAL_TOOL_INSTRUCTION,
-    THINKING_CHAIN_INSTRUCTION,
-    TOOL_INSTRUCTION,
-    TOOL_INSTRUCTION_DEFAULT,
+    THINKING_CHAIN_INSTRUCTION,  # noqa: F401 - legacy tutor_node import surface
+    TOOL_INSTRUCTION,  # noqa: F401 - legacy tutor_node import surface
+    TOOL_INSTRUCTION_DEFAULT,  # noqa: F401 - legacy tutor_node import surface
     _MAX_PHASE_TRANSITIONS,
-    _infer_tutor_loop_phase,
     _iteration_beat,
-    _iteration_label,
     _tool_acknowledgment,
     build_tutor_identity_grounding_prompt,
     build_tutor_living_stream_cues,

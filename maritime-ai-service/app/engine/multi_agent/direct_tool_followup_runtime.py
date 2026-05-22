@@ -7,7 +7,10 @@ from dataclasses import dataclass
 import logging
 from typing import Any, Awaitable, Callable
 
-from app.engine.multi_agent.direct_prompts import _resolve_tool_choice, _tool_name
+from app.engine.multi_agent.direct_prompt_tool_binding import (
+    _resolve_tool_choice,
+    _tool_name,
+)
 from app.engine.multi_agent.visual_intent_resolver import (
     required_visual_tool_names,
 )
