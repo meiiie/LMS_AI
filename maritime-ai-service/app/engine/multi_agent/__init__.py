@@ -32,4 +32,7 @@ def __getattr__(name: str):
     if name == "process_with_multi_agent_streaming":
         from app.engine.multi_agent.streaming_runtime import process_with_multi_agent_streaming
         return process_with_multi_agent_streaming
+    if name == "graph":
+        import importlib
+        return importlib.import_module(f"{__name__}.graph")
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

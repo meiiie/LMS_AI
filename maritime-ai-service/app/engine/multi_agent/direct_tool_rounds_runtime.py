@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sys
-from typing import Any, Optional
+from typing import Optional
 
 from app.core.config import settings
 from app.engine.multi_agent.document_preview_contract import (
@@ -279,9 +278,9 @@ async def execute_direct_tool_rounds_impl(
         invoke_tool_with_runtime as _invoke_tool_with_runtime_impl,
     )
     from app.engine.multi_agent.direct_runtime_bindings import (
-        _extract_runtime_target,
+        build_direct_tool_provider_policy,
         _inject_widget_blocks_from_tool_results,
-        _remember_runtime_target,
+        resolve_direct_tool_runtime_bindings,
     )
     from app.engine.llm_pool import (
         FAILOVER_MODE_AUTO,
@@ -304,89 +303,35 @@ async def execute_direct_tool_rounds_impl(
     initial_timeout_profile = visual_policy.initial_timeout_profile
     followup_timeout_profile = visual_policy.followup_timeout_profile
     visual_emitted_any = False
-    request_failover_mode = (
-        FAILOVER_MODE_PINNED
-        if provider and str(provider).strip().lower() != "auto"
-        else FAILOVER_MODE_AUTO
+    provider_policy = build_direct_tool_provider_policy(
+        state=state,
+        provider=provider,
+        llm_base=llm_base,
+        llm_auto=llm_auto,
+        llm_with_tools=llm_with_tools,
+        failover_mode_auto=FAILOVER_MODE_AUTO,
+        failover_mode_pinned=FAILOVER_MODE_PINNED,
     )
-    resolved_provider = _extract_runtime_target(llm_base or llm_auto or llm_with_tools)[0]
-    graph_module = sys.modules.get("app.engine.multi_agent.graph")
-    graph_ainvoke_with_fallback = getattr(
-        graph_module,
-        "_ainvoke_with_fallback",
-        ainvoke_with_fallback,
+    request_failover_mode = provider_policy.request_failover_mode
+    resolved_provider = provider_policy.resolved_provider
+    tool_runtime_bindings = resolve_direct_tool_runtime_bindings(
+        ainvoke_with_fallback=ainvoke_with_fallback,
+        stream_direct_answer_with_fallback=stream_direct_answer_with_fallback,
+        stream_direct_wait_heartbeats=stream_direct_wait_heartbeats,
+        build_direct_tool_reflection=_build_direct_tool_reflection,
+        maybe_emit_host_action_event=_maybe_emit_host_action_event,
+        maybe_emit_visual_event=_maybe_emit_visual_event,
+        emit_visual_commit_events=_emit_visual_commit_events,
+        get_tool_by_name=_get_tool_by_name_impl,
+        invoke_tool_with_runtime=_invoke_tool_with_runtime_impl,
     )
-    graph_stream_direct_answer_with_fallback = getattr(
-        graph_module,
-        "_stream_direct_answer_with_fallback",
-        stream_direct_answer_with_fallback,
-    )
-    graph_stream_direct_wait_heartbeats = getattr(
-        graph_module,
-        "_stream_direct_wait_heartbeats",
-        stream_direct_wait_heartbeats,
-    )
-    graph_build_direct_tool_reflection = getattr(
-        graph_module,
-        "_build_direct_tool_reflection",
-        _build_direct_tool_reflection,
-    )
-    graph_maybe_emit_host_action_event = getattr(
-        graph_module,
-        "_maybe_emit_host_action_event",
-        _maybe_emit_host_action_event,
-    )
-    graph_maybe_emit_visual_event = getattr(
-        graph_module,
-        "_maybe_emit_visual_event",
-        _maybe_emit_visual_event,
-    )
-    graph_emit_visual_commit_events = getattr(
-        graph_module,
-        "_emit_visual_commit_events",
-        _emit_visual_commit_events,
-    )
-    graph_get_tool_by_name = getattr(
-        graph_module,
-        "get_tool_by_name",
-        _get_tool_by_name_impl,
-    )
-    graph_invoke_tool_with_runtime = getattr(
-        graph_module,
-        "invoke_tool_with_runtime",
-        _invoke_tool_with_runtime_impl,
-    )
-
-    def remember_execution_target(
-        candidate_llm: Any,
-        fallback_source: Any | None = None,
-    ) -> tuple[str | None, str | None]:
-        provider_name, model_name = _remember_runtime_target(state, candidate_llm)
-        if (not provider_name or not model_name) and fallback_source is not None:
-            fallback_provider, fallback_model = _remember_runtime_target(
-                state,
-                fallback_source,
-            )
-            provider_name = provider_name or fallback_provider
-            model_name = model_name or fallback_model
-        return provider_name, model_name
-
-    def runtime_tier_for(
-        candidate_llm: Any,
-        fallback_source: Any | None = None,
-    ) -> str:
-        for source in (candidate_llm, fallback_source, llm_base, llm_auto, llm_with_tools):
-            tier_value = getattr(source, "_wiii_tier_key", None) if source is not None else None
-            if isinstance(tier_value, str) and tier_value.strip():
-                return tier_value.strip().lower()
-        return "moderate"
 
     opening_cue, direct_thinking_stop, initial_heartbeat, opening_thinking_started = await start_direct_opening_phase_impl(
         query=query,
         state=state,
         push_event=push_event,
         infer_direct_reasoning_cue=_infer_direct_reasoning_cue,
-        stream_direct_wait_heartbeats=graph_stream_direct_wait_heartbeats,
+        stream_direct_wait_heartbeats=tool_runtime_bindings.stream_direct_wait_heartbeats,
     )
     streamed_direct_answer = False
     try:
@@ -399,8 +344,8 @@ async def execute_direct_tool_rounds_impl(
             push_event=push_event,
             native_tool_messages=native_tool_messages,
             runtime_context_base=runtime_context_base,
-            get_tool_by_name=graph_get_tool_by_name,
-            invoke_tool_with_runtime=graph_invoke_tool_with_runtime,
+            get_tool_by_name=tool_runtime_bindings.get_tool_by_name,
+            invoke_tool_with_runtime=tool_runtime_bindings.invoke_tool_with_runtime,
             summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
             logger_obj=logger,
         )
@@ -415,8 +360,8 @@ async def execute_direct_tool_rounds_impl(
             push_event=push_event,
             native_tool_messages=native_tool_messages,
             runtime_context_base=runtime_context_base,
-            invoke_tool_with_runtime=graph_invoke_tool_with_runtime,
-            maybe_emit_host_action_event=graph_maybe_emit_host_action_event,
+            invoke_tool_with_runtime=tool_runtime_bindings.invoke_tool_with_runtime,
+            maybe_emit_host_action_event=tool_runtime_bindings.maybe_emit_host_action_event,
             summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
             should_request_course_preview=_should_request_uploaded_doc_course_preview,
             find_course_host_action_tool=_find_doc_course_host_action_tool,
@@ -435,17 +380,17 @@ async def execute_direct_tool_rounds_impl(
 
         if tools and forced_tool_choice:
             # Forced tool choice — use ainvoke to ensure tool calls happen
-            candidate_provider, _candidate_model = remember_execution_target(
+            candidate_provider, _candidate_model = provider_policy.remember_execution_target(
                 llm_with_tools,
                 fallback_source=llm_base,
             )
             resolved_provider = candidate_provider or resolved_provider
-            llm_response = await graph_ainvoke_with_fallback(
+            llm_response = await tool_runtime_bindings.ainvoke_with_fallback(
                 llm_with_tools,
                 messages,
                 tools=tools,
                 tool_choice=forced_tool_choice,
-                tier=runtime_tier_for(llm_with_tools, llm_base),
+                tier=provider_policy.runtime_tier_for(llm_with_tools, llm_base),
                 provider=provider,
                 resolved_provider=resolved_provider,
                 failover_mode=request_failover_mode,
@@ -455,12 +400,12 @@ async def execute_direct_tool_rounds_impl(
                 allowed_fallback_providers=allowed_fallback_providers,
             )
         else:
-            candidate_provider, _candidate_model = remember_execution_target(
+            candidate_provider, _candidate_model = provider_policy.remember_execution_target(
                 llm_with_tools,
                 fallback_source=llm_base,
             )
             resolved_provider = candidate_provider or resolved_provider
-            llm_response, streamed_direct_answer = await graph_stream_direct_answer_with_fallback(
+            llm_response, streamed_direct_answer = await tool_runtime_bindings.stream_direct_answer_with_fallback(
                 llm_with_tools,
                 messages,
                 push_event,
@@ -515,15 +460,15 @@ async def execute_direct_tool_rounds_impl(
             visual_emitted_any=visual_emitted_any,
             runtime_context_base=runtime_context_base,
             handoffs_enabled=settings.enable_agent_handoffs,
-            get_tool_by_name=graph_get_tool_by_name,
-            invoke_tool_with_runtime=graph_invoke_tool_with_runtime,
+            get_tool_by_name=tool_runtime_bindings.get_tool_by_name,
+            invoke_tool_with_runtime=tool_runtime_bindings.invoke_tool_with_runtime,
             is_search_tool_name=_is_search_tool_name,
             prefer_official_query_for_known_docs=_prefer_official_query_for_known_docs,
             summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
-            maybe_emit_host_action_event=graph_maybe_emit_host_action_event,
-            maybe_emit_visual_event=graph_maybe_emit_visual_event,
-            emit_visual_commit_events=graph_emit_visual_commit_events,
-            build_direct_tool_reflection=graph_build_direct_tool_reflection,
+            maybe_emit_host_action_event=tool_runtime_bindings.maybe_emit_host_action_event,
+            maybe_emit_visual_event=tool_runtime_bindings.maybe_emit_visual_event,
+            emit_visual_commit_events=tool_runtime_bindings.emit_visual_commit_events,
+            build_direct_tool_reflection=tool_runtime_bindings.build_direct_tool_reflection,
             push_status_only_progress=push_status_only_progress,
             build_tool_result_message=_build_tool_result_message,
             normalize_tool_call=_normalize_tool_call,
@@ -578,10 +523,10 @@ async def execute_direct_tool_rounds_impl(
             followup_timeout_profile=followup_timeout_profile,
             state=state,
             allowed_fallback_providers=allowed_fallback_providers,
-            ainvoke_with_fallback=graph_ainvoke_with_fallback,
-            stream_direct_wait_heartbeats=graph_stream_direct_wait_heartbeats,
-            remember_execution_target=remember_execution_target,
-            runtime_tier_for=runtime_tier_for,
+            ainvoke_with_fallback=tool_runtime_bindings.ainvoke_with_fallback,
+            stream_direct_wait_heartbeats=tool_runtime_bindings.stream_direct_wait_heartbeats,
+            remember_execution_target=provider_policy.remember_execution_target,
+            runtime_tier_for=provider_policy.runtime_tier_for,
             round_cue=round_cue,
             round_tool_names=round_tool_names,
             logger_obj=logger,
@@ -608,10 +553,10 @@ async def execute_direct_tool_rounds_impl(
         resolved_provider=resolved_provider,
         request_failover_mode=request_failover_mode,
         allowed_fallback_providers=allowed_fallback_providers,
-        ainvoke_with_fallback=graph_ainvoke_with_fallback,
-        stream_direct_wait_heartbeats=graph_stream_direct_wait_heartbeats,
-        remember_execution_target=remember_execution_target,
-        runtime_tier_for=runtime_tier_for,
+        ainvoke_with_fallback=tool_runtime_bindings.ainvoke_with_fallback,
+        stream_direct_wait_heartbeats=tool_runtime_bindings.stream_direct_wait_heartbeats,
+        remember_execution_target=provider_policy.remember_execution_target,
+        runtime_tier_for=provider_policy.runtime_tier_for,
         inject_widget_blocks_from_tool_results=_inject_widget_blocks_from_tool_results,
         structured_visuals_enabled=visual_policy.structured_visuals_enabled,
         logger_obj=logger,
