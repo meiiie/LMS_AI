@@ -2,14 +2,8 @@ import logging
 import re
 
 from app.engine.tools.visual_html_builders import _wrap_html
-from app.engine.tools.visual_pendulum_scaffold import (
-    _build_pendulum_simulation_scaffold,
-    _looks_like_pendulum_simulation,
-)
+from app.engine.tools.visual_ai_slop import check_ai_slop_patterns
 from app.engine.tools.visual_scaffolds import (
-    _looks_like_dashboard,
-    _looks_like_quiz,
-    _looks_like_simulation,
     build_scaffold,
     detect_scaffold,
 )
@@ -64,6 +58,24 @@ def validate_code_studio_output_impl(
     quality_profile: str,
 ) -> str | None:
     lowered = raw_html.lower()
+    high_severity_slop = [
+        violation
+        for violation in check_ai_slop_patterns(raw_html)
+        if violation.severity == "high"
+    ]
+    if high_severity_slop:
+        details = "\n".join(
+            f"- {violation.rule}: {violation.message}"
+            for violation in high_severity_slop[:3]
+        )
+        return (
+            "Error: Code Studio output chua dat bar UI/UX truoc preview. "
+            "Hay sua cac dau hieu AI slop high-severity sau:\n"
+            f"{details}\n\n"
+            "Dung icon/SVG thay emoji trong UI chrome, tranh hero gradient tim-xanh, "
+            "va giu visual tap trung vao state/controls/readout that."
+        )
+
     chart_like = requested_visual_type == "chart" or artifact_kind == "chart_widget"
     uses_chart_runtime = any(
         token in lowered

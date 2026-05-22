@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537, #539, #549, #551, #553 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537, #539, #549, #551, #553, #555 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -224,6 +224,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_node_turn_policy.py`, keeping routing metadata, identity/social
   chatter policy, visual effort upgrade, provider override selection, and
   codebase/uploaded-document guards behind a typed lifecycle contract.
+- Follow-up #555 connected high-severity AI-slop detection to Code Studio
+  visual-code validation, so structural emoji and obvious hero-gradient slop
+  force a repair turn before preview instead of opening weak app chrome.
 
 ## Preserved Intentionally
 
@@ -289,9 +292,10 @@ backups, data PDFs, or local skill folders.
   from their canonical modules instead of through direct execution.
 - Code Studio deterministic fallback is now split across contract, spec,
   quality, captions, registry, shell, and renderer modules. The remaining debt
-  is product quality rather than module size: the scaffold should keep moving
-  toward richer typed visual intents and away from broad template fallback when
-  the primary visual tool path is healthy.
+  is product quality rather than module size: high-severity slop is now gated
+  before preview, and the scaffold should keep moving toward richer typed
+  visual intents and away from broad template fallback when the primary visual
+  tool path is healthy.
 - Some tests still import compatibility `graph.py` modules. Move tests toward
   `runtime.py` imports when the external import window can close.
 

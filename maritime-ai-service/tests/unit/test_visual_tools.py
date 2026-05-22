@@ -1548,6 +1548,30 @@ class TestCreateVisualCodeTool:
 
         assert "tool_generate_visual" in result
 
+    def test_rejects_high_severity_ai_slop_before_preview(self, monkeypatch):
+        class FakeSettings:
+            enable_llm_code_gen_visuals = True
+        monkeypatch.setattr("app.core.config.get_settings", lambda: FakeSettings())
+        from app.engine.tools.visual_tools import tool_create_visual_code
+
+        result = tool_create_visual_code.invoke({
+            "code_html": (
+                "<style>"
+                ".hero{padding:24px;background:#0f172a;color:white}"
+                ".action{border:1px solid #475569;padding:12px}"
+                "</style>"
+                "<div class='hero'>"
+                "<h2>" + "\U0001F680" + " Launch Panel</h2>"
+                "<button class='action'>" + "\U0001F680" + " Start</button>"
+                "<p>Interactive shell with enough visible content for validation.</p>"
+                "</div>"
+            ),
+            "title": "Slop Gate",
+        })
+
+        assert "AI slop" in result
+        assert "emoji_in_code_elements" in result
+
     def test_full_html_passthrough(self, monkeypatch):
         class FakeSettings:
             enable_llm_code_gen_visuals = True
