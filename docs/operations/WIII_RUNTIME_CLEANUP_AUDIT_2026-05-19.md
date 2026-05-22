@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -123,6 +123,11 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   RAF script wrapper, and shell composition helpers into
   `code_studio_scaffold_shell.py`, leaving `code_studio_template_scaffold.py`
   focused on spec inference, renderer registry, and public API.
+- Follow-up #495 moved Code Studio scaffold topic-library data, concept
+  matching, deterministic title/palette/object/motion/count inference, and
+  `extract_scaffold_spec` / `detect_scaffold_kind` into
+  `code_studio_scaffold_spec.py`, leaving `code_studio_template_scaffold.py`
+  as a renderer registry plus compatibility import surface.
 
 ## Preserved Intentionally
 
@@ -172,13 +177,11 @@ backups, data PDFs, or local skill folders.
   returns, and forced web-search shortcuts have moved out. The next durable
   step is shrinking the compatibility export surface once external imports can
   close.
-- `code_studio_template_scaffold.py` is still a large deterministic fallback,
-  but contract, renderer dispatch, caption copy, explicit-simulation quality
-  policy, shared shell helpers, scene/data-band bodies, and particle,
-  oscillation, timeline, and function-plot bodies have moved behind focused
-  boundaries. The next durable step is shrinking topic/spec extraction data and
-  helpers if product quality evidence shows that the deterministic fallback
-  remains too broad.
+- Code Studio deterministic fallback is now split across contract, spec,
+  quality, captions, registry, shell, and renderer modules. The remaining debt
+  is product quality rather than module size: the scaffold should keep moving
+  toward richer typed visual intents and away from broad template fallback when
+  the primary visual tool path is healthy.
 - Some tests still import compatibility `graph.py` modules. Move tests toward
   `runtime.py` imports when the external import window can close.
 
@@ -304,3 +307,7 @@ after moving palette/title/ARIA/CSS/script/shell helpers into
 routing regression set passed with 131 tests. Targeted ruff checks, repository
 `ruff check app/ --select=E9,F63,F7`, and `git diff --check` also passed for
 the shell helper extraction.
+In follow-up #495, the Code Studio scaffold regression set passed with 57 tests
+after moving deterministic intent/spec extraction into
+`code_studio_scaffold_spec.py`. Targeted ruff checks passed for the spec and
+renderer shell import surfaces.
