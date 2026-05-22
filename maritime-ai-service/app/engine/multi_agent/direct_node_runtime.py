@@ -10,7 +10,6 @@ from app.core.config import settings
 from app.core.exceptions import ProviderUnavailableError
 from app.engine.llm_failover_runtime import classify_failover_reason_impl
 from app.engine.multi_agent.document_preview_contract import (
-    DOC_PREVIEW_HOST_ACTION_TOOL as _DOC_PREVIEW_HOST_ACTION_TOOL,
     has_uploaded_document_context as _has_uploaded_document_context,
     uploaded_document_attachments_from_context as _uploaded_document_attachments,
 )
@@ -99,6 +98,7 @@ from app.engine.multi_agent.direct_node_thinking_effort import (
 from app.engine.multi_agent.direct_node_thinking_snapshot import (
     record_direct_node_thinking_snapshot,
 )
+from app.engine.multi_agent.direct_node_tool_selection import select_direct_node_tools
 from app.engine.multi_agent.direct_node_uploaded_context import (
     _build_image_input_answer,
     _build_uploaded_document_context_fallback_answer,
@@ -144,7 +144,6 @@ from app.engine.multi_agent.graph_runtime_helpers import (
     _extract_runtime_target,
     _is_native_runtime_handle,
 )
-from app.engine.multi_agent.tool_collection import _force_skills_from_state
 from app.engine.multi_agent.supervisor_runtime_support import (
     _looks_reasoning_safety_meta_turn,
     _looks_session_memory_ack_only_turn,
@@ -567,104 +566,24 @@ async def direct_response_node_impl(
             )
             explicit_web_search_turn = _is_explicit_web_search_turn_for_direct(query, state)
 
-            if is_short_house_chatter or is_identity_turn or is_emotional_support_turn:
-                tools, force_tools = [], False
-            elif is_codebase_source_turn and not explicit_web_search_turn and not needs_web_search(query):
-                tools, force_tools = [], False
-            else:
-                tools, force_tools = collect_direct_tools(
-                    query,
-                    ctx.get("user_role", "student"),
-                    state=state,
-                )
-                # Phase F5 (2026-05-06) — SOTA tool-binding for @-mention.
-                # When user force-binds via `@plugin-name` (Cursor / Claude
-                # Code / GitHub Copilot pattern), tool selection is NOT a
-                # heuristic guess: the user EXPLICITLY chose the plugin.
-                # We must:
-                #   (a) preserve every force-bound tool through the
-                #       skill_recommender prune step (must_include),
-                #   (b) flip force_tools=True so the LLM is required to
-                #       call (tool_choice="any" / "required" downstream),
-                #   (c) inject the SKILL prompt + page inventory at top
-                #       of system message (Anthropic Computer Use 2026
-                #       progressive disclosure pattern).
-                #
-                # Without these, NVIDIA DeepSeek frequently returns prose
-                # ("đang trỏ giúp cậu...") with zero tool_calls and the
-                # cursor never actually moves — exact symptom user hit
-                # 2026-05-06.
-                _force_skills_set = _force_skills_from_state(state)
-                if routing_intent == "web_search":
-                    _force_skills_set.add("web-search")
-                    merged_force_skills = sorted(_force_skills_set)
-                    state["force_skills"] = merged_force_skills
-                    if isinstance(ctx, dict):
-                        ctx["force_skills"] = merged_force_skills
-                _force_required_tools: list[str] = []
-                if "wiii-pointy" in _force_skills_set:
-                    # Exact inventory id contract — see SKILL.md anti-hallucination
-                    # rules. Force inventory + show, but NOT clear (clear
-                    # is a stop-action, only relevant when user said "stop").
-                    _force_required_tools.extend(
-                        ["tool_pointy_show", "tool_pointy_inventory"]
-                    )
-                if "web-search" in _force_skills_set:
-                    _force_required_tools.append("tool_web_search")
-                if _force_required_tools:
-                    force_tools = True
-                    logger.info(
-                        "[DIRECT] Force-bound via @-mention: required=%s",
-                        _force_required_tools,
-                    )
-                try:
-                    from app.engine.skills.skill_recommender import select_runtime_tools
-
-                    must_include_names = direct_required_tool_names(
-                        query,
-                        ctx.get("user_role", "student"),
-                    )
-                    if (
-                        has_uploaded_document_context
-                        and _looks_uploaded_document_preview_request(query)
-                        and _DOC_PREVIEW_HOST_ACTION_TOOL not in must_include_names
-                    ):
-                        must_include_names.append(_DOC_PREVIEW_HOST_ACTION_TOOL)
-                    # Merge force-bound names into must_include so the
-                    # recommender (max_tools=7) cannot prune them out
-                    # when the bound list is large.
-                    for n in _force_required_tools:
-                        if n not in must_include_names:
-                            must_include_names.append(n)
-
-                    selected_tools = select_runtime_tools(
-                        tools,
-                        query=query,
-                        intent=(state.get("routing_metadata") or {}).get("intent"),
-                        user_role=ctx.get("user_role", "student"),
-                        max_tools=min(len(tools), 7),
-                        must_include=must_include_names,
-                    )
-                    if selected_tools:
-                        tools = selected_tools
-                        logger.info(
-                            "[DIRECT] Runtime-selected tools: %s",
-                            [getattr(tool, "name", getattr(tool, "__name__", "unknown")) for tool in tools],
-                        )
-                except Exception as selection_error:
-                    logger.debug("[DIRECT] Runtime tool selection skipped: %s", selection_error)
-
-                if has_uploaded_document_context and _looks_uploaded_document_preview_request(query):
-                    tools, force_tools, doc_preview_debug = _rebind_document_preview_host_action_tool(
-                        tools=tools,
-                        force_tools=force_tools,
-                        query=query,
-                        state=state,
-                        ctx=ctx,
-                    )
-                    if isinstance(state.get("routing_metadata"), dict):
-                        state["routing_metadata"]["doc_preview_runtime"] = doc_preview_debug
-
+            tool_selection = select_direct_node_tools(
+                query=query,
+                state=state,
+                ctx=ctx,
+                routing_intent=routing_intent,
+                is_short_house_chatter=is_short_house_chatter,
+                is_identity_turn=is_identity_turn,
+                is_emotional_support_turn=is_emotional_support_turn,
+                is_codebase_source_turn=is_codebase_source_turn,
+                explicit_web_search_turn=explicit_web_search_turn,
+                has_uploaded_document_context=has_uploaded_document_context,
+                needs_web_search=needs_web_search,
+                collect_direct_tools=collect_direct_tools,
+                direct_required_tool_names=direct_required_tool_names,
+                logger_obj=logger,
+            )
+            tools = tool_selection.tools
+            force_tools = tool_selection.force_tools
             if (
                 not response
                 and has_uploaded_document_context
