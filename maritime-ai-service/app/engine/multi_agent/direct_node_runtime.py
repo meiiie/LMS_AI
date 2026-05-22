@@ -24,6 +24,9 @@ from app.engine.multi_agent.direct_node_fast_response_runtime import (
 from app.engine.multi_agent.direct_node_host_timeout import (
     run_direct_node_execution_with_host_timeout,
 )
+from app.engine.multi_agent.direct_node_image_input_preflight import (
+    execute_direct_node_image_input_preflight,
+)
 from app.engine.multi_agent.direct_node_execution_prep import (
     prepare_direct_node_tool_execution,
 )
@@ -56,9 +59,6 @@ from app.engine.multi_agent.direct_node_final_state import finalize_direct_node_
 from app.engine.multi_agent.direct_node_operational_fast_paths import (
     _build_codebase_analysis_fallback_answer,
     _build_codebase_analysis_fallback_thinking,
-    _build_image_input_thinking,
-    _build_image_input_unavailable_answer,
-    _build_image_input_unavailable_thinking,
     _is_explicit_web_search_turn_for_direct,
     _looks_generic_direct_fallback_response,
     _should_use_codebase_source_note_fast_answer,
@@ -72,7 +72,6 @@ from app.engine.multi_agent.direct_node_thinking_snapshot import (
 )
 from app.engine.multi_agent.direct_node_tool_selection import select_direct_node_tools
 from app.engine.multi_agent.direct_node_uploaded_context import (
-    _build_image_input_answer,
     _build_uploaded_document_context_fallback_answer,
     _build_uploaded_document_visual_guard_answer,
     _looks_uploaded_document_preview_request,
@@ -214,35 +213,18 @@ async def direct_response_node_impl(
     if document_preflight_result is not None:
         response = document_preflight_result.response
         response_type = document_preflight_result.response_type
-    if ctx_for_preflight.get("image_input_error") and has_uploaded_document_context:
-        ctx_for_preflight["images"] = []
-    if (
-        not response
-        and ctx_for_preflight.get("image_input_error")
-        and not has_uploaded_document_context
-    ):
-        response = _build_image_input_unavailable_answer(query)
-        response_type = "image_input_unavailable"
-        fast_thinking = _build_image_input_unavailable_thinking()
-        record_direct_node_thinking_snapshot(
-            state=state,
-            thinking=fast_thinking,
-            provenance="deterministic_image_input_unavailable",
-            record_thinking_snapshot_fn=record_thinking_snapshot,
-        )
-    elif not response and ctx_for_preflight.get("images") and not has_uploaded_document_context:
-        response = await _build_image_input_answer(
-            query,
-            list(ctx_for_preflight.get("images") or []),
-        )
-        response_type = "image_input"
-        fast_thinking = _build_image_input_thinking(query)
-        record_direct_node_thinking_snapshot(
-            state=state,
-            thinking=fast_thinking,
-            provenance="deterministic_image_input",
-            record_thinking_snapshot_fn=record_thinking_snapshot,
-        )
+
+    image_preflight_result = await execute_direct_node_image_input_preflight(
+        query=query,
+        state=state,
+        ctx=ctx_for_preflight,
+        response_present=bool(response),
+        has_uploaded_document_context=has_uploaded_document_context,
+        record_thinking_snapshot_fn=record_thinking_snapshot,
+    )
+    if image_preflight_result is not None:
+        response = image_preflight_result.response
+        response_type = image_preflight_result.response_type
 
     if not response:
         fast_response = resolve_direct_node_fast_response(
