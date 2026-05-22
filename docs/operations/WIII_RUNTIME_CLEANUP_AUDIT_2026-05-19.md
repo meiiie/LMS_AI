@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537, #539 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -196,6 +196,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #537 moved live-evidence planner prompt text and hint-list
   formatting into `direct_prompt_evidence.py`, keeping current-source lookup
   guidance separate from the direct prompt assembly shell.
+- Follow-up #539 moved uploaded-document context plan recording, preview
+  response sanitization, and the early LMS document-preview preflight into
+  `direct_node_document_preflight.py`, keeping preview-before-planner safety
+  visible as a focused lifecycle helper.
 
 ## Preserved Intentionally
 
@@ -227,7 +231,7 @@ backups, data PDFs, or local skill folders.
   thinking-effort policy, emergency fallback/salvage helpers, uploaded-context
   guards, operational/meta/chatter fast-response selection, visible
   thought helpers, thinking snapshot side effects, document-preview
-  host-action rebinding/execution, direct-node tool selection, LLM preflight,
+  host-action rebinding/execution/preflight, direct-node tool selection, LLM preflight,
   execution preparation, response cleanup, visible-thinking finalization,
   exception/source fallback lifecycle, final state/domain notice handling, and
   host UI timeout handling have moved out. The long-term cleanup direction is
