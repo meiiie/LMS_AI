@@ -29,6 +29,10 @@ from app.engine.multi_agent.direct_node_llm_preflight import (
     maybe_build_uploaded_visual_guard,
     select_direct_node_llm,
 )
+from app.engine.multi_agent.direct_node_response_cleanup import (
+    apply_source_backed_empty_response_fallback,
+    clean_direct_node_llm_response,
+)
 from app.engine.multi_agent.direct_node_document_preview_rebind import (
     _direct_role_candidates,
     _rebind_document_preview_host_action_tool,
@@ -791,77 +795,53 @@ async def direct_response_node_impl(
                     state["tool_call_events"] = tool_call_events
 
                 response, thinking_content, tools_used = extract_direct_response(llm_response, messages)
-                response = sanitize_structured_visual_answer_text(
-                    response,
+                cleaned_response = clean_direct_node_llm_response(
+                    query=query,
+                    state=state,
+                    response=response,
+                    thinking_content=thinking_content,
+                    tools_used=tools_used,
                     tool_call_events=tool_call_events,
+                    is_identity_turn=is_identity_turn,
+                    is_codebase_analysis_turn=_is_codebase_analysis_query(query),
+                    explicit_web_search_turn=explicit_web_search_turn,
+                    sanitize_structured_visual_answer_text=sanitize_structured_visual_answer_text,
+                    sanitize_wiii_house_text=sanitize_wiii_house_text,
+                    strip_direct_inline_private_asides=_strip_direct_inline_private_asides,
+                    strip_dsml_residue=_strip_dsml_residue,
+                    compact_basic_identity_answer=_compact_basic_identity_answer,
+                    looks_generic_direct_fallback_response=(
+                        _looks_generic_direct_fallback_response
+                    ),
+                    build_codebase_analysis_fallback_answer=(
+                        _build_codebase_analysis_fallback_answer
+                    ),
+                    build_codebase_analysis_fallback_thinking=(
+                        _build_codebase_analysis_fallback_thinking
+                    ),
+                    record_direct_node_thinking_snapshot=record_direct_node_thinking_snapshot,
+                    record_thinking_snapshot_fn=record_thinking_snapshot,
                 )
-                response = sanitize_wiii_house_text(response, query=query)
-                response = _strip_direct_inline_private_asides(response)
-                # Defensive DSML strip — DeepSeek occasionally emits tool-call
-                # markup as prose content even when tool_choice is "none".
-                response = _strip_dsml_residue(response).strip()
-                if is_identity_turn:
-                    response = _compact_basic_identity_answer(response, query=query)
-                if (
-                    _is_codebase_analysis_query(query)
-                    and not explicit_web_search_turn
-                    and _looks_generic_direct_fallback_response(response)
-                ):
-                    response = _build_codebase_analysis_fallback_answer(query)
-                    thinking_content = _build_codebase_analysis_fallback_thinking(query)
-                    record_direct_node_thinking_snapshot(
-                        state=state,
-                        thinking=thinking_content,
-                        provenance="deterministic_codebase_fallback",
-                        record_thinking_snapshot_fn=record_thinking_snapshot,
-                    )
-
+                response = cleaned_response.response
+                thinking_content = cleaned_response.thinking_content
+                tools_used = cleaned_response.tools_used
                 # Source-backed graceful synthesis: when the LLM returned an
                 # empty body but tools captured real search results (Perplexity
                 # 2026 / Anthropic Computer Use 2026 evidence-pool pattern),
                 # build a citation-bearing answer directly from tool_call_events
                 # instead of letting the user see nothing.
-                if tool_call_events and (
-                    not str(response or "").strip()
-                    or looks_like_search_placeholder_answer(response)
-                ):
-                    try:
-                        synthesis_template = build_search_template_fallback(
-                            query=query,
-                            tool_call_events=tool_call_events,
-                        )
-                    except Exception as template_error:
-                        logger.warning(
-                            "[DIRECT] Empty-response template fallback build failed: %s",
-                            template_error,
-                        )
-                        synthesis_template = ""
-                    if synthesis_template:
-                        logger.info(
-                            "[DIRECT] LLM returned empty/placeholder body — engaging "
-                            "source-backed template fallback (events=%d, len=%d)",
-                            len(tool_call_events),
-                            len(synthesis_template),
-                        )
-                        try:
-                            inc_counter(
-                                "wiii.direct.template_fallback.engaged",
-                                labels={"trigger": "empty_body"},
-                            )
-                        except Exception:  # noqa: BLE001
-                            pass
-                        response = synthesis_template
-                        if not tools_used:
-                            empty_body_tool_names = sorted({
-                                str(event.get("name") or "")
-                                for event in tool_call_events
-                                if event.get("type") == "result" and event.get("name")
-                            })
-                            tools_used = [
-                                {"name": name}
-                                for name in empty_body_tool_names
-                                if name
-                            ]
+                source_fallback = apply_source_backed_empty_response_fallback(
+                    query=query,
+                    response=response,
+                    tools_used=tools_used,
+                    tool_call_events=tool_call_events,
+                    looks_like_search_placeholder_answer=looks_like_search_placeholder_answer,
+                    build_search_template_fallback=build_search_template_fallback,
+                    inc_counter=inc_counter,
+                    logger_obj=logger,
+                )
+                response = source_fallback.response
+                tools_used = source_fallback.tools_used
 
                 if _should_surface_direct_visible_thought(
                     thinking_content,
