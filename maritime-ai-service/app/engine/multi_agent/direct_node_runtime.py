@@ -21,6 +21,9 @@ from app.engine.multi_agent.direct_node_fast_response_runtime import (
 from app.engine.multi_agent.direct_node_host_timeout import (
     run_direct_node_execution_with_host_timeout,
 )
+from app.engine.multi_agent.direct_node_execution_prep import (
+    prepare_direct_node_tool_execution,
+)
 from app.engine.multi_agent.direct_node_document_preview_rebind import (
     _direct_role_candidates,
     _rebind_document_preview_host_action_tool,
@@ -31,10 +34,6 @@ from app.engine.multi_agent.direct_intent import (
 )
 from app.engine.multi_agent.direct_reasoning import (
     _is_codebase_analysis_query,
-)
-from app.engine.multi_agent.direct_response_runtime import (
-    resolve_direct_fallback_provider_allowlist_impl_wrapper,
-    resolve_direct_answer_primary_timeout_impl,
 )
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
@@ -140,7 +139,6 @@ from app.engine.reasoning import (
     record_thinking_snapshot,
     should_align_visible_thinking_language,
 )
-from app.engine.tools.runtime_context import build_tool_runtime_context
 from app.engine.multi_agent.graph_runtime_helpers import (
     _copy_runtime_metadata,
     _extract_runtime_target,
@@ -723,64 +721,44 @@ async def direct_response_node_impl(
                     query[:60],
                 )
 
-                if visual_decision.force_tool and not force_tools and routing_intent not in ("learning", "lookup"):
-                    has_visual_tool = any(getattr(tool, "name", getattr(tool, "__name__", "")) == "tool_generate_visual" for tool in tools)
-                    if has_visual_tool:
-                        force_tools = True
-                        logger.info(
-                            "[DIRECT] Visual intent -> force tool_choice='any' (visual_type=%s)",
-                            visual_decision.visual_type,
-                        )
-                    else:
-                        logger.warning(
-                            "[DIRECT] Visual intent detected but tool_generate_visual not in tools list",
-                        )
+                execution_prep = prepare_direct_node_tool_execution(
+                    llm=llm,
+                    tools=tools,
+                    force_tools=force_tools,
+                    query=query,
+                    state=state,
+                    ctx=ctx,
+                    bus_id=bus_id,
+                    domain_name_vi=domain_name_vi,
+                    role_name=role_name,
+                    tools_context_override=tools_context_override,
+                    visual_decision=visual_decision,
+                    history_limit=history_limit,
+                    routing_intent=routing_intent,
+                    is_identity_turn=is_identity_turn,
+                    is_short_house_chatter=is_short_house_chatter,
+                    use_house_voice_direct=use_house_voice_direct,
+                    direct_provider_override=direct_provider_override,
+                    preferred_provider=preferred_provider,
+                    explicit_user_provider=explicit_user_provider,
+                    needs_web_search=needs_web_search,
+                    needs_datetime=needs_datetime,
+                    resolve_direct_answer_timeout_profile=resolve_direct_answer_timeout_profile,
+                    bind_direct_tools=bind_direct_tools,
+                    build_direct_system_messages=build_direct_system_messages,
+                    build_visual_tool_runtime_metadata=build_visual_tool_runtime_metadata,
+                    logger_obj=logger,
+                )
 
-                bound_provider, bound_model = _extract_runtime_target(llm)
-                bound_provider = bound_provider or state.get("provider")
-                if bound_provider and str(bound_provider).strip().lower() != "auto":
-                    state["_execution_provider"] = str(bound_provider)
-                if bound_model:
-                    state["_execution_model"] = str(bound_model)
-                    state["model"] = str(bound_model)
-                direct_answer_timeout_profile = resolve_direct_answer_timeout_profile(
-                    provider_name=bound_provider or direct_provider_override or preferred_provider,
-                    query=query,
-                    state=state,
-                    is_identity_turn=is_identity_turn,
-                    is_short_house_chatter=is_short_house_chatter,
-                    use_house_voice_direct=use_house_voice_direct,
-                    tools_bound=bool(tools),
+                force_tools = execution_prep.force_tools
+                direct_answer_timeout_profile = execution_prep.direct_answer_timeout_profile
+                direct_answer_primary_timeout = execution_prep.direct_answer_primary_timeout
+                direct_allowed_fallback_providers = (
+                    execution_prep.direct_allowed_fallback_providers
                 )
-                direct_answer_primary_timeout = resolve_direct_answer_primary_timeout_impl(
-                    provider_name=bound_provider or direct_provider_override or preferred_provider,
-                    query=query,
-                    state=state,
-                    is_identity_turn=is_identity_turn,
-                    is_short_house_chatter=is_short_house_chatter,
-                    use_house_voice_direct=use_house_voice_direct,
-                    tools_bound=bool(tools),
-                )
-                direct_allowed_fallback_providers = None
-                if not explicit_user_provider:
-                    direct_allowed_fallback_providers = (
-                        resolve_direct_fallback_provider_allowlist_impl_wrapper(
-                            provider_name=bound_provider or direct_provider_override or preferred_provider,
-                            query=query,
-                            state=state,
-                            is_identity_turn=is_identity_turn,
-                            is_short_house_chatter=is_short_house_chatter,
-                            use_house_voice_direct=use_house_voice_direct,
-                            tools_bound=bool(tools),
-                        )
-                    )
-                llm_with_tools, llm_auto, forced_tool_choice = bind_direct_tools(
-                    llm,
-                    tools,
-                    force_tools,
-                    provider=bound_provider,
-                    include_forced_choice=True,
-                )
+                llm_with_tools = execution_prep.llm_with_tools
+                llm_auto = execution_prep.llm_auto
+                forced_tool_choice = execution_prep.forced_tool_choice
                 # v9.0 F18 (2026-05-07) — when pointy is force-bound, the
                 # tool's selector is already enum-constrained at JSON-schema
                 # layer (Literal[...] in tool_pointy_show args). That's
@@ -792,37 +770,9 @@ async def direct_response_node_impl(
                 # is invoked, and the enum-constrained pointy tool wins
                 # when query is UI-related (other tools have unrelated
                 # signatures).
-                if force_tools:
-                    logger.info(
-                        "[DIRECT] Forced tool_choice=%r (web=%s, dt=%s, visual=%s)",
-                        forced_tool_choice,
-                        needs_web_search(query),
-                        needs_datetime(query),
-                        visual_decision.force_tool,
-                    )
-
-                native_direct_messages = _is_native_runtime_handle(llm)
-                messages = build_direct_system_messages(
-                    state,
-                    query,
-                    domain_name_vi,
-                    role_name=role_name,
-                    tools_context_override=tools_context_override,
-                    visual_decision=visual_decision,
-                    history_limit=history_limit,
-                    native_messages=native_direct_messages,
-                )
-                runtime_context_base = build_tool_runtime_context(
-                    event_bus_id=bus_id,
-                    request_id=ctx.get("request_id"),
-                    session_id=state.get("session_id"),
-                    organization_id=state.get("organization_id"),
-                    user_id=state.get("user_id"),
-                    user_role=ctx.get("user_role", "student"),
-                    node="direct",
-                    source="agentic_loop",
-                    metadata=build_visual_tool_runtime_metadata(state, query),
-                )
+                native_direct_messages = execution_prep.native_direct_messages
+                messages = execution_prep.messages
+                runtime_context_base = execution_prep.runtime_context_base
 
                 # Wiii Pointy v2.6 — adaptive max rounds. Loop tự exit
                 # khi LLM ngừng gọi tool; cap chỉ là runaway protection.

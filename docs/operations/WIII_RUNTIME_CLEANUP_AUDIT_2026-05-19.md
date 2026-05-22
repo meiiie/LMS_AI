@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -153,6 +153,11 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_node_host_timeout.py`, keeping the bounded fallback, answer-delta
   emission, and standalone-vs-LMS copy selection outside the main provider/tool
   execution branch.
+- Follow-up #507 moved direct-node execution preparation into
+  `direct_node_execution_prep.py`, keeping visual forced-tool policy,
+  provider/model state propagation, timeout profile selection, fallback
+  provider allowlisting, tool binding, message assembly, and runtime context
+  construction behind a focused helper.
 
 ## Preserved Intentionally
 
@@ -184,9 +189,10 @@ backups, data PDFs, or local skill folders.
   thinking-effort policy, emergency fallback/salvage helpers, uploaded-context
   guards, operational/meta/chatter fast-response selection, visible
   thought helpers, thinking snapshot side effects, document-preview
-  host-action rebinding/execution, direct-node tool selection, and host UI
-  timeout handling have moved out. The long-term cleanup direction is lifecycle,
-  response-finalization, and SSE V3 parity modules with narrow contract tests.
+  host-action rebinding/execution, direct-node tool selection, execution
+  preparation, and host UI timeout handling have moved out. The long-term
+  cleanup direction is lifecycle, response-finalization, and SSE V3 parity
+  modules with narrow contract tests.
 - `direct_prompts.py` remains the main direct prompt assembly surface, but
   force-bound skill directives, Pointy inventory prompt injection, the direct
   turn contract, provider-aware tool binding, and tool-context prompt builders
@@ -368,3 +374,7 @@ regressions passed with 46 tests after moving host UI timeout fallback into
 `direct_node_host_timeout.py`. Targeted ruff checks, repository
 `ruff check app/ --select=E9,F63,F7`, and `git diff --check` also passed for
 the extraction.
+In follow-up #507, focused direct-node execution-preparation tests plus
+direct-node tool-selection, host-timeout, and provider-error regressions passed
+with 41 tests after moving direct-node execution preparation into
+`direct_node_execution_prep.py`.
