@@ -21,6 +21,9 @@ from app.engine.multi_agent.direct_node_document_preflight import (
 from app.engine.multi_agent.direct_node_fast_response_runtime import (
     resolve_direct_node_fast_response,
 )
+from app.engine.multi_agent.direct_node_event_sink import (
+    build_direct_node_event_sink,
+)
 from app.engine.multi_agent.direct_node_host_timeout import (
     run_direct_node_execution_with_host_timeout,
 )
@@ -128,20 +131,14 @@ async def direct_response_node_impl(
     """Direct response node - conversational responses without RAG."""
     query = state.get("query", "")
 
-    event_queue = None
     bus_id = state.get("_event_bus_id")
-    if bus_id:
-        from app.engine.multi_agent.graph_event_bus import _get_event_queue
-
-        event_queue = _get_event_queue(bus_id)
-
-    async def push_event(event: dict):
-        capture_public_thinking_event(state, event)
-        if event_queue:
-            try:
-                event_queue.put_nowait(event)
-            except Exception as queue_error:
-                logger.debug("[DIRECT] Event queue push failed: %s", queue_error)
+    event_sink = build_direct_node_event_sink(
+        state=state,
+        bus_id=bus_id,
+        capture_public_thinking_event=capture_public_thinking_event,
+        logger_obj=logger,
+    )
+    push_event = event_sink.push_event
 
     tracer = get_or_create_tracer(state)
     tracer.start_step(direct_response_step_name, "Tao phan hoi truc tiep")
