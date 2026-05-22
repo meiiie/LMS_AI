@@ -15,9 +15,9 @@ Covers:
 - delete_memory: single memory delete
 """
 
-import pytest
 import json
-from unittest.mock import patch, MagicMock, PropertyMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 from uuid import uuid4
 from datetime import datetime, timezone
 
@@ -98,7 +98,9 @@ class TestFormatEmbedding:
 class TestSaveMemory:
     """Test memory saving."""
 
-    def test_successful_save(self):
+    def test_successful_save(self, monkeypatch):
+        from app.repositories import semantic_memory_repository_runtime as runtime_mod
+
         repo = _make_repo()
 
         mock_row = MagicMock()
@@ -113,6 +115,34 @@ class TestSaveMemory:
         mock_row.updated_at = None
 
         mock_session = _mock_session(repo, fetchone=mock_row)
+        inline_space = SimpleNamespace(
+            storage_kind="inline",
+            provider="google",
+            model="models/gemini-embedding-001",
+            dimensions=768,
+            space_fingerprint="google:models/gemini-embedding-001:768",
+        )
+        source_contract = SimpleNamespace(
+            provider="google",
+            model="models/gemini-embedding-001",
+            dimensions=768,
+            fingerprint="google:models/gemini-embedding-001:768",
+        )
+        monkeypatch.setattr(
+            runtime_mod,
+            "get_embedding_write_spaces",
+            lambda *_args, **_kwargs: (inline_space,),
+        )
+        monkeypatch.setattr(
+            runtime_mod,
+            "get_active_embedding_space_contract",
+            lambda: source_contract,
+        )
+        monkeypatch.setattr(
+            runtime_mod,
+            "build_shadow_embedding_sync",
+            lambda **kwargs: list(kwargs["source_embedding"]),
+        )
 
         from app.models.semantic_memory import SemanticMemoryCreate
         memory = SemanticMemoryCreate(
