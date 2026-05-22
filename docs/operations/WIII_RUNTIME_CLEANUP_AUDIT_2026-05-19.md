@@ -204,6 +204,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_node_image_input_preflight.py`, keeping uploaded-document image-error
   cleanup, vision-unavailable fallback, and base64 image analysis ahead of the
   planner LLM.
+- Follow-up #543 moved uploaded-document LMS host-action shortcut contracts
+  into `direct_document_host_action_shortcuts.py`, keeping preview/course
+  approval-token safety text out of the direct tool-loop shell.
 
 ## Preserved Intentionally
 
@@ -254,7 +257,7 @@ backups, data PDFs, or local skill folders.
   uploaded-document preview/course payload shell, uploaded-document course
   analysis/generic planning, uploaded-document text shaping, document source
   refs, domain-specific course plan builder modules, visual-turn policy,
-  graph/runtime binding resolution, per-turn provider policy, message
+  document host-action shortcut contracts, graph/runtime binding resolution, per-turn provider policy, message
   builders, generic tool dispatch, final synthesis helper construction, final
   synthesis execution, post-tool convergence policy, follow-up LLM
   selection/invocation, response finalization, post-tool search-template
