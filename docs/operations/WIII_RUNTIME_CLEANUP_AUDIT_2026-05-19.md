@@ -110,6 +110,11 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   self/capability/meta answers, uploaded-document fact fallback, session-memory
   ack/write/recall, hunger chatter, response types, state side effects, and
   thinking snapshot provenance strings behind one focused contract.
+- Follow-up #489 moved direct prompt tool binding helpers into
+  `direct_prompt_tool_binding.py` and direct/code-studio tool-context prompt
+  builders into `direct_prompt_tool_context.py`, while keeping graph-era
+  compatibility exports and making query/state inputs explicit for best-effort
+  skill prompt injection.
 
 ## Preserved Intentionally
 
@@ -145,8 +150,9 @@ backups, data PDFs, or local skill folders.
   lifecycle, response-finalization, and SSE V3 parity modules with narrow
   contract tests.
 - `direct_prompts.py` remains the main direct prompt assembly surface, but
-  force-bound skill directives, Pointy inventory prompt injection, and the
-  direct turn contract now live in `direct_prompt_turn_contracts.py`.
+  force-bound skill directives, Pointy inventory prompt injection, the direct
+  turn contract, provider-aware tool binding, and tool-context prompt builders
+  now live in focused helper modules.
 - `direct_tool_rounds_runtime.py` is now a smaller orchestration shell. Pointy,
   explicit web-search policy, deterministic document host-action execution,
   uploaded-document preview/course payload shell, document source refs, domain
@@ -271,3 +277,9 @@ conservative/direct-node/document-context regressions passed with 90 tests after
 moving fast-response selection into `direct_node_fast_response_runtime.py`.
 Targeted ruff checks also passed for the direct-node runtime, the new helper,
 and the focused regression set.
+In follow-up #489, focused prompt/tool-context tests plus graph routing and
+legacy direct binding regressions passed with 192 tests after moving direct
+tool binding and tool-context prompt builders out of `direct_prompts.py`.
+Additional direct-node/guidance prompt tests passed with 69 tests. Targeted
+ruff checks, repository `ruff check app/ --select=E9,F63,F7`, and
+`git diff --check` also passed for the prompt tool-context extraction.
