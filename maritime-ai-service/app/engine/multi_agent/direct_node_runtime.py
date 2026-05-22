@@ -7,7 +7,6 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.exceptions import ProviderUnavailableError
-from app.engine.llm_failover_runtime import classify_failover_reason_impl
 from app.engine.multi_agent.document_preview_contract import (
     has_uploaded_document_context as _has_uploaded_document_context,
     uploaded_document_attachments_from_context as _uploaded_document_attachments,
@@ -73,10 +72,8 @@ from app.engine.multi_agent.direct_node_meta_fast_paths import (
     _build_wiii_capability_inventory_thinking,
     _looks_self_feeling_probe_turn,
 )
-from app.engine.multi_agent.direct_node_emergency_fallbacks import (
-    _emergency_search_fallback,
-    _emit_synthetic_tool_events,
-    _salvage_direct_turn_from_final_result,
+from app.engine.multi_agent.direct_node_exception_fallbacks import (
+    handle_direct_node_generation_exception,
 )
 from app.engine.multi_agent.direct_node_operational_fast_paths import (
     _DSML_BLOCK_RE,
@@ -900,419 +897,49 @@ async def direct_response_node_impl(
                     },
                 )
         except Exception as exc:
-            salvaged = await _salvage_direct_turn_from_final_result(
+            fallback_result = await handle_direct_node_generation_exception(
+                exc=exc,
+                query=query,
+                state=state,
+                ctx_for_preflight=ctx_for_preflight,
+                tools=tools,
+                tool_call_events=tool_call_events,
                 llm_response=llm_response,
                 messages=messages,
-                extract_direct_response=extract_direct_response,
-                sanitize_structured_visual_answer_text=sanitize_structured_visual_answer_text,
-                sanitize_wiii_house_text=sanitize_wiii_house_text,
-                tool_call_events=tool_call_events,
-                query=query,
-                is_identity_turn=is_identity_turn,
+                llm=llm,
                 routing_intent=routing_intent,
                 response_language=response_language,
-                llm=llm,
+                is_identity_turn=is_identity_turn,
+                explicit_user_provider=explicit_user_provider,
+                explicit_web_search_turn=explicit_web_search_turn,
+                needs_web_search=needs_web_search,
+                extract_direct_response=extract_direct_response,
+                sanitize_structured_visual_answer_text=(
+                    sanitize_structured_visual_answer_text
+                ),
+                sanitize_wiii_house_text=sanitize_wiii_house_text,
+                build_search_template_fallback=build_search_template_fallback,
+                build_uploaded_document_context_fallback_answer=(
+                    _build_uploaded_document_context_fallback_answer
+                ),
+                build_codebase_analysis_fallback_answer=(
+                    _build_codebase_analysis_fallback_answer
+                ),
+                build_codebase_analysis_fallback_thinking=(
+                    _build_codebase_analysis_fallback_thinking
+                ),
+                get_phase_fallback=get_phase_fallback,
+                record_direct_node_thinking_snapshot=(
+                    record_direct_node_thinking_snapshot
+                ),
+                record_thinking_snapshot_fn=record_thinking_snapshot,
+                tracer=tracer,
+                push_event=push_event,
+                inc_counter=inc_counter,
+                logger_obj=logger,
             )
-            if salvaged:
-                response, salvaged_thinking, salvaged_tools = salvaged
-                if salvaged_tools:
-                    state["tools_used"] = salvaged_tools
-                if salvaged_thinking:
-                    record_direct_node_thinking_snapshot(
-                        state=state,
-                        thinking=salvaged_thinking,
-                        provenance="final_snapshot",
-                        record_thinking_snapshot_fn=record_thinking_snapshot,
-                    )
-                logger.warning(
-                    "[DIRECT] Post-processing failed but salvaged final result: %s",
-                    exc,
-                )
-                tracer.end_step(
-                    result="Salvaged direct response after post-processing error",
-                    confidence=0.7,
-                    details={
-                        "response_type": "llm_salvaged",
-                        "error_type": type(exc).__name__,
-                    },
-                )
-            elif (
-                isinstance(exc, ProviderUnavailableError)
-                and (
-                    uploaded_fallback := _build_uploaded_document_context_fallback_answer(
-                        query,
-                        ctx_for_preflight,
-                    )
-                )
-            ):
-                response = uploaded_fallback
-                logger.info(
-                    "[DIRECT] Provider unavailable; returned uploaded-file context fallback (len=%d)",
-                    len(response),
-                )
-                tracer.end_step(
-                    result="Uploaded-file context fallback (provider unavailable)",
-                    confidence=0.65,
-                    details={
-                        "response_type": "uploaded_file_context_fallback",
-                        "error_type": type(exc).__name__,
-                    },
-                )
-            elif isinstance(exc, ProviderUnavailableError) and tool_call_events:
-                template_response = ""
-                try:
-                    template_response = build_search_template_fallback(
-                        query=query,
-                        tool_call_events=tool_call_events,
-                    )
-                except Exception as template_error:
-                    logger.warning(
-                        "[DIRECT] Provider unavailable and search fallback build failed: %s",
-                        template_error,
-                    )
-                if not template_response:
-                    raise
-                response = template_response
-                template_tool_names = sorted({
-                    str(event.get("name") or "")
-                    for event in tool_call_events
-                    if event.get("type") == "result" and event.get("name")
-                })
-                template_tools = [
-                    {"name": name} for name in template_tool_names if name
-                ]
-                if template_tools:
-                    state["tools_used"] = template_tools
-                logger.info(
-                    "[DIRECT] Provider unavailable after tools; returning "
-                    "source-backed fallback (tools=%d, len=%d)",
-                    len(template_tools),
-                    len(response),
-                )
-                tracer.end_step(
-                    result="Source-backed fallback (provider unavailable after tools)",
-                    confidence=0.6,
-                    details={
-                        "response_type": "search_template_fallback",
-                        "tools_used_count": len(template_tools),
-                        "response_length": len(response),
-                    },
-                )
-            elif isinstance(exc, ProviderUnavailableError) and needs_web_search(query):
-                fallback_events: list[dict[str, Any]] = []
-                try:
-                    fallback_events = await _emergency_search_fallback(
-                        query=query,
-                        tools=tools,
-                        timeout_seconds=30.0,
-                    )
-                except Exception as emergency_error:
-                    logger.warning(
-                        "[DIRECT] Provider unavailable and emergency search failed: %s",
-                        emergency_error,
-                    )
-                    fallback_events = []
-
-                template_response = ""
-                if fallback_events:
-                    try:
-                        await _emit_synthetic_tool_events(
-                            fallback_events,
-                            push_event=push_event,
-                        )
-                        state["tool_call_events"] = fallback_events
-                        template_response = build_search_template_fallback(
-                            query=query,
-                            tool_call_events=fallback_events,
-                        )
-                    except Exception as template_error:
-                        logger.warning(
-                            "[DIRECT] Emergency search template fallback failed: %s",
-                            template_error,
-                        )
-                        template_response = ""
-                if not template_response:
-                    raise
-                response = template_response
-                template_tool_names = sorted({
-                    str(event.get("name") or "")
-                    for event in fallback_events
-                    if event.get("type") == "result" and event.get("name")
-                })
-                template_tools = [
-                    {"name": name} for name in template_tool_names if name
-                ]
-                if template_tools:
-                    state["tools_used"] = template_tools
-                logger.info(
-                    "[DIRECT] Provider unavailable before tool planning; "
-                    "returned emergency source-backed fallback (tools=%d, len=%d)",
-                    len(template_tools),
-                    len(response),
-                )
-                tracer.end_step(
-                    result="Source-backed fallback (provider unavailable before tools)",
-                    confidence=0.55,
-                    details={
-                        "response_type": "search_template_fallback",
-                        "tools_used_count": len(template_tools),
-                        "response_length": len(response),
-                    },
-                )
-            elif explicit_user_provider and needs_web_search(query):
-                fallback_events = list(tool_call_events or [])
-                if not fallback_events:
-                    logger.info(
-                        "[DIRECT] Explicit provider web turn failed before tool "
-                        "evidence — engaging LLM-free emergency search"
-                    )
-                    try:
-                        fallback_events = await _emergency_search_fallback(
-                            query=query,
-                            tools=tools,
-                            timeout_seconds=30.0,
-                        )
-                    except Exception as emergency_error:
-                        logger.warning(
-                            "[DIRECT] Explicit-provider emergency search failed: %s",
-                            emergency_error,
-                        )
-                        fallback_events = []
-
-                template_response = ""
-                if fallback_events:
-                    try:
-                        if not tool_call_events:
-                            await _emit_synthetic_tool_events(
-                                fallback_events,
-                                push_event=push_event,
-                            )
-                            state["tool_call_events"] = fallback_events
-                        template_response = build_search_template_fallback(
-                            query=query,
-                            tool_call_events=fallback_events,
-                        )
-                    except Exception as template_error:
-                        logger.warning(
-                            "[DIRECT] Explicit-provider template fallback failed: %s",
-                            template_error,
-                        )
-                        template_response = ""
-                if not template_response:
-                    classified = classify_failover_reason_impl(error=exc)
-                    raise ProviderUnavailableError(
-                        provider=str(explicit_user_provider).strip().lower(),
-                        reason_code=str(classified.get("reason_code") or "provider_unavailable"),
-                        message="Provider được chọn hiện không sẵn sàng để xử lý yêu cầu này.",
-                        details=classified.get("detail"),
-                    ) from exc
-
-                response = template_response
-                if fallback_events and not tool_call_events:
-                    tool_call_events = fallback_events
-                template_tool_names = sorted({
-                    str(event.get("name") or "")
-                    for event in fallback_events
-                    if event.get("type") == "result" and event.get("name")
-                })
-                template_tools = [
-                    {"name": name} for name in template_tool_names if name
-                ]
-                if template_tools:
-                    state["tools_used"] = template_tools
-                logger.info(
-                    "[DIRECT] Explicit provider failed on web turn; returned "
-                    "source-backed emergency fallback (tools=%d, len=%d)",
-                    len(template_tools),
-                    len(response),
-                )
-                tracer.end_step(
-                    result="Source-backed fallback (explicit provider web failure)",
-                    confidence=0.55,
-                    details={
-                        "response_type": "search_template_fallback",
-                        "tools_used_count": len(template_tools),
-                        "response_length": len(response),
-                    },
-                )
-            elif explicit_user_provider:
-                uploaded_fallback = _build_uploaded_document_context_fallback_answer(
-                    query,
-                    ctx_for_preflight,
-                )
-                if uploaded_fallback:
-                    response = uploaded_fallback
-                    logger.info(
-                        "[DIRECT] Explicit provider failed; returned uploaded-file context fallback (len=%d)",
-                        len(response),
-                    )
-                    tracer.end_step(
-                        result="Uploaded-file context fallback (explicit provider failed)",
-                        confidence=0.65,
-                        details={
-                            "response_type": "uploaded_file_context_fallback",
-                            "error_type": type(exc).__name__,
-                        },
-                    )
-                else:
-                    if isinstance(exc, ProviderUnavailableError):
-                        raise
-                    classified = classify_failover_reason_impl(error=exc)
-                    raise ProviderUnavailableError(
-                        provider=str(explicit_user_provider).strip().lower(),
-                        reason_code=str(classified.get("reason_code") or "provider_unavailable"),
-                        message="Provider được chọn hiện không sẵn sàng để xử lý yêu cầu này.",
-                        details=classified.get("detail"),
-                    ) from exc
-            else:
-                logger.warning("[DIRECT] LLM generation failed: %s", exc)
-                logger.info(
-                    "[DIRECT] Template fallback consideration — "
-                    "tool_call_events count=%d, types=%s",
-                    len(tool_call_events) if tool_call_events else 0,
-                    [
-                        f"{event.get('type')}:{event.get('name')}"
-                        for event in (tool_call_events or [])[:6]
-                    ],
-                )
-                fallback_events = list(tool_call_events or [])
-                if not fallback_events and needs_web_search(query):
-                    logger.info(
-                        "[DIRECT] Round-0 timeout with empty tool history — "
-                        "engaging LLM-free emergency search"
-                    )
-                    try:
-                        fallback_events = await _emergency_search_fallback(
-                            query=query,
-                            tools=tools,
-                            timeout_seconds=30.0,
-                        )
-                        logger.info(
-                            "[DIRECT] Emergency search produced %d synthetic events",
-                            len(fallback_events),
-                        )
-                    except Exception as emergency_error:
-                        logger.warning(
-                            "[DIRECT] Emergency search failed: %s",
-                            emergency_error,
-                        )
-                        fallback_events = []
-                template_response = ""
-                try:
-                    template_response = build_search_template_fallback(
-                        query=query,
-                        tool_call_events=fallback_events,
-                    )
-                    logger.info(
-                        "[DIRECT] Template fallback build returned len=%d",
-                        len(template_response or ""),
-                    )
-                except Exception as template_error:
-                    logger.warning(
-                        "[DIRECT] Template fallback build failed: %s",
-                        template_error,
-                    )
-                if template_response:
-                    if fallback_events and not tool_call_events:
-                        tool_call_events = fallback_events
-                        state["tool_call_events"] = fallback_events
-                    try:
-                        trigger_label = (
-                            "emergency_search"
-                            if not tool_call_events or fallback_events == tool_call_events
-                            else "exception_with_tools"
-                        )
-                        inc_counter(
-                            "wiii.direct.template_fallback.engaged",
-                            labels={"trigger": trigger_label},
-                        )
-                    except Exception:  # noqa: BLE001
-                        pass
-                    response = template_response
-                    template_tool_names = sorted({
-                        str(event.get("name") or "")
-                        for event in tool_call_events
-                        if event.get("type") == "result" and event.get("name")
-                    })
-                    template_tools = [
-                        {"name": name} for name in template_tool_names if name
-                    ]
-                    if template_tools:
-                        state["tools_used"] = template_tools
-                    logger.info(
-                        "[DIRECT] Source-backed template fallback engaged "
-                        "(synthesis LLM unavailable, tools=%d, len=%d)",
-                        len(template_tools),
-                        len(response),
-                    )
-                    tracer.end_step(
-                        result="Source-backed fallback (synthesis LLM unavailable)",
-                        confidence=0.6,
-                        details={
-                            "response_type": "search_template_fallback",
-                            "tools_used_count": len(template_tools),
-                            "response_length": len(response),
-                        },
-                    )
-                else:
-                    codebase_fallback = (
-                        _build_codebase_analysis_fallback_answer(query)
-                        if _is_codebase_analysis_query(query) and not explicit_web_search_turn
-                        else ""
-                    )
-                    if isinstance(exc, ProviderUnavailableError):
-                        uploaded_fallback = _build_uploaded_document_context_fallback_answer(
-                            query,
-                            ctx_for_preflight,
-                        )
-                        if uploaded_fallback:
-                            response = uploaded_fallback
-                        elif codebase_fallback:
-                            response = codebase_fallback
-                            codebase_thinking = _build_codebase_analysis_fallback_thinking(query)
-                            record_direct_node_thinking_snapshot(
-                                state=state,
-                                thinking=codebase_thinking,
-                                provenance="deterministic_codebase_fallback",
-                                record_thinking_snapshot_fn=record_thinking_snapshot,
-                            )
-                        else:
-                            raise
-                    else:
-                        uploaded_fallback = _build_uploaded_document_context_fallback_answer(
-                            query,
-                            ctx_for_preflight,
-                        )
-                        if uploaded_fallback:
-                            response = uploaded_fallback
-                        elif codebase_fallback:
-                            response = codebase_fallback
-                            codebase_thinking = _build_codebase_analysis_fallback_thinking(query)
-                            record_direct_node_thinking_snapshot(
-                                state=state,
-                                thinking=codebase_thinking,
-                                provenance="deterministic_codebase_fallback",
-                                record_thinking_snapshot_fn=record_thinking_snapshot,
-                            )
-                        else:
-                            response = (
-                                get_phase_fallback(state)
-                                if getattr(settings, "enable_natural_conversation", False) is True
-                                else "Xin chao! Toi co the giup gi cho ban?"
-                            )
-                    tracer.end_step(
-                        result="Fallback (LLM generation error)",
-                        confidence=0.5,
-                        details={
-                            "response_type": (
-                                "uploaded_file_context_fallback"
-                                if uploaded_fallback
-                                else "codebase_source_backed_fallback"
-                                if codebase_fallback
-                                else "fallback"
-                            )
-                        },
-                    )
+            response = fallback_result.response
+            tool_call_events = fallback_result.tool_call_events
 
     resolved_direct_thinking = resolve_public_thinking_content(
         state,

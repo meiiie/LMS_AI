@@ -203,9 +203,10 @@ backups, data PDFs, or local skill folders.
   guards, operational/meta/chatter fast-response selection, visible
   thought helpers, thinking snapshot side effects, document-preview
   host-action rebinding/execution, direct-node tool selection, LLM preflight,
-  execution preparation, response cleanup, visible-thinking finalization, and
-  host UI timeout handling have moved out. The long-term cleanup direction is lifecycle,
-  response-finalization, and SSE V3 parity modules with narrow contract tests.
+  execution preparation, response cleanup, visible-thinking finalization,
+  exception/source fallback lifecycle, and host UI timeout handling have moved
+  out. The long-term cleanup direction is lifecycle, response-finalization, and
+  SSE V3 parity modules with narrow contract tests.
 - `direct_prompts.py` remains the main direct prompt assembly surface, but
   force-bound skill directives, Pointy inventory prompt injection, the direct
   turn contract, provider-aware tool binding, and tool-context prompt builders
@@ -404,3 +405,9 @@ direct-node response-cleanup, LLM-preflight, execution-preparation,
 tool-selection, host-timeout, document-preview, fast-response, and
 provider-error regressions passed with 60 tests after moving visible-thinking
 finalization into `direct_node_visible_thinking_finalization.py`.
+In follow-up #515, helper-level exception fallback tests plus provider-error,
+visible-thinking finalization, response-cleanup, LLM-preflight,
+execution-preparation, tool-selection, host-timeout, document-preview, and
+fast-response regressions passed with 64 tests after moving salvage,
+provider-unavailable, source-template, emergency search, explicit-provider, and
+generic fallback handling into `direct_node_exception_fallbacks.py`.
