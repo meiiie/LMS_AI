@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -176,6 +176,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   web-search policy, uploaded-document payload, document text, and Pointy
   selector helpers from their owning modules while the shell only exposes
   `execute_direct_tool_rounds_impl`.
+- Follow-up #523 moved graph runtime wait-surface and Code Studio regex
+  bindings to their canonical modules, closing obsolete graph-era re-exports
+  from `direct_execution.py`.
 
 ## Preserved Intentionally
 
@@ -231,9 +234,9 @@ backups, data PDFs, or local skill folders.
   private-helper compatibility export surface is now closed; internal tests and
   consumers import only the orchestration entry point from this shell.
 - `direct_execution.py` is now closer to a provider invocation/fallback shell:
-  visible answer/thinking text shaping moved to `direct_stream_text_runtime.py`.
-  It still carries graph-era compatibility re-exports for wait-surface and
-  Code Studio regex helpers until legacy `graph.py` imports can close.
+  visible answer/thinking text shaping moved to `direct_stream_text_runtime.py`,
+  and graph runtime bindings now load wait-surface and Code Studio regex helpers
+  from their canonical modules instead of through direct execution.
 - Code Studio deterministic fallback is now split across contract, spec,
   quality, captions, registry, shell, and renderer modules. The remaining debt
   is product quality rather than module size: the scaffold should keep moving
@@ -432,3 +435,6 @@ In follow-up #521, the direct tool-round regression set passed with 81 tests
 after moving private helper imports from `direct_tool_rounds_runtime.py` to
 their owning modules and removing obsolete compatibility aliases/export tuples
 from the tool-round orchestration shell.
+In follow-up #523, direct execution streaming tests and graph routing tests
+passed after moving graph runtime wait-surface and Code Studio regex bindings
+away from `direct_execution.py` and into their canonical helper modules.
