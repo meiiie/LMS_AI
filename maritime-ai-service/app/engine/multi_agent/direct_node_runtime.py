@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -18,6 +17,9 @@ from app.engine.multi_agent.direct_node_document_preview_runtime import (
 )
 from app.engine.multi_agent.direct_node_fast_response_runtime import (
     resolve_direct_node_fast_response,
+)
+from app.engine.multi_agent.direct_node_host_timeout import (
+    run_direct_node_execution_with_host_timeout,
 )
 from app.engine.multi_agent.direct_node_document_preview_rebind import (
     _direct_role_candidates,
@@ -846,48 +848,15 @@ async def direct_response_node_impl(
                     allowed_fallback_providers=direct_allowed_fallback_providers,
                     native_tool_messages=native_direct_messages,
                 )
-                if routing_intent == "host_ui_navigation":
-                    try:
-                        llm_response, messages, tool_call_events = await asyncio.wait_for(
-                            direct_execution,
-                            timeout=_HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS,
-                        )
-                    except asyncio.TimeoutError:
-                        from app.engine.native_chat_runtime import make_assistant_message
-
-                        logger.warning(
-                            "[DIRECT] Host UI navigation answer exceeded %.1fs; returning bounded fallback",
-                            _HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS,
-                        )
-                        # Phase F2 (2026-05-06): surface-aware fallback. Khi Wiii
-                        # chạy standalone (host_type=wiii-desktop / wiii-web),
-                        # KHÔNG nói "panel Wiii / làm mới trang LMS" — không có
-                        # LMS context. AI nên nói "thử lại" hoặc trỏ trực tiếp.
-                        host_ctx = state.get("host_context") if isinstance(state, dict) else None
-                        host_type = (host_ctx or {}).get("host_type", "") if isinstance(host_ctx, dict) else ""
-                        is_standalone = host_type in ("wiii-desktop", "wiii-web")
-                        if is_standalone:
-                            fallback_answer = (
-                                "Mình đã thử trỏ chuột vào element rồi. Nếu chưa thấy "
-                                "cursor di chuyển, bạn thử gửi lại câu hỏi nhé — "
-                                "đôi khi LLM cần thêm chút thời gian xử lý."
-                            )
-                        else:
-                            fallback_answer = (
-                                "Mình đã nhận yêu cầu trỏ trên giao diện rồi. "
-                                "Nếu Wiii chưa highlight ngay, hãy thử mở lại panel Wiii hoặc làm mới trang LMS nhé."
-                            )
-                        await push_event(
-                            {
-                                "type": "answer_delta",
-                                "content": fallback_answer,
-                                "node": "direct",
-                            }
-                        )
-                        llm_response = make_assistant_message(fallback_answer)
-                        tool_call_events = []
-                else:
-                    llm_response, messages, tool_call_events = await direct_execution
+                llm_response, messages, tool_call_events = await run_direct_node_execution_with_host_timeout(
+                    direct_execution=direct_execution,
+                    routing_intent=routing_intent,
+                    state=state,
+                    messages=messages,
+                    push_event=push_event,
+                    timeout_seconds=_HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS,
+                    logger_obj=logger,
+                )
 
                 if tool_call_events:
                     state["tool_call_events"] = tool_call_events
