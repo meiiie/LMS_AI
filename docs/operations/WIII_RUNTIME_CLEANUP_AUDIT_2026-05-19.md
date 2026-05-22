@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -105,6 +105,11 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   execution into `direct_node_document_preview_runtime.py`, keeping forced
   preview tool choice, tool-call event capture, response sanitization,
   `tools_used`, and routing metadata updates behind one focused contract.
+- Follow-up #487 moved direct-node deterministic fast-response selection into
+  `direct_node_fast_response_runtime.py`, keeping Pointy guard responses,
+  self/capability/meta answers, uploaded-document fact fallback, session-memory
+  ack/write/recall, hunger chatter, response types, state side effects, and
+  thinking snapshot provenance strings behind one focused contract.
 
 ## Preserved Intentionally
 
@@ -134,7 +139,7 @@ backups, data PDFs, or local skill folders.
 
 - `direct_node_runtime.py` remains large, but session-memory parsing/recall,
   thinking-effort policy, emergency fallback/salvage helpers, uploaded-context
-  guards, operational fast paths, meta fast paths, chatter fast paths, visible
+  guards, operational/meta/chatter fast-response selection, visible
   thought helpers, thinking snapshot side effects, and document-preview
   host-action rebinding/execution have moved out. The long-term cleanup direction is
   lifecycle, response-finalization, and SSE V3 parity modules with narrow
@@ -261,3 +266,8 @@ forced uploaded-document preview execution into
 `direct_node_document_preview_runtime.py`. Targeted ruff checks, repository
 `ruff check app/ --select=E9,F63,F7`, and `git diff --check` also passed for
 the preview preflight extraction.
+In follow-up #487, focused deterministic fast-response helper tests plus
+conservative/direct-node/document-context regressions passed with 90 tests after
+moving fast-response selection into `direct_node_fast_response_runtime.py`.
+Targeted ruff checks also passed for the direct-node runtime, the new helper,
+and the focused regression set.
