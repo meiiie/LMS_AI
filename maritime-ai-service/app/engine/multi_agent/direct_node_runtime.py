@@ -13,6 +13,11 @@ from app.engine.multi_agent.document_preview_contract import (
 from app.engine.multi_agent.direct_node_document_preview_runtime import (
     execute_direct_node_document_preview_round,
 )
+from app.engine.multi_agent.direct_node_document_preflight import (
+    build_document_preview_response_sanitizer,
+    execute_direct_node_document_preview_preflight,
+    record_uploaded_document_context_plan,
+)
 from app.engine.multi_agent.direct_node_fast_response_runtime import (
     resolve_direct_node_fast_response,
 )
@@ -33,9 +38,6 @@ from app.engine.multi_agent.direct_node_response_cleanup import (
 )
 from app.engine.multi_agent.direct_node_visible_thinking_finalization import (
     finalize_direct_node_visible_thinking,
-)
-from app.engine.multi_agent.direct_node_document_preview_rebind import (
-    _rebind_document_preview_host_action_tool,
 )
 from app.engine.multi_agent.direct_intent import (
     _looks_emotional_support_turn,
@@ -170,83 +172,48 @@ async def direct_response_node_impl(
     ctx_for_preflight = state.get("context", {}) if isinstance(state.get("context"), dict) else {}
     has_uploaded_document_context = _has_uploaded_document_context(ctx_for_preflight)
 
-    def sanitize_document_preview_response(
-        preview_response: str,
-        preview_tool_call_events: list[dict[str, Any]],
-    ) -> str:
-        preview_response = sanitize_structured_visual_answer_text(
-            preview_response,
-            tool_call_events=preview_tool_call_events,
-        )
-        preview_response = sanitize_wiii_house_text(preview_response, query=query)
-        preview_response = _strip_direct_inline_private_asides(preview_response)
-        return _strip_dsml_residue(preview_response).strip()
+    sanitize_document_preview_response = build_document_preview_response_sanitizer(
+        query=query,
+        sanitize_structured_visual_answer_text=sanitize_structured_visual_answer_text,
+        sanitize_wiii_house_text=sanitize_wiii_house_text,
+        strip_direct_inline_private_asides=_strip_direct_inline_private_asides,
+        strip_dsml_residue=_strip_dsml_residue,
+    )
 
-    if (
-        not response
-        and has_uploaded_document_context
-        and not str(state.get("thinking_content") or "").strip()
-    ):
-        document_thinking = (
-            "Mình nhận đây là lượt hỏi có tài liệu upload đã được parse thành Markdown, "
-            "nên ưu tiên đối chiếu marker, bảng và các dòng trong document_context trước khi suy luận thêm. "
-            "Nếu phần nào không có trong file, Wiii phải nói rõ thay vì bịa."
-        )
-        record_direct_node_thinking_snapshot(
-            state=state,
-            thinking=document_thinking,
-            provenance="document_context_plan",
-            record_thinking_snapshot_fn=record_thinking_snapshot,
-        )
-    if (
-        not response
-        and has_uploaded_document_context
-        and _looks_uploaded_document_preview_request(query)
-    ):
-        routing_meta = state.get("routing_metadata")
-        if not isinstance(routing_meta, dict):
-            routing_meta = {}
-            state["routing_metadata"] = routing_meta
-        preview_tools, preview_force_tools, doc_preview_debug = (
-            _rebind_document_preview_host_action_tool(
-                tools=[],
-                force_tools=False,
-                query=query,
-                state=state,
-                ctx=ctx_for_preflight,
-            )
-        )
-        routing_meta["doc_preview_preflight"] = doc_preview_debug
-        preview_result = await execute_direct_node_document_preview_round(
-            query=query,
-            state=state,
-            ctx=ctx_for_preflight,
-            bus_id=bus_id,
-            tools=preview_tools,
-            force_tools=preview_force_tools,
-            messages=[],
-            push_event=push_event,
-            build_visual_tool_runtime_metadata=build_visual_tool_runtime_metadata,
-            execute_direct_tool_rounds=execute_direct_tool_rounds,
-            extract_direct_response=extract_direct_response,
-            sanitize_preview_response=sanitize_document_preview_response,
-            fallback_response=(
-                "Mình đã gửi bản preview bài học sang LMS. "
-                "Giáo viên cần xem phần so sánh thay đổi và nguồn trích dẫn rồi bấm Áp dụng để cấp approval_token."
-            ),
-            debug=doc_preview_debug,
-            routing_metadata_key="doc_preview_preflight",
-            success_status="executed",
-            failure_status="execution_failed",
-            failure_log_message="[DIRECT] Early document preview host action failed: %s",
-            logger_obj=logger,
-        )
-        if preview_result is not None:
-            response = preview_result.response
-            response_type = "document_preview_host_action"
-            logger.info(
-                "[DIRECT] Executed LMS document preview host action before planner LLM"
-            )
+    document_thinking = (
+        "Mình nhận đây là lượt hỏi có tài liệu upload đã được parse thành Markdown, "
+        "nên ưu tiên đối chiếu marker, bảng và các dòng trong document_context trước khi suy luận thêm. "
+        "Nếu phần nào không có trong file, Wiii phải nói rõ thay vì bịa."
+    )
+    record_uploaded_document_context_plan(
+        state=state,
+        response_present=bool(response),
+        has_uploaded_document_context=has_uploaded_document_context,
+        document_thinking=document_thinking,
+        record_thinking_snapshot_fn=record_thinking_snapshot,
+    )
+    document_preflight_result = await execute_direct_node_document_preview_preflight(
+        query=query,
+        state=state,
+        ctx=ctx_for_preflight,
+        bus_id=bus_id,
+        response_present=bool(response),
+        has_uploaded_document_context=has_uploaded_document_context,
+        looks_uploaded_document_preview_request=_looks_uploaded_document_preview_request,
+        push_event=push_event,
+        build_visual_tool_runtime_metadata=build_visual_tool_runtime_metadata,
+        execute_direct_tool_rounds=execute_direct_tool_rounds,
+        extract_direct_response=extract_direct_response,
+        sanitize_preview_response=sanitize_document_preview_response,
+        fallback_response=(
+            "Mình đã gửi bản preview bài học sang LMS. "
+            "Giáo viên cần xem phần so sánh thay đổi và nguồn trích dẫn rồi bấm Áp dụng để cấp approval_token."
+        ),
+        logger_obj=logger,
+    )
+    if document_preflight_result is not None:
+        response = document_preflight_result.response
+        response_type = document_preflight_result.response_type
     if ctx_for_preflight.get("image_input_error") and has_uploaded_document_context:
         ctx_for_preflight["images"] = []
     if (
