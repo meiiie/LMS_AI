@@ -18,11 +18,7 @@ from app.engine.multi_agent.direct_intent import (
     _looks_selfhood_followup_turn,
 )
 from app.engine.multi_agent.direct_wait_surface import (
-    _build_code_studio_wait_heartbeat_text,
     _build_direct_wait_heartbeat_text,
-    _compact_visible_query,
-    _contains_wait_marker,
-    _thinking_start_label,
 )
 from app.engine.multi_agent.direct_tool_rounds_runtime import (
     execute_direct_tool_rounds_impl,
@@ -35,12 +31,6 @@ from app.engine.multi_agent.direct_response_runtime import (
 from app.engine.multi_agent.state import AgentState
 
 from app.engine.multi_agent.direct_prompts import _resolve_tool_choice
-from app.engine.multi_agent.code_studio_patterns import (
-    _CODE_STUDIO_ACTION_JSON_RE,
-    _CODE_STUDIO_SANDBOX_IMAGE_RE,
-    _CODE_STUDIO_SANDBOX_LINK_RE,
-    _CODE_STUDIO_SANDBOX_PATH_RE,
-)
 from app.engine.multi_agent.direct_runtime_bindings import (
     _extract_runtime_target,
     _is_native_runtime_handle,
@@ -65,20 +55,6 @@ from app.engine.reasoning import (
 from app.engine.llm_runtime_metadata import record_runtime_failover_event
 
 logger = logging.getLogger(__name__)
-
-
-# Compatibility re-exports for the legacy graph shim. New code should import
-# these helpers from their canonical modules directly.
-__all__ = [
-    "_CODE_STUDIO_ACTION_JSON_RE",
-    "_CODE_STUDIO_SANDBOX_IMAGE_RE",
-    "_CODE_STUDIO_SANDBOX_LINK_RE",
-    "_CODE_STUDIO_SANDBOX_PATH_RE",
-    "_build_code_studio_wait_heartbeat_text",
-    "_compact_visible_query",
-    "_contains_wait_marker",
-    "_thinking_start_label",
-]
 
 
 def _looks_primary_timeout_failure(exc: Exception) -> bool:

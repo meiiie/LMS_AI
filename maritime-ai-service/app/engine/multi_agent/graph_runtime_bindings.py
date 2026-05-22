@@ -548,15 +548,15 @@ _ainvoke_with_fallback = _load_attr(
     "_ainvoke_with_fallback",
 )
 _compact_visible_query = _load_attr(
-    "app.engine.multi_agent.direct_execution",
+    "app.engine.multi_agent.direct_wait_surface",
     "_compact_visible_query",
 )
 _build_direct_wait_heartbeat_text = _load_attr(
-    "app.engine.multi_agent.direct_execution",
+    "app.engine.multi_agent.direct_wait_surface",
     "_build_direct_wait_heartbeat_text",
 )
 _build_code_studio_wait_heartbeat_text = _load_attr(
-    "app.engine.multi_agent.direct_execution",
+    "app.engine.multi_agent.direct_wait_surface",
     "_build_code_studio_wait_heartbeat_text",
 )
 _push_status_only_progress = _load_attr(
@@ -564,11 +564,11 @@ _push_status_only_progress = _load_attr(
     "_push_status_only_progress",
 )
 _contains_wait_marker = _load_attr(
-    "app.engine.multi_agent.direct_execution",
+    "app.engine.multi_agent.direct_wait_surface",
     "_contains_wait_marker",
 )
 _thinking_start_label = _load_attr(
-    "app.engine.multi_agent.direct_execution",
+    "app.engine.multi_agent.direct_wait_surface",
     "_thinking_start_label",
 )
 _stream_direct_wait_heartbeats = _load_attr(
@@ -600,19 +600,19 @@ _extract_direct_response = _load_attr(
     "_extract_direct_response",
 )
 _CODE_STUDIO_ACTION_JSON_RE = _load_attr(
-    "app.engine.multi_agent.direct_execution",
+    "app.engine.multi_agent.code_studio_patterns",
     "_CODE_STUDIO_ACTION_JSON_RE",
 )
 _CODE_STUDIO_SANDBOX_IMAGE_RE = _load_attr(
-    "app.engine.multi_agent.direct_execution",
+    "app.engine.multi_agent.code_studio_patterns",
     "_CODE_STUDIO_SANDBOX_IMAGE_RE",
 )
 _CODE_STUDIO_SANDBOX_LINK_RE = _load_attr(
-    "app.engine.multi_agent.direct_execution",
+    "app.engine.multi_agent.code_studio_patterns",
     "_CODE_STUDIO_SANDBOX_LINK_RE",
 )
 _CODE_STUDIO_SANDBOX_PATH_RE = _load_attr(
-    "app.engine.multi_agent.direct_execution",
+    "app.engine.multi_agent.code_studio_patterns",
     "_CODE_STUDIO_SANDBOX_PATH_RE",
 )
 
