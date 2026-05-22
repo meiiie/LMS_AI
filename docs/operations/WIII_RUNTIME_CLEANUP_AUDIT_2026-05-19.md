@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -171,6 +171,11 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_node_visible_thinking_finalization.py`, keeping aligned thinking,
   unsafe thought clearing, language checks, emotional-rescue thinking, and
   snapshot side effects outside the main direct node.
+- Follow-up #521 closed the obsolete private-helper compatibility export
+  surface in `direct_tool_rounds_runtime.py`; tests now import synthesis,
+  web-search policy, uploaded-document payload, document text, and Pointy
+  selector helpers from their owning modules while the shell only exposes
+  `execute_direct_tool_rounds_impl`.
 
 ## Preserved Intentionally
 
@@ -222,9 +227,9 @@ backups, data PDFs, or local skill folders.
   builders, generic tool dispatch, final synthesis helper construction, final
   synthesis execution, post-tool convergence policy, follow-up LLM
   selection/invocation, response finalization, post-tool search-template
-  returns, and forced web-search shortcuts have moved out. The next durable
-  step is shrinking the compatibility export surface once external imports can
-  close.
+  returns, and forced web-search shortcuts have moved out. Its obsolete
+  private-helper compatibility export surface is now closed; internal tests and
+  consumers import only the orchestration entry point from this shell.
 - `direct_execution.py` is now closer to a provider invocation/fallback shell:
   visible answer/thinking text shaping moved to `direct_stream_text_runtime.py`.
   It still carries graph-era compatibility re-exports for wait-surface and
@@ -423,3 +428,7 @@ focused direct-node regression set still passed with 68 tests after moving
 private direct-node helper imports from `direct_node_runtime.py` to their owning
 modules and removing obsolete compatibility export tuples/imports from the
 runtime.
+In follow-up #521, the direct tool-round regression set passed with 81 tests
+after moving private helper imports from `direct_tool_rounds_runtime.py` to
+their owning modules and removing obsolete compatibility aliases/export tuples
+from the tool-round orchestration shell.

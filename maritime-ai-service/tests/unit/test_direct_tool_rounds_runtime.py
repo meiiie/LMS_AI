@@ -13,8 +13,8 @@ from app.engine.multi_agent.direct_document_host_action_runtime import (
 
 
 def test_build_direct_final_synthesis_instruction_is_mode_aware_for_market_turn():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
-        _build_direct_final_synthesis_instruction,
+    from app.engine.multi_agent.direct_final_synthesis_runtime import (
+        build_direct_final_synthesis_instruction as _build_direct_final_synthesis_instruction,
     )
 
     instruction = _build_direct_final_synthesis_instruction(
@@ -31,7 +31,7 @@ def test_build_direct_final_synthesis_instruction_is_mode_aware_for_market_turn(
 
 
 def test_explicit_web_search_returns_template_after_fetch_evidence():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_web_search_policy import (
         _prefer_official_query_for_known_docs,
         _should_return_search_template_after_tool_round,
         _should_use_search_template_for_empty_response,
@@ -316,8 +316,8 @@ def test_direct_public_thinking_dedupe_allows_changed_blocks():
 
 
 def test_build_direct_final_synthesis_instruction_is_mode_aware_for_math_turn():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
-        _build_direct_final_synthesis_instruction,
+    from app.engine.multi_agent.direct_final_synthesis_runtime import (
+        build_direct_final_synthesis_instruction as _build_direct_final_synthesis_instruction,
     )
 
     instruction = _build_direct_final_synthesis_instruction(
@@ -1379,7 +1379,7 @@ async def test_uploaded_document_course_plan_runs_host_action_without_planner_ll
 
 
 def test_uploaded_doc_course_plan_builder_creates_full_lms_architecture():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_course_params,
     )
 
@@ -1431,7 +1431,7 @@ def test_uploaded_doc_course_plan_builder_creates_full_lms_architecture():
 
 
 def test_uploaded_doc_course_plan_builder_keeps_maritime_research_out_of_lms_manual():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_course_params,
         _normalize_doc_preview_text,
     )
@@ -1501,7 +1501,7 @@ def test_uploaded_doc_course_plan_builder_keeps_maritime_research_out_of_lms_man
 
 
 def test_uploaded_doc_course_plan_builder_keeps_maritime_lms_research_out_of_holilihu_manual():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_course_params,
         _normalize_doc_preview_text,
     )
@@ -1556,7 +1556,7 @@ def test_uploaded_doc_course_plan_builder_keeps_maritime_lms_research_out_of_hol
 
 
 def test_uploaded_doc_course_plan_research_title_overrides_manual_markers_in_body():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_course_params,
         _normalize_doc_preview_text,
     )
@@ -1608,7 +1608,7 @@ def test_uploaded_doc_course_plan_research_title_overrides_manual_markers_in_bod
 
 
 def test_uploaded_doc_course_plan_maritime_lms_does_not_use_vessel_template():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_course_params,
         _normalize_doc_preview_text,
     )
@@ -1663,7 +1663,7 @@ def test_uploaded_doc_course_plan_maritime_lms_does_not_use_vessel_template():
 
 
 def test_uploaded_doc_course_title_skips_cover_metadata_for_long_thesis_doc():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_course_params,
         _normalize_doc_preview_text,
     )
@@ -1718,7 +1718,7 @@ def test_uploaded_doc_course_title_skips_cover_metadata_for_long_thesis_doc():
 
 
 def test_generic_uploaded_doc_course_clusters_full_long_document_map():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_course_params,
         _normalize_doc_preview_text,
     )
@@ -1775,7 +1775,7 @@ def test_generic_uploaded_doc_course_clusters_full_long_document_map():
 
 
 def test_uploaded_doc_course_parses_unicode_vietnamese_source_lines():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_course_params,
     )
 
@@ -1811,8 +1811,8 @@ def test_uploaded_doc_course_parses_unicode_vietnamese_source_lines():
 
 
 def test_uploaded_doc_course_request_matches_real_teacher_curriculum_wording():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
-        _looks_uploaded_doc_course_request,
+    from app.engine.multi_agent.document_preview_contract import (
+        looks_uploaded_document_course_request as _looks_uploaded_doc_course_request,
     )
 
     assert _looks_uploaded_doc_course_request("Tạo bài giảng đi.")
@@ -1828,7 +1828,7 @@ def test_uploaded_doc_course_request_matches_real_teacher_curriculum_wording():
 
 
 def test_uploaded_doc_preview_skips_logo_data_uri_and_focuses_teacher_manual():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_preview_params,
     )
 
@@ -1879,7 +1879,7 @@ def test_uploaded_doc_preview_skips_logo_data_uri_and_focuses_teacher_manual():
 
 
 def test_uploaded_doc_preview_preserves_general_wiii_marker_from_query():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_preview_params,
     )
 
@@ -1913,7 +1913,7 @@ def test_uploaded_doc_preview_preserves_general_wiii_marker_from_query():
 
 
 def test_uploaded_doc_preview_preserves_labelled_non_wiii_marker_from_query():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_preview_params,
     )
 
@@ -1945,7 +1945,7 @@ def test_uploaded_doc_preview_preserves_labelled_non_wiii_marker_from_query():
 
 
 def test_uploaded_doc_preview_prefers_explicit_query_title_over_parser_metadata():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_preview_params,
     )
 
@@ -1980,7 +1980,7 @@ def test_uploaded_doc_preview_prefers_explicit_query_title_over_parser_metadata(
 
 
 def test_uploaded_doc_preview_prefers_real_teacher_heading_over_smart_excerpt_outline():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_preview_params,
     )
 
@@ -2033,7 +2033,7 @@ def test_uploaded_doc_preview_prefers_real_teacher_heading_over_smart_excerpt_ou
 
 
 def test_doc_preview_clean_line_drops_checkbox_table_markers():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import _clean_doc_preview_line
+    from app.engine.multi_agent.direct_document_preview_text import _clean_doc_preview_line
 
     assert _clean_doc_preview_line(
         "| **□** | Thong tin khoa hoan chinh. | Co tieu de va muc tieu hoc tap. |"
@@ -2041,7 +2041,7 @@ def test_doc_preview_clean_line_drops_checkbox_table_markers():
 
 
 def test_uploaded_doc_preview_filters_bare_table_labels_from_goals():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_preview_params,
     )
 
@@ -2078,7 +2078,7 @@ def test_uploaded_doc_preview_filters_bare_table_labels_from_goals():
 
 
 def test_uploaded_doc_preview_keeps_ordered_actions_out_of_learning_goals():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_preview_params,
     )
 
@@ -2115,7 +2115,7 @@ def test_uploaded_doc_preview_keeps_ordered_actions_out_of_learning_goals():
 
 
 def test_uploaded_doc_preview_excludes_admonitions_from_learning_goals():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_preview_params,
     )
 
@@ -2148,7 +2148,7 @@ def test_uploaded_doc_preview_excludes_admonitions_from_learning_goals():
 
 
 def test_uploaded_doc_preview_shapes_descriptive_excerpt_into_learning_goal():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_preview_params,
     )
 
@@ -2181,7 +2181,7 @@ def test_uploaded_doc_preview_shapes_descriptive_excerpt_into_learning_goal():
 
 
 def test_uploaded_doc_preview_repairs_truncated_publish_word_in_learning_goal():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_preview_params,
     )
 
@@ -2212,7 +2212,7 @@ def test_uploaded_doc_preview_repairs_truncated_publish_word_in_learning_goal():
 
 
 def test_uploaded_doc_preview_supplements_sparse_lms_learning_goals():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_document_preview_payloads import (
         _build_uploaded_doc_preview_params,
     )
 
@@ -2462,7 +2462,7 @@ def _state_with_targets(*ids: str) -> SimpleNamespace:
 
 
 def test_pointy_validator_accepts_bare_id_in_inventory():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 
@@ -2551,7 +2551,7 @@ async def test_direct_pointy_post_dispatch_rewrites_inventory_result() -> None:
 
 
 def test_pointy_validator_accepts_auto_id_in_inventory():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 
@@ -2560,7 +2560,7 @@ def test_pointy_validator_accepts_auto_id_in_inventory():
 
 
 def test_pointy_validator_accepts_data_wiii_id_verbose_form():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 
@@ -2572,7 +2572,7 @@ def test_pointy_validator_accepts_data_wiii_id_verbose_form():
 
 
 def test_pointy_validator_rejects_compound_css_selector():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 
@@ -2588,7 +2588,7 @@ def test_pointy_validator_rejects_compound_css_selector():
 
 
 def test_pointy_validator_rejects_class_selector():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 
@@ -2599,7 +2599,7 @@ def test_pointy_validator_rejects_class_selector():
 
 
 def test_pointy_validator_rejects_aria_label_selector():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 
@@ -2610,7 +2610,7 @@ def test_pointy_validator_rejects_aria_label_selector():
 
 
 def test_pointy_validator_rejects_pseudo_class_selector():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 
@@ -2621,7 +2621,7 @@ def test_pointy_validator_rejects_pseudo_class_selector():
 
 def test_pointy_validator_rejects_id_with_hash_prefix():
     """The `#chat-send-button` form is a CSS id selector, not a bare id."""
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 
@@ -2631,7 +2631,7 @@ def test_pointy_validator_rejects_id_with_hash_prefix():
 
 
 def test_pointy_validator_rejects_empty_selector():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 
@@ -2642,7 +2642,7 @@ def test_pointy_validator_rejects_empty_selector():
 
 
 def test_pointy_validator_rejects_unknown_bare_id_with_inventory_hint():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 
@@ -2654,7 +2654,7 @@ def test_pointy_validator_rejects_unknown_bare_id_with_inventory_hint():
 
 
 def test_pointy_validator_rejects_unknown_auto_id_with_inventory_hint():
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 
@@ -2667,7 +2667,7 @@ def test_pointy_validator_rejects_unknown_auto_id_with_inventory_hint():
 
 def test_pointy_validator_passes_bare_id_when_inventory_empty():
     """Without inventory we can't verify — fall through to permissive."""
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 
@@ -2677,7 +2677,7 @@ def test_pointy_validator_passes_bare_id_when_inventory_empty():
 
 def test_pointy_validator_passes_auto_id_when_inventory_empty():
     """Without inventory, allow Wiii synthetic id syntax and let frontend resolve."""
-    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+    from app.engine.multi_agent.direct_pointy_runtime import (
         _validate_pointy_selector,
     )
 

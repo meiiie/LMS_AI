@@ -47,9 +47,6 @@ from app.engine.multi_agent.direct_reasoning import (
     _build_direct_tool_reflection,
     _infer_direct_reasoning_cue,
 )
-from app.engine.multi_agent.direct_final_synthesis_runtime import (
-    build_direct_final_synthesis_instruction,
-)
 from app.engine.multi_agent.direct_search_template_runtime import (
     build_direct_post_tool_search_template_response,
 )
@@ -64,68 +61,12 @@ from app.engine.multi_agent.direct_document_host_action_runtime import (
     execute_requested_document_host_action_shortcut,
 )
 from app.engine.multi_agent.direct_document_preview_payloads import (
-    _DOC_PREVIEW_LOW_VALUE_LABELS,
-    _looks_uploaded_doc_course_request,
-    _normalize_doc_preview_text,
-    _is_doc_preview_scaffold_line,
-    _is_doc_preview_low_value_line,
     _find_doc_preview_host_action_tool,
     _find_doc_course_host_action_tool,
     _should_request_uploaded_doc_course_preview,
     _should_request_uploaded_doc_preview,
-    _first_nonempty_line,
-    _select_doc_preview_title_line,
-    _score_doc_preview_title_candidate,
-    _is_doc_preview_cover_metadata_line,
-    _clean_doc_preview_line,
-    _extract_marker,
-    _strip_doc_preview_goal_label,
-    _is_doc_preview_ordered_action_line,
-    _strip_doc_preview_ordered_action_prefix,
-    _is_doc_preview_admonition_line,
-    _repair_doc_preview_common_truncations,
-    _clip_doc_preview_line,
-    _shape_doc_preview_learning_goal,
-    _supplement_doc_preview_learning_goals,
-    _extract_relevant_lines,
-    _extract_doc_preview_title_from_query,
-    _polish_doc_preview_vietnamese_title,
-    _is_low_value_doc_preview_title,
-    _focus_doc_preview_markdown,
-    _extract_source_pages,
-    _resolve_doc_preview_lesson_id,
-    _resolve_doc_preview_course_id,
-    _extend_doc_context_id_candidates,
-    _extract_doc_course_title_from_query,
-    _doc_source_reference,
-    _extract_doc_section_references,
-    _match_doc_refs,
-    _looks_holilihu_lms_manual_document,
-    _looks_maritime_vessel_management_document,
-    _looks_maritime_training_lms_document,
-    _dedupe_doc_refs,
-    _top_course_source_references,
-    _lms_manual_lesson,
-    _build_lms_manual_course_plan,
-    _build_maritime_vessel_management_course_plan,
-    _build_maritime_training_lms_course_plan,
-    _extract_doc_headings,
-    _section_candidate_markers,
-    _copy_doc_refs_with_indices,
-    _document_course_section_candidates,
-    _cluster_document_course_sections,
-    _select_lesson_section_candidates,
-    _cluster_title,
-    _lesson_refs_for_candidate,
-    _classify_uploaded_document_course_domain,
-    _build_document_course_quality_report,
-    _build_generic_document_course_plan,
     _build_uploaded_doc_course_params,
     _build_uploaded_doc_preview_params,
-)
-from app.engine.multi_agent.direct_pointy_runtime import (
-    _format_pointy_inventory,  # noqa: F401 - compatibility alias
-    _validate_pointy_selector,  # noqa: F401 - compatibility alias
 )
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.tool_call_text_parser import (
@@ -133,11 +74,8 @@ from app.engine.multi_agent.tool_call_text_parser import (
     tool_names_from_tools,
 )
 from app.engine.multi_agent.direct_web_search_policy import (
-    _has_search_tool_result,  # noqa: F401 - compatibility alias
     _is_search_tool_name,
     _prefer_official_query_for_known_docs,
-    _should_return_search_template_after_tool_round,  # noqa: F401 - compatibility alias
-    _should_use_search_template_for_empty_response,  # noqa: F401 - compatibility alias
 )
 from app.engine.multi_agent.visual_events import (
     _collect_active_visual_session_ids,
@@ -148,70 +86,6 @@ from app.engine.multi_agent.visual_events import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Compatibility alias for older tests and graph imports while synthesis helpers move out.
-_build_direct_final_synthesis_instruction = build_direct_final_synthesis_instruction
-
-_DIRECT_DOCUMENT_PREVIEW_PAYLOAD_COMPAT_EXPORTS = (
-    _DOC_PREVIEW_LOW_VALUE_LABELS,
-    _looks_uploaded_doc_course_request,
-    _normalize_doc_preview_text,
-    _is_doc_preview_scaffold_line,
-    _is_doc_preview_low_value_line,
-    _find_doc_preview_host_action_tool,
-    _find_doc_course_host_action_tool,
-    _should_request_uploaded_doc_course_preview,
-    _should_request_uploaded_doc_preview,
-    _first_nonempty_line,
-    _select_doc_preview_title_line,
-    _score_doc_preview_title_candidate,
-    _is_doc_preview_cover_metadata_line,
-    _clean_doc_preview_line,
-    _extract_marker,
-    _strip_doc_preview_goal_label,
-    _is_doc_preview_ordered_action_line,
-    _strip_doc_preview_ordered_action_prefix,
-    _is_doc_preview_admonition_line,
-    _repair_doc_preview_common_truncations,
-    _clip_doc_preview_line,
-    _shape_doc_preview_learning_goal,
-    _supplement_doc_preview_learning_goals,
-    _extract_relevant_lines,
-    _extract_doc_preview_title_from_query,
-    _polish_doc_preview_vietnamese_title,
-    _is_low_value_doc_preview_title,
-    _focus_doc_preview_markdown,
-    _extract_source_pages,
-    _resolve_doc_preview_lesson_id,
-    _resolve_doc_preview_course_id,
-    _extend_doc_context_id_candidates,
-    _extract_doc_course_title_from_query,
-    _doc_source_reference,
-    _extract_doc_section_references,
-    _match_doc_refs,
-    _looks_holilihu_lms_manual_document,
-    _looks_maritime_vessel_management_document,
-    _looks_maritime_training_lms_document,
-    _dedupe_doc_refs,
-    _top_course_source_references,
-    _lms_manual_lesson,
-    _build_lms_manual_course_plan,
-    _build_maritime_vessel_management_course_plan,
-    _build_maritime_training_lms_course_plan,
-    _extract_doc_headings,
-    _section_candidate_markers,
-    _copy_doc_refs_with_indices,
-    _document_course_section_candidates,
-    _cluster_document_course_sections,
-    _select_lesson_section_candidates,
-    _cluster_title,
-    _lesson_refs_for_candidate,
-    _classify_uploaded_document_course_domain,
-    _build_document_course_quality_report,
-    _build_generic_document_course_plan,
-    _build_uploaded_doc_course_params,
-    _build_uploaded_doc_preview_params,
-)
 
 _DOC_COURSE_HOST_ACTION_SHORTCUT = DocumentHostActionShortcut(
     tool_name=_DOC_COURSE_HOST_ACTION_TOOL,
