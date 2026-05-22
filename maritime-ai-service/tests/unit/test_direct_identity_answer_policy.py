@@ -1,13 +1,15 @@
 import pytest
 
 from app.engine.multi_agent.direct_node_runtime import (
-    _align_direct_visible_thought,
-    _contains_direct_internal_thought_leak,
     _compact_basic_identity_answer,
     _extract_direct_woven_thought,
-    _should_surface_direct_visible_thought,
     _strip_direct_inline_private_asides,
     _trim_direct_visible_thought_answer_draft,
+)
+from app.engine.multi_agent.direct_node_visible_thought import (
+    _align_direct_visible_thought,
+    _contains_direct_internal_thought_leak,
+    _should_surface_direct_visible_thought,
 )
 
 
@@ -143,7 +145,7 @@ async def test_align_direct_visible_thought_drops_selfhood_summary_intro_and_mix
         return None
 
     monkeypatch.setattr(
-        "app.engine.multi_agent.direct_node_runtime.align_visible_thinking_language",
+        "app.engine.multi_agent.direct_node_visible_thought.align_visible_thinking_language",
         _fake_align,
     )
 
@@ -169,7 +171,7 @@ async def test_align_direct_visible_thought_keeps_turn_analysis_but_drops_answer
         return None
 
     monkeypatch.setattr(
-        "app.engine.multi_agent.direct_node_runtime.align_visible_thinking_language",
+        "app.engine.multi_agent.direct_node_visible_thought.align_visible_thinking_language",
         _fake_align,
     )
 

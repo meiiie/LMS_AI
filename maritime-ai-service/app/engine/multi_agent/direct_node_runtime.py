@@ -33,6 +33,9 @@ from app.engine.multi_agent.direct_node_response_cleanup import (
     apply_source_backed_empty_response_fallback,
     clean_direct_node_llm_response,
 )
+from app.engine.multi_agent.direct_node_visible_thinking_finalization import (
+    finalize_direct_node_visible_thinking,
+)
 from app.engine.multi_agent.direct_node_document_preview_rebind import (
     _direct_role_candidates,
     _rebind_document_preview_host_action_tool,
@@ -131,13 +134,9 @@ from app.engine.multi_agent.direct_node_visible_thought import (
     _DIRECT_WOVEN_THOUGHT_INTENTS,
     _IDENTITY_LORE_MARKERS,
     _IDENTITY_ORIGIN_QUERY_MARKERS,
-    _align_direct_visible_thought,
-    _build_emotional_rescue_visible_thought,
     _compact_basic_identity_answer,
-    _contains_direct_internal_thought_leak,
     _extract_direct_woven_thought,
     _looks_like_direct_english_planner_thought,
-    _should_surface_direct_visible_thought,
     _strip_direct_inline_private_asides,
     _trim_direct_visible_thought_answer_draft,
 )
@@ -146,7 +145,6 @@ from app.engine.multi_agent.state import AgentState
 from app.engine.reasoning import (
     align_visible_thinking_language,
     record_thinking_snapshot,
-    should_align_visible_thinking_language,
 )
 from app.engine.multi_agent.supervisor_runtime_support import (
     _looks_reasoning_safety_meta_turn,
@@ -843,51 +841,19 @@ async def direct_response_node_impl(
                 response = source_fallback.response
                 tools_used = source_fallback.tools_used
 
-                if _should_surface_direct_visible_thought(
-                    thinking_content,
-                    routing_intent=routing_intent,
+                await finalize_direct_node_visible_thinking(
+                    query=query,
+                    state=state,
                     response=response,
-                ):
-                    aligned_thinking = await _align_direct_visible_thought(
-                        thinking_content,
-                        response_language=response_language,
-                        llm=llm,
-                    )
-                    if aligned_thinking and not _contains_direct_internal_thought_leak(
-                        aligned_thinking
-                    ) and not should_align_visible_thinking_language(
-                        aligned_thinking,
-                        target_language=response_language,
-                    ):
-                        record_direct_node_thinking_snapshot(
-                            state=state,
-                            thinking=aligned_thinking,
-                            provenance="aligned_cleanup",
-                            record_thinking_snapshot_fn=record_thinking_snapshot,
-                        )
-                    else:
-                        state.pop("thinking", None)
-                        state["thinking_content"] = ""
-                else:
-                    state.pop("thinking", None)
-                    state["thinking_content"] = ""
-                if not str(state.get("thinking_content") or "").strip():
-                    emotional_rescue = await _build_emotional_rescue_visible_thought(
-                        query=query,
-                        state=state,
-                        response=response,
-                        response_language=response_language,
-                        llm=llm,
-                        build_direct_reasoning_summary=build_direct_reasoning_summary,
-                        tool_names=list(tools_used or []),
-                    )
-                    if emotional_rescue:
-                        record_direct_node_thinking_snapshot(
-                            state=state,
-                            thinking=emotional_rescue,
-                            provenance="aligned_cleanup",
-                            record_thinking_snapshot_fn=record_thinking_snapshot,
-                        )
+                    thinking_content=thinking_content,
+                    routing_intent=routing_intent,
+                    response_language=response_language,
+                    llm=llm,
+                    tools_used=list(tools_used or []),
+                    build_direct_reasoning_summary=build_direct_reasoning_summary,
+                    record_direct_node_thinking_snapshot=record_direct_node_thinking_snapshot,
+                    record_thinking_snapshot_fn=record_thinking_snapshot,
+                )
                 if tools_used:
                     state["tools_used"] = tools_used
 
