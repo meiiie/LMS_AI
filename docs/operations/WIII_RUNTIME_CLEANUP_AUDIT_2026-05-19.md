@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -162,6 +162,11 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_node_llm_preflight.py`, keeping direct/native LLM selection,
   unsupported-native fallback, uploaded visual guard decisions, and
   natural-conversation penalty binding outside the main direct node.
+- Follow-up #511 moved direct-node response cleanup and empty-body
+  source-backed fallback into `direct_node_response_cleanup.py`, keeping
+  visible answer sanitization, DSML/tool-call residue stripping, codebase
+  deterministic fallback snapshots, template fallback metrics, and tools-used
+  reconstruction behind focused helpers.
 
 ## Preserved Intentionally
 
@@ -194,9 +199,9 @@ backups, data PDFs, or local skill folders.
   guards, operational/meta/chatter fast-response selection, visible
   thought helpers, thinking snapshot side effects, document-preview
   host-action rebinding/execution, direct-node tool selection, LLM preflight,
-  execution preparation, and host UI timeout handling have moved out. The
-  long-term cleanup direction is lifecycle, response-finalization, and SSE V3
-  parity modules with narrow contract tests.
+  execution preparation, response cleanup, and host UI timeout handling have
+  moved out. The long-term cleanup direction is lifecycle,
+  response-finalization, and SSE V3 parity modules with narrow contract tests.
 - `direct_prompts.py` remains the main direct prompt assembly surface, but
   force-bound skill directives, Pointy inventory prompt injection, the direct
   turn contract, provider-aware tool binding, and tool-context prompt builders
@@ -386,3 +391,7 @@ In follow-up #509, focused direct-node LLM-preflight tests plus direct-node
 execution-preparation, tool-selection, host-timeout, document-preview,
 fast-response, and provider-error regressions passed with 53 tests after
 moving LLM preflight into `direct_node_llm_preflight.py`.
+In follow-up #511, focused direct-node response-cleanup tests plus direct-node
+LLM-preflight, execution-preparation, tool-selection, host-timeout,
+document-preview, fast-response, and provider-error regressions passed with 57
+tests after moving response cleanup into `direct_node_response_cleanup.py`.
