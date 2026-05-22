@@ -200,6 +200,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   response sanitization, and the early LMS document-preview preflight into
   `direct_node_document_preflight.py`, keeping preview-before-planner safety
   visible as a focused lifecycle helper.
+- Follow-up #541 moved direct-node image-input preflight into
+  `direct_node_image_input_preflight.py`, keeping uploaded-document image-error
+  cleanup, vision-unavailable fallback, and base64 image analysis ahead of the
+  planner LLM.
 
 ## Preserved Intentionally
 
@@ -231,8 +235,9 @@ backups, data PDFs, or local skill folders.
   thinking-effort policy, emergency fallback/salvage helpers, uploaded-context
   guards, operational/meta/chatter fast-response selection, visible
   thought helpers, thinking snapshot side effects, document-preview
-  host-action rebinding/execution/preflight, direct-node tool selection, LLM preflight,
-  execution preparation, response cleanup, visible-thinking finalization,
+  host-action rebinding/execution/preflight, image-input preflight,
+  direct-node tool selection, LLM preflight, execution preparation, response cleanup,
+  visible-thinking finalization,
   exception/source fallback lifecycle, final state/domain notice handling, and
   host UI timeout handling have moved out. The long-term cleanup direction is
   lifecycle modules and SSE V3 parity modules with narrow contract tests. Its
