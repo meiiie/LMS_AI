@@ -312,7 +312,7 @@ class ChatOrchestrator:
             return None
 
         if shape == "hunger_chatter":
-            from app.engine.multi_agent.direct_node_runtime import (
+            from app.engine.multi_agent.direct_node_chatter_runtime import (
                 _build_hunger_chatter_answer,
                 _build_hunger_chatter_thinking,
             )

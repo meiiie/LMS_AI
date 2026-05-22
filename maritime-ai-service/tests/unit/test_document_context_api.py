@@ -307,7 +307,9 @@ def test_document_context_injection_builds_shared_prompt_surface():
 
 
 def test_uploaded_document_context_allows_image_error_to_fall_through():
-    from app.engine.multi_agent.direct_node_runtime import _has_uploaded_document_context
+    from app.engine.multi_agent.document_preview_contract import (
+        has_uploaded_document_context as _has_uploaded_document_context,
+    )
 
     assert _has_uploaded_document_context(
         {
@@ -352,7 +354,7 @@ def test_supervisor_routes_uploaded_file_context_to_direct(monkeypatch):
 
 
 def test_uploaded_video_context_fallback_mentions_parse_facts():
-    from app.engine.multi_agent.direct_node_runtime import (
+    from app.engine.multi_agent.direct_node_uploaded_context import (
         _build_uploaded_document_context_fallback_answer,
     )
 
@@ -390,7 +392,7 @@ def test_uploaded_video_context_fallback_mentions_parse_facts():
 
 
 def test_uploaded_video_metadata_query_stays_deterministic():
-    from app.engine.multi_agent.direct_node_runtime import (
+    from app.engine.multi_agent.direct_node_uploaded_context import (
         _build_uploaded_document_context_fallback_answer,
         _looks_uploaded_file_metadata_query,
         _looks_uploaded_file_visual_inspection_query,
@@ -433,7 +435,7 @@ def test_uploaded_video_metadata_query_stays_deterministic():
 
 
 def test_uploaded_document_marker_query_stays_deterministic():
-    from app.engine.multi_agent.direct_node_runtime import (
+    from app.engine.multi_agent.direct_node_uploaded_context import (
         _build_uploaded_document_context_fallback_answer,
         _looks_uploaded_context_fact_query,
         _looks_uploaded_file_visual_inspection_query,
@@ -475,7 +477,7 @@ def test_uploaded_document_marker_query_stays_deterministic():
 
 
 def test_uploaded_document_preview_request_bypasses_fact_fast_path():
-    from app.engine.multi_agent.direct_node_runtime import (
+    from app.engine.multi_agent.direct_node_uploaded_context import (
         _looks_uploaded_context_fact_query,
         _looks_uploaded_document_preview_request,
     )
@@ -506,7 +508,7 @@ def test_uploaded_document_preview_request_bypasses_fact_fast_path():
 
 
 def test_uploaded_document_visual_guard_does_not_describe_frames_without_vision():
-    from app.engine.multi_agent.direct_node_runtime import (
+    from app.engine.multi_agent.direct_node_uploaded_context import (
         _build_uploaded_document_visual_guard_answer,
         _looks_uploaded_file_visual_inspection_query,
         _provider_likely_supports_image_blocks,

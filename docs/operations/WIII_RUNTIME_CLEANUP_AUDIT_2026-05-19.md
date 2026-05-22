@@ -206,7 +206,9 @@ backups, data PDFs, or local skill folders.
   execution preparation, response cleanup, visible-thinking finalization,
   exception/source fallback lifecycle, final state/domain notice handling, and
   host UI timeout handling have moved out. The long-term cleanup direction is
-  lifecycle modules and SSE V3 parity modules with narrow contract tests.
+  lifecycle modules and SSE V3 parity modules with narrow contract tests. Its
+  obsolete private helper compatibility export tuples are now closed; tests
+  import helper contracts from their owning modules.
 - `direct_prompts.py` remains the main direct prompt assembly surface, but
   force-bound skill directives, Pointy inventory prompt injection, the direct
   turn contract, provider-aware tool binding, and tool-context prompt builders
@@ -416,3 +418,8 @@ direct-node regression set passed with 68 tests after moving final thinking
 snapshot resolution, `final_response`/`agent_outputs` assignment, current-agent
 marking, and general-intent domain notice handling into
 `direct_node_final_state.py`.
+In follow-up #519, affected import-surface tests passed with 142 tests and the
+focused direct-node regression set still passed with 68 tests after moving
+private direct-node helper imports from `direct_node_runtime.py` to their owning
+modules and removing obsolete compatibility export tuples/imports from the
+runtime.

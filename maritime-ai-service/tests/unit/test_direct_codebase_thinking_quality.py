@@ -96,7 +96,9 @@ def test_codebase_fallback_thinking_is_public_evidence_ledger_not_answer_copy():
 
 
 def test_image_input_thinking_is_evidence_led_for_ocr_and_color_questions():
-    from app.engine.multi_agent.direct_node_runtime import _build_image_input_thinking
+    from app.engine.multi_agent.direct_node_operational_fast_paths import (
+        _build_image_input_thinking,
+    )
 
     thinking = _build_image_input_thinking("Doc chu va mau nen trong anh nay")
 
@@ -107,7 +109,7 @@ def test_image_input_thinking_is_evidence_led_for_ocr_and_color_questions():
 
 
 def test_codebase_fallback_answer_replaces_generic_phase_greeting():
-    from app.engine.multi_agent.direct_node_runtime import (
+    from app.engine.multi_agent.direct_node_operational_fast_paths import (
         _build_codebase_analysis_fallback_answer,
         _build_codebase_analysis_fallback_thinking,
         _looks_generic_direct_fallback_response,
@@ -131,7 +133,7 @@ def test_codebase_fallback_answer_replaces_generic_phase_greeting():
 
 
 def test_codebase_source_notes_use_deterministic_fast_answer():
-    from app.engine.multi_agent.direct_node_runtime import (
+    from app.engine.multi_agent.direct_node_operational_fast_paths import (
         _build_codebase_analysis_fallback_answer,
         _should_use_codebase_source_note_fast_answer,
     )
@@ -189,7 +191,9 @@ async def test_guardian_fast_passes_safe_image_inspection_without_llm():
 
 def test_hunger_chatter_unicode_fast_path_matches_vietnamese() -> None:
     from app.engine.multi_agent.direct_intent import _normalize_for_intent
-    from app.engine.multi_agent.direct_node_runtime import _looks_hunger_chatter_turn
+    from app.engine.multi_agent.direct_node_chatter_runtime import (
+        _looks_hunger_chatter_turn,
+    )
 
     query = "\u0111\u00f3i ph\u1ebft"
 
@@ -197,7 +201,7 @@ def test_hunger_chatter_unicode_fast_path_matches_vietnamese() -> None:
 
 
 def test_pointy_missing_inventory_fails_soft_without_llm() -> None:
-    from app.engine.multi_agent.direct_node_runtime import (
+    from app.engine.multi_agent.direct_node_operational_fast_paths import (
         _build_pointy_missing_inventory_answer,
         _pointy_requested_without_inventory,
     )
