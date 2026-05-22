@@ -336,7 +336,7 @@ class TestConservativeFastRouting:
         )
 
     def test_session_memory_extracts_unscoped_explicit_remember_turn(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_session_memory_runtime import (
             _extract_session_memory_items_from_text,
         )
 
@@ -355,7 +355,7 @@ class TestConservativeFastRouting:
         ) == ["màu kiểm thử hôm nay là xanh rêu 548"]
 
     def test_session_memory_write_answer_acknowledges_specific_temporary_item(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_session_memory_runtime import (
             _build_session_memory_write_answer,
             _build_session_memory_write_thinking,
         )
@@ -373,7 +373,7 @@ class TestConservativeFastRouting:
         assert "semantic memory" in thinking
 
     def test_direct_reply_only_answer_extracts_exact_ack(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_node_operational_fast_paths import (
             _extract_direct_reply_only_answer,
         )
 
@@ -385,7 +385,7 @@ class TestConservativeFastRouting:
         )
 
     def test_session_memory_recall_answer_extracts_recent_session_seed(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_session_memory_runtime import (
             _extract_session_memory_recall_answer,
         )
 
@@ -420,7 +420,7 @@ class TestConservativeFastRouting:
         )
 
     def test_session_memory_recall_list_instruction_does_not_filter_by_pointy(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_session_memory_runtime import (
             _extract_session_memory_recall_answer,
         )
 
@@ -455,7 +455,7 @@ class TestConservativeFastRouting:
         )
 
     def test_session_memory_recall_keeps_labeled_priority_bundle_together(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_session_memory_runtime import (
             _extract_session_memory_recall_answer,
         )
 
@@ -490,7 +490,7 @@ class TestConservativeFastRouting:
         )
 
     def test_session_memory_recall_keeps_acceptance_criteria_bundle_together(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_session_memory_runtime import (
             _extract_session_memory_recall_answer,
         )
 
@@ -530,7 +530,7 @@ class TestConservativeFastRouting:
         )
 
     def test_session_memory_recall_answer_extracts_single_named_value(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_session_memory_runtime import (
             _extract_session_memory_recall_answer,
         )
 
@@ -561,7 +561,7 @@ class TestConservativeFastRouting:
         ) == "mỏ neo xanh 507"
 
     def test_session_memory_recall_answer_extracts_natural_just_said_value(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_session_memory_runtime import (
             _extract_session_memory_recall_answer,
         )
 
@@ -592,7 +592,7 @@ class TestConservativeFastRouting:
         ) == "xanh neo"
 
     def test_session_memory_recall_answer_extracts_today_color_value(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_session_memory_runtime import (
             _extract_session_memory_recall_answer,
         )
 
@@ -619,7 +619,7 @@ class TestConservativeFastRouting:
         ) == "xanh rêu 548"
 
     def test_wiii_pipeline_meta_answer_is_bounded_and_actionable(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_node_operational_fast_paths import (
             _build_wiii_pipeline_meta_answer,
         )
 
@@ -690,7 +690,7 @@ class TestConservativeFastRouting:
         ) is False
 
     def test_session_memory_numbered_criteria_are_preserved(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_session_memory_runtime import (
             _extract_session_memory_items_from_text,
             _extract_session_memory_recall_answer,
         )
@@ -719,7 +719,7 @@ class TestConservativeFastRouting:
         assert "multimodal" in answer
 
     def test_session_memory_anchor_bundle_in_current_session_is_preserved(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_session_memory_runtime import (
             _extract_session_memory_items_from_text,
             _extract_session_memory_recall_answer,
         )
@@ -760,11 +760,11 @@ class TestConservativeFastRouting:
         assert len(answer) > 300
 
     def test_hunger_chatter_doi_qua_routes_to_fast_social(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_node_chatter_runtime import (
             _build_hunger_chatter_answer,
-            _fold_direct_text,
             _looks_hunger_chatter_turn,
         )
+        from app.engine.multi_agent.direct_text_utils import _fold_direct_text
         from app.engine.multi_agent.supervisor_hint_runtime import (
             classify_fast_chatter_turn_impl,
         )
@@ -796,7 +796,7 @@ class TestConservativeFastRouting:
         ) is False
 
     def test_reasoning_safety_meta_answer_is_safe_and_bounded(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_node_meta_fast_paths import (
             _build_reasoning_safety_meta_answer,
             _build_reasoning_safety_meta_thinking,
         )
@@ -814,7 +814,7 @@ class TestConservativeFastRouting:
         assert "mềm, rõ" in thinking
 
     def test_reasoning_safety_meta_answer_supports_richer_public_thinking(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_node_meta_fast_paths import (
             _build_reasoning_safety_meta_answer,
             _build_reasoning_safety_meta_thinking,
         )
@@ -831,7 +831,7 @@ class TestConservativeFastRouting:
         assert "không lộ phần nội bộ" in answer
 
     def test_hunger_chatter_has_useful_fast_answer_and_thinking(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_node_chatter_runtime import (
             _build_hunger_chatter_answer,
             _build_hunger_chatter_thinking,
             _looks_hunger_chatter_turn,
@@ -861,7 +861,7 @@ class TestConservativeFastRouting:
         assert _build_hunger_chatter_answer("bụng đói").startswith("Bụng đói")
 
     def test_self_feeling_probe_keeps_living_boundary(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_node_meta_fast_paths import (
             _build_self_feeling_probe_answer,
             _build_self_feeling_probe_thinking,
             _looks_self_feeling_probe_turn,
@@ -895,7 +895,7 @@ class TestConservativeFastRouting:
         assert "một cái máy phủ nhận" in thinking
 
     def test_wiii_capability_inventory_is_truthful_about_current_surface(self):
-        from app.engine.multi_agent.direct_node_runtime import (
+        from app.engine.multi_agent.direct_node_meta_fast_paths import (
             _build_wiii_capability_inventory_answer,
             _build_wiii_capability_inventory_thinking,
         )

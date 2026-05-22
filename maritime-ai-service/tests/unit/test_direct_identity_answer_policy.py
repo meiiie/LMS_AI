@@ -1,15 +1,13 @@
 import pytest
 
-from app.engine.multi_agent.direct_node_runtime import (
-    _compact_basic_identity_answer,
-    _extract_direct_woven_thought,
-    _strip_direct_inline_private_asides,
-    _trim_direct_visible_thought_answer_draft,
-)
 from app.engine.multi_agent.direct_node_visible_thought import (
     _align_direct_visible_thought,
+    _compact_basic_identity_answer,
     _contains_direct_internal_thought_leak,
+    _extract_direct_woven_thought,
     _should_surface_direct_visible_thought,
+    _strip_direct_inline_private_asides,
+    _trim_direct_visible_thought_answer_draft,
 )
 
 

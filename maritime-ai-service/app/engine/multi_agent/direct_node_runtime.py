@@ -9,7 +9,6 @@ from app.core.config import settings
 from app.core.exceptions import ProviderUnavailableError
 from app.engine.multi_agent.document_preview_contract import (
     has_uploaded_document_context as _has_uploaded_document_context,
-    uploaded_document_attachments_from_context as _uploaded_document_attachments,
 )
 from app.engine.multi_agent.direct_node_document_preview_runtime import (
     execute_direct_node_document_preview_round,
@@ -36,12 +35,10 @@ from app.engine.multi_agent.direct_node_visible_thinking_finalization import (
     finalize_direct_node_visible_thinking,
 )
 from app.engine.multi_agent.direct_node_document_preview_rebind import (
-    _direct_role_candidates,
     _rebind_document_preview_host_action_tool,
 )
 from app.engine.multi_agent.direct_intent import (
     _looks_emotional_support_turn,
-    _normalize_for_intent,
 )
 from app.engine.multi_agent.direct_reasoning import (
     _is_codebase_analysis_query,
@@ -50,60 +47,22 @@ from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
     looks_like_search_placeholder_answer,
 )
-from app.engine.multi_agent.direct_session_memory_runtime import (
-    _build_session_memory_write_answer,
-    _build_session_memory_write_thinking,
-    _extract_session_memory_items_from_text,
-    _extract_session_memory_recall_answer,
-    _with_requested_response_marker,
-)
-from app.engine.multi_agent.direct_text_utils import _fold_direct_text
-from app.engine.multi_agent.direct_node_chatter_runtime import (
-    _build_hunger_chatter_answer,
-    _build_hunger_chatter_thinking,
-    _looks_hunger_chatter_turn,
-)
-from app.engine.multi_agent.direct_node_meta_fast_paths import (
-    _build_reasoning_safety_meta_answer,
-    _build_reasoning_safety_meta_thinking,
-    _build_self_feeling_probe_answer,
-    _build_self_feeling_probe_thinking,
-    _build_wiii_capability_inventory_answer,
-    _build_wiii_capability_inventory_thinking,
-    _looks_self_feeling_probe_turn,
-)
 from app.engine.multi_agent.direct_node_exception_fallbacks import (
     handle_direct_node_generation_exception,
 )
 from app.engine.multi_agent.direct_node_final_state import finalize_direct_node_state
 from app.engine.multi_agent.direct_node_operational_fast_paths import (
-    _DSML_BLOCK_RE,
-    _DSML_STRAY_ASCII_RE,
-    _DSML_STRAY_FULLWIDTH_RE,
-    _GENERIC_DIRECT_FALLBACK_MARKERS,
     _build_codebase_analysis_fallback_answer,
     _build_codebase_analysis_fallback_thinking,
     _build_image_input_thinking,
     _build_image_input_unavailable_answer,
     _build_image_input_unavailable_thinking,
-    _build_pointy_fast_path_thinking,
-    _build_pointy_missing_inventory_answer,
-    _build_pointy_missing_inventory_thinking,
-    _build_wiii_pipeline_meta_answer,
-    _build_wiii_pipeline_meta_thinking,
-    _clean_emergency_web_search_query,
-    _extract_direct_reply_only_answer,
-    _extract_pointy_fast_path_answer,
     _is_explicit_web_search_turn_for_direct,
     _looks_generic_direct_fallback_response,
-    _pointy_requested_without_inventory,
     _should_use_codebase_source_note_fast_answer,
     _strip_dsml_residue,
 )
 from app.engine.multi_agent.direct_node_thinking_effort import (
-    _DIRECT_ANALYTICAL_THINKING_MODES,
-    _DIRECT_CANONICAL_THINKING_EFFORT_ALIASES,
-    _canonicalize_direct_thinking_effort,
     _resolve_direct_thinking_effort,
 )
 from app.engine.multi_agent.direct_node_thinking_snapshot import (
@@ -114,131 +73,21 @@ from app.engine.multi_agent.direct_node_uploaded_context import (
     _build_image_input_answer,
     _build_uploaded_document_context_fallback_answer,
     _build_uploaded_document_visual_guard_answer,
-    _first_markdown_line,
-    _image_payload_attr,
-    _looks_uploaded_context_fact_query,
     _looks_uploaded_document_preview_request,
-    _looks_uploaded_file_metadata_query,
     _looks_uploaded_file_visual_inspection_query,
-    _plain_markdown_excerpt,
     _provider_likely_supports_image_blocks,
-    _uploaded_context_has_video,
 )
 from app.engine.multi_agent.direct_node_visible_thought import (
-    _DIRECT_ENGLISH_PLANNER_MARKERS,
-    _DIRECT_INTERNAL_THOUGHT_MARKERS,
-    _DIRECT_VISIBLE_THOUGHT_DRAFT_SPLITTERS,
-    _DIRECT_VISIBLE_THOUGHT_TRAILING_SELF_EVAL,
-    _DIRECT_WOVEN_THOUGHT_INTENTS,
-    _IDENTITY_LORE_MARKERS,
-    _IDENTITY_ORIGIN_QUERY_MARKERS,
     _compact_basic_identity_answer,
-    _extract_direct_woven_thought,
-    _looks_like_direct_english_planner_thought,
     _strip_direct_inline_private_asides,
-    _trim_direct_visible_thought_answer_draft,
 )
 from app.engine.runtime.runtime_metrics import inc_counter
 from app.engine.multi_agent.state import AgentState
 from app.engine.reasoning import (
-    align_visible_thinking_language,
     record_thinking_snapshot,
-)
-from app.engine.multi_agent.supervisor_runtime_support import (
-    _looks_reasoning_safety_meta_turn,
-    _looks_session_memory_ack_only_turn,
-    _looks_session_memory_recall_turn,
-    _looks_session_memory_write_turn,
-    _looks_wiii_capability_inventory_turn,
-    _looks_wiii_pipeline_meta_turn,
 )
 
 logger = logging.getLogger(__name__)
-
-_DIRECT_SESSION_MEMORY_COMPAT_EXPORTS = (
-    _build_session_memory_write_answer,
-    _build_session_memory_write_thinking,
-    _extract_session_memory_items_from_text,
-    _extract_session_memory_recall_answer,
-    _with_requested_response_marker,
-)
-
-_DIRECT_FAST_RESPONSE_COMPAT_EXPORTS = (
-    _build_hunger_chatter_answer,
-    _build_hunger_chatter_thinking,
-    _build_pointy_fast_path_thinking,
-    _build_pointy_missing_inventory_answer,
-    _build_pointy_missing_inventory_thinking,
-    _build_reasoning_safety_meta_answer,
-    _build_reasoning_safety_meta_thinking,
-    _build_self_feeling_probe_answer,
-    _build_self_feeling_probe_thinking,
-    _build_wiii_capability_inventory_answer,
-    _build_wiii_capability_inventory_thinking,
-    _build_wiii_pipeline_meta_answer,
-    _build_wiii_pipeline_meta_thinking,
-    _extract_direct_reply_only_answer,
-    _extract_pointy_fast_path_answer,
-    _fold_direct_text,
-    _looks_hunger_chatter_turn,
-    _looks_reasoning_safety_meta_turn,
-    _looks_self_feeling_probe_turn,
-    _looks_session_memory_ack_only_turn,
-    _looks_session_memory_recall_turn,
-    _looks_session_memory_write_turn,
-    _looks_wiii_capability_inventory_turn,
-    _looks_wiii_pipeline_meta_turn,
-    _pointy_requested_without_inventory,
-)
-
-_DIRECT_VISIBLE_THOUGHT_COMPAT_EXPORTS = (
-    align_visible_thinking_language,
-    _DIRECT_ENGLISH_PLANNER_MARKERS,
-    _DIRECT_INTERNAL_THOUGHT_MARKERS,
-    _DIRECT_VISIBLE_THOUGHT_DRAFT_SPLITTERS,
-    _DIRECT_VISIBLE_THOUGHT_TRAILING_SELF_EVAL,
-    _DIRECT_WOVEN_THOUGHT_INTENTS,
-    _IDENTITY_LORE_MARKERS,
-    _extract_direct_woven_thought,
-    _looks_like_direct_english_planner_thought,
-    _trim_direct_visible_thought_answer_draft,
-)
-
-_DIRECT_UPLOADED_CONTEXT_COMPAT_EXPORTS = (
-    _uploaded_document_attachments,
-    _image_payload_attr,
-    _first_markdown_line,
-    _plain_markdown_excerpt,
-    _uploaded_context_has_video,
-    _build_uploaded_document_context_fallback_answer,
-    _looks_uploaded_context_fact_query,
-    _looks_uploaded_file_metadata_query,
-    _looks_uploaded_file_visual_inspection_query,
-    _provider_likely_supports_image_blocks,
-)
-
-_DIRECT_OPERATIONAL_FAST_PATH_COMPAT_EXPORTS = (
-    _normalize_for_intent,
-    _DSML_BLOCK_RE,
-    _DSML_STRAY_ASCII_RE,
-    _DSML_STRAY_FULLWIDTH_RE,
-    _GENERIC_DIRECT_FALLBACK_MARKERS,
-    _build_image_input_thinking,
-    _clean_emergency_web_search_query,
-    _strip_dsml_residue,
-)
-
-_DIRECT_THINKING_EFFORT_COMPAT_EXPORTS = (
-    _DIRECT_ANALYTICAL_THINKING_MODES,
-    _DIRECT_CANONICAL_THINKING_EFFORT_ALIASES,
-    _IDENTITY_ORIGIN_QUERY_MARKERS,
-    _canonicalize_direct_thinking_effort,
-)
-
-_DIRECT_DOCUMENT_PREVIEW_REBIND_COMPAT_EXPORTS = (
-    _direct_role_candidates,
-    _rebind_document_preview_host_action_tool,
-)
 
 _HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS = 45.0  # Phase F3 (2026-05-06): bumped 24→45s. NVIDIA DeepSeek tool-heavy pointy turns (inventory + show + synthesis) regularly hit 25-35s; 24s caused canned fallback even when LLM was actively succeeding.
 
