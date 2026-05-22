@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -101,6 +101,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #483 moved repeated direct-node thinking snapshot side effects into
   `direct_node_thinking_snapshot.py`, so deterministic fast paths commit
   `thinking`, `thinking_content`, and reasoning snapshots through one helper.
+- Follow-up #485 moved direct-node uploaded-document preview host-action
+  execution into `direct_node_document_preview_runtime.py`, keeping forced
+  preview tool choice, tool-call event capture, response sanitization,
+  `tools_used`, and routing metadata updates behind one focused contract.
 
 ## Preserved Intentionally
 
@@ -132,7 +136,7 @@ backups, data PDFs, or local skill folders.
   thinking-effort policy, emergency fallback/salvage helpers, uploaded-context
   guards, operational fast paths, meta fast paths, chatter fast paths, visible
   thought helpers, thinking snapshot side effects, and document-preview
-  host-action rebinding have moved out. The long-term cleanup direction is
+  host-action rebinding/execution have moved out. The long-term cleanup direction is
   lifecycle, response-finalization, and SSE V3 parity modules with narrow
   contract tests.
 - `direct_prompts.py` remains the main direct prompt assembly surface, but
@@ -251,3 +255,9 @@ In follow-up #483, targeted direct-node regression tests plus focused thinking
 snapshot helper tests passed with 117 tests after moving repeated direct-node
 thinking snapshot writes into `direct_node_thinking_snapshot.py`. Targeted ruff
 checks also passed for direct-node runtime and the new helper.
+In follow-up #485, focused direct-node document preview helper tests plus
+direct-node provider/preview regression tests passed with 38 tests after moving
+forced uploaded-document preview execution into
+`direct_node_document_preview_runtime.py`. Targeted ruff checks, repository
+`ruff check app/ --select=E9,F63,F7`, and `git diff --check` also passed for
+the preview preflight extraction.

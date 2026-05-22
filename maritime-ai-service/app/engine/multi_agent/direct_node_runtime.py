@@ -11,10 +11,11 @@ from app.core.exceptions import ProviderUnavailableError
 from app.engine.llm_failover_runtime import classify_failover_reason_impl
 from app.engine.multi_agent.document_preview_contract import (
     DOC_PREVIEW_HOST_ACTION_TOOL as _DOC_PREVIEW_HOST_ACTION_TOOL,
-    document_preview_forced_tool_choice as _document_preview_forced_tool_choice,
-    has_document_preview_host_action_tool as _has_document_preview_host_action_tool,
     has_uploaded_document_context as _has_uploaded_document_context,
     uploaded_document_attachments_from_context as _uploaded_document_attachments,
+)
+from app.engine.multi_agent.direct_node_document_preview_runtime import (
+    execute_direct_node_document_preview_round,
 )
 from app.engine.multi_agent.direct_node_document_preview_rebind import (
     _direct_role_candidates,
@@ -285,6 +286,19 @@ async def direct_response_node_impl(
 
     ctx_for_preflight = state.get("context", {}) if isinstance(state.get("context"), dict) else {}
     has_uploaded_document_context = _has_uploaded_document_context(ctx_for_preflight)
+
+    def sanitize_document_preview_response(
+        preview_response: str,
+        preview_tool_call_events: list[dict[str, Any]],
+    ) -> str:
+        preview_response = sanitize_structured_visual_answer_text(
+            preview_response,
+            tool_call_events=preview_tool_call_events,
+        )
+        preview_response = sanitize_wiii_house_text(preview_response, query=query)
+        preview_response = _strip_direct_inline_private_asides(preview_response)
+        return _strip_dsml_residue(preview_response).strip()
+
     if (
         not response
         and has_uploaded_document_context
@@ -320,89 +334,36 @@ async def direct_response_node_impl(
             )
         )
         routing_meta["doc_preview_preflight"] = doc_preview_debug
-        if _has_document_preview_host_action_tool(preview_tools):
-            try:
-                preview_runtime_context = build_tool_runtime_context(
-                    event_bus_id=bus_id,
-                    request_id=ctx_for_preflight.get("request_id"),
-                    session_id=state.get("session_id"),
-                    organization_id=state.get("organization_id"),
-                    user_id=state.get("user_id"),
-                    user_role=ctx_for_preflight.get("user_role", "student"),
-                    node="direct",
-                    source="agentic_loop",
-                    metadata=build_visual_tool_runtime_metadata(state, query),
-                )
-                (
-                    preview_llm_response,
-                    preview_messages,
-                    preview_tool_call_events,
-                ) = await execute_direct_tool_rounds(
-                    object(),
-                    object(),
-                    [],
-                    preview_tools,
-                    push_event,
-                    runtime_context_base=preview_runtime_context,
-                    max_rounds=1,
-                    query=query,
-                    state=state,
-                    forced_tool_choice=_document_preview_forced_tool_choice(query, preview_tools),
-                    llm_base=None,
-                    native_tool_messages=False,
-                )
-                if preview_tool_call_events:
-                    state["tool_call_events"] = preview_tool_call_events
-
-                response, _preview_thinking, tools_used = extract_direct_response(
-                    preview_llm_response,
-                    preview_messages,
-                )
-                response = sanitize_structured_visual_answer_text(
-                    response,
-                    tool_call_events=preview_tool_call_events,
-                )
-                response = sanitize_wiii_house_text(response, query=query)
-                response = _strip_direct_inline_private_asides(response)
-                response = _strip_dsml_residue(response).strip()
-                if not response:
-                    response = (
-                        "Mình đã gửi bản preview bài học sang LMS. "
-                        "Giáo viên cần xem phần so sánh thay đổi và nguồn trích dẫn rồi bấm Áp dụng để cấp approval_token."
-                    )
-                if not tools_used:
-                    preview_tool_names = sorted({
-                        str(event.get("name") or "")
-                        for event in preview_tool_call_events
-                        if event.get("name")
-                    })
-                    tools_used = [
-                        {"name": name}
-                        for name in preview_tool_names
-                        if name
-                    ]
-                if tools_used:
-                    state["tools_used"] = tools_used
-                response_type = "document_preview_host_action"
-                routing_meta["doc_preview_preflight"] = {
-                    **doc_preview_debug,
-                    "status": "executed",
-                    "tool_count": len(preview_tools),
-                    "force_tools": preview_force_tools,
-                }
-                logger.info(
-                    "[DIRECT] Executed LMS document preview host action before planner LLM"
-                )
-            except Exception as preview_error:
-                routing_meta["doc_preview_preflight"] = {
-                    **doc_preview_debug,
-                    "status": "execution_failed",
-                    "error": type(preview_error).__name__,
-                }
-                logger.warning(
-                    "[DIRECT] Early document preview host action failed: %s",
-                    preview_error,
-                )
+        preview_result = await execute_direct_node_document_preview_round(
+            query=query,
+            state=state,
+            ctx=ctx_for_preflight,
+            bus_id=bus_id,
+            tools=preview_tools,
+            force_tools=preview_force_tools,
+            messages=[],
+            push_event=push_event,
+            build_visual_tool_runtime_metadata=build_visual_tool_runtime_metadata,
+            execute_direct_tool_rounds=execute_direct_tool_rounds,
+            extract_direct_response=extract_direct_response,
+            sanitize_preview_response=sanitize_document_preview_response,
+            fallback_response=(
+                "Mình đã gửi bản preview bài học sang LMS. "
+                "Giáo viên cần xem phần so sánh thay đổi và nguồn trích dẫn rồi bấm Áp dụng để cấp approval_token."
+            ),
+            debug=doc_preview_debug,
+            routing_metadata_key="doc_preview_preflight",
+            success_status="executed",
+            failure_status="execution_failed",
+            failure_log_message="[DIRECT] Early document preview host action failed: %s",
+            logger_obj=logger,
+        )
+        if preview_result is not None:
+            response = preview_result.response
+            response_type = "document_preview_host_action"
+            logger.info(
+                "[DIRECT] Executed LMS document preview host action before planner LLM"
+            )
     if ctx_for_preflight.get("image_input_error") and has_uploaded_document_context:
         ctx_for_preflight["images"] = []
     if (
@@ -846,61 +807,31 @@ async def direct_response_node_impl(
                 not response
                 and has_uploaded_document_context
                 and _looks_uploaded_document_preview_request(query)
-                and _has_document_preview_host_action_tool(tools)
             ):
-                try:
-                    preview_runtime_context = build_tool_runtime_context(
-                        event_bus_id=bus_id,
-                        request_id=ctx.get("request_id"),
-                        session_id=state.get("session_id"),
-                        organization_id=state.get("organization_id"),
-                        user_id=state.get("user_id"),
-                        user_role=ctx.get("user_role", "student"),
-                        node="direct",
-                        source="agentic_loop",
-                        metadata=build_visual_tool_runtime_metadata(state, query),
-                    )
-                    llm_response, messages, tool_call_events = await execute_direct_tool_rounds(
-                        object(),
-                        object(),
-                        messages,
-                        tools,
-                        push_event,
-                        runtime_context_base=preview_runtime_context,
-                        max_rounds=1,
-                        query=query,
-                        state=state,
-                        forced_tool_choice=_document_preview_forced_tool_choice(query, tools),
-                        llm_base=None,
-                        native_tool_messages=False,
-                    )
-                    if tool_call_events:
-                        state["tool_call_events"] = tool_call_events
-
-                    response, thinking_content, tools_used = extract_direct_response(
-                        llm_response,
-                        messages,
-                    )
-                    response = sanitize_structured_visual_answer_text(
-                        response,
-                        tool_call_events=tool_call_events,
-                    )
-                    response = sanitize_wiii_house_text(response, query=query)
-                    response = _strip_direct_inline_private_asides(response)
-                    response = _strip_dsml_residue(response).strip()
-                    if not tools_used:
-                        preview_tool_names = sorted({
-                            str(event.get("name") or "")
-                            for event in tool_call_events
-                            if event.get("name")
-                        })
-                        tools_used = [
-                            {"name": name}
-                            for name in preview_tool_names
-                            if name
-                        ]
-                    if tools_used:
-                        state["tools_used"] = tools_used
+                preview_result = await execute_direct_node_document_preview_round(
+                    query=query,
+                    state=state,
+                    ctx=ctx,
+                    bus_id=bus_id,
+                    tools=tools,
+                    force_tools=force_tools,
+                    messages=messages,
+                    push_event=push_event,
+                    build_visual_tool_runtime_metadata=build_visual_tool_runtime_metadata,
+                    execute_direct_tool_rounds=execute_direct_tool_rounds,
+                    extract_direct_response=extract_direct_response,
+                    sanitize_preview_response=sanitize_document_preview_response,
+                    failure_log_message=(
+                        "[DIRECT] Deterministic document preview pre-LLM path failed: %s"
+                    ),
+                    logger_obj=logger,
+                )
+                if preview_result is not None:
+                    response = preview_result.response
+                    thinking_content = preview_result.thinking_content
+                    tools_used = preview_result.tools_used
+                    messages = preview_result.messages
+                    tool_call_events = preview_result.tool_call_events
                     tracer.end_step(
                         result="Deterministic uploaded-document preview host action",
                         confidence=0.9,
@@ -909,11 +840,6 @@ async def direct_response_node_impl(
                             "tools_bound": len(tools),
                             "force_tools": force_tools,
                         },
-                    )
-                except Exception as preview_error:
-                    logger.warning(
-                        "[DIRECT] Deterministic document preview pre-LLM path failed: %s",
-                        preview_error,
                     )
 
             direct_node_id = "direct_identity" if is_identity_turn else "direct"
