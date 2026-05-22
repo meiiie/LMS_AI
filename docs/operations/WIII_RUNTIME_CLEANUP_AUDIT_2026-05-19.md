@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -128,6 +128,11 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `extract_scaffold_spec` / `detect_scaffold_kind` into
   `code_studio_scaffold_spec.py`, leaving `code_studio_template_scaffold.py`
   as a renderer registry plus compatibility import surface.
+- Follow-up #497 moved direct-answer visible stream text helpers into
+  `direct_stream_text_runtime.py`, keeping incomplete `<thinking>` stripping,
+  native chunk part extraction, duplicate answer-delta comparison, visible
+  thinking cleanup/alignment, and pseudo-stream answer chunking outside the
+  provider fallback shell.
 
 ## Preserved Intentionally
 
@@ -177,6 +182,10 @@ backups, data PDFs, or local skill folders.
   returns, and forced web-search shortcuts have moved out. The next durable
   step is shrinking the compatibility export surface once external imports can
   close.
+- `direct_execution.py` is now closer to a provider invocation/fallback shell:
+  visible answer/thinking text shaping moved to `direct_stream_text_runtime.py`.
+  It still carries graph-era compatibility re-exports for wait-surface and
+  Code Studio regex helpers until legacy `graph.py` imports can close.
 - Code Studio deterministic fallback is now split across contract, spec,
   quality, captions, registry, shell, and renderer modules. The remaining debt
   is product quality rather than module size: the scaffold should keep moving
@@ -311,3 +320,7 @@ In follow-up #495, the Code Studio scaffold regression set passed with 57 tests
 after moving deterministic intent/spec extraction into
 `code_studio_scaffold_spec.py`. Targeted ruff checks passed for the spec and
 renderer shell import surfaces.
+In follow-up #497, the direct execution streaming regression set passed with 22
+tests after moving visible stream text helpers into
+`direct_stream_text_runtime.py`. Targeted ruff checks passed for the direct
+execution compatibility wrapper and new helper module.

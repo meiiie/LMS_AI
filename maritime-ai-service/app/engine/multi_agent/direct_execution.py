@@ -8,32 +8,10 @@ tool calling.
 from __future__ import annotations
 
 import asyncio
-from difflib import SequenceMatcher
-import json
 import logging
 import re
-import unicodedata
-import uuid
-import time
 from typing import Any, Optional
 
-from app.core.config import settings
-from app.engine.multi_agent.direct_reasoning import (
-    _DIRECT_ANALYSIS_PREFIXES,
-    _DIRECT_BROWSER_TOOLS,
-    _DIRECT_HOST_ACTION_PREFIX,
-    _DIRECT_LEGAL_TOOLS,
-    _DIRECT_LMS_PREFIX,
-    _DIRECT_MEMORY_TOOLS,
-    _DIRECT_NEWS_TOOLS,
-    _DIRECT_TIME_TOOLS,
-    _DIRECT_WEB_TOOLS,
-    _build_direct_tool_reflection,
-    _has_prefixed_tool,
-    _infer_direct_reasoning_cue,
-    _uses_host_action_tool,
-    _uses_lms_tool,
-)
 from app.engine.multi_agent.direct_intent import (
     _looks_emotional_support_turn,
     _looks_identity_selfhood_turn,
@@ -46,17 +24,6 @@ from app.engine.multi_agent.direct_wait_surface import (
     _contains_wait_marker,
     _thinking_start_label,
 )
-from app.engine.multi_agent.direct_opening_runtime import (
-    finalize_direct_opening_phase_impl,
-    start_direct_opening_phase_impl,
-)
-from app.engine.multi_agent.direct_visible_thinking_cleanup import (
-    looks_like_direct_selfhood_answer_draft_paragraph,
-    looks_like_direct_selfhood_english_meta_paragraph,
-    looks_like_direct_selfhood_meta_heading,
-    looks_like_direct_selfhood_meta_intro,
-    strip_direct_selfhood_filler_prefix,
-)
 from app.engine.multi_agent.direct_tool_rounds_runtime import (
     execute_direct_tool_rounds_impl,
 )
@@ -67,14 +34,7 @@ from app.engine.multi_agent.direct_response_runtime import (
 )
 from app.engine.multi_agent.state import AgentState
 
-from app.engine.multi_agent.direct_prompts import _resolve_tool_choice, _tool_name
-from app.engine.multi_agent.public_thinking import _public_reasoning_delta_chunks
-from app.engine.multi_agent.visual_intent_resolver import required_visual_tool_names, resolve_visual_intent
-from app.engine.multi_agent.visual_events import (
-    _collect_active_visual_session_ids, _emit_visual_commit_events,
-    _maybe_emit_host_action_event, _maybe_emit_visual_event,
-    _summarize_tool_result_for_stream,
-)
+from app.engine.multi_agent.direct_prompts import _resolve_tool_choice
 from app.engine.multi_agent.code_studio_patterns import (
     _CODE_STUDIO_ACTION_JSON_RE,
     _CODE_STUDIO_SANDBOX_IMAGE_RE,
@@ -88,6 +48,15 @@ from app.engine.multi_agent.direct_runtime_bindings import (
     _stream_openai_compatible_answer_with_route,
     _truncate_before_code_dump,
 )
+from app.engine.multi_agent.direct_stream_text_runtime import (
+    _compute_visible_answer_delta,
+    _extract_message_text,
+    _extract_stream_chunk_parts,
+    _normalize_direct_visible_thinking_impl,
+    _split_visible_answer_chunks,
+    _split_visible_thinking_chunks,
+    _strip_incomplete_thinking_blocks,
+)
 from app.engine.reasoning import (
     align_visible_thinking_language,
     sanitize_visible_reasoning_text,
@@ -97,166 +66,19 @@ from app.engine.llm_runtime_metadata import record_runtime_failover_event
 
 logger = logging.getLogger(__name__)
 
-_DIRECT_VISIBLE_THINKING_PLANNER_MARKERS = (
-    "my response to this inquiry",
-    "reflecting on the response",
-    "reflecting on this response",
-    "reflecting on the inquiry",
-    "my response to this question",
-    "my approach to this question",
-    "my approach to answering",
-    "here's my take on those thoughts",
-    "tailored for an expert audience",
-    "for an expert audience",
-    "i will attempt a few kaomoji",
-    "dash of personality and charm",
-    "let's begin",
-    "lets begin",
-    "day la cach minh thu tom tat lai nhung suy nghi do",
-    "nham den doi tuong chuyen gia",
-    "xung o ngoi thu nhat, nhu ban yeu cau",
-    "to make it easier for them",
-    "i will break this down",
-    "i can't resist",
-    "i cant resist",
-    "signature wiii style",
-    "final polished version",
-    "i will greet",
-)
 
-# Functions still in graph.py — imported lazily inside functions to avoid circular deps.
-# These should be extracted to shared modules in future refactoring phases.
-
-
-def _strip_incomplete_thinking_blocks(text: str) -> str:
-    """Remove complete or partial <thinking> blocks from cumulative streamed text."""
-    clean = str(text or "")
-    lowered = clean.lower()
-    start = lowered.find("<thinking>")
-    while start >= 0:
-        end = lowered.find("</thinking>", start + len("<thinking>"))
-        if end < 0:
-            clean = clean[:start]
-            break
-        clean = clean[:start] + clean[end + len("</thinking>"):]
-        lowered = clean.lower()
-        start = lowered.find("<thinking>")
-    clean = re.sub(r"</thinking\s*>?", "", clean, flags=re.IGNORECASE)
-    clean = re.sub(r"</thinking$", "", clean, flags=re.IGNORECASE)
-    return clean
-
-
-def _extract_stream_chunk_parts(content: Any) -> tuple[str, str]:
-    """Extract per-chunk native reasoning and visible answer text."""
-    if isinstance(content, list):
-        reasoning_parts: list[str] = []
-        answer_parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                if item:
-                    answer_parts.append(item)
-                continue
-            if not isinstance(item, dict):
-                continue
-            block_type = str(item.get("type") or "").strip().lower()
-            if block_type == "thinking":
-                thinking_text = str(item.get("thinking") or "").strip()
-                if thinking_text:
-                    reasoning_parts.append(thinking_text)
-                continue
-            if block_type == "text":
-                text_value = str(item.get("text") or "").strip()
-                if text_value:
-                    answer_parts.append(text_value)
-                continue
-            text_value = str(item.get("text") or item.get("content") or "").strip()
-            if text_value:
-                answer_parts.append(text_value)
-        return "".join(reasoning_parts), "".join(answer_parts)
-    if isinstance(content, str):
-        return "", content
-    return "", str(content or "")
-
-
-def _extract_message_text(content: Any) -> str:
-    """Flatten a message payload into plain text for intent/alignment checks."""
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                if item.strip():
-                    parts.append(item.strip())
-                continue
-            if not isinstance(item, dict):
-                continue
-            text_value = str(
-                item.get("text")
-                or item.get("content")
-                or item.get("thinking")
-                or ""
-            ).strip()
-            if text_value:
-                parts.append(text_value)
-        return "\n".join(parts).strip()
-    return str(content or "").strip()
-
-
-def _normalize_stream_compare_text(value: str) -> str:
-    """Normalize answer text for duplicate/replay comparison."""
-    return re.sub(r"\s+", " ", str(value or "")).strip()
-
-
-def _compute_visible_answer_delta(*, emitted_text: str, visible_text: str) -> str:
-    """Return only the genuinely new visible answer text for SSE streaming.
-
-    Some providers emit incremental text chunks and then replay a near-identical
-    full answer near the end of the stream. We want to keep real incremental
-    growth while skipping those replays.
-    """
-    candidate = str(visible_text or "")
-    emitted = str(emitted_text or "")
-    if not candidate:
-        return ""
-    if not emitted:
-        return candidate
-    if candidate == emitted:
-        return ""
-    if candidate.startswith(emitted):
-        return candidate[len(emitted):]
-    if emitted.startswith(candidate):
-        return ""
-
-    normalized_candidate = _normalize_stream_compare_text(candidate)
-    normalized_emitted = _normalize_stream_compare_text(emitted)
-    if normalized_candidate and normalized_candidate == normalized_emitted:
-        return ""
-
-    max_overlap = min(len(candidate), len(emitted))
-    for overlap in range(max_overlap, 0, -1):
-        if emitted.endswith(candidate[:overlap]):
-            return candidate[overlap:]
-
-    if len(normalized_candidate) >= 80 and len(normalized_emitted) >= 80:
-        similarity = SequenceMatcher(None, normalized_candidate, normalized_emitted).ratio()
-        if similarity >= 0.985:
-            return ""
-
-    return candidate
-
-
-def _split_visible_thinking_chunks(text: str) -> list[str]:
-    """Break a thinking block into stable SSE-sized paragraphs without rewriting it."""
-    clean = sanitize_visible_reasoning_text(str(text or "")).strip()
-    if not clean:
-        return []
-
-    paragraphs = [part.strip() for part in re.split(r"\n{2,}", clean) if part.strip()]
-    if paragraphs:
-        return paragraphs
-
-    return [clean]
+# Compatibility re-exports for the legacy graph shim. New code should import
+# these helpers from their canonical modules directly.
+__all__ = [
+    "_CODE_STUDIO_ACTION_JSON_RE",
+    "_CODE_STUDIO_SANDBOX_IMAGE_RE",
+    "_CODE_STUDIO_SANDBOX_LINK_RE",
+    "_CODE_STUDIO_SANDBOX_PATH_RE",
+    "_build_code_studio_wait_heartbeat_text",
+    "_compact_visible_query",
+    "_contains_wait_marker",
+    "_thinking_start_label",
+]
 
 
 def _looks_primary_timeout_failure(exc: Exception) -> bool:
@@ -266,50 +88,6 @@ def _looks_primary_timeout_failure(exc: Exception) -> bool:
     return "timed out" in text or "timeout" in text
 
 
-def _fold_direct_marker_text(text: str) -> str:
-    lowered = str(text or "").strip().lower()
-    lowered = lowered.replace("đ", "d").replace("Đ", "d")
-    return "".join(
-        ch for ch in unicodedata.normalize("NFKD", lowered)
-        if not unicodedata.combining(ch)
-    )
-
-
-def _looks_like_direct_selfhood_meta_heading(paragraph: str) -> bool:
-    clean = sanitize_visible_reasoning_text(str(paragraph or "")).strip()
-    if not clean:
-        return False
-    lowered = clean.lower()
-    if len(clean) > 120:
-        return False
-    if not (clean.startswith("**") and clean.endswith("**")):
-        return False
-    return any(marker in lowered for marker in _DIRECT_SELFHOOD_META_HEADING_MARKERS)
-
-
-def _strip_direct_selfhood_filler_prefix(paragraph: str) -> str:
-    clean = str(paragraph or "").strip()
-    if not clean:
-        return ""
-    lowered = clean.lower()
-    for prefix in _DIRECT_SELFHOOD_ENGLISH_FILLER_PREFIXES:
-        if lowered.startswith(prefix):
-            stripped = clean[len(prefix):].lstrip(" ,.-:;…")
-            if stripped and stripped[0].islower():
-                stripped = stripped[0].upper() + stripped[1:]
-            return stripped
-    return clean
-
-
-def _looks_like_direct_selfhood_english_paragraph(paragraph: str) -> bool:
-    clean = str(paragraph or "").strip()
-    if len(clean) < 40:
-        return False
-    lowered = clean.lower()
-    if not any(marker in lowered for marker in _DIRECT_SELFHOOD_ENGLISH_PARAGRAPH_MARKERS):
-        return False
-    return all((ord(ch) < 128) or ch in "\n\r\t" for ch in clean)
-
 
 async def _normalize_direct_visible_thinking(
     text: str,
@@ -318,107 +96,16 @@ async def _normalize_direct_visible_thinking(
     alignment_mode: str | None,
     llm: Any,
 ) -> str:
-    clean = sanitize_visible_reasoning_text(str(text or "")).strip()
-    if not clean:
-        return ""
-
-    paragraphs = [part.strip() for part in re.split(r"\n{2,}", clean) if part.strip()]
-    if not paragraphs:
-        paragraphs = [clean]
-
-    kept: list[str] = []
-    for paragraph in paragraphs:
-        lowered = paragraph.lower().strip()
-        folded = _fold_direct_marker_text(paragraph)
-        if alignment_mode == "direct_selfhood":
-            if (
-                looks_like_direct_selfhood_meta_heading(paragraph)
-                or looks_like_direct_selfhood_meta_intro(paragraph)
-                or looks_like_direct_selfhood_answer_draft_paragraph(paragraph)
-            ):
-                continue
-        if any(
-            marker in lowered or marker in folded
-            for marker in _DIRECT_VISIBLE_THINKING_PLANNER_MARKERS
-        ):
-            continue
-
-        normalized = paragraph
-        if alignment_mode == "direct_selfhood":
-            if looks_like_direct_selfhood_english_meta_paragraph(normalized):
-                continue
-            normalized = strip_direct_selfhood_filler_prefix(normalized)
-        if should_align_visible_thinking_language(
-            normalized,
-            target_language=response_language,
-        ):
-            try:
-                aligned = await align_visible_thinking_language(
-                    normalized,
-                    target_language=response_language,
-                    alignment_mode=alignment_mode,
-                    llm=llm,
-                )
-            except Exception:
-                aligned = None
-            if aligned and not should_align_visible_thinking_language(
-                aligned,
-                target_language=response_language,
-            ):
-                normalized = aligned.strip()
-
-        if should_align_visible_thinking_language(
-            normalized,
-            target_language=response_language,
-        ):
-            continue
-
-        normalized = sanitize_visible_reasoning_text(normalized).strip()
-        if alignment_mode == "direct_selfhood":
-            if (
-                looks_like_direct_selfhood_meta_heading(normalized)
-                or looks_like_direct_selfhood_meta_intro(normalized)
-                or looks_like_direct_selfhood_english_meta_paragraph(normalized)
-                or looks_like_direct_selfhood_answer_draft_paragraph(normalized)
-            ):
-                continue
-            normalized = strip_direct_selfhood_filler_prefix(normalized)
-            if should_align_visible_thinking_language(
-                normalized,
-                target_language=response_language,
-            ):
-                continue
-        if normalized:
-            kept.append(normalized)
-
-    return "\n\n".join(kept).strip()
-
-
-def _split_visible_answer_chunks(text: str, *, target_size: int = 160) -> list[str]:
-    """Chunk a completed answer for pseudo-stream playback without changing content."""
-    clean = str(text or "").strip()
-    if not clean:
-        return []
-    if len(clean) <= target_size:
-        return [clean]
-
-    chunks: list[str] = []
-    start = 0
-    while start < len(clean):
-        end = min(len(clean), start + target_size)
-        if end < len(clean):
-            search_start = max(start + 1, end - 40)
-            boundary = -1
-            for index in range(end, search_start, -1):
-                if clean[index - 1].isspace():
-                    boundary = index
-                    break
-            if boundary > start:
-                end = boundary
-        chunks.append(clean[start:end])
-        start = end
-    return chunks or [clean]
-
+    """Compatibility wrapper for tests that patch direct_execution reasoning hooks."""
+    return await _normalize_direct_visible_thinking_impl(
+        text,
+        response_language=response_language,
+        alignment_mode=alignment_mode,
+        llm=llm,
+        align_visible_thinking_language_fn=align_visible_thinking_language,
+        should_align_visible_thinking_language_fn=should_align_visible_thinking_language,
+        sanitize_visible_reasoning_text_fn=sanitize_visible_reasoning_text,
+    )
 
 def _should_prefer_native_langchain_stream(
     *,
