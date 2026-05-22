@@ -92,6 +92,9 @@ from app.engine.multi_agent.direct_node_thinking_effort import (
     _canonicalize_direct_thinking_effort,
     _resolve_direct_thinking_effort,
 )
+from app.engine.multi_agent.direct_node_thinking_snapshot import (
+    record_direct_node_thinking_snapshot,
+)
 from app.engine.multi_agent.direct_node_uploaded_context import (
     _build_image_input_answer,
     _build_uploaded_document_context_fallback_answer,
@@ -270,13 +273,11 @@ async def direct_response_node_impl(
     explicit_web_search_turn = _is_explicit_web_search_turn_for_direct(query, state)
     if not response and _is_codebase_analysis_query(query) and not explicit_web_search_turn:
         codebase_thinking = _build_codebase_analysis_fallback_thinking(query)
-        state["thinking"] = codebase_thinking
-        state["thinking_content"] = codebase_thinking
-        record_thinking_snapshot(
-            state,
-            codebase_thinking,
-            node="direct",
+        record_direct_node_thinking_snapshot(
+            state=state,
+            thinking=codebase_thinking,
             provenance="codebase_source_backed_plan",
+            record_thinking_snapshot_fn=record_thinking_snapshot,
         )
         if _should_use_codebase_source_note_fast_answer(query):
             response = _build_codebase_analysis_fallback_answer(query)
@@ -294,13 +295,11 @@ async def direct_response_node_impl(
             "nên ưu tiên đối chiếu marker, bảng và các dòng trong document_context trước khi suy luận thêm. "
             "Nếu phần nào không có trong file, Wiii phải nói rõ thay vì bịa."
         )
-        state["thinking"] = document_thinking
-        state["thinking_content"] = document_thinking
-        record_thinking_snapshot(
-            state,
-            document_thinking,
-            node="direct",
+        record_direct_node_thinking_snapshot(
+            state=state,
+            thinking=document_thinking,
             provenance="document_context_plan",
+            record_thinking_snapshot_fn=record_thinking_snapshot,
         )
     if (
         not response
@@ -414,13 +413,11 @@ async def direct_response_node_impl(
         response = _build_image_input_unavailable_answer(query)
         response_type = "image_input_unavailable"
         fast_thinking = _build_image_input_unavailable_thinking()
-        state["thinking"] = fast_thinking
-        state["thinking_content"] = fast_thinking
-        record_thinking_snapshot(
-            state,
-            fast_thinking,
-            node="direct",
+        record_direct_node_thinking_snapshot(
+            state=state,
+            thinking=fast_thinking,
             provenance="deterministic_image_input_unavailable",
+            record_thinking_snapshot_fn=record_thinking_snapshot,
         )
     elif not response and ctx_for_preflight.get("images") and not has_uploaded_document_context:
         response = await _build_image_input_answer(
@@ -429,13 +426,11 @@ async def direct_response_node_impl(
         )
         response_type = "image_input"
         fast_thinking = _build_image_input_thinking(query)
-        state["thinking"] = fast_thinking
-        state["thinking_content"] = fast_thinking
-        record_thinking_snapshot(
-            state,
-            fast_thinking,
-            node="direct",
+        record_direct_node_thinking_snapshot(
+            state=state,
+            thinking=fast_thinking,
             provenance="deterministic_image_input",
+            record_thinking_snapshot_fn=record_thinking_snapshot,
         )
 
     if not response:
@@ -449,25 +444,21 @@ async def direct_response_node_impl(
                 if response:
                     response_type = "pointy_fast_path"
                     fast_thinking = _build_pointy_fast_path_thinking(state)
-                    state["thinking"] = fast_thinking
-                    state["thinking_content"] = fast_thinking
-                    record_thinking_snapshot(
-                        state,
-                        fast_thinking,
-                        node="direct",
+                    record_direct_node_thinking_snapshot(
+                        state=state,
+                        thinking=fast_thinking,
                         provenance="deterministic_pointy_fast_path",
+                        record_thinking_snapshot_fn=record_thinking_snapshot,
                     )
             elif _pointy_requested_without_inventory(state):
                 response = _build_pointy_missing_inventory_answer(query)
                 response_type = "pointy_missing_inventory"
                 fast_thinking = _build_pointy_missing_inventory_thinking(query)
-                state["thinking"] = fast_thinking
-                state["thinking_content"] = fast_thinking
-                record_thinking_snapshot(
-                    state,
-                    fast_thinking,
-                    node="direct",
+                record_direct_node_thinking_snapshot(
+                    state=state,
+                    thinking=fast_thinking,
                     provenance="deterministic_pointy_missing_inventory",
+                    record_thinking_snapshot_fn=record_thinking_snapshot,
                 )
             elif (
                 _looks_self_feeling_probe_turn(query)
@@ -477,13 +468,11 @@ async def direct_response_node_impl(
                 response = _build_self_feeling_probe_answer(query)
                 response_type = "self_feeling_probe"
                 fast_thinking = _build_self_feeling_probe_thinking(query)
-                state["thinking"] = fast_thinking
-                state["thinking_content"] = fast_thinking
-                record_thinking_snapshot(
-                    state,
-                    fast_thinking,
-                    node="direct",
+                record_direct_node_thinking_snapshot(
+                    state=state,
+                    thinking=fast_thinking,
                     provenance="deterministic_self_feeling_probe",
+                    record_thinking_snapshot_fn=record_thinking_snapshot,
                 )
             elif (
                 _looks_wiii_capability_inventory_turn(_fold_direct_text(query))
@@ -493,13 +482,11 @@ async def direct_response_node_impl(
                 response = _build_wiii_capability_inventory_answer(query)
                 response_type = "wiii_capability_inventory"
                 fast_thinking = _build_wiii_capability_inventory_thinking(query)
-                state["thinking"] = fast_thinking
-                state["thinking_content"] = fast_thinking
-                record_thinking_snapshot(
-                    state,
-                    fast_thinking,
-                    node="direct",
+                record_direct_node_thinking_snapshot(
+                    state=state,
+                    thinking=fast_thinking,
                     provenance="deterministic_wiii_capability_inventory",
+                    record_thinking_snapshot_fn=record_thinking_snapshot,
                 )
             elif (
                 has_uploaded_document_context
@@ -517,13 +504,11 @@ async def direct_response_node_impl(
                         "Mình nhận đây là câu hỏi fact-check trực tiếp về file/video vừa upload, "
                         "nên ưu tiên dữ kiện parser đã trích ra thay vì gọi LLM suy diễn."
                     )
-                    state["thinking"] = fast_thinking
-                    state["thinking_content"] = fast_thinking
-                    record_thinking_snapshot(
-                        state,
-                        fast_thinking,
-                        node="direct",
+                    record_direct_node_thinking_snapshot(
+                        state=state,
+                        thinking=fast_thinking,
                         provenance="deterministic_uploaded_file_context_fact",
+                        record_thinking_snapshot_fn=record_thinking_snapshot,
                     )
             elif (
                 fast_method == "conservative_fast_path"
@@ -533,13 +518,11 @@ async def direct_response_node_impl(
                 response = _build_reasoning_safety_meta_answer(query)
                 response_type = "reasoning_safety_meta"
                 fast_thinking = _build_reasoning_safety_meta_thinking(query)
-                state["thinking"] = fast_thinking
-                state["thinking_content"] = fast_thinking
-                record_thinking_snapshot(
-                    state,
-                    fast_thinking,
-                    node="direct",
+                record_direct_node_thinking_snapshot(
+                    state=state,
+                    thinking=fast_thinking,
                     provenance="deterministic_reasoning_safety_meta",
+                    record_thinking_snapshot_fn=record_thinking_snapshot,
                 )
             elif (
                 fast_method == "conservative_fast_path"
@@ -549,13 +532,11 @@ async def direct_response_node_impl(
                 response = _build_wiii_pipeline_meta_answer(query)
                 response_type = "wiii_pipeline_meta"
                 fast_thinking = _build_wiii_pipeline_meta_thinking(query)
-                state["thinking"] = fast_thinking
-                state["thinking_content"] = fast_thinking
-                record_thinking_snapshot(
-                    state,
-                    fast_thinking,
-                    node="direct",
+                record_direct_node_thinking_snapshot(
+                    state=state,
+                    thinking=fast_thinking,
                     provenance="deterministic_wiii_pipeline_meta",
+                    record_thinking_snapshot_fn=record_thinking_snapshot,
                 )
             elif (
                 fast_method == "conservative_fast_path"
@@ -570,13 +551,11 @@ async def direct_response_node_impl(
                     "Mình nhận đây là lượt gọi lại thông tin trong chính phiên này, "
                     "nên ưu tiên đọc lịch sử gần nhất thay vì ghi thêm memory mới."
                 )
-                state["thinking"] = fast_thinking
-                state["thinking_content"] = fast_thinking
-                record_thinking_snapshot(
-                    state,
-                    fast_thinking,
-                    node="direct",
+                record_direct_node_thinking_snapshot(
+                    state=state,
+                    thinking=fast_thinking,
                     provenance="deterministic_session_memory_recall",
+                    record_thinking_snapshot_fn=record_thinking_snapshot,
                 )
             elif (
                 fast_method == "conservative_fast_path"
@@ -589,13 +568,11 @@ async def direct_response_node_impl(
                     "Mình ghi nhận điều bạn muốn giữ trong phiên hiện tại và giữ phản hồi "
                     "đúng một câu như bạn yêu cầu."
                 )
-                state["thinking"] = fast_thinking
-                state["thinking_content"] = fast_thinking
-                record_thinking_snapshot(
-                    state,
-                    fast_thinking,
-                    node="direct",
+                record_direct_node_thinking_snapshot(
+                    state=state,
+                    thinking=fast_thinking,
                     provenance="deterministic_session_ack",
+                    record_thinking_snapshot_fn=record_thinking_snapshot,
                 )
             elif _looks_session_memory_write_turn(normalized_for_fast):
                 response = _with_requested_response_marker(
@@ -604,13 +581,11 @@ async def direct_response_node_impl(
                 )
                 response_type = "session_memory_write"
                 fast_thinking = _build_session_memory_write_thinking(query)
-                state["thinking"] = fast_thinking
-                state["thinking_content"] = fast_thinking
-                record_thinking_snapshot(
-                    state,
-                    fast_thinking,
-                    node="direct",
+                record_direct_node_thinking_snapshot(
+                    state=state,
+                    thinking=fast_thinking,
                     provenance="deterministic_session_memory_write",
+                    record_thinking_snapshot_fn=record_thinking_snapshot,
                 )
             elif (
                 fast_method == "conservative_fast_path"
@@ -623,13 +598,11 @@ async def direct_response_node_impl(
                         "Mình dùng ngữ cảnh ngay trong phiên này để nhắc lại đúng "
                         "mẩu thông tin bạn vừa yêu cầu Wiii giữ."
                     )
-                    state["thinking"] = fast_thinking
-                    state["thinking_content"] = fast_thinking
-                    record_thinking_snapshot(
-                        state,
-                        fast_thinking,
-                        node="direct",
+                    record_direct_node_thinking_snapshot(
+                        state=state,
+                        thinking=fast_thinking,
                         provenance="deterministic_session_memory_recall",
+                        record_thinking_snapshot_fn=record_thinking_snapshot,
                     )
             elif (
                 _looks_hunger_chatter_turn(normalized_for_fast)
@@ -640,13 +613,11 @@ async def direct_response_node_impl(
                 response = _build_hunger_chatter_answer(query)
                 response_type = "hunger_chatter"
                 fast_thinking = _build_hunger_chatter_thinking(query)
-                state["thinking"] = fast_thinking
-                state["thinking_content"] = fast_thinking
-                record_thinking_snapshot(
-                    state,
-                    fast_thinking,
-                    node="direct",
+                record_direct_node_thinking_snapshot(
+                    state=state,
+                    thinking=fast_thinking,
                     provenance="deterministic_hunger_chatter",
+                    record_thinking_snapshot_fn=record_thinking_snapshot,
                 )
         except Exception as exc:
             logger.debug("[DIRECT] Session memory ack fast response skipped: %s", exc)
@@ -1233,13 +1204,11 @@ async def direct_response_node_impl(
                 ):
                     response = _build_codebase_analysis_fallback_answer(query)
                     thinking_content = _build_codebase_analysis_fallback_thinking(query)
-                    state["thinking"] = thinking_content
-                    state["thinking_content"] = thinking_content
-                    record_thinking_snapshot(
-                        state,
-                        thinking_content,
-                        node="direct",
+                    record_direct_node_thinking_snapshot(
+                        state=state,
+                        thinking=thinking_content,
                         provenance="deterministic_codebase_fallback",
+                        record_thinking_snapshot_fn=record_thinking_snapshot,
                     )
 
                 # Source-backed graceful synthesis: when the LLM returned an
@@ -1305,13 +1274,11 @@ async def direct_response_node_impl(
                         aligned_thinking,
                         target_language=response_language,
                     ):
-                        state["thinking"] = aligned_thinking
-                        state["thinking_content"] = aligned_thinking
-                        record_thinking_snapshot(
-                            state,
-                            aligned_thinking,
-                            node="direct",
+                        record_direct_node_thinking_snapshot(
+                            state=state,
+                            thinking=aligned_thinking,
                             provenance="aligned_cleanup",
+                            record_thinking_snapshot_fn=record_thinking_snapshot,
                         )
                     else:
                         state.pop("thinking", None)
@@ -1330,13 +1297,11 @@ async def direct_response_node_impl(
                         tool_names=list(tools_used or []),
                     )
                     if emotional_rescue:
-                        state["thinking"] = emotional_rescue
-                        state["thinking_content"] = emotional_rescue
-                        record_thinking_snapshot(
-                            state,
-                            emotional_rescue,
-                            node="direct",
+                        record_direct_node_thinking_snapshot(
+                            state=state,
+                            thinking=emotional_rescue,
                             provenance="aligned_cleanup",
+                            record_thinking_snapshot_fn=record_thinking_snapshot,
                         )
                 if tools_used:
                     state["tools_used"] = tools_used
@@ -1360,13 +1325,11 @@ async def direct_response_node_impl(
                 if _is_codebase_analysis_query(query) and not explicit_web_search_turn:
                     response = _build_codebase_analysis_fallback_answer(query)
                     codebase_thinking = _build_codebase_analysis_fallback_thinking(query)
-                    state["thinking"] = codebase_thinking
-                    state["thinking_content"] = codebase_thinking
-                    record_thinking_snapshot(
-                        state,
-                        codebase_thinking,
-                        node="direct",
+                    record_direct_node_thinking_snapshot(
+                        state=state,
+                        thinking=codebase_thinking,
                         provenance="deterministic_codebase_fallback",
+                        record_thinking_snapshot_fn=record_thinking_snapshot,
                     )
                 else:
                     response = (
@@ -1404,13 +1367,11 @@ async def direct_response_node_impl(
                 if salvaged_tools:
                     state["tools_used"] = salvaged_tools
                 if salvaged_thinking:
-                    state["thinking"] = salvaged_thinking
-                    state["thinking_content"] = salvaged_thinking
-                    record_thinking_snapshot(
-                        state,
-                        salvaged_thinking,
-                        node="direct",
+                    record_direct_node_thinking_snapshot(
+                        state=state,
+                        thinking=salvaged_thinking,
                         provenance="final_snapshot",
+                        record_thinking_snapshot_fn=record_thinking_snapshot,
                     )
                 logger.warning(
                     "[DIRECT] Post-processing failed but salvaged final result: %s",
@@ -1758,13 +1719,11 @@ async def direct_response_node_impl(
                         elif codebase_fallback:
                             response = codebase_fallback
                             codebase_thinking = _build_codebase_analysis_fallback_thinking(query)
-                            state["thinking"] = codebase_thinking
-                            state["thinking_content"] = codebase_thinking
-                            record_thinking_snapshot(
-                                state,
-                                codebase_thinking,
-                                node="direct",
+                            record_direct_node_thinking_snapshot(
+                                state=state,
+                                thinking=codebase_thinking,
                                 provenance="deterministic_codebase_fallback",
+                                record_thinking_snapshot_fn=record_thinking_snapshot,
                             )
                         else:
                             raise
@@ -1778,13 +1737,11 @@ async def direct_response_node_impl(
                         elif codebase_fallback:
                             response = codebase_fallback
                             codebase_thinking = _build_codebase_analysis_fallback_thinking(query)
-                            state["thinking"] = codebase_thinking
-                            state["thinking_content"] = codebase_thinking
-                            record_thinking_snapshot(
-                                state,
-                                codebase_thinking,
-                                node="direct",
+                            record_direct_node_thinking_snapshot(
+                                state=state,
+                                thinking=codebase_thinking,
                                 provenance="deterministic_codebase_fallback",
+                                record_thinking_snapshot_fn=record_thinking_snapshot,
                             )
                         else:
                             response = (
