@@ -75,6 +75,7 @@ from app.engine.multi_agent.direct_node_meta_fast_paths import (
 from app.engine.multi_agent.direct_node_exception_fallbacks import (
     handle_direct_node_generation_exception,
 )
+from app.engine.multi_agent.direct_node_final_state import finalize_direct_node_state
 from app.engine.multi_agent.direct_node_operational_fast_paths import (
     _DSML_BLOCK_RE,
     _DSML_STRAY_ASCII_RE,
@@ -941,39 +942,17 @@ async def direct_response_node_impl(
             response = fallback_result.response
             tool_call_events = fallback_result.tool_call_events
 
-    resolved_direct_thinking = resolve_public_thinking_content(
-        state,
-        fallback="",
+    from app.core.org_context import get_current_org_id
+
+    finalize_direct_node_state(
+        state=state,
+        response=response,
+        domain_name_vi=domain_name_vi,
+        resolve_public_thinking_content=resolve_public_thinking_content,
+        record_thinking_snapshot_fn=record_thinking_snapshot,
+        enable_org_knowledge=settings.enable_org_knowledge,
+        get_current_org_id_fn=get_current_org_id,
     )
-    if resolved_direct_thinking:
-        state["thinking_content"] = resolved_direct_thinking
-        record_thinking_snapshot(
-            state,
-            resolved_direct_thinking,
-            node="direct",
-            provenance=(
-                "final_snapshot"
-                if resolved_direct_thinking == str(state.get("thinking") or "").strip()
-                else "aligned_cleanup"
-            ),
-        )
-
-    state["final_response"] = response
-    state["agent_outputs"] = {"direct": response}
-    state["current_agent"] = "direct"
-
-    routing_meta = state.get("routing_metadata", {})
-    intent = routing_meta.get("intent", "") if routing_meta else ""
-    if intent == "general":
-        from app.core.config import settings as local_settings
-        from app.core.org_context import get_current_org_id
-
-        suppress = local_settings.enable_org_knowledge and bool(get_current_org_id())
-        if not suppress:
-            state["domain_notice"] = (
-                f"Noi dung nay nam ngoai chuyen mon {domain_name_vi}. "
-                f"De duoc ho tro chinh xac hon, hay hoi ve {domain_name_vi} nhe!"
-            )
 
     logger.info("[DIRECT] Response prepared, tracer passed to synthesizer")
     return state

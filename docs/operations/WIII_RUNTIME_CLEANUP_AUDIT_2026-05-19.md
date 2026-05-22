@@ -204,9 +204,9 @@ backups, data PDFs, or local skill folders.
   thought helpers, thinking snapshot side effects, document-preview
   host-action rebinding/execution, direct-node tool selection, LLM preflight,
   execution preparation, response cleanup, visible-thinking finalization,
-  exception/source fallback lifecycle, and host UI timeout handling have moved
-  out. The long-term cleanup direction is lifecycle, response-finalization, and
-  SSE V3 parity modules with narrow contract tests.
+  exception/source fallback lifecycle, final state/domain notice handling, and
+  host UI timeout handling have moved out. The long-term cleanup direction is
+  lifecycle modules and SSE V3 parity modules with narrow contract tests.
 - `direct_prompts.py` remains the main direct prompt assembly surface, but
   force-bound skill directives, Pointy inventory prompt injection, the direct
   turn contract, provider-aware tool binding, and tool-context prompt builders
@@ -411,3 +411,8 @@ execution-preparation, tool-selection, host-timeout, document-preview, and
 fast-response regressions passed with 64 tests after moving salvage,
 provider-unavailable, source-template, emergency search, explicit-provider, and
 generic fallback handling into `direct_node_exception_fallbacks.py`.
+In follow-up #517, helper-level final-state tests plus the same focused
+direct-node regression set passed with 68 tests after moving final thinking
+snapshot resolution, `final_response`/`agent_outputs` assignment, current-agent
+marking, and general-intent domain notice handling into
+`direct_node_final_state.py`.
