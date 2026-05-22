@@ -4,7 +4,7 @@ Status: Active
 
 Owner: Architecture Maintainers (CODEOWNERS; track drift through `area:docs` GitHub issues)
 
-Last updated: 2026-05-19
+Last updated: 2026-05-22
 
 This is the short navigational map for humans and coding agents working in the
 Wiii repository. It complements `AGENTS.md`, the operation docs, and deeper
@@ -59,7 +59,7 @@ The normal chat turn should be read in this order:
 |---|---|
 | Sync chat behavior | `maritime-ai-service/app/api/v1/chat.py`, then `maritime-ai-service/app/services/chat_orchestrator.py` |
 | Streaming behavior | `maritime-ai-service/app/api/v1/chat_stream.py`, then `maritime-ai-service/app/services/chat_stream_coordinator.py` |
-| Direct tool loop | `maritime-ai-service/app/engine/multi_agent/direct_tool_rounds_runtime.py` (main orchestration)<br>Generic dispatch: `direct_tool_dispatch_runtime.py`<br>Final synthesis helpers: `direct_final_synthesis_runtime.py`<br>Pointy policy: `direct_pointy_runtime.py`<br>Web-search policy: `direct_web_search_policy.py`<br>Document host-action shortcuts: `direct_document_host_action_runtime.py`<br>Uploaded-document preview/course payloads: `direct_document_preview_payloads.py`<br>Message builders: `direct_tool_message_runtime.py`<br>Session-memory fast paths: `direct_session_memory_runtime.py` |
+| Direct tool loop | `maritime-ai-service/app/engine/multi_agent/direct_tool_rounds_runtime.py` (main orchestration)<br>Generic dispatch: `direct_tool_dispatch_runtime.py`<br>Final synthesis helpers: `direct_final_synthesis_runtime.py`<br>Pointy policy: `direct_pointy_runtime.py`<br>Web-search policy: `direct_web_search_policy.py`<br>Document host-action shortcuts: `direct_document_host_action_runtime.py`<br>Uploaded-document preview/course payloads: `direct_document_preview_payloads.py`<br>Uploaded-document source refs: `direct_document_source_refs.py`<br>Uploaded-document domain course plans: `direct_document_course_domain_plans.py`<br>Message builders: `direct_tool_message_runtime.py`<br>Session-memory fast paths: `direct_session_memory_runtime.py` |
 | Native stream/provider quirks | `maritime-ai-service/app/engine/multi_agent/openai_stream_runtime.py` |
 | Routing and supervisor behavior | `maritime-ai-service/app/engine/multi_agent/supervisor*.py` |
 | Direct prompt assembly | `maritime-ai-service/app/engine/multi_agent/direct_prompts.py` (main assembly)<br>Turn contract and forced-skill prompt helpers: `direct_prompt_turn_contracts.py` |
