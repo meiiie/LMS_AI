@@ -213,6 +213,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #547 moved the late analytical answer contract into
   `direct_prompt_analytical_answer.py`, keeping market/math/codebase answer
   style rules separate from direct system prompt assembly.
+- Follow-up #549 moved direct-node event sink creation and event dispatch into
+  `direct_node_event_sink.py`, keeping capture + SSE bus forwarding out of the
+  direct-node runtime shell.
 
 ## Preserved Intentionally
 
@@ -245,7 +248,7 @@ backups, data PDFs, or local skill folders.
   guards, operational/meta/chatter fast-response selection, visible
   thought helpers, thinking snapshot side effects, document-preview
   host-action rebinding/execution/preflight, image-input preflight,
-  direct-node tool selection, LLM preflight, execution preparation, response cleanup,
+  direct-node event sink lifecycle, direct-node tool selection, LLM preflight, execution preparation, response cleanup,
   visible-thinking finalization,
   exception/source fallback lifecycle, final state/domain notice handling, and
   host UI timeout handling have moved out. The long-term cleanup direction is
