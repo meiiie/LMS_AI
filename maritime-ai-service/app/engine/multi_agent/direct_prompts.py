@@ -13,19 +13,11 @@ from app.core.config import settings
 from app.engine.multi_agent.state import AgentState
 
 from app.engine.multi_agent.direct_prompt_turn_contracts import (
-    _build_direct_turn_contract,
-    _build_force_skill_directive,
-    _extract_pointy_inventory,
-    _force_skills_for_turn,
-)
-from app.engine.multi_agent.direct_prompt_tool_binding import (
-    _bind_direct_tools,
-    _resolve_tool_choice,
-    _tool_name,
+    _build_direct_turn_contract as _build_direct_turn_contract_impl,
+    _build_force_skill_directive as _build_force_skill_directive_impl,
 )
 from app.engine.multi_agent.direct_prompt_tool_context import (
-    _build_code_studio_tools_context,
-    _build_direct_tools_context,
+    _build_direct_tools_context as _build_direct_tools_context_impl,
 )
 from app.engine.multi_agent.direct_intent import (
     _looks_identity_selfhood_turn,
@@ -44,20 +36,6 @@ from app.engine.multi_agent.direct_reasoning import (
 from app.prompts.prompt_context_utils import build_response_language_instruction
 
 logger = logging.getLogger(__name__)
-
-_DIRECT_PROMPT_TURN_CONTRACT_COMPAT_EXPORTS = (
-    _build_direct_turn_contract,
-    _build_force_skill_directive,
-    _extract_pointy_inventory,
-    _force_skills_for_turn,
-)
-
-_DIRECT_PROMPT_TOOL_COMPAT_EXPORTS = (
-    _bind_direct_tools,
-    _resolve_tool_choice,
-    _tool_name,
-    _build_code_studio_tools_context,
-)
 
 _DIRECT_SELFHOOD_ORIGIN_QUERY_MARKERS = (
     "ra doi",
@@ -737,7 +715,7 @@ def _build_direct_system_messages(
     tools_ctx = (
         tools_context_override
         if tools_context_override is not None
-        else _build_direct_tools_context(
+        else _build_direct_tools_context_impl(
             settings,
             domain_name_vi,
             ctx.get("user_role", "student"),
@@ -804,7 +782,7 @@ def _build_direct_system_messages(
                 + "- Nếu người dùng hỏi 'bạn là ai', 'tên gì', 'cuộc sống thế nào', hãy trả lời trực diện, tự nhiên, có hồn."
             )
 
-    turn_contract = _build_direct_turn_contract(state)
+    turn_contract = _build_direct_turn_contract_impl(state)
     if turn_contract:
         system_prompt = system_prompt + "\n\n" + turn_contract
 
@@ -905,7 +883,7 @@ def _build_direct_system_messages(
     # for `tool_choice="required"` flows: positive imperative phrasing
     # ("YOU MUST call X NOW with the right id from inventory") rather
     # than prohibitions ("don't generate prose").
-    force_directive = _build_force_skill_directive(state)
+    force_directive = _build_force_skill_directive_impl(state)
     if force_directive and not is_chatter_role:
         system_prompt = force_directive + "\n\n" + system_prompt
 

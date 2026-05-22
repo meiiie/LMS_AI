@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -179,6 +179,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #523 moved graph runtime wait-surface and Code Studio regex
   bindings to their canonical modules, closing obsolete graph-era re-exports
   from `direct_execution.py`.
+- Follow-up #525 moved direct prompt consumers to canonical turn-contract,
+  tool-binding, and tool-context modules, closing obsolete compatibility export
+  tuples and implicit private-helper re-exports from `direct_prompts.py`.
 
 ## Preserved Intentionally
 
@@ -217,10 +220,10 @@ backups, data PDFs, or local skill folders.
   lifecycle modules and SSE V3 parity modules with narrow contract tests. Its
   obsolete private helper compatibility export tuples are now closed; tests
   import helper contracts from their owning modules.
-- `direct_prompts.py` remains the main direct prompt assembly surface, but
-  force-bound skill directives, Pointy inventory prompt injection, the direct
-  turn contract, provider-aware tool binding, and tool-context prompt builders
-  now live in focused helper modules.
+- `direct_prompts.py` remains the main direct prompt assembly surface. Force-bound
+  skill directives, Pointy inventory prompt injection, the direct turn contract,
+  provider-aware tool binding, and tool-context prompt builders now live in
+  focused helper modules, and consumers import those helper contracts directly.
 - `direct_tool_rounds_runtime.py` is now a smaller orchestration shell. Pointy,
   explicit web-search policy, deterministic document host-action execution,
   uploaded-document preview/course payload shell, uploaded-document course
@@ -438,3 +441,7 @@ from the tool-round orchestration shell.
 In follow-up #523, direct execution streaming tests and graph routing tests
 passed after moving graph runtime wait-surface and Code Studio regex bindings
 away from `direct_execution.py` and into their canonical helper modules.
+In follow-up #525, direct prompt contract tests, direct tool-round force-skill
+tests, and graph prompt compatibility tests passed after moving prompt helper
+consumers to the canonical turn-contract, tool-binding, and tool-context
+modules.

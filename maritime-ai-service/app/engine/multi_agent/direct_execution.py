@@ -30,7 +30,7 @@ from app.engine.multi_agent.direct_response_runtime import (
 )
 from app.engine.multi_agent.state import AgentState
 
-from app.engine.multi_agent.direct_prompts import _resolve_tool_choice
+from app.engine.multi_agent.direct_prompt_tool_binding import _resolve_tool_choice
 from app.engine.multi_agent.direct_runtime_bindings import (
     _extract_runtime_target,
     _is_native_runtime_handle,

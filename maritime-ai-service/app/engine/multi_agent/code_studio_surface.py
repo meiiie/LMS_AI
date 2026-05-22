@@ -9,8 +9,10 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.config import settings
-from app.engine.multi_agent.direct_prompts import (
+from app.engine.multi_agent.direct_prompt_tool_context import (
     _build_code_studio_tools_context,
+)
+from app.engine.multi_agent.direct_prompts import (
     _build_direct_system_messages,
 )
 from app.engine.multi_agent.state import AgentState
