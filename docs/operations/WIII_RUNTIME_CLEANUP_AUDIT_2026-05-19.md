@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -119,6 +119,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_document_preview_text.py`, keeping line cleanup, title selection,
   marker extraction, learning-goal shaping, role-focused markdown, and
   source-page parsing separate from host-action payload assembly.
+- Follow-up #493 moved Code Studio scaffold palette, title/ARIA, shared CSS,
+  RAF script wrapper, and shell composition helpers into
+  `code_studio_scaffold_shell.py`, leaving `code_studio_template_scaffold.py`
+  focused on spec inference, renderer registry, and public API.
 
 ## Preserved Intentionally
 
@@ -169,12 +173,12 @@ backups, data PDFs, or local skill folders.
   step is shrinking the compatibility export surface once external imports can
   close.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
-  but contract, renderer dispatch, caption copy, and explicit-simulation
-  quality policy are no longer embedded in the renderer body. Scene and
-  data-band bodies plus particle, oscillation, timeline, and function-plot
-  bodies have moved behind the registry boundary. The next durable step is
-  shrinking topic/spec extraction data and helpers if product quality evidence
-  shows that the deterministic fallback remains too broad.
+  but contract, renderer dispatch, caption copy, explicit-simulation quality
+  policy, shared shell helpers, scene/data-band bodies, and particle,
+  oscillation, timeline, and function-plot bodies have moved behind focused
+  boundaries. The next durable step is shrinking topic/spec extraction data and
+  helpers if product quality evidence shows that the deterministic fallback
+  remains too broad.
 - Some tests still import compatibility `graph.py` modules. Move tests toward
   `runtime.py` imports when the external import window can close.
 
@@ -294,3 +298,9 @@ helpers into `direct_document_preview_text.py`. The broader LMS/document
 preview contract regression set passed with 107 tests. Targeted ruff checks,
 repository `ruff check app/ --select=E9,F63,F7`, and `git diff --check` also
 passed for the text helper extraction.
+In follow-up #493, the Code Studio scaffold regression set passed with 57 tests
+after moving palette/title/ARIA/CSS/script/shell helpers into
+`code_studio_scaffold_shell.py`. The broader Code Studio scaffold plus graph
+routing regression set passed with 131 tests. Targeted ruff checks, repository
+`ruff check app/ --select=E9,F63,F7`, and `git diff --check` also passed for
+the shell helper extraction.
