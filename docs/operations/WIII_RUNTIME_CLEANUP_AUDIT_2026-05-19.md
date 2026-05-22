@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -167,6 +167,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   visible answer sanitization, DSML/tool-call residue stripping, codebase
   deterministic fallback snapshots, template fallback metrics, and tools-used
   reconstruction behind focused helpers.
+- Follow-up #513 moved direct-node visible-thinking finalization into
+  `direct_node_visible_thinking_finalization.py`, keeping aligned thinking,
+  unsafe thought clearing, language checks, emotional-rescue thinking, and
+  snapshot side effects outside the main direct node.
 
 ## Preserved Intentionally
 
@@ -199,8 +203,8 @@ backups, data PDFs, or local skill folders.
   guards, operational/meta/chatter fast-response selection, visible
   thought helpers, thinking snapshot side effects, document-preview
   host-action rebinding/execution, direct-node tool selection, LLM preflight,
-  execution preparation, response cleanup, and host UI timeout handling have
-  moved out. The long-term cleanup direction is lifecycle,
+  execution preparation, response cleanup, visible-thinking finalization, and
+  host UI timeout handling have moved out. The long-term cleanup direction is lifecycle,
   response-finalization, and SSE V3 parity modules with narrow contract tests.
 - `direct_prompts.py` remains the main direct prompt assembly surface, but
   force-bound skill directives, Pointy inventory prompt injection, the direct
@@ -395,3 +399,8 @@ In follow-up #511, focused direct-node response-cleanup tests plus direct-node
 LLM-preflight, execution-preparation, tool-selection, host-timeout,
 document-preview, fast-response, and provider-error regressions passed with 57
 tests after moving response cleanup into `direct_node_response_cleanup.py`.
+In follow-up #513, focused direct-node visible-thinking finalization tests plus
+direct-node response-cleanup, LLM-preflight, execution-preparation,
+tool-selection, host-timeout, document-preview, fast-response, and
+provider-error regressions passed with 60 tests after moving visible-thinking
+finalization into `direct_node_visible_thinking_finalization.py`.
