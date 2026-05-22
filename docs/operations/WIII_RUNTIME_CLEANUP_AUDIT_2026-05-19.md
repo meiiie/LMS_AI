@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -98,6 +98,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   provider/failover helpers into `direct_runtime_bindings.py`, keeping
   compatibility aliases for the legacy `graph.py` shim and making provider
   memory/runtime-tier lookup a typed per-turn policy object.
+- Follow-up #483 moved repeated direct-node thinking snapshot side effects into
+  `direct_node_thinking_snapshot.py`, so deterministic fast paths commit
+  `thinking`, `thinking_content`, and reasoning snapshots through one helper.
 
 ## Preserved Intentionally
 
@@ -128,9 +131,10 @@ backups, data PDFs, or local skill folders.
 - `direct_node_runtime.py` remains large, but session-memory parsing/recall,
   thinking-effort policy, emergency fallback/salvage helpers, uploaded-context
   guards, operational fast paths, meta fast paths, chatter fast paths, visible
-  thought helpers, and document-preview host-action rebinding have moved out.
-  The long-term cleanup direction is lifecycle, response-finalization, and SSE
-  V3 parity modules with narrow contract tests.
+  thought helpers, thinking snapshot side effects, and document-preview
+  host-action rebinding have moved out. The long-term cleanup direction is
+  lifecycle, response-finalization, and SSE V3 parity modules with narrow
+  contract tests.
 - `direct_prompts.py` remains the main direct prompt assembly surface, but
   force-bound skill directives, Pointy inventory prompt injection, and the
   direct turn contract now live in `direct_prompt_turn_contracts.py`.
@@ -243,3 +247,7 @@ tests passed with 84 tests after moving graph override binding resolution and
 provider/failover helpers into `direct_runtime_bindings.py`. Targeted ruff
 checks also passed for the package shim, direct runtime bindings, and direct
 tool loop.
+In follow-up #483, targeted direct-node regression tests plus focused thinking
+snapshot helper tests passed with 117 tests after moving repeated direct-node
+thinking snapshot writes into `direct_node_thinking_snapshot.py`. Targeted ruff
+checks also passed for direct-node runtime and the new helper.
