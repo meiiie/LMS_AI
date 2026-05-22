@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -193,6 +193,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   thinking-example loading into `direct_prompt_visible_thinking.py`, keeping
   source-backed/codebase thinking instructions separate from the direct prompt
   assembly shell.
+- Follow-up #537 moved live-evidence planner prompt text and hint-list
+  formatting into `direct_prompt_evidence.py`, keeping current-source lookup
+  guidance separate from the direct prompt assembly shell.
 
 ## Preserved Intentionally
 
@@ -234,8 +237,9 @@ backups, data PDFs, or local skill folders.
 - `direct_prompts.py` remains the main direct prompt assembly surface. Force-bound
   skill directives, Pointy inventory prompt injection, the direct turn contract,
   provider-aware tool binding, tool-context prompt builders, selfhood/origin
-  prompt contracts, and visible-thinking prompt guidance now live in focused
-  helper modules, and consumers import those helper contracts directly.
+  prompt contracts, visible-thinking prompt guidance, and live-evidence prompt
+  contracts now live in focused helper modules, and consumers import those
+  helper contracts directly.
 - `direct_tool_rounds_runtime.py` is now a smaller orchestration shell. Pointy,
   explicit web-search policy, deterministic document host-action execution,
   uploaded-document preview/course payload shell, uploaded-document course
