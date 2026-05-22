@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -138,6 +138,12 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_document_course_maritime_plans.py`, leaving
   `direct_document_course_domain_plans.py` as a compatibility export surface for
   existing document preview/tool-loop imports.
+- Follow-up #501 moved uploaded-document course title extraction, source
+  section parsing, domain classification, document-map clustering, quality
+  reporting, and generic course-plan construction into
+  `direct_document_course_analysis.py`, leaving
+  `direct_document_preview_payloads.py` focused on preview/course host-action
+  payload assembly plus compatibility exports.
 
 ## Preserved Intentionally
 
@@ -178,9 +184,10 @@ backups, data PDFs, or local skill folders.
   now live in focused helper modules.
 - `direct_tool_rounds_runtime.py` is now a smaller orchestration shell. Pointy,
   explicit web-search policy, deterministic document host-action execution,
-  uploaded-document preview/course payload shell, uploaded-document text
-  shaping, document source refs, domain-specific course plan builder modules,
-  visual-turn policy, graph/runtime binding resolution, per-turn provider policy, message
+  uploaded-document preview/course payload shell, uploaded-document course
+  analysis/generic planning, uploaded-document text shaping, document source
+  refs, domain-specific course plan builder modules, visual-turn policy,
+  graph/runtime binding resolution, per-turn provider policy, message
   builders, generic tool dispatch, final synthesis helper construction, final
   synthesis execution, post-tool convergence policy, follow-up LLM
   selection/invocation, response finalization, post-tool search-template
@@ -334,3 +341,9 @@ In follow-up #499, the document preview/tool-loop regression set passed with
 maritime modules. The focused host UI/tool surface regression set passed with
 14 tests. Targeted ruff checks, repository `ruff check app/ --select=E9,F63,F7`,
 and `git diff --check` also passed for the domain plan builder split.
+In follow-up #501, the document preview/tool-loop regression set passed with
+93 tests after moving course analysis and generic planning helpers out of
+`direct_document_preview_payloads.py`. The focused host UI/tool surface
+regression set passed with 14 tests. Targeted ruff checks, repository
+`ruff check app/ --select=E9,F63,F7`, and `git diff --check` also passed for
+the course analysis extraction.
