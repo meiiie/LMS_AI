@@ -210,6 +210,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #545 moved the Code Studio delivery-first answer contract into
   `direct_prompt_code_studio.py`, keeping artifact/code delivery UX rules out
   of the general direct prompt assembly shell.
+- Follow-up #547 moved the late analytical answer contract into
+  `direct_prompt_analytical_answer.py`, keeping market/math/codebase answer
+  style rules separate from direct system prompt assembly.
 
 ## Preserved Intentionally
 
@@ -253,8 +256,9 @@ backups, data PDFs, or local skill folders.
   skill directives, Pointy inventory prompt injection, the direct turn contract,
   provider-aware tool binding, tool-context prompt builders, selfhood/origin
   prompt contracts, visible-thinking prompt guidance, and live-evidence prompt
-  contracts, and Code Studio delivery prompt rules now live in focused helper
-  modules, and consumers import those helper contracts directly.
+  contracts, Code Studio delivery prompt rules, and analytical answer contracts
+  now live in focused helper modules, and consumers import those helper
+  contracts directly.
 - `direct_tool_rounds_runtime.py` is now a smaller orchestration shell. Pointy,
   explicit web-search policy, deterministic document host-action execution,
   uploaded-document preview/course payload shell, uploaded-document course
