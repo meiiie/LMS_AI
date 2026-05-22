@@ -45,9 +45,6 @@ from app.engine.multi_agent.direct_node_response_cleanup import (
 from app.engine.multi_agent.direct_node_visible_thinking_finalization import (
     finalize_direct_node_visible_thinking,
 )
-from app.engine.multi_agent.direct_intent import (
-    _looks_emotional_support_turn,
-)
 from app.engine.multi_agent.direct_reasoning import (
     _is_codebase_analysis_query,
 )
@@ -62,17 +59,14 @@ from app.engine.multi_agent.direct_node_final_state import finalize_direct_node_
 from app.engine.multi_agent.direct_node_operational_fast_paths import (
     _build_codebase_analysis_fallback_answer,
     _build_codebase_analysis_fallback_thinking,
-    _is_explicit_web_search_turn_for_direct,
     _looks_generic_direct_fallback_response,
     _strip_dsml_residue,
-)
-from app.engine.multi_agent.direct_node_thinking_effort import (
-    _resolve_direct_thinking_effort,
 )
 from app.engine.multi_agent.direct_node_thinking_snapshot import (
     record_direct_node_thinking_snapshot,
 )
 from app.engine.multi_agent.direct_node_tool_selection import select_direct_node_tools
+from app.engine.multi_agent.direct_node_turn_policy import resolve_direct_node_turn_policy
 from app.engine.multi_agent.direct_node_turn_start import start_direct_node_turn
 from app.engine.multi_agent.direct_node_uploaded_context import (
     _build_uploaded_document_context_fallback_answer,
@@ -261,98 +255,42 @@ async def direct_response_node_impl(
         try:
             from app.engine.multi_agent.agent_config import AgentConfigRegistry
 
-            ctx = state.get("context", {})
-            response_language = str(ctx.get("response_language") or "vi").strip() or "vi"
-            thinking_effort = state.get("thinking_effort")
-            routing_meta = state.get("routing_metadata") or {}
-            routing_hint = state.get("_routing_hint") if isinstance(state.get("_routing_hint"), dict) else {}
-            routing_method = str(routing_meta.get("method") or "").strip().lower()
-            routing_intent = str(routing_meta.get("intent") or "").strip().lower()
-            hint_kind = str(routing_hint.get("kind") or "").strip().lower()
-            hint_shape = str(routing_hint.get("shape") or "").strip().lower()
-            normalized_query = normalize_for_intent(query)
-            short_token_count = len([token for token in normalized_query.split() if token])
-            is_identity_turn = (
-                hint_kind == "identity_probe"
-                or hint_kind == "selfhood_followup"
-                or routing_intent in {"identity", "selfhood"}
-                or looks_identity_selfhood_turn(query)
-            )
-            is_emotional_support_turn = _looks_emotional_support_turn(query)
-            is_chatter_fast_path = (
-                routing_method == "always_on_chatter_fast_path"
-                or (hint_kind == "fast_chatter" and hint_shape in {"reaction", "vague_banter"})
-            )
-            is_social_fast_path = (
-                routing_method == "always_on_social_fast_path"
-                or (hint_kind == "fast_chatter" and hint_shape == "social")
-            )
-            visual_decision = resolve_visual_intent(query)
-            is_short_house_chatter = (
-                not is_identity_turn
-                and (
-                    is_chatter_fast_path
-                    or is_social_fast_path
-                    or (
-                        routing_intent == "social"
-                        and short_token_count <= 6
-                        and not needs_web_search(query)
-                        and not needs_datetime(query)
-                        and not visual_decision.force_tool
-                    )
-                )
-            )
-            history_limit = 0 if is_short_house_chatter else 10
-            tools_context_override = "" if is_short_house_chatter else None
-            role_name = (
-                "direct_chatter_agent"
-                if (is_short_house_chatter or is_identity_turn)
-                else "direct_agent"
-            )
-            if is_short_house_chatter:
-                history_limit = 0
-                tools_context_override = ""
-            if is_identity_turn:
-                history_limit = max(history_limit, 6)
-            thinking_effort = _resolve_direct_thinking_effort(
+            turn_policy = resolve_direct_node_turn_policy(
                 query=query,
                 state=state,
-                current_effort=thinking_effort,
-                is_identity_turn=is_identity_turn,
-                is_short_house_chatter=is_short_house_chatter,
+                has_uploaded_document_context=has_uploaded_document_context,
+                normalize_for_intent=normalize_for_intent,
+                looks_identity_selfhood_turn=looks_identity_selfhood_turn,
+                needs_web_search=needs_web_search,
+                needs_datetime=needs_datetime,
+                resolve_visual_intent=resolve_visual_intent,
+                recommended_visual_thinking_effort=recommended_visual_thinking_effort,
+                get_active_code_studio_session=get_active_code_studio_session,
+                merge_thinking_effort=merge_thinking_effort,
+                get_effective_provider=get_effective_provider,
+                get_explicit_user_provider=get_explicit_user_provider,
+                looks_uploaded_document_preview_request=(
+                    _looks_uploaded_document_preview_request
+                ),
+                logger_obj=logger,
             )
-
-            visual_effort = recommended_visual_thinking_effort(
-                query,
-                active_code_session=get_active_code_studio_session(state),
-            )
-            if visual_effort:
-                previous_effort = thinking_effort
-                thinking_effort = merge_thinking_effort(
-                    thinking_effort,
-                    visual_effort,
-                )
-                if thinking_effort != previous_effort:
-                    logger.info(
-                        "[DIRECT] Visual intent detected -> upgrade thinking effort %s -> %s",
-                        previous_effort or "default",
-                        thinking_effort,
-                    )
-
-            preferred_provider = get_effective_provider(state)
-            explicit_user_provider = get_explicit_user_provider(state)
-            use_house_voice_direct = (
-                routing_intent in {"social", "personal", "off_topic"}
-                and not needs_web_search(query)
-                and not needs_datetime(query)
-                and not visual_decision.force_tool
-            )
-            direct_provider_override = explicit_user_provider or preferred_provider
-            is_codebase_source_turn = _is_codebase_analysis_query(query) and not (
-                has_uploaded_document_context
-                and _looks_uploaded_document_preview_request(query)
-            )
-            explicit_web_search_turn = _is_explicit_web_search_turn_for_direct(query, state)
+            ctx = turn_policy.ctx
+            response_language = turn_policy.response_language
+            thinking_effort = turn_policy.thinking_effort
+            routing_intent = turn_policy.routing_intent
+            is_identity_turn = turn_policy.is_identity_turn
+            is_emotional_support_turn = turn_policy.is_emotional_support_turn
+            is_short_house_chatter = turn_policy.is_short_house_chatter
+            visual_decision = turn_policy.visual_decision
+            history_limit = turn_policy.history_limit
+            tools_context_override = turn_policy.tools_context_override
+            role_name = turn_policy.role_name
+            preferred_provider = turn_policy.preferred_provider
+            explicit_user_provider = turn_policy.explicit_user_provider
+            use_house_voice_direct = turn_policy.use_house_voice_direct
+            direct_provider_override = turn_policy.direct_provider_override
+            is_codebase_source_turn = turn_policy.is_codebase_source_turn
+            explicit_web_search_turn = turn_policy.explicit_web_search_turn
 
             tool_selection = select_direct_node_tools(
                 query=query,
