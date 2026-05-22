@@ -23,6 +23,9 @@ from app.engine.multi_agent.direct_prompt_evidence import (
     _build_live_evidence_planner_contract,
     _join_direct_hint_list,
 )
+from app.engine.multi_agent.direct_prompt_code_studio import (
+    _build_code_studio_delivery_contract,
+)
 from app.engine.multi_agent.direct_prompt_selfhood import (
     _build_direct_selfhood_system_prompt,
     _identity_answer_contract_lines,
@@ -33,7 +36,6 @@ from app.engine.multi_agent.direct_prompt_visible_thinking import (
 )
 from app.engine.multi_agent.direct_intent import (
     _looks_identity_selfhood_turn,
-    _normalize_for_intent,
 )
 from app.engine.multi_agent.direct_reasoning import (
     _build_direct_analytical_axes,
@@ -283,39 +285,6 @@ def _build_direct_analytical_system_prompt(
         sections.append(tools_context.strip())
 
     return "\n\n".join(section for section in sections if section.strip())
-
-
-def _build_code_studio_delivery_contract(query: str) -> str:
-    """Role-local answer contract for delivery-first technical responses."""
-    normalized = _normalize_for_intent(query)
-    is_chart_request = any(
-        token in normalized
-        for token in ("bieu do", "chart", "plot", "matplotlib", "seaborn", "png", "svg")
-    )
-    is_html_request = any(
-        token in normalized
-        for token in ("html", "landing page", "website", "web app", "microsite", "trang web")
-    )
-
-    lines = [
-        "## CODE STUDIO DELIVERY CONTRACT:",
-        "- Voi tac vu ky thuat, mo dau answer bang ket qua da tao hoac da xac nhan. Khong mo dau bang loi chao, tu gioi thieu, hay small talk.",
-        "- Khi vua tao artifact, neu ro ten file, loai san pham, va dieu nguoi dung co the mo ra ngay luc nay.",
-        "- Neu yeu cau chua du du lieu cu the, tao mot demo trung tinh phu hop voi task va noi ro do la demo. Khong bien no thanh lore ca nhan cua Wiii.",
-        "- Khong dua nhan vat phu, thu cung ao, catchphrase, hay chi tiet de thuong khong lien quan vao output ky thuat neu user khong yeu cau.",
-        "- Uu tien 3 phan theo thu tu: da tao gi, no dung de lam gi, nguoi dung co the lam gi tiep theo.",
-    ]
-    if is_chart_request:
-        lines.append(
-            "- Voi yeu cau bieu do/chart mo ho, uu tien tao mot chart demo trung tinh va giao lai file PNG that (neu co sandbox), hoac Mermaid SVG khi khong co sandbox."
-        )
-    if is_html_request:
-        lines.append(
-            "- Voi yeu cau landing page/HTML, tao file HTML that va mo ta ro nhung gi nguoi dung co the xem/mo ngay."
-        )
-    return "\n".join(lines)
-
-
 
 
 def _build_direct_analytical_answer_contract(query: str, state: AgentState) -> str:
