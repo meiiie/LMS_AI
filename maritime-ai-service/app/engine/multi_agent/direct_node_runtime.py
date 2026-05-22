@@ -64,7 +64,6 @@ from app.engine.multi_agent.direct_node_operational_fast_paths import (
     _build_codebase_analysis_fallback_thinking,
     _is_explicit_web_search_turn_for_direct,
     _looks_generic_direct_fallback_response,
-    _should_use_codebase_source_note_fast_answer,
     _strip_dsml_residue,
 )
 from app.engine.multi_agent.direct_node_thinking_effort import (
@@ -74,6 +73,7 @@ from app.engine.multi_agent.direct_node_thinking_snapshot import (
     record_direct_node_thinking_snapshot,
 )
 from app.engine.multi_agent.direct_node_tool_selection import select_direct_node_tools
+from app.engine.multi_agent.direct_node_turn_start import start_direct_node_turn
 from app.engine.multi_agent.direct_node_uploaded_context import (
     _build_uploaded_document_context_fallback_answer,
     _build_uploaded_document_visual_guard_answer,
@@ -143,27 +143,20 @@ async def direct_response_node_impl(
     tracer = get_or_create_tracer(state)
     tracer.start_step(direct_response_step_name, "Tao phan hoi truc tiep")
 
-    use_natural = getattr(settings, "enable_natural_conversation", False) is True
-    if not use_natural:
-        greetings = get_domain_greetings(state.get("domain_id", settings.default_domain))
-        query_lower = query.lower().strip()
-        response = greetings.get(query_lower)
-    else:
-        query_lower = query.lower().strip()
-        response = None
-    response_type = "greeting" if response else ""
-    explicit_web_search_turn = _is_explicit_web_search_turn_for_direct(query, state)
-    if not response and _is_codebase_analysis_query(query) and not explicit_web_search_turn:
-        codebase_thinking = _build_codebase_analysis_fallback_thinking(query)
-        record_direct_node_thinking_snapshot(
-            state=state,
-            thinking=codebase_thinking,
-            provenance="codebase_source_backed_plan",
-            record_thinking_snapshot_fn=record_thinking_snapshot,
-        )
-        if _should_use_codebase_source_note_fast_answer(query):
-            response = _build_codebase_analysis_fallback_answer(query)
-            response_type = "codebase_source_backed_fast"
+    turn_start = start_direct_node_turn(
+        query=query,
+        state=state,
+        enable_natural_conversation=(
+            getattr(settings, "enable_natural_conversation", False) is True
+        ),
+        default_domain=settings.default_domain,
+        get_domain_greetings=get_domain_greetings,
+        record_thinking_snapshot_fn=record_thinking_snapshot,
+    )
+    query_lower = turn_start.query_lower
+    response = turn_start.response
+    response_type = turn_start.response_type
+    explicit_web_search_turn = turn_start.explicit_web_search_turn
 
     ctx_for_preflight = state.get("context", {}) if isinstance(state.get("context"), dict) else {}
     has_uploaded_document_context = _has_uploaded_document_context(ctx_for_preflight)
