@@ -222,11 +222,11 @@ def time_block(
     name: str, *, labels: Optional[LabelDict] = None
 ) -> Generator[None, None, None]:
     """Context manager that records the duration of the block in ms."""
-    started = time.monotonic()
+    started_ns = time.perf_counter_ns()
     try:
         yield
     finally:
-        elapsed = (time.monotonic() - started) * 1000.0
+        elapsed = (time.perf_counter_ns() - started_ns) / 1_000_000.0
         record_latency_ms(name, elapsed, labels=labels)
 
 

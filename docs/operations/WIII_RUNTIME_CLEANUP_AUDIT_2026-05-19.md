@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -182,6 +182,9 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #525 moved direct prompt consumers to canonical turn-contract,
   tool-binding, and tool-context modules, closing obsolete compatibility export
   tuples and implicit private-helper re-exports from `direct_prompts.py`.
+- Follow-up #527 made runtime metrics timing use a high-resolution monotonic
+  clock, so local Windows verification and CI Linux record `time_block()`
+  durations through the same stable contract.
 
 ## Preserved Intentionally
 
@@ -445,3 +448,6 @@ In follow-up #525, direct prompt contract tests, direct tool-round force-skill
 tests, and graph prompt compatibility tests passed after moving prompt helper
 consumers to the canonical turn-contract, tool-binding, and tool-context
 modules.
+In follow-up #527, the runtime metrics regression tests passed after switching
+`time_block()` from the coarse Windows monotonic clock to high-resolution
+`perf_counter_ns()`.
