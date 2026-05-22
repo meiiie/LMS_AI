@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -185,6 +185,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #527 made runtime metrics timing use a high-resolution monotonic
   clock, so local Windows verification and CI Linux record `time_block()`
   durations through the same stable contract.
+- Follow-up #533 moved direct selfhood/origin prompt contracts into
+  `direct_prompt_selfhood.py`, keeping identity-turn detection, answer-shape
+  lines, and the selfhood system prompt behind one focused module while
+  `direct_prompts.py` remains the system-message assembly shell.
 
 ## Preserved Intentionally
 
@@ -225,8 +229,9 @@ backups, data PDFs, or local skill folders.
   import helper contracts from their owning modules.
 - `direct_prompts.py` remains the main direct prompt assembly surface. Force-bound
   skill directives, Pointy inventory prompt injection, the direct turn contract,
-  provider-aware tool binding, and tool-context prompt builders now live in
-  focused helper modules, and consumers import those helper contracts directly.
+  provider-aware tool binding, tool-context prompt builders, and selfhood/origin
+  prompt contracts now live in focused helper modules, and consumers import
+  those helper contracts directly.
 - `direct_tool_rounds_runtime.py` is now a smaller orchestration shell. Pointy,
   explicit web-search policy, deterministic document host-action execution,
   uploaded-document preview/course payload shell, uploaded-document course
