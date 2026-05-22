@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -90,6 +90,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   plan builders into `direct_document_course_domain_plans.py`, leaving
   `direct_document_preview_payloads.py` as the preview/course payload shell and
   compatibility import surface.
+- Follow-up #479 moved direct visual-turn policy into
+  `direct_visual_tool_policy_runtime.py`, keeping visual intent resolution,
+  visual commit detection, initial/follow-up timeout selection, and structured
+  visual feature state behind one typed contract.
 
 ## Preserved Intentionally
 
@@ -129,12 +133,12 @@ backups, data PDFs, or local skill folders.
 - `direct_tool_rounds_runtime.py` is now a smaller orchestration shell. Pointy,
   explicit web-search policy, deterministic document host-action execution,
   uploaded-document preview/course payload shell, document source refs, domain
-  course plan builders, message builders, generic tool dispatch, final
-  synthesis helper construction, final synthesis execution, post-tool
-  convergence policy, follow-up LLM selection/invocation, response
+  course plan builders, visual-turn policy, message builders, generic tool
+  dispatch, final synthesis helper construction, final synthesis execution,
+  post-tool convergence policy, follow-up LLM selection/invocation, response
   finalization, post-tool search-template returns, and forced web-search
-  shortcuts have moved out. The next durable step is separating the remaining
-  visual shortcut branch from the main loop.
+  shortcuts have moved out. The next durable step is extracting graph/runtime
+  binding resolution and per-turn provider policy from the main loop.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, caption copy, and explicit-simulation
   quality policy are no longer embedded in the renderer body. Scene and
@@ -225,3 +229,7 @@ In follow-up #477, the direct tool-round command passed with 81 tests after
 moving uploaded-document source-reference helpers and deterministic domain
 course plan builders out of `direct_document_preview_payloads.py`. Targeted
 ruff checks also passed for the document payload/source-ref/course-plan modules.
+In follow-up #479, the direct tool-round command plus the new visual policy
+tests passed with 84 tests after moving visual-turn policy into
+`direct_visual_tool_policy_runtime.py`. Targeted ruff checks also passed for
+the direct loop and visual policy module.

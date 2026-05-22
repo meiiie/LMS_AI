@@ -57,6 +57,9 @@ from app.engine.multi_agent.direct_search_template_runtime import (
 from app.engine.multi_agent.direct_forced_web_search_runtime import (
     execute_forced_web_search_shortcut,
 )
+from app.engine.multi_agent.direct_visual_tool_policy_runtime import (
+    build_direct_visual_tool_policy,
+)
 from app.engine.multi_agent.direct_document_host_action_runtime import (
     DocumentHostActionShortcut,
     execute_requested_document_host_action_shortcut,
@@ -143,9 +146,6 @@ from app.engine.multi_agent.visual_events import (
     _maybe_emit_host_action_event,
     _maybe_emit_visual_event,
     _summarize_tool_result_for_stream,
-)
-from app.engine.multi_agent.visual_intent_resolver import (
-    resolve_visual_intent,
 )
 
 logger = logging.getLogger(__name__)
@@ -293,19 +293,16 @@ async def execute_direct_tool_rounds_impl(
     tool_call_events: list[dict] = []
     state = state or {}
     direct_thinking_stop = asyncio.Event()
-    visual_decision = resolve_visual_intent(query)
-    requires_visual_commit = (
-        visual_decision.force_tool
-        and visual_decision.presentation_intent in {"article_figure", "chart_runtime"}
+    visual_policy = build_direct_visual_tool_policy(
+        query=query,
+        settings_obj=settings,
+        timeout_profile_structured=TIMEOUT_PROFILE_STRUCTURED,
+        timeout_profile_background=TIMEOUT_PROFILE_BACKGROUND,
     )
-    initial_timeout_profile = (
-        TIMEOUT_PROFILE_STRUCTURED if visual_decision.force_tool else None
-    )
-    followup_timeout_profile = (
-        TIMEOUT_PROFILE_BACKGROUND
-        if requires_visual_commit
-        else TIMEOUT_PROFILE_STRUCTURED
-    )
+    visual_decision = visual_policy.visual_decision
+    requires_visual_commit = visual_policy.requires_visual_commit
+    initial_timeout_profile = visual_policy.initial_timeout_profile
+    followup_timeout_profile = visual_policy.followup_timeout_profile
     visual_emitted_any = False
     request_failover_mode = (
         FAILOVER_MODE_PINNED
@@ -616,7 +613,7 @@ async def execute_direct_tool_rounds_impl(
         remember_execution_target=remember_execution_target,
         runtime_tier_for=runtime_tier_for,
         inject_widget_blocks_from_tool_results=_inject_widget_blocks_from_tool_results,
-        structured_visuals_enabled=getattr(settings, "enable_structured_visuals", False),
+        structured_visuals_enabled=visual_policy.structured_visuals_enabled,
         logger_obj=logger,
     )
 
