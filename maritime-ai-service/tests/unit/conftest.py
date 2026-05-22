@@ -26,6 +26,16 @@ def _disable_rate_limiting():
 
 
 @pytest.fixture(autouse=True)
+def _reset_shared_db_unavailable_state():
+    """Keep shared DB cooldown state from leaking between unit tests."""
+    from app.core.database import clear_shared_database_unavailable
+
+    clear_shared_database_unavailable()
+    yield
+    clear_shared_database_unavailable()
+
+
+@pytest.fixture(autouse=True)
 def _prevent_db_connection_hangs():
     """Prevent unit tests from hanging on DB connection attempts.
 
