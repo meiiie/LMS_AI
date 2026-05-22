@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -94,6 +94,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_visual_tool_policy_runtime.py`, keeping visual intent resolution,
   visual commit detection, initial/follow-up timeout selection, and structured
   visual feature state behind one typed contract.
+- Follow-up #481 moved direct tool-loop graph override resolution and
+  provider/failover helpers into `direct_runtime_bindings.py`, keeping
+  compatibility aliases for the legacy `graph.py` shim and making provider
+  memory/runtime-tier lookup a typed per-turn policy object.
 
 ## Preserved Intentionally
 
@@ -133,12 +137,13 @@ backups, data PDFs, or local skill folders.
 - `direct_tool_rounds_runtime.py` is now a smaller orchestration shell. Pointy,
   explicit web-search policy, deterministic document host-action execution,
   uploaded-document preview/course payload shell, document source refs, domain
-  course plan builders, visual-turn policy, message builders, generic tool
-  dispatch, final synthesis helper construction, final synthesis execution,
-  post-tool convergence policy, follow-up LLM selection/invocation, response
+  course plan builders, visual-turn policy, graph/runtime binding resolution,
+  per-turn provider policy, message builders, generic tool dispatch, final
+  synthesis helper construction, final synthesis execution, post-tool
+  convergence policy, follow-up LLM selection/invocation, response
   finalization, post-tool search-template returns, and forced web-search
-  shortcuts have moved out. The next durable step is extracting graph/runtime
-  binding resolution and per-turn provider policy from the main loop.
+  shortcuts have moved out. The next durable step is shrinking the compatibility
+  export surface once external imports can close.
 - `code_studio_template_scaffold.py` is still a large deterministic fallback,
   but contract, renderer dispatch, caption copy, and explicit-simulation
   quality policy are no longer embedded in the renderer body. Scene and
@@ -233,3 +238,8 @@ In follow-up #479, the direct tool-round command plus the new visual policy
 tests passed with 84 tests after moving visual-turn policy into
 `direct_visual_tool_policy_runtime.py`. Targeted ruff checks also passed for
 the direct loop and visual policy module.
+In follow-up #481, the direct tool-round command plus focused runtime binding
+tests passed with 84 tests after moving graph override binding resolution and
+provider/failover helpers into `direct_runtime_bindings.py`. Targeted ruff
+checks also passed for the package shim, direct runtime bindings, and direct
+tool loop.
