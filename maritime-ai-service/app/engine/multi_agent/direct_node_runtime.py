@@ -23,25 +23,19 @@ from app.engine.multi_agent.direct_node_fast_response_runtime import (
 from app.engine.multi_agent.direct_node_event_sink import (
     build_direct_node_event_sink,
 )
-from app.engine.multi_agent.direct_node_host_timeout import (
-    run_direct_node_execution_with_host_timeout,
-)
 from app.engine.multi_agent.direct_node_image_input_preflight import (
     execute_direct_node_image_input_preflight,
-)
-from app.engine.multi_agent.direct_node_execution_prep import (
-    prepare_direct_node_tool_execution,
 )
 from app.engine.multi_agent.direct_node_llm_preflight import (
     apply_direct_node_natural_conversation_penalties,
     maybe_build_uploaded_visual_guard,
     select_direct_node_llm,
 )
+from app.engine.multi_agent.direct_node_llm_tool_loop import (
+    execute_direct_node_llm_tool_loop,
+)
 from app.engine.multi_agent.direct_node_llm_fallback import (
     resolve_direct_node_llm_unavailable_fallback,
-)
-from app.engine.multi_agent.direct_node_llm_execution_finalization import (
-    finalize_direct_node_llm_execution,
 )
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
@@ -79,7 +73,7 @@ from app.engine.reasoning import (
 
 logger = logging.getLogger(__name__)
 
-_HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS = 45.0  # Phase F3 (2026-05-06): bumped 24→45s. NVIDIA DeepSeek tool-heavy pointy turns (inventory + show + synthesis) regularly hit 25-35s; 24s caused canned fallback even when LLM was actively succeeding.
+_HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS = 45.0  # Phase F3 (2026-05-06): bumped 24->45s. Tool-heavy pointy turns regularly hit 25-35s; 24s caused canned fallback even when LLM was actively succeeding.
 
 async def direct_response_node_impl(
     state: AgentState,
@@ -407,130 +401,56 @@ async def direct_response_node_impl(
             )
 
             if llm and not response:
-                logger.warning(
-                    "[DIRECT] tools=%d, force=%s, web=%s, dt=%s, query='%s'",
-                    len(tools),
-                    force_tools,
-                    needs_web_search(query),
-                    needs_datetime(query),
-                    query[:60],
-                )
-
-                execution_prep = prepare_direct_node_tool_execution(
+                llm_tool_loop = await execute_direct_node_llm_tool_loop(
                     llm=llm,
-                    tools=tools,
-                    force_tools=force_tools,
                     query=query,
                     state=state,
                     ctx=ctx,
                     bus_id=bus_id,
                     domain_name_vi=domain_name_vi,
                     role_name=role_name,
+                    tools=tools,
+                    force_tools=force_tools,
                     tools_context_override=tools_context_override,
                     visual_decision=visual_decision,
                     history_limit=history_limit,
                     routing_intent=routing_intent,
+                    response_language=response_language,
                     is_identity_turn=is_identity_turn,
                     is_short_house_chatter=is_short_house_chatter,
                     use_house_voice_direct=use_house_voice_direct,
                     direct_provider_override=direct_provider_override,
                     preferred_provider=preferred_provider,
                     explicit_user_provider=explicit_user_provider,
+                    explicit_web_search_turn=explicit_web_search_turn,
+                    push_event=push_event,
                     needs_web_search=needs_web_search,
                     needs_datetime=needs_datetime,
                     resolve_direct_answer_timeout_profile=resolve_direct_answer_timeout_profile,
                     bind_direct_tools=bind_direct_tools,
                     build_direct_system_messages=build_direct_system_messages,
                     build_visual_tool_runtime_metadata=build_visual_tool_runtime_metadata,
-                    logger_obj=logger,
-                )
-
-                force_tools = execution_prep.force_tools
-                direct_answer_timeout_profile = execution_prep.direct_answer_timeout_profile
-                direct_answer_primary_timeout = execution_prep.direct_answer_primary_timeout
-                direct_allowed_fallback_providers = (
-                    execution_prep.direct_allowed_fallback_providers
-                )
-                llm_with_tools = execution_prep.llm_with_tools
-                llm_auto = execution_prep.llm_auto
-                forced_tool_choice = execution_prep.forced_tool_choice
-                # v9.0 F18 (2026-05-07) — when pointy is force-bound, the
-                # tool's selector is already enum-constrained at JSON-schema
-                # layer (Literal[...] in tool_pointy_show args). That's
-                # SeeAct's textual-choice grounding applied at argument
-                # layer. We DON'T need to override tool_choice to specific
-                # tool name (caused NVIDIA bind_tools incompat in early
-                # tests) — the existing `_resolve_tool_choice("any")` is
-                # sufficient because force_tools=True ensures SOME tool
-                # is invoked, and the enum-constrained pointy tool wins
-                # when query is UI-related (other tools have unrelated
-                # signatures).
-                native_direct_messages = execution_prep.native_direct_messages
-                messages = execution_prep.messages
-                runtime_context_base = execution_prep.runtime_context_base
-
-                # Wiii Pointy v2.6 — adaptive max rounds. Loop tự exit
-                # khi LLM ngừng gọi tool; cap chỉ là runaway protection.
-                # Default 12 (Anthropic Computer Use ref dùng 10), settings
-                # override cho power-users / autonomous flows.
-                _direct_max_rounds = getattr(settings, "direct_agent_max_tool_rounds", 12)
-
-                direct_execution = execute_direct_tool_rounds(
-                    llm_with_tools,
-                    llm_auto,
-                    messages,
-                    tools,
-                    push_event,
-                    runtime_context_base=runtime_context_base,
-                    max_rounds=_direct_max_rounds,
-                    query=query,
-                    state=state,
-                    provider=explicit_user_provider,
-                    forced_tool_choice=forced_tool_choice,
-                    llm_base=llm,
-                    direct_answer_timeout_profile=direct_answer_timeout_profile,
-                    direct_answer_primary_timeout=direct_answer_primary_timeout,
-                    allowed_fallback_providers=direct_allowed_fallback_providers,
-                    native_tool_messages=native_direct_messages,
-                )
-                llm_response, messages, tool_call_events = await run_direct_node_execution_with_host_timeout(
-                    direct_execution=direct_execution,
-                    routing_intent=routing_intent,
-                    state=state,
-                    messages=messages,
-                    push_event=push_event,
-                    timeout_seconds=_HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS,
-                    logger_obj=logger,
-                )
-
-                llm_finalization = await finalize_direct_node_llm_execution(
-                    query=query,
-                    state=state,
-                    llm_response=llm_response,
-                    messages=messages,
-                    tool_call_events=tool_call_events,
-                    llm=llm,
-                    routing_intent=routing_intent,
-                    response_language=response_language,
-                    is_identity_turn=is_identity_turn,
-                    explicit_web_search_turn=explicit_web_search_turn,
+                    execute_direct_tool_rounds=execute_direct_tool_rounds,
                     extract_direct_response=extract_direct_response,
-                    sanitize_structured_visual_answer_text=sanitize_structured_visual_answer_text,
+                    sanitize_structured_visual_answer_text=(
+                        sanitize_structured_visual_answer_text
+                    ),
                     sanitize_wiii_house_text=sanitize_wiii_house_text,
                     build_direct_reasoning_summary=build_direct_reasoning_summary,
+                    tracer=tracer,
                     logger_obj=logger,
+                    direct_max_rounds=getattr(
+                        settings, "direct_agent_max_tool_rounds", 12
+                    ),
+                    host_ui_total_timeout_seconds=(
+                        _HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS
+                    ),
                 )
-                response = llm_finalization.response
 
-                tracer.end_step(
-                    result=f"Phan hoi LLM: {len(response)} chars",
-                    confidence=0.85,
-                    details={
-                        "response_type": "llm_generated",
-                        "tools_bound": len(tools),
-                        "force_tools": force_tools,
-                    },
-                )
+                response = llm_tool_loop.response
+                messages = llm_tool_loop.messages
+                tool_call_events = llm_tool_loop.tool_call_events
+                force_tools = llm_tool_loop.force_tools
             elif not response:
                 llm_fallback = resolve_direct_node_llm_unavailable_fallback(
                     query=query,
@@ -559,6 +479,13 @@ async def direct_response_node_impl(
                     details={"response_type": llm_fallback.response_type},
                 )
         except Exception as exc:
+            llm_response = getattr(exc, "_direct_node_llm_response", llm_response)
+            messages = getattr(exc, "_direct_node_messages", messages)
+            tool_call_events = getattr(
+                exc,
+                "_direct_node_tool_call_events",
+                tool_call_events,
+            )
             fallback_result = await handle_direct_node_generation_exception(
                 exc=exc,
                 query=query,
