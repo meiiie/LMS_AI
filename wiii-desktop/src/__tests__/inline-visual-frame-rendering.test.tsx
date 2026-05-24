@@ -52,4 +52,14 @@ describe("InlineVisualFrame rendering contract", () => {
     expect((iframe as HTMLIFrameElement).style.height).toBe("520px");
     expect((iframe as HTMLIFrameElement).style.minHeight).toBe("360px");
   });
+
+  it("uses Vietnamese copy for frame creation errors", async () => {
+    URL.createObjectURL = vi.fn(() => {
+      throw new Error("blob failed");
+    });
+
+    render(<InlineVisualFrame html="<main>Broken</main>" title="Broken" />);
+
+    expect(await screen.findByText("Lỗi frame: blob failed")).toBeTruthy();
+  });
 });

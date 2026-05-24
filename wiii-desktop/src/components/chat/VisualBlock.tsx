@@ -530,10 +530,10 @@ function VisualActionBar({
           className="visual-action-bar__button visual-action-bar__button--artifact"
           onClick={requestArtifactHandoff}
           disabled={isStreaming}
-          aria-label={artifactHandoffLabel || "Mo thanh Artifact"}
+          aria-label={artifactHandoffLabel || "Mở thành Artifact"}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.8 4.5L18 9.3l-4.2 1.8L12 15.6l-1.8-4.5L6 9.3l4.2-1.8L12 3z"/><path d="M19 14l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9L19 14z"/><path d="M5 14l.6 1.5L7 16l-1.4.5L5 18l-.6-1.5L3 16l1.4-.5L5 14z"/></svg>
-          {artifactHandoffLabel || "Mo thanh Artifact"}
+          {artifactHandoffLabel || "Mở thành Artifact"}
         </button>
       )}
       {hasCodeStudioSession && (

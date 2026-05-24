@@ -205,7 +205,7 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
       <div
         className={`rounded-[20px] border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700 ${className}`}
       >
-        Loi frame: {error}
+        Lỗi frame: {error}
       </div>
     );
   }
@@ -260,8 +260,8 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
               ? "bg-[var(--accent)] text-white shadow-md"
               : "bg-white/90 text-text-secondary border border-border shadow-sm hover:bg-white hover:border-[var(--accent)]/40"
           }`}
-          title={tweaksActive ? "Tat Tweaks" : "Tuy chinh Tweaks"}
-          aria-label={tweaksActive ? "Deactivate Tweaks" : "Activate Tweaks"}
+          title={tweaksActive ? "Tắt Tweaks" : "Tùy chỉnh Tweaks"}
+          aria-label={tweaksActive ? "Tắt Tweaks" : "Bật Tweaks"}
           aria-pressed={tweaksActive}
         >
           <svg
