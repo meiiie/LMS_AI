@@ -63,4 +63,32 @@ describe("InlineVisualFrame host shell", () => {
     expect(wrapped).toContain("function measureHeight()");
     expect(wrapped).toContain("resizeObserver.observe(document.documentElement)");
   });
+
+  it("strips blocked external font assets before applying the iframe CSP", () => {
+    const wrapped = buildVisualFrameDocument(
+      [
+        "<!DOCTYPE html>",
+        "<html>",
+        "<head>",
+        "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\">",
+        "<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,600\">",
+        "<style>@import url('https://fonts.googleapis.com/css?family=Roboto'); body{font-family:sans-serif}</style>",
+        "</head>",
+        "<body><main>Preview</main></body>",
+        "</html>",
+      ].join(""),
+      {
+        title: "Preview",
+        sessionId: "vs-fonts",
+        shellVariant: "immersive",
+        frameKind: "app",
+        hostShellMode: "force",
+      },
+    );
+
+    expect(wrapped).not.toContain("fonts.googleapis.com");
+    expect(wrapped).not.toContain("fonts.gstatic.com");
+    expect(wrapped).toContain("Content-Security-Policy");
+    expect(wrapped).toContain("body{font-family:sans-serif}");
+  });
 });

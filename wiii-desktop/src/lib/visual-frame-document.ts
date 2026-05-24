@@ -25,6 +25,11 @@ const ALLOWED_CDNS = [
 
 const FRAME_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob: ${ALLOWED_CDNS.join(" ")}; style-src 'unsafe-inline' ${ALLOWED_CDNS.join(" ")}; img-src blob: data: ${ALLOWED_CDNS.join(" ")}; font-src data: ${ALLOWED_CDNS.join(" ")}; connect-src 'none';">`;
 
+const BLOCKED_EXTERNAL_FONT_LINK_RE =
+  /<link\b[^>]*href=(["'])https:\/\/fonts\.(?:googleapis|gstatic)\.com(?:\/[^"']*)?\1[^>]*>/gi;
+const BLOCKED_EXTERNAL_FONT_IMPORT_RE =
+  /@import\s+(?:url\()?["']?https:\/\/fonts\.googleapis\.com\/[^"')]+["']?\)?\s*;?/gi;
+
 const STORAGE_SHIM = `
 <script>
   (function () {
@@ -79,6 +84,12 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function stripBlockedExternalFontAssets(content: string): string {
+  return content
+    .replace(BLOCKED_EXTERNAL_FONT_LINK_RE, "")
+    .replace(BLOCKED_EXTERNAL_FONT_IMPORT_RE, "");
 }
 
 /**
@@ -247,8 +258,9 @@ export function buildVisualFrameDocument(
     showFrameIntro = false,
     hostShellMode = frameKind === "legacy" ? "auto" : "force",
     hostThemeOverrides = undefined,
-  }: VisualFrameDocumentOptions = {},
+}: VisualFrameDocumentOptions = {},
 ): string {
+  const sanitizedContent = stripBlockedExternalFontAssets(content);
   const hasIntro = showFrameIntro && Boolean(title || summary);
   const bridgeScript = `
   <script>
@@ -551,14 +563,14 @@ export function buildVisualFrameDocument(
   // defaults so they win the cascade without breaking standalone preview.
   const themeOverrideBlock = renderHostThemeOverrideBlock(hostThemeOverrides);
 
-  if (/<html/i.test(content)) {
+  if (/<html/i.test(sanitizedContent)) {
     const headInjected = injectIntoHead(
-      content,
+      sanitizedContent,
       `${FRAME_CSP}\n${STORAGE_SHIM}\n${shellStyle}${themeOverrideBlock}`,
     );
     const shouldWrapBody =
       hostShellMode === "force" &&
-      !/wiii-frame-shell|data-wiii-host-shell/i.test(content);
+      !/wiii-frame-shell|data-wiii-host-shell/i.test(sanitizedContent);
 
     if (
       shouldWrapBody &&
@@ -614,7 +626,7 @@ export function buildVisualFrameDocument(
 <body class="${hostShellMode === "force" ? "wiii-host-shell-active" : ""}" data-wiii-host-shell="${hostShellMode === "force" ? "true" : "false"}" data-wiii-has-intro="${hasIntro ? "true" : "false"}">
   <div class="wiii-frame-shell" data-wiii-frame-kind="${escapeHtml(frameKind)}" data-wiii-shell-variant="${escapeHtml(shellVariant)}">
     ${intro}
-    <div class="wiii-frame-content">${content}</div>
+    <div class="wiii-frame-content">${sanitizedContent}</div>
   </div>
   ${bridgeScript}
   ${TWEAKS_INJECT}

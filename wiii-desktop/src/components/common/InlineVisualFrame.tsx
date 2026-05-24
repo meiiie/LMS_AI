@@ -6,6 +6,7 @@ import {
   readHostThemeOverrides,
 } from "@/lib/visual-frame-document";
 import {
+  buildVisualFrameHostSyncMessage,
   clampVisualFrameContentHeight,
   getVisualFrameHeightProfile,
   parseVisualFrameBridgeMessage,
@@ -153,20 +154,14 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
         }
         return;
       }
-      if (
-        message.kind === "ready" &&
-        iframeRef.current?.contentWindow
-      ) {
+      if (message.kind === "ready" && iframeRef.current?.contentWindow) {
         iframeRef.current.contentWindow.postMessage(
-          {
-            type: "wiii-visual-sync",
-            payload: {
-              sessionId,
-              frameKind,
-              shellVariant,
-              runtimeManifest: runtimeManifest || null,
-            },
-          },
+          buildVisualFrameHostSyncMessage({
+            sessionId,
+            frameKind,
+            shellVariant,
+            runtimeManifest: runtimeManifest || null,
+          }),
           "*",
         );
         return;
@@ -230,7 +225,10 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
       data-inline-visual-frame={frameKind}
       data-inline-visual-shell={shellVariant}
       data-inline-visual-sizing={sizingMode}
-      style={{ position: "relative" }}
+      style={{
+        position: "relative",
+        ...(sizingMode === "viewport" ? { height: "100%", minHeight: "0px" } : {}),
+      }}
     >
       {/* eslint-disable-next-line react/iframe-missing-sandbox */}
       <iframe
