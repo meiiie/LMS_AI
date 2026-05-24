@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { bootstrapLocalChat, chatComposer, sendPrompt } from "./support/local-chat-harness";
 
 const INITIAL_PROMPT =
   "Build a mini pendulum physics app in chat with drag interaction. Use Code Studio and keep it inline with the conversation.";
@@ -13,45 +14,13 @@ const VN_FOLLOWUP_PROMPT_2 =
 const VN_SHOW_CODE_PROMPT =
   "Cho tôi xem code đang được sinh ra";
 
-function buildInitScript(serverUrl: string, userId: string, displayName: string) {
-  const settingsPayload = {
-    server_url: serverUrl,
-    api_key: "local-dev-key",
-    user_id: userId,
-    user_role: "admin",
-    display_name: displayName,
-    llm_provider: "google",
-    theme: "light",
-    default_domain: "maritime",
-  };
-  const authPayload = {
-    data: {
-      user: null,
-      authMode: "legacy",
-    },
-  };
-
-  return `
-    localStorage.clear();
-    sessionStorage.clear();
-    localStorage.setItem('wiii:app_settings', JSON.stringify(${JSON.stringify(settingsPayload)}));
-    localStorage.setItem('wiii:auth_state', JSON.stringify(${JSON.stringify(authPayload)}));
-  `;
-}
-
-async function sendPrompt(page, prompt: string) {
-  const inputBox = page.locator("textarea[aria-label]").first();
-  await inputBox.waitFor({ state: "visible", timeout: 60_000 });
-  await inputBox.fill(prompt);
-  await inputBox.press("Enter");
-}
-
 test.describe("code studio runtime", () => {
   test("streams a code studio app inline and versions follow-up patches", async ({ page }, testInfo) => {
     const uniqueUser = `code-studio-e2e-${Date.now()}`;
-    await page.addInitScript(buildInitScript("http://127.0.0.1:8000", uniqueUser, "Code Studio Smoke"));
-    await page.goto("/", { waitUntil: "domcontentloaded", timeout: 60_000 });
-    await page.waitForLoadState("networkidle", { timeout: 60_000 });
+    await bootstrapLocalChat(page, {
+      userId: uniqueUser,
+      displayName: "Code Studio Smoke",
+    });
 
     await sendPrompt(page, INITIAL_PROMPT);
 
@@ -102,9 +71,10 @@ test.describe("code studio runtime", () => {
 
   test("supports vietnamese follow-up app edits and explicit code view", async ({ page }, testInfo) => {
     const uniqueUser = `code-studio-vn-${Date.now()}`;
-    await page.addInitScript(buildInitScript("http://127.0.0.1:8000", uniqueUser, "Code Studio VN Smoke"));
-    await page.goto("/", { waitUntil: "domcontentloaded", timeout: 60_000 });
-    await page.waitForLoadState("networkidle", { timeout: 60_000 });
+    await bootstrapLocalChat(page, {
+      userId: uniqueUser,
+      displayName: "Code Studio VN Smoke",
+    });
 
     const panel = page.locator(".code-studio-panel").first();
 
@@ -165,7 +135,7 @@ test.describe("code studio runtime", () => {
 
 async function sendAndSettle(page, prompt: string) {
   await sendPrompt(page, prompt);
-  const input = page.locator("textarea[aria-label]").first();
+  const input = chatComposer(page);
   await expect
     .poll(
       async () => page.locator('[aria-label="Dừng tạo phản hồi"]').count(),
@@ -178,9 +148,10 @@ async function sendAndSettle(page, prompt: string) {
 
 async function setupFresh(page, label: string) {
   const uid = `routing-${label}-${Date.now()}`;
-  await page.addInitScript(buildInitScript("http://127.0.0.1:8000", uid, `Routing ${label}`));
-  await page.goto("/", { waitUntil: "domcontentloaded", timeout: 60_000 });
-  await page.waitForLoadState("networkidle", { timeout: 60_000 });
+  await bootstrapLocalChat(page, {
+    userId: uid,
+    displayName: `Routing ${label}`,
+  });
 }
 
 test.describe("Phase 8 routing", () => {

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { bootstrapLocalChat, sendPrompt } from "./support/local-chat-harness";
 
 const FIRST_PROMPTS = [
   "Explain Kimi linear attention in charts. Use 2 to 3 small inline figures, each proving one claim: the problem, the mechanism, and the result.",
@@ -18,39 +19,6 @@ const TECHNICAL_LEAKS = [
   "template",
   "de tom tat nhanh noi dung",
 ];
-
-function buildInitScript(serverUrl: string, userId: string, displayName: string) {
-  const settingsPayload = {
-    server_url: serverUrl,
-    api_key: "local-dev-key",
-    user_id: userId,
-    user_role: "admin",
-    display_name: displayName,
-    llm_provider: "google",
-    theme: "light",
-    default_domain: "maritime",
-  };
-  const authPayload = {
-    data: {
-      user: null,
-      authMode: "legacy",
-    },
-  };
-
-  return `
-    localStorage.clear();
-    sessionStorage.clear();
-    localStorage.setItem('wiii:app_settings', JSON.stringify(${JSON.stringify(settingsPayload)}));
-    localStorage.setItem('wiii:auth_state', JSON.stringify(${JSON.stringify(authPayload)}));
-  `;
-}
-
-async function sendPrompt(page, prompt: string) {
-  const inputBox = page.locator("textarea[aria-label]").first();
-  await inputBox.waitFor({ state: "visible", timeout: 60_000 });
-  await inputBox.fill(prompt);
-  await inputBox.press("Enter");
-}
 
 async function visualSnapshot(page) {
   const visual = page.getByTestId("visual-block").last();
@@ -184,9 +152,10 @@ function hasTechnicalLeak(text: string) {
 
 async function runVisualScenario(page, testInfo, viewportLabel: string) {
   const uniqueUser = `visual-e2e-${viewportLabel}-${Date.now()}`;
-  await page.addInitScript(buildInitScript("http://127.0.0.1:8000", uniqueUser, `Visual ${viewportLabel}`));
-  await page.goto("/", { waitUntil: "domcontentloaded", timeout: 60_000 });
-  await page.waitForLoadState("networkidle", { timeout: 60_000 });
+  await bootstrapLocalChat(page, {
+    userId: uniqueUser,
+    displayName: `Visual ${viewportLabel}`,
+  });
 
   if (viewportLabel === "mobile") {
     await expect(page.getByLabel("Menu")).toBeVisible();

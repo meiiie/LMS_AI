@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -78,7 +79,7 @@ def dump_json(path: Path, payload: object) -> None:
 
 
 def send_prompt(page, prompt: str) -> None:
-    input_box = page.locator("textarea[aria-label]").first
+    input_box = page.locator('[data-wiii-id="chat-textarea"]').first
     input_box.wait_for(state="visible", timeout=60_000)
     input_box.fill(prompt)
     input_box.press("Enter")
@@ -120,21 +121,46 @@ def build_effective_user_id(base_user_id: str, stable_user_id: bool) -> str:
     return f"{base_user_id}-{int(time.time() * 1000)}"
 
 
-def build_init_script(server_url: str, user_id: str, display_name: str) -> str:
+def safe_email(user_id: str) -> str:
+    local_part = re.sub(r"[^a-z0-9-]+", "-", user_id.lower())[:48]
+    return f"{local_part or 'playwright'}@localhost"
+
+
+def build_authenticated_init_script(server_url: str, user_id: str, display_name: str, session: dict) -> str:
+    user = session.get("user") or {}
+    auth_user = {
+        "id": user.get("id") or user_id,
+        "email": user.get("email") or safe_email(user_id),
+        "name": user.get("name") or display_name,
+        "avatar_url": user.get("avatar_url") or "",
+        "role": user.get("role") or "admin",
+        "legacy_role": user.get("legacy_role") or user.get("role") or "admin",
+        "platform_role": user.get("platform_role") or "platform_admin",
+        "organization_role": user.get("organization_role") or "",
+        "host_role": user.get("host_role") or "",
+        "role_source": user.get("role_source") or "platform",
+        "active_organization_id": user.get("active_organization_id") or session.get("organization_id") or "",
+        "connector_id": "",
+        "identity_version": "2",
+    }
     settings_payload = {
         "server_url": server_url,
-        "api_key": "local-dev-key",
-        "user_id": user_id,
-        "user_role": "admin",
-        "display_name": display_name,
+        "api_key": "",
+        "user_id": auth_user["id"],
+        "user_role": auth_user["role"],
+        "display_name": auth_user["name"],
         "llm_provider": "google",
         "theme": "light",
         "default_domain": "maritime",
     }
-    auth_payload = {
-        "data": {
-            "user": None,
-            "authMode": "legacy",
+    if auth_user["active_organization_id"]:
+        settings_payload["organization_id"] = auth_user["active_organization_id"]
+    auth_payload = {"data": {"user": auth_user, "authMode": "oauth"}}
+    token_payload = {
+        "tokens": {
+            "access_token": session["access_token"],
+            "refresh_token": session["refresh_token"],
+            "expires_at": int(time.time() * 1000) + int(session.get("expires_in") or 900) * 1000,
         }
     }
     return (
@@ -142,7 +168,38 @@ def build_init_script(server_url: str, user_id: str, display_name: str) -> str:
         "sessionStorage.clear();"
         f"localStorage.setItem('wiii:app_settings', JSON.stringify({json.dumps(settings_payload)}));"
         f"localStorage.setItem('wiii:auth_state', JSON.stringify({json.dumps(auth_payload)}));"
+        f"localStorage.setItem('wiii:wiii_auth_tokens', JSON.stringify({json.dumps(token_payload)}));"
     )
+
+
+def bootstrap_local_chat(page, base_url: str, server_url: str, user_id: str, display_name: str) -> None:
+    status = page.request.get(
+        f"{server_url}/api/v1/auth/dev-login/status",
+        timeout=30_000,
+    )
+    if not status.ok:
+        raise RuntimeError(
+            f"dev-login status probe failed ({status.status}); "
+            "start the local backend with ENABLE_DEV_LOGIN=true",
+        )
+    status_json = status.json()
+    if not status_json.get("enabled"):
+        raise RuntimeError("dev-login is disabled; visual smoke requires ENABLE_DEV_LOGIN=true")
+
+    login = page.request.post(
+        f"{server_url}/api/v1/auth/dev-login",
+        data={"email": safe_email(user_id), "name": display_name, "role": "admin"},
+        timeout=30_000,
+    )
+    if not login.ok:
+        raise RuntimeError(f"dev-login failed ({login.status}): {login.text()}")
+
+    page.add_init_script(
+        build_authenticated_init_script(server_url, user_id, display_name, login.json())
+    )
+    page.goto(base_url, wait_until="domcontentloaded", timeout=60_000)
+    composer = page.locator('[data-wiii-id="chat-textarea"]').first
+    composer.wait_for(state="visible", timeout=60_000)
 
 
 def main() -> int:
@@ -170,11 +227,9 @@ def main() -> int:
         context = browser.new_context(
             viewport={"width": args.viewport_width, "height": args.viewport_height},
         )
-        context.add_init_script(build_init_script(args.server_url, effective_user_id, args.display_name))
         page = context.new_page()
 
-        page.goto(args.base_url, wait_until="domcontentloaded", timeout=60_000)
-        page.wait_for_load_state("networkidle", timeout=60_000)
+        bootstrap_local_chat(page, args.base_url, args.server_url, effective_user_id, args.display_name)
 
         send_prompt(page, args.first_prompt)
         first_visual = page.locator('[data-testid="visual-block"]').first
