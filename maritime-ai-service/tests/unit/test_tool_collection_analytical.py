@@ -8,6 +8,11 @@ class _FakeTool:
 
 def test_collect_direct_tools_strips_visual_tools_for_analytical_text_turn(monkeypatch):
     from app.engine.multi_agent import tool_collection as module
+    from app.engine.multi_agent.visual_intent_resolver import (
+        build_visual_tool_requirement,
+        required_visual_tool_names,
+        visual_tool_capability_names,
+    )
 
     monkeypatch.setattr(module.settings, "enable_character_tools", False, raising=False)
     monkeypatch.setattr(module.settings, "enable_lms_integration", False, raising=False)
@@ -36,6 +41,9 @@ def test_collect_direct_tools_strips_visual_tools_for_analytical_text_turn(monke
                 preferred_tool=None,
                 visual_type=None,
             ),
+            "build_visual_tool_requirement": build_visual_tool_requirement,
+            "required_visual_tool_names": required_visual_tool_names,
+            "visual_tool_capability_names": visual_tool_capability_names,
             "filter_tools_for_visual_intent": lambda tools, _decision, structured_visuals_enabled: tools,
             "_should_strip_visual_tools_from_direct": lambda _query, _decision: False,
             "_normalize_for_intent": lambda text: text.lower(),
