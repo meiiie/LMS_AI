@@ -6,25 +6,11 @@ import logging
 from typing import Any
 
 from app.core.config import settings
-from app.engine.multi_agent.document_preview_contract import (
-    has_uploaded_document_context as _has_uploaded_document_context,
-)
 from app.engine.multi_agent.direct_node_document_preview_runtime import (
     execute_direct_node_document_preview_round,
 )
-from app.engine.multi_agent.direct_node_document_preflight import (
-    build_document_preview_response_sanitizer,
-    execute_direct_node_document_preview_preflight,
-    record_uploaded_document_context_plan,
-)
-from app.engine.multi_agent.direct_node_fast_response_runtime import (
-    resolve_direct_node_fast_response,
-)
 from app.engine.multi_agent.direct_node_event_sink import (
     build_direct_node_event_sink,
-)
-from app.engine.multi_agent.direct_node_image_input_preflight import (
-    execute_direct_node_image_input_preflight,
 )
 from app.engine.multi_agent.direct_node_llm_preflight import (
     prepare_direct_node_llm_preflight,
@@ -45,23 +31,21 @@ from app.engine.multi_agent.direct_node_final_state import finalize_direct_node_
 from app.engine.multi_agent.direct_node_operational_fast_paths import (
     _build_codebase_analysis_fallback_answer,
     _build_codebase_analysis_fallback_thinking,
-    _strip_dsml_residue,
+)
+from app.engine.multi_agent.direct_node_pre_llm_pipeline import (
+    execute_direct_node_pre_llm_pipeline,
 )
 from app.engine.multi_agent.direct_node_thinking_snapshot import (
     record_direct_node_thinking_snapshot,
 )
 from app.engine.multi_agent.direct_node_tool_selection import select_direct_node_tools
 from app.engine.multi_agent.direct_node_turn_policy import resolve_direct_node_turn_policy
-from app.engine.multi_agent.direct_node_turn_start import start_direct_node_turn
 from app.engine.multi_agent.direct_node_uploaded_context import (
     _build_uploaded_document_context_fallback_answer,
     _build_uploaded_document_visual_guard_answer,
     _looks_uploaded_document_preview_request,
     _looks_uploaded_file_visual_inspection_query,
     _provider_likely_supports_image_blocks,
-)
-from app.engine.multi_agent.direct_node_visible_thought import (
-    _strip_direct_inline_private_asides,
 )
 from app.engine.runtime.runtime_metrics import inc_counter
 from app.engine.multi_agent.state import AgentState
@@ -121,111 +105,38 @@ async def direct_response_node_impl(
     tracer = get_or_create_tracer(state)
     tracer.start_step(direct_response_step_name, "Tao phan hoi truc tiep")
 
-    turn_start = start_direct_node_turn(
+    pre_llm_pipeline = await execute_direct_node_pre_llm_pipeline(
         query=query,
         state=state,
+        bus_id=bus_id,
+        push_event=push_event,
+        tracer=tracer,
         enable_natural_conversation=(
             getattr(settings, "enable_natural_conversation", False) is True
         ),
         default_domain=settings.default_domain,
         get_domain_greetings=get_domain_greetings,
-        record_thinking_snapshot_fn=record_thinking_snapshot,
-    )
-    query_lower = turn_start.query_lower
-    response = turn_start.response
-    response_type = turn_start.response_type
-    explicit_web_search_turn = turn_start.explicit_web_search_turn
-
-    ctx_for_preflight = state.get("context", {}) if isinstance(state.get("context"), dict) else {}
-    has_uploaded_document_context = _has_uploaded_document_context(ctx_for_preflight)
-
-    sanitize_document_preview_response = build_document_preview_response_sanitizer(
-        query=query,
-        sanitize_structured_visual_answer_text=sanitize_structured_visual_answer_text,
-        sanitize_wiii_house_text=sanitize_wiii_house_text,
-        strip_direct_inline_private_asides=_strip_direct_inline_private_asides,
-        strip_dsml_residue=_strip_dsml_residue,
-    )
-
-    document_thinking = (
-        "Mình nhận đây là lượt hỏi có tài liệu upload đã được parse thành Markdown, "
-        "nên ưu tiên đối chiếu marker, bảng và các dòng trong document_context trước khi suy luận thêm. "
-        "Nếu phần nào không có trong file, Wiii phải nói rõ thay vì bịa."
-    )
-    record_uploaded_document_context_plan(
-        state=state,
-        response_present=bool(response),
-        has_uploaded_document_context=has_uploaded_document_context,
-        document_thinking=document_thinking,
-        record_thinking_snapshot_fn=record_thinking_snapshot,
-    )
-    document_preflight_result = await execute_direct_node_document_preview_preflight(
-        query=query,
-        state=state,
-        ctx=ctx_for_preflight,
-        bus_id=bus_id,
-        response_present=bool(response),
-        has_uploaded_document_context=has_uploaded_document_context,
-        looks_uploaded_document_preview_request=_looks_uploaded_document_preview_request,
-        push_event=push_event,
+        normalize_for_intent=normalize_for_intent,
+        needs_web_search=needs_web_search,
+        needs_datetime=needs_datetime,
         build_visual_tool_runtime_metadata=build_visual_tool_runtime_metadata,
         execute_direct_tool_rounds=execute_direct_tool_rounds,
         extract_direct_response=extract_direct_response,
-        sanitize_preview_response=sanitize_document_preview_response,
-        fallback_response=(
-            "Mình đã gửi bản preview bài học sang LMS. "
-            "Giáo viên cần xem phần so sánh thay đổi và nguồn trích dẫn rồi bấm Áp dụng để cấp approval_token."
-        ),
+        sanitize_structured_visual_answer_text=sanitize_structured_visual_answer_text,
+        sanitize_wiii_house_text=sanitize_wiii_house_text,
+        record_thinking_snapshot_fn=record_thinking_snapshot,
         logger_obj=logger,
     )
-    if document_preflight_result is not None:
-        response = document_preflight_result.response
-        response_type = document_preflight_result.response_type
-
-    image_preflight_result = await execute_direct_node_image_input_preflight(
-        query=query,
-        state=state,
-        ctx=ctx_for_preflight,
-        response_present=bool(response),
-        has_uploaded_document_context=has_uploaded_document_context,
-        record_thinking_snapshot_fn=record_thinking_snapshot,
+    response = pre_llm_pipeline.response
+    explicit_web_search_turn = pre_llm_pipeline.explicit_web_search_turn
+    ctx_for_preflight = pre_llm_pipeline.ctx_for_preflight
+    has_uploaded_document_context = pre_llm_pipeline.has_uploaded_document_context
+    domain_name_vi = pre_llm_pipeline.domain_name_vi
+    sanitize_document_preview_response = (
+        pre_llm_pipeline.sanitize_document_preview_response
     )
-    if image_preflight_result is not None:
-        response = image_preflight_result.response
-        response_type = image_preflight_result.response_type
 
     if not response:
-        fast_response = resolve_direct_node_fast_response(
-            query=query,
-            state=state,
-            ctx=ctx_for_preflight,
-            has_uploaded_document_context=has_uploaded_document_context,
-            normalize_for_intent=normalize_for_intent,
-            needs_web_search=needs_web_search,
-            needs_datetime=needs_datetime,
-            record_thinking_snapshot_fn=record_thinking_snapshot,
-            logger_obj=logger,
-        )
-        if fast_response is not None:
-            response = fast_response.response
-            response_type = fast_response.response_type
-
-    domain_config = state.get("domain_config", {})
-    domain_name_vi = domain_config.get("name_vi", "")
-    if not domain_name_vi:
-        domain_id = state.get("domain_id", settings.default_domain)
-        domain_name_vi = {
-            "maritime": "Hang hai",
-            "traffic_law": "Luat Giao thong",
-        }.get(domain_id, domain_id)
-
-    if response:
-        tracer.end_step(
-            result=f"Direct fast response: {response[:50]}...",
-            confidence=1.0,
-            details={"response_type": response_type or "greeting", "query": query_lower},
-        )
-    else:
         explicit_user_provider: str | None = None
         llm = None
         llm_response = None
