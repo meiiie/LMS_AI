@@ -2,6 +2,36 @@ import pytest
 from starlette.requests import Request
 
 
+def test_host_action_audit_route_registered_when_host_actions_disabled(monkeypatch):
+    import app.api.v1 as api_v1
+    from app.core.config import settings
+
+    registered: list[tuple[str, str]] = []
+    optional_registered: list[tuple[str, str, str]] = []
+
+    monkeypatch.setattr(
+        api_v1,
+        "_register_router",
+        lambda _router, import_path, label: registered.append((import_path, label)),
+    )
+    monkeypatch.setattr(
+        api_v1,
+        "_register_optional_router",
+        lambda _router, flag_name, import_path, label: optional_registered.append(
+            (flag_name, import_path, label)
+        ),
+    )
+    monkeypatch.setattr(settings, "enable_host_actions", False, raising=False)
+
+    api_v1._build_router()
+
+    assert ("app.api.v1.host_actions.router", "Host Action Audit") in registered
+    assert all(
+        import_path != "app.api.v1.host_actions.router"
+        for _flag_name, import_path, _label in optional_registered
+    )
+
+
 def _make_request() -> Request:
     scope = {
         "type": "http",
