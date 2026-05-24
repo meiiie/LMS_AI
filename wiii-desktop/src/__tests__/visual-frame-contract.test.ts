@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildVisualFrameHostSyncMessage,
   clampVisualFrameContentHeight,
   getVisualFrameHeightProfile,
   parseVisualFrameBridgeMessage,
@@ -57,5 +58,22 @@ describe("visual frame contract", () => {
       type: "wiii-frame-resize",
       payload: { height: "640" },
     })).toBeNull();
+  });
+
+  it("builds a typed host sync message for app frames", () => {
+    expect(buildVisualFrameHostSyncMessage({
+      sessionId: "vs_1",
+      frameKind: "app",
+      shellVariant: "immersive",
+      runtimeManifest: { storage: "ephemeral" },
+    })).toEqual({
+      type: "wiii-visual-sync",
+      payload: {
+        sessionId: "vs_1",
+        frameKind: "app",
+        shellVariant: "immersive",
+        runtimeManifest: { storage: "ephemeral" },
+      },
+    });
   });
 });

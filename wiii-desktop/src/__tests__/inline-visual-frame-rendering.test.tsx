@@ -32,6 +32,8 @@ describe("InlineVisualFrame rendering contract", () => {
     await waitFor(() => expect(iframe.getAttribute("src")).toBe("blob:wiii-visual-frame"));
 
     expect(iframe.parentElement?.getAttribute("data-inline-visual-sizing")).toBe("viewport");
+    expect(iframe.parentElement?.style.height).toBe("100%");
+    expect(iframe.parentElement?.style.minHeight).toBe("0px");
     expect((iframe as HTMLIFrameElement).style.height).toBe("100%");
     expect((iframe as HTMLIFrameElement).style.minHeight).toBe("0px");
   });

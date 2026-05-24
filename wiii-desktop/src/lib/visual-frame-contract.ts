@@ -1,6 +1,18 @@
 export type VisualFrameKind = "legacy" | "inline_html" | "app";
 export type VisualFrameSizingMode = "content" | "viewport";
 
+export interface VisualFrameHostSyncPayload {
+  sessionId: string;
+  frameKind: VisualFrameKind;
+  shellVariant: string;
+  runtimeManifest: unknown | null;
+}
+
+export interface VisualFrameHostSyncMessage {
+  type: "wiii-visual-sync";
+  payload: VisualFrameHostSyncPayload;
+}
+
 export interface VisualFrameHeightProfile {
   initialHeight: number;
   minHeight: number;
@@ -71,6 +83,15 @@ export function resolveVisualFrameCssHeight(
 ): string {
   if (profile.sizingMode === "viewport") return "100%";
   return `${height}px`;
+}
+
+export function buildVisualFrameHostSyncMessage(
+  payload: VisualFrameHostSyncPayload,
+): VisualFrameHostSyncMessage {
+  return {
+    type: "wiii-visual-sync",
+    payload,
+  };
 }
 
 export function parseVisualFrameBridgeMessage(
