@@ -27,9 +27,7 @@ from app.engine.multi_agent.direct_node_image_input_preflight import (
     execute_direct_node_image_input_preflight,
 )
 from app.engine.multi_agent.direct_node_llm_preflight import (
-    apply_direct_node_natural_conversation_penalties,
-    maybe_build_uploaded_visual_guard,
-    select_direct_node_llm,
+    prepare_direct_node_llm_preflight,
 )
 from app.engine.multi_agent.direct_node_llm_tool_loop import (
     execute_direct_node_llm_tool_loop,
@@ -337,31 +335,30 @@ async def direct_response_node_impl(
                 _supports_native_answer_streaming_impl,
             )
 
-            llm_selection = select_direct_node_llm(
-                is_identity_turn=is_identity_turn,
+            llm_preflight = prepare_direct_node_llm_preflight(
+                query=query,
+                state=state,
                 ctx=ctx,
+                ctx_for_preflight=ctx_for_preflight,
+                has_uploaded_document_context=has_uploaded_document_context,
+                response=response,
+                is_identity_turn=is_identity_turn,
                 is_short_house_chatter=is_short_house_chatter,
                 is_emotional_support_turn=is_emotional_support_turn,
                 use_house_voice_direct=use_house_voice_direct,
                 is_codebase_source_turn=is_codebase_source_turn,
-                response_present=bool(response),
                 thinking_effort=thinking_effort,
                 direct_provider_override=direct_provider_override,
+                preferred_provider=preferred_provider,
                 requested_model=state.get("model"),
+                enable_natural_conversation=(
+                    getattr(settings, "enable_natural_conversation", False) is True
+                ),
+                presence_penalty=getattr(settings, "llm_presence_penalty", 0.0),
+                frequency_penalty=getattr(settings, "llm_frequency_penalty", 0.0),
                 get_native_llm=AgentConfigRegistry.get_native_llm,
                 get_llm=AgentConfigRegistry.get_llm,
                 supports_native_answer_streaming=_supports_native_answer_streaming_impl,
-            )
-            llm = llm_selection.llm
-
-            visual_guard = maybe_build_uploaded_visual_guard(
-                llm=llm,
-                query=query,
-                state=state,
-                ctx_for_preflight=ctx_for_preflight,
-                has_uploaded_document_context=has_uploaded_document_context,
-                direct_provider_override=direct_provider_override,
-                preferred_provider=preferred_provider,
                 looks_uploaded_file_visual_inspection_query=(
                     _looks_uploaded_file_visual_inspection_query
                 ),
@@ -371,34 +368,11 @@ async def direct_response_node_impl(
                 build_uploaded_document_visual_guard_answer=(
                     _build_uploaded_document_visual_guard_answer
                 ),
+                tracer=tracer,
+                logger_obj=logger,
             )
-            if visual_guard is not None:
-                response = visual_guard.response
-                logger.info(
-                    "[DIRECT] Uploaded video frame question routed to text-only provider; "
-                    "returned visual guard fallback (provider=%s model=%s)",
-                    visual_guard.provider,
-                    visual_guard.model,
-                )
-                tracer.end_step(
-                    result="Uploaded-file visual guard fallback (text-only provider)",
-                    confidence=0.7,
-                    details={
-                        "response_type": "uploaded_file_visual_guard_fallback",
-                        "provider": visual_guard.provider,
-                        "model": visual_guard.model,
-                    },
-                )
-
-            llm = apply_direct_node_natural_conversation_penalties(
-                llm,
-                response_present=bool(response),
-                enable_natural_conversation=(
-                    getattr(settings, "enable_natural_conversation", False) is True
-                ),
-                presence_penalty=getattr(settings, "llm_presence_penalty", 0.0),
-                frequency_penalty=getattr(settings, "llm_frequency_penalty", 0.0),
-            )
+            llm = llm_preflight.llm
+            response = llm_preflight.response
 
             if llm and not response:
                 llm_tool_loop = await execute_direct_node_llm_tool_loop(

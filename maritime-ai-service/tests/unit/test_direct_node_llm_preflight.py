@@ -3,8 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from app.engine.multi_agent.direct_node_llm_preflight import (
+    DirectNodeLlmSelection,
     apply_direct_node_natural_conversation_penalties,
     maybe_build_uploaded_visual_guard,
+    prepare_direct_node_llm_preflight,
     select_direct_node_llm,
 )
 
@@ -133,3 +135,118 @@ def test_apply_natural_conversation_penalties_skips_native_llm() -> None:
 
     assert result is llm
     assert llm.bind_kwargs is None
+
+
+def test_prepare_direct_node_llm_preflight_applies_uploaded_visual_guard_before_penalties():
+    llm = _Llm(provider="text-only", model="text-model")
+    ctx_for_preflight = {"images": [{"url": "frame.png"}]}
+    tracer_calls: list[dict[str, Any]] = []
+
+    class _Tracer:
+        def end_step(self, **kwargs: Any) -> None:
+            tracer_calls.append(kwargs)
+
+    penalty_calls: list[dict[str, Any]] = []
+
+    def apply_penalties_fn(candidate_llm: Any, **kwargs: Any) -> Any:
+        penalty_calls.append(kwargs)
+        return candidate_llm
+
+    result = prepare_direct_node_llm_preflight(
+        query="anh trong video noi gi",
+        state={"model": "state-model"},
+        ctx={},
+        ctx_for_preflight=ctx_for_preflight,
+        has_uploaded_document_context=True,
+        response="",
+        is_identity_turn=False,
+        is_short_house_chatter=False,
+        is_emotional_support_turn=False,
+        use_house_voice_direct=False,
+        is_codebase_source_turn=False,
+        thinking_effort="medium",
+        direct_provider_override=None,
+        preferred_provider="qwen",
+        requested_model="qwen3-next",
+        enable_natural_conversation=True,
+        presence_penalty=0.2,
+        frequency_penalty=0.1,
+        get_native_llm=lambda *_args, **_kwargs: None,
+        get_llm=lambda *_args, **_kwargs: llm,
+        supports_native_answer_streaming=lambda _provider: False,
+        looks_uploaded_file_visual_inspection_query=lambda _query: True,
+        provider_likely_supports_image_blocks=lambda _provider, _model: False,
+        build_uploaded_document_visual_guard_answer=lambda _query, _ctx: "need vision",
+        tracer=_Tracer(),
+        logger_obj=type("_Logger", (), {"info": lambda *_args, **_kwargs: None})(),
+        apply_penalties_fn=apply_penalties_fn,
+    )
+
+    assert result.llm is llm
+    assert result.response == "need vision"
+    assert result.visual_guard is not None
+    assert result.visual_guard.provider == "text-only"
+    assert ctx_for_preflight["images"] == []
+    assert penalty_calls == [
+        {
+            "response_present": True,
+            "enable_natural_conversation": True,
+            "presence_penalty": 0.2,
+            "frequency_penalty": 0.1,
+        }
+    ]
+    assert tracer_calls == [
+        {
+            "result": "Uploaded-file visual guard fallback (text-only provider)",
+            "confidence": 0.7,
+            "details": {
+                "response_type": "uploaded_file_visual_guard_fallback",
+                "provider": "text-only",
+                "model": "text-model",
+            },
+        }
+    ]
+
+
+def test_prepare_direct_node_llm_preflight_allows_selection_injection():
+    selected_llm = _Llm(provider="qwen")
+    selection = DirectNodeLlmSelection(
+        direct_node_id="direct",
+        native_direct_possible=True,
+        llm=selected_llm,
+    )
+
+    result = prepare_direct_node_llm_preflight(
+        query="xin chao",
+        state={},
+        ctx={},
+        ctx_for_preflight={},
+        has_uploaded_document_context=False,
+        response="",
+        is_identity_turn=False,
+        is_short_house_chatter=False,
+        is_emotional_support_turn=False,
+        use_house_voice_direct=False,
+        is_codebase_source_turn=False,
+        thinking_effort=None,
+        direct_provider_override=None,
+        preferred_provider=None,
+        requested_model=None,
+        enable_natural_conversation=False,
+        presence_penalty=0.0,
+        frequency_penalty=0.0,
+        get_native_llm=lambda *_args, **_kwargs: None,
+        get_llm=lambda *_args, **_kwargs: None,
+        supports_native_answer_streaming=lambda _provider: False,
+        looks_uploaded_file_visual_inspection_query=lambda _query: False,
+        provider_likely_supports_image_blocks=lambda _provider, _model: True,
+        build_uploaded_document_visual_guard_answer=lambda _query, _ctx: "",
+        tracer=type("_Tracer", (), {"end_step": lambda *_args, **_kwargs: None})(),
+        logger_obj=type("_Logger", (), {"info": lambda *_args, **_kwargs: None})(),
+        select_llm_fn=lambda **_kwargs: selection,
+    )
+
+    assert result.selection is selection
+    assert result.llm is selected_llm
+    assert result.response == ""
+    assert result.visual_guard is None
