@@ -66,6 +66,45 @@ _COURSE_REQUEST_MARKERS = (
     "outline",
 )
 
+_LESSON_AUTHORING_EXCLUSION_MARKERS = (
+    "bai tap",
+    "bai kiem tra",
+    "cau hoi",
+    "kiem tra",
+    "quiz",
+)
+
+_LESSON_AUTHORING_VERBS = (
+    "build",
+    "create",
+    "lam",
+    "lap",
+    "soan",
+    "tao",
+    "thiet ke",
+    "viet",
+    "write",
+    "xay dung",
+)
+
+_LESSON_PREVIEW_REQUEST_MARKERS = (
+    "approval_token",
+    "ban nhap",
+    "ban xem truoc",
+    "cap nhat bai hoc",
+    "citation",
+    "diff",
+    "draft",
+    "lesson patch",
+    "preview",
+    "preview_lesson_patch",
+    "source references",
+    "source_references",
+    "tao ban xem truoc",
+    "trich dan",
+    "xem truoc",
+)
+
 
 def normalize_document_contract_text(value: Any) -> str:
     text = str(value or "").replace("\\_", "_")
@@ -125,6 +164,23 @@ def looks_uploaded_document_course_request(query: str) -> bool:
     if any(marker in normalized for marker in _COURSE_REQUEST_BLOCKERS):
         return False
     return any(marker in normalized for marker in _COURSE_REQUEST_MARKERS)
+
+
+def _looks_singular_lesson_authoring_request(normalized: str) -> bool:
+    if not ("bai hoc" in normalized or "lesson" in normalized):
+        return False
+    if any(marker in normalized for marker in _LESSON_AUTHORING_EXCLUSION_MARKERS):
+        return False
+    return any(marker in normalized for marker in _LESSON_AUTHORING_VERBS)
+
+
+def looks_uploaded_document_lesson_preview_request(query: str) -> bool:
+    normalized = normalize_document_contract_text(query)
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in _LESSON_PREVIEW_REQUEST_MARKERS) or (
+        _looks_singular_lesson_authoring_request(normalized)
+    )
 
 
 def _runtime_tool_name(

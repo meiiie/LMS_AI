@@ -8,6 +8,8 @@ from typing import Any
 
 from app.engine.multi_agent.document_preview_contract import (
     has_uploaded_document_context as _has_uploaded_document_context,
+    looks_uploaded_document_course_request as _looks_uploaded_document_course_request,
+    looks_uploaded_document_lesson_preview_request as _looks_uploaded_document_lesson_preview_request,
     uploaded_document_attachments_from_context as _uploaded_document_attachments,
 )
 from app.engine.multi_agent.direct_session_memory_runtime import (
@@ -121,48 +123,11 @@ def _looks_uploaded_document_preview_request(query: str) -> bool:
     folded = _fold_direct_text(query)
     if not folded:
         return False
-    preview_markers = (
-        "approval_token",
-        "ban nhap",
-        "ban xem truoc",
-        "citation",
-        "diff",
-        "lesson patch",
-        "preview",
-        "preview_lesson_patch",
-        "source references",
-        "source_references",
-        "lap bai giang",
-        "soan bai giang",
-        "soan giao an",
-        "tao bai giang",
-        "tao giao an",
-        "tao hoc lieu",
-        "tao ban xem truoc",
-        "tao khoa hoc",
-        "thiet ke bai giang",
-        "thiet ke khoa hoc",
-        "xay dung bai giang",
-        "cau truc khoa hoc",
-        "toan bo khoa",
-        "cay khoa",
-        "chia khoa",
-        "course architect",
-        "course outline",
-        "course syllabus",
-        "curriculum",
-        "de cuong khoa",
-        "de cuong mon",
-        "giao trinh",
-        "ke hoach giang day",
-        "learning path",
-        "lo trinh hoc",
-        "syllabus",
-        "generate_course_from_document",
-        "trich dan",
-        "xem truoc",
+    return _looks_uploaded_document_course_request(
+        folded
+    ) or _looks_uploaded_document_lesson_preview_request(
+        folded
     )
-    return any(marker in folded for marker in preview_markers)
 
 
 def _looks_uploaded_context_fact_query(query: str, ctx: dict[str, Any]) -> bool:

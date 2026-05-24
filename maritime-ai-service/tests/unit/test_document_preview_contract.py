@@ -8,6 +8,7 @@ from app.engine.multi_agent.document_preview_contract import (
     has_document_preview_host_action_tool,
     has_uploaded_document_context,
     looks_uploaded_document_course_request,
+    looks_uploaded_document_lesson_preview_request,
     uploaded_document_attachments_from_context,
     uploaded_document_attachments_from_state,
 )
@@ -44,6 +45,13 @@ def test_uploaded_document_course_intent_is_shared_by_preview_and_tool_rounds():
     assert not looks_uploaded_document_course_request("cap nhat bai hoc hien tai")
 
 
+def test_uploaded_document_lesson_preview_intent_is_shared_by_preview_and_tool_rounds():
+    assert looks_uploaded_document_lesson_preview_request("tao cho minh bai hoc")
+    assert looks_uploaded_document_lesson_preview_request("cap nhat bai hoc hien tai")
+    assert looks_uploaded_document_lesson_preview_request("create a lesson from this file")
+    assert not looks_uploaded_document_lesson_preview_request("tao cau hoi cho bai hoc")
+
+
 def test_document_preview_forced_tool_choice_prefers_course_when_available():
     tools = [
         SimpleNamespace(name=DOC_PREVIEW_HOST_ACTION_TOOL),
@@ -57,6 +65,10 @@ def test_document_preview_forced_tool_choice_prefers_course_when_available():
     )
     assert (
         document_preview_forced_tool_choice("cap nhat bai hoc hien tai", tools)
+        == DOC_PREVIEW_HOST_ACTION_TOOL
+    )
+    assert (
+        document_preview_forced_tool_choice("tao cho minh bai hoc", tools)
         == DOC_PREVIEW_HOST_ACTION_TOOL
     )
 

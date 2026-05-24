@@ -9,6 +9,7 @@ from app.engine.multi_agent.document_preview_contract import (
     DOC_PREVIEW_HOST_ACTION_TOOL as _DOC_PREVIEW_HOST_ACTION_TOOL,
     find_document_host_action_tool,
     looks_uploaded_document_course_request as _looks_uploaded_doc_course_request,
+    looks_uploaded_document_lesson_preview_request as _looks_uploaded_doc_lesson_preview_request,
     normalize_document_contract_text as _normalize_doc_preview_text,
     uploaded_document_attachments_from_state as _uploaded_document_attachments_from_state,
 )
@@ -144,25 +145,7 @@ def _should_request_uploaded_doc_preview(
         return False
     if not _uploaded_document_attachments_from_state(state):
         return False
-    normalized = _normalize_doc_preview_text(query)
-    return any(
-        marker in normalized
-        for marker in (
-            "preview",
-            "xem truoc",
-            "ban xem truoc",
-            "ban nhap",
-            "draft",
-            "cap nhat bai hoc",
-            "tao ban xem truoc",
-            "lesson patch",
-            "preview_lesson_patch",
-            "source_references",
-            "citation",
-            "trich dan",
-            "nguon",
-        )
-    )
+    return _looks_uploaded_doc_lesson_preview_request(query)
 
 
 def _resolve_doc_preview_lesson_id(state: AgentState | None) -> str:

@@ -11,7 +11,12 @@ import logging
 from typing import Any, Optional
 
 from app.core.config import settings
+from app.engine.multi_agent.document_preview_contract import (
+    looks_uploaded_document_course_request as _contract_looks_uploaded_document_course_request,
+    looks_uploaded_document_lesson_preview_request as _contract_looks_uploaded_document_lesson_preview_request,
+)
 from app.engine.multi_agent.state import AgentState
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,6 +27,14 @@ def _load_attr(module_name: str, attr_name: str):
 
 def _normalize_for_intent(query: str) -> str:
     return _load_attr("app.engine.multi_agent.direct_intent", "_normalize_for_intent")(query)
+
+
+def _looks_uploaded_document_course_request(query: str) -> bool:
+    return _contract_looks_uploaded_document_course_request(query)
+
+
+def _looks_uploaded_document_lesson_preview_request(query: str) -> bool:
+    return _contract_looks_uploaded_document_lesson_preview_request(query)
 
 
 def _needs_web_search(query: str) -> bool:
@@ -277,113 +290,17 @@ def _has_uploaded_document_context_state(state: Optional[AgentState]) -> bool:
 def _looks_like_document_preview_request(query: str, state: Optional[AgentState]) -> bool:
     if not _has_uploaded_document_context_state(state):
         return False
-    normalized = _normalize_for_intent(query)
-    return any(
-        marker in normalized
-        for marker in (
-            "preview",
-            "xem truoc",
-            "ban xem truoc",
-            "ban nhap",
-            "draft",
-            "cap nhat bai hoc",
-            "lap bai giang",
-            "soan bai giang",
-            "soan giao an",
-            "tao bai giang",
-            "tao giao an",
-            "tao hoc lieu",
-            "tao bai hoc",
-            "tao khoa hoc",
-            "thiet ke bai giang",
-            "thiet ke khoa hoc",
-            "xay dung bai giang",
-            "cau truc khoa hoc",
-            "toan bo khoa",
-            "cay khoa",
-            "chia khoa",
-            "course architect",
-            "course outline",
-            "course syllabus",
-            "curriculum",
-            "de cuong khoa",
-            "de cuong mon",
-            "giao trinh",
-            "ke hoach giang day",
-            "learning path",
-            "lo trinh hoc",
-            "syllabus",
-            "generate_course_from_document",
-            "lesson patch",
-            "preview_lesson_patch",
-            "source_references",
-            "citation",
-            "trich dan",
-            "nguon",
-        )
+    return _looks_uploaded_document_course_request(
+        query
+    ) or _looks_uploaded_document_lesson_preview_request(
+        query
     )
 
 
 def _looks_like_document_course_preview_request(query: str, state: Optional[AgentState]) -> bool:
     if not _has_uploaded_document_context_state(state):
         return False
-    normalized = _normalize_for_intent(query)
-    if any(
-        marker in normalized
-        for marker in (
-            "preview_lesson_patch",
-            "lesson patch",
-            "bai hoc hien tai",
-            "cap nhat bai hoc",
-        )
-    ):
-        return False
-    return any(
-        marker in normalized
-        for marker in (
-            "generate_course_from_document",
-            "lap bai giang",
-            "soan bai giang",
-            "soan giao an",
-            "tao bai giang",
-            "tao giao an",
-            "tao hoc lieu",
-            "course architect",
-            "course outline",
-            "course syllabus",
-            "curriculum",
-            "full course",
-            "toan bo khoa",
-            "cay khoa",
-            "chia khoa",
-            "chia thanh bai",
-            "chia thanh chuong",
-            "chuong trinh dao tao",
-            "de cuong khoa",
-            "de cuong mon",
-            "giao trinh",
-            "ke hoach giang day",
-            "khoa dao tao",
-            "khoa day du",
-            "khoa hoan chinh",
-            "learning path",
-            "lo trinh hoc",
-            "lo trinh khoa",
-            "nhieu bai hoc",
-            "nhieu chuong",
-            "phan chia bai hoc",
-            "syllabus",
-            "tao khoa hoc",
-            "thiet ke bai giang",
-            "thiet ke khoa hoc",
-            "xay dung bai giang",
-            "cau truc khoa hoc",
-            "chuong/bai",
-            "chuong bai",
-            "module",
-            "outline",
-        )
-    )
+    return _looks_uploaded_document_course_request(query)
 
 
 def _document_preview_host_action_tools(tools: list[Any]) -> list[Any]:
