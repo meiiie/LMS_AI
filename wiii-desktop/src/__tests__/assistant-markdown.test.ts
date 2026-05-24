@@ -9,7 +9,7 @@ describe("normalizeAssistantMarkdown", () => {
     const normalized = normalizeAssistantMarkdown(input);
 
     expect(normalized).toContain("So sánh nhanh:\n\n| Tiêu chí | Annex I | Annex VI |");
-    expect(normalized).toContain("\n|------|------|------|");
+    expect(normalized).toContain("\n| ------ | ------ | ------ |");
     expect(normalized).toContain("\n| Ô nhiễm | Dầu ra biển | Khí thải |");
     expect(normalized).toContain("\n\n---\n\nMẹo nhớ:");
   });
@@ -39,5 +39,28 @@ describe("normalizeAssistantMarkdown", () => {
 
     expect(normalized).toContain("Các bước:\n- Mở lớp\n- Chọn bài\n- Áp dụng");
     expect(normalized).toContain("câu A - B vẫn là văn xuôi");
+  });
+  it("rebuilds dense product-style tables whose rows were collapsed into one line", () => {
+    const input =
+      "--- 🔍 So sánh nhanh: | Tiêu chí | Annex I | Annex VI |---------|----------|---------| | Ô nhiễm | Dầu ra biển | Khí thải ra không khí | Chất gây hại | Dầu, hydrocarbon | SOx, NOx, PM, CO₂ | Ghi chép | Oil Record Book | FONAR, EIAPP | --- 💡 Mẹo nhớ: đọc theo từng cột.";
+
+    const normalized = normalizeAssistantMarkdown(input);
+
+    expect(normalized).toContain("---\n\n🔍 So sánh nhanh:");
+    expect(normalized).toContain("| Tiêu chí | Annex I | Annex VI |");
+    expect(normalized).toContain("| --------- | ---------- | --------- |");
+    expect(normalized).toContain("| Ô nhiễm | Dầu ra biển | Khí thải ra không khí |");
+    expect(normalized).toContain("| Ghi chép | Oil Record Book | FONAR, EIAPP |");
+    expect(normalized).toContain("\n\n---\n\n💡 Mẹo nhớ:");
+  });
+
+  it("promotes inline blockquotes after Vietnamese quote prompts", () => {
+    const input =
+      "Cậu chỉ cần nói: > “Mình thấy nút Khóa học” hoặc > “Mình không thấy gì cả”";
+
+    const normalized = normalizeAssistantMarkdown(input);
+
+    expect(normalized).toContain("Cậu chỉ cần nói:\n> “Mình thấy nút Khóa học”");
+    expect(normalized).toContain("hoặc\n\n> “Mình không thấy gì cả”");
   });
 });
