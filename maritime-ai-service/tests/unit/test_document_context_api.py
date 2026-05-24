@@ -507,6 +507,33 @@ def test_uploaded_document_preview_request_bypasses_fact_fast_path():
     assert not _looks_uploaded_context_fact_query(query, ctx)
 
 
+def test_uploaded_document_lesson_creation_request_bypasses_fact_fast_path():
+    from app.engine.multi_agent.direct_node_uploaded_context import (
+        _looks_uploaded_context_fact_query,
+        _looks_uploaded_document_preview_request,
+    )
+
+    ctx = {
+        "document_context": {
+            "attachments": [
+                {
+                    "file_name": "lesson.docx",
+                    "media_kind": "document",
+                    "parser": "markitdown",
+                    "markdown": (
+                        "Ke hoach bai hoc thu nghiem Wiii\n"
+                        "Chu de: An toan hang hai va approval_token.\n"
+                    ),
+                }
+            ]
+        }
+    }
+    query = "tao cho minh bai hoc"
+
+    assert _looks_uploaded_document_preview_request(query)
+    assert not _looks_uploaded_context_fact_query(query, ctx)
+
+
 def test_uploaded_document_visual_guard_does_not_describe_frames_without_vision():
     from app.engine.multi_agent.direct_node_uploaded_context import (
         _build_uploaded_document_visual_guard_answer,

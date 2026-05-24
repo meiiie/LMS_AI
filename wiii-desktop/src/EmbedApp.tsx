@@ -17,7 +17,7 @@
  * 5. Render <ChatView /> directly (no shell)
  * 6. sendReadySignal() to parent
  */
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { ChatView } from "@/components/chat/ChatView";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { ToastContainer } from "@/components/common/Toast";
@@ -34,6 +34,11 @@ import { parseEmbedConfig, validateEmbedConfig, getAuthMode } from "@/lib/embed-
 import { sendReadySignal, sendError, setParentOrigin } from "@/lib/embed-bridge";
 import { buildAuthUserFromJwt, toCompatibilitySettingsRole } from "@/lib/auth-user";
 import type { EmbedConfig } from "@/lib/embed-auth";
+
+const PreviewPanel = lazy(async () => {
+  const mod = await import("@/components/layout/PreviewPanel");
+  return { default: mod.PreviewPanel };
+});
 
 export default function EmbedApp() {
   const [embedConfig, setEmbedConfig] = useState<EmbedConfig | null>(null);
@@ -312,6 +317,9 @@ export default function EmbedApp() {
     <ErrorBoundary>
       <div className="h-screen w-full overflow-hidden">
         <ChatView />
+        <Suspense fallback={null}>
+          <PreviewPanel />
+        </Suspense>
       </div>
       <ToastContainer />
     </ErrorBoundary>
