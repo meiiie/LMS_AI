@@ -35,6 +35,9 @@ from app.engine.multi_agent.visual_intent_support import (
     metadata_value_impl,
     normalize_impl,
 )
+from app.engine.tools.code_studio_app_intent_contract import (
+    infer_code_studio_app_category as infer_code_studio_app_category_contract,
+)
 VisualMode = Literal["text", "mermaid", "template", "inline_html", "app"]
 PresentationIntent = Literal["text", "article_figure", "chart_runtime", "code_studio_app", "artifact"]
 StudioLane = Literal["app", "artifact", "widget"]
@@ -125,24 +128,13 @@ def _infer_followup_simulation_type(normalized: str) -> str | None:
     )
 
 def _infer_code_studio_app_category(normalized: str, *, visual_type: str | None = None) -> str:
-    if visual_type == "simulation" or _contains_any(
-        normalized,
-        _SIMULATION_APP_CUES + _SIMULATION_PATCH_CUES + _SCENE_SIMULATION_CUES,
-    ):
-        return "simulation"
-    if visual_type == "quiz" or _contains_any(normalized, _QUIZ_WIDGET_CUES):
-        return "quiz"
-    if visual_type == "interactive_table" or _contains_any(normalized, _INTERACTIVE_TABLE_CUES):
-        return "interactive_table"
-    if _contains_any(normalized, _SEARCH_WIDGET_CUES):
-        return "search_widget"
-    if _contains_any(normalized, _CODE_WIDGET_CUES):
-        return "code_widget"
-    if _contains_any(normalized, _DASHBOARD_APP_CUES):
-        return "dashboard"
-    if _contains_any(normalized, _MINI_TOOL_CUES):
-        return "mini_tool"
-    return "mini_tool"
+    return infer_code_studio_app_category_contract(
+        presentation_intent="code_studio_app",
+        studio_lane="app",
+        requested_visual_type=visual_type or "",
+        user_query=normalized,
+        planning_profile="simulation_canvas" if visual_type == "simulation" else "",
+    )
 
 def detect_visual_patch_request(query: str) -> bool:
     """Return True when the query looks like a follow-up edit to an existing visual."""

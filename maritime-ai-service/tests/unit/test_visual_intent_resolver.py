@@ -6,6 +6,7 @@ from app.engine.multi_agent.visual_intent_resolver import (
     preferred_visual_tool_name,
     resolve_visual_intent,
 )
+from app.engine.tools.code_studio_app_intent_contract import infer_code_studio_app_category
 
 
 def test_resolves_comparison_visual():
@@ -255,6 +256,32 @@ def test_search_widget_request_routes_to_typed_app_category():
     assert decision.visual_type == "react_app"
     assert decision.app_category == "search_widget"
     assert decision.preferred_tool == "tool_create_visual_code"
+
+
+def test_code_studio_app_categories_match_typed_contract():
+    cases = (
+        ("Hay mo phong vat ly con lac co the keo tha", "simulation"),
+        ("Tao cho minh quizz gom 30 cau hoi ve tieng Trung de luyen tap", "quiz"),
+        ("Tao dashboard app HTML cho chien dich nay", "dashboard"),
+        ("Tao interactive table co filter va sort cho danh sach hoc vien", "interactive_table"),
+        ("Tao search widget tim kiem tai lieu trong chat", "search_widget"),
+        ("Tao code widget HTML co editor va preview trong chat", "code_widget"),
+        ("Tao mini tool tinh toan do lech hang hai", "mini_tool"),
+    )
+
+    for prompt, expected_category in cases:
+        decision = resolve_visual_intent(prompt)
+        contract_category = infer_code_studio_app_category(
+            presentation_intent=decision.presentation_intent,
+            studio_lane=decision.studio_lane or "",
+            requested_visual_type=decision.visual_type or "",
+            user_query=prompt,
+            planning_profile=decision.planning_profile,
+        )
+
+        assert decision.presentation_intent == "code_studio_app"
+        assert decision.app_category == expected_category
+        assert contract_category == expected_category
 
 
 def test_ignores_false_positive_visual_terms():
