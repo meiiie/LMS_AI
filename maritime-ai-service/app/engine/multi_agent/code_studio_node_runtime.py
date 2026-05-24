@@ -7,6 +7,11 @@ from app.engine.multi_agent.code_studio_provider_execution import (
     CodeStudioProviderExecutionRequest,
     execute_code_studio_provider_execution,
 )
+from app.engine.multi_agent.code_studio_node_preflight import (
+    CodeStudioNodePreflightDependencies,
+    CodeStudioNodePreflightRequest,
+    execute_code_studio_node_preflight,
+)
 from app.engine.multi_agent.code_studio_scaffold_fallback_policy import (
     resolve_code_studio_scaffold_fallback,
 )
@@ -72,48 +77,36 @@ async def code_studio_node_impl(
     tracer = get_or_create_tracer(state)
     tracer.start_step(step_names.DIRECT_RESPONSE, "Che tac dau ra ky thuat")
 
-    domain_config = state.get("domain_config", {})
-    domain_name_vi = domain_config.get("name_vi", "")
-    if not domain_name_vi:
-        domain_id = state.get("domain_id", settings_obj.default_domain)
-        domain_name_vi = {
-            "maritime": "Hang hai",
-            "traffic_law": "Luat Giao thong",
-        }.get(domain_id, domain_id)
-
     try:
         _ctx = state.get("context", {})
         explicit_provider = get_effective_provider(state)
-        response = ""
+        preflight = await execute_code_studio_node_preflight(
+            request=CodeStudioNodePreflightRequest(
+                query=query,
+                state=state,
+                default_domain=settings_obj.default_domain,
+                push_event=_push_event,
+                tracer=tracer,
+            ),
+            dependencies=CodeStudioNodePreflightDependencies(
+                looks_like_ambiguous_simulation_request=(
+                    looks_like_ambiguous_simulation_request
+                ),
+                ground_simulation_query_from_visual_context=(
+                    ground_simulation_query_from_visual_context
+                ),
+                last_inline_visual_title=last_inline_visual_title,
+                build_ambiguous_simulation_clarifier=(
+                    build_ambiguous_simulation_clarifier
+                ),
+            ),
+        )
+        effective_query = preflight.effective_query
+        response = preflight.response
+        domain_name_vi = preflight.domain_name_vi
         tools: list = []
         force_tools = False
         runtime_context_base = None
-        if looks_like_ambiguous_simulation_request(query, state):
-            grounded_query = ground_simulation_query_from_visual_context(query, state)
-            if grounded_query:
-                effective_query = grounded_query
-                state["thinking_content"] = (
-                    "Mình đang bám theo visual hiện tại để tiếp tục mô phỏng, "
-                    "vì turn này tuy ngắn nhưng đã có đủ ngữ cảnh để không cần hỏi lại."
-                )
-                await _push_event({
-                    "type": "status",
-                    "content": f"Mình đang nối mô phỏng vào chủ đề hiện tại: `{last_inline_visual_title(state)}`...",
-                    "step": "code_generation",
-                    "node": "code_studio_agent",
-                    "details": {"visibility": "status_only"},
-                })
-            else:
-                response = build_ambiguous_simulation_clarifier(state)
-                state["thinking_content"] = (
-                    "Mình cần chốt rõ chủ đề mô phỏng trước khi mở canvas, "
-                    "để khỏi dựng sai hiện tượng hoặc tạo một app lệch mục tiêu."
-                )
-                tracer.end_step(
-                    result="Code studio clarification before build",
-                    confidence=0.9,
-                    details={"response_type": "clarify", "reason": "ambiguous_simulation_request"},
-                )
         if not response:
             tool_setup = prepare_code_studio_tool_setup(
                 effective_query=effective_query,
