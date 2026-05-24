@@ -1083,6 +1083,16 @@ html.dark .shiki span {
   background: color-mix(in srgb, var(--surface-secondary) 50%, var(--surface));
 }
 
+.code-studio-panel__preview {
+  height: 100%;
+  min-height: 0;
+}
+
+.code-studio-panel__preview [data-inline-visual-sizing="viewport"] {
+  height: 100%;
+  min-height: 0;
+}
+
 /* Blinking cursor during streaming */
 .code-studio-cursor {
   display: inline-block;
