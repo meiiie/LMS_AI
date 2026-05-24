@@ -257,6 +257,9 @@ def tool_create_visual_code_impl(
         requested_visual_type=runtime_metadata_text("visual_requested_type", "concept"),
         quality_profile=runtime_quality_profile(),
         code_studio_version=runtime_code_studio_version(),
+        app_category=runtime_metadata_text("app_category", ""),
+        user_query=runtime_metadata_text("visual_user_query", ""),
+        planning_profile=runtime_metadata_text("planning_profile", ""),
     )
     if runtime_contract.is_blocked_for_code_studio:
         return (

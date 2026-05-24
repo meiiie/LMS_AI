@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.visual_intent_resolver import resolve_visual_intent
+from app.engine.tools.code_studio_app_intent_contract import (
+    resolve_code_studio_app_intent_contract,
+)
 
 
 def _build_direct_tools_context(
@@ -282,10 +285,20 @@ def _build_code_studio_tools_context(
         )
         if llm_code_gen:
             if visual_decision.presentation_intent in {"code_studio_app", "artifact"}:
+                app_contract = resolve_code_studio_app_intent_contract(
+                    presentation_intent=visual_decision.presentation_intent,
+                    studio_lane=visual_decision.studio_lane or "",
+                    artifact_kind=visual_decision.artifact_kind or "",
+                    requested_visual_type=visual_decision.visual_type or "",
+                    app_category=getattr(visual_decision, "app_category", ""),
+                    user_query=query,
+                    planning_profile=visual_decision.planning_profile,
+                )
                 tool_hints.append(
                     "- tool_create_visual_code: TOOL CHINH CHO QUERY NAY. "
                     "Dung no de tao app/widget/artifact code-centric voi host-owned shell, body logic ro rang, va patch cung session."
                 )
+                tool_hints.extend(app_contract.prompt_lines())
                 tool_hints.append(
                     "- DESIGN: App/widget can su dung shell cua host, controls gon, va feedback bridge ro rang. "
                     "Khong tao dashboard/card loe loet neu bai toan la app inline trong chat."

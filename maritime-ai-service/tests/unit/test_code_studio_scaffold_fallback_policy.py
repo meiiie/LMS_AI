@@ -15,6 +15,7 @@ def _visual_decision(**overrides):
         "studio_lane": "app",
         "artifact_kind": "html_app",
         "visual_type": "simulation",
+        "app_category": "simulation",
         "quality_profile": "premium",
     }
     data.update(overrides)
@@ -33,6 +34,8 @@ def test_suppresses_generic_simulation_scaffold_fallback() -> None:
     assert decision.policy_reason == "app_requires_tool_generated_preview"
     assert decision.response_type == "code_studio_scaffold_suppressed"
     assert "template chung chung" in decision.response
+    assert decision.app_category == "simulation"
+    assert decision.metric_labels()["app_category"] == "simulation"
     assert decision.metric_labels()["reason"] == "llm_prose_no_tool_call"
 
 

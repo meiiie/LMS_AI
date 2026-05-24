@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 
-def build_artifact_decision_impl(*, decision_cls, reason: str = "artifact-request"):
+def build_artifact_decision_impl(
+    *,
+    decision_cls,
+    reason: str = "artifact-request",
+    artifact_kind: str = "html_app",
+    app_category: str = "artifact",
+):
     return decision_cls(
         mode="app",
         force_tool=True,
@@ -12,7 +18,7 @@ def build_artifact_decision_impl(*, decision_cls, reason: str = "artifact-reques
         preferred_tool="tool_create_visual_code",
         figure_budget=1,
         studio_lane="artifact",
-        artifact_kind="html_app",
+        artifact_kind=artifact_kind,
         quality_profile="premium",
         renderer_contract="host_shell",
         preferred_render_surface="html",
@@ -20,10 +26,17 @@ def build_artifact_decision_impl(*, decision_cls, reason: str = "artifact-reques
         thinking_floor="high",
         critic_policy="standard",
         living_expression_mode="subtle",
+        app_category=app_category,
     )
 
 
-def build_app_decision_impl(*, decision_cls, visual_type: str | None, reason: str):
+def build_app_decision_impl(
+    *,
+    decision_cls,
+    visual_type: str | None,
+    reason: str,
+    app_category: str = "",
+):
     is_simulation = visual_type == "simulation"
     return decision_cls(
         mode="app",
@@ -42,6 +55,7 @@ def build_app_decision_impl(*, decision_cls, visual_type: str | None, reason: st
         thinking_floor="max" if is_simulation else "high",
         critic_policy="premium" if is_simulation else "standard",
         living_expression_mode="expressive" if is_simulation else "subtle",
+        app_category=app_category or ("simulation" if is_simulation else "mini_tool"),
     )
 
 

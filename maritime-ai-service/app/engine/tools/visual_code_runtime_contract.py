@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from app.engine.tools.code_studio_app_intent_contract import (
+    CodeStudioAppIntentContract,
+    resolve_code_studio_app_intent_contract,
+)
+
 
 BLOCKED_CODE_STUDIO_PRESENTATION_INTENTS = frozenset({"article_figure", "chart_runtime"})
 CODE_STUDIO_PRESENTATION_INTENTS = frozenset({"code_studio_app", "artifact"})
@@ -64,6 +69,7 @@ class VisualCodeRuntimeContract:
     quality_profile: str
     code_studio_version: int = 0
     renderer_contract: str = "host_shell"
+    app_intent_contract: CodeStudioAppIntentContract | None = None
 
     @property
     def is_blocked_for_code_studio(self) -> bool:
@@ -73,13 +79,16 @@ class VisualCodeRuntimeContract:
     def runtime_manifest(self) -> dict[str, Any] | None:
         if self.renderer_kind != "app":
             return None
-        return {
+        manifest = {
             "ui_runtime": "html",
             "storage": False,
             "mcp_access": False,
             "file_export": self.studio_lane == "artifact",
             "shareability": "session" if self.studio_lane == "app" else "artifact",
         }
+        if self.app_intent_contract is not None:
+            manifest.update(self.app_intent_contract.metadata())
+        return manifest
 
     def payload_metadata(self) -> dict[str, Any]:
         metadata: dict[str, Any] = {
@@ -94,6 +103,8 @@ class VisualCodeRuntimeContract:
             "quality_profile": self.quality_profile,
             "renderer_contract": self.renderer_contract,
         }
+        if self.app_intent_contract is not None:
+            metadata.update(self.app_intent_contract.metadata())
         if self.code_studio_version > 0:
             metadata["code_studio_version"] = self.code_studio_version
         return metadata
@@ -107,6 +118,9 @@ def resolve_visual_code_runtime_contract(
     requested_visual_type: str = "",
     quality_profile: str = "",
     code_studio_version: Any = 0,
+    app_category: str = "",
+    user_query: str = "",
+    planning_profile: str = "",
 ) -> VisualCodeRuntimeContract:
     """Resolve Code Studio lane metadata once, before validation and payload build."""
 
@@ -121,6 +135,17 @@ def resolve_visual_code_runtime_contract(
     requested_type = _text(requested_visual_type, "concept")
     resolved_visual_type = requested_type if requested_type in CODE_STUDIO_VISUAL_TYPES else "concept"
     renderer_kind = "app" if resolved_lane in {"app", "widget"} else "inline_html"
+    app_contract = None
+    if resolved_intent in CODE_STUDIO_PRESENTATION_INTENTS:
+        app_contract = resolve_code_studio_app_intent_contract(
+            presentation_intent=resolved_intent,
+            studio_lane=resolved_lane,
+            artifact_kind=resolved_artifact_kind,
+            requested_visual_type=resolved_visual_type,
+            app_category=app_category,
+            user_query=user_query,
+            planning_profile=planning_profile,
+        )
 
     return VisualCodeRuntimeContract(
         presentation_intent=resolved_intent,
@@ -133,4 +158,5 @@ def resolve_visual_code_runtime_contract(
         patch_strategy="app_state" if renderer_kind == "app" else "replace_html",
         quality_profile=_choice(quality_profile, CODE_STUDIO_QUALITY_PROFILES, "standard"),
         code_studio_version=_code_studio_version(code_studio_version),
+        app_intent_contract=app_contract,
     )

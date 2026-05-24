@@ -95,6 +95,22 @@ def _build_code_studio_progress_messages(
             "Mình vẫn đang làm việc và sẽ báo ngay khi preview thật sự sẵn sàng...",
         ]
 
+    if getattr(visual_decision, "app_category", "") == "quiz":
+        return [
+            "Mình đang dựng luồng câu hỏi, lựa chọn trả lời, và trạng thái điểm...",
+            "Mình đang nối submit/reset cùng phản hồi đúng sai...",
+            "Mình đang rà lại để quiz có thể tương tác thật trong Code Studio...",
+            "Mình vẫn đang hoàn thiện preview quiz...",
+        ]
+
+    if getattr(visual_decision, "app_category", "") == "dashboard":
+        return [
+            "Mình đang dựng data model, metric cards, và bộ lọc chính...",
+            "Mình đang nối trạng thái filter/view toggle với phần hiển thị...",
+            "Mình đang rà lại để dashboard không thành biểu đồ giả hoặc card rỗng...",
+            "Mình vẫn đang hoàn thiện preview dashboard...",
+        ]
+
     if visual_decision.presentation_intent == "artifact":
         return [
             "Mình đang lên bộ khung artifact và quy ước nhúng...",

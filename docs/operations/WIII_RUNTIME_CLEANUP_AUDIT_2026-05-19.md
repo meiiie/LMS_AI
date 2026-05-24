@@ -254,6 +254,13 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   Generic app/simulation failures are suppressed with an auditable safe-stop
   response; artifact fallback remains allowed when the contract says it is the
   right lane.
+- Follow-up #567 added a typed Code Studio app-intent contract for simulations,
+  quizzes, dashboards, mini tools, interactive tables, search/code widgets, and
+  artifacts. Visual intent metadata, Code Studio payload metadata, runtime
+  manifests, prompt guidance, and fallback metrics now carry app category,
+  required surface, controls, state/readout expectations, feedback hooks, and
+  reject-if-missing criteria instead of relying on generic `simulation` or
+  `react_app` labels alone.
 
 ## Preserved Intentionally
 
@@ -326,8 +333,9 @@ backups, data PDFs, or local skill folders.
   primary visual tool path is healthy. Follow-up #561 introduced typed runtime
   contracts for visual intent metadata and Code Studio visual-code lanes, and
   follow-up #565 now uses those contracts to suppress broad app/simulation
-  scaffold fallback in product flows. The next quality frontier is deeper typed
-  visual intents for app categories, not adding more ad-hoc templates.
+  scaffold fallback in product flows. Follow-up #567 introduced typed app
+  category contracts so the next quality frontier is local/product E2E evidence
+  and stricter generated-code critique, not adding more ad-hoc templates.
 - Some tests still import compatibility `graph.py` modules. Move tests toward
   `runtime.py` imports when the external import window can close.
 

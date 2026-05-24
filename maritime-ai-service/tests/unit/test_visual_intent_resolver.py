@@ -122,6 +122,8 @@ def test_resolves_app_request():
     assert decision.presentation_intent == "code_studio_app"
     assert decision.preferred_tool == "tool_create_visual_code"
     assert decision.studio_lane == "app"
+    assert decision.visual_type == "react_app"
+    assert decision.app_category == "dashboard"
 
 
 def test_resolves_vietnamese_simulation_request_as_app():
@@ -136,6 +138,7 @@ def test_resolves_vietnamese_simulation_request_as_app():
     assert decision.planning_profile == "simulation_canvas"
     assert decision.thinking_floor == "max"
     assert decision.critic_policy == "premium"
+    assert decision.app_category == "simulation"
 
 
 def test_resolves_accented_vietnamese_simulation_request_as_app():
@@ -156,6 +159,7 @@ def test_resolves_english_pendulum_simulation_request_as_app():
     assert decision.presentation_intent == "code_studio_app"
     assert decision.preferred_tool == "tool_create_visual_code"
     assert decision.quality_profile == "premium"
+    assert decision.app_category == "simulation"
 
 
 def test_resolves_literary_scene_simulation_request_as_code_studio_app():
@@ -205,6 +209,7 @@ def test_resolves_embeddable_html_app_as_artifact():
     assert decision.preferred_render_surface == "html"
     assert decision.planning_profile == "artifact_html"
     assert decision.thinking_floor == "high"
+    assert decision.app_category == "artifact"
 
 
 def test_quiz_creation_request_routes_to_code_studio():
@@ -214,6 +219,8 @@ def test_quiz_creation_request_routes_to_code_studio():
     assert decision.presentation_intent == "code_studio_app"
     assert decision.preferred_tool == "tool_create_visual_code"
     assert decision.studio_lane == "app"
+    assert decision.visual_type == "quiz"
+    assert decision.app_category == "quiz"
 
 
 def test_plain_quiz_request_without_creation_verbs_stays_text():
@@ -230,6 +237,24 @@ def test_interactive_quiz_widget_request_routes_to_code_studio():
     assert decision.presentation_intent == "code_studio_app"
     assert decision.preferred_tool == "tool_create_visual_code"
     assert decision.studio_lane == "app"
+    assert decision.visual_type == "quiz"
+    assert decision.app_category == "quiz"
+
+
+def test_interactive_table_request_routes_to_typed_app_category():
+    decision = resolve_visual_intent("Tao interactive table co filter va sort cho danh sach hoc vien")
+    assert decision.mode == "app"
+    assert decision.visual_type == "interactive_table"
+    assert decision.app_category == "interactive_table"
+    assert decision.preferred_tool == "tool_create_visual_code"
+
+
+def test_search_widget_request_routes_to_typed_app_category():
+    decision = resolve_visual_intent("Tao search widget tim kiem tai lieu trong chat")
+    assert decision.mode == "app"
+    assert decision.visual_type == "react_app"
+    assert decision.app_category == "search_widget"
+    assert decision.preferred_tool == "tool_create_visual_code"
 
 
 def test_ignores_false_positive_visual_terms():

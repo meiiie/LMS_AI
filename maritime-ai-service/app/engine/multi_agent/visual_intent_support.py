@@ -150,6 +150,43 @@ QUIZ_WIDGET_CUES = (
     "mini quiz app",
 )
 
+DASHBOARD_APP_CUES = (
+    "dashboard",
+    "dashboard app",
+    "analytics",
+    "bang dieu khien",
+)
+
+MINI_TOOL_CUES = (
+    "mini tool",
+    "interactive tool",
+    "calculator",
+    "tinh toan",
+    "tool nho",
+)
+
+INTERACTIVE_TABLE_CUES = (
+    "interactive table",
+    "bang tuong tac",
+    "filter table",
+    "sortable table",
+)
+
+SEARCH_WIDGET_CUES = (
+    "search widget",
+    "search tool",
+    "widget tim kiem",
+    "cong cu tim kiem",
+)
+
+CODE_WIDGET_CUES = (
+    "code widget",
+    "code editor",
+    "snippet",
+    "playground",
+    "code playground",
+)
+
 QUIZ_CREATION_CUES = (
     "tao",
     "lam",
