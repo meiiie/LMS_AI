@@ -4,22 +4,65 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import dataclass
+from enum import StrEnum
 import logging
 import time
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
 from app.engine.multi_agent.code_studio_scaffold_fallback_policy import (
     CodeStudioScaffoldFallbackDecision,
     resolve_code_studio_scaffold_fallback,
 )
-from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.code_studio_template_scaffold import (
     build_code_studio_scaffold,
 )
+from app.engine.multi_agent.state import AgentState
 from app.engine.runtime.runtime_metrics import inc_counter
 
 logger = logging.getLogger(__name__)
+
+
+class CodeStudioToolRoundTrigger(StrEnum):
+    """Auditable reasons that force Code Studio out of normal provider output."""
+
+    STREAM_OVERALL_TIMEOUT = "stream_overall_timeout"
+    STREAM_EMPTY = "stream_empty"
+    STREAMED_CODE_HTML = "streamed_code_html"
+    AINVOKE_FALLBACK_FAIL = "ainvoke_fallback_fail"
+    AINVOKE_CANCELLED = "ainvoke_cancelled"
+    AINVOKE_EXCEPTION = "ainvoke_exception"
+    LLM_PROSE_NO_TOOL_CALL = "llm_prose_no_tool_call"
+
+
+class CodeStudioToolRoundOutcomeKind(StrEnum):
+    """Typed outcomes before the loop converts them into chat messages."""
+
+    SCAFFOLD_TOOL_CALL = "scaffold_tool_call"
+    SAFE_STOP_RESPONSE = "safe_stop_response"
+    STREAMED_CODE_HTML_TOOL_CALL = "streamed_code_html_tool_call"
+
+
+@dataclass(frozen=True, slots=True)
+class CodeStudioToolRoundOutcome:
+    """Result of resolving a Code Studio provider/tool-round boundary."""
+
+    kind: CodeStudioToolRoundOutcomeKind
+    content: str
+    tool_calls: tuple[dict[str, Any], ...] = ()
+    trigger: str = ""
+    scaffold_decision: CodeStudioScaffoldFallbackDecision | None = None
+
+    @property
+    def first_tool_call(self) -> dict[str, Any] | None:
+        return self.tool_calls[0] if self.tool_calls else None
+
+
+def _trigger_reason(trigger: CodeStudioToolRoundTrigger | str) -> str:
+    if isinstance(trigger, CodeStudioToolRoundTrigger):
+        return trigger.value
+    return str(trigger or "unknown").strip() or "unknown"
 
 
 def _normalize_tc(tc: object) -> dict:
@@ -41,27 +84,50 @@ def _normalize_tc(tc: object) -> dict:
     }
 
 
-def _build_scaffold_manual_tool_call(
+def _build_streamed_code_html_tool_round_outcome(
+    query: str,
+    code_html: str,
+    *,
+    content: str = "",
+) -> CodeStudioToolRoundOutcome:
+    """Return the typed outcome for a stream that yielded HTML but no tool call."""
+
+    manual_tc = {
+        "name": "tool_create_visual_code",
+        "args": {
+            "code_html": code_html,
+            "title": query[:60] if query else "Visual",
+        },
+        "id": f"manual_tc_{uuid.uuid4().hex[:8]}",
+    }
+    return CodeStudioToolRoundOutcome(
+        kind=CodeStudioToolRoundOutcomeKind.STREAMED_CODE_HTML_TOOL_CALL,
+        content=content,
+        tool_calls=(manual_tc,),
+        trigger=CodeStudioToolRoundTrigger.STREAMED_CODE_HTML.value,
+    )
+
+
+def resolve_code_studio_scaffold_tool_round_outcome(
     query: str,
     *,
-    reason: str = "unknown",
+    trigger: CodeStudioToolRoundTrigger | str = "unknown",
     state: Optional[AgentState] = None,
-) -> tuple[dict | None, str, CodeStudioScaffoldFallbackDecision]:
-    """Build a synthetic scaffold tool call only when the contract allows it.
+) -> CodeStudioToolRoundOutcome:
+    """Resolve scaffold-or-safe-stop as a typed tool-round outcome.
 
-    Returned ``manual_tc`` is ``None`` when the policy suppresses broad
-    template rescue. Otherwise it matches the shape expected by the rest of the
-    Code Studio loop (``name``/``args``/``id``). ``visible_caption`` is either
-    the scaffold caption or a short safe-stop response.
+    ``SCAFFOLD_TOOL_CALL`` is returned only when the fallback policy says the
+    visual/runtime contract allows deterministic scaffold delivery. Otherwise
+    the outcome is ``SAFE_STOP_RESPONSE`` and carries the policy response.
 
-    The ``reason`` label is forwarded to the
-    scaffold metrics so operators can see whether stream timeouts, ainvoke
-    timeouts, or LLM-prose-only rounds are driving engaged or suppressed
-    fallback rate.
+    The trigger label is forwarded to scaffold metrics so operators can see
+    whether stream timeouts, ainvoke timeouts, or LLM-prose-only rounds are
+    driving engaged or suppressed fallback rate.
 
     Pattern reference: Anthropic Computer Use 2026 evidence-pool retention
     + Wiii VISUAL_CODE_GEN.md "host-governed runtime" lane.
     """
+    reason = _trigger_reason(trigger)
     fallback_decision = resolve_code_studio_scaffold_fallback(
         query=query,
         state=state,
@@ -75,7 +141,12 @@ def _build_scaffold_manual_tool_call(
             )
         except Exception:  # noqa: BLE001 — never let metrics break a request
             pass
-        return None, fallback_decision.response, fallback_decision
+        return CodeStudioToolRoundOutcome(
+            kind=CodeStudioToolRoundOutcomeKind.SAFE_STOP_RESPONSE,
+            content=fallback_decision.response,
+            trigger=reason,
+            scaffold_decision=fallback_decision,
+        )
 
     scaffold_html = build_code_studio_scaffold(query)
     visible_caption = fallback_decision.response
@@ -96,7 +167,31 @@ def _build_scaffold_manual_tool_call(
         )
     except Exception:  # noqa: BLE001 — never let metrics break a request
         pass
-    return manual_tc, visible_caption, fallback_decision
+    return CodeStudioToolRoundOutcome(
+        kind=CodeStudioToolRoundOutcomeKind.SCAFFOLD_TOOL_CALL,
+        content=visible_caption,
+        tool_calls=(manual_tc,),
+        trigger=reason,
+        scaffold_decision=fallback_decision,
+    )
+
+
+def _build_scaffold_manual_tool_call(
+    query: str,
+    *,
+    reason: str = "unknown",
+    state: Optional[AgentState] = None,
+) -> tuple[dict | None, str, CodeStudioScaffoldFallbackDecision]:
+    """Build a synthetic scaffold tool call only when the contract allows it."""
+
+    outcome = resolve_code_studio_scaffold_tool_round_outcome(
+        query,
+        trigger=reason,
+        state=state,
+    )
+    if outcome.scaffold_decision is None:
+        raise RuntimeError("Code Studio scaffold outcome missing policy decision")
+    return outcome.first_tool_call, outcome.content, outcome.scaffold_decision
 
 
 async def execute_code_studio_tool_rounds_impl(
@@ -158,15 +253,19 @@ async def execute_code_studio_tool_rounds_impl(
             return Message(role="assistant", content=content, tool_calls=native_tcs)
         return Message(role="assistant", content=content)
 
-    def _scaffold_or_safe_response(reason: str) -> Message:
-        manual_tc, visible_caption, _decision = _build_scaffold_manual_tool_call(
+    def _assistant_message_from_outcome(outcome: CodeStudioToolRoundOutcome) -> Message:
+        return _AM(
+            content=outcome.content,
+            tool_calls=list(outcome.tool_calls) if outcome.tool_calls else None,
+        )
+
+    def _scaffold_or_safe_response(trigger: CodeStudioToolRoundTrigger | str) -> Message:
+        outcome = resolve_code_studio_scaffold_tool_round_outcome(
             query,
-            reason=reason,
+            trigger=trigger,
             state=state,
         )
-        if manual_tc:
-            return _AM(content=visible_caption, tool_calls=[manual_tc])
-        return _AM(content=visible_caption)
+        return _assistant_message_from_outcome(outcome)
 
     def _TM(content: str = "", *, tool_call_id: str = "") -> Message:
         """Native tool-result message."""
@@ -325,7 +424,9 @@ async def execute_code_studio_tool_rounds_impl(
             # (provider-level hang or connection reset that the per-chunk
             # timeout could not interrupt).
             try:
-                llm_response = _scaffold_or_safe_response("stream_overall_timeout")
+                llm_response = _scaffold_or_safe_response(
+                    CodeStudioToolRoundTrigger.STREAM_OVERALL_TIMEOUT
+                )
             except Exception as scaffold_err:
                 logger.warning(
                     "[CODE_STUDIO] Scaffold construction after stream timeout failed: %s",
@@ -341,18 +442,12 @@ async def execute_code_studio_tool_rounds_impl(
                 "[CODE_STUDIO] No tool_calls in astream response, constructing from streamed code_html (%d chars)",
                 len(code_streamer.full_code_html),
             )
-            manual_tc = {
-                "name": "tool_create_visual_code",
-                "args": {
-                    "code_html": code_streamer.full_code_html,
-                    "title": query[:60] if query else "Visual",
-                },
-                "id": f"manual_tc_{uuid.uuid4().hex[:8]}",
-            }
-            llm_response = _AM(
+            outcome = _build_streamed_code_html_tool_round_outcome(
+                query,
+                code_streamer.full_code_html,
                 content=getattr(llm_response, "content", "") if llm_response else "",
-                tool_calls=[manual_tc],
             )
+            llm_response = _assistant_message_from_outcome(outcome)
         elif not has_tool_calls and not code_streamer.full_code_html:
             # Stream finished/timed-out without producing either a tool call
             # or any usable code_html. Fall through to the contract-gated
@@ -361,7 +456,9 @@ async def execute_code_studio_tool_rounds_impl(
                 "[CODE_STUDIO] Stream produced no tool_calls and no code_html — "
                 "resolving contract-gated fallback"
             )
-            llm_response = _scaffold_or_safe_response("stream_empty")
+            llm_response = _scaffold_or_safe_response(
+                CodeStudioToolRoundTrigger.STREAM_EMPTY
+            )
     else:
         progress_messages = build_code_studio_progress_messages(query, state)
         # Non-streaming planning call — operator-tunable so the graceful
@@ -468,7 +565,9 @@ async def execute_code_studio_tool_rounds_impl(
                         "contract-gated fallback",
                         fb_err,
                     )
-                    llm_response = _scaffold_or_safe_response("ainvoke_fallback_fail")
+                    llm_response = _scaffold_or_safe_response(
+                        CodeStudioToolRoundTrigger.AINVOKE_FALLBACK_FAIL
+                    )
                 break
             try:
                 await asyncio.wait_for(asyncio.shield(llm_task), timeout=poll_interval)
@@ -493,7 +592,9 @@ async def execute_code_studio_tool_rounds_impl(
                 logger.warning(
                     "[CODE_STUDIO] LLM call cancelled — resolving contract-gated fallback"
                 )
-                llm_response = _scaffold_or_safe_response("ainvoke_cancelled")
+                llm_response = _scaffold_or_safe_response(
+                    CodeStudioToolRoundTrigger.AINVOKE_CANCELLED
+                )
             else:
                 llm_exc = llm_task.exception()
                 if llm_exc is not None:
@@ -502,7 +603,9 @@ async def execute_code_studio_tool_rounds_impl(
                         "— resolving contract-gated fallback",
                         llm_exc,
                     )
-                    llm_response = _scaffold_or_safe_response("ainvoke_exception")
+                    llm_response = _scaffold_or_safe_response(
+                        CodeStudioToolRoundTrigger.AINVOKE_EXCEPTION
+                    )
                 else:
                     llm_response = llm_task.result()
 
@@ -512,7 +615,9 @@ async def execute_code_studio_tool_rounds_impl(
             "[CODE_STUDIO] LLM returned prose without tool call but visual "
             "delivery is required — resolving contract-gated fallback"
         )
-        llm_response = _scaffold_or_safe_response("llm_prose_no_tool_call")
+        llm_response = _scaffold_or_safe_response(
+            CodeStudioToolRoundTrigger.LLM_PROSE_NO_TOOL_CALL
+        )
 
     total_tool_calls = 0
     max_total_tool_calls = 6

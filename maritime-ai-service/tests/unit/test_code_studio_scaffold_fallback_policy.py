@@ -158,6 +158,27 @@ def test_manual_scaffold_helper_does_not_inject_tool_call_for_simulation() -> No
     assert "template chung chung" in visible_caption
 
 
+def test_tool_round_outcome_safe_stops_simulation_scaffold() -> None:
+    outcome = code_studio_tool_rounds.resolve_code_studio_scaffold_tool_round_outcome(
+        "Hay mo phong vat ly con lac co the keo tha",
+        trigger=code_studio_tool_rounds.CodeStudioToolRoundTrigger.STREAM_EMPTY,
+        state={},
+    )
+
+    assert (
+        outcome.kind
+        == code_studio_tool_rounds.CodeStudioToolRoundOutcomeKind.SAFE_STOP_RESPONSE
+    )
+    assert outcome.first_tool_call is None
+    assert outcome.trigger == "stream_empty"
+    assert outcome.scaffold_decision is not None
+    assert (
+        outcome.scaffold_decision.policy_reason
+        == "app_requires_tool_generated_preview"
+    )
+    assert outcome.scaffold_decision.metric_labels()["reason"] == "stream_empty"
+
+
 def test_manual_scaffold_helper_keeps_artifact_fallback(monkeypatch) -> None:
     monkeypatch.setattr(
         code_studio_tool_rounds,
@@ -176,3 +197,56 @@ def test_manual_scaffold_helper_keeps_artifact_fallback(monkeypatch) -> None:
     assert manual_tc["name"] == "tool_create_visual_code"
     assert manual_tc["args"]["code_html"] == "<html><body>artifact scaffold</body></html>"
     assert visible_caption
+
+
+def test_tool_round_outcome_keeps_artifact_scaffold_contract(monkeypatch) -> None:
+    monkeypatch.setattr(
+        code_studio_tool_rounds,
+        "build_code_studio_scaffold",
+        lambda _query: "<html><body>artifact scaffold</body></html>",
+    )
+
+    outcome = code_studio_tool_rounds.resolve_code_studio_scaffold_tool_round_outcome(
+        "Tao mot mini app HTML de nhung vao LMS",
+        trigger=code_studio_tool_rounds.CodeStudioToolRoundTrigger.AINVOKE_EXCEPTION,
+        state={},
+    )
+
+    assert (
+        outcome.kind
+        == code_studio_tool_rounds.CodeStudioToolRoundOutcomeKind.SCAFFOLD_TOOL_CALL
+    )
+    assert outcome.first_tool_call is not None
+    assert outcome.first_tool_call["name"] == "tool_create_visual_code"
+    assert (
+        outcome.first_tool_call["args"]["code_html"]
+        == "<html><body>artifact scaffold</body></html>"
+    )
+    assert outcome.trigger == "ainvoke_exception"
+    assert outcome.scaffold_decision is not None
+    assert (
+        outcome.scaffold_decision.policy_reason
+        == "artifact_contract_allows_scaffold"
+    )
+
+
+def test_streamed_code_html_outcome_is_not_scaffold_fallback() -> None:
+    outcome = code_studio_tool_rounds._build_streamed_code_html_tool_round_outcome(
+        "Build a tiny stopwatch app",
+        "<html><body>stopwatch</body></html>",
+        content="provider caption",
+    )
+
+    assert (
+        outcome.kind
+        == code_studio_tool_rounds.CodeStudioToolRoundOutcomeKind.STREAMED_CODE_HTML_TOOL_CALL
+    )
+    assert outcome.content == "provider caption"
+    assert outcome.scaffold_decision is None
+    assert outcome.trigger == "streamed_code_html"
+    assert outcome.first_tool_call is not None
+    assert outcome.first_tool_call["name"] == "tool_create_visual_code"
+    assert (
+        outcome.first_tool_call["args"]["code_html"]
+        == "<html><body>stopwatch</body></html>"
+    )
