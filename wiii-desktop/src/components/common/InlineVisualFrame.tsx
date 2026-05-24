@@ -63,6 +63,7 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
   );
   const [height, setHeight] = useState(heightProfile.initialHeight);
   const [error, setError] = useState<string | null>(null);
+  const [frameReady, setFrameReady] = useState(false);
   const [tweaksAvailable, setTweaksAvailable] = useState(false);
   const [tweaksActive, setTweaksActive] = useState(false);
 
@@ -78,6 +79,7 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
         sessionId,
         shellVariant,
         frameKind,
+        sizingMode,
         showFrameIntro,
         hostShellMode,
         hostThemeOverrides: readHostThemeOverrides(),
@@ -88,6 +90,7 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
       html,
       sessionId,
       shellVariant,
+      sizingMode,
       showFrameIntro,
       summary,
       title,
@@ -102,6 +105,7 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
       blobUrlRef.current = url;
       setBlobUrl(url);
       setError(null);
+      setFrameReady(false);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Không thể tạo visual frame",
@@ -127,11 +131,12 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
         sessionId,
         frameKind,
         shellVariant,
+        sizingMode,
         runtimeManifest: runtimeManifest || null,
       }),
       "*",
     );
-  }, [frameKind, runtimeManifest, sessionId, shellVariant]);
+  }, [frameKind, runtimeManifest, sessionId, shellVariant, sizingMode]);
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
@@ -169,6 +174,7 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
         return;
       }
       if (message.kind === "ready") {
+        setFrameReady(true);
         postHostSync();
         return;
       }
@@ -231,6 +237,8 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
       data-inline-visual-frame={frameKind}
       data-inline-visual-shell={shellVariant}
       data-inline-visual-sizing={sizingMode}
+      data-inline-visual-ready={frameReady ? "true" : "false"}
+      aria-busy={frameReady ? undefined : true}
       style={{
         position: "relative",
         ...(sizingMode === "viewport" ? { height: "100%", minHeight: "0px" } : {}),
@@ -243,7 +251,10 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
         sandbox="allow-scripts"
         // @ts-expect-error allowtransparency is a legacy but widely supported iframe attribute
         allowtransparency="true"
-        onLoad={postHostSync}
+        onLoad={() => {
+          setFrameReady(true);
+          postHostSync();
+        }}
         style={{
           width: "100%",
           height: iframeHeight,

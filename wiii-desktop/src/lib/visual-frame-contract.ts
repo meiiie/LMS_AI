@@ -5,6 +5,7 @@ export interface VisualFrameHostSyncPayload {
   sessionId: string;
   frameKind: VisualFrameKind;
   shellVariant: string;
+  sizingMode: VisualFrameSizingMode;
   runtimeManifest: unknown | null;
 }
 

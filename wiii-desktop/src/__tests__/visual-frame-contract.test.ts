@@ -65,6 +65,7 @@ describe("visual frame contract", () => {
       sessionId: "vs_1",
       frameKind: "app",
       shellVariant: "immersive",
+      sizingMode: "viewport",
       runtimeManifest: { storage: "ephemeral" },
     })).toEqual({
       type: "wiii-visual-sync",
@@ -72,6 +73,7 @@ describe("visual frame contract", () => {
         sessionId: "vs_1",
         frameKind: "app",
         shellVariant: "immersive",
+        sizingMode: "viewport",
         runtimeManifest: { storage: "ephemeral" },
       },
     });

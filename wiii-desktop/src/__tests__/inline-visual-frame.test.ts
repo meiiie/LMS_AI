@@ -54,12 +54,15 @@ describe("InlineVisualFrame host shell", () => {
       sessionId: "vs-tall",
       shellVariant: "immersive",
       frameKind: "app",
+      sizingMode: "viewport",
       showFrameIntro: false,
       hostShellMode: "force",
     });
 
     expect(wrapped).toContain("overflow: auto;");
     expect(wrapped).toContain("overscroll-behavior: contain;");
+    expect(wrapped).toContain('data-wiii-sizing-mode="viewport"');
+    expect(wrapped).toContain("state.parentState.sizingMode");
     expect(wrapped).toContain("function measureHeight()");
     expect(wrapped).toContain("resizeObserver.observe(document.documentElement)");
   });

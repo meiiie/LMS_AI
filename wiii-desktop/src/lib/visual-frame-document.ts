@@ -1,5 +1,8 @@
 import type { VisualShellVariant } from "@/api/types";
-import type { VisualFrameKind } from "@/lib/visual-frame-contract";
+import type {
+  VisualFrameKind,
+  VisualFrameSizingMode,
+} from "@/lib/visual-frame-contract";
 
 export type VisualFrameHostShellMode = "auto" | "force";
 
@@ -9,6 +12,7 @@ export interface VisualFrameDocumentOptions {
   sessionId?: string;
   shellVariant?: VisualShellVariant;
   frameKind?: VisualFrameKind;
+  sizingMode?: VisualFrameSizingMode;
   showFrameIntro?: boolean;
   hostShellMode?: VisualFrameHostShellMode;
   hostThemeOverrides?: Record<string, string>;
@@ -255,6 +259,7 @@ export function buildVisualFrameDocument(
     sessionId = "",
     shellVariant = "editorial",
     frameKind = "inline_html",
+    sizingMode = "content",
     showFrameIntro = false,
     hostShellMode = frameKind === "legacy" ? "auto" : "force",
     hostThemeOverrides = undefined,
@@ -272,8 +277,20 @@ export function buildVisualFrameDocument(
         summary: ${JSON.stringify(summary)},
         shellVariant: ${JSON.stringify(shellVariant)},
         frameKind: ${JSON.stringify(frameKind)},
+        sizingMode: ${JSON.stringify(sizingMode)},
         reducedMotion: reducedMotion
       };
+
+      function applyRuntimeDataset() {
+        document.documentElement.dataset.wiiiFrameKind = state.frameKind;
+        document.documentElement.dataset.wiiiShellVariant = state.shellVariant;
+        document.documentElement.dataset.wiiiSizingMode = state.sizingMode;
+        if (document.body) {
+          document.body.dataset.wiiiFrameKind = state.frameKind;
+          document.body.dataset.wiiiShellVariant = state.shellVariant;
+          document.body.dataset.wiiiSizingMode = state.sizingMode;
+        }
+      }
 
       function post(type, payload) {
         parent.postMessage({ type: type, payload: payload || {} }, '*');
@@ -337,12 +354,16 @@ export function buildVisualFrameDocument(
         if (!data || typeof data !== 'object') return;
         if (data.type === 'wiii-visual-sync') {
           state.parentState = data.payload || {};
-          document.documentElement.dataset.wiiiShellVariant = state.shellVariant;
+          if (state.parentState && typeof state.parentState.sizingMode === 'string') {
+            state.sizingMode = state.parentState.sizingMode;
+          }
+          applyRuntimeDataset();
           notifyResize();
         }
       });
 
       window.addEventListener('load', function () {
+        applyRuntimeDataset();
         notifyResize();
         if (window.ResizeObserver) {
           var resizeObserver = new ResizeObserver(function () { queueResize(); });
@@ -351,7 +372,7 @@ export function buildVisualFrameDocument(
         }
         setTimeout(notifyResize, 120);
         setTimeout(notifyResize, 500);
-        post('wiii-frame-ready', { sessionId: state.sessionId, frameKind: state.frameKind, shellVariant: state.shellVariant });
+        post('wiii-frame-ready', { sessionId: state.sessionId, frameKind: state.frameKind, shellVariant: state.shellVariant, sizingMode: state.sizingMode });
       });
     })();
   </script>`;
@@ -498,6 +519,15 @@ export function buildVisualFrameDocument(
     .wiii-frame-content {
       padding: ${contentPadding};
     }
+    body[data-wiii-sizing-mode="viewport"] {
+      min-height: 100vh;
+    }
+    body[data-wiii-sizing-mode="viewport"] .wiii-frame-shell {
+      min-height: calc(100vh - 8px);
+    }
+    body[data-wiii-sizing-mode="viewport"] .wiii-frame-content {
+      min-height: 0;
+    }
     canvas, svg, table, img { max-width: 100%; height: auto; }
     /* Sprint V5: Lighter form defaults — transparent, thin border */
     button, select, input:not([type="range"]), textarea {
@@ -584,7 +614,7 @@ export function buildVisualFrameDocument(
             attrs,
             "wiii-host-shell-active",
           );
-          return `<body${mergedAttrs} data-wiii-host-shell="true" data-wiii-has-intro="${hasIntro ? "true" : "false"}">
+          return `<body${mergedAttrs} data-wiii-host-shell="true" data-wiii-has-intro="${hasIntro ? "true" : "false"}" data-wiii-frame-kind="${escapeHtml(frameKind)}" data-wiii-shell-variant="${escapeHtml(shellVariant)}" data-wiii-sizing-mode="${escapeHtml(sizingMode)}">
   <div class="wiii-frame-shell" data-wiii-frame-kind="${escapeHtml(frameKind)}" data-wiii-shell-variant="${escapeHtml(shellVariant)}">
     ${intro}
     <div class="wiii-frame-content">${bodyContent}</div>
@@ -597,13 +627,17 @@ export function buildVisualFrameDocument(
     }
 
     const bodyDecorated = headInjected.replace(
-      /<body([^>]*>)/i,
+      /<body([^>]*)>/i,
       (_match, attrs: string) => {
         const mergedAttrs = mergeBodyClassAttribute(
           attrs,
           hostShellMode === "force" ? "wiii-host-shell-active" : "",
         );
-        return `<body${mergedAttrs}${hostShellMode === "force" ? ` data-wiii-host-shell="true" data-wiii-has-intro="${hasIntro ? "true" : "false"}"` : ""}>`;
+        const hostAttrs =
+          hostShellMode === "force"
+            ? ` data-wiii-host-shell="true" data-wiii-has-intro="${hasIntro ? "true" : "false"}"`
+            : "";
+        return `<body${mergedAttrs}${hostAttrs} data-wiii-frame-kind="${escapeHtml(frameKind)}" data-wiii-shell-variant="${escapeHtml(shellVariant)}" data-wiii-sizing-mode="${escapeHtml(sizingMode)}">`;
       },
     );
 
@@ -616,14 +650,14 @@ export function buildVisualFrameDocument(
   }
 
   return `<!DOCTYPE html>
-<html lang="vi">
+<html lang="vi" data-wiii-frame-kind="${escapeHtml(frameKind)}" data-wiii-shell-variant="${escapeHtml(shellVariant)}" data-wiii-sizing-mode="${escapeHtml(sizingMode)}">
 <head>
   <meta charset="utf-8">
   ${FRAME_CSP}
   ${STORAGE_SHIM}
   ${shellStyle}${themeOverrideBlock}
 </head>
-<body class="${hostShellMode === "force" ? "wiii-host-shell-active" : ""}" data-wiii-host-shell="${hostShellMode === "force" ? "true" : "false"}" data-wiii-has-intro="${hasIntro ? "true" : "false"}">
+<body class="${hostShellMode === "force" ? "wiii-host-shell-active" : ""}" data-wiii-host-shell="${hostShellMode === "force" ? "true" : "false"}" data-wiii-has-intro="${hasIntro ? "true" : "false"}" data-wiii-frame-kind="${escapeHtml(frameKind)}" data-wiii-shell-variant="${escapeHtml(shellVariant)}" data-wiii-sizing-mode="${escapeHtml(sizingMode)}">
   <div class="wiii-frame-shell" data-wiii-frame-kind="${escapeHtml(frameKind)}" data-wiii-shell-variant="${escapeHtml(shellVariant)}">
     ${intro}
     <div class="wiii-frame-content">${sanitizedContent}</div>
