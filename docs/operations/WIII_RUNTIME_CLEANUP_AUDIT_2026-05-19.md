@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537, #539, #549, #551, #553, #555, #557, #559 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537, #539, #549, #551, #553, #555, #557, #559, #561 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -235,6 +235,12 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   collapsed tables, horizontal rules, and inline lists; made Code Studio
   previews render through the `app`/`immersive` iframe lane; and let tall app
   frames scroll internally instead of clipping simulations.
+- Follow-up #561 moved visual-intent runtime metadata and Code Studio
+  visual-code lane resolution behind typed contracts. Tool runtime metadata is
+  now built through `VisualToolRuntimeIntent`, and `tool_create_visual_code`
+  resolves presentation intent, studio lane, artifact kind, renderer kind,
+  patch strategy, quality profile, and runtime manifest through
+  `VisualCodeRuntimeContract` before validation/payload build.
 
 ## Preserved Intentionally
 
@@ -303,8 +309,11 @@ backups, data PDFs, or local skill folders.
   quality, captions, registry, shell, and renderer modules. The remaining debt
   is product quality rather than module size: high-severity slop is now gated
   before preview, and the first markdown/iframe UX cleanup landed in #559. The
-  scaffold should keep moving toward richer typed visual intents and away from
-  broad template fallback when the primary visual tool path is healthy.
+  scaffold should keep moving away from broad template fallback when the
+  primary visual tool path is healthy. Follow-up #561 introduced typed runtime
+  contracts for visual intent metadata and Code Studio visual-code lanes; the
+  next quality frontier is using those contracts to reduce deterministic
+  scaffold fallback in product flows, not adding more ad-hoc templates.
 - Some tests still import compatibility `graph.py` modules. Move tests toward
   `runtime.py` imports when the external import window can close.
 

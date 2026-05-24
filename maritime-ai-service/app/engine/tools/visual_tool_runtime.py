@@ -2,6 +2,10 @@ import json
 import re
 from typing import Any, Callable
 
+from app.engine.tools.visual_code_runtime_contract import (
+    resolve_visual_code_runtime_contract,
+)
+
 
 def tool_generate_visual_impl(
     *,
@@ -246,64 +250,51 @@ def tool_create_visual_code_impl(
     if not getattr(get_settings(), "enable_llm_code_gen_visuals", False):
         return "Error: Visual code generation chưa được bật (enable_llm_code_gen_visuals=False)."
 
-    presentation_intent = runtime_presentation_intent()
-    if presentation_intent in {"article_figure", "chart_runtime"}:
+    runtime_contract = resolve_visual_code_runtime_contract(
+        presentation_intent=runtime_presentation_intent(),
+        studio_lane=runtime_studio_lane(),
+        artifact_kind=runtime_artifact_kind(),
+        requested_visual_type=runtime_metadata_text("visual_requested_type", "concept"),
+        quality_profile=runtime_quality_profile(),
+        code_studio_version=runtime_code_studio_version(),
+    )
+    if runtime_contract.is_blocked_for_code_studio:
         return (
             "Error: tool_create_visual_code khong phai lane dung cho article figure/chart runtime. "
             "Hay dung tool_generate_visual de tao figure giai thich hoac chart runtime chuan."
         )
 
-    studio_lane = runtime_studio_lane() or "app"
-    artifact_kind = runtime_artifact_kind() or "html_app"
-    requested_visual_type = runtime_metadata_text("visual_requested_type", "concept")
-    resolved_visual_type = requested_visual_type if requested_visual_type in {
-        "comparison",
-        "process",
-        "matrix",
-        "architecture",
-        "concept",
-        "infographic",
-        "chart",
-        "timeline",
-        "map_lite",
-        "simulation",
-        "quiz",
-        "interactive_table",
-        "react_app",
-    } else "concept"
-    resolved_renderer_kind = "app" if studio_lane in {"app", "widget"} else "inline_html"
-    resolved_shell_variant = "immersive" if resolved_renderer_kind == "app" else "editorial"
-    resolved_patch_strategy = "app_state" if resolved_renderer_kind == "app" else "replace_html"
-    quality_profile = runtime_quality_profile()
-
     raw = maybe_upgrade_code_studio_output(
         raw,
         title=title,
         subtitle=subtitle,
-        requested_visual_type=resolved_visual_type,
-        studio_lane=studio_lane,
-        artifact_kind=artifact_kind,
-        quality_profile=quality_profile,
+        requested_visual_type=runtime_contract.resolved_visual_type,
+        studio_lane=runtime_contract.studio_lane,
+        artifact_kind=runtime_contract.artifact_kind,
+        quality_profile=runtime_contract.quality_profile,
     )
 
     quality_error = validate_code_studio_output(
         raw,
-        requested_visual_type=resolved_visual_type,
-        studio_lane=studio_lane,
-        artifact_kind=artifact_kind,
-        quality_profile=quality_profile,
+        requested_visual_type=runtime_contract.resolved_visual_type,
+        studio_lane=runtime_contract.studio_lane,
+        artifact_kind=runtime_contract.artifact_kind,
+        quality_profile=runtime_contract.quality_profile,
     )
     if quality_error:
         return quality_error
 
     raw_len = len(raw)
     if raw_len > 500:
-        quality_score, quality_deficiencies = quality_score_visual_output(raw, resolved_visual_type)
+        quality_score, quality_deficiencies = quality_score_visual_output(
+            raw,
+            runtime_contract.resolved_visual_type,
+        )
         logger.info(
             "[QUALITY_GATE] raw=%d chars, score=%d/10, type=%s, deficiencies=%d",
             raw_len,
             quality_score,
-            resolved_visual_type,
+            runtime_contract.resolved_visual_type,
             len(quality_deficiencies),
         )
         if quality_score < 6 and quality_deficiencies:
@@ -342,34 +333,20 @@ def tool_create_visual_code_impl(
     )
 
     payload = normalize_visual_payload(
-        visual_type=resolved_visual_type,
+        visual_type=runtime_contract.resolved_visual_type,
         spec={},
         title=safe_title,
         summary=safe_summary,
         subtitle=subtitle,
         visual_session_id=resolved_visual_session_id,
         operation=resolved_operation,
-        renderer_kind=resolved_renderer_kind,
-        shell_variant=resolved_shell_variant,
-        patch_strategy=resolved_patch_strategy,
+        renderer_kind=runtime_contract.renderer_kind,
+        shell_variant=runtime_contract.shell_variant,
+        patch_strategy=runtime_contract.patch_strategy,
         narrative_anchor="after-lead",
         fallback_html=final_html,
-        runtime_manifest={
-            "ui_runtime": "html",
-            "storage": False,
-            "mcp_access": False,
-            "file_export": studio_lane == "artifact",
-            "shareability": "session" if studio_lane == "app" else "artifact",
-        } if resolved_renderer_kind == "app" else None,
-        metadata={
-            "source_tool": "tool_create_visual_code",
-            "presentation_intent": presentation_intent or "code_studio_app",
-            "studio_lane": studio_lane,
-            "artifact_kind": artifact_kind,
-            "quality_profile": quality_profile,
-            "renderer_contract": "host_shell",
-            **({"code_studio_version": runtime_code_studio_version()} if runtime_code_studio_version() > 0 else {}),
-        },
+        runtime_manifest=runtime_contract.runtime_manifest,
+        metadata=runtime_contract.payload_metadata(),
     )
     log_visual_telemetry(
         "tool_create_visual_code",
