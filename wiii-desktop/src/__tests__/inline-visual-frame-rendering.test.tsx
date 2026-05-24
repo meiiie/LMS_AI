@@ -32,6 +32,8 @@ describe("InlineVisualFrame rendering contract", () => {
     await waitFor(() => expect(iframe.getAttribute("src")).toBe("blob:wiii-visual-frame"));
 
     expect(iframe.parentElement?.getAttribute("data-inline-visual-sizing")).toBe("viewport");
+    expect(iframe.parentElement?.getAttribute("data-inline-visual-ready")).toBe("false");
+    expect(iframe.parentElement?.getAttribute("aria-busy")).toBe("true");
     expect(iframe.parentElement?.style.height).toBe("100%");
     expect(iframe.parentElement?.style.minHeight).toBe("0px");
     expect((iframe as HTMLIFrameElement).style.height).toBe("100%");
@@ -67,11 +69,13 @@ describe("InlineVisualFrame rendering contract", () => {
           sessionId: "vs_bridge",
           frameKind: "app",
           shellVariant: "immersive",
+          sizingMode: "viewport",
           runtimeManifest: { ui_runtime: "iframe", storage: true },
         },
       },
       "*",
     );
+    expect(iframe.parentElement?.getAttribute("data-inline-visual-ready")).toBe("true");
   });
 
   it("keeps normal inline app visuals content-sized", async () => {
