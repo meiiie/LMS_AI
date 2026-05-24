@@ -1,8 +1,19 @@
 import { defineConfig } from "@playwright/test";
 
+const frontendPort = process.env.WIII_PLAYWRIGHT_FRONTEND_PORT || "1420";
+const backendPort = process.env.WIII_PLAYWRIGHT_BACKEND_PORT || "8000";
+const baseURL =
+  process.env.WIII_PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${frontendPort}`;
+const backendURL =
+  process.env.WIII_PLAYWRIGHT_SERVER_URL || `http://127.0.0.1:${backendPort}`;
+
 export default defineConfig({
   testDir: "./playwright",
-  testMatch: ["visual-runtime.spec.ts", "code-studio-runtime.spec.ts"],
+  testMatch: [
+    "local-chat-harness.spec.ts",
+    "visual-runtime.spec.ts",
+    "code-studio-runtime.spec.ts",
+  ],
   fullyParallel: false,
   workers: 1,
   timeout: 180_000,
@@ -11,7 +22,7 @@ export default defineConfig({
   },
   reporter: [["list"]],
   use: {
-    baseURL: "http://127.0.0.1:1420",
+    baseURL,
     browserName: "chromium",
     headless: true,
     trace: "retain-on-failure",
@@ -21,13 +32,13 @@ export default defineConfig({
   webServer: [
     {
       command: "node scripts/start-visual-backend.mjs",
-      url: "http://127.0.0.1:8000/api/v1/health/live",
+      url: `${backendURL}/api/v1/health/live`,
       reuseExistingServer: true,
       timeout: 180_000,
     },
     {
       command: "node scripts/start-visual-frontend.mjs",
-      url: "http://127.0.0.1:1420",
+      url: baseURL,
       reuseExistingServer: true,
       timeout: 180_000,
     },
