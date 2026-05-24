@@ -46,7 +46,7 @@ export const CodeStudioPanel = memo(function CodeStudioPanel({
         animate={{ x: 0, opacity: 1 }}
         exit={{ x: "100%", opacity: 0 }}
         transition={{ type: "spring", damping: 25, stiffness: 200 }}
-        className="fixed right-0 top-[var(--titlebar-height,32px)] bottom-[var(--statusbar-height,24px)] w-[52vw] max-w-[860px] min-w-[420px] border-l border-border z-40 flex flex-col shadow-xl code-studio-panel"
+        className="fixed inset-x-0 top-[var(--titlebar-height,32px)] bottom-[var(--statusbar-height,24px)] w-full max-w-full min-w-0 border-l border-border z-40 flex flex-col shadow-xl code-studio-panel sm:left-auto sm:right-0 sm:w-[52vw] sm:max-w-[860px] sm:min-w-[420px]"
       >
         <CodeStudioContent session={session} onClose={closeCodeStudio} />
       </motion.div>

@@ -142,6 +142,23 @@ describe("CodeStudioPanel", () => {
     );
   });
 
+  it("keeps the overlay shell mobile-safe before the sm breakpoint", async () => {
+    seedCompleteSession("code");
+
+    const { container } = render(<CodeStudioPanel />);
+
+    const shell = container.querySelector(".code-studio-panel");
+    expect(shell).toBeTruthy();
+    const classTokens = new Set((shell?.getAttribute("class") || "").split(/\s+/));
+
+    expect(classTokens.has("inset-x-0")).toBe(true);
+    expect(classTokens.has("w-full")).toBe(true);
+    expect(classTokens.has("max-w-full")).toBe(true);
+    expect(classTokens.has("min-w-0")).toBe(true);
+    expect(classTokens.has("min-w-[420px]")).toBe(false);
+    expect(classTokens.has("sm:min-w-[420px]")).toBe(true);
+  });
+
   it("uses Vietnamese-first labels in the Code Studio surface", async () => {
     seedCompleteSession("code");
 
