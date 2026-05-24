@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Sequence
 
 from app.engine.messages import Message, ToolCall
+from app.engine.multi_agent.visual_events import (
+    _emit_visual_commit_events,
+    _maybe_emit_visual_event,
+    _summarize_tool_result_for_stream,
+)
 
 
 def _tool_call_dict_to_native(tool_call: dict[str, Any]) -> ToolCall:
@@ -16,6 +21,11 @@ def _tool_call_dict_to_native(tool_call: dict[str, Any]) -> ToolCall:
         name=str(tool_call.get("name") or ""),
         arguments=raw_args,
     )
+
+
+def _is_visual_result_tool(tool_name: str) -> bool:
+    lowered_tool_name = str(tool_name or "").lower()
+    return "visual" in lowered_tool_name or "chart" in lowered_tool_name
 
 
 @dataclass(slots=True)
@@ -85,6 +95,39 @@ async def _emit_tool_result(
             "node": "tutor_agent",
         }
     )
+
+
+async def _emit_visual_lifecycle_if_available(
+    *,
+    push: Callable[[dict[str, Any]], Awaitable[None]],
+    tool_name: str,
+    result: Any,
+    tool_id: str,
+    logger_obj: Any,
+) -> None:
+    """Forward structured visual payloads onto the same SSE lifecycle as direct."""
+    if not _is_visual_result_tool(tool_name):
+        return
+
+    visual_tool_call_events: list[dict[str, Any]] = []
+    try:
+        visual_session_ids, _disposed_session_ids = await _maybe_emit_visual_event(
+            push_event=push,
+            tool_name=tool_name,
+            tool_call_id=tool_id,
+            result=result,
+            node="tutor_agent",
+            tool_call_events=visual_tool_call_events,
+        )
+        if visual_session_ids:
+            await _emit_visual_commit_events(
+                push_event=push,
+                node="tutor_agent",
+                visual_session_ids=visual_session_ids,
+                tool_call_events=visual_tool_call_events,
+            )
+    except Exception as exc:
+        logger_obj.warning("[TUTOR_AGENT] Visual lifecycle emit skipped: %s", exc)
 
 
 async def _emit_tool_acknowledgment(
@@ -533,6 +576,13 @@ async def dispatch_tutor_tool_call(
             tool_call_id=tool_id,
             run_sync_in_thread=True,
         )
+        await _emit_visual_lifecycle_if_available(
+            push=push,
+            tool_name=tool_name,
+            result=result,
+            tool_id=tool_id,
+            logger_obj=logger_obj,
+        )
         _record_tool_use(
             tools_used=tools_used,
             tool_name=tool_name,
@@ -543,7 +593,11 @@ async def dispatch_tutor_tool_call(
         await _emit_tool_result(
             push=push,
             tool_name=tool_name,
-            result=result,
+            result=(
+                _summarize_tool_result_for_stream(tool_name, result)
+                if _is_visual_result_tool(tool_name)
+                else result
+            ),
             tool_id=tool_id,
         )
         await _emit_tool_acknowledgment(
