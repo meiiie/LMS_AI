@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from app.engine.multi_agent.code_studio_context import (
@@ -25,6 +26,21 @@ from app.engine.multi_agent.visual_events import (
 from app.engine.tools.invocation import get_tool_by_name, invoke_tool_with_runtime
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class CodeStudioFastPathRecipe:
+    """Typed recipe contract for one audited Code Studio fast path."""
+
+    code_html: str
+    title: str
+    call_id_prefix: str
+    response: str
+    thinking_content: str
+
+    def tool_args(self) -> dict[str, str]:
+        return {"code_html": self.code_html, "title": self.title}
+
 
 _PENDULUM_FAST_PATH_HTML = """
 <div class="pendulum-prototype">
@@ -383,49 +399,49 @@ def _contains_visual_payload_result(result: Any) -> bool:
     return isinstance(payload, dict) and bool(payload.get("visual_session_id")) and "fallback_html" in payload
 
 
-def _build_recipe(query: str, state: AgentState) -> dict[str, str] | None:
+def _build_recipe(query: str, state: AgentState) -> CodeStudioFastPathRecipe | None:
     if _should_use_pendulum_code_studio_fast_path(query, state):
-        return {
-            "code_html": _PENDULUM_FAST_PATH_HTML,
-            "title": _infer_pendulum_fast_path_title(query, state),
-            "call_id_prefix": "fast_pendulum",
-            "response": (
+        return CodeStudioFastPathRecipe(
+            code_html=_PENDULUM_FAST_PATH_HTML,
+            title=_infer_pendulum_fast_path_title(query, state),
+            call_id_prefix="fast_pendulum",
+            response=(
                 "Mình đã dùng Code Studio để tạo mô phỏng con lắc inline. "
                 "Bạn có thể kéo quả nặng, xem preview, và patch tiếp trên cùng session này."
             ),
-            "thinking_content": (
+            thinking_content=(
                 "Mình đi theo scaffold con lắc host-owned để ưu tiên preview ổn định, patch được, "
                 "và giữ cùng session Code Studio."
             ),
-        }
+        )
     if _should_use_colreg_code_studio_fast_path(query, state):
-        return {
-            "code_html": _COLREG_RULE15_FAST_PATH_HTML,
-            "title": _infer_colreg_fast_path_title(query, state),
-            "call_id_prefix": "fast_colreg15",
-            "response": (
+        return CodeStudioFastPathRecipe(
+            code_html=_COLREG_RULE15_FAST_PATH_HTML,
+            title=_infer_colreg_fast_path_title(query, state),
+            call_id_prefix="fast_colreg15",
+            response=(
                 "Mình đã dùng Code Studio để mô phỏng tình huống cắt hướng theo Quy tắc 15 COLREGs. "
                 "Bạn có thể xem canvas, điều chỉnh mức tránh va, và tiếp tục patch trên cùng session này."
             ),
-            "thinking_content": (
+            thinking_content=(
                 "Mình chọn scaffold canvas cho COLREG để khởi động nhanh, có telemetry rõ ràng, "
                 "và để bạn nhìn thấy ngay give-way / stand-on thay vì chỉ đọc lý thuyết."
             ),
-        }
+        )
     if _should_use_artifact_code_studio_fast_path(query, state):
-        return {
-            "code_html": _ARTIFACT_FAST_PATH_HTML,
-            "title": _infer_artifact_fast_path_title(query, state),
-            "call_id_prefix": "fast_artifact",
-            "response": (
+        return CodeStudioFastPathRecipe(
+            code_html=_ARTIFACT_FAST_PATH_HTML,
+            title=_infer_artifact_fast_path_title(query, state),
+            call_id_prefix="fast_artifact",
+            response=(
                 "Mình đã dùng Code Studio để tạo bộ khung mini HTML app embeddable. "
                 "Bạn có thể mở preview ngay, rồi mở thành Artifact để chỉnh sửa sau."
             ),
-            "thinking_content": (
+            thinking_content=(
                 "Mình đi bằng scaffold artifact nhẹ để bạn có một bộ khung HTML tự chứa ngay lập tức, "
                 "rồi mới patch và mở rộng tiếp theo nhu cầu thật."
             ),
-        }
+        )
     return None
 
 
@@ -448,8 +464,8 @@ async def execute_code_studio_fast_path(
         return None
 
     tool_name = str(getattr(matched, "name", "") or getattr(matched, "__name__", "") or "tool_create_visual_code")
-    tool_args = {"code_html": recipe["code_html"], "title": recipe["title"]}
-    tool_call_id = f"{recipe['call_id_prefix']}_{uuid.uuid4().hex[:10]}"
+    tool_args = recipe.tool_args()
+    tool_call_id = f"{recipe.call_id_prefix}_{uuid.uuid4().hex[:10]}"
 
     try:
         result = await invoke_tool_with_runtime(
@@ -463,20 +479,20 @@ async def execute_code_studio_fast_path(
             run_sync_in_thread=True,
         )
     except Exception as exc:
-        logger.warning("[CODE_STUDIO] Recipe fast path failed (%s): %s", recipe["call_id_prefix"], exc)
+        logger.warning("[CODE_STUDIO] Recipe fast path failed (%s): %s", recipe.call_id_prefix, exc)
         return None
 
     if isinstance(result, str) and result.strip().lower().startswith("error:"):
         logger.debug(
             "[CODE_STUDIO] Recipe fast path returned tool error (%s): %s",
-            recipe["call_id_prefix"],
+            recipe.call_id_prefix,
             result[:180],
         )
         return None
     if not _contains_visual_payload_result(result):
         logger.debug(
             "[CODE_STUDIO] Recipe fast path did not return a visual payload (%s): %s",
-            recipe["call_id_prefix"],
+            recipe.call_id_prefix,
             str(result)[:180],
         )
         return None
@@ -534,13 +550,13 @@ async def execute_code_studio_fast_path(
         or "tool_create_visual_code"
     )
     return {
-        "response": sanitize_code_studio_response(recipe["response"], tool_call_events, state),
-        "thinking_content": recipe["thinking_content"],
+        "response": sanitize_code_studio_response(recipe.response, tool_call_events, state),
+        "thinking_content": recipe.thinking_content,
         "tool_call_events": tool_call_events,
         # Presenter contract: tools_used must be a list of dicts with at
         # least a "name" key (see chat_response_presenter.py). Storing the
         # raw LangChain Tool object here used to crash the pendulum
         # fast-path turn with "'Tool' object has no attribute 'get'".
         "tools_used": [{"name": str(matched_name)}],
-        "fast_path": recipe["call_id_prefix"],
+        "fast_path": recipe.call_id_prefix,
     }

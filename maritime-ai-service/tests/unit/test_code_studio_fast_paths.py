@@ -4,8 +4,10 @@ import pytest
 
 from app.engine.multi_agent import code_studio_fast_paths
 from app.engine.multi_agent.code_studio_fast_paths import (
+    CodeStudioFastPathRecipe,
     _COLREG_RULE15_FAST_PATH_HTML,
     _PENDULUM_FAST_PATH_HTML,
+    _build_recipe,
     _contains_visual_payload_result,
 )
 from app.engine.multi_agent.tool_collection import _build_visual_tool_runtime_metadata
@@ -52,6 +54,17 @@ def test_pendulum_fast_path_html_satisfies_visual_payload_contract() -> None:
     assert payload.renderer_kind == "app"
     assert "<canvas" in (payload.fallback_html or "").lower()
     assert "requestAnimationFrame" in (payload.fallback_html or "")
+
+
+def test_fast_path_recipe_contract_builds_tool_args() -> None:
+    recipe = _build_recipe("simulate COLREG rule 15 crossing situation", {"context": {}})
+
+    assert isinstance(recipe, CodeStudioFastPathRecipe)
+    assert recipe.call_id_prefix == "fast_colreg15"
+    assert recipe.tool_args() == {
+        "code_html": _COLREG_RULE15_FAST_PATH_HTML,
+        "title": "COLREGs Rule 15 Simulation",
+    }
 
 
 @pytest.mark.asyncio
