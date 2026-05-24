@@ -113,7 +113,7 @@ describe("CodeStudioPanel", () => {
 
     render(<CodeStudioPanel />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Xem trước" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("inline-visual-frame")).toBeTruthy();
@@ -140,5 +140,18 @@ describe("CodeStudioPanel", () => {
         className: "w-full h-full",
       }),
     );
+  });
+
+  it("uses Vietnamese-first labels in the Code Studio surface", async () => {
+    seedCompleteSession("code");
+
+    render(<CodeStudioPanel />);
+
+    expect(await screen.findByRole("button", { name: "Mã" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Xem trước" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Đóng Code Studio" })).toBeTruthy();
+    expect(screen.getByText("Đã xong")).toBeTruthy();
+    expect(screen.getByText(/1 dòng · \d+ byte/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sao chép" })).toBeTruthy();
   });
 });

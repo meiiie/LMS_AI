@@ -63,4 +63,18 @@ describe("normalizeAssistantMarkdown", () => {
     expect(normalized).toContain("Cậu chỉ cần nói:\n> “Mình thấy nút Khóa học”");
     expect(normalized).toContain("hoặc\n\n> “Mình không thấy gì cả”");
   });
+
+  it("repairs collapsed Vietnamese maritime tables after prose prefixes", () => {
+    const input =
+      "Ví dụ đời thường: Giống như bạn không được đốt than trong nhà. --- 🔍 So sánh nhanh: | Tiêu chí | Annex I | Annex VI |---------|----------|---------| | Ô nhiễm | Dầu ra biển | Khí thải ra không khí | Chất gây hại | Dầu, hydrocarbon | SOx, NOx, PM, CO₂ | Giới hạn chính | Không xả dầu | Hàm lượng lưu huỳnh ≤0.50% | --- 💡 Mẹo nhớ: đọc theo từng cột.";
+
+    const normalized = normalizeAssistantMarkdown(input);
+
+    expect(normalized).toContain("Ví dụ đời thường: Giống như bạn không được đốt than trong nhà.");
+    expect(normalized).toContain("\n\n---\n\n🔍 So sánh nhanh:");
+    expect(normalized).toContain("| Tiêu chí | Annex I | Annex VI |");
+    expect(normalized).toContain("| Ô nhiễm | Dầu ra biển | Khí thải ra không khí |");
+    expect(normalized).toContain("| Giới hạn chính | Không xả dầu | Hàm lượng lưu huỳnh ≤0.50% |");
+    expect(normalized).toContain("\n\n---\n\n💡 Mẹo nhớ:");
+  });
 });
