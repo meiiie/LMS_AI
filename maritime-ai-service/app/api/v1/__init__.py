@@ -65,6 +65,7 @@ def _build_router() -> APIRouter:
         ("app.api.v1.generated_files.router", "Generated Files"),
         ("app.api.v1.llm_status.router", "LLM Status"),
         ("app.api.v1.document_context.router", "Document Context"),
+        ("app.api.v1.host_actions.router", "Host Action Audit"),
         ("app.api.v1.voice.router", "Voice"),
         ("app.api.v1.soul_bridge.router", "Soul Bridge"),
         ("app.api.v1.living_agent.router", "Living Agent"),
@@ -88,7 +89,6 @@ def _build_router() -> APIRouter:
         ),
         ("enable_magic_link_auth", "app.auth.magic_link_router.router", "Magic Link Auth"),
         ("enable_dev_login", "app.auth.dev_login_router.router", "Dev Login"),
-        ("enable_host_actions", "app.api.v1.host_actions.router", "Host Actions"),
     ]
     for flag_name, import_path, label in optional_router_specs:
         _register_optional_router(router, flag_name, import_path, label)
