@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildVisualFrameDocument } from "@/components/common/InlineVisualFrame";
+import { buildVisualFrameDocument } from "@/lib/visual-frame-document";
 
 describe("InlineVisualFrame host shell", () => {
   it("wraps full-document app html in the host shell when forced", () => {
