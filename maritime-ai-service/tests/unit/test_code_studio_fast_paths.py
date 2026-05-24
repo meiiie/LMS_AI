@@ -5,6 +5,7 @@ import pytest
 from app.engine.multi_agent import code_studio_fast_paths
 from app.engine.multi_agent.code_studio_fast_paths import (
     CodeStudioFastPathRecipe,
+    CodeStudioFastPathResult,
     _COLREG_RULE15_FAST_PATH_HTML,
     _PENDULUM_FAST_PATH_HTML,
     _build_recipe,
@@ -65,6 +66,52 @@ def test_fast_path_recipe_contract_builds_tool_args() -> None:
         "code_html": _COLREG_RULE15_FAST_PATH_HTML,
         "title": "COLREGs Rule 15 Simulation",
     }
+
+
+@pytest.mark.asyncio
+async def test_recipe_fast_path_returns_typed_result(monkeypatch) -> None:
+    async def fake_invoke_tool_with_runtime(*_args, **_kwargs):
+        return '{"visual_session_id":"vs-fast","fallback_html":"<canvas></canvas>"}'
+
+    async def fake_maybe_emit_visual_event(**_kwargs):
+        return ["vs-fast"], []
+
+    async def fake_emit_visual_commit_events(**_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        code_studio_fast_paths,
+        "invoke_tool_with_runtime",
+        fake_invoke_tool_with_runtime,
+    )
+    monkeypatch.setattr(
+        code_studio_fast_paths,
+        "_maybe_emit_visual_event",
+        fake_maybe_emit_visual_event,
+    )
+    monkeypatch.setattr(
+        code_studio_fast_paths,
+        "_emit_visual_commit_events",
+        fake_emit_visual_commit_events,
+    )
+
+    async def push_event(*_args, **_kwargs):
+        return None
+
+    result = await code_studio_fast_paths.execute_code_studio_fast_path(
+        state={"context": {}},
+        query="simulate COLREG rule 15 crossing situation",
+        tools=[SimpleNamespace(name="tool_create_visual_code")],
+        push_event=push_event,
+        runtime_context_base=None,
+        derive_code_stream_session_id=lambda **_kwargs: "vs-test",
+        sanitize_code_studio_response=lambda text, *_args: text,
+    )
+
+    assert isinstance(result, CodeStudioFastPathResult)
+    assert result.fast_path == "fast_colreg15"
+    assert result.tools_used == [{"name": "tool_create_visual_code"}]
+    assert result.tool_call_events[0]["type"] == "call"
 
 
 @pytest.mark.asyncio

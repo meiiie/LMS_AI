@@ -42,6 +42,17 @@ class CodeStudioFastPathRecipe:
         return {"code_html": self.code_html, "title": self.title}
 
 
+@dataclass(frozen=True, slots=True)
+class CodeStudioFastPathResult:
+    """Typed result emitted by an audited Code Studio fast path."""
+
+    response: str
+    thinking_content: str
+    tool_call_events: list[dict[str, Any]]
+    tools_used: list[dict[str, Any]]
+    fast_path: str
+
+
 _PENDULUM_FAST_PATH_HTML = """
 <div class="pendulum-prototype">
   <style>
@@ -454,7 +465,7 @@ async def execute_code_studio_fast_path(
     runtime_context_base: Any,
     derive_code_stream_session_id: Callable[..., str],
     sanitize_code_studio_response: Callable[[str, list[dict[str, Any]] | None, AgentState | None], str],
-) -> dict[str, Any] | None:
+) -> CodeStudioFastPathResult | None:
     matched = get_tool_by_name(tools, "tool_create_visual_code")
     if not matched:
         return None
@@ -549,14 +560,14 @@ async def execute_code_studio_fast_path(
         or getattr(matched, "__name__", None)
         or "tool_create_visual_code"
     )
-    return {
-        "response": sanitize_code_studio_response(recipe.response, tool_call_events, state),
-        "thinking_content": recipe.thinking_content,
-        "tool_call_events": tool_call_events,
+    return CodeStudioFastPathResult(
+        response=sanitize_code_studio_response(recipe.response, tool_call_events, state),
+        thinking_content=recipe.thinking_content,
+        tool_call_events=tool_call_events,
         # Presenter contract: tools_used must be a list of dicts with at
         # least a "name" key (see chat_response_presenter.py). Storing the
         # raw LangChain Tool object here used to crash the pendulum
         # fast-path turn with "'Tool' object has no attribute 'get'".
-        "tools_used": [{"name": str(matched_name)}],
-        "fast_path": recipe.call_id_prefix,
-    }
+        tools_used=[{"name": str(matched_name)}],
+        fast_path=recipe.call_id_prefix,
+    )

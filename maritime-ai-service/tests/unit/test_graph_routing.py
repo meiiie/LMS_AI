@@ -15,6 +15,7 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 
+from app.engine.multi_agent.code_studio_fast_paths import CodeStudioFastPathResult
 from app.engine.multi_agent.graph import (
     route_decision,
     _ainvoke_with_fallback,
@@ -1226,13 +1227,13 @@ class TestSimulationClarifier:
             "domain_config": {},
         }
         fake_tracer = MagicMock()
-        fast_path_result = {
-            "response": "opened deterministic visual preview",
-            "thinking_content": "deterministic code studio recipe",
-            "tool_call_events": [],
-            "tools_used": [{"name": "tool_create_visual_code"}],
-            "fast_path": "fast_colreg15",
-        }
+        fast_path_result = CodeStudioFastPathResult(
+            response="opened deterministic visual preview",
+            thinking_content="deterministic code studio recipe",
+            tool_call_events=[],
+            tools_used=[{"name": "tool_create_visual_code"}],
+            fast_path="fast_colreg15",
+        )
 
         with patch("app.engine.multi_agent.graph._get_or_create_tracer", return_value=fake_tracer), \
              patch("app.engine.multi_agent.graph.settings") as mock_settings, \

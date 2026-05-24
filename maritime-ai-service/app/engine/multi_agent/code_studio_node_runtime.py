@@ -153,18 +153,18 @@ async def code_studio_node_impl(
             )
 
             if fast_path_result:
-                response = fast_path_result["response"]
-                state["thinking_content"] = fast_path_result["thinking_content"]
-                state["tool_call_events"] = fast_path_result["tool_call_events"]
-                state["tools_used"] = fast_path_result["tools_used"]
+                response = fast_path_result.response
+                state["thinking_content"] = fast_path_result.thinking_content
+                state["tool_call_events"] = fast_path_result.tool_call_events
+                state["tools_used"] = fast_path_result.tools_used
                 tracer.end_step(
-                    result=f"Code studio fast path: {fast_path_result.get('fast_path', 'recipe_scaffold')}",
+                    result=f"Code studio fast path: {fast_path_result.fast_path}",
                     confidence=0.91,
                     details={
                         "response_type": "capability_generated",
                         "tools_bound": len(tools),
                         "force_tools": force_tools,
-                        "fast_path": fast_path_result.get("fast_path", "recipe_scaffold"),
+                        "fast_path": fast_path_result.fast_path,
                     },
                 )
             else:
