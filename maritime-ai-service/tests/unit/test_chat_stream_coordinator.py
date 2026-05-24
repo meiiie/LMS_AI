@@ -196,6 +196,56 @@ async def test_generate_stream_v3_events_bypasses_context_build_for_pointy_highl
 
 
 @pytest.mark.asyncio
+async def test_generate_stream_v3_events_bypasses_provider_for_visual_fast_path():
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "maritime"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name="Minh"),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(
+        side_effect=AssertionError("visual fast path should not build full context")
+    )
+    orchestrator.finalize_response_turn = MagicMock()
+
+    request = _make_request(
+        message=(
+            "Create a compact inline visual comparing soft attention and linear attention. "
+            "Use structured visual lifecycle."
+        ),
+        user_context=SimpleNamespace(document_context=None),
+    )
+
+    chunks = []
+    async for chunk in generate_stream_v3_events(
+        chat_request=request,
+        request_headers={},
+        background_save=MagicMock(),
+        start_time=time.time(),
+        orchestrator=orchestrator,
+    ):
+        chunks.append(chunk)
+
+    assert any("event: visual_open" in chunk for chunk in chunks)
+    assert any("event: visual_commit" in chunk for chunk in chunks)
+    assert any("v3-visual_fast_path" in chunk for chunk in chunks)
+    orchestrator.build_multi_agent_execution_input.assert_not_called()
+    orchestrator.finalize_response_turn.assert_called_once()
+    assert (
+        orchestrator.finalize_response_turn.call_args.kwargs["current_agent"]
+        == "visual_fast_path"
+    )
+    assert (
+        orchestrator.finalize_response_turn.call_args.kwargs[
+            "include_lms_insights"
+        ]
+        is False
+    )
+
+
+@pytest.mark.asyncio
 async def test_generate_stream_v3_events_forwards_metadata_agent_to_finalize():
     orchestrator = MagicMock()
     prepared_turn = SimpleNamespace(
