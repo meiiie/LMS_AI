@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Callable
 
+from app.engine.multi_agent.direct_node_pre_llm_stage_contract import (
+    DirectDocumentPreviewPreflightDependencies,
+    DirectDocumentPreviewPreflightRequest,
+    DirectDocumentPreviewPreflightResult,
+)
 from app.engine.multi_agent.direct_node_document_preview_rebind import (
     _rebind_document_preview_host_action_tool,
 )
@@ -15,12 +19,6 @@ from app.engine.multi_agent.direct_node_thinking_snapshot import (
     record_direct_node_thinking_snapshot,
 )
 from app.engine.multi_agent.state import AgentState
-
-
-@dataclass(frozen=True)
-class DirectDocumentPreviewPreflightResult:
-    response: str
-    response_type: str = "document_preview_host_action"
 
 
 def build_document_preview_response_sanitizer(
@@ -70,65 +68,57 @@ def record_uploaded_document_context_plan(
 
 async def execute_direct_node_document_preview_preflight(
     *,
-    query: str,
-    state: AgentState,
-    ctx: dict[str, Any],
-    bus_id: str | None,
-    response_present: bool,
-    has_uploaded_document_context: bool,
-    looks_uploaded_document_preview_request: Callable[[str], bool],
-    push_event,
-    build_visual_tool_runtime_metadata,
-    execute_direct_tool_rounds,
-    extract_direct_response,
-    sanitize_preview_response,
-    fallback_response: str,
-    logger_obj,
+    request: DirectDocumentPreviewPreflightRequest,
+    dependencies: DirectDocumentPreviewPreflightDependencies,
 ) -> DirectDocumentPreviewPreflightResult | None:
     if (
-        response_present
-        or not has_uploaded_document_context
-        or not looks_uploaded_document_preview_request(query)
+        request.response_present
+        or not request.has_uploaded_document_context
+        or not dependencies.looks_uploaded_document_preview_request(request.query)
     ):
         return None
 
-    routing_meta = state.get("routing_metadata")
+    routing_meta = request.state.get("routing_metadata")
     if not isinstance(routing_meta, dict):
         routing_meta = {}
-        state["routing_metadata"] = routing_meta
+        request.state["routing_metadata"] = routing_meta
     preview_tools, preview_force_tools, doc_preview_debug = (
         _rebind_document_preview_host_action_tool(
             tools=[],
             force_tools=False,
-            query=query,
-            state=state,
-            ctx=ctx,
+            query=request.query,
+            state=request.state,
+            ctx=request.ctx,
         )
     )
     routing_meta["doc_preview_preflight"] = doc_preview_debug
     preview_result = await execute_direct_node_document_preview_round(
-        query=query,
-        state=state,
-        ctx=ctx,
-        bus_id=bus_id,
+        query=request.query,
+        state=request.state,
+        ctx=request.ctx,
+        bus_id=request.bus_id,
         tools=preview_tools,
         force_tools=preview_force_tools,
         messages=[],
-        push_event=push_event,
-        build_visual_tool_runtime_metadata=build_visual_tool_runtime_metadata,
-        execute_direct_tool_rounds=execute_direct_tool_rounds,
-        extract_direct_response=extract_direct_response,
-        sanitize_preview_response=sanitize_preview_response,
-        fallback_response=fallback_response,
+        push_event=request.push_event,
+        build_visual_tool_runtime_metadata=(
+            dependencies.build_visual_tool_runtime_metadata
+        ),
+        execute_direct_tool_rounds=dependencies.execute_direct_tool_rounds,
+        extract_direct_response=dependencies.extract_direct_response,
+        sanitize_preview_response=dependencies.sanitize_preview_response,
+        fallback_response=dependencies.fallback_response,
         debug=doc_preview_debug,
         routing_metadata_key="doc_preview_preflight",
         success_status="executed",
         failure_status="execution_failed",
         failure_log_message="[DIRECT] Early document preview host action failed: %s",
-        logger_obj=logger_obj,
+        logger_obj=dependencies.logger_obj,
     )
     if preview_result is None:
         return None
 
-    logger_obj.info("[DIRECT] Executed LMS document preview host action before planner LLM")
+    dependencies.logger_obj.info(
+        "[DIRECT] Executed LMS document preview host action before planner LLM"
+    )
     return DirectDocumentPreviewPreflightResult(response=preview_result.response)

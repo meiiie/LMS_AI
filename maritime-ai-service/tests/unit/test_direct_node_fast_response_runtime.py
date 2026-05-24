@@ -1,4 +1,8 @@
 from app.engine.multi_agent.direct_intent import _normalize_for_intent
+from app.engine.multi_agent.direct_node_pre_llm_stage_contract import (
+    DirectNodeFastResponseDependencies,
+    DirectNodeFastResponseRequest,
+)
 
 
 def _record_snapshot_calls():
@@ -10,26 +14,47 @@ def _record_snapshot_calls():
     return calls, record_snapshot
 
 
-def test_fast_response_resolves_pointy_missing_inventory_without_llm():
+def _resolve_fast_response(
+    *,
+    query: str,
+    state: dict,
+    ctx: dict,
+    has_uploaded_document_context: bool,
+    record_snapshot,
+):
     from app.engine.multi_agent.direct_node_fast_response_runtime import (
         resolve_direct_node_fast_response,
     )
 
+    return resolve_direct_node_fast_response(
+        request=DirectNodeFastResponseRequest(
+            query=query,
+            state=state,
+            ctx=ctx,
+            has_uploaded_document_context=has_uploaded_document_context,
+        ),
+        dependencies=DirectNodeFastResponseDependencies(
+            normalize_for_intent=_normalize_for_intent,
+            needs_web_search=lambda _query: False,
+            needs_datetime=lambda _query: False,
+            record_thinking_snapshot_fn=record_snapshot,
+        ),
+    )
+
+
+def test_fast_response_resolves_pointy_missing_inventory_without_llm():
     calls, record_snapshot = _record_snapshot_calls()
     state: dict = {
         "force_skills": ["wiii-pointy"],
         "context": {"force_skills": ["wiii-pointy"]},
     }
 
-    result = resolve_direct_node_fast_response(
+    result = _resolve_fast_response(
         query="show send button",
         state=state,
         ctx={},
         has_uploaded_document_context=False,
-        normalize_for_intent=_normalize_for_intent,
-        needs_web_search=lambda _query: False,
-        needs_datetime=lambda _query: False,
-        record_thinking_snapshot_fn=record_snapshot,
+        record_snapshot=record_snapshot,
     )
 
     assert result is not None
@@ -40,10 +65,6 @@ def test_fast_response_resolves_pointy_missing_inventory_without_llm():
 
 
 def test_fast_response_session_ack_sets_ack_flag_and_snapshot():
-    from app.engine.multi_agent.direct_node_fast_response_runtime import (
-        resolve_direct_node_fast_response,
-    )
-
     calls, record_snapshot = _record_snapshot_calls()
     state: dict = {
         "routing_metadata": {
@@ -56,15 +77,12 @@ def test_fast_response_session_ack_sets_ack_flag_and_snapshot():
         "Tra loi chi: Da ghi nhan."
     )
 
-    result = resolve_direct_node_fast_response(
+    result = _resolve_fast_response(
         query=query,
         state=state,
         ctx={},
         has_uploaded_document_context=False,
-        normalize_for_intent=_normalize_for_intent,
-        needs_web_search=lambda _query: False,
-        needs_datetime=lambda _query: False,
-        record_thinking_snapshot_fn=record_snapshot,
+        record_snapshot=record_snapshot,
     )
 
     assert result is not None
@@ -75,10 +93,6 @@ def test_fast_response_session_ack_sets_ack_flag_and_snapshot():
 
 
 def test_fast_response_uploaded_document_fact_uses_document_context():
-    from app.engine.multi_agent.direct_node_fast_response_runtime import (
-        resolve_direct_node_fast_response,
-    )
-
     calls, record_snapshot = _record_snapshot_calls()
     state: dict = {"routing_metadata": {"intent": "uploaded_file_context"}}
     ctx = {
@@ -97,15 +111,12 @@ def test_fast_response_uploaded_document_fact_uses_document_context():
         }
     }
 
-    result = resolve_direct_node_fast_response(
+    result = _resolve_fast_response(
         query="Tai lieu vua upload co marker nao?",
         state=state,
         ctx=ctx,
         has_uploaded_document_context=True,
-        normalize_for_intent=_normalize_for_intent,
-        needs_web_search=lambda _query: False,
-        needs_datetime=lambda _query: False,
-        record_thinking_snapshot_fn=record_snapshot,
+        record_snapshot=record_snapshot,
     )
 
     assert result is not None
@@ -115,22 +126,15 @@ def test_fast_response_uploaded_document_fact_uses_document_context():
 
 
 def test_fast_response_returns_none_for_regular_learning_turn():
-    from app.engine.multi_agent.direct_node_fast_response_runtime import (
-        resolve_direct_node_fast_response,
-    )
-
     calls, record_snapshot = _record_snapshot_calls()
     state: dict = {"routing_metadata": {"intent": "learning"}}
 
-    result = resolve_direct_node_fast_response(
+    result = _resolve_fast_response(
         query="Giai thich quy tac COLREG 15",
         state=state,
         ctx={},
         has_uploaded_document_context=False,
-        normalize_for_intent=_normalize_for_intent,
-        needs_web_search=lambda _query: False,
-        needs_datetime=lambda _query: False,
-        record_thinking_snapshot_fn=record_snapshot,
+        record_snapshot=record_snapshot,
     )
 
     assert result is None

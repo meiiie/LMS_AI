@@ -1,5 +1,10 @@
 import pytest
 
+from app.engine.multi_agent.direct_node_pre_llm_stage_contract import (
+    DirectImageInputPreflightDependencies,
+    DirectImageInputPreflightRequest,
+)
+
 
 @pytest.mark.asyncio
 async def test_image_preflight_clears_images_when_document_context_owns_turn():
@@ -13,12 +18,16 @@ async def test_image_preflight_clears_images_when_document_context_owns_turn():
     }
 
     result = await execute_direct_node_image_input_preflight(
-        query="tao bai giang tu file vua upload",
-        state={},
-        ctx=ctx,
-        response_present=False,
-        has_uploaded_document_context=True,
-        record_thinking_snapshot_fn=lambda *_args, **_kwargs: None,
+        request=DirectImageInputPreflightRequest(
+            query="tao bai giang tu file vua upload",
+            state={},
+            ctx=ctx,
+            response_present=False,
+            has_uploaded_document_context=True,
+        ),
+        dependencies=DirectImageInputPreflightDependencies(
+            record_thinking_snapshot_fn=lambda *_args, **_kwargs: None,
+        ),
     )
 
     assert result is None
@@ -35,13 +44,17 @@ async def test_image_preflight_returns_vision_unavailable_without_llm():
     state = {}
 
     result = await execute_direct_node_image_input_preflight(
-        query="Nhin anh nay va mo ta giup minh",
-        state=state,
-        ctx={"image_input_error": "vision_disabled"},
-        response_present=False,
-        has_uploaded_document_context=False,
-        record_thinking_snapshot_fn=lambda *args, **kwargs: snapshots.append(
-            (args, kwargs)
+        request=DirectImageInputPreflightRequest(
+            query="Nhin anh nay va mo ta giup minh",
+            state=state,
+            ctx={"image_input_error": "vision_disabled"},
+            response_present=False,
+            has_uploaded_document_context=False,
+        ),
+        dependencies=DirectImageInputPreflightDependencies(
+            record_thinking_snapshot_fn=lambda *args, **kwargs: snapshots.append(
+                (args, kwargs)
+            ),
         ),
     )
 
@@ -65,12 +78,16 @@ async def test_image_preflight_analyzes_base64_images_before_llm(monkeypatch):
 
     state = {}
     result = await module.execute_direct_node_image_input_preflight(
-        query="Nhin anh nay",
-        state=state,
-        ctx={"images": [{"type": "base64", "data": "abc"}]},
-        response_present=False,
-        has_uploaded_document_context=False,
-        record_thinking_snapshot_fn=lambda *_args, **_kwargs: None,
+        request=DirectImageInputPreflightRequest(
+            query="Nhin anh nay",
+            state=state,
+            ctx={"images": [{"type": "base64", "data": "abc"}]},
+            response_present=False,
+            has_uploaded_document_context=False,
+        ),
+        dependencies=DirectImageInputPreflightDependencies(
+            record_thinking_snapshot_fn=lambda *_args, **_kwargs: None,
+        ),
     )
 
     assert result is not None

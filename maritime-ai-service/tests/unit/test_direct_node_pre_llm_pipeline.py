@@ -68,8 +68,9 @@ async def test_pre_llm_pipeline_preserves_document_then_image_order():
 
     async def document_preview_preflight_fn(**kwargs):
         calls.append("document")
-        assert kwargs["response_present"] is False
-        assert kwargs["sanitize_preview_response"]("ok", []) == "clean:ok"
+        assert kwargs["request"].response_present is False
+        assert kwargs["request"].has_uploaded_document_context is True
+        assert kwargs["dependencies"].sanitize_preview_response("ok", []) == "clean:ok"
         return SimpleNamespace(
             response="Preview da gui.",
             response_type="document_preview_host_action",
@@ -77,7 +78,8 @@ async def test_pre_llm_pipeline_preserves_document_then_image_order():
 
     async def image_input_preflight_fn(**kwargs):
         calls.append("image")
-        assert kwargs["response_present"] is True
+        assert kwargs["request"].response_present is True
+        assert kwargs["dependencies"].record_thinking_snapshot_fn
         return None
 
     def fast_response_fn(**_kwargs):
@@ -134,9 +136,16 @@ async def test_pre_llm_pipeline_uses_fast_response_when_preflights_do_not_answer
             record_document_plan_fn=lambda **_kwargs: None,
             document_preview_preflight_fn=no_document_answer,
             image_input_preflight_fn=no_image_answer,
-            fast_response_fn=lambda **_kwargs: SimpleNamespace(
-                response="Fast answer.",
-                response_type="wiii_pipeline_meta",
+            fast_response_fn=lambda **kwargs: (
+                SimpleNamespace(
+                    response="Fast answer.",
+                    response_type="wiii_pipeline_meta",
+                )
+                if (
+                    kwargs["request"].query == "wiii pipeline la gi"
+                    and kwargs["dependencies"].normalize_for_intent("A") == "A"
+                )
+                else None
             ),
         ),
     )
