@@ -12,6 +12,15 @@ from app.engine.multi_agent.code_studio_node_preflight import (
     CodeStudioNodePreflightRequest,
     execute_code_studio_node_preflight,
 )
+from app.engine.multi_agent.code_studio_node_events import (
+    CodeStudioNodeEventSinkRequest,
+    create_code_studio_node_event_sink,
+)
+from app.engine.multi_agent.code_studio_node_final_state import (
+    CodeStudioNodeFinalStateDependencies,
+    CodeStudioNodeFinalStateRequest,
+    apply_code_studio_node_final_state,
+)
 from app.engine.multi_agent.code_studio_scaffold_fallback_policy import (
     resolve_code_studio_scaffold_fallback,
 )
@@ -19,10 +28,6 @@ from app.engine.multi_agent.code_studio_tool_setup import (
     prepare_code_studio_tool_setup,
 )
 from app.engine.multi_agent.state import AgentState
-from app.engine.reasoning import (
-    record_thinking_snapshot,
-    resolve_visible_thinking_from_lifecycle,
-)
 from app.engine.runtime.runtime_metrics import inc_counter
 
 
@@ -61,18 +66,16 @@ async def code_studio_node_impl(
     query = state.get("query", "")
     effective_query = query
 
-    _event_queue = None
     _bus_id = state.get("_event_bus_id")
-    if _bus_id:
-        _event_queue = get_event_queue(_bus_id)
-
-    async def _push_event(event: dict):
-        capture_public_thinking_event(state, event)
-        if _event_queue:
-            try:
-                _event_queue.put_nowait(event)
-            except Exception as _qe:
-                logger.debug("[CODE_STUDIO] Event queue push failed: %s", _qe)
+    event_sink = create_code_studio_node_event_sink(
+        CodeStudioNodeEventSinkRequest(
+            state=state,
+            bus_id=_bus_id,
+            get_event_queue=get_event_queue,
+            capture_public_thinking_event=capture_public_thinking_event,
+            logger=logger,
+        )
+    )
 
     tracer = get_or_create_tracer(state)
     tracer.start_step(step_names.DIRECT_RESPONSE, "Che tac dau ra ky thuat")
@@ -85,7 +88,7 @@ async def code_studio_node_impl(
                 query=query,
                 state=state,
                 default_domain=settings_obj.default_domain,
-                push_event=_push_event,
+                push_event=event_sink.push_event,
                 tracer=tracer,
             ),
             dependencies=CodeStudioNodePreflightDependencies(
@@ -127,7 +130,7 @@ async def code_studio_node_impl(
                 state=state,
                 query=effective_query,
                 tools=tools,
-                push_event=_push_event,
+                push_event=event_sink.push_event,
                 runtime_context_base=runtime_context_base,
             )
 
@@ -157,8 +160,8 @@ async def code_studio_node_impl(
                         tools=tools,
                         force_tools=force_tools,
                         runtime_context_base=runtime_context_base,
-                        event_queue_present=bool(_event_queue),
-                        push_event=_push_event,
+                        event_queue_present=event_sink.event_queue_present,
+                        push_event=event_sink.push_event,
                         settings_obj=settings_obj,
                         requested_model=state.get("model"),
                     ),
@@ -231,27 +234,17 @@ async def code_studio_node_impl(
             },
         )
 
-    if not state.get("thinking_content"):
-        state["thinking_content"] = resolve_visible_thinking_from_lifecycle(
-            state,
-            fallback=await build_code_studio_reasoning_summary(
-                query,
-                state,
-                direct_tool_names(state.get("tools_used", [])),
-            ),
-            default_node="code_studio_agent",
-        )
-    if state.get("thinking_content"):
-        record_thinking_snapshot(
-            state,
-            state.get("thinking_content"),
-            node="code_studio_agent",
-            provenance="final_snapshot",
-        )
-
-    state["final_response"] = response
-    state["agent_outputs"] = {"code_studio_agent": response}
-    state["current_agent"] = "code_studio_agent"
+    await apply_code_studio_node_final_state(
+        request=CodeStudioNodeFinalStateRequest(
+            state=state,
+            response=response,
+            query=query,
+        ),
+        dependencies=CodeStudioNodeFinalStateDependencies(
+            build_code_studio_reasoning_summary=build_code_studio_reasoning_summary,
+            direct_tool_names=direct_tool_names,
+        ),
+    )
 
     logger.info("[CODE_STUDIO] Response prepared, tracer passed to synthesizer")
 
