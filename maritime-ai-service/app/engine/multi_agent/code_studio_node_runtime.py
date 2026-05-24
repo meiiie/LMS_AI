@@ -35,7 +35,7 @@ async def code_studio_node_impl(
     build_code_studio_tools_context,
     build_tool_runtime_context_fn,
     build_visual_tool_runtime_metadata,
-    execute_pendulum_code_studio_fast_path,
+    execute_code_studio_fast_path,
     execute_code_studio_tool_rounds,
     extract_direct_response,
     build_code_studio_stream_summary_messages,
@@ -144,7 +144,7 @@ async def code_studio_node_impl(
                 metadata=build_visual_tool_runtime_metadata(state, effective_query),
             )
 
-            fast_path_result = await execute_pendulum_code_studio_fast_path(
+            fast_path_result = await execute_code_studio_fast_path(
                 state=state,
                 query=effective_query,
                 tools=tools,
