@@ -24,6 +24,14 @@ from app.engine.multi_agent.direct_node_image_input_preflight import (
 from app.engine.multi_agent.direct_node_operational_fast_paths import (
     _strip_dsml_residue,
 )
+from app.engine.multi_agent.direct_node_pre_llm_stage_contract import (
+    DirectDocumentPreviewPreflightDependencies,
+    DirectDocumentPreviewPreflightRequest,
+    DirectImageInputPreflightDependencies,
+    DirectImageInputPreflightRequest,
+    DirectNodeFastResponseDependencies,
+    DirectNodeFastResponseRequest,
+)
 from app.engine.multi_agent.direct_node_turn_start import start_direct_node_turn
 from app.engine.multi_agent.direct_node_uploaded_context import (
     _looks_uploaded_document_preview_request,
@@ -162,37 +170,47 @@ async def execute_direct_node_pre_llm_pipeline(
     )
 
     document_preflight_result = await dependencies.document_preview_preflight_fn(
-        query=query,
-        state=state,
-        ctx=ctx_for_preflight,
-        bus_id=request.bus_id,
-        response_present=bool(response),
-        has_uploaded_document_context=has_uploaded_document_context,
-        looks_uploaded_document_preview_request=_looks_uploaded_document_preview_request,
-        push_event=request.push_event,
-        build_visual_tool_runtime_metadata=(
-            dependencies.build_visual_tool_runtime_metadata
+        request=DirectDocumentPreviewPreflightRequest(
+            query=query,
+            state=state,
+            ctx=ctx_for_preflight,
+            bus_id=request.bus_id,
+            response_present=bool(response),
+            has_uploaded_document_context=has_uploaded_document_context,
+            push_event=request.push_event,
         ),
-        execute_direct_tool_rounds=dependencies.execute_direct_tool_rounds,
-        extract_direct_response=dependencies.extract_direct_response,
-        sanitize_preview_response=sanitize_document_preview_response,
-        fallback_response=(
-            "Mình đã gửi bản preview bài học sang LMS. "
-            "Giáo viên cần xem phần so sánh thay đổi và nguồn trích dẫn rồi bấm Áp dụng để cấp approval_token."
+        dependencies=DirectDocumentPreviewPreflightDependencies(
+            looks_uploaded_document_preview_request=(
+                _looks_uploaded_document_preview_request
+            ),
+            build_visual_tool_runtime_metadata=(
+                dependencies.build_visual_tool_runtime_metadata
+            ),
+            execute_direct_tool_rounds=dependencies.execute_direct_tool_rounds,
+            extract_direct_response=dependencies.extract_direct_response,
+            sanitize_preview_response=sanitize_document_preview_response,
+            fallback_response=(
+                "Mình đã gửi bản preview bài học sang LMS. "
+                "Giáo viên cần xem phần so sánh thay đổi và nguồn trích dẫn rồi bấm Áp dụng để cấp approval_token."
+            ),
+            logger_obj=dependencies.logger_obj,
         ),
-        logger_obj=dependencies.logger_obj,
     )
     if document_preflight_result is not None:
         response = document_preflight_result.response
         response_type = document_preflight_result.response_type
 
     image_preflight_result = await dependencies.image_input_preflight_fn(
-        query=query,
-        state=state,
-        ctx=ctx_for_preflight,
-        response_present=bool(response),
-        has_uploaded_document_context=has_uploaded_document_context,
-        record_thinking_snapshot_fn=dependencies.record_thinking_snapshot_fn,
+        request=DirectImageInputPreflightRequest(
+            query=query,
+            state=state,
+            ctx=ctx_for_preflight,
+            response_present=bool(response),
+            has_uploaded_document_context=has_uploaded_document_context,
+        ),
+        dependencies=DirectImageInputPreflightDependencies(
+            record_thinking_snapshot_fn=dependencies.record_thinking_snapshot_fn,
+        ),
     )
     if image_preflight_result is not None:
         response = image_preflight_result.response
@@ -200,15 +218,19 @@ async def execute_direct_node_pre_llm_pipeline(
 
     if not response:
         fast_response = dependencies.fast_response_fn(
-            query=query,
-            state=state,
-            ctx=ctx_for_preflight,
-            has_uploaded_document_context=has_uploaded_document_context,
-            normalize_for_intent=dependencies.normalize_for_intent,
-            needs_web_search=dependencies.needs_web_search,
-            needs_datetime=dependencies.needs_datetime,
-            record_thinking_snapshot_fn=dependencies.record_thinking_snapshot_fn,
-            logger_obj=dependencies.logger_obj,
+            request=DirectNodeFastResponseRequest(
+                query=query,
+                state=state,
+                ctx=ctx_for_preflight,
+                has_uploaded_document_context=has_uploaded_document_context,
+            ),
+            dependencies=DirectNodeFastResponseDependencies(
+                normalize_for_intent=dependencies.normalize_for_intent,
+                needs_web_search=dependencies.needs_web_search,
+                needs_datetime=dependencies.needs_datetime,
+                record_thinking_snapshot_fn=dependencies.record_thinking_snapshot_fn,
+                logger_obj=dependencies.logger_obj,
+            ),
         )
         if fast_response is not None:
             response = fast_response.response
