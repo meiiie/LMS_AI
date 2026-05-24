@@ -40,19 +40,11 @@ from app.engine.multi_agent.direct_node_llm_preflight import (
 from app.engine.multi_agent.direct_node_llm_fallback import (
     resolve_direct_node_llm_unavailable_fallback,
 )
-from app.engine.multi_agent.direct_node_response_cleanup import (
-    apply_source_backed_empty_response_fallback,
-    clean_direct_node_llm_response,
-)
-from app.engine.multi_agent.direct_node_visible_thinking_finalization import (
-    finalize_direct_node_visible_thinking,
-)
-from app.engine.multi_agent.direct_reasoning import (
-    _is_codebase_analysis_query,
+from app.engine.multi_agent.direct_node_llm_execution_finalization import (
+    finalize_direct_node_llm_execution,
 )
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
-    looks_like_search_placeholder_answer,
 )
 from app.engine.multi_agent.direct_node_exception_fallbacks import (
     handle_direct_node_generation_exception,
@@ -61,7 +53,6 @@ from app.engine.multi_agent.direct_node_final_state import finalize_direct_node_
 from app.engine.multi_agent.direct_node_operational_fast_paths import (
     _build_codebase_analysis_fallback_answer,
     _build_codebase_analysis_fallback_thinking,
-    _looks_generic_direct_fallback_response,
     _strip_dsml_residue,
 )
 from app.engine.multi_agent.direct_node_thinking_snapshot import (
@@ -78,7 +69,6 @@ from app.engine.multi_agent.direct_node_uploaded_context import (
     _provider_likely_supports_image_blocks,
 )
 from app.engine.multi_agent.direct_node_visible_thought import (
-    _compact_basic_identity_answer,
     _strip_direct_inline_private_asides,
 )
 from app.engine.runtime.runtime_metrics import inc_counter
@@ -337,8 +327,6 @@ async def direct_response_node_impl(
                 )
                 if preview_result is not None:
                     response = preview_result.response
-                    thinking_content = preview_result.thinking_content
-                    tools_used = preview_result.tools_used
                     messages = preview_result.messages
                     tool_call_events = preview_result.tool_call_events
                     tracer.end_step(
@@ -515,73 +503,24 @@ async def direct_response_node_impl(
                     logger_obj=logger,
                 )
 
-                if tool_call_events:
-                    state["tool_call_events"] = tool_call_events
-
-                response, thinking_content, tools_used = extract_direct_response(llm_response, messages)
-                cleaned_response = clean_direct_node_llm_response(
+                llm_finalization = await finalize_direct_node_llm_execution(
                     query=query,
                     state=state,
-                    response=response,
-                    thinking_content=thinking_content,
-                    tools_used=tools_used,
+                    llm_response=llm_response,
+                    messages=messages,
                     tool_call_events=tool_call_events,
-                    is_identity_turn=is_identity_turn,
-                    is_codebase_analysis_turn=_is_codebase_analysis_query(query),
-                    explicit_web_search_turn=explicit_web_search_turn,
-                    sanitize_structured_visual_answer_text=sanitize_structured_visual_answer_text,
-                    sanitize_wiii_house_text=sanitize_wiii_house_text,
-                    strip_direct_inline_private_asides=_strip_direct_inline_private_asides,
-                    strip_dsml_residue=_strip_dsml_residue,
-                    compact_basic_identity_answer=_compact_basic_identity_answer,
-                    looks_generic_direct_fallback_response=(
-                        _looks_generic_direct_fallback_response
-                    ),
-                    build_codebase_analysis_fallback_answer=(
-                        _build_codebase_analysis_fallback_answer
-                    ),
-                    build_codebase_analysis_fallback_thinking=(
-                        _build_codebase_analysis_fallback_thinking
-                    ),
-                    record_direct_node_thinking_snapshot=record_direct_node_thinking_snapshot,
-                    record_thinking_snapshot_fn=record_thinking_snapshot,
-                )
-                response = cleaned_response.response
-                thinking_content = cleaned_response.thinking_content
-                tools_used = cleaned_response.tools_used
-                # Source-backed graceful synthesis: when the LLM returned an
-                # empty body but tools captured real search results (Perplexity
-                # 2026 / Anthropic Computer Use 2026 evidence-pool pattern),
-                # build a citation-bearing answer directly from tool_call_events
-                # instead of letting the user see nothing.
-                source_fallback = apply_source_backed_empty_response_fallback(
-                    query=query,
-                    response=response,
-                    tools_used=tools_used,
-                    tool_call_events=tool_call_events,
-                    looks_like_search_placeholder_answer=looks_like_search_placeholder_answer,
-                    build_search_template_fallback=build_search_template_fallback,
-                    inc_counter=inc_counter,
-                    logger_obj=logger,
-                )
-                response = source_fallback.response
-                tools_used = source_fallback.tools_used
-
-                await finalize_direct_node_visible_thinking(
-                    query=query,
-                    state=state,
-                    response=response,
-                    thinking_content=thinking_content,
+                    llm=llm,
                     routing_intent=routing_intent,
                     response_language=response_language,
-                    llm=llm,
-                    tools_used=list(tools_used or []),
+                    is_identity_turn=is_identity_turn,
+                    explicit_web_search_turn=explicit_web_search_turn,
+                    extract_direct_response=extract_direct_response,
+                    sanitize_structured_visual_answer_text=sanitize_structured_visual_answer_text,
+                    sanitize_wiii_house_text=sanitize_wiii_house_text,
                     build_direct_reasoning_summary=build_direct_reasoning_summary,
-                    record_direct_node_thinking_snapshot=record_direct_node_thinking_snapshot,
-                    record_thinking_snapshot_fn=record_thinking_snapshot,
+                    logger_obj=logger,
                 )
-                if tools_used:
-                    state["tools_used"] = tools_used
+                response = llm_finalization.response
 
                 tracer.end_step(
                     result=f"Phan hoi LLM: {len(response)} chars",
