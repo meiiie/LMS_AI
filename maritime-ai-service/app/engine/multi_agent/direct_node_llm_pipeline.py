@@ -13,6 +13,10 @@ from app.engine.multi_agent.direct_node_document_preview_runtime import (
 from app.engine.multi_agent.direct_node_exception_fallbacks import (
     handle_direct_node_generation_exception,
 )
+from app.engine.multi_agent.direct_node_exception_fallback_contract import (
+    DirectNodeExceptionFallbackDependencies,
+    DirectNodeExceptionFallbackRequest,
+)
 from app.engine.multi_agent.direct_node_llm_fallback import (
     resolve_direct_node_llm_unavailable_fallback,
 )
@@ -356,43 +360,49 @@ async def execute_direct_node_llm_pipeline(
             tool_call_events,
         )
         fallback_result = await handle_direct_node_generation_exception(
-            exc=exc,
-            query=query,
-            state=state,
-            ctx_for_preflight=request.ctx_for_preflight,
-            tools=tools,
-            tool_call_events=tool_call_events,
-            llm_response=llm_response,
-            messages=messages,
-            llm=llm,
-            routing_intent=routing_intent,
-            response_language=response_language,
-            is_identity_turn=is_identity_turn,
-            explicit_user_provider=explicit_user_provider,
-            explicit_web_search_turn=explicit_web_search_turn,
-            needs_web_search=dependencies.needs_web_search,
-            extract_direct_response=dependencies.extract_direct_response,
-            sanitize_structured_visual_answer_text=(
-                dependencies.sanitize_structured_visual_answer_text
+            request=DirectNodeExceptionFallbackRequest(
+                exc=exc,
+                query=query,
+                state=state,
+                ctx_for_preflight=request.ctx_for_preflight,
+                tools=tools,
+                tool_call_events=tool_call_events,
+                llm_response=llm_response,
+                messages=messages,
+                llm=llm,
+                routing_intent=routing_intent,
+                response_language=response_language,
+                is_identity_turn=is_identity_turn,
+                explicit_user_provider=explicit_user_provider,
+                explicit_web_search_turn=explicit_web_search_turn,
+                tracer=request.tracer,
+                push_event=request.push_event,
             ),
-            sanitize_wiii_house_text=dependencies.sanitize_wiii_house_text,
-            build_search_template_fallback=build_search_template_fallback,
-            build_uploaded_document_context_fallback_answer=(
-                _build_uploaded_document_context_fallback_answer
+            dependencies=DirectNodeExceptionFallbackDependencies(
+                needs_web_search=dependencies.needs_web_search,
+                extract_direct_response=dependencies.extract_direct_response,
+                sanitize_structured_visual_answer_text=(
+                    dependencies.sanitize_structured_visual_answer_text
+                ),
+                sanitize_wiii_house_text=dependencies.sanitize_wiii_house_text,
+                build_search_template_fallback=build_search_template_fallback,
+                build_uploaded_document_context_fallback_answer=(
+                    _build_uploaded_document_context_fallback_answer
+                ),
+                build_codebase_analysis_fallback_answer=(
+                    _build_codebase_analysis_fallback_answer
+                ),
+                build_codebase_analysis_fallback_thinking=(
+                    _build_codebase_analysis_fallback_thinking
+                ),
+                get_phase_fallback=dependencies.get_phase_fallback,
+                record_direct_node_thinking_snapshot=(
+                    record_direct_node_thinking_snapshot
+                ),
+                record_thinking_snapshot_fn=dependencies.record_thinking_snapshot_fn,
+                inc_counter=inc_counter,
+                logger_obj=dependencies.logger_obj,
             ),
-            build_codebase_analysis_fallback_answer=(
-                _build_codebase_analysis_fallback_answer
-            ),
-            build_codebase_analysis_fallback_thinking=(
-                _build_codebase_analysis_fallback_thinking
-            ),
-            get_phase_fallback=dependencies.get_phase_fallback,
-            record_direct_node_thinking_snapshot=record_direct_node_thinking_snapshot,
-            record_thinking_snapshot_fn=dependencies.record_thinking_snapshot_fn,
-            tracer=request.tracer,
-            push_event=request.push_event,
-            inc_counter=inc_counter,
-            logger_obj=dependencies.logger_obj,
         )
         response = fallback_result.response
         tool_call_events = fallback_result.tool_call_events
