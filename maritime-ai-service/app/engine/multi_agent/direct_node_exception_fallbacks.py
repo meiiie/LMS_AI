@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any, Callable
 
 from app.core.config import settings
@@ -14,75 +13,64 @@ from app.engine.multi_agent.direct_node_emergency_fallbacks import (
     _emit_synthetic_tool_events,
     _salvage_direct_turn_from_final_result,
 )
+from app.engine.multi_agent.direct_node_exception_fallback_contract import (
+    DirectNodeExceptionFallbackDependencies,
+    DirectNodeExceptionFallbackRequest,
+    DirectNodeExceptionFallbackResult,
+)
 from app.engine.multi_agent.direct_reasoning import _is_codebase_analysis_query
 from app.engine.multi_agent.state import AgentState
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class DirectNodeExceptionFallbackResult:
-    """Recovered direct-node response after an exception path."""
-
-    response: str
-    tool_call_events: list[dict[str, Any]]
-
-
 async def handle_direct_node_generation_exception(
     *,
-    exc: Exception,
-    query: str,
-    state: AgentState,
-    ctx_for_preflight: dict[str, Any],
-    tools: list[Any],
-    tool_call_events: list[dict[str, Any]],
-    llm_response: Any,
-    messages: list[Any],
-    llm: Any,
-    routing_intent: str,
-    response_language: str,
-    is_identity_turn: bool,
-    explicit_user_provider: str | None,
-    explicit_web_search_turn: bool,
-    needs_web_search: Callable[[str], bool],
-    extract_direct_response: Callable[..., Any],
-    sanitize_structured_visual_answer_text: Callable[..., str],
-    sanitize_wiii_house_text: Callable[..., str],
-    build_search_template_fallback: Callable[..., str],
-    build_uploaded_document_context_fallback_answer: Callable[..., str],
-    build_codebase_analysis_fallback_answer: Callable[[str], str],
-    build_codebase_analysis_fallback_thinking: Callable[[str], str],
-    get_phase_fallback: Callable[[AgentState], str],
-    record_direct_node_thinking_snapshot: Callable[..., str],
-    record_thinking_snapshot_fn: Callable[..., Any],
-    tracer: Any,
-    push_event: Callable[..., Any],
-    inc_counter: Callable[..., Any],
-    logger_obj: logging.Logger | None = None,
-    salvage_direct_turn_from_final_result_fn: Callable[..., Any] | None = None,
-    emergency_search_fallback_fn: Callable[..., Any] | None = None,
-    emit_synthetic_tool_events_fn: Callable[..., Any] | None = None,
-    classify_failover_reason_fn: Callable[..., dict[str, Any]] | None = None,
+    request: DirectNodeExceptionFallbackRequest,
+    dependencies: DirectNodeExceptionFallbackDependencies,
 ) -> DirectNodeExceptionFallbackResult:
     """Recover or re-raise after direct-node LLM/tool generation fails."""
 
-    log = logger_obj or logger
+    exc = request.exc
+    query = request.query
+    state = request.state
+    ctx_for_preflight = request.ctx_for_preflight
+    tools = request.tools
+    tool_call_events = request.tool_call_events
+    llm_response = request.llm_response
+    messages = request.messages
+    llm = request.llm
+    routing_intent = request.routing_intent
+    response_language = request.response_language
+    is_identity_turn = request.is_identity_turn
+    explicit_user_provider = request.explicit_user_provider
+    explicit_web_search_turn = request.explicit_web_search_turn
+    tracer = request.tracer
+    push_event = request.push_event
+
+    log = dependencies.logger_obj or logger
     salvage_direct_turn = (
-        salvage_direct_turn_from_final_result_fn
+        dependencies.salvage_direct_turn_from_final_result_fn
         or _salvage_direct_turn_from_final_result
     )
-    emergency_search = emergency_search_fallback_fn or _emergency_search_fallback
-    emit_synthetic_events = emit_synthetic_tool_events_fn or _emit_synthetic_tool_events
+    emergency_search = (
+        dependencies.emergency_search_fallback_fn or _emergency_search_fallback
+    )
+    emit_synthetic_events = (
+        dependencies.emit_synthetic_tool_events_fn or _emit_synthetic_tool_events
+    )
     classify_failover_reason = (
-        classify_failover_reason_fn or classify_failover_reason_impl
+        dependencies.classify_failover_reason_fn or classify_failover_reason_impl
     )
 
     salvaged = await salvage_direct_turn(
         llm_response=llm_response,
         messages=messages,
-        extract_direct_response=extract_direct_response,
-        sanitize_structured_visual_answer_text=sanitize_structured_visual_answer_text,
-        sanitize_wiii_house_text=sanitize_wiii_house_text,
+        extract_direct_response=dependencies.extract_direct_response,
+        sanitize_structured_visual_answer_text=(
+            dependencies.sanitize_structured_visual_answer_text
+        ),
+        sanitize_wiii_house_text=dependencies.sanitize_wiii_house_text,
         tool_call_events=tool_call_events,
         query=query,
         is_identity_turn=is_identity_turn,
@@ -95,11 +83,11 @@ async def handle_direct_node_generation_exception(
         if salvaged_tools:
             state["tools_used"] = salvaged_tools
         if salvaged_thinking:
-            record_direct_node_thinking_snapshot(
+            dependencies.record_direct_node_thinking_snapshot(
                 state=state,
                 thinking=salvaged_thinking,
                 provenance="final_snapshot",
-                record_thinking_snapshot_fn=record_thinking_snapshot_fn,
+                record_thinking_snapshot_fn=dependencies.record_thinking_snapshot_fn,
             )
         log.warning(
             "[DIRECT] Post-processing failed but salvaged final result: %s",
@@ -120,7 +108,7 @@ async def handle_direct_node_generation_exception(
 
     uploaded_fallback = ""
     if isinstance(exc, ProviderUnavailableError):
-        uploaded_fallback = build_uploaded_document_context_fallback_answer(
+        uploaded_fallback = dependencies.build_uploaded_document_context_fallback_answer(
             query,
             ctx_for_preflight,
         )
@@ -147,7 +135,7 @@ async def handle_direct_node_generation_exception(
         template_response = _build_template_response(
             query=query,
             tool_call_events=tool_call_events,
-            build_search_template_fallback=build_search_template_fallback,
+            build_search_template_fallback=dependencies.build_search_template_fallback,
             log=log,
             warning_message="[DIRECT] Provider unavailable and search fallback build failed: %s",
         )
@@ -177,7 +165,7 @@ async def handle_direct_node_generation_exception(
             tool_call_events=tool_call_events,
         )
 
-    if isinstance(exc, ProviderUnavailableError) and needs_web_search(query):
+    if isinstance(exc, ProviderUnavailableError) and dependencies.needs_web_search(query):
         fallback_events = await _run_emergency_search(
             query=query,
             tools=tools,
@@ -193,7 +181,7 @@ async def handle_direct_node_generation_exception(
                     push_event=push_event,
                 )
                 state["tool_call_events"] = fallback_events
-                template_response = build_search_template_fallback(
+                template_response = dependencies.build_search_template_fallback(
                     query=query,
                     tool_call_events=fallback_events,
                 )
@@ -229,7 +217,7 @@ async def handle_direct_node_generation_exception(
             tool_call_events=fallback_events,
         )
 
-    if explicit_user_provider and needs_web_search(query):
+    if explicit_user_provider and dependencies.needs_web_search(query):
         return await _handle_explicit_provider_web_failure(
             exc=exc,
             query=query,
@@ -237,7 +225,7 @@ async def handle_direct_node_generation_exception(
             tools=tools,
             tool_call_events=tool_call_events,
             explicit_user_provider=explicit_user_provider,
-            build_search_template_fallback=build_search_template_fallback,
+            build_search_template_fallback=dependencies.build_search_template_fallback,
             emergency_search=emergency_search,
             emit_synthetic_events=emit_synthetic_events,
             push_event=push_event,
@@ -247,7 +235,7 @@ async def handle_direct_node_generation_exception(
         )
 
     if explicit_user_provider:
-        uploaded_fallback = build_uploaded_document_context_fallback_answer(
+        uploaded_fallback = dependencies.build_uploaded_document_context_fallback_answer(
             query,
             ctx_for_preflight,
         )
@@ -296,20 +284,24 @@ async def handle_direct_node_generation_exception(
         tools=tools,
         tool_call_events=tool_call_events,
         explicit_web_search_turn=explicit_web_search_turn,
-        needs_web_search=needs_web_search,
-        build_search_template_fallback=build_search_template_fallback,
+        needs_web_search=dependencies.needs_web_search,
+        build_search_template_fallback=dependencies.build_search_template_fallback,
         build_uploaded_document_context_fallback_answer=(
-            build_uploaded_document_context_fallback_answer
+            dependencies.build_uploaded_document_context_fallback_answer
         ),
-        build_codebase_analysis_fallback_answer=build_codebase_analysis_fallback_answer,
+        build_codebase_analysis_fallback_answer=(
+            dependencies.build_codebase_analysis_fallback_answer
+        ),
         build_codebase_analysis_fallback_thinking=(
-            build_codebase_analysis_fallback_thinking
+            dependencies.build_codebase_analysis_fallback_thinking
         ),
-        get_phase_fallback=get_phase_fallback,
-        record_direct_node_thinking_snapshot=record_direct_node_thinking_snapshot,
-        record_thinking_snapshot_fn=record_thinking_snapshot_fn,
+        get_phase_fallback=dependencies.get_phase_fallback,
+        record_direct_node_thinking_snapshot=(
+            dependencies.record_direct_node_thinking_snapshot
+        ),
+        record_thinking_snapshot_fn=dependencies.record_thinking_snapshot_fn,
         emergency_search=emergency_search,
-        inc_counter=inc_counter,
+        inc_counter=dependencies.inc_counter,
         tracer=tracer,
         log=log,
     )
