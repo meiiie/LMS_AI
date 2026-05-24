@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537, #539, #549, #551, #553, #555, #557, #559, #561 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537, #539, #549, #551, #553, #555, #557, #559, #561, #563 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -241,6 +241,12 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   resolves presentation intent, studio lane, artifact kind, renderer kind,
   patch strategy, quality profile, and runtime manifest through
   `VisualCodeRuntimeContract` before validation/payload build.
+- Follow-up #563 moved direct-node LLM/tool execution result finalization into
+  `direct_node_llm_execution_finalization.py`, keeping response extraction,
+  cleanup, source-backed empty-response fallback, visible-thinking finalization,
+  and `tool_call_events` / `tools_used` state side effects behind one tested
+  helper while preserving host-timeout execution and exception salvage in the
+  main shell.
 
 ## Preserved Intentionally
 
@@ -275,8 +281,8 @@ backups, data PDFs, or local skill folders.
   host-action rebinding/execution/preflight, image-input preflight,
   direct-node event sink lifecycle, direct-node turn-start lifecycle,
   direct-node turn-policy lifecycle, direct-node tool selection, LLM preflight,
-  LLM-unavailable fallback selection, execution preparation, response cleanup,
-  visible-thinking finalization,
+  LLM-unavailable fallback selection, execution preparation, LLM/tool execution
+  result finalization,
   exception/source fallback lifecycle, final state/domain notice handling, and
   host UI timeout handling have moved out. The long-term cleanup direction is
   lifecycle modules and SSE V3 parity modules with narrow contract tests. Its
