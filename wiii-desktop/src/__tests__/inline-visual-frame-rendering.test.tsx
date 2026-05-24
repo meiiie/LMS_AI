@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { InlineVisualFrame } from "@/components/common/InlineVisualFrame";
 
 const originalCreateObjectUrl = URL.createObjectURL;
@@ -36,6 +36,42 @@ describe("InlineVisualFrame rendering contract", () => {
     expect(iframe.parentElement?.style.minHeight).toBe("0px");
     expect((iframe as HTMLIFrameElement).style.height).toBe("100%");
     expect((iframe as HTMLIFrameElement).style.minHeight).toBe("0px");
+  });
+
+  it("syncs host visual state when a sandbox frame finishes loading", async () => {
+    render(
+      <InlineVisualFrame
+        html="<main>Bridge app</main>"
+        title="Bridge app"
+        sessionId="vs_bridge"
+        frameKind="app"
+        sizingMode="viewport"
+        shellVariant="immersive"
+        runtimeManifest={{ ui_runtime: "iframe", storage: true }}
+      />,
+    );
+
+    const iframe = await screen.findByTitle("Bridge app");
+    const postMessage = vi.fn();
+    Object.defineProperty(iframe, "contentWindow", {
+      configurable: true,
+      value: { postMessage },
+    });
+
+    fireEvent.load(iframe);
+
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        type: "wiii-visual-sync",
+        payload: {
+          sessionId: "vs_bridge",
+          frameKind: "app",
+          shellVariant: "immersive",
+          runtimeManifest: { ui_runtime: "iframe", storage: true },
+        },
+      },
+      "*",
+    );
   });
 
   it("keeps normal inline app visuals content-sized", async () => {

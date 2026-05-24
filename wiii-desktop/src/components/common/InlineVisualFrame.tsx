@@ -119,6 +119,20 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
     setHeight(heightProfile.initialHeight);
   }, [heightProfile.initialHeight, html, sizingMode]);
 
+  const postHostSync = useCallback(() => {
+    const target = iframeRef.current?.contentWindow;
+    if (!target) return;
+    target.postMessage(
+      buildVisualFrameHostSyncMessage({
+        sessionId,
+        frameKind,
+        shellVariant,
+        runtimeManifest: runtimeManifest || null,
+      }),
+      "*",
+    );
+  }, [frameKind, runtimeManifest, sessionId, shellVariant]);
+
   useEffect(() => {
     const handler = (event: MessageEvent) => {
       if (iframeRef.current && event.source !== iframeRef.current.contentWindow)
@@ -154,16 +168,8 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
         }
         return;
       }
-      if (message.kind === "ready" && iframeRef.current?.contentWindow) {
-        iframeRef.current.contentWindow.postMessage(
-          buildVisualFrameHostSyncMessage({
-            sessionId,
-            frameKind,
-            shellVariant,
-            runtimeManifest: runtimeManifest || null,
-          }),
-          "*",
-        );
+      if (message.kind === "ready") {
+        postHostSync();
         return;
       }
       if (message.kind === "bridge") {
@@ -175,7 +181,7 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [frameKind, heightProfile, onBridgeEvent, runtimeManifest, sessionId, shellVariant]);
+  }, [heightProfile, onBridgeEvent, postHostSync]);
 
   // Tweaks toggle: send activate/deactivate to iframe
   const handleTweaksToggle = useCallback(() => {
@@ -237,6 +243,7 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
         sandbox="allow-scripts"
         // @ts-expect-error allowtransparency is a legacy but widely supported iframe attribute
         allowtransparency="true"
+        onLoad={postHostSync}
         style={{
           width: "100%",
           height: iframeHeight,
