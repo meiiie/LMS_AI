@@ -6,6 +6,9 @@ from __future__ import annotations
 from app.engine.multi_agent.code_studio_scaffold_fallback_policy import (
     resolve_code_studio_scaffold_fallback,
 )
+from app.engine.multi_agent.code_studio_tool_setup import (
+    prepare_code_studio_tool_setup,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.reasoning import (
     record_thinking_snapshot,
@@ -108,41 +111,20 @@ async def code_studio_node_impl(
                     details={"response_type": "clarify", "reason": "ambiguous_simulation_request"},
                 )
         if not response:
-            tools, force_tools = collect_code_studio_tools(effective_query, _ctx.get("user_role", "student"))
-            try:
-                from app.engine.skills.skill_recommender import select_runtime_tools
-
-                selected_tools = select_runtime_tools(
-                    tools,
-                    query=effective_query,
-                    intent=(state.get("routing_metadata") or {}).get("intent"),
-                    user_role=_ctx.get("user_role", "student"),
-                    max_tools=min(len(tools), 8),
-                    must_include=code_studio_required_tool_names(
-                        effective_query,
-                        _ctx.get("user_role", "student"),
-                    ),
-                )
-                if selected_tools:
-                    tools = selected_tools
-                    logger.info(
-                        "[CODE_STUDIO] Runtime-selected tools: %s",
-                        [getattr(tool, "name", getattr(tool, "__name__", "unknown")) for tool in tools],
-                    )
-            except Exception as _selection_err:
-                logger.debug("[CODE_STUDIO] Runtime tool selection skipped: %s", _selection_err)
-
-            runtime_context_base = build_tool_runtime_context_fn(
-                event_bus_id=_bus_id,
-                request_id=_ctx.get("request_id"),
-                session_id=state.get("session_id"),
-                organization_id=state.get("organization_id"),
-                user_id=state.get("user_id"),
-                user_role=_ctx.get("user_role", "student"),
-                node="code_studio_agent",
-                source="agentic_loop",
-                metadata=build_visual_tool_runtime_metadata(state, effective_query),
+            tool_setup = prepare_code_studio_tool_setup(
+                effective_query=effective_query,
+                state=state,
+                ctx=_ctx,
+                bus_id=_bus_id,
+                collect_code_studio_tools=collect_code_studio_tools,
+                code_studio_required_tool_names=code_studio_required_tool_names,
+                build_tool_runtime_context_fn=build_tool_runtime_context_fn,
+                build_visual_tool_runtime_metadata=build_visual_tool_runtime_metadata,
+                logger_obj=logger,
             )
+            tools = tool_setup.tools
+            force_tools = tool_setup.force_tools
+            runtime_context_base = tool_setup.runtime_context_base
 
             fast_path_result = await execute_code_studio_fast_path(
                 state=state,
