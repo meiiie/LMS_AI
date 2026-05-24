@@ -9,14 +9,18 @@
  * Backend uses code_studio_context.active_session for quality/session decisions.
  */
 import { create } from "zustand";
-import type { VisualPayload } from "@/api/types";
+import type { ChatCodeStudioContext, VisualPayload } from "@/api/types";
 
 /** Metadata from backend code_open/code_complete events — session-level, not per-version. */
+type ChatCodeStudioActiveSession = NonNullable<
+  ChatCodeStudioContext["active_session"]
+>;
+
 export interface CodeStudioMetadata {
-  studioLane?: string;
-  artifactKind?: string;
-  qualityProfile?: string;
-  rendererContract?: string;
+  studioLane?: ChatCodeStudioActiveSession["studio_lane"];
+  artifactKind?: ChatCodeStudioActiveSession["artifact_kind"];
+  qualityProfile?: ChatCodeStudioActiveSession["quality_profile"];
+  rendererContract?: ChatCodeStudioActiveSession["renderer_contract"];
   requestedView?: "code" | "preview";
 }
 
@@ -48,6 +52,40 @@ export interface CodeStudioSession {
   metadata: CodeStudioMetadata;
 }
 
+export interface CodeStudioActiveSessionContext extends ChatCodeStudioContext {
+  active_session: ChatCodeStudioActiveSession & {
+    requested_view?: "code" | "preview";
+  };
+}
+
+function resolveStudioLane(
+  lane: CodeStudioMetadata["studioLane"],
+): ChatCodeStudioActiveSession["studio_lane"] {
+  return lane || "app";
+}
+
+export function buildCodeStudioActiveSessionContext(
+  session: CodeStudioSession,
+): CodeStudioActiveSessionContext {
+  return {
+    active_session: {
+      session_id: session.sessionId,
+      title: session.title,
+      status: session.status,
+      active_version: session.activeVersion,
+      version_count: session.versions.length,
+      language: session.language,
+      studio_lane: resolveStudioLane(session.metadata.studioLane),
+      artifact_kind: session.metadata.artifactKind,
+      quality_profile: session.metadata.qualityProfile,
+      renderer_contract: session.metadata.rendererContract,
+      requested_view: session.metadata.requestedView,
+      has_preview: Boolean(session.visualPayload),
+    },
+    requested_view: session.metadata.requestedView,
+  };
+}
+
 interface CodeStudioState {
   activeSessionId: string | null;
   sessions: Record<string, CodeStudioSession>;
@@ -59,7 +97,7 @@ interface CodeStudioState {
   setActiveSession: (sessionId: string | null) => void;
   setRequestedView: (sessionId: string, requestedView?: "code" | "preview") => void;
   /** Serialize active session info for backend context injection */
-  getActiveSessionContext: () => Record<string, unknown> | undefined;
+  getActiveSessionContext: () => CodeStudioActiveSessionContext | undefined;
   clearSessions: () => void;
 }
 
@@ -236,24 +274,8 @@ export const useCodeStudioStore = create<CodeStudioState>((set, get) => ({
     if (!activeSessionId) return undefined;
     const session = sessions[activeSessionId];
     if (!session) return undefined;
-    return {
-      active_session: {
-        session_id: session.sessionId,
-        title: session.title,
-        status: session.status,
-        active_version: session.activeVersion,
-        version_count: session.versions.length,
-        language: session.language,
-          studio_lane: session.metadata.studioLane,
-          artifact_kind: session.metadata.artifactKind,
-          quality_profile: session.metadata.qualityProfile,
-          renderer_contract: session.metadata.rendererContract,
-          requested_view: session.metadata.requestedView,
-          has_preview: Boolean(session.visualPayload),
-        },
-        requested_view: session.metadata.requestedView,
-      };
-    },
+    return buildCodeStudioActiveSessionContext(session);
+  },
 
   clearSessions: () => set({ activeSessionId: null, sessions: {} }),
 }));

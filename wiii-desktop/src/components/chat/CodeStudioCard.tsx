@@ -34,8 +34,8 @@ export const CodeStudioCard = memo(function CodeStudioCard({
       { label: "Giao di\u1EC7n", done: code.includes("<style") },
       { label: "Canvas", done: code.includes("<canvas") || code.includes("<svg") },
       { label: "Logic", done: code.includes("<script") || code.includes("function") },
-      { label: "Controls", done: code.includes('type="range"') || code.includes("<button") },
-      { label: "Bridge", done: code.includes("wiiivisualbridge") || code.includes("reportresult") },
+      { label: "\u0110i\u1EC1u khi\u1EC3n", done: code.includes('type="range"') || code.includes("<button") },
+      { label: "K\u1EBFt n\u1ED1i", done: code.includes("wiiivisualbridge") || code.includes("reportresult") },
     ];
   }, [session?.code]);
 
@@ -134,14 +134,14 @@ export const CodeStudioCard = memo(function CodeStudioCard({
                 onClick={handleOpen}
                 className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-surface-tertiary hover:bg-border text-text-secondary transition-colors"
               >
-                <Code2 size={11} /> Xem code
+                <Code2 size={11} /> Xem mã
               </button>
               {session?.visualSessionId && (
                 <button
                   onClick={handlePreview}
                   className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 text-[var(--accent)] transition-colors"
                 >
-                  <Eye size={11} /> Xem preview
+                  <Eye size={11} /> Xem trước
                 </button>
               )}
             </div>

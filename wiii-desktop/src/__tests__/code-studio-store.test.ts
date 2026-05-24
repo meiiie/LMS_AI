@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useCodeStudioStore } from "@/stores/code-studio-store";
+import {
+  buildCodeStudioActiveSessionContext,
+  useCodeStudioStore,
+} from "@/stores/code-studio-store";
 
 function resetStore() {
   useCodeStudioStore.setState({
@@ -186,6 +189,43 @@ describe("code-studio-store", () => {
   });
 
   describe("getActiveSessionContext", () => {
+    it("builds a typed active-session context payload", () => {
+      const store = useCodeStudioStore.getState();
+      store.openSession("vs_typed", "Typed Preview", "html", 2, {
+        studioLane: "app",
+        artifactKind: "html_app",
+        qualityProfile: "premium",
+        rendererContract: "host_shell",
+        requestedView: "preview",
+      });
+      store.completeSession(
+        "vs_typed",
+        "<main />",
+        "html",
+        2,
+        { id: "vp-typed" } as any,
+      );
+
+      const session = useCodeStudioStore.getState().sessions["vs_typed"];
+      expect(buildCodeStudioActiveSessionContext(session)).toEqual({
+        active_session: {
+          session_id: "vs_typed",
+          title: "Typed Preview",
+          status: "complete",
+          active_version: 2,
+          version_count: 1,
+          language: "html",
+          studio_lane: "app",
+          artifact_kind: "html_app",
+          quality_profile: "premium",
+          renderer_contract: "host_shell",
+          requested_view: "preview",
+          has_preview: true,
+        },
+        requested_view: "preview",
+      });
+    });
+
     it("returns active session metadata for follow-up turns", () => {
       const store = useCodeStudioStore.getState();
       store.openSession("vs_1", "Pendulum", "html", 1, {
