@@ -66,6 +66,82 @@ def _safe_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+@dataclass(frozen=True, slots=True)
+class CodeStudioScaffoldFallbackIntent:
+    """Normalized visual intent metadata used by scaffold fallback policy."""
+
+    force_tool: bool
+    presentation_intent: str
+    preferred_tool: str
+    studio_lane: str
+    artifact_kind: str
+    visual_type: str
+    app_category: str
+    quality_profile: str
+    planning_profile: str
+
+    @classmethod
+    def from_visual_decision(cls, visual_decision: Any) -> "CodeStudioScaffoldFallbackIntent":
+        """Create a safe, non-guessing intent view from the visual resolver output."""
+
+        return cls(
+            force_tool=bool(getattr(visual_decision, "force_tool", False)),
+            presentation_intent=_safe_text(
+                getattr(visual_decision, "presentation_intent", "")
+            ),
+            preferred_tool=_safe_text(getattr(visual_decision, "preferred_tool", "")),
+            studio_lane=_safe_text(getattr(visual_decision, "studio_lane", "")),
+            artifact_kind=_safe_text(getattr(visual_decision, "artifact_kind", "")),
+            visual_type=_safe_text(getattr(visual_decision, "visual_type", "")),
+            app_category=_safe_text(getattr(visual_decision, "app_category", "")),
+            quality_profile=_safe_text(getattr(visual_decision, "quality_profile", "")),
+            planning_profile=_safe_text(getattr(visual_decision, "planning_profile", "")),
+        )
+
+    def with_runtime_contract(self, contract: Any) -> "CodeStudioScaffoldFallbackIntent":
+        """Overlay the resolved runtime contract without broadening missing metadata."""
+
+        app_intent_contract = getattr(contract, "app_intent_contract", None)
+        return CodeStudioScaffoldFallbackIntent(
+            force_tool=self.force_tool,
+            presentation_intent=_safe_text(
+                getattr(contract, "presentation_intent", self.presentation_intent)
+            ),
+            preferred_tool=self.preferred_tool,
+            studio_lane=_safe_text(getattr(contract, "studio_lane", self.studio_lane)),
+            artifact_kind=_safe_text(
+                getattr(contract, "artifact_kind", self.artifact_kind)
+            ),
+            visual_type=_safe_text(
+                getattr(contract, "resolved_visual_type", self.visual_type)
+            ),
+            app_category=_safe_text(
+                getattr(app_intent_contract, "category", self.app_category)
+            ),
+            quality_profile=_safe_text(
+                getattr(contract, "quality_profile", self.quality_profile)
+            ),
+            planning_profile=self.planning_profile,
+        )
+
+    @property
+    def is_code_studio_tool_contract(self) -> bool:
+        return self.force_tool and self.preferred_tool == "tool_create_visual_code"
+
+    def decision_fields(self) -> dict[str, str]:
+        """Return stable decision fields without inventing missing intent metadata."""
+
+        return {
+            "presentation_intent": self.presentation_intent or "none",
+            "preferred_tool": self.preferred_tool or "none",
+            "studio_lane": self.studio_lane or "none",
+            "artifact_kind": self.artifact_kind or "none",
+            "visual_type": self.visual_type or "none",
+            "app_category": self.app_category or "none",
+            "quality_profile": self.quality_profile or "standard",
+        }
+
+
 def _safe_failure_response(
     *,
     visual_type: str,
@@ -141,45 +217,33 @@ def resolve_code_studio_scaffold_fallback(
             detect_kind=detect_kind_fn,
         )
 
-    presentation_intent = _safe_text(getattr(visual_decision, "presentation_intent", ""))
-    preferred_tool = _safe_text(getattr(visual_decision, "preferred_tool", ""))
-    studio_lane = _safe_text(getattr(visual_decision, "studio_lane", ""))
-    artifact_kind = _safe_text(getattr(visual_decision, "artifact_kind", ""))
-    visual_type = _safe_text(getattr(visual_decision, "visual_type", ""))
-    app_category = _safe_text(getattr(visual_decision, "app_category", ""))
-    quality_profile = _safe_text(getattr(visual_decision, "quality_profile", ""))
+    intent = CodeStudioScaffoldFallbackIntent.from_visual_decision(visual_decision)
     metric_kind = _safe_kind(query, detect_kind_fn)
 
-    if not getattr(visual_decision, "force_tool", False) or preferred_tool != "tool_create_visual_code":
+    if not intent.is_code_studio_tool_contract:
         return CodeStudioScaffoldFallbackDecision(
             engage_scaffold=False,
             response=_safe_failure_response(
-                visual_type=visual_type,
-                presentation_intent=presentation_intent,
+                visual_type=intent.visual_type,
+                presentation_intent=intent.presentation_intent,
             ),
             metric_kind=metric_kind,
             callsite_reason=reason,
             policy_reason="not_code_studio_tool_contract",
             response_type="code_studio_scaffold_suppressed",
-            presentation_intent=presentation_intent,
-            preferred_tool=preferred_tool or "none",
-            studio_lane=studio_lane or "none",
-            artifact_kind=artifact_kind or "none",
-            visual_type=visual_type or "none",
-            app_category=app_category or "none",
-            quality_profile=quality_profile or "standard",
+            **intent.decision_fields(),
         )
 
     try:
         contract = resolve_contract_fn(
-            presentation_intent=presentation_intent,
-            studio_lane=studio_lane,
-            artifact_kind=artifact_kind,
-            requested_visual_type=visual_type,
-            quality_profile=quality_profile,
-            app_category=app_category,
+            presentation_intent=intent.presentation_intent,
+            studio_lane=intent.studio_lane,
+            artifact_kind=intent.artifact_kind,
+            requested_visual_type=intent.visual_type,
+            quality_profile=intent.quality_profile,
+            app_category=intent.app_category,
             user_query=query,
-            planning_profile=_safe_text(getattr(visual_decision, "planning_profile", "")),
+            planning_profile=intent.planning_profile,
         )
     except Exception:
         return _resolution_failure_decision(
@@ -188,53 +252,34 @@ def resolve_code_studio_scaffold_fallback(
             detect_kind=detect_kind_fn,
         )
 
-    presentation_intent = _safe_text(getattr(contract, "presentation_intent", presentation_intent))
-    studio_lane = _safe_text(getattr(contract, "studio_lane", studio_lane))
-    artifact_kind = _safe_text(getattr(contract, "artifact_kind", artifact_kind))
-    visual_type = _safe_text(getattr(contract, "resolved_visual_type", visual_type))
-    app_category = _safe_text(
-        getattr(getattr(contract, "app_intent_contract", None), "category", app_category)
-    )
-    quality_profile = _safe_text(getattr(contract, "quality_profile", quality_profile))
+    intent = intent.with_runtime_contract(contract)
 
     if getattr(contract, "is_blocked_for_code_studio", False):
         return CodeStudioScaffoldFallbackDecision(
             engage_scaffold=False,
             response=_safe_failure_response(
-                visual_type=visual_type,
-                presentation_intent=presentation_intent,
+                visual_type=intent.visual_type,
+                presentation_intent=intent.presentation_intent,
             ),
             metric_kind=metric_kind,
             callsite_reason=reason,
             policy_reason="blocked_code_studio_presentation_intent",
             response_type="code_studio_scaffold_suppressed",
-            presentation_intent=presentation_intent,
-            preferred_tool=preferred_tool,
-            studio_lane=studio_lane,
-            artifact_kind=artifact_kind,
-            visual_type=visual_type,
-            app_category=app_category,
-            quality_profile=quality_profile,
+            **intent.decision_fields(),
         )
 
-    if presentation_intent not in _SAFE_SCAFFOLD_PRESENTATION_INTENTS:
+    if intent.presentation_intent not in _SAFE_SCAFFOLD_PRESENTATION_INTENTS:
         return CodeStudioScaffoldFallbackDecision(
             engage_scaffold=False,
             response=_safe_failure_response(
-                visual_type=visual_type,
-                presentation_intent=presentation_intent,
+                visual_type=intent.visual_type,
+                presentation_intent=intent.presentation_intent,
             ),
             metric_kind=metric_kind,
             callsite_reason=reason,
             policy_reason="app_requires_tool_generated_preview",
             response_type="code_studio_scaffold_suppressed",
-            presentation_intent=presentation_intent,
-            preferred_tool=preferred_tool,
-            studio_lane=studio_lane,
-            artifact_kind=artifact_kind,
-            visual_type=visual_type,
-            app_category=app_category,
-            quality_profile=quality_profile,
+            **intent.decision_fields(),
         )
 
     return CodeStudioScaffoldFallbackDecision(
@@ -244,11 +289,5 @@ def resolve_code_studio_scaffold_fallback(
         callsite_reason=reason,
         policy_reason="artifact_contract_allows_scaffold",
         response_type="code_studio_contract_scaffold_fallback",
-        presentation_intent=presentation_intent,
-        preferred_tool=preferred_tool,
-        studio_lane=studio_lane,
-        artifact_kind=artifact_kind,
-        visual_type=visual_type,
-        app_category=app_category,
-        quality_profile=quality_profile,
+        **intent.decision_fields(),
     )

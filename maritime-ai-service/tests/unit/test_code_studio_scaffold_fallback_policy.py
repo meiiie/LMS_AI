@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app.engine.multi_agent.code_studio_scaffold_fallback_policy import (
+    CodeStudioScaffoldFallbackIntent,
     resolve_code_studio_scaffold_fallback,
 )
 from app.engine.multi_agent import code_studio_tool_rounds
@@ -78,6 +79,32 @@ def test_suppresses_plain_text_misroute_without_sanitizing_to_app() -> None:
     assert decision.policy_reason == "not_code_studio_tool_contract"
     assert decision.presentation_intent == "text"
     assert decision.preferred_tool == "none"
+    assert decision.studio_lane == "none"
+    assert decision.visual_type == "none"
+
+
+def test_fallback_intent_contract_does_not_invent_missing_visual_metadata() -> None:
+    intent = CodeStudioScaffoldFallbackIntent.from_visual_decision(
+        _visual_decision(
+            force_tool=False,
+            preferred_tool=None,
+            studio_lane=None,
+            visual_type=None,
+            app_category=None,
+            quality_profile=None,
+        )
+    )
+
+    assert intent.is_code_studio_tool_contract is False
+    assert intent.decision_fields() == {
+        "presentation_intent": "code_studio_app",
+        "preferred_tool": "none",
+        "studio_lane": "none",
+        "artifact_kind": "html_app",
+        "visual_type": "none",
+        "app_category": "none",
+        "quality_profile": "standard",
+    }
 
 
 def test_allows_artifact_scaffold_fallback_with_contract_metadata() -> None:
