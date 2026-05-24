@@ -16,13 +16,10 @@ from app.engine.multi_agent.visual_intent_support import (
     CODE_WIDGET_CUES as _CODE_WIDGET_CUES,
     DASHBOARD_APP_CUES as _DASHBOARD_APP_CUES,
     INTERACTIVE_TABLE_CUES as _INTERACTIVE_TABLE_CUES,
-    LEGACY_VISUAL_TOOL_NAMES as _LEGACY_VISUAL_TOOL_NAMES,
     MINI_TOOL_CUES as _MINI_TOOL_CUES,
     QUIZ_WIDGET_CUES as _QUIZ_WIDGET_CUES,
-    SCENE_SIMULATION_CUES as _SCENE_SIMULATION_CUES,
     SEARCH_WIDGET_CUES as _SEARCH_WIDGET_CUES,
     SIMULATION_APP_CUES as _SIMULATION_APP_CUES,
-    SIMULATION_PATCH_CUES as _SIMULATION_PATCH_CUES,
     contains_any_impl,
     detect_visual_patch_request_impl,
     infer_figure_budget_impl,
@@ -59,7 +56,73 @@ CodeStudioAppCategory = Literal[
     "code_widget",
     "artifact",
 ]
+VisualToolCapabilityLane = Literal["structured_visual", "code_studio", "mermaid", "legacy_chart"]
 
+
+@dataclass(frozen=True, slots=True)
+class VisualToolCapability:
+    """Runtime capability advertised by a visual generation tool."""
+
+    name: str
+    lane: VisualToolCapabilityLane
+    presentation_intents: tuple[PresentationIntent, ...]
+    legacy: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class VisualToolRequirement:
+    """Auditable tool-binding requirement derived from one visual intent decision."""
+
+    force_tool: bool
+    mode: str
+    presentation_intent: str
+    required_tool_names: tuple[str, ...]
+    required_capabilities: tuple[VisualToolCapability, ...]
+    visual_tool_names: frozenset[str]
+    strip_unrequired_visual_tools: bool
+
+    def should_keep_tool_name(self, tool_name: str) -> bool:
+        """Return whether a bound tool should survive visual-intent narrowing."""
+
+        if not self.strip_unrequired_visual_tools:
+            return True
+        if tool_name in self.required_tool_names:
+            return True
+        if tool_name in self.visual_tool_names:
+            return False
+        return True
+
+
+VISUAL_TOOL_CAPABILITIES: dict[str, VisualToolCapability] = {
+    "tool_generate_visual": VisualToolCapability(
+        name="tool_generate_visual",
+        lane="structured_visual",
+        presentation_intents=("article_figure", "chart_runtime"),
+    ),
+    "tool_create_visual_code": VisualToolCapability(
+        name="tool_create_visual_code",
+        lane="code_studio",
+        presentation_intents=("code_studio_app", "artifact"),
+    ),
+    "tool_generate_mermaid": VisualToolCapability(
+        name="tool_generate_mermaid",
+        lane="mermaid",
+        presentation_intents=("article_figure",),
+    ),
+    "tool_generate_chart": VisualToolCapability(
+        name="tool_generate_chart",
+        lane="legacy_chart",
+        presentation_intents=("chart_runtime",),
+        legacy=True,
+    ),
+    "tool_generate_interactive_chart": VisualToolCapability(
+        name="tool_generate_interactive_chart",
+        lane="legacy_chart",
+        presentation_intents=("chart_runtime",),
+        legacy=True,
+    ),
+}
+VISUAL_TOOL_CAPABILITY_NAMES = frozenset(VISUAL_TOOL_CAPABILITIES)
 
 
 @dataclass(frozen=True)
@@ -216,11 +279,13 @@ def recommended_visual_thinking_effort(
 def _resolve_preferred_tool(
     visual_decision: VisualIntentDecision,
 ) -> str | None:
-    if visual_decision.preferred_tool:
-        return visual_decision.preferred_tool
-    if visual_decision.mode in {"template", "inline_html", "app"}:
+    preferred_tool = getattr(visual_decision, "preferred_tool", None)
+    if preferred_tool:
+        return preferred_tool
+    mode = getattr(visual_decision, "mode", "")
+    if mode in {"template", "inline_html", "app"}:
         return preferred_visual_tool_name()
-    if visual_decision.mode == "mermaid":
+    if mode == "mermaid":
         return "tool_generate_mermaid"
     return None
 
@@ -229,11 +294,46 @@ def required_visual_tool_names(
     visual_decision: VisualIntentDecision,
 ) -> tuple[str, ...]:
     """Return the visual tool names that should remain available for an explicit intent."""
-    if not visual_decision.force_tool:
+    if not bool(getattr(visual_decision, "force_tool", False)):
         return ()
 
     tool_name = _resolve_preferred_tool(visual_decision)
     return (tool_name,) if tool_name else ()
+
+
+def visual_tool_capability_names(*, include_legacy: bool = True) -> frozenset[str]:
+    """Return known visual tool names for deterministic pruning."""
+
+    if include_legacy:
+        return VISUAL_TOOL_CAPABILITY_NAMES
+    return frozenset(
+        name for name, capability in VISUAL_TOOL_CAPABILITIES.items()
+        if not capability.legacy
+    )
+
+
+def build_visual_tool_requirement(
+    visual_decision: VisualIntentDecision,
+    *,
+    structured_visuals_enabled: bool,
+) -> VisualToolRequirement:
+    """Build the typed visual tool requirement consumed by tool collection."""
+
+    required_tool_names = required_visual_tool_names(visual_decision)
+    required_capabilities = tuple(
+        VISUAL_TOOL_CAPABILITIES[tool_name]
+        for tool_name in required_tool_names
+        if tool_name in VISUAL_TOOL_CAPABILITIES
+    )
+    return VisualToolRequirement(
+        force_tool=bool(getattr(visual_decision, "force_tool", False)),
+        mode=str(getattr(visual_decision, "mode", "") or ""),
+        presentation_intent=str(getattr(visual_decision, "presentation_intent", "text") or "text"),
+        required_tool_names=required_tool_names,
+        required_capabilities=required_capabilities,
+        visual_tool_names=VISUAL_TOOL_CAPABILITY_NAMES,
+        strip_unrequired_visual_tools=structured_visuals_enabled and bool(required_tool_names),
+    )
 
 
 def filter_tools_for_visual_intent(
@@ -243,24 +343,18 @@ def filter_tools_for_visual_intent(
     structured_visuals_enabled: bool,
 ) -> list[Any]:
     """Reduce drift toward legacy visual tools when structured intent is explicit."""
-    if not structured_visuals_enabled:
-        return tools
-
-    allowed_names = set(
-        required_visual_tool_names(visual_decision)
+    requirement = build_visual_tool_requirement(
+        visual_decision,
+        structured_visuals_enabled=structured_visuals_enabled,
     )
-    if not allowed_names:
+    if not requirement.strip_unrequired_visual_tools:
         return tools
 
     filtered: list[Any] = []
     for tool in tools:
         tool_name = str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "")
-        if tool_name in allowed_names:
+        if requirement.should_keep_tool_name(tool_name):
             filtered.append(tool)
-            continue
-        if tool_name in _LEGACY_VISUAL_TOOL_NAMES:
-            continue
-        filtered.append(tool)
 
     return filtered
 

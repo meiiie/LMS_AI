@@ -141,6 +141,30 @@ def filter_tools_for_visual_intent(tools, visual_decision, *, structured_visuals
     )
 
 
+def build_visual_tool_requirement(visual_decision, *, structured_visuals_enabled: bool):
+    return _load_attr(
+        "app.engine.multi_agent.visual_intent_resolver",
+        "build_visual_tool_requirement",
+    )(
+        visual_decision,
+        structured_visuals_enabled=structured_visuals_enabled,
+    )
+
+
+def required_visual_tool_names(visual_decision):
+    return _load_attr(
+        "app.engine.multi_agent.visual_intent_resolver",
+        "required_visual_tool_names",
+    )(visual_decision)
+
+
+def visual_tool_capability_names(*, include_legacy: bool = True):
+    return _load_attr(
+        "app.engine.multi_agent.visual_intent_resolver",
+        "visual_tool_capability_names",
+    )(include_legacy=include_legacy)
+
+
 def detect_visual_patch_request(query: str) -> bool:
     return _load_attr(
         "app.engine.multi_agent.visual_intent_resolver",
@@ -190,6 +214,28 @@ def _should_strip_visual_tools_for_analytical_text_turn(
 
 def _tool_name(tool: Any) -> str:
     return str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "").strip()
+
+
+def _strip_visual_tool_capabilities(
+    tools: list[Any],
+    *,
+    keep_names: tuple[str, ...] = (),
+) -> list[Any]:
+    """Drop known visual tools while preserving non-visual tool capabilities."""
+
+    visual_names = set(visual_tool_capability_names(include_legacy=True))
+    keep_name_set = set(keep_names)
+    return [
+        tool for tool in tools
+        if _tool_name(tool) not in visual_names or _tool_name(tool) in keep_name_set
+    ]
+
+
+def _tools_matching_visual_requirement(tools: list[Any], visual_requirement: Any) -> list[Any]:
+    required_names = set(getattr(visual_requirement, "required_tool_names", ()) or ())
+    if not required_names:
+        return []
+    return [tool for tool in tools if _tool_name(tool) in required_names]
 
 
 def _is_host_ui_navigation_route(state: Optional[AgentState]) -> bool:
@@ -702,6 +748,11 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         logger.debug("[DIRECT] Visual tools unavailable: %s", _e)
 
     visual_decision = resolve_visual_intent(query)
+    structured_visuals_enabled = getattr(settings, "enable_structured_visuals", False)
+    visual_requirement = build_visual_tool_requirement(
+        visual_decision,
+        structured_visuals_enabled=structured_visuals_enabled,
+    )
     thinking_mode = _infer_direct_thinking_mode(query, state, [])
     normalized_query = _normalize_for_intent(query)
     _prefers_code_execution_lane = any(
@@ -724,57 +775,29 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
     _direct_tools = filter_tools_for_visual_intent(
         _direct_tools,
         visual_decision,
-        structured_visuals_enabled=getattr(settings, "enable_structured_visuals", False),
+        structured_visuals_enabled=structured_visuals_enabled,
     )
     if web_search_forced:
         # Explicit @web-search is a stronger user contract than visual intent.
         # Research prompts often mention charts, pipelines, or summaries; those
         # words must not narrow the tool bundle to visual generation.
-        _direct_tools = [
-            tool
-            for tool in _direct_tools
-            if str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "")
-            not in {
-                "tool_create_visual_code",
-                "tool_generate_visual",
-                "tool_generate_mermaid",
-                "tool_generate_interactive_chart",
-            }
-        ]
+        _direct_tools = _strip_visual_tool_capabilities(_direct_tools)
     if _should_strip_visual_tools_from_direct(query, visual_decision):
-        _direct_tools = [
-            tool for tool in _direct_tools
-            if str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "")
-            not in {
-                "tool_create_visual_code",
-                "tool_generate_visual",
-                "tool_generate_mermaid",
-                "tool_generate_interactive_chart",
-            }
-        ]
+        _direct_tools = _strip_visual_tool_capabilities(_direct_tools)
     if _should_strip_visual_tools_for_analytical_text_turn(
         query,
         visual_decision,
         thinking_mode=thinking_mode,
     ):
-        _direct_tools = [
-            tool for tool in _direct_tools
-            if str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "")
-            not in {
-                "tool_create_visual_code",
-                "tool_generate_visual",
-                "tool_generate_mermaid",
-                "tool_generate_interactive_chart",
-            }
-        ]
+        _direct_tools = _strip_visual_tool_capabilities(_direct_tools)
     # Clear inline article/chart requests should stay tightly on the visual lane.
     # If there is no competing web/legal/news/datetime/LMS intent, bind only the
     # preferred visual tool so the first tool call is deterministic and the
     # direct lane does not waste latency on unrelated tool options.
     if (
-        visual_decision.force_tool
-        and visual_decision.preferred_tool
-        and visual_decision.presentation_intent in {"article_figure", "chart_runtime"}
+        visual_requirement.force_tool
+        and visual_requirement.required_tool_names
+        and visual_requirement.presentation_intent in {"article_figure", "chart_runtime"}
         and not (
             _needs_web_search(query)
             or _needs_datetime(query)
@@ -784,21 +807,16 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
             or web_search_forced
         )
     ):
-        preferred_name = visual_decision.preferred_tool
-        preferred_tools = [
-            tool
-            for tool in _direct_tools
-            if str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "") == preferred_name
-        ]
+        preferred_tools = _tools_matching_visual_requirement(_direct_tools, visual_requirement)
         if preferred_tools:
             _direct_tools = preferred_tools
     _needs_visual_tool = (
         not _prefers_code_execution_lane
         and
-        visual_decision.force_tool
-        and visual_decision.mode in {"template", "inline_html", "app", "mermaid"}
+        visual_requirement.force_tool
+        and visual_requirement.mode in {"template", "inline_html", "app", "mermaid"}
         and (
-            visual_decision.presentation_intent in {"article_figure", "chart_runtime"}
+            visual_requirement.presentation_intent in {"article_figure", "chart_runtime"}
             or not _needs_analysis_tool(query)
         )
     )
@@ -899,11 +917,16 @@ def _collect_code_studio_tools(query: str, user_role: str = "student"):
         logger.debug("[CODE_STUDIO] Browser sandbox tools unavailable: %s", _e)
 
     visual_decision = resolve_visual_intent(query)
+    structured_visuals_enabled = getattr(settings, "enable_structured_visuals", False)
+    visual_requirement = build_visual_tool_requirement(
+        visual_decision,
+        structured_visuals_enabled=structured_visuals_enabled,
+    )
     _tools = filter_tools_for_role(_tools, user_role)
     _tools = filter_tools_for_visual_intent(
         _tools,
         visual_decision,
-        structured_visuals_enabled=getattr(settings, "enable_structured_visuals", False),
+        structured_visuals_enabled=structured_visuals_enabled,
     )
 
     # Clear app/artifact requests should not drift across a broad tool bundle.
@@ -911,16 +934,11 @@ def _collect_code_studio_tools(query: str, user_role: str = "student"):
     # narrow the bound tools to that target so the first tool call is
     # deterministic and faster to emit in streaming.
     if (
-        visual_decision.force_tool
-        and visual_decision.preferred_tool
-        and visual_decision.presentation_intent in {"code_studio_app", "artifact"}
+        visual_requirement.force_tool
+        and visual_requirement.required_tool_names
+        and visual_requirement.presentation_intent in {"code_studio_app", "artifact"}
     ):
-        preferred_name = visual_decision.preferred_tool
-        preferred_tools = [
-            tool
-            for tool in _tools
-            if str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "") == preferred_name
-        ]
+        preferred_tools = _tools_matching_visual_requirement(_tools, visual_requirement)
         if preferred_tools:
             _tools = preferred_tools
 
@@ -988,14 +1006,7 @@ def _direct_required_tool_names(query: str, user_role: str = "student") -> list[
     # These capabilities now live exclusively in code_studio_agent.
 
     if visual_decision.force_tool and not _needs_analysis_tool(query):
-        _structured = getattr(settings, "enable_structured_visuals", False)
-        if visual_decision.mode == "mermaid" and _structured:
-            required.append("tool_generate_mermaid")
-        elif visual_decision.preferred_tool:
-            required.append(visual_decision.preferred_tool)
-        elif _structured:
-            # Structured mode: ALL visual intents → multi-figure tool
-            required.append("tool_generate_visual")
+        required.extend(required_visual_tool_names(visual_decision))
 
     deduped: list[str] = []
     for tool_name in required:
@@ -1032,26 +1043,8 @@ def _code_studio_required_tool_names(query: str, user_role: str = "student") -> 
     ):
         required.append("tool_browser_snapshot_url")
 
-    if visual_decision.force_tool and visual_decision.preferred_tool:
-        required.append(visual_decision.preferred_tool)
-        deduped: list[str] = []
-        for tool_name in required:
-            if tool_name not in deduped:
-                deduped.append(tool_name)
-        return deduped
-
     if visual_decision.force_tool:
-        _structured = getattr(settings, "enable_structured_visuals", False)
-        _llm_code_gen = getattr(settings, "enable_llm_code_gen_visuals", False)
-        if visual_decision.mode == "mermaid" and _structured:
-            required.append("tool_generate_mermaid")
-        elif _structured and _llm_code_gen:
-            if visual_decision.presentation_intent in {"article_figure", "chart_runtime"}:
-                required.append("tool_generate_visual")
-            else:
-                required.append("tool_create_visual_code")
-        elif _structured:
-            required.append("tool_generate_visual")
+        required.extend(required_visual_tool_names(visual_decision))
 
     deduped: list[str] = []
     for tool_name in required:

@@ -427,6 +427,7 @@ def test_host_action_tools_pointy_only_when_no_host_actions_present():
 
 def test_off_topic_direct_prose_does_not_bind_heavy_tools(monkeypatch):
     from app.engine.multi_agent import tool_collection as module
+    from app.engine.multi_agent.visual_intent_resolver import build_visual_tool_requirement
 
     monkeypatch.setattr(module.settings, "enable_character_tools", False, raising=False)
     monkeypatch.setattr(module.settings, "enable_lms_integration", False, raising=False)
@@ -453,6 +454,7 @@ def test_off_topic_direct_prose_does_not_bind_heavy_tools(monkeypatch):
     )
     monkeypatch.setattr(module, "filter_tools_for_role", lambda tools, _role: tools)
     monkeypatch.setattr(module, "filter_tools_for_visual_intent", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(module, "build_visual_tool_requirement", build_visual_tool_requirement)
 
     def fake_load_attr(_module_name: str, attr_name: str):
         if attr_name == "_normalize_for_intent":
@@ -480,6 +482,7 @@ def test_off_topic_direct_prose_does_not_bind_heavy_tools(monkeypatch):
 
 def test_reasoning_safety_meta_direct_prose_overrides_false_visual_force(monkeypatch):
     from app.engine.multi_agent import tool_collection as module
+    from app.engine.multi_agent.visual_intent_resolver import build_visual_tool_requirement
 
     monkeypatch.setattr(module.settings, "enable_character_tools", False, raising=False)
     monkeypatch.setattr(module.settings, "enable_lms_integration", False, raising=False)
@@ -507,6 +510,7 @@ def test_reasoning_safety_meta_direct_prose_overrides_false_visual_force(monkeyp
     )
     monkeypatch.setattr(module, "filter_tools_for_role", lambda tools, _role: tools)
     monkeypatch.setattr(module, "filter_tools_for_visual_intent", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(module, "build_visual_tool_requirement", build_visual_tool_requirement)
 
     def fake_load_attr(_module_name: str, attr_name: str):
         if attr_name == "_normalize_for_intent":

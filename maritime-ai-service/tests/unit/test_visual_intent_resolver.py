@@ -1,12 +1,24 @@
 from app.engine.multi_agent.visual_intent_resolver import (
+    build_visual_tool_requirement,
     detect_visual_patch_request,
     filter_tools_for_visual_intent,
     merge_quality_profile,
     recommended_visual_thinking_effort,
     preferred_visual_tool_name,
+    required_visual_tool_names,
     resolve_visual_intent,
+    visual_tool_capability_names,
 )
 from app.engine.tools.code_studio_app_intent_contract import infer_code_studio_app_category
+
+
+class _Tool:
+    def __init__(self, name: str):
+        self.name = name
+
+
+def _tool_names(tools):
+    return [tool.name for tool in tools]
 
 
 def test_resolves_comparison_visual():
@@ -314,6 +326,61 @@ def test_preferred_visual_tool_name_always_returns_structured():
     assert preferred_visual_tool_name() == "tool_generate_visual"
 
 
+def test_visual_tool_requirement_chart_uses_structured_visual_tool():
+    decision = resolve_visual_intent("Vẽ biểu đồ KPI theo tháng")
+    requirement = build_visual_tool_requirement(
+        decision,
+        structured_visuals_enabled=True,
+    )
+
+    assert required_visual_tool_names(decision) == ("tool_generate_visual",)
+    assert requirement.required_tool_names == ("tool_generate_visual",)
+    assert [capability.lane for capability in requirement.required_capabilities] == [
+        "structured_visual",
+    ]
+
+
+def test_visual_tool_requirement_simulation_requires_code_studio_tool():
+    decision = resolve_visual_intent("Hãy mô phỏng vật lý con lắc có kéo thả chuột")
+    requirement = build_visual_tool_requirement(
+        decision,
+        structured_visuals_enabled=True,
+    )
+
+    assert required_visual_tool_names(decision) == ("tool_create_visual_code",)
+    assert requirement.required_tool_names == ("tool_create_visual_code",)
+    assert [capability.lane for capability in requirement.required_capabilities] == [
+        "code_studio",
+    ]
+
+
+def test_visual_tool_requirement_artifact_requires_code_studio_tool():
+    decision = resolve_visual_intent("Tạo một mini app HTML để nhúng vào LMS")
+    requirement = build_visual_tool_requirement(
+        decision,
+        structured_visuals_enabled=True,
+    )
+
+    assert decision.presentation_intent == "artifact"
+    assert required_visual_tool_names(decision) == ("tool_create_visual_code",)
+    assert requirement.required_tool_names == ("tool_create_visual_code",)
+
+
+def test_visual_tool_capability_inventory_includes_modern_and_legacy_tools():
+    assert visual_tool_capability_names() == frozenset({
+        "tool_generate_visual",
+        "tool_create_visual_code",
+        "tool_generate_mermaid",
+        "tool_generate_chart",
+        "tool_generate_interactive_chart",
+    })
+    assert visual_tool_capability_names(include_legacy=False) == frozenset({
+        "tool_generate_visual",
+        "tool_create_visual_code",
+        "tool_generate_mermaid",
+    })
+
+
 def test_merge_quality_profile_prefers_higher_bar():
     assert merge_quality_profile("standard", "premium") == "premium"
     assert merge_quality_profile("draft", None) == "draft"
@@ -345,10 +412,6 @@ def test_detects_visual_patch_followup_with_unicode_vietnamese():
 
 
 def test_filter_tools_for_visual_intent_drops_legacy_visual_tools():
-    class _Tool:
-        def __init__(self, name: str):
-            self.name = name
-
     decision = resolve_visual_intent("Explain Kimi linear attention in charts")
     tools = [
         _Tool("tool_generate_interactive_chart"),
@@ -364,3 +427,98 @@ def test_filter_tools_for_visual_intent_drops_legacy_visual_tools():
     )
 
     assert [tool.name for tool in filtered] == ["tool_generate_visual", "tool_web_search"]
+
+
+def test_filter_tools_for_visual_intent_keeps_chart_lane_only():
+    decision = resolve_visual_intent("Vẽ biểu đồ so sánh tốc độ các loại tàu container")
+    tools = [
+        _Tool("tool_create_visual_code"),
+        _Tool("tool_generate_visual"),
+        _Tool("tool_generate_mermaid"),
+        _Tool("tool_generate_interactive_chart"),
+        _Tool("tool_generate_chart"),
+        _Tool("tool_web_search"),
+    ]
+
+    filtered = filter_tools_for_visual_intent(
+        tools,
+        decision,
+        structured_visuals_enabled=True,
+    )
+
+    assert _tool_names(filtered) == ["tool_generate_visual", "tool_web_search"]
+
+
+def test_filter_tools_for_visual_intent_keeps_app_lane_only():
+    decision = resolve_visual_intent("Hãy mô phỏng vật lý con lắc có kéo thả chuột")
+    tools = [
+        _Tool("tool_generate_visual"),
+        _Tool("tool_create_visual_code"),
+        _Tool("tool_generate_mermaid"),
+        _Tool("tool_web_search"),
+    ]
+
+    filtered = filter_tools_for_visual_intent(
+        tools,
+        decision,
+        structured_visuals_enabled=True,
+    )
+
+    assert _tool_names(filtered) == ["tool_create_visual_code", "tool_web_search"]
+
+
+def test_filter_tools_for_visual_intent_keeps_artifact_lane_only():
+    decision = resolve_visual_intent("Tạo một mini app HTML để nhúng vào LMS")
+    tools = [
+        _Tool("tool_generate_visual"),
+        _Tool("tool_create_visual_code"),
+        _Tool("tool_generate_mermaid"),
+        _Tool("tool_generate_interactive_chart"),
+        _Tool("tool_web_search"),
+    ]
+
+    filtered = filter_tools_for_visual_intent(
+        tools,
+        decision,
+        structured_visuals_enabled=True,
+    )
+
+    assert _tool_names(filtered) == ["tool_create_visual_code", "tool_web_search"]
+
+
+def test_filter_tools_for_visual_intent_keeps_mermaid_lane_only():
+    decision = resolve_visual_intent("Vẽ flowchart quy trình onboarding")
+    tools = [
+        _Tool("tool_generate_visual"),
+        _Tool("tool_create_visual_code"),
+        _Tool("tool_generate_interactive_chart"),
+        _Tool("tool_generate_chart"),
+        _Tool("tool_generate_mermaid"),
+        _Tool("tool_web_search"),
+    ]
+
+    filtered = filter_tools_for_visual_intent(
+        tools,
+        decision,
+        structured_visuals_enabled=True,
+    )
+
+    assert _tool_names(filtered) == ["tool_generate_mermaid", "tool_web_search"]
+
+
+def test_filter_tools_for_visual_intent_leaves_text_turn_tools_alone():
+    decision = resolve_visual_intent("Visual Studio Code khác Visual Basic thế nào?")
+    tools = [
+        _Tool("tool_generate_visual"),
+        _Tool("tool_create_visual_code"),
+        _Tool("tool_web_search"),
+        _Tool("tool_knowledge_search"),
+    ]
+
+    filtered = filter_tools_for_visual_intent(
+        tools,
+        decision,
+        structured_visuals_enabled=True,
+    )
+
+    assert _tool_names(filtered) == _tool_names(tools)
