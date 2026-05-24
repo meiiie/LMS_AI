@@ -155,6 +155,13 @@ def merge_quality_profile(base_profile, override_profile):
     )(base_profile, override_profile)
 
 
+def build_visual_tool_runtime_intent(*, query: str, visual_decision):
+    return _load_attr(
+        "app.engine.multi_agent.visual_runtime_metadata_contract",
+        "build_visual_tool_runtime_intent",
+    )(query=query, visual_decision=visual_decision)
+
+
 def _log_visual_telemetry(event_name: str, **kwargs) -> None:
     return _load_attr(
         "app.engine.multi_agent.visual_events",
@@ -1056,35 +1063,11 @@ def _code_studio_required_tool_names(query: str, user_role: str = "student") -> 
 def _build_visual_tool_runtime_metadata(state: dict, query: str) -> dict[str, Any] | None:
     """Provide visual intent metadata and patch defaults to the tool runtime layer."""
     visual_decision = resolve_visual_intent(query)
-    metadata: dict[str, Any] = {}
-
-    if visual_decision.force_tool and visual_decision.mode in {"template", "inline_html", "app", "mermaid"}:
-        metadata.update({
-            "visual_user_query": query,
-            "visual_intent_mode": visual_decision.mode,
-            "visual_intent_reason": visual_decision.reason,
-            "visual_force_tool": True,
-            "presentation_intent": visual_decision.presentation_intent,
-            "figure_budget": visual_decision.figure_budget,
-            "quality_profile": visual_decision.quality_profile,
-            "preferred_render_surface": visual_decision.preferred_render_surface,
-            "planning_profile": visual_decision.planning_profile,
-            "thinking_floor": visual_decision.thinking_floor,
-            "critic_policy": visual_decision.critic_policy,
-            "living_expression_mode": visual_decision.living_expression_mode,
-        })
-        if visual_decision.visual_type:
-            metadata["visual_requested_type"] = visual_decision.visual_type
-        if visual_decision.preferred_tool:
-            metadata["preferred_visual_tool"] = visual_decision.preferred_tool
-        if visual_decision.studio_lane:
-            metadata["studio_lane"] = visual_decision.studio_lane
-        if visual_decision.artifact_kind:
-            metadata["artifact_kind"] = visual_decision.artifact_kind
-        if visual_decision.renderer_contract:
-            metadata["renderer_contract"] = visual_decision.renderer_contract
-        if visual_decision.renderer_kind_hint:
-            metadata["renderer_kind_hint"] = visual_decision.renderer_kind_hint
+    runtime_intent = build_visual_tool_runtime_intent(
+        query=query,
+        visual_decision=visual_decision,
+    )
+    metadata: dict[str, Any] = runtime_intent.to_metadata() if runtime_intent else {}
 
     if not detect_visual_patch_request(query):
         return metadata or None
