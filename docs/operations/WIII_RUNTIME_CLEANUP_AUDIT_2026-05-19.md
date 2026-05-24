@@ -247,6 +247,13 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   and `tool_call_events` / `tools_used` state side effects behind one tested
   helper while preserving host-timeout execution and exception salvage in the
   main shell.
+- Follow-up #565 moved deterministic Code Studio scaffold fallback decisions
+  behind `code_studio_scaffold_fallback_policy.py`. Tool-round timeouts,
+  no-tool-call responses, and outer Code Studio node exceptions now resolve a
+  typed `VisualCodeRuntimeContract` before engaging a template fallback.
+  Generic app/simulation failures are suppressed with an auditable safe-stop
+  response; artifact fallback remains allowed when the contract says it is the
+  right lane.
 
 ## Preserved Intentionally
 
@@ -317,9 +324,10 @@ backups, data PDFs, or local skill folders.
   before preview, and the first markdown/iframe UX cleanup landed in #559. The
   scaffold should keep moving away from broad template fallback when the
   primary visual tool path is healthy. Follow-up #561 introduced typed runtime
-  contracts for visual intent metadata and Code Studio visual-code lanes; the
-  next quality frontier is using those contracts to reduce deterministic
-  scaffold fallback in product flows, not adding more ad-hoc templates.
+  contracts for visual intent metadata and Code Studio visual-code lanes, and
+  follow-up #565 now uses those contracts to suppress broad app/simulation
+  scaffold fallback in product flows. The next quality frontier is deeper typed
+  visual intents for app categories, not adding more ad-hoc templates.
 - Some tests still import compatibility `graph.py` modules. Move tests toward
   `runtime.py` imports when the external import window can close.
 

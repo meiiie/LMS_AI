@@ -9,11 +9,13 @@ import time
 import uuid
 from typing import Optional
 
+from app.engine.multi_agent.code_studio_scaffold_fallback_policy import (
+    CodeStudioScaffoldFallbackDecision,
+    resolve_code_studio_scaffold_fallback,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.code_studio_template_scaffold import (
     build_code_studio_scaffold,
-    build_scaffold_visible_caption,
-    detect_scaffold_kind,
 )
 from app.engine.runtime.runtime_metrics import inc_counter
 
@@ -43,24 +45,40 @@ def _build_scaffold_manual_tool_call(
     query: str,
     *,
     reason: str = "unknown",
-) -> tuple[dict, str]:
-    """Build a synthetic tool_call payload that injects an HTML scaffold.
+    state: Optional[AgentState] = None,
+) -> tuple[dict | None, str, CodeStudioScaffoldFallbackDecision]:
+    """Build a synthetic scaffold tool call only when the contract allows it.
 
-    Returned ``manual_tc`` matches the shape expected by the rest of the
-    code_studio loop (``name``/``args``/``id``); ``visible_caption`` is the
-    short Vietnamese explainer the chat thread shows above the canvas.
+    Returned ``manual_tc`` is ``None`` when the policy suppresses broad
+    template rescue. Otherwise it matches the shape expected by the rest of the
+    Code Studio loop (``name``/``args``/``id``). ``visible_caption`` is either
+    the scaffold caption or a short safe-stop response.
 
     The ``reason`` label is forwarded to the
-    ``wiii.code_studio.scaffold.engaged`` counter so operators can see in
-    Grafana whether stream timeouts, ainvoke timeouts, or LLM-prose-only
-    rounds are driving the fallback rate.
+    scaffold metrics so operators can see whether stream timeouts, ainvoke
+    timeouts, or LLM-prose-only rounds are driving engaged or suppressed
+    fallback rate.
 
     Pattern reference: Anthropic Computer Use 2026 evidence-pool retention
     + Wiii VISUAL_CODE_GEN.md "host-governed runtime" lane.
     """
+    fallback_decision = resolve_code_studio_scaffold_fallback(
+        query=query,
+        state=state,
+        reason=reason,
+    )
+    if not fallback_decision.engage_scaffold:
+        try:
+            inc_counter(
+                "wiii.code_studio.scaffold.suppressed",
+                labels=fallback_decision.metric_labels(),
+            )
+        except Exception:  # noqa: BLE001 — never let metrics break a request
+            pass
+        return None, fallback_decision.response, fallback_decision
+
     scaffold_html = build_code_studio_scaffold(query)
-    visible_caption = build_scaffold_visible_caption(query)
-    kind = detect_scaffold_kind(query)
+    visible_caption = fallback_decision.response
     short_title = (query or "Khung dựng cảnh").strip()[:60]
     manual_tc = {
         "name": "tool_create_visual_code",
@@ -74,11 +92,11 @@ def _build_scaffold_manual_tool_call(
     try:
         inc_counter(
             "wiii.code_studio.scaffold.engaged",
-            labels={"kind": kind, "reason": reason},
+            labels=fallback_decision.metric_labels(),
         )
     except Exception:  # noqa: BLE001 — never let metrics break a request
         pass
-    return manual_tc, visible_caption
+    return manual_tc, visible_caption, fallback_decision
 
 
 async def execute_code_studio_tool_rounds_impl(
@@ -140,6 +158,16 @@ async def execute_code_studio_tool_rounds_impl(
             return Message(role="assistant", content=content, tool_calls=native_tcs)
         return Message(role="assistant", content=content)
 
+    def _scaffold_or_safe_response(reason: str) -> Message:
+        manual_tc, visible_caption, _decision = _build_scaffold_manual_tool_call(
+            query,
+            reason=reason,
+            state=state,
+        )
+        if manual_tc:
+            return _AM(content=visible_caption, tool_calls=[manual_tc])
+        return _AM(content=visible_caption)
+
     def _TM(content: str = "", *, tool_call_id: str = "") -> Message:
         """Native tool-result message."""
         return Message(role="tool", content=str(content), tool_call_id=str(tool_call_id))
@@ -185,7 +213,7 @@ async def execute_code_studio_tool_rounds_impl(
         # and the per-chunk asyncio.wait_for cannot reliably cancel the
         # underlying httpx connection. We therefore wrap the entire stream
         # loop with asyncio.timeout() (Python 3.11+) so the runtime cancels
-        # the whole task tree and the graceful scaffold fallback engages.
+        # the whole task tree and then resolves the contract-gated fallback.
         stream_overall_timeout = float(getattr(settings_obj, "code_studio_stream_overall_timeout_seconds", 90.0))
         code_html_done_at: float | None = None
         astream_timed_out = False
@@ -279,7 +307,7 @@ async def execute_code_studio_tool_rounds_impl(
             except (asyncio.TimeoutError, TimeoutError):
                 astream_timed_out = True
                 logger.warning(
-                    "[CODE_STUDIO] astream overall timeout after %ds — engaging graceful scaffold",
+                    "[CODE_STUDIO] astream overall timeout after %ds — resolving contract-gated fallback",
                     stream_overall_timeout,
                 )
             # Existing code below uses the astream loop's outputs.
@@ -297,10 +325,7 @@ async def execute_code_studio_tool_rounds_impl(
             # (provider-level hang or connection reset that the per-chunk
             # timeout could not interrupt).
             try:
-                manual_tc, visible_caption = _build_scaffold_manual_tool_call(
-                    query, reason="stream_overall_timeout"
-                )
-                llm_response = _AM(content=visible_caption, tool_calls=[manual_tc])
+                llm_response = _scaffold_or_safe_response("stream_overall_timeout")
             except Exception as scaffold_err:
                 logger.warning(
                     "[CODE_STUDIO] Scaffold construction after stream timeout failed: %s",
@@ -330,27 +355,21 @@ async def execute_code_studio_tool_rounds_impl(
             )
         elif not has_tool_calls and not code_streamer.full_code_html:
             # Stream finished/timed-out without producing either a tool call
-            # or any usable code_html. Fall through to the topic-aware scaffold
-            # so the user still gets a canvas instead of an empty turn.
+            # or any usable code_html. Fall through to the contract-gated
+            # fallback policy; app/simulation turns may stop safely here.
             logger.warning(
                 "[CODE_STUDIO] Stream produced no tool_calls and no code_html — "
-                "engaging graceful HTML scaffold"
+                "resolving contract-gated fallback"
             )
-            manual_tc, visible_caption = _build_scaffold_manual_tool_call(
-                query, reason="stream_empty"
-            )
-            llm_response = _AM(
-                content=visible_caption,
-                tool_calls=[manual_tc],
-            )
+            llm_response = _scaffold_or_safe_response("stream_empty")
     else:
         progress_messages = build_code_studio_progress_messages(query, state)
         # Non-streaming planning call — operator-tunable so the graceful
         # scaffold can engage well before the user's HTTP timeout. The
         # streaming path covers the same query type within
         # ``code_studio_stream_overall_timeout_seconds`` when the provider
-        # is healthy; an unhealthy provider fails over to the topic-aware
-        # scaffold rather than burning a multi-minute wait.
+        # is healthy; an unhealthy provider resolves a contract-gated fallback
+        # rather than burning a multi-minute wait.
         llm_hard_timeout = float(getattr(settings_obj, "code_studio_llm_hard_timeout_seconds", 90.0))
         poll_interval = 8.0
 
@@ -445,17 +464,11 @@ async def execute_code_studio_tool_rounds_impl(
                     )
                 except Exception as fb_err:
                     logger.warning(
-                        "[CODE_STUDIO] Fallback ainvoke also failed (%s) — engaging "
-                        "graceful HTML scaffold so user still gets a canvas",
+                        "[CODE_STUDIO] Fallback ainvoke also failed (%s) — resolving "
+                        "contract-gated fallback",
                         fb_err,
                     )
-                    manual_tc, visible_caption = _build_scaffold_manual_tool_call(
-                        query, reason="ainvoke_fallback_fail"
-                    )
-                    llm_response = _AM(
-                        content=visible_caption,
-                        tool_calls=[manual_tc],
-                    )
+                    llm_response = _scaffold_or_safe_response("ainvoke_fallback_fail")
                 break
             try:
                 await asyncio.wait_for(asyncio.shield(llm_task), timeout=poll_interval)
@@ -478,30 +491,18 @@ async def execute_code_studio_tool_rounds_impl(
         if llm_response is None:
             if llm_task.cancelled():
                 logger.warning(
-                    "[CODE_STUDIO] LLM call cancelled — engaging graceful HTML scaffold"
+                    "[CODE_STUDIO] LLM call cancelled — resolving contract-gated fallback"
                 )
-                manual_tc, visible_caption = _build_scaffold_manual_tool_call(
-                    query, reason="ainvoke_cancelled"
-                )
-                llm_response = _AM(
-                    content=visible_caption,
-                    tool_calls=[manual_tc],
-                )
+                llm_response = _scaffold_or_safe_response("ainvoke_cancelled")
             else:
                 llm_exc = llm_task.exception()
                 if llm_exc is not None:
                     logger.warning(
                         "[CODE_STUDIO] Initial tool-planning call failed before any tool call (%s) "
-                        "— engaging graceful HTML scaffold",
+                        "— resolving contract-gated fallback",
                         llm_exc,
                     )
-                    manual_tc, visible_caption = _build_scaffold_manual_tool_call(
-                        query, reason="ainvoke_exception"
-                    )
-                    llm_response = _AM(
-                        content=visible_caption,
-                        tool_calls=[manual_tc],
-                    )
+                    llm_response = _scaffold_or_safe_response("ainvoke_exception")
                 else:
                     llm_response = llm_task.result()
 
@@ -509,20 +510,14 @@ async def execute_code_studio_tool_rounds_impl(
     if not has_initial_tool_calls and requires_code_studio_visual_delivery(query, tools):
         logger.warning(
             "[CODE_STUDIO] LLM returned prose without tool call but visual "
-            "delivery is required — engaging graceful HTML scaffold"
+            "delivery is required — resolving contract-gated fallback"
         )
-        manual_tc, visible_caption = _build_scaffold_manual_tool_call(
-            query, reason="llm_prose_no_tool_call"
-        )
-        llm_response = _AM(
-            content=visible_caption,
-            tool_calls=[manual_tc],
-        )
+        llm_response = _scaffold_or_safe_response("llm_prose_no_tool_call")
 
     total_tool_calls = 0
     max_total_tool_calls = 6
     # Sprint 35e follow-up: cap the post-tool synthesizer round so the
-    # graceful scaffold path doesn't burn 15+ minutes when NVIDIA NIM
+    # fallback path doesn't burn 15+ minutes when NVIDIA NIM
     # stalls after our scaffold tool result lands. Without this cap,
     # ``TIMEOUT_PROFILE_BACKGROUND`` lets the wait stretch indefinitely.
     post_tool_synthesis_timeout = float(getattr(
