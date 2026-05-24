@@ -206,7 +206,7 @@ from app.engine.multi_agent.graph_runtime_bindings import (
     _build_code_studio_reasoning_summary,
     _build_code_studio_tool_reflection,
     _execute_code_studio_tool_rounds,
-    _execute_pendulum_code_studio_fast_path,
+    _execute_code_studio_fast_path,
     _get_phase_fallback,
 )
 
@@ -412,7 +412,7 @@ async def code_studio_node(state: AgentState) -> AgentState:
         build_code_studio_tools_context=_build_code_studio_tools_context,
         build_tool_runtime_context_fn=build_tool_runtime_context,
         build_visual_tool_runtime_metadata=_build_visual_tool_runtime_metadata,
-        execute_pendulum_code_studio_fast_path=_execute_pendulum_code_studio_fast_path,
+        execute_code_studio_fast_path=_execute_code_studio_fast_path,
         execute_code_studio_tool_rounds=_execute_code_studio_tool_rounds,
         extract_direct_response=_extract_direct_response,
         build_code_studio_stream_summary_messages=_build_code_studio_stream_summary_messages,

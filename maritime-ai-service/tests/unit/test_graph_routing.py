@@ -1242,7 +1242,7 @@ class TestSimulationClarifier:
                  return_value=([SimpleNamespace(name="tool_create_visual_code")], True),
              ), \
              patch(
-                 "app.engine.multi_agent.graph._execute_pendulum_code_studio_fast_path",
+                 "app.engine.multi_agent.graph._execute_code_studio_fast_path",
                  new=AsyncMock(return_value=fast_path_result),
              ) as mock_fast_path, \
              patch(
@@ -1813,7 +1813,7 @@ class TestProviderFlowIntegrity:
             "app.engine.multi_agent.graph._build_direct_system_messages",
             return_value=[],
         ), patch(
-            "app.engine.multi_agent.graph._execute_pendulum_code_studio_fast_path",
+            "app.engine.multi_agent.graph._execute_code_studio_fast_path",
             new=AsyncMock(return_value=None),
         ), patch(
             "app.engine.multi_agent.graph._execute_code_studio_tool_rounds",

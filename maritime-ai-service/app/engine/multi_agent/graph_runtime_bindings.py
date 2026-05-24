@@ -7,10 +7,13 @@ import inspect
 from importlib import import_module
 from pathlib import Path
 import re
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from app.core.config import settings
 from app.engine.multi_agent.state import AgentState
+
+if TYPE_CHECKING:
+    from app.engine.reasoning import ReasoningRenderResult
 
 
 def _load_attr(module_name: str, attr_name: str) -> Any:
@@ -920,7 +923,7 @@ async def _execute_code_studio_tool_rounds(
     )
 
 
-async def _execute_pendulum_code_studio_fast_path(
+async def _execute_code_studio_fast_path(
     *,
     state: AgentState,
     query: str,
@@ -937,6 +940,9 @@ async def _execute_pendulum_code_studio_fast_path(
         derive_code_stream_session_id=_derive_code_stream_session_id,
         sanitize_code_studio_response=_sanitize_code_studio_response,
     )
+
+
+_execute_pendulum_code_studio_fast_path = _execute_code_studio_fast_path
 
 
 def _get_phase_fallback(state: AgentState) -> str:
