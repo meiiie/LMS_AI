@@ -1,0 +1,66 @@
+name: Wiii Self-Harness
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/wiii_self_harness/**'
+      - 'docs/operations/WIII_SELF_HARNESS.md'
+      - '.github/workflows/wiii-self-harness.yml'
+      - 'maritime-ai-service/app/engine/multi_agent/visual_intent_resolver.py'
+      - 'maritime-ai-service/app/engine/multi_agent/visual_intent_support.py'
+      - 'maritime-ai-service/app/engine/multi_agent/tool_collection.py'
+      - 'maritime-ai-service/app/engine/multi_agent/code_studio_tool_rounds.py'
+      - 'maritime-ai-service/app/engine/multi_agent/code_studio_scaffold_fallback_policy.py'
+      - 'maritime-ai-service/app/engine/multi_agent/document_preview_contract.py'
+      - 'maritime-ai-service/app/engine/multi_agent/direct_node_document_preview_runtime.py'
+      - 'maritime-ai-service/app/api/v1/host_actions.py'
+      - 'maritime-ai-service/app/engine/context/host_action_audit.py'
+      - 'wiii-desktop/src/components/layout/CodeStudioPanel.tsx'
+      - 'wiii-desktop/src/components/chat/VisualBlock.tsx'
+      - 'docs/integration/WIII_LMS_DOC_TO_COURSE_CONTRACT.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/wiii_self_harness/**'
+      - 'docs/operations/WIII_SELF_HARNESS.md'
+      - '.github/workflows/wiii-self-harness.yml'
+      - 'maritime-ai-service/app/engine/multi_agent/visual_intent_resolver.py'
+      - 'maritime-ai-service/app/engine/multi_agent/visual_intent_support.py'
+      - 'maritime-ai-service/app/engine/multi_agent/tool_collection.py'
+      - 'maritime-ai-service/app/engine/multi_agent/code_studio_tool_rounds.py'
+      - 'maritime-ai-service/app/engine/multi_agent/code_studio_scaffold_fallback_policy.py'
+      - 'maritime-ai-service/app/engine/multi_agent/document_preview_contract.py'
+      - 'maritime-ai-service/app/engine/multi_agent/direct_node_document_preview_runtime.py'
+      - 'maritime-ai-service/app/api/v1/host_actions.py'
+      - 'maritime-ai-service/app/engine/context/host_action_audit.py'
+      - 'wiii-desktop/src/components/layout/CodeStudioPanel.tsx'
+      - 'wiii-desktop/src/components/chat/VisualBlock.tsx'
+      - 'docs/integration/WIII_LMS_DOC_TO_COURSE_CONTRACT.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  self-harness:
+    name: Wiii Self-Harness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: '3.11'
+
+      - name: Validate scenario manifest
+        run: python tools/wiii_self_harness/run_wiii_self_harness.py
+
+      - name: Run harness unit tests
+        run: python -m unittest discover -s tools/wiii_self_harness -p "test_*.py"

@@ -1,0 +1,340 @@
+{
+  "harness": "Wiii Self-Harness",
+  "version": 1,
+  "description": "Repo-owned system harness for active Wiii product contracts. It validates that critical architecture scenarios remain explicit and tied to living runtime, test, docs, and CI evidence.",
+  "required_scenarios": [
+    "visual-tool-capability-sync",
+    "code-studio-scaffold-boundary",
+    "lms-document-preview-apply-approval",
+    "host-action-audit-route",
+    "frontend-visual-code-studio-shell"
+  ],
+  "scenarios": [
+    {
+      "id": "visual-tool-capability-sync",
+      "title": "Visual intent binds the correct tool capability",
+      "status": "active",
+      "layer": "Wiii Core",
+      "risk": "high",
+      "owner": "Project leadership",
+      "active_product_path": true,
+      "contract": "VisualIntentDecision -> VisualToolRequirement -> direct and Code Studio tool collection",
+      "invariants": [
+        "required_visual_tool_names is the single source of required visual tool names.",
+        "Chart and article figure requests keep tool_generate_visual.",
+        "Code Studio app and artifact requests keep tool_create_visual_code.",
+        "Mermaid requests stay on the Mermaid lane and do not drift to chart or app tools.",
+        "Explicit web search remains stronger than visual intent and may strip visual tools."
+      ],
+      "evidence": [
+        {
+          "kind": "runtime",
+          "path": "maritime-ai-service/app/engine/multi_agent/visual_intent_resolver.py",
+          "must_contain": [
+            "class VisualToolCapability",
+            "class VisualToolRequirement",
+            "def required_visual_tool_names",
+            "def build_visual_tool_requirement",
+            "def visual_tool_capability_names"
+          ]
+        },
+        {
+          "kind": "runtime",
+          "path": "maritime-ai-service/app/engine/multi_agent/tool_collection.py",
+          "must_contain": [
+            "build_visual_tool_requirement",
+            "filter_tools_for_visual_intent",
+            "_strip_visual_tool_capabilities",
+            "_tools_matching_visual_requirement",
+            "web_search_forced"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "maritime-ai-service/tests/unit/test_visual_intent_resolver.py",
+          "must_contain": [
+            "required_visual_tool_names",
+            "tool_generate_visual",
+            "tool_create_visual_code",
+            "tool_generate_mermaid"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "maritime-ai-service/tests/unit/test_tool_collection_visual_requirements.py",
+          "must_contain": [
+            "tool_generate_visual",
+            "tool_create_visual_code",
+            "tool_generate_mermaid",
+            "web-search"
+          ]
+        }
+      ],
+      "verification": [
+        {
+          "command": "cd maritime-ai-service; uv run --python 3.12 --extra dev pytest tests/unit/test_visual_intent_resolver.py tests/unit/test_tool_collection_visual_requirements.py -q --tb=short",
+          "purpose": "Prove typed visual requirements keep chart, app, artifact, Mermaid, and web-search routing deterministic."
+        }
+      ]
+    },
+    {
+      "id": "code-studio-scaffold-boundary",
+      "title": "Code Studio scaffold fallback is policy-gated",
+      "status": "active",
+      "layer": "Wiii Core",
+      "risk": "high",
+      "owner": "Project leadership",
+      "active_product_path": true,
+      "contract": "Provider/tool-loop failures resolve to typed CodeStudioToolRoundOutcome values before any scaffold is injected.",
+      "invariants": [
+        "The tool loop records why a fallback boundary was reached.",
+        "Generic simulation or app requests stop safely instead of receiving a broad template.",
+        "Only artifact contracts can engage the deterministic scaffold fallback.",
+        "Synthetic scaffold tool calls always target tool_create_visual_code."
+      ],
+      "evidence": [
+        {
+          "kind": "runtime",
+          "path": "maritime-ai-service/app/engine/multi_agent/code_studio_tool_rounds.py",
+          "must_contain": [
+            "class CodeStudioToolRoundTrigger",
+            "class CodeStudioToolRoundOutcomeKind",
+            "class CodeStudioToolRoundOutcome",
+            "resolve_code_studio_scaffold_tool_round_outcome",
+            "SAFE_STOP_RESPONSE"
+          ]
+        },
+        {
+          "kind": "runtime",
+          "path": "maritime-ai-service/app/engine/multi_agent/code_studio_scaffold_fallback_policy.py",
+          "must_contain": [
+            "class CodeStudioScaffoldFallbackDecision",
+            "class CodeStudioScaffoldFallbackIntent",
+            "def resolve_code_studio_scaffold_fallback",
+            "app_requires_tool_generated_preview",
+            "artifact_contract_allows_scaffold"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "maritime-ai-service/tests/unit/test_code_studio_scaffold_fallback_policy.py",
+          "must_contain": [
+            "test_suppresses_generic_simulation_scaffold_fallback",
+            "test_allows_artifact_scaffold_fallback_with_contract_metadata",
+            "SAFE_STOP_RESPONSE",
+            "tool_create_visual_code"
+          ]
+        }
+      ],
+      "verification": [
+        {
+          "command": "cd maritime-ai-service; uv run --python 3.12 --extra dev pytest tests/unit/test_code_studio_scaffold_fallback_policy.py -q --tb=short",
+          "purpose": "Prove scaffold fallback can only engage through the typed policy and returns safe-stop outcomes otherwise."
+        }
+      ]
+    },
+    {
+      "id": "lms-document-preview-apply-approval",
+      "title": "Uploaded LMS documents use preview/apply approval",
+      "status": "active",
+      "layer": "Wiii Host",
+      "risk": "high",
+      "owner": "Project leadership",
+      "active_product_path": true,
+      "contract": "Uploaded document authoring must emit a preview host action with source references before any LMS apply flow uses an approval token.",
+      "invariants": [
+        "Uploaded document authoring binds preview host actions, not direct LMS mutation.",
+        "Lesson and course preview tool names are shared by one contract module.",
+        "Preview payloads must carry source references or citations from the uploaded document.",
+        "Apply is outside Wiii runtime mutation and requires host approval_token or preview token handling.",
+        "Legacy direct course mutation is guarded by an explicit safe contract."
+      ],
+      "evidence": [
+        {
+          "kind": "runtime",
+          "path": "maritime-ai-service/app/engine/multi_agent/document_preview_contract.py",
+          "must_contain": [
+            "DOC_PREVIEW_HOST_ACTION_TOOL",
+            "DOC_COURSE_HOST_ACTION_TOOL",
+            "DOCUMENT_PREVIEW_CAPABILITY_NAMES",
+            "document_preview_forced_tool_choice",
+            "extract_document_preview_capabilities"
+          ]
+        },
+        {
+          "kind": "runtime",
+          "path": "maritime-ai-service/app/engine/multi_agent/direct_node_document_preview_runtime.py",
+          "must_contain": [
+            "execute_direct_node_document_preview_round",
+            "forced_tool_choice",
+            "host_action",
+            "routing_metadata_key"
+          ]
+        },
+        {
+          "kind": "docs",
+          "path": "docs/integration/WIII_LMS_DOC_TO_COURSE_CONTRACT.md",
+          "must_contain": [
+            "approval_token",
+            "source_references",
+            "host_action_preview_apply",
+            "Do not implement LMS mutations in the Wiii repository"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "maritime-ai-service/tests/unit/test_document_preview_contract.py",
+          "must_contain": [
+            "tao cho minh bai hoc",
+            "DOC_PREVIEW_HOST_ACTION_TOOL",
+            "document_preview_forced_tool_choice"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "maritime-ai-service/tests/unit/test_document_context_api.py",
+          "must_contain": [
+            "approval_token",
+            "source_references",
+            "_looks_uploaded_document_preview_request"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "maritime-ai-service/tests/unit/test_course_generation_flow.py",
+          "must_contain": [
+            "legacy_lms_mutation_confirmation_required",
+            "host_action_preview_apply",
+            "source_references"
+          ]
+        }
+      ],
+      "verification": [
+        {
+          "command": "cd maritime-ai-service; uv run --python 3.12 --extra dev pytest tests/unit/test_document_preview_contract.py tests/unit/test_document_context_api.py tests/unit/test_direct_node_document_preview_runtime.py tests/unit/test_course_generation_flow.py -q --tb=short",
+          "purpose": "Prove uploaded document preview detection, forced host-action binding, source refs, and legacy mutation guard stay intact."
+        }
+      ]
+    },
+    {
+      "id": "host-action-audit-route",
+      "title": "Host action audit route remains available and token-safe",
+      "status": "active",
+      "layer": "Wiii Host",
+      "risk": "medium",
+      "owner": "Project leadership",
+      "active_product_path": true,
+      "contract": "Host action lifecycle events are accepted through the authenticated audit route and preview tokens are hashed before audit persistence.",
+      "invariants": [
+        "The /api/v1/host-actions/audit route remains registered.",
+        "Audit writes include authenticated user and organization context.",
+        "Preview tokens are hashed and never persisted in clear text.",
+        "Host action audit tests exercise route submission and token hashing."
+      ],
+      "evidence": [
+        {
+          "kind": "runtime",
+          "path": "maritime-ai-service/app/api/v1/host_actions.py",
+          "must_contain": [
+            "APIRouter(prefix=\"/host-actions\"",
+            "@router.post(\"/audit\"",
+            "RequireAuth",
+            "log_host_action_event"
+          ]
+        },
+        {
+          "kind": "runtime",
+          "path": "maritime-ai-service/app/engine/context/host_action_audit.py",
+          "must_contain": [
+            "def _hash_preview_token",
+            "preview_token_hash",
+            "log_auth_event",
+            "organization_id"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "maritime-ai-service/tests/unit/test_host_action_audit.py",
+          "must_contain": [
+            "/api/v1/host-actions/audit",
+            "test_log_host_action_event_hashes_preview_token",
+            "test_submit_host_action_audit_logs_success",
+            "preview_token_hash"
+          ]
+        }
+      ],
+      "verification": [
+        {
+          "command": "cd maritime-ai-service; uv run --python 3.12 --extra dev pytest tests/unit/test_host_action_audit.py -q --tb=short",
+          "purpose": "Prove the audit endpoint and hashed preview-token persistence contract remain covered."
+        }
+      ]
+    },
+    {
+      "id": "frontend-visual-code-studio-shell",
+      "title": "Frontend visual and Code Studio shells avoid raw output drift",
+      "status": "active",
+      "layer": "Wiii Host",
+      "risk": "medium",
+      "owner": "Project leadership",
+      "active_product_path": true,
+      "contract": "VisualBlock and CodeStudioPanel keep app previews in host-owned frames, preserve mobile-safe layout, and avoid rendering raw code when preview is selected.",
+      "invariants": [
+        "Completed Code Studio sessions prefer preview unless code view was explicitly requested.",
+        "Code Studio previews render as immersive app frames with viewport sizing.",
+        "The overlay shell remains mobile-safe before the small breakpoint.",
+        "VisualBlock delegates an open Code Studio session instead of duplicating the frame.",
+        "Vietnamese-first UI copy remains covered by focused tests."
+      ],
+      "evidence": [
+        {
+          "kind": "runtime",
+          "path": "wiii-desktop/src/components/layout/CodeStudioPanel.tsx",
+          "must_contain": [
+            "InlineVisualFrame",
+            "sizingMode=\"viewport\"",
+            "shellVariant=\"immersive\"",
+            "requestedView",
+            "showTweaksToggle"
+          ]
+        },
+        {
+          "kind": "runtime",
+          "path": "wiii-desktop/src/components/chat/VisualBlock.tsx",
+          "must_contain": [
+            "delegateToCodeStudioPanel",
+            "htmlPayload",
+            "InlineVisualFrame",
+            "Đang mở trong Code Studio"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "wiii-desktop/src/__tests__/code-studio-panel.test.tsx",
+          "must_contain": [
+            "renders Code Studio previews as app frames",
+            "sizingMode: \"viewport\"",
+            "shellVariant: \"immersive\"",
+            "keeps the overlay shell mobile-safe",
+            "uses Vietnamese-first labels"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "wiii-desktop/src/__tests__/visual-block-copy.test.tsx",
+          "must_contain": [
+            "VisualBlock copy",
+            "uses Vietnamese copy",
+            "Mở thành Artifact"
+          ]
+        }
+      ],
+      "verification": [
+        {
+          "command": "cd wiii-desktop; npx vitest run src/__tests__/code-studio-panel.test.tsx src/__tests__/visual-block-copy.test.tsx --pool forks --maxWorkers=1",
+          "purpose": "Prove Code Studio panel preview behavior, mobile-safe layout, and visual handoff copy remain covered."
+        }
+      ]
+    }
+  ]
+}

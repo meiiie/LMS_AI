@@ -73,7 +73,9 @@ var/
 _find_untested.py
 docx_output.txt
 test_*.txt
-/tools/
+/tools/*
+!/tools/wiii_self_harness/
+!/tools/wiii_self_harness/**
 
 # === pip install artifacts ===
 maritime-ai-service/=*
