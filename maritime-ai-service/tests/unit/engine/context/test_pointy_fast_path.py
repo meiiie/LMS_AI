@@ -282,6 +282,22 @@ def test_capability_inventory_prompt_does_not_emit_image_input_fast_path_action(
     assert action is None
 
 
+def test_visual_simulation_prompt_does_not_get_hijacked_by_open_term():
+    action = build_pointy_fast_path_action(
+        "Mô phỏng Quy tắc 15 COLREGs",
+        _context([
+            {
+                "id": "auto:button:giai-thich-quy-tac-15-colregs",
+                "selector": '[data-wiii-id="auto:button:giai-thich-quy-tac-15-colregs"]',
+                "label": "Giai thich Quy tac 15 COLREGs",
+                "click_safe": True,
+            }
+        ]),
+    )
+
+    assert action is None
+
+
 def test_skips_when_frontend_fast_path_already_reported_feedback():
     action = build_pointy_fast_path_action(
         "Wiii oi, nut Kham pha khoa hoc o dau?",

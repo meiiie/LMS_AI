@@ -75,11 +75,12 @@ async def code_studio_node_impl(
         }.get(domain_id, domain_id)
 
     try:
-        from app.engine.multi_agent.agent_config import AgentConfigRegistry
-
         _ctx = state.get("context", {})
         explicit_provider = get_effective_provider(state)
         response = ""
+        tools: list = []
+        force_tools = False
+        runtime_context_base = None
         if looks_like_ambiguous_simulation_request(query, state):
             grounded_query = ground_simulation_query_from_visual_context(query, state)
             if grounded_query:
@@ -95,12 +96,6 @@ async def code_studio_node_impl(
                     "node": "code_studio_agent",
                     "details": {"visibility": "status_only"},
                 })
-                llm = AgentConfigRegistry.get_llm(
-                    "code_studio_agent",
-                    effort_override=state.get("thinking_effort"),
-                    provider_override=explicit_provider,
-                    requested_model=state.get("model"),
-                )
             else:
                 response = build_ambiguous_simulation_clarifier(state)
                 state["thinking_content"] = (
@@ -112,26 +107,7 @@ async def code_studio_node_impl(
                     confidence=0.9,
                     details={"response_type": "clarify", "reason": "ambiguous_simulation_request"},
                 )
-                llm = None
-        else:
-            thinking_effort = state.get("thinking_effort")
-            llm = AgentConfigRegistry.get_llm(
-                "code_studio_agent",
-                effort_override=thinking_effort,
-                provider_override=explicit_provider,
-                requested_model=state.get("model"),
-            )
-
-        if llm and getattr(settings_obj, "enable_natural_conversation", False) is True:
-            _pp = getattr(settings_obj, "llm_presence_penalty", 0.0)
-            _fp = getattr(settings_obj, "llm_frequency_penalty", 0.0)
-            if _pp or _fp:
-                try:
-                    llm = llm.bind(presence_penalty=_pp, frequency_penalty=_fp)
-                except Exception:
-                    pass
-
-        if llm:
+        if not response:
             tools, force_tools = collect_code_studio_tools(effective_query, _ctx.get("user_role", "student"))
             try:
                 from app.engine.skills.skill_recommender import select_runtime_tools
@@ -156,35 +132,6 @@ async def code_studio_node_impl(
             except Exception as _selection_err:
                 logger.debug("[CODE_STUDIO] Runtime tool selection skipped: %s", _selection_err)
 
-            bound_provider = getattr(llm, "_wiii_provider_name", None) or state.get("provider")
-            bound_model = (
-                getattr(llm, "_wiii_model_name", None)
-                or getattr(llm, "model_name", None)
-                or getattr(llm, "model", None)
-            )
-            if bound_provider and str(bound_provider).strip().lower() != "auto":
-                state["_execution_provider"] = str(bound_provider)
-            if bound_model:
-                state["_execution_model"] = str(bound_model)
-                state["model"] = str(bound_model)
-            llm_with_tools, llm_auto, forced_tool_choice = bind_direct_tools(
-                llm,
-                tools,
-                force_tools,
-                provider=bound_provider,
-                include_forced_choice=True,
-            )
-            messages = build_direct_system_messages(
-                state,
-                effective_query,
-                domain_name_vi,
-                role_name="code_studio_agent",
-                tools_context_override=build_code_studio_tools_context(
-                    settings_obj,
-                    _ctx.get("user_role", "student"),
-                    effective_query,
-                ),
-            )
             runtime_context_base = build_tool_runtime_context_fn(
                 event_bus_id=_bus_id,
                 request_id=_ctx.get("request_id"),
@@ -221,6 +168,55 @@ async def code_studio_node_impl(
                     },
                 )
             else:
+                from app.engine.multi_agent.agent_config import AgentConfigRegistry
+
+                thinking_effort = state.get("thinking_effort")
+                llm = AgentConfigRegistry.get_llm(
+                    "code_studio_agent",
+                    effort_override=thinking_effort,
+                    provider_override=explicit_provider,
+                    requested_model=state.get("model"),
+                )
+                if llm and getattr(settings_obj, "enable_natural_conversation", False) is True:
+                    _pp = getattr(settings_obj, "llm_presence_penalty", 0.0)
+                    _fp = getattr(settings_obj, "llm_frequency_penalty", 0.0)
+                    if _pp or _fp:
+                        try:
+                            llm = llm.bind(presence_penalty=_pp, frequency_penalty=_fp)
+                        except Exception:
+                            pass
+                if not llm:
+                    raise RuntimeError("Code Studio provider returned no LLM")
+
+                bound_provider = getattr(llm, "_wiii_provider_name", None) or state.get("provider")
+                bound_model = (
+                    getattr(llm, "_wiii_model_name", None)
+                    or getattr(llm, "model_name", None)
+                    or getattr(llm, "model", None)
+                )
+                if bound_provider and str(bound_provider).strip().lower() != "auto":
+                    state["_execution_provider"] = str(bound_provider)
+                if bound_model:
+                    state["_execution_model"] = str(bound_model)
+                    state["model"] = str(bound_model)
+                llm_with_tools, llm_auto, forced_tool_choice = bind_direct_tools(
+                    llm,
+                    tools,
+                    force_tools,
+                    provider=bound_provider,
+                    include_forced_choice=True,
+                )
+                messages = build_direct_system_messages(
+                    state,
+                    effective_query,
+                    domain_name_vi,
+                    role_name="code_studio_agent",
+                    tools_context_override=build_code_studio_tools_context(
+                        settings_obj,
+                        _ctx.get("user_role", "student"),
+                        effective_query,
+                    ),
+                )
                 llm_response, messages, _tc_events = await execute_code_studio_tool_rounds(
                     llm_with_tools,
                     llm_auto,

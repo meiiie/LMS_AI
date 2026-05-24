@@ -277,6 +277,19 @@ describe("pointy fast path", () => {
     ).toBeNull();
   });
 
+  it("does not hijack visual simulation prompts because of the Vietnamese 'mo' token", () => {
+    const ctx = makeHostContext([
+      {
+        id: "auto:button:giai-thich-quy-tac-15-colregs",
+        selector: "[data-wiii-id=\"auto:button:giai-thich-quy-tac-15-colregs\"]",
+        label: "Giai thich Quy tac 15 COLREGs",
+        click_safe: true,
+      },
+    ]);
+
+    expect(buildPointyFastPathAction("Mô phỏng Quy tắc 15 COLREGs", ctx)).toBeNull();
+  });
+
   it("allows embodied Pointy only for explicit Pointy-style turns", () => {
     expect(looksExplicitPointyTurn("Pointy hay chi vao nut Gui tin nhan va noi mot lan thoi.")).toBe(true);
     expect(looksExplicitPointyTurn("Pointy, chi lai nut Gui va noi that ngan thoi.")).toBe(true);

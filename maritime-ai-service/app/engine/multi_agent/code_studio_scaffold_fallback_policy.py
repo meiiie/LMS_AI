@@ -33,6 +33,7 @@ class CodeStudioScaffoldFallbackDecision:
     studio_lane: str
     artifact_kind: str
     visual_type: str
+    app_category: str
     quality_profile: str
 
     def metric_labels(self) -> dict[str, str]:
@@ -43,6 +44,7 @@ class CodeStudioScaffoldFallbackDecision:
             "policy_reason": self.policy_reason,
             "presentation_intent": self.presentation_intent,
             "visual_type": self.visual_type,
+            "app_category": self.app_category,
             "studio_lane": self.studio_lane,
         }
 
@@ -107,6 +109,7 @@ def _resolution_failure_decision(
         studio_lane="unknown",
         artifact_kind="unknown",
         visual_type="unknown",
+        app_category="unknown",
         quality_profile="unknown",
     )
 
@@ -143,6 +146,7 @@ def resolve_code_studio_scaffold_fallback(
     studio_lane = _safe_text(getattr(visual_decision, "studio_lane", ""))
     artifact_kind = _safe_text(getattr(visual_decision, "artifact_kind", ""))
     visual_type = _safe_text(getattr(visual_decision, "visual_type", ""))
+    app_category = _safe_text(getattr(visual_decision, "app_category", ""))
     quality_profile = _safe_text(getattr(visual_decision, "quality_profile", ""))
     metric_kind = _safe_kind(query, detect_kind_fn)
 
@@ -162,6 +166,7 @@ def resolve_code_studio_scaffold_fallback(
             studio_lane=studio_lane or "none",
             artifact_kind=artifact_kind or "none",
             visual_type=visual_type or "none",
+            app_category=app_category or "none",
             quality_profile=quality_profile or "standard",
         )
 
@@ -172,6 +177,9 @@ def resolve_code_studio_scaffold_fallback(
             artifact_kind=artifact_kind,
             requested_visual_type=visual_type,
             quality_profile=quality_profile,
+            app_category=app_category,
+            user_query=query,
+            planning_profile=_safe_text(getattr(visual_decision, "planning_profile", "")),
         )
     except Exception:
         return _resolution_failure_decision(
@@ -184,6 +192,9 @@ def resolve_code_studio_scaffold_fallback(
     studio_lane = _safe_text(getattr(contract, "studio_lane", studio_lane))
     artifact_kind = _safe_text(getattr(contract, "artifact_kind", artifact_kind))
     visual_type = _safe_text(getattr(contract, "resolved_visual_type", visual_type))
+    app_category = _safe_text(
+        getattr(getattr(contract, "app_intent_contract", None), "category", app_category)
+    )
     quality_profile = _safe_text(getattr(contract, "quality_profile", quality_profile))
 
     if getattr(contract, "is_blocked_for_code_studio", False):
@@ -202,6 +213,7 @@ def resolve_code_studio_scaffold_fallback(
             studio_lane=studio_lane,
             artifact_kind=artifact_kind,
             visual_type=visual_type,
+            app_category=app_category,
             quality_profile=quality_profile,
         )
 
@@ -221,6 +233,7 @@ def resolve_code_studio_scaffold_fallback(
             studio_lane=studio_lane,
             artifact_kind=artifact_kind,
             visual_type=visual_type,
+            app_category=app_category,
             quality_profile=quality_profile,
         )
 
@@ -236,5 +249,6 @@ def resolve_code_studio_scaffold_fallback(
         studio_lane=studio_lane,
         artifact_kind=artifact_kind,
         visual_type=visual_type,
+        app_category=app_category,
         quality_profile=quality_profile,
     )

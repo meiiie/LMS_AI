@@ -61,6 +61,42 @@ _UNSAFE_CLICK_TERMS = (
     "mark complete",
     "hoan thanh",
 )
+_VISUAL_DELIVERY_TERMS = (
+    "mo phong",
+    "simulate",
+    "simulation",
+    "simulator",
+    "canvas",
+    "code studio",
+    "tao visual",
+    "tao hinh",
+    "ve bieu do",
+    "draw chart",
+    "create chart",
+    "mermaid",
+    "html app",
+)
+_EXPLICIT_POINTY_OPERATOR_TERMS = (
+    "pointy",
+    "chi cho",
+    "chi vao",
+    "chi lai",
+    "chi giup",
+    "chi den",
+    "chi toi",
+    "tro toi",
+    "tro vao",
+    "tro den",
+    "highlight",
+    "show me where",
+    "point to",
+    "o dau",
+    "where",
+    "nut",
+    "button",
+    "bam",
+    "click",
+)
 
 _TARGET_ALIASES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (
@@ -236,6 +272,11 @@ def build_pointy_fast_path_action(
         return None
 
     normalized_prompt = normalize_pointy_text(prompt)
+    if _has_any_term(normalized_prompt, _VISUAL_DELIVERY_TERMS) and not _has_any_term(
+        normalized_prompt,
+        _EXPLICIT_POINTY_OPERATOR_TERMS,
+    ):
+        return None
     wants_locate = _has_any_term(normalized_prompt, _LOCATE_TERMS)
     wants_click = _has_any_term(normalized_prompt, _CLICK_TERMS)
     if not normalized_prompt or (not wants_locate and not wants_click):

@@ -45,6 +45,8 @@ def test_build_visual_tool_runtime_intent_preserves_typed_lane_metadata() -> Non
     assert metadata["artifact_kind"] == "html_app"
     assert metadata["renderer_contract"] == "host_shell"
     assert metadata["renderer_kind_hint"] == "app"
+    assert metadata["app_category"] == "simulation"
+    assert "state_model" in metadata["app_reject_if_missing"]
 
 
 def test_build_visual_tool_runtime_intent_skips_non_visual_turns() -> None:

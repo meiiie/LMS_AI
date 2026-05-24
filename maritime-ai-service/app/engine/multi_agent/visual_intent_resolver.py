@@ -13,9 +13,14 @@ from app.engine.multi_agent.visual_intent_presets import (
     build_diagram_decision_impl,
 )
 from app.engine.multi_agent.visual_intent_support import (
+    CODE_WIDGET_CUES as _CODE_WIDGET_CUES,
+    DASHBOARD_APP_CUES as _DASHBOARD_APP_CUES,
+    INTERACTIVE_TABLE_CUES as _INTERACTIVE_TABLE_CUES,
     LEGACY_VISUAL_TOOL_NAMES as _LEGACY_VISUAL_TOOL_NAMES,
+    MINI_TOOL_CUES as _MINI_TOOL_CUES,
     QUIZ_WIDGET_CUES as _QUIZ_WIDGET_CUES,
     SCENE_SIMULATION_CUES as _SCENE_SIMULATION_CUES,
+    SEARCH_WIDGET_CUES as _SEARCH_WIDGET_CUES,
     SIMULATION_APP_CUES as _SIMULATION_APP_CUES,
     SIMULATION_PATCH_CUES as _SIMULATION_PATCH_CUES,
     contains_any_impl,
@@ -41,6 +46,16 @@ PreferredRenderSurface = Literal["svg", "canvas", "html", "video"]
 PlanningProfile = Literal["article_svg", "chart_svg", "simulation_canvas", "artifact_html"]
 CriticPolicy = Literal["none", "standard", "premium"]
 LivingExpressionMode = Literal["subtle", "expressive"]
+CodeStudioAppCategory = Literal[
+    "simulation",
+    "quiz",
+    "dashboard",
+    "mini_tool",
+    "interactive_table",
+    "search_widget",
+    "code_widget",
+    "artifact",
+]
 
 
 
@@ -63,6 +78,7 @@ class VisualIntentDecision:
     critic_policy: CriticPolicy = "standard"
     living_expression_mode: LivingExpressionMode = "expressive"
     renderer_kind_hint: str = ""
+    app_category: CodeStudioAppCategory | str = ""
 
 
 def _looks_like_quiz_app_request(query: str, normalized: str) -> bool:
@@ -107,6 +123,26 @@ def _infer_followup_simulation_type(normalized: str) -> str | None:
         normalized,
         contains_any=_contains_any,
     )
+
+def _infer_code_studio_app_category(normalized: str, *, visual_type: str | None = None) -> str:
+    if visual_type == "simulation" or _contains_any(
+        normalized,
+        _SIMULATION_APP_CUES + _SIMULATION_PATCH_CUES + _SCENE_SIMULATION_CUES,
+    ):
+        return "simulation"
+    if visual_type == "quiz" or _contains_any(normalized, _QUIZ_WIDGET_CUES):
+        return "quiz"
+    if visual_type == "interactive_table" or _contains_any(normalized, _INTERACTIVE_TABLE_CUES):
+        return "interactive_table"
+    if _contains_any(normalized, _SEARCH_WIDGET_CUES):
+        return "search_widget"
+    if _contains_any(normalized, _CODE_WIDGET_CUES):
+        return "code_widget"
+    if _contains_any(normalized, _DASHBOARD_APP_CUES):
+        return "dashboard"
+    if _contains_any(normalized, _MINI_TOOL_CUES):
+        return "mini_tool"
+    return "mini_tool"
 
 def detect_visual_patch_request(query: str) -> bool:
     """Return True when the query looks like a follow-up edit to an existing visual."""
@@ -310,7 +346,12 @@ def _resolve_visual_intent_core(query: str) -> VisualIntentDecision:
             "react app",
         ),
     ):
-        return build_artifact_decision_impl(decision_cls=VisualIntentDecision)
+        artifact_kind = "search_widget" if _contains_any(normalized, _SEARCH_WIDGET_CUES) else "html_app"
+        return build_artifact_decision_impl(
+            decision_cls=VisualIntentDecision,
+            artifact_kind=artifact_kind,
+            app_category="artifact" if artifact_kind == "html_app" else "search_widget",
+        )
 
     if _contains_any(
         normalized,
@@ -333,11 +374,19 @@ def _resolve_visual_intent_core(query: str) -> VisualIntentDecision:
             "drag and drop",
             "interactive table",
         ),
-    ) or _contains_any(normalized, _QUIZ_WIDGET_CUES) or _looks_like_quiz_app_request(query, normalized) or (
+    ) or _contains_any(
+        normalized,
+        _QUIZ_WIDGET_CUES
+        + _DASHBOARD_APP_CUES
+        + _MINI_TOOL_CUES
+        + _INTERACTIVE_TABLE_CUES
+        + _SEARCH_WIDGET_CUES
+        + _CODE_WIDGET_CUES,
+    ) or _looks_like_quiz_app_request(query, normalized) or (
         "app" in normalized
         and _contains_any(normalized, _SIMULATION_APP_CUES)
     ):
-        visual_type = "simulation" if _contains_any(
+        if _contains_any(
             normalized,
             (
                 "simulation",
@@ -358,11 +407,20 @@ def _resolve_visual_intent_core(query: str) -> VisualIntentDecision:
                 "van hoc",
                 "nhan vat",
             ),
-        ) else None
+        ):
+            visual_type = "simulation"
+        elif _looks_like_quiz_app_request(query, normalized) or _contains_any(normalized, _QUIZ_WIDGET_CUES):
+            visual_type = "quiz"
+        elif _contains_any(normalized, _INTERACTIVE_TABLE_CUES):
+            visual_type = "interactive_table"
+        else:
+            visual_type = "react_app"
+        app_category = _infer_code_studio_app_category(normalized, visual_type=visual_type)
         return build_app_decision_impl(
             decision_cls=VisualIntentDecision,
             visual_type=visual_type,
             reason="app-request",
+            app_category=app_category,
         )
 
     if _looks_like_app_followup_patch(normalized):
@@ -371,6 +429,7 @@ def _resolve_visual_intent_core(query: str) -> VisualIntentDecision:
             decision_cls=VisualIntentDecision,
             visual_type=visual_type,
             reason="app-followup-patch",
+            app_category=_infer_code_studio_app_category(normalized, visual_type=visual_type),
         )
 
     if _contains_any(
