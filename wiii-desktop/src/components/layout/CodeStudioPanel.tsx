@@ -371,13 +371,14 @@ function PreviewTab({ session }: { session: CodeStudioSession }) {
   }
 
   return (
-    <div className="h-full">
+    <div className="h-full min-h-0 code-studio-panel__preview">
       <InlineVisualFrame
         html={session.code}
         title={session.title}
         sessionId={session.sessionId}
         className="w-full h-full"
         frameKind="app"
+        sizingMode="viewport"
         shellVariant="immersive"
         hostShellMode="force"
         showTweaksToggle

@@ -134,6 +134,7 @@ describe("CodeStudioPanel", () => {
     expect(inlineVisualFrameSpy).toHaveBeenLastCalledWith(
       expect.objectContaining({
         frameKind: "app",
+        sizingMode: "viewport",
         shellVariant: "immersive",
         hostShellMode: "force",
         className: "w-full h-full",

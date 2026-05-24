@@ -42,6 +42,12 @@ test.describe("code studio runtime", () => {
       .toBe(true);
 
     await expect(panel.locator("iframe").first()).toBeVisible({ timeout: 120_000 });
+    await expect(panel.locator('[data-inline-visual-sizing="viewport"]').first()).toBeVisible({ timeout: 120_000 });
+    await expect
+      .poll(async () =>
+        panel.locator("iframe").first().evaluate((node) => (node as HTMLIFrameElement).style.height),
+      )
+      .toBe("100%");
     await expect(inlineCard.getByRole("button", { name: /xem code/i })).toBeVisible();
 
     await sendPrompt(page, FOLLOWUP_PROMPT);
@@ -61,6 +67,7 @@ test.describe("code studio runtime", () => {
       .toEqual(["v1", "v2"]);
 
     await expect(panel.locator("iframe").first()).toBeVisible({ timeout: 120_000 });
+    await expect(panel.locator('[data-inline-visual-sizing="viewport"]').first()).toBeVisible({ timeout: 120_000 });
     await expect(inlineCard.getByRole("button", { name: /xem code/i })).toBeVisible();
 
     await page.screenshot({
@@ -178,6 +185,15 @@ test.describe("Phase 8 routing", () => {
 
     const hasApp = csCount > 0 || (visualCount > 0 && iframeCount > 0);
     expect(hasApp).toBe(true);
+    if (csCount > 0) {
+      const panel = page.locator(".code-studio-panel").first();
+      await expect(panel.locator('[data-inline-visual-sizing="viewport"]').first()).toBeVisible({ timeout: 30_000 });
+      await expect
+        .poll(async () =>
+          panel.locator("iframe").first().evaluate((node) => (node as HTMLIFrameElement).style.height),
+        )
+        .toBe("100%");
+    }
 
     await page.screenshot({ path: testInfo.outputPath("routing-pendulum.png"), fullPage: true });
   });

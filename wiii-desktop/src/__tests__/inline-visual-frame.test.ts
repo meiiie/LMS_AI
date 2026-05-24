@@ -60,5 +60,7 @@ describe("InlineVisualFrame host shell", () => {
 
     expect(wrapped).toContain("overflow: auto;");
     expect(wrapped).toContain("overscroll-behavior: contain;");
+    expect(wrapped).toContain("function measureHeight()");
+    expect(wrapped).toContain("resizeObserver.observe(document.documentElement)");
   });
 });

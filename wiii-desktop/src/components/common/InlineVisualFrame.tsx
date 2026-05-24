@@ -1,5 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { VisualRuntimeManifest, VisualShellVariant } from "@/api/types";
+import {
+  clampVisualFrameContentHeight,
+  getVisualFrameHeightProfile,
+  parseVisualFrameBridgeMessage,
+  resolveVisualFrameCssHeight,
+  resolveVisualFrameSizingMode,
+} from "@/lib/visual-frame-contract";
+import type { VisualFrameKind, VisualFrameSizingMode } from "@/lib/visual-frame-contract";
 
 const ALLOWED_CDNS = [
   "https://cdn.jsdelivr.net",
@@ -66,7 +74,8 @@ interface InlineVisualFrameProps {
   summary?: string;
   sessionId?: string;
   shellVariant?: VisualShellVariant;
-  frameKind?: "legacy" | "inline_html" | "app";
+  frameKind?: VisualFrameKind;
+  sizingMode?: VisualFrameSizingMode;
   runtimeManifest?: VisualRuntimeManifest | null;
   showFrameIntro?: boolean;
   hostShellMode?: "auto" | "force";
@@ -285,8 +294,29 @@ export function buildVisualFrameDocument(
         parent.postMessage({ type: type, payload: payload || {} }, '*');
       }
 
+      function measureHeight() {
+        var body = document.body || {};
+        var doc = document.documentElement || {};
+        var rectHeight = body.getBoundingClientRect ? body.getBoundingClientRect().height : 0;
+        return Math.ceil(Math.max(
+          body.scrollHeight || 0,
+          body.offsetHeight || 0,
+          doc.scrollHeight || 0,
+          doc.offsetHeight || 0,
+          rectHeight || 0
+        ));
+      }
+
       function notifyResize() {
-        post('wiii-frame-resize', { height: document.body.scrollHeight, sessionId: state.sessionId });
+        post('wiii-frame-resize', { height: measureHeight(), sessionId: state.sessionId });
+      }
+
+      function queueResize() {
+        if (window.requestAnimationFrame) {
+          window.requestAnimationFrame(notifyResize);
+        } else {
+          setTimeout(notifyResize, 0);
+        }
       }
 
       window.WiiiVisualBridge = {
@@ -330,7 +360,9 @@ export function buildVisualFrameDocument(
       window.addEventListener('load', function () {
         notifyResize();
         if (window.ResizeObserver) {
-          new ResizeObserver(function () { notifyResize(); }).observe(document.body);
+          var resizeObserver = new ResizeObserver(function () { queueResize(); });
+          resizeObserver.observe(document.body);
+          resizeObserver.observe(document.documentElement);
         }
         setTimeout(notifyResize, 120);
         setTimeout(notifyResize, 500);
@@ -630,11 +662,20 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
   hostShellMode = frameKind === "legacy" ? "auto" : "force",
   onBridgeEvent,
   showTweaksToggle = false,
+  sizingMode: requestedSizingMode,
 }: InlineVisualFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const blobUrlRef = useRef<string | null>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [height, setHeight] = useState(frameKind === "app" ? 520 : 320);
+  const sizingMode = useMemo(
+    () => resolveVisualFrameSizingMode(frameKind, requestedSizingMode),
+    [frameKind, requestedSizingMode],
+  );
+  const heightProfile = useMemo(
+    () => getVisualFrameHeightProfile(frameKind, sizingMode),
+    [frameKind, sizingMode],
+  );
+  const [height, setHeight] = useState(heightProfile.initialHeight);
   const [error, setError] = useState<string | null>(null);
   const [tweaksAvailable, setTweaksAvailable] = useState(false);
   const [tweaksActive, setTweaksActive] = useState(false);
@@ -689,44 +730,46 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
   }, [wrappedHtml]);
 
   useEffect(() => {
+    setHeight(heightProfile.initialHeight);
+  }, [heightProfile.initialHeight, html, sizingMode]);
+
+  useEffect(() => {
     const handler = (event: MessageEvent) => {
       if (iframeRef.current && event.source !== iframeRef.current.contentWindow)
         return;
-      const data = event.data;
-      if (!data || typeof data !== "object") return;
+      const message = parseVisualFrameBridgeMessage(event.data);
+      if (!message) return;
 
       // Tweaks protocol: iframe announces edit mode availability
-      if (data.type === "__edit_mode_available") {
+      if (message.kind === "tweaks_available") {
         setTweaksAvailable(true);
         return;
       }
 
       // Tweaks protocol: collect persisted edits
-      if (data.type === "__edit_mode_set_keys" && data.edits) {
+      if (message.kind === "tweaks_persist") {
         // Fire a bridge event so the host can persist tweaks if desired
-        onBridgeEvent?.({ bridgeType: "tweaks_persist", edits: data.edits });
+        onBridgeEvent?.({ bridgeType: "tweaks_persist", edits: message.edits });
         window.dispatchEvent(
           new CustomEvent("wiii:visual-frame", {
-            detail: { bridgeType: "tweaks_persist", edits: data.edits },
+            detail: { bridgeType: "tweaks_persist", edits: message.edits },
           }),
         );
         return;
       }
 
-      if (data.type === "wiii-frame-resize") {
-        const nextHeight = (data.payload as { height?: number } | undefined)
-          ?.height;
-        if (typeof nextHeight === "number" && nextHeight > 0) {
-          const minHeight = frameKind === "app" ? 360 : 120;
-          const maxHeight = frameKind === "app" ? 1120 : 880;
-          setHeight(
-            Math.min(Math.max(nextHeight + 10, minHeight), maxHeight),
-          );
+      if (message.kind === "resize") {
+        const nextHeight = clampVisualFrameContentHeight(
+          message.height,
+          heightProfile,
+        );
+        if (nextHeight !== null) {
+          setHeight(nextHeight);
         }
         return;
       }
       if (
-        data.type === "wiii-frame-ready" &&
+        message.kind === "ready" &&
         iframeRef.current?.contentWindow
       ) {
         iframeRef.current.contentWindow.postMessage(
@@ -743,31 +786,16 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
         );
         return;
       }
-      if (
-        data.type === "wiii-frame-telemetry" ||
-        data.type === "wiii-frame-interaction" ||
-        data.type === "wiii-frame-control" ||
-        data.type === "wiii-frame-focus" ||
-        data.type === "wiii-frame-result"
-      ) {
-        const bridgeType =
-          data.type === "wiii-frame-telemetry"
-            ? "telemetry"
-            : data.type === "wiii-frame-control"
-              ? "control"
-              : data.type === "wiii-frame-focus"
-                ? "focus"
-                : data.type === "wiii-frame-result"
-                  ? "result"
-                  : "interaction";
-        const detail = { bridgeType, ...(data.payload || {}) };
-        onBridgeEvent?.(detail);
-        window.dispatchEvent(new CustomEvent("wiii:visual-frame", { detail }));
+      if (message.kind === "bridge") {
+        onBridgeEvent?.(message.detail);
+        window.dispatchEvent(
+          new CustomEvent("wiii:visual-frame", { detail: message.detail }),
+        );
       }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [frameKind, onBridgeEvent, runtimeManifest, sessionId, shellVariant]);
+  }, [frameKind, heightProfile, onBridgeEvent, runtimeManifest, sessionId, shellVariant]);
 
   // Tweaks toggle: send activate/deactivate to iframe
   const handleTweaksToggle = useCallback(() => {
@@ -809,17 +837,14 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
       : shellVariant === "editorial"
         ? "overflow-visible bg-transparent"
         : "overflow-clip rounded-2xl bg-transparent";
-  const iframeMinHeight = frameKind === "app" ? 360 : 120;
-  const iframeHeight =
-    frameKind === "app" && /\bh-full\b/.test(className)
-      ? `max(${height}px, 100%)`
-      : `${height}px`;
+  const iframeHeight = resolveVisualFrameCssHeight(height, heightProfile);
 
   return (
     <div
       className={`${wrapperClassName} ${className}`.trim()}
       data-inline-visual-frame={frameKind}
       data-inline-visual-shell={shellVariant}
+      data-inline-visual-sizing={sizingMode}
       style={{ position: "relative" }}
     >
       {/* eslint-disable-next-line react/iframe-missing-sandbox */}
@@ -832,7 +857,7 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
         style={{
           width: "100%",
           height: iframeHeight,
-          minHeight: `${iframeMinHeight}px`,
+          minHeight: `${heightProfile.minHeight}px`,
           border: "none",
           display: "block",
           background: "transparent",
