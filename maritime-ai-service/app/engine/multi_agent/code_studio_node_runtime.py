@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-
+from app.engine.multi_agent.code_studio_provider_execution import (
+    CodeStudioProviderExecutionDependencies,
+    CodeStudioProviderExecutionRequest,
+    execute_code_studio_provider_execution,
+)
 from app.engine.multi_agent.code_studio_scaffold_fallback_policy import (
     resolve_code_studio_scaffold_fallback,
 )
@@ -150,141 +154,40 @@ async def code_studio_node_impl(
                     },
                 )
             else:
-                from app.engine.multi_agent.agent_config import AgentConfigRegistry
-
-                thinking_effort = state.get("thinking_effort")
-                llm = AgentConfigRegistry.get_llm(
-                    "code_studio_agent",
-                    effort_override=thinking_effort,
-                    provider_override=explicit_provider,
-                    requested_model=state.get("model"),
-                )
-                if llm and getattr(settings_obj, "enable_natural_conversation", False) is True:
-                    _pp = getattr(settings_obj, "llm_presence_penalty", 0.0)
-                    _fp = getattr(settings_obj, "llm_frequency_penalty", 0.0)
-                    if _pp or _fp:
-                        try:
-                            llm = llm.bind(presence_penalty=_pp, frequency_penalty=_fp)
-                        except Exception:
-                            pass
-                if not llm:
-                    raise RuntimeError("Code Studio provider returned no LLM")
-
-                bound_provider = getattr(llm, "_wiii_provider_name", None) or state.get("provider")
-                bound_model = (
-                    getattr(llm, "_wiii_model_name", None)
-                    or getattr(llm, "model_name", None)
-                    or getattr(llm, "model", None)
-                )
-                if bound_provider and str(bound_provider).strip().lower() != "auto":
-                    state["_execution_provider"] = str(bound_provider)
-                if bound_model:
-                    state["_execution_model"] = str(bound_model)
-                    state["model"] = str(bound_model)
-                llm_with_tools, llm_auto, forced_tool_choice = bind_direct_tools(
-                    llm,
-                    tools,
-                    force_tools,
-                    provider=bound_provider,
-                    include_forced_choice=True,
-                )
-                messages = build_direct_system_messages(
-                    state,
-                    effective_query,
-                    domain_name_vi,
-                    role_name="code_studio_agent",
-                    tools_context_override=build_code_studio_tools_context(
-                        settings_obj,
-                        _ctx.get("user_role", "student"),
-                        effective_query,
+                provider_execution = await execute_code_studio_provider_execution(
+                    request=CodeStudioProviderExecutionRequest(
+                        effective_query=effective_query,
+                        state=state,
+                        ctx=_ctx,
+                        domain_name_vi=domain_name_vi,
+                        explicit_provider=explicit_provider,
+                        tools=tools,
+                        force_tools=force_tools,
+                        runtime_context_base=runtime_context_base,
+                        event_queue_present=bool(_event_queue),
+                        push_event=_push_event,
+                        settings_obj=settings_obj,
+                        requested_model=state.get("model"),
+                    ),
+                    dependencies=CodeStudioProviderExecutionDependencies(
+                        bind_direct_tools=bind_direct_tools,
+                        build_direct_system_messages=build_direct_system_messages,
+                        build_code_studio_tools_context=build_code_studio_tools_context,
+                        execute_code_studio_tool_rounds=execute_code_studio_tool_rounds,
+                        extract_direct_response=extract_direct_response,
+                        build_code_studio_stream_summary_messages=(
+                            build_code_studio_stream_summary_messages
+                        ),
+                        stream_answer_with_fallback=stream_answer_with_fallback,
+                        sanitize_code_studio_response=sanitize_code_studio_response,
+                        build_code_studio_reasoning_summary=(
+                            build_code_studio_reasoning_summary
+                        ),
+                        direct_tool_names=direct_tool_names,
+                        logger_obj=logger,
                     ),
                 )
-                llm_response, messages, _tc_events = await execute_code_studio_tool_rounds(
-                    llm_with_tools,
-                    llm_auto,
-                    messages,
-                    tools,
-                    _push_event,
-                    runtime_context_base=runtime_context_base,
-                    query=effective_query,
-                    state=state,
-                    provider=state.get("provider"),
-                    runtime_provider=bound_provider,
-                    forced_tool_choice=forced_tool_choice,
-                )
-
-                if _tc_events:
-                    state["tool_call_events"] = _tc_events
-
-                response, thinking_content, tools_used = extract_direct_response(llm_response, messages)
-                streamed_code_studio_answer = False
-                if _event_queue and _tc_events:
-                    try:
-                        summary_provider = (
-                            bound_provider
-                            if bound_provider and str(bound_provider).strip().lower() != "auto"
-                            else state.get("provider")
-                        )
-                        from app.engine.llm_pool import (
-                            ThinkingTier,
-                            get_llm_for_provider,
-                        )
-
-                        summary_llm = get_llm_for_provider(
-                            summary_provider,
-                            default_tier=ThinkingTier.MODERATE,
-                            strict_pin=bool(
-                                summary_provider
-                                and str(summary_provider).strip().lower() != "auto"
-                            ),
-                        )
-                        summary_messages = build_code_studio_stream_summary_messages(
-                            state,
-                            effective_query,
-                            domain_name_vi,
-                            tool_call_events=_tc_events,
-                        )
-                        streamed_summary_response, streamed_code_studio_answer = await stream_answer_with_fallback(
-                            summary_llm,
-                            summary_messages,
-                            _push_event,
-                            provider=summary_provider,
-                            node="code_studio_agent",
-                        )
-                        streamed_response, _summary_thinking, _summary_tools = extract_direct_response(
-                            streamed_summary_response,
-                            summary_messages,
-                        )
-                        if streamed_response:
-                            response = streamed_response
-                    except Exception as _summary_err:
-                        logger.warning(
-                            "[CODE_STUDIO] Final streamed delivery summary failed, using buffered response: %s",
-                            _summary_err,
-                        )
-                response = sanitize_code_studio_response(response, _tc_events, state)
-
-                _safe_thinking = await build_code_studio_reasoning_summary(
-                    effective_query,
-                    state,
-                    direct_tool_names(tools_used),
-                )
-                if _safe_thinking:
-                    state["thinking_content"] = resolve_visible_thinking_from_lifecycle(
-                        state,
-                        fallback=_safe_thinking,
-                        default_node="code_studio_agent",
-                    )
-                    if state.get("thinking_content"):
-                        record_thinking_snapshot(
-                            state,
-                            state.get("thinking_content"),
-                            node="code_studio_agent",
-                            provenance="aligned_cleanup",
-                        )
-
-                if tools_used:
-                    state["tools_used"] = tools_used
+                response = provider_execution.response
 
                 tracer.end_step(
                     result=f"Code studio response: {len(response)} chars",
@@ -293,7 +196,7 @@ async def code_studio_node_impl(
                         "response_type": "capability_generated",
                         "tools_bound": len(tools),
                         "force_tools": force_tools,
-                        "streamed_delivery": streamed_code_studio_answer,
+                        "streamed_delivery": provider_execution.streamed_delivery,
                     },
                 )
         elif not response:
