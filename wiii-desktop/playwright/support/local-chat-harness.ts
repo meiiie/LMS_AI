@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 
 type BootstrapOptions = {
   serverUrl?: string;
@@ -17,7 +18,7 @@ function defaultServerUrl(): string {
 }
 
 function uniqueUserId(base = "playwright-chat"): string {
-  return `${base}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `${base}-${Date.now()}-${randomUUID().slice(0, 8)}`;
 }
 
 function settingsPayload(serverUrl: string, userId: string, displayName: string) {
