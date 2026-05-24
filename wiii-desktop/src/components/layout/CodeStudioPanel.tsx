@@ -377,6 +377,9 @@ function PreviewTab({ session }: { session: CodeStudioSession }) {
         title={session.title}
         sessionId={session.sessionId}
         className="w-full h-full"
+        frameKind="app"
+        shellVariant="immersive"
+        hostShellMode="force"
         showTweaksToggle
       />
     </div>

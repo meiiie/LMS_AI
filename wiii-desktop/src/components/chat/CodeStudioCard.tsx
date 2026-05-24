@@ -61,7 +61,10 @@ export const CodeStudioCard = memo(function CodeStudioCard({
   // Single return — avoids early returns that can cause React reconciler issues
   // with "Rendered fewer hooks than expected" when phase transitions change the tree.
   return (
-    <article className="code-studio-card rounded-xl border border-border/60 overflow-hidden">
+    <article
+      className="code-studio-card rounded-xl border border-border/60 overflow-hidden"
+      data-status={session?.status ?? "missing"}
+    >
       {!session ? null : isStreaming && !hasCode ? (
         /* Phase 1: Planning (streaming, no code yet) */
         <>
@@ -105,8 +108,8 @@ export const CodeStudioCard = memo(function CodeStudioCard({
               ))}
             </div>
           )}
-          <div className="max-h-[280px] overflow-y-auto bg-[#0f172a] text-[#e2e8f0] border-t border-border/30">
-            <pre className="p-3 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-all m-0">
+          <div className="max-h-[320px] overflow-auto bg-[#0f172a] text-[#e2e8f0] border-t border-border/30">
+            <pre className="p-3 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words m-0">
               <code>{session.code}</code>
               <span className="inline-block w-[2px] h-[14px] bg-[var(--accent)] animate-pulse ml-0.5 align-middle" />
               <div ref={codeEndRef} />

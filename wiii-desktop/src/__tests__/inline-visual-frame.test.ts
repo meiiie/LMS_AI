@@ -46,4 +46,19 @@ describe("InlineVisualFrame host shell", () => {
     expect(wrapped).toContain("Compute cost");
     expect(wrapped).toContain("Figure nay chung minh chi phi tang nhanh theo context.");
   });
+
+  it("allows app frames to scroll inside the iframe instead of clipping tall simulations", () => {
+    const wrapped = buildVisualFrameDocument("<main style=\"height:1400px\">Tall app</main>", {
+      title: "Tall simulation",
+      summary: "",
+      sessionId: "vs-tall",
+      shellVariant: "immersive",
+      frameKind: "app",
+      showFrameIntro: false,
+      hostShellMode: "force",
+    });
+
+    expect(wrapped).toContain("overflow: auto;");
+    expect(wrapped).toContain("overscroll-behavior: contain;");
+  });
 });

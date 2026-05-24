@@ -5,6 +5,8 @@ import { CodeStudioPanel } from "@/components/layout/CodeStudioPanel";
 import { useCodeStudioStore } from "@/stores/code-studio-store";
 import { useUIStore } from "@/stores/ui-store";
 
+const inlineVisualFrameSpy = vi.fn();
+
 vi.mock("motion/react", () => ({
   AnimatePresence: ({ children }: any) => createElement("div", null, children),
   motion: {
@@ -16,8 +18,10 @@ vi.mock("motion/react", () => ({
 }));
 
 vi.mock("@/components/common/InlineVisualFrame", () => ({
-  InlineVisualFrame: ({ title }: { title: string }) =>
-    createElement("div", { "data-testid": "inline-visual-frame" }, `Preview: ${title}`),
+  InlineVisualFrame: (props: Record<string, unknown>) => {
+    inlineVisualFrameSpy(props);
+    return createElement("div", { "data-testid": "inline-visual-frame" }, `Preview: ${props.title}`);
+  },
 }));
 
 if (typeof globalThis.requestAnimationFrame === "undefined") {
@@ -31,6 +35,7 @@ if (typeof globalThis.cancelAnimationFrame === "undefined") {
 }
 
 function resetStores() {
+  inlineVisualFrameSpy.mockReset();
   useUIStore.setState({
     codeStudioPanelOpen: false,
     artifactPanelOpen: false,
@@ -115,5 +120,24 @@ describe("CodeStudioPanel", () => {
     });
 
     expect(useCodeStudioStore.getState().sessions["vs_1"].metadata.requestedView).toBe("preview");
+  });
+
+  it("renders Code Studio previews as app frames", async () => {
+    seedCompleteSession("preview");
+
+    render(<CodeStudioPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("inline-visual-frame")).toBeTruthy();
+    });
+
+    expect(inlineVisualFrameSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        frameKind: "app",
+        shellVariant: "immersive",
+        hostShellMode: "force",
+        className: "w-full h-full",
+      }),
+    );
   });
 });

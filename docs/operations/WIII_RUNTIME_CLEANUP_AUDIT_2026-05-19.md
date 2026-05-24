@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537, #539, #549, #551, #553, #555, #557 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537, #539, #549, #551, #553, #555, #557, #559 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -231,6 +231,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
   `direct_node_llm_fallback.py`, keeping source-backed codebase fallback,
   phase fallback, and explicit-provider fail-closed behavior behind a typed
   helper before the larger LLM execution shell is split.
+- Follow-up #559 added a guarded assistant-markdown normalization pass for
+  collapsed tables, horizontal rules, and inline lists; made Code Studio
+  previews render through the `app`/`immersive` iframe lane; and let tall app
+  frames scroll internally instead of clipping simulations.
 
 ## Preserved Intentionally
 
@@ -298,9 +302,9 @@ backups, data PDFs, or local skill folders.
 - Code Studio deterministic fallback is now split across contract, spec,
   quality, captions, registry, shell, and renderer modules. The remaining debt
   is product quality rather than module size: high-severity slop is now gated
-  before preview, and the scaffold should keep moving toward richer typed
-  visual intents and away from broad template fallback when the primary visual
-  tool path is healthy.
+  before preview, and the first markdown/iframe UX cleanup landed in #559. The
+  scaffold should keep moving toward richer typed visual intents and away from
+  broad template fallback when the primary visual tool path is healthy.
 - Some tests still import compatibility `graph.py` modules. Move tests toward
   `runtime.py` imports when the external import window can close.
 
@@ -504,3 +508,7 @@ modules.
 In follow-up #527, the runtime metrics regression tests passed after switching
 `time_block()` from the coarse Windows monotonic clock to high-resolution
 `perf_counter_ns()`.
+In follow-up #559, the desktop targeted markdown/Code Studio/iframe regression
+set passed with 59 tests, full desktop Vitest passed with 2481 tests, TypeScript
+typecheck passed, `build:embed` passed, and local browser smoke loaded the Wiii
+chat shell on `http://127.0.0.1:1420/`.
