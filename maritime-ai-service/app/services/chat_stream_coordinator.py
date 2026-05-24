@@ -571,6 +571,100 @@ async def generate_stream_v3_events(
             "_use_multi_agent",
             getattr(settings, "use_multi_agent", True),
         )
+        try:
+            from app.services.chat_stream_visual_fast_path import (
+                build_visual_fast_path_result,
+            )
+
+            visual_fast_path = await build_visual_fast_path_result(chat_request)
+        except Exception as visual_fast_path_err:
+            logger.debug(
+                "[STREAM-V3] Structured visual fast-path skipped: %s",
+                visual_fast_path_err,
+            )
+            visual_fast_path = None
+
+        if visual_fast_path is not None:
+            visual_started_ms = latency_tracker.elapsed_ms()
+            visual_events = [
+                await create_thinking_start_event(
+                    "Wiii đang dựng minh họa",
+                    "visual_fast_path",
+                    summary=visual_fast_path.thinking,
+                ),
+                await create_thinking_delta_event(
+                    visual_fast_path.thinking,
+                    node="visual_fast_path",
+                ),
+                await create_thinking_end_event(
+                    "visual_fast_path",
+                    duration_ms=max(1, latency_tracker.elapsed_ms() - visual_started_ms),
+                ),
+                *visual_fast_path.events,
+                await create_answer_event(visual_fast_path.answer),
+                await create_metadata_event(
+                    reasoning_trace={
+                        "method": "structured_visual_fast_path",
+                        "steps": [
+                            "prepared_turn_validated",
+                            "matched_explicit_visual_creation",
+                            "emitted_structured_visual_lifecycle",
+                        ],
+                    },
+                    processing_time=time.time() - start_time,
+                    confidence=1.0,
+                    model=None,
+                    provider="deterministic",
+                    runtime_authoritative=True,
+                    doc_count=0,
+                    thinking=visual_fast_path.thinking,
+                    thinking_content=visual_fast_path.thinking,
+                    agent_type="visual_fast_path",
+                    session_id=effective_session_id_str,
+                    request_id=request_id,
+                    routing_metadata=visual_fast_path.routing_metadata,
+                    stream_latency=latency_tracker.to_payload(),
+                    streaming_version="v3-visual_fast_path",
+                ),
+                await create_done_event(time.time() - start_time),
+            ]
+
+            for event in visual_events:
+                chunks, event_counter, should_stop = serialize_stream_event(
+                    event=event,
+                    event_counter=event_counter,
+                    enable_artifacts=settings.enable_artifacts,
+                    presentation_state=presentation_state,
+                )
+                for chunk in chunks:
+                    yield chunk
+                if should_stop:
+                    return
+
+            try:
+                orchestrator.finalize_response_turn(
+                    session_id=effective_session_id,
+                    user_id=str(chat_request.user_id),
+                    user_role=chat_request.role,
+                    message=chat_request.message,
+                    response_text=visual_fast_path.answer,
+                    context=finalization_context,
+                    domain_id=resolved_domain_id,
+                    organization_id=resolved_org_id,
+                    current_agent="visual_fast_path",
+                    background_save=background_save,
+                    save_response_immediately=False,
+                    include_lms_insights=False,
+                    continuity_channel="web",
+                    transport_type="stream",
+                )
+            except Exception as finalize_err:
+                logger.warning(
+                    "[STREAM-V3] Visual fast-path finalization failed: %s",
+                    finalize_err,
+                )
+            return
+
         pointy_highlight_action_name = "ui.highlight"
         try:
             from app.engine.context.pointy_actions import POINTY_ACTION_HIGHLIGHT
