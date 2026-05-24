@@ -33,6 +33,8 @@ from app.engine.multi_agent.direct_node_operational_fast_paths import (
     _build_codebase_analysis_fallback_thinking,
 )
 from app.engine.multi_agent.direct_node_pre_llm_pipeline import (
+    DirectNodePreLlmPipelineDependencies,
+    DirectNodePreLlmPipelineRequest,
     execute_direct_node_pre_llm_pipeline,
 )
 from app.engine.multi_agent.direct_node_thinking_snapshot import (
@@ -106,26 +108,30 @@ async def direct_response_node_impl(
     tracer.start_step(direct_response_step_name, "Tao phan hoi truc tiep")
 
     pre_llm_pipeline = await execute_direct_node_pre_llm_pipeline(
-        query=query,
-        state=state,
-        bus_id=bus_id,
-        push_event=push_event,
-        tracer=tracer,
-        enable_natural_conversation=(
-            getattr(settings, "enable_natural_conversation", False) is True
+        request=DirectNodePreLlmPipelineRequest(
+            query=query,
+            state=state,
+            bus_id=bus_id,
+            push_event=push_event,
+            tracer=tracer,
+            enable_natural_conversation=(
+                getattr(settings, "enable_natural_conversation", False) is True
+            ),
+            default_domain=settings.default_domain,
         ),
-        default_domain=settings.default_domain,
-        get_domain_greetings=get_domain_greetings,
-        normalize_for_intent=normalize_for_intent,
-        needs_web_search=needs_web_search,
-        needs_datetime=needs_datetime,
-        build_visual_tool_runtime_metadata=build_visual_tool_runtime_metadata,
-        execute_direct_tool_rounds=execute_direct_tool_rounds,
-        extract_direct_response=extract_direct_response,
-        sanitize_structured_visual_answer_text=sanitize_structured_visual_answer_text,
-        sanitize_wiii_house_text=sanitize_wiii_house_text,
-        record_thinking_snapshot_fn=record_thinking_snapshot,
-        logger_obj=logger,
+        dependencies=DirectNodePreLlmPipelineDependencies(
+            get_domain_greetings=get_domain_greetings,
+            normalize_for_intent=normalize_for_intent,
+            needs_web_search=needs_web_search,
+            needs_datetime=needs_datetime,
+            build_visual_tool_runtime_metadata=build_visual_tool_runtime_metadata,
+            execute_direct_tool_rounds=execute_direct_tool_rounds,
+            extract_direct_response=extract_direct_response,
+            sanitize_structured_visual_answer_text=sanitize_structured_visual_answer_text,
+            sanitize_wiii_house_text=sanitize_wiii_house_text,
+            record_thinking_snapshot_fn=record_thinking_snapshot,
+            logger_obj=logger,
+        ),
     )
     response = pre_llm_pipeline.response
     explicit_web_search_turn = pre_llm_pipeline.explicit_web_search_turn
