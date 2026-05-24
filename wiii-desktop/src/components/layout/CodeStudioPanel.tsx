@@ -114,7 +114,7 @@ const CodeStudioContent = memo(function CodeStudioContent({
         done: code.includes("<script") || code.includes("function"),
       },
       {
-        label: "Controls tương tác",
+        label: "Điều khiển tương tác",
         done: code.includes('type="range"') || code.includes("<button"),
       },
       {
@@ -180,13 +180,13 @@ const CodeStudioContent = memo(function CodeStudioContent({
       <div className="flex border-b border-border shrink-0">
         <TabButton
           icon={Code2}
-          label="Code"
+          label="Mã"
           active={activeTab === "code"}
           onClick={() => handleSelectTab("code")}
         />
         <TabButton
           icon={Eye}
-          label="Preview"
+          label="Xem trước"
           active={activeTab === "preview"}
           onClick={() => handleSelectTab("preview")}
           disabled={isStreaming}
@@ -302,7 +302,7 @@ function CodeTab({ session }: { session: CodeStudioSession }) {
       {/* Toolbar */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50 shrink-0">
         <span className="text-[10px] text-text-tertiary">
-          {lineCount} dòng · {session.code.length} bytes
+          {lineCount} dòng · {session.code.length} byte
           {isStreaming && session.totalBytes > 0 && (
             <>
               {" "}
@@ -322,7 +322,7 @@ function CodeTab({ session }: { session: CodeStudioSession }) {
             ) : (
               <Copy size={12} />
             )}
-            {copied ? "Đã chép" : "Copy"}
+            {copied ? "Đã chép" : "Sao chép"}
           </button>
           <button
             onClick={handleDownload}
@@ -355,7 +355,7 @@ function PreviewTab({ session }: { session: CodeStudioSession }) {
       <div className="flex flex-col items-center justify-center h-full text-text-tertiary py-16">
         <Loader2 size={32} className="mb-3 animate-spin opacity-50" />
         <p className="text-sm">
-          Đang tạo code, preview sẽ hiện sau khi hoàn thành.
+          Đang tạo mã, bản xem trước sẽ hiện sau khi hoàn thành.
         </p>
       </div>
     );
@@ -365,7 +365,7 @@ function PreviewTab({ session }: { session: CodeStudioSession }) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-text-tertiary py-16">
         <Eye size={32} className="mb-3 opacity-50" />
-        <p className="text-sm">Không có code để preview.</p>
+        <p className="text-sm">Không có mã để xem trước.</p>
       </div>
     );
   }
