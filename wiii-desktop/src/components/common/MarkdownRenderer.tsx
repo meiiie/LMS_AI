@@ -1,5 +1,6 @@
 import { lazy, Suspense, useDeferredValue, useMemo } from "react";
 import { stripWiiiInternalMarkup } from "@/lib/internal-markup";
+import { normalizeAssistantMarkdown } from "@/lib/assistant-markdown";
 import { splitWidgetBlocks } from "./widget-segments";
 
 const InlineHtmlWidget = lazy(() => import("./InlineHtmlWidget"));
@@ -121,7 +122,7 @@ export function MarkdownRenderer({
   // Reference: https://react.dev/reference/react/useDeferredValue
   const deferredContent = useDeferredValue(content);
   const safeContent = useMemo(
-    () => stripWiiiInternalMarkup(deferredContent),
+    () => normalizeAssistantMarkdown(stripWiiiInternalMarkup(deferredContent)),
     [deferredContent],
   );
   const segments = useMemo(() => splitWidgetBlocks(safeContent), [safeContent]);

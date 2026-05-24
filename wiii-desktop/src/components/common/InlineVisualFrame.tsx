@@ -437,7 +437,8 @@ export function buildVisualFrameDocument(
     rect.c-green,g.c-green>rect { fill: light-dark(#ecfdf5,#0d3320); stroke: light-dark(#6ee7b7,#34d399); }
     body {
       padding: ${bodyPadding};
-      overflow: hidden;
+      overflow: ${frameKind === "app" ? "auto" : "hidden"};
+      overscroll-behavior: contain;
       background: transparent;
     }
     body.wiii-host-shell-active {
@@ -633,7 +634,7 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const blobUrlRef = useRef<string | null>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [height, setHeight] = useState(frameKind === "app" ? 420 : 320);
+  const [height, setHeight] = useState(frameKind === "app" ? 520 : 320);
   const [error, setError] = useState<string | null>(null);
   const [tweaksAvailable, setTweaksAvailable] = useState(false);
   const [tweaksActive, setTweaksActive] = useState(false);
@@ -716,11 +717,10 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
         const nextHeight = (data.payload as { height?: number } | undefined)
           ?.height;
         if (typeof nextHeight === "number" && nextHeight > 0) {
+          const minHeight = frameKind === "app" ? 360 : 120;
+          const maxHeight = frameKind === "app" ? 1120 : 880;
           setHeight(
-            Math.min(
-              Math.max(nextHeight + 10, frameKind === "app" ? 260 : 120),
-              frameKind === "app" ? 980 : 880,
-            ),
+            Math.min(Math.max(nextHeight + 10, minHeight), maxHeight),
           );
         }
         return;
@@ -809,6 +809,11 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
       : shellVariant === "editorial"
         ? "overflow-visible bg-transparent"
         : "overflow-clip rounded-2xl bg-transparent";
+  const iframeMinHeight = frameKind === "app" ? 360 : 120;
+  const iframeHeight =
+    frameKind === "app" && /\bh-full\b/.test(className)
+      ? `max(${height}px, 100%)`
+      : `${height}px`;
 
   return (
     <div
@@ -826,7 +831,8 @@ export const InlineVisualFrame = memo(function InlineVisualFrame({
         allowtransparency="true"
         style={{
           width: "100%",
-          height: `${height}px`,
+          height: iframeHeight,
+          minHeight: `${iframeMinHeight}px`,
           border: "none",
           display: "block",
           background: "transparent",
