@@ -1,0 +1,84 @@
+from types import SimpleNamespace
+
+import pytest
+
+from app.engine.multi_agent import code_studio_fast_paths
+from app.engine.multi_agent.code_studio_fast_paths import (
+    _COLREG_RULE15_FAST_PATH_HTML,
+    _PENDULUM_FAST_PATH_HTML,
+    _contains_visual_payload_result,
+)
+from app.engine.multi_agent.tool_collection import _build_visual_tool_runtime_metadata
+from app.engine.tools.runtime_context import ToolRuntimeContext, tool_runtime_scope
+from app.engine.tools.visual_tools import parse_visual_payloads, tool_create_visual_code
+
+
+def _create_payloads(query: str, code_html: str):
+    metadata = _build_visual_tool_runtime_metadata({"context": {}}, query) or {}
+    with tool_runtime_scope(ToolRuntimeContext(metadata=metadata)):
+        result = tool_create_visual_code.invoke({
+            "code_html": code_html,
+            "title": "Fast path smoke",
+        })
+    return result, parse_visual_payloads(result)
+
+
+def test_colreg_fast_path_html_satisfies_visual_payload_contract() -> None:
+    result, payloads = _create_payloads(
+        "Mô phỏng Quy tắc 15 COLREGs",
+        _COLREG_RULE15_FAST_PATH_HTML,
+    )
+
+    assert _contains_visual_payload_result(result)
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload.type == "simulation"
+    assert payload.renderer_kind == "app"
+    assert payload.metadata["app_category"] == "simulation"
+    assert "<canvas" in (payload.fallback_html or "").lower()
+    assert "window.WiiiVisualBridge.reportResult" in (payload.fallback_html or "")
+
+
+def test_pendulum_fast_path_html_satisfies_visual_payload_contract() -> None:
+    result, payloads = _create_payloads(
+        "Hãy mô phỏng vật lý con lắc có kéo thả chuột",
+        _PENDULUM_FAST_PATH_HTML,
+    )
+
+    assert _contains_visual_payload_result(result)
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload.type == "simulation"
+    assert payload.renderer_kind == "app"
+    assert "<canvas" in (payload.fallback_html or "").lower()
+    assert "requestAnimationFrame" in (payload.fallback_html or "")
+
+
+@pytest.mark.asyncio
+async def test_recipe_fast_path_rejects_non_payload_tool_result(monkeypatch) -> None:
+    async def fake_invoke_tool_with_runtime(*_args, **_kwargs):
+        return "Quality score 4/10 - chua dat"
+
+    monkeypatch.setattr(
+        code_studio_fast_paths,
+        "invoke_tool_with_runtime",
+        fake_invoke_tool_with_runtime,
+    )
+
+    pushed_events = []
+
+    async def push_event(event):
+        pushed_events.append(event)
+
+    result = await code_studio_fast_paths.execute_code_studio_fast_path(
+        state={"context": {}},
+        query="Mô phỏng Quy tắc 15 COLREGs",
+        tools=[SimpleNamespace(name="tool_create_visual_code")],
+        push_event=push_event,
+        runtime_context_base=None,
+        derive_code_stream_session_id=lambda **_kwargs: "vs-test",
+        sanitize_code_studio_response=lambda text, *_args: text,
+    )
+
+    assert result is None
+    assert pushed_events == []

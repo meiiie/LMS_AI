@@ -1215,6 +1215,56 @@ class TestSimulationClarifier:
         assert result["current_agent"] == "code_studio_agent"
 
 
+    @pytest.mark.asyncio
+    async def test_code_studio_node_runs_recipe_fast_path_before_provider_selection(self):
+        from app.core.exceptions import ProviderUnavailableError
+
+        state = {
+            "query": "mo phong COLREG rule 15",
+            "context": {},
+            "domain_id": "maritime",
+            "domain_config": {},
+        }
+        fake_tracer = MagicMock()
+        fast_path_result = {
+            "response": "opened deterministic visual preview",
+            "thinking_content": "deterministic code studio recipe",
+            "tool_call_events": [],
+            "tools_used": [{"name": "tool_create_visual_code"}],
+            "fast_path": "fast_colreg15",
+        }
+
+        with patch("app.engine.multi_agent.graph._get_or_create_tracer", return_value=fake_tracer), \
+             patch("app.engine.multi_agent.graph.settings") as mock_settings, \
+             patch("app.engine.multi_agent.graph._looks_like_ambiguous_simulation_request", return_value=False), \
+             patch(
+                 "app.engine.multi_agent.graph._collect_code_studio_tools",
+                 return_value=([SimpleNamespace(name="tool_create_visual_code")], True),
+             ), \
+             patch(
+                 "app.engine.multi_agent.graph._execute_pendulum_code_studio_fast_path",
+                 new=AsyncMock(return_value=fast_path_result),
+             ) as mock_fast_path, \
+             patch(
+                 "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+                 side_effect=ProviderUnavailableError(
+                     provider="test",
+                     reason_code="not_configured",
+                     message="provider unavailable",
+                 ),
+             ) as mock_get_llm:
+            mock_settings.default_domain = "maritime"
+            mock_settings.enable_natural_conversation = False
+
+            result = await code_studio_node(state)
+
+        mock_fast_path.assert_awaited_once()
+        mock_get_llm.assert_not_called()
+        assert result["final_response"] == "opened deterministic visual preview"
+        assert result["tools_used"] == [{"name": "tool_create_visual_code"}]
+        assert result["current_agent"] == "code_studio_agent"
+
+
 class TestCodeStudioProgressHeartbeat:
     def test_code_stream_session_id_is_stable_for_same_request_id(self):
         runtime = SimpleNamespace(request_id="req-code-studio-123")

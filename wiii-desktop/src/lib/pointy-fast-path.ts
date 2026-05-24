@@ -50,6 +50,44 @@ const UNSAFE_CLICK_TERMS = [
   "hoan thanh",
 ];
 
+const VISUAL_DELIVERY_TERMS = [
+  "mo phong",
+  "simulate",
+  "simulation",
+  "simulator",
+  "canvas",
+  "code studio",
+  "tao visual",
+  "tao hinh",
+  "ve bieu do",
+  "draw chart",
+  "create chart",
+  "mermaid",
+  "html app",
+];
+
+const EXPLICIT_POINTY_OPERATOR_TERMS = [
+  "pointy",
+  "chi cho",
+  "chi vao",
+  "chi lai",
+  "chi giup",
+  "chi den",
+  "chi toi",
+  "tro toi",
+  "tro vao",
+  "tro den",
+  "highlight",
+  "show me where",
+  "point to",
+  "o dau",
+  "where",
+  "nut",
+  "button",
+  "bam",
+  "click",
+];
+
 interface PointyTargetAlias {
   ids: string[];
   terms: string[];
@@ -275,6 +313,12 @@ export function buildPointyFastPathAction(
 
   const normalizedPrompt = normalizePointyText(prompt);
   if (!normalizedPrompt) return null;
+  if (
+    hasAnyTerm(normalizedPrompt, VISUAL_DELIVERY_TERMS)
+    && !hasAnyTerm(normalizedPrompt, EXPLICIT_POINTY_OPERATOR_TERMS)
+  ) {
+    return null;
+  }
   const wantsLocate = hasAnyTerm(normalizedPrompt, LOCATE_TERMS);
   const wantsClick = hasAnyTerm(normalizedPrompt, CLICK_TERMS);
   if (!wantsLocate && !wantsClick) return null;
