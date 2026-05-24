@@ -6,7 +6,7 @@ Owner: Project leadership
 
 Issue: #411
 
-Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537, #539, #549, #551, #553, #555 (owner: Architecture Maintainers)
+Follow-up issues: #413, #415, #417, #419, #421, #423, #425, #427, #429, #431, #433, #435, #437, #439, #441, #477, #479, #481, #483, #485, #487, #489, #491, #493, #495, #497, #499, #501, #503, #505, #507, #509, #511, #513, #515, #517, #519, #521, #523, #525, #527, #533, #535, #537, #539, #549, #551, #553, #555, #557 (owner: Architecture Maintainers)
 
 ## Purpose
 
@@ -227,6 +227,10 @@ without broad deletes, secret exposure, or unreviewed product behavior changes.
 - Follow-up #555 connected high-severity AI-slop detection to Code Studio
   visual-code validation, so structural emoji and obvious hero-gradient slop
   force a repair turn before preview instead of opening weak app chrome.
+- Follow-up #557 moved direct-node no-LLM fallback selection into
+  `direct_node_llm_fallback.py`, keeping source-backed codebase fallback,
+  phase fallback, and explicit-provider fail-closed behavior behind a typed
+  helper before the larger LLM execution shell is split.
 
 ## Preserved Intentionally
 
@@ -260,7 +264,8 @@ backups, data PDFs, or local skill folders.
   thought helpers, thinking snapshot side effects, document-preview
   host-action rebinding/execution/preflight, image-input preflight,
   direct-node event sink lifecycle, direct-node turn-start lifecycle,
-  direct-node turn-policy lifecycle, direct-node tool selection, LLM preflight, execution preparation, response cleanup,
+  direct-node turn-policy lifecycle, direct-node tool selection, LLM preflight,
+  LLM-unavailable fallback selection, execution preparation, response cleanup,
   visible-thinking finalization,
   exception/source fallback lifecycle, final state/domain notice handling, and
   host UI timeout handling have moved out. The long-term cleanup direction is

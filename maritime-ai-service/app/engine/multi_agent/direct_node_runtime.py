@@ -6,7 +6,6 @@ import logging
 from typing import Any
 
 from app.core.config import settings
-from app.core.exceptions import ProviderUnavailableError
 from app.engine.multi_agent.document_preview_contract import (
     has_uploaded_document_context as _has_uploaded_document_context,
 )
@@ -37,6 +36,9 @@ from app.engine.multi_agent.direct_node_llm_preflight import (
     apply_direct_node_natural_conversation_penalties,
     maybe_build_uploaded_visual_guard,
     select_direct_node_llm,
+)
+from app.engine.multi_agent.direct_node_llm_fallback import (
+    resolve_direct_node_llm_unavailable_fallback,
 )
 from app.engine.multi_agent.direct_node_response_cleanup import (
     apply_source_backed_empty_response_fallback,
@@ -591,37 +593,31 @@ async def direct_response_node_impl(
                     },
                 )
             elif not response:
-                if explicit_user_provider:
-                    raise ProviderUnavailableError(
-                        provider=str(explicit_user_provider).strip().lower(),
-                        reason_code="busy",
-                        message="Provider được chọn hiện không sẵn sàng để xử lý yêu cầu này.",
-                    )
-                if _is_codebase_analysis_query(query) and not explicit_web_search_turn:
-                    response = _build_codebase_analysis_fallback_answer(query)
-                    codebase_thinking = _build_codebase_analysis_fallback_thinking(query)
-                    record_direct_node_thinking_snapshot(
-                        state=state,
-                        thinking=codebase_thinking,
-                        provenance="deterministic_codebase_fallback",
-                        record_thinking_snapshot_fn=record_thinking_snapshot,
-                    )
-                else:
-                    response = (
-                        get_phase_fallback(state)
-                        if getattr(settings, "enable_natural_conversation", False) is True
-                        else "Xin chao! Toi co the giup gi cho ban?"
-                    )
+                llm_fallback = resolve_direct_node_llm_unavailable_fallback(
+                    query=query,
+                    state=state,
+                    explicit_user_provider=explicit_user_provider,
+                    explicit_web_search_turn=explicit_web_search_turn,
+                    enable_natural_conversation=(
+                        getattr(settings, "enable_natural_conversation", False) is True
+                    ),
+                    get_phase_fallback=get_phase_fallback,
+                    build_codebase_analysis_fallback_answer=(
+                        _build_codebase_analysis_fallback_answer
+                    ),
+                    build_codebase_analysis_fallback_thinking=(
+                        _build_codebase_analysis_fallback_thinking
+                    ),
+                    record_direct_node_thinking_snapshot=(
+                        record_direct_node_thinking_snapshot
+                    ),
+                    record_thinking_snapshot_fn=record_thinking_snapshot,
+                )
+                response = llm_fallback.response
                 tracer.end_step(
                     result="Fallback (LLM unavailable)",
                     confidence=0.5,
-                    details={
-                        "response_type": (
-                            "codebase_source_backed_fallback"
-                            if _is_codebase_analysis_query(query) and not explicit_web_search_turn
-                            else "fallback"
-                        )
-                    },
+                    details={"response_type": llm_fallback.response_type},
                 )
         except Exception as exc:
             fallback_result = await handle_direct_node_generation_exception(
