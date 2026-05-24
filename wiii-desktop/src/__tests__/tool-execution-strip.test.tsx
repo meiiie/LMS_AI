@@ -33,6 +33,7 @@ describe("ToolExecutionStrip", () => {
           activeVersion: 1,
           chunkCount: 1,
           totalBytes: 14,
+          visualSessionId: "vs_app_1",
           createdAt: Date.now(),
           metadata: { studioLane: "app" },
         },
@@ -58,7 +59,8 @@ describe("ToolExecutionStrip", () => {
     render(<ToolExecutionStrip block={block} />);
 
     expect(screen.getByText("Pendulum App")).toBeTruthy();
-    expect(screen.getByText("Xem code")).toBeTruthy();
+    expect(screen.getByText("Xem mã")).toBeTruthy();
+    expect(screen.getByText("Xem trước")).toBeTruthy();
   });
 
   it("renders CodeStudioCard via _code_studio_session_id injected by SSE handler", () => {
@@ -70,7 +72,10 @@ describe("ToolExecutionStrip", () => {
           title: "Wave Simulation",
           language: "html",
           status: "streaming",
-          code: "<div>streaming...</div>",
+          code: [
+            "<style></style><canvas></canvas><button>Run</button>",
+            "<script>window.WiiiVisualBridge.reportResult()</script>",
+          ].join(""),
           versions: [],
           activeVersion: 1,
           chunkCount: 3,
@@ -98,6 +103,8 @@ describe("ToolExecutionStrip", () => {
     render(<ToolExecutionStrip block={block} />);
 
     expect(screen.getByText("Wave Simulation")).toBeTruthy();
+    expect(screen.getByText(/Điều khiển/)).toBeTruthy();
+    expect(screen.getByText(/Kết nối/)).toBeTruthy();
   });
 
   it("hides raw python code and filesystem paths by default", () => {
