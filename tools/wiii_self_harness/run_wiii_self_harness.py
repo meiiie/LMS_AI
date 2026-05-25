@@ -22,6 +22,7 @@ HARNESS_NAME = "Wiii Self-Harness"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = Path(__file__).with_name("wiii_self_harness_scenarios.json")
 DEFAULT_REQUIRED_SCENARIOS = (
+    "system-flow-observability-map",
     "visual-tool-capability-sync",
     "code-studio-scaffold-boundary",
     "lms-document-preview-apply-approval",
