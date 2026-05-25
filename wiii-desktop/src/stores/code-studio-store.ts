@@ -86,6 +86,19 @@ export function buildCodeStudioActiveSessionContext(
   };
 }
 
+export function resolveCodeStudioSessionIdForVisualSession(
+  sessions: Record<string, CodeStudioSession>,
+  visualSessionId?: string | null,
+): string | null {
+  const normalized = visualSessionId?.trim();
+  if (!normalized) return null;
+  if (sessions[normalized]) return normalized;
+
+  return Object.values(sessions).find(
+    (session) => session.visualSessionId === normalized,
+  )?.sessionId ?? null;
+}
+
 interface CodeStudioState {
   activeSessionId: string | null;
   sessions: Record<string, CodeStudioSession>;

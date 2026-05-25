@@ -63,6 +63,42 @@ describe("ToolExecutionStrip", () => {
     expect(screen.getByText("Xem trước")).toBeTruthy();
   });
 
+  it("resolves CodeStudioCard through a mapped visual_session_id", () => {
+    const store = useCodeStudioStore.getState();
+    store.openSession("cs_mapped", "Mapped Pendulum App", "html", 1, {
+      studioLane: "app",
+    });
+    store.completeSession(
+      "cs_mapped",
+      "<div>app</div>",
+      "html",
+      1,
+      undefined,
+      "vs_mapped",
+    );
+
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-code-mapped",
+      status: "completed",
+      tool: {
+        id: "tool-code-mapped",
+        name: "tool_create_visual_code",
+        args: {
+          title: "Mapped Pendulum App",
+        },
+        result: JSON.stringify({
+          visual_session_id: "vs_mapped",
+        }),
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+
+    expect(screen.getByText("Mapped Pendulum App")).toBeTruthy();
+    expect(screen.getByText("Xem trước")).toBeTruthy();
+  });
+
   it("renders CodeStudioCard via _code_studio_session_id injected by SSE handler", () => {
     useCodeStudioStore.setState({
       activeSessionId: "cs_abc",

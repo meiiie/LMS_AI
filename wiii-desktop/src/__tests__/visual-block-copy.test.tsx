@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VisualBlock } from "@/components/chat/VisualBlock";
 import type { VisualBlockData, VisualPayload } from "@/api/types";
@@ -82,5 +82,35 @@ describe("VisualBlock copy", () => {
     render(<VisualBlock block={block} onSuggestedQuestion={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "Mở thành Artifact" })).toBeTruthy();
+  });
+
+  it("delegates mapped Code Studio visuals to the owning panel session", () => {
+    const store = useCodeStudioStore.getState();
+    store.openSession("cs-owner", "Mapped simulation", "html", 1);
+    store.completeSession(
+      "cs-owner",
+      "<main>Mapped simulation</main>",
+      "html",
+      1,
+      undefined,
+      "vs-copy-1",
+    );
+    useUIStore.setState({
+      codeStudioPanelOpen: true,
+    });
+    store.setActiveSession("cs-owner");
+
+    const block: VisualBlockData = {
+      type: "visual",
+      id: "block-copy-2",
+      visual: makeVisual(),
+      status: "committed",
+    };
+
+    render(<VisualBlock block={block} onSuggestedQuestion={vi.fn()} />);
+
+    expect(screen.queryByTestId("inline-visual-frame")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Code Studio/ }));
+    expect(useCodeStudioStore.getState().activeSessionId).toBe("cs-owner");
   });
 });

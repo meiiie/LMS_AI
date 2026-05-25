@@ -7,7 +7,10 @@ import type {
 import { motion, AnimatePresence } from "motion/react";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useChatStore } from "@/stores/chat-store";
-import { useCodeStudioStore } from "@/stores/code-studio-store";
+import {
+  resolveCodeStudioSessionIdForVisualSession,
+  useCodeStudioStore,
+} from "@/stores/code-studio-store";
 import { useUIStore } from "@/stores/ui-store";
 import { trackVisualTelemetry } from "@/lib/visual-telemetry";
 import { staggerContainer } from "@/lib/animations";
@@ -146,10 +149,13 @@ export function VisualBlock({
   // Delegate to Code Studio panel when it's open for this visual — avoid duplicate display
   const codeStudioPanelOpen = useUIStore((s) => s.codeStudioPanelOpen);
   const codeStudioActiveSessionId = useCodeStudioStore((s) => s.activeSessionId);
-  const hasCodeStudioSessionForThis = useCodeStudioStore((s) => Boolean(s.sessions[sessionId]));
+  const codeStudioSessionIdForThis = useCodeStudioStore((s) =>
+    resolveCodeStudioSessionIdForVisualSession(s.sessions, sessionId),
+  );
+  const hasCodeStudioSessionForThis = Boolean(codeStudioSessionIdForThis);
   const delegateToCodeStudioPanel = codeStudioPanelOpen
     && hasCodeStudioSessionForThis
-    && codeStudioActiveSessionId === sessionId;
+    && codeStudioActiveSessionId === codeStudioSessionIdForThis;
 
   let renderError: string | null = null;
   let usedFallback = false;
@@ -385,7 +391,7 @@ export function VisualBlock({
           type="button"
           className="flex items-center gap-2.5 w-full rounded-xl border border-border/60 bg-surface-secondary/40 px-4 py-3 text-left text-sm text-text-secondary hover:bg-surface-secondary transition-colors"
           onClick={() => {
-            useCodeStudioStore.getState().setActiveSession(sessionId);
+            useCodeStudioStore.getState().setActiveSession(codeStudioSessionIdForThis || sessionId);
             useUIStore.getState().openCodeStudio();
           }}
         >
@@ -505,11 +511,15 @@ function VisualActionBar({
   artifactHandoffPrompt?: string;
   onSuggestedQuestion?: (prompt: string) => void;
 }) {
-  const hasCodeStudioSession = useCodeStudioStore((s) => Boolean(s.sessions[sessionId]));
+  const codeStudioSessionId = useCodeStudioStore((s) =>
+    resolveCodeStudioSessionIdForVisualSession(s.sessions, sessionId),
+  );
+  const hasCodeStudioSession = Boolean(codeStudioSessionId);
   const isStreaming = useChatStore((state) => state.isStreaming);
 
   const openInCodeStudio = () => {
-    useCodeStudioStore.getState().setActiveSession(sessionId);
+    if (!codeStudioSessionId) return;
+    useCodeStudioStore.getState().setActiveSession(codeStudioSessionId);
     useUIStore.getState().openCodeStudio();
   };
 
