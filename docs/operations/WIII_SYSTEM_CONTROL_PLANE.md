@@ -61,6 +61,9 @@ As of 2026-05-25:
   supporting system-comprehension harness: `2433` tracked files, `3241`
   internal import edges, and `123` semantic batches. Generated output stays in
   ignored `.understand-anything/`.
+- `tools/wiii_understand_harness/run_wiii_understand_flow_map.py` provides
+  repo-owned scoped flow maps for chat baseline, LMS document preview,
+  visual/Code Studio, and harness governance audits.
 
 ## Control Plane Model
 
@@ -73,7 +76,7 @@ Wiii should be operated through five product layers and one governance layer:
 | Wiii Host | desktop, embed, LMS, Pointy, visual/code frames | preview missing, Pointy wrong action, visual clipped | `wiii-desktop/src/**`, LMS/host bridge modules |
 | Wiii Org | auth, membership, tenant boundaries, permissions | wrong user/org, auth loop, cross-tenant risk | `app/auth/**`, org middleware, repositories |
 | Wiii Data | PostgreSQL, pgvector, MinIO, Valkey, migrations | missing history, citations, uploads, memory, or source refs | repositories, migrations, document context paths |
-| Governance | issue/branch/PR/release/harness controls | risky or unreviewable changes keep landing | `.github/**`, `docs/operations/**`, `tools/wiii_self_harness/**` |
+| Governance | issue/branch/PR/release/harness controls | risky or unreviewable changes keep landing | `.github/**`, `docs/operations/**`, `tools/wiii_self_harness/**`, `tools/wiii_understand_harness/**` |
 
 Do not start with a code edit until the failing symptom is mapped to one of
 these layers and one active runtime flow.
@@ -136,12 +139,13 @@ The expected loop is:
 
 ## Harness Relationship
 
-Wiii currently has three harness levels:
+Wiii currently has four harness levels:
 
 | Harness | Purpose | What it proves | What it does not prove |
 |---|---|---|---|
 | Wiii Self-Harness | static contract manifest | critical evidence files and tokens still exist | runtime behavior works |
 | Understand-Anything Trial | source inventory and dependency graph | codebase size, dependency hubs, semantic batches, and scan pollution | runtime behavior, LMS safety, or product acceptance |
+| Understand-Anything Flow Map Wrapper | scoped deterministic scan/import-map profiles | selected flow files, support files, import-map stats, and dependency hotspots | runtime behavior, LMS safety, or product acceptance |
 | Local E2E Harness | browser/bootstrap smoke | local app can authenticate and reach chat UI | LMS production acceptance works |
 | Production Smoke | deployed release smoke | public health, embed, Pointy, structured visual SSE | deep document/LMS apply flow works |
 

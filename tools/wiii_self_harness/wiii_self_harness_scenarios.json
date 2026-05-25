@@ -103,9 +103,11 @@
       "invariants": [
         "Understand-Anything remains a supporting comprehension reference, not a runtime dependency or test replacement.",
         "The focused audit records the inspected commit, bounded Wiii trial, dependency hubs, and adoption decision.",
+        "The repo-owned wrapper exposes scoped flow profiles for chat, LMS document preview, visual/Code Studio, and harness governance maps.",
+        "The wrapper writes generated scan, import-map, and hotspot summary output only under ignored `.understand-anything/tmp/`.",
         "Generated `.understand-anything/` graph and intermediate output stay ignored.",
         "A tracked `.understandignore` excludes generated output, local agent scratch, logs, secrets, binary assets, and build artifacts.",
-        "The Self-Harness workflow re-runs when the comprehension audit or scan guardrail changes."
+        "The Self-Harness workflow re-runs when the comprehension audit, wrapper, or scan guardrail changes."
       ],
       "evidence": [
         {
@@ -118,6 +120,36 @@
             "Dependency hubs found by import-map",
             "Windows Domain Scan Needs Guardrails",
             "Adoption Decision"
+          ]
+        },
+        {
+          "kind": "docs",
+          "path": "tools/wiii_understand_harness/README.md",
+          "must_contain": [
+            "Wiii Understand-Anything Flow Map",
+            "--profile lms-document-preview",
+            ".understand-anything/tmp/",
+            "navigation aid, not proof of runtime behavior"
+          ]
+        },
+        {
+          "kind": "runtime",
+          "path": "tools/wiii_understand_harness/run_wiii_understand_flow_map.py",
+          "must_contain": [
+            "FLOW_PROFILES",
+            "chat-baseline",
+            "lms-document-preview",
+            "visual-code-studio",
+            "llm_graph_workflow"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "tools/wiii_understand_harness/test_run_wiii_understand_flow_map.py",
+          "must_contain": [
+            "test_run_flow_map_reuses_scan_input_and_writes_ignored_outputs",
+            "test_select_profile_files_keeps_primary_and_support_separate",
+            "test_list_profiles_cli_does_not_require_reference_clone"
           ]
         },
         {
@@ -156,16 +188,19 @@
           "path": ".gitignore",
           "must_contain": [
             ".understand-anything/",
-            "**/.understand-anything/"
+            "**/.understand-anything/",
+            "tools/wiii_understand_harness"
           ]
         },
         {
           "kind": "ci",
           "path": ".github/workflows/wiii-self-harness.yml",
           "must_contain": [
+            "tools/wiii_understand_harness/**",
             "docs/operations/WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_*.md",
             ".understandignore",
-            "Validate scenario manifest"
+            "Validate scenario manifest",
+            "Run Understand-Anything wrapper unit tests"
           ]
         }
       ],
@@ -173,6 +208,10 @@
         {
           "command": "python tools/wiii_self_harness/run_wiii_self_harness.py",
           "purpose": "Prove the system-comprehension reference remains documented, ignored, and tied to workflow evidence."
+        },
+        {
+          "command": "python -m unittest discover -s tools/wiii_understand_harness -p \"test_*.py\"",
+          "purpose": "Prove the scoped Understand-Anything wrapper selects Wiii flow files and emits guarded summaries without requiring the reference clone in unit tests."
         }
       ]
     },

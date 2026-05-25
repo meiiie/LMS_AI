@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'tools/wiii_self_harness/**'
+      - 'tools/wiii_understand_harness/**'
       - 'docs/operations/WIII_SELF_HARNESS.md'
       - 'docs/operations/WIII_SYSTEM_CONTROL_PLANE.md'
       - 'docs/operations/WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md'
@@ -43,6 +44,7 @@ on:
     branches: [main]
     paths:
       - 'tools/wiii_self_harness/**'
+      - 'tools/wiii_understand_harness/**'
       - 'docs/operations/WIII_SELF_HARNESS.md'
       - 'docs/operations/WIII_SYSTEM_CONTROL_PLANE.md'
       - 'docs/operations/WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md'
@@ -104,3 +106,6 @@ jobs:
 
       - name: Run harness unit tests
         run: python -m unittest discover -s tools/wiii_self_harness -p "test_*.py"
+
+      - name: Run Understand-Anything wrapper unit tests
+        run: python -m unittest discover -s tools/wiii_understand_harness -p "test_*.py"
