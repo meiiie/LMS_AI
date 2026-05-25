@@ -16,7 +16,10 @@ import type { ToolExecutionBlockData } from "@/api/types";
 import { TOOL_LABELS } from "@/lib/reasoning-labels";
 import { VisualArtifactCard } from "./VisualArtifactCard";
 import { CodeStudioCard } from "./CodeStudioCard";
-import { useCodeStudioStore } from "@/stores/code-studio-store";
+import {
+  resolveCodeStudioSessionIdForVisualSession,
+  useCodeStudioStore,
+} from "@/stores/code-studio-store";
 
 interface ToolExecutionStripProps {
   block: ToolExecutionBlockData;
@@ -460,13 +463,13 @@ function VisualToolStrip({ block }: ToolExecutionStripProps) {
     block.tool.args.visual_session_id.trim()
       ? block.tool.args.visual_session_id.trim()
       : extractVisualSessionIdFromResult(block.tool.result);
-  const vsId = visual_session_id || csSessionId;
-  const hasCodeStudioSession = useCodeStudioStore((s) =>
-    vsId ? Boolean(s.sessions[vsId]) : false,
+  const codeStudioSessionId = useCodeStudioStore((s) =>
+    resolveCodeStudioSessionIdForVisualSession(s.sessions, visual_session_id)
+    || (csSessionId && s.sessions[csSessionId] ? csSessionId : null),
   );
 
-  if (hasCodeStudioSession) {
-    return <CodeStudioCard sessionId={vsId} />;
+  if (codeStudioSessionId) {
+    return <CodeStudioCard sessionId={codeStudioSessionId} />;
   }
   return <VisualArtifactCard block={block} />;
 }

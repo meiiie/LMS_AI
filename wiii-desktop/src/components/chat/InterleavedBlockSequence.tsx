@@ -25,7 +25,6 @@ import { PreviewGroup } from "./PreviewGroup";
 import { ArtifactCard } from "./ArtifactCard";
 import { VisualBlock } from "./VisualBlock";
 import { ToolExecutionStrip } from "./ToolExecutionStrip";
-import { useCodeStudioStore } from "@/stores/code-studio-store";
 
 function BlockErrorFallback({
   blockType,
@@ -865,9 +864,6 @@ export function InterleavedBlockSequence({
   onSuggestedQuestion,
 }: InterleavedBlockSequenceProps) {
   const [inspectorIntervalId, setInspectorIntervalId] = useState<string | null>(null);
-  const codeStudioVisualIds = useCodeStudioStore((s) =>
-    new Set(Object.values(s.sessions).map((sess) => sess.visualSessionId).filter(Boolean)),
-  );
   const showReasoningRail = shouldRenderReasoningRail(blocks, showThinking, thinkingLevel);
   const groupedBlockIds = new Set<string>();
 
@@ -1031,9 +1027,6 @@ export function InterleavedBlockSequence({
         }
 
         if (block.type === "visual") {
-          // Skip visual blocks that belong to a CodeStudio session (rendered inside CodeStudioCard)
-          const vsId = (block as VisualBlockData).visual.visual_session_id;
-          if (vsId && codeStudioVisualIds.has(vsId)) return null;
           if (editorialComposition?.entryId === block.id) {
             return (
               <BlockErrorBoundary key={block.id} blockType="visual">

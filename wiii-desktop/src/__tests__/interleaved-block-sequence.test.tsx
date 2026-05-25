@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ContentBlock } from "@/api/types";
 import { InterleavedBlockSequence } from "@/components/chat/InterleavedBlockSequence";
+import { useCodeStudioStore } from "@/stores/code-studio-store";
 
 vi.mock("@/components/common/MarkdownRenderer", () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
@@ -161,6 +162,13 @@ function createVisual(
 }
 
 describe("InterleavedBlockSequence", () => {
+  beforeEach(() => {
+    useCodeStudioStore.setState({
+      activeSessionId: null,
+      sessions: {},
+    });
+  });
+
   it("dedupes action bridges that repeat adjacent thinking text", () => {
     const blocks: ContentBlock[] = [
       createThinking("Dang soi lai du lieu can bam.", {
@@ -316,6 +324,53 @@ describe("InterleavedBlockSequence", () => {
     expect(screen.queryByTestId("reasoning-interval")).toBeNull();
     expect(screen.getByTestId("tool-strip").textContent || "").toContain("tool_generate_visual");
     expect(screen.getByTestId("visual-block")).toBeTruthy();
+  });
+
+  it("keeps Code Studio-owned visual blocks as transcript anchors", () => {
+    const store = useCodeStudioStore.getState();
+    store.openSession("cs-code-visual", "Pendulum App", "html", 1, {
+      studioLane: "app",
+    });
+    store.completeSession(
+      "cs-code-visual",
+      "<main>Pendulum</main>",
+      "html",
+      1,
+      undefined,
+      "vs-code-visual",
+    );
+
+    const baseVisual = createVisual().visual;
+    const blocks: ContentBlock[] = [
+      createAnswer("Minh da dung mot app nho de minh hoa chuyen dong."),
+      createVisual({
+        id: "visual-code",
+        sessionId: "vs-code-visual",
+        visual: {
+          ...baseVisual,
+          id: "visual-code",
+          visual_session_id: "vs-code-visual",
+          title: "Pendulum App",
+          renderer_kind: "app",
+          shell_variant: "immersive",
+          patch_strategy: "app_state",
+          chrome_mode: "app",
+          runtime: "sandbox_html",
+          fallback_html: "<main>Pendulum</main>",
+        },
+      }),
+    ];
+
+    render(
+      <InterleavedBlockSequence
+        blocks={blocks}
+        showThinking
+        thinkingLevel="balanced"
+      />,
+    );
+
+    expect(screen.getByTestId("visual-block")).toBeTruthy();
+    expect(screen.getByText("Pendulum App")).toBeTruthy();
   });
 
   it("renders detailed trace in the main flow and still keeps the inspector available", () => {

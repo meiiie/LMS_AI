@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   buildCodeStudioActiveSessionContext,
+  resolveCodeStudioSessionIdForVisualSession,
   useCodeStudioStore,
 } from "@/stores/code-studio-store";
 
@@ -139,6 +140,32 @@ describe("code-studio-store", () => {
       expect(session.activeVersion).toBe(2);
     });
 
+  });
+
+  describe("resolveCodeStudioSessionIdForVisualSession", () => {
+    it("resolves both direct session ids and mapped visual session ids", () => {
+      const store = useCodeStudioStore.getState();
+      store.openSession("cs_mapped", "Mapped App", "html", 1);
+      store.completeSession(
+        "cs_mapped",
+        "<main />",
+        "html",
+        1,
+        undefined,
+        "vs_mapped",
+      );
+
+      const { sessions } = useCodeStudioStore.getState();
+      expect(
+        resolveCodeStudioSessionIdForVisualSession(sessions, "cs_mapped"),
+      ).toBe("cs_mapped");
+      expect(
+        resolveCodeStudioSessionIdForVisualSession(sessions, "vs_mapped"),
+      ).toBe("cs_mapped");
+      expect(
+        resolveCodeStudioSessionIdForVisualSession(sessions, "missing"),
+      ).toBeNull();
+    });
   });
 
   describe("switchVersion", () => {
