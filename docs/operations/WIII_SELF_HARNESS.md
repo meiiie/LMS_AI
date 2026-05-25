@@ -40,7 +40,8 @@ The first scenario set covers the active product risk surface:
   describes the active flow-monitoring ladder.
 - `system-comprehension-reference-harness`: Understand-Anything remains a
   guarded, local-only comprehension reference with generated graph output
-  ignored.
+  ignored, and the repo-owned flow-map wrapper stays available for scoped
+  audits.
 - `memory-context-provenance-ledger`: Runtime Flow Ledger embeds privacy-safe
   context provenance for conversation, document, memory, and host sources.
 - `chat-baseline-acceptance-harness`: ordinary Vietnamese chat remains on the
@@ -63,6 +64,7 @@ From the repository root:
 ```powershell
 python tools/wiii_self_harness/run_wiii_self_harness.py
 python -m unittest discover -s tools/wiii_self_harness -p "test_*.py"
+python -m unittest discover -s tools/wiii_understand_harness -p "test_*.py"
 ```
 
 To list scenarios:
@@ -93,8 +95,9 @@ It fails closed when a scenario is malformed, a file disappears, or a required
 contract token no longer exists in the evidence file.
 
 The comprehension-reference scenario is intentionally static. It validates the
-adoption decision, ignore rules, and workflow triggers; it does not require
-generated `.understand-anything/` output to exist.
+adoption decision, ignore rules, wrapper files, wrapper unit tests, and workflow
+triggers; it does not require generated `.understand-anything/` output to
+exist.
 
 ## Extension Rules
 
@@ -115,10 +118,10 @@ specific contract, not merely show that a subsystem exists.
 
 ## CI
 
-`.github/workflows/wiii-self-harness.yml` runs the manifest validator and its
-unit tests when harness files, workflow files, or the covered product contracts
-change. The workflow uses only Python and does not install backend or desktop
-dependencies.
+`.github/workflows/wiii-self-harness.yml` runs the manifest validator,
+Self-Harness unit tests, and Understand-Anything wrapper unit tests when
+harness files, workflow files, or the covered product contracts change. The
+workflow uses only Python and does not install backend or desktop dependencies.
 
 ## Non-Goals
 

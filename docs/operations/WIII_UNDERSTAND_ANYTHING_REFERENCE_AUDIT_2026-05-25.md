@@ -163,6 +163,35 @@ The highest inbound hubs match the places Wiii already feels risky:
 Future refactors touching these hubs need focused tests and an explicit
 rollback note because a small edit can affect many active flows.
 
+## Repo-Owned Wrapper
+
+Wiii now keeps a small wrapper around the deterministic Understand-Anything
+scanner and import-map extractor:
+
+```text
+tools/wiii_understand_harness/run_wiii_understand_flow_map.py
+```
+
+The wrapper exposes named flow profiles instead of asking each maintainer to
+reconstruct path lists by hand:
+
+- `chat-baseline`
+- `lms-document-preview`
+- `visual-code-studio`
+- `self-harness`
+
+Example:
+
+```powershell
+python tools/wiii_understand_harness/run_wiii_understand_flow_map.py --profile lms-document-preview
+```
+
+The wrapper writes generated scan, import input, import-map, and summary files
+under ignored `.understand-anything/tmp/`. The summary records selected files,
+support files, language/category counts, import-map stats, and top inbound and
+outbound dependency hubs. It does not run the full LLM graph workflow, does not
+enable auto-update hooks, and does not prove runtime safety.
+
 ## Adoption Decision
 
 Adopt Understand-Anything as a supporting system-comprehension harness for Wiii
@@ -198,14 +227,17 @@ Do not use it for:
   authoritative.
 - Re-run deterministic scan/import-map when a future audit touches a large
   dependency hub.
+- Keep repo-owned flow profiles in
+  `tools/wiii_understand_harness/run_wiii_understand_flow_map.py` focused on
+  active Wiii flows, not broad directory dumps.
 
 ## Follow-Up Issues
 
 Open separate issues before expanding this slice:
 
-1. Add a small repo-owned wrapper that runs the deterministic scan/import-map
-   into ignored output and prints the Wiii hotspot summary.
-   Owner: Project leadership. Target: 2026-06-05.
+1. Keep the repo-owned deterministic scan/import-map wrapper current as Wiii
+   flow ownership changes.
+   Owner: Project leadership. Target: ongoing.
 2. Decide whether a generated knowledge graph should ever be versioned, and if
    so, define size limits, privacy policy, update cadence, and review rules.
    Owner: Project leadership. Target: 2026-06-12.

@@ -77,6 +77,9 @@ test_*.txt
 !/tools/wiii_self_harness/
 !/tools/wiii_self_harness/**
 tools/wiii_self_harness/__pycache__/
+!/tools/wiii_understand_harness/
+!/tools/wiii_understand_harness/**
+tools/wiii_understand_harness/__pycache__/
 
 # === pip install artifacts ===
 maritime-ai-service/=*
