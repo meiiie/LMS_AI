@@ -130,6 +130,30 @@ def test_allows_artifact_scaffold_fallback_with_contract_metadata() -> None:
     assert decision.metric_labels()["kind"] == "default"
 
 
+def test_suppresses_artifact_scaffold_when_callsite_cannot_deliver_preview() -> None:
+    decision = resolve_code_studio_scaffold_fallback(
+        query="Tạo một mini app HTML để nhúng LMS",
+        reason="node_outer_RuntimeError",
+        allow_scaffold_delivery=False,
+        resolve_visual_intent_fn=lambda _query: _visual_decision(
+            presentation_intent="artifact",
+            studio_lane="artifact",
+            visual_type=None,
+            quality_profile="premium",
+        ),
+        build_caption_fn=lambda _query: "caption should not be shown",
+        detect_kind_fn=lambda _query: "default",
+    )
+
+    assert decision.engage_scaffold is False
+    assert decision.policy_reason == "scaffold_delivery_unavailable"
+    assert decision.response_type == "code_studio_scaffold_suppressed"
+    assert decision.presentation_intent == "artifact"
+    assert decision.studio_lane == "artifact"
+    assert "preview thật" in decision.response
+    assert "caption should not be shown" not in decision.response
+
+
 def test_resolution_failure_suppresses_scaffold() -> None:
     def broken_resolver(_query: str):
         raise RuntimeError("resolver unavailable")
