@@ -35,8 +35,19 @@
             "Control Plane Model",
             "Active Runtime Flows",
             "Flow Monitoring Ladder",
+            "WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md",
             "runtime flow ledger",
             "LMS document preview/apply acceptance"
+          ]
+        },
+        {
+          "kind": "docs",
+          "path": "docs/operations/WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md",
+          "must_contain": [
+            "OpenHuman",
+            "OpenClaw",
+            ".Codex/external/reference-systems",
+            "Runtime Flow Ledger + Chat Baseline Acceptance Harness"
           ]
         },
         {

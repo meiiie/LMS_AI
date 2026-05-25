@@ -12,6 +12,7 @@ Use this folder for repository-level documentation that explains the product, th
 - `operations/WIII_AGENTIC_CODEBASE_HARNESS.md`: large-codebase agent workflow, context layering, and WIP recovery pattern
 - `operations/WIII_SYSTEM_CONTROL_PLANE.md`: whole-system operating map, active flow monitoring ladder, and debugging protocol
 - `operations/WIII_SELF_HARNESS.md`: static scenario harness for active product-path contracts
+- `operations/WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md`: external reference systems audit baseline and local clone workspace
 - `plans/2026-04-27-wiii-native-orchestration-rfc.md`: phased RFC for replacing remaining LangGraph assumptions with Wiii-owned runtime contracts
 - `plans/2026-04-28-wiii-pipeline-simplification-plan.md`: current request/auth/memory/router/agent/tool/RAG/stream lifecycle and safe LangGraph/history/compat cleanup plan
 - `operations/WIII_DOCUMENTATION_GOVERNANCE.md`: documentation lifecycle, cleanup controls, and issue/PR standards

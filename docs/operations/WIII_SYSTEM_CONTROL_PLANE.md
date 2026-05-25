@@ -26,6 +26,8 @@ It complements:
 
 - `docs/WIII_PROJECT_MENTAL_MODEL.md` for the five-layer product model.
 - `docs/architecture/WIII_CODEBASE_MAP.md` for source navigation.
+- `docs/operations/WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md` for external
+  systems Wiii should compare against before deeper runtime changes.
 - `docs/operations/WIII_SELF_HARNESS.md` for static contract harnessing.
 - `docs/operations/WIII_LOCAL_E2E_HARNESS.md` for local browser entry.
 - `docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md` for pinned production
@@ -139,29 +141,41 @@ implementation target after the current documentation map is merged.
 
 Proceed in this order unless production risk forces a hotfix:
 
-1. **LMS document preview/apply acceptance**
+1. **Reference systems audit**
+   - Start with OpenHuman for memory/context/living-agent structure.
+   - Start with OpenClaw for gateway/session/tool/trace structure.
+   - Convert findings into concrete Wiii flow-ledger and chat-baseline
+     requirements.
+
+2. **Chat stream baseline**
+   - Run ordinary Vietnamese chat prompts with no document, no LMS, no visual,
+     and no Pointy action.
+   - Verify route decision, SSE order, frontend rendering, no raw payload, and
+     finalization.
+
+3. **LMS document preview/apply acceptance**
    - Use a safe test tenant/course.
    - Upload real DOCX/PDF.
    - Ask for a lesson in Vietnamese.
    - Verify preview, source refs, citations, `approval_token`, and final draft.
 
-2. **Runtime flow ledger**
+4. **Runtime flow ledger**
    - Add a typed, privacy-safe turn trace surface.
    - Keep it log/metadata first; avoid a dashboard until the schema is stable.
    - Include route decision, selected tools, source counts, visual/host events,
      provider/model, and finalization status.
 
-3. **Stream and route replay cases**
+5. **Stream and route replay cases**
    - Add golden replay scenarios for uploaded document, visual, Code Studio,
      RAG, and Pointy no-action cases.
    - Keep production smoke lightweight; keep mutation acceptance isolated.
 
-4. **Frontend acceptance matrix**
+6. **Frontend acceptance matrix**
    - Authenticated LMS/embed browser run.
    - Visual/Code Studio frame screenshots.
    - Markdown/code streaming and source-reference visibility.
 
-5. **Living/memory audit**
+7. **Living/memory audit**
    - Map post-turn hooks and memory write/read paths.
    - Add tenant-safe replay checks before changing memory behavior.
 
