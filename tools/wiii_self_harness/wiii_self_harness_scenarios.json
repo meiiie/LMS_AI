@@ -4,6 +4,7 @@
   "description": "Repo-owned system harness for active Wiii product contracts. It validates that critical architecture scenarios remain explicit and tied to living runtime, test, docs, and CI evidence.",
   "required_scenarios": [
     "system-flow-observability-map",
+    "system-comprehension-reference-harness",
     "memory-context-provenance-ledger",
     "visual-tool-capability-sync",
     "code-studio-scaffold-boundary",
@@ -86,6 +87,91 @@
         {
           "command": "python tools/wiii_self_harness/run_wiii_self_harness.py",
           "purpose": "Prove the system control-plane map remains present and tied to the Self-Harness contract."
+        }
+      ]
+    },
+    {
+      "id": "system-comprehension-reference-harness",
+      "title": "System comprehension reference stays guarded",
+      "status": "active",
+      "layer": "Governance",
+      "risk": "medium",
+      "owner": "Project leadership",
+      "active_product_path": true,
+      "contract": "Understand-Anything is adopted as a local-only system-comprehension reference with generated graph output ignored and scan guardrails tracked.",
+      "invariants": [
+        "Understand-Anything remains a supporting comprehension reference, not a runtime dependency or test replacement.",
+        "The focused audit records the inspected commit, bounded Wiii trial, dependency hubs, and adoption decision.",
+        "Generated `.understand-anything/` graph and intermediate output stay ignored.",
+        "A tracked `.understandignore` excludes generated output, local agent scratch, logs, secrets, binary assets, and build artifacts.",
+        "The Self-Harness workflow re-runs when the comprehension audit or scan guardrail changes."
+      ],
+      "evidence": [
+        {
+          "kind": "docs",
+          "path": "docs/operations/WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-25.md",
+          "must_contain": [
+            "system-comprehension harness",
+            "470cc01dc5f9236a93eb704afdd479cd5db79710",
+            "Tracked files scanned",
+            "Dependency hubs found by import-map",
+            "Windows Domain Scan Needs Guardrails",
+            "Adoption Decision"
+          ]
+        },
+        {
+          "kind": "docs",
+          "path": "docs/operations/WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md",
+          "must_contain": [
+            "Understand-Anything",
+            "system-comprehension harness",
+            "deterministic scan/import-map",
+            ".understandignore"
+          ]
+        },
+        {
+          "kind": "docs",
+          "path": "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md",
+          "must_contain": [
+            "WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-25.md",
+            "2433",
+            "3241",
+            "123",
+            "Understand-Anything Trial"
+          ]
+        },
+        {
+          "kind": "governance",
+          "path": ".understandignore",
+          "must_contain": [
+            ".understand-anything/",
+            "wiii-desktop/dist-embed/",
+            "*.pdf",
+            "*.min.js"
+          ]
+        },
+        {
+          "kind": "governance",
+          "path": ".gitignore",
+          "must_contain": [
+            ".understand-anything/",
+            "**/.understand-anything/"
+          ]
+        },
+        {
+          "kind": "ci",
+          "path": ".github/workflows/wiii-self-harness.yml",
+          "must_contain": [
+            "docs/operations/WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_*.md",
+            ".understandignore",
+            "Validate scenario manifest"
+          ]
+        }
+      ],
+      "verification": [
+        {
+          "command": "python tools/wiii_self_harness/run_wiii_self_harness.py",
+          "purpose": "Prove the system-comprehension reference remains documented, ignored, and tied to workflow evidence."
         }
       ]
     },
