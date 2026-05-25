@@ -194,3 +194,20 @@ def test_collect_code_studio_tools_uses_visual_requirement_for_simulation(monkey
 
     assert force_tools is True
     assert _tool_names(tools) == ["tool_create_visual_code"]
+
+
+def test_collect_code_studio_tools_keeps_required_html_file_tool(monkeypatch):
+    from app.engine.multi_agent import tool_collection as module
+
+    _patch_visual_collection_modules(monkeypatch, module)
+
+    tools, force_tools = module._collect_code_studio_tools(
+        "Tao landing page HTML cho san pham de nhung LMS",
+        user_role="student",
+    )
+
+    assert force_tools is True
+    assert _tool_names(tools) == [
+        "tool_generate_html_file",
+        "tool_create_visual_code",
+    ]
