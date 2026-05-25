@@ -1479,7 +1479,7 @@ class TestCodeStudioProgressHeartbeat:
 
     def test_progress_message_includes_elapsed_seconds(self):
         formatted = _format_code_studio_progress_message("Minh dang dung canvas loop...", 42.1)
-        assert "(da 42s)" in formatted
+        assert "(đã 42s)" in formatted
 
     def test_retry_status_is_honest_about_long_running_simulation(self):
         retry = _build_code_studio_retry_status(
@@ -1488,7 +1488,7 @@ class TestCodeStudioProgressHeartbeat:
             elapsed_seconds=240,
         )
         assert "preview thật" in retry
-        assert "(da 240s)" in retry
+        assert "(đã 240s)" in retry
 
     @pytest.mark.asyncio
     async def test_stream_answer_suppresses_raw_code_dump_for_code_studio_lane(self):

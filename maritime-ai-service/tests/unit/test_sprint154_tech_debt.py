@@ -470,7 +470,7 @@ class TestCodeStudioTerminalFailures:
 
         assert "PNG" in message or "png" in message
         assert "sandbox" in message.lower()
-        assert "ket noi" in message.lower()
+        assert "lỗi kết nối" in message.lower()
 
 
 class TestCodeStudioWave002:
