@@ -15,6 +15,9 @@ from app.engine.multi_agent.code_studio_scaffold_fallback_policy import (
     CodeStudioScaffoldFallbackDecision,
     resolve_code_studio_scaffold_fallback,
 )
+from app.engine.multi_agent.code_studio_event_payloads import (
+    sanitize_code_studio_tool_call_args_for_stream,
+)
 from app.engine.multi_agent.code_studio_template_scaffold import (
     build_code_studio_scaffold,
 )
@@ -703,7 +706,18 @@ async def execute_code_studio_tool_rounds_impl(
                 "[CODE_STUDIO] Invoking tool %s (id=%s, args_keys=%s)",
                 tc_name, tc_id, list(tc_args.keys()) if isinstance(tc_args, dict) else "?",
             )
-            await push_event({"type": "tool_call", "content": {"name": tc_name, "args": tc_args, "id": tc_id}, "node": "code_studio_agent"})
+            await push_event({
+                "type": "tool_call",
+                "content": {
+                    "name": tc_name,
+                    "args": sanitize_code_studio_tool_call_args_for_stream(
+                        tc_name,
+                        tc_args,
+                    ),
+                    "id": tc_id,
+                },
+                "node": "code_studio_agent",
+            })
             tool_call_events.append({"type": "call", "name": tc_name, "args": tc_args, "id": tc_id})
             matched = get_tool_by_name(tools, str(tc_name).strip())
             logger.info(

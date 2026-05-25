@@ -16,6 +16,9 @@ from app.engine.multi_agent.code_studio_context import (
     _should_use_colreg_code_studio_fast_path,
     _should_use_pendulum_code_studio_fast_path,
 )
+from app.engine.multi_agent.code_studio_event_payloads import (
+    sanitize_code_studio_tool_call_args_for_stream,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.visual_events import (
     _collect_active_visual_session_ids,
@@ -514,7 +517,14 @@ async def execute_code_studio_fast_path(
 
     await push_event({
         "type": "tool_call",
-        "content": {"name": tool_name, "args": tool_args, "id": tool_call_id},
+        "content": {
+            "name": tool_name,
+            "args": sanitize_code_studio_tool_call_args_for_stream(
+                tool_name,
+                tool_args,
+            ),
+            "id": tool_call_id,
+        },
         "node": "code_studio_agent",
     })
     await push_event({

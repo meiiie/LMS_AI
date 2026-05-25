@@ -70,7 +70,10 @@ def test_fast_path_recipe_contract_builds_tool_args() -> None:
 
 @pytest.mark.asyncio
 async def test_recipe_fast_path_returns_typed_result(monkeypatch) -> None:
+    invoked_args = {}
+
     async def fake_invoke_tool_with_runtime(*_args, **_kwargs):
+        invoked_args.update(_args[1])
         return '{"visual_session_id":"vs-fast","fallback_html":"<canvas></canvas>"}'
 
     async def fake_maybe_emit_visual_event(**_kwargs):
@@ -95,8 +98,10 @@ async def test_recipe_fast_path_returns_typed_result(monkeypatch) -> None:
         fake_emit_visual_commit_events,
     )
 
-    async def push_event(*_args, **_kwargs):
-        return None
+    pushed_events = []
+
+    async def push_event(event):
+        pushed_events.append(event)
 
     result = await code_studio_fast_paths.execute_code_studio_fast_path(
         state={"context": {}},
@@ -112,6 +117,12 @@ async def test_recipe_fast_path_returns_typed_result(monkeypatch) -> None:
     assert result.fast_path == "fast_colreg15"
     assert result.tools_used == [{"name": "tool_create_visual_code"}]
     assert result.tool_call_events[0]["type"] == "call"
+    assert result.tool_call_events[0]["args"]["code_html"] == _COLREG_RULE15_FAST_PATH_HTML
+    assert invoked_args["code_html"] == _COLREG_RULE15_FAST_PATH_HTML
+    tool_call_event = next(event for event in pushed_events if event["type"] == "tool_call")
+    public_args = tool_call_event["content"]["args"]
+    assert public_args["code_html"]["redacted"] is True
+    assert _COLREG_RULE15_FAST_PATH_HTML not in str(public_args)
 
 
 @pytest.mark.asyncio
