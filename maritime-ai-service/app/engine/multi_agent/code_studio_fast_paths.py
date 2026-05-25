@@ -388,14 +388,14 @@ _COLREG_RULE15_FAST_PATH_HTML = """
 
 _ARTIFACT_FAST_PATH_HTML = """
 <section style="font-family:system-ui,sans-serif;padding:24px;border:1px solid #e2e8f0;border-radius:18px;background:#fff8f1;max-width:520px">
-  <span style="display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#ffedd5;color:#9a3412;font-weight:600">Artifact scaffold</span>
-  <h2 style="margin:14px 0 10px;font-size:24px;color:#7c2d12">Mini HTML app ready</h2>
+  <span style="display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#ffedd5;color:#9a3412;font-weight:600">Khung Artifact</span>
+  <h2 style="margin:14px 0 10px;font-size:24px;color:#7c2d12">Mini HTML app đã sẵn sàng</h2>
   <p style="margin:0;color:#78350f;line-height:1.6">Đây là bộ khung embeddable gọn nhẹ để bạn preview ngay và patch tiếp trong Code Studio hoặc Artifact lane.</p>
   <button id="cta" type="button">Thử tương tác</button>
-  <p id="state" aria-live="polite" style="margin:12px 0 0">Ready to embed</p>
+  <p id="state" aria-live="polite" style="margin:12px 0 0">Sẵn sàng nhúng</p>
 </section>
 <script>
-const state=document.getElementById('state');document.getElementById('cta')?.addEventListener('click',()=>{state.textContent='Clicked once - artifact scaffold is alive';window.WiiiVisualBridge?.reportResult?.('artifact',{clicked:true},'Mini HTML app ready','completed')});
+const state=document.getElementById('state');document.getElementById('cta')?.addEventListener('click',()=>{state.textContent='Đã nhấn một lần - khung artifact đang hoạt động';window.WiiiVisualBridge?.reportResult?.('artifact',{clicked:true},'Mini HTML app đã sẵn sàng','completed')});
 </script>
 """.strip()
 

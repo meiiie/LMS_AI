@@ -132,7 +132,7 @@ def _format_code_studio_progress_message(message: str, elapsed_seconds: float) -
     if elapsed_seconds <= 0:
         return message
     elapsed = int(max(1, round(elapsed_seconds)))
-    return f"{message} (da {elapsed}s)"
+    return f"{message} (đã {elapsed}s)"
 
 
 def _build_code_studio_retry_status(
@@ -261,19 +261,19 @@ def _build_code_studio_terminal_failure_response(
 
     if artifact_names:
         return (
-            f"Mình đã bắt đầu chuẩn bị `{artifact_names[0]}`, nhưng sandbox đang gặp lỗi kết nối (ket noi) nên chưa thể "
+            f"Mình đã bắt đầu chuẩn bị `{artifact_names[0]}`, nhưng sandbox đang gặp lỗi kết nối nên chưa thể "
             "hoàn tất artifact này ở turn hiện tại. Khi kênh thực thi ổn định trở lại, mình có thể chạy lại và "
             "gửi kết quả ngay."
         )
 
     if is_chart_request:
         return (
-            "Mình chưa thể tạo file PNG thật lúc này vì sandbox đang gặp lỗi kết nối (ket noi). "
+            "Mình chưa thể tạo file PNG thật lúc này vì sandbox đang gặp lỗi kết nối. "
             "Khi kênh thực thi ổn định trở lại, mình có thể chạy lại và gửi cho cậu artifact biểu đồ ngay."
         )
 
     return (
-        "Mình đã đến bước thực thi, nhưng sandbox đang gặp lỗi kết nối (ket noi) nên chưa thể tạo kết quả thật ngay lúc này. "
+        "Mình đã đến bước thực thi, nhưng sandbox đang gặp lỗi kết nối nên chưa thể tạo kết quả thật ngay lúc này. "
         "Khi kênh này ổn định trở lại, mình có thể chạy lại và giao artifact hoàn chỉnh cho cậu."
     )
 
@@ -363,7 +363,7 @@ def _infer_pendulum_fast_path_title(query: str, state: Optional[AgentState] = No
         return active_title
     normalized_query = _normalize_for_intent(query)
     if "con lac" in normalized_query:
-        return "Mo phong con lac"
+        return "Mô phỏng con lắc"
     return "Mini Pendulum Physics App"
 
 
