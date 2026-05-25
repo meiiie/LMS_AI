@@ -1,3 +1,4 @@
+import json
 import asyncio
 import time
 from types import SimpleNamespace
@@ -7,6 +8,7 @@ import pytest
 
 from app.models.schemas import UserRole
 from app.core.exceptions import ProviderUnavailableError
+from app.engine.multi_agent.runtime_flow_ledger import RUNTIME_FLOW_LEDGER_SCHEMA_VERSION
 from app.engine.multi_agent.runtime_contracts import WiiiStreamEvent, WiiiTurnRequest
 from app.services.chat_orchestrator import AgentType
 from app.services.chat_orchestrator import RequestScope
@@ -26,6 +28,27 @@ def _make_request(**overrides):
     }
     base.update(overrides)
     return SimpleNamespace(**base)
+
+
+def _event_payloads(chunks, event_name):
+    payloads = []
+    marker = f"event: {event_name}"
+    for chunk in chunks:
+        if marker not in chunk:
+            continue
+        for line in chunk.splitlines():
+            if line.startswith("data: "):
+                payloads.append(json.loads(line.removeprefix("data: ")))
+                break
+    return payloads
+
+
+def _runtime_flow_ledgers(chunks):
+    return [
+        payload["runtime_flow_ledger"]
+        for payload in _event_payloads(chunks, "metadata")
+        if isinstance(payload, dict) and "runtime_flow_ledger" in payload
+    ]
 
 
 @pytest.mark.asyncio
@@ -61,6 +84,10 @@ async def test_generate_stream_v3_events_emits_blocked_sequence():
     assert "event: answer" in chunks[2]
     assert "event: metadata" in chunks[3]
     assert "event: done" in chunks[4]
+    ledgers = _runtime_flow_ledgers(chunks)
+    assert ledgers
+    assert ledgers[0]["schema_version"] == RUNTIME_FLOW_LEDGER_SCHEMA_VERSION
+    assert ledgers[0]["route"]["lane"] == "blocked"
 
 
 @pytest.mark.asyncio
@@ -130,6 +157,122 @@ async def test_generate_stream_v3_events_finalizes_answer_after_stream():
 
 
 @pytest.mark.asyncio
+async def test_generate_stream_v3_events_emits_flow_ledger_when_runtime_omits_metadata():
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "maritime"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name="Minh"),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(
+        return_value=SimpleNamespace(
+            query="Explain Rule 5",
+            user_id="user-1",
+            session_id="session-1",
+            context={"conversation_history": ""},
+            domain_id="maritime",
+            thinking_effort=None,
+            provider="nvidia",
+            model="deepseek-ai/deepseek-v4-flash",
+        )
+    )
+
+    async def fake_stream_fn(**_kwargs):
+        yield SimpleNamespace(type="answer", content="Hello")
+        yield SimpleNamespace(type="done", content={"processing_time": 0.1})
+
+    chunks = []
+    async for chunk in generate_stream_v3_events(
+        chat_request=_make_request(),
+        request_headers={"X-Request-ID": "req-ledger-native"},
+        background_save=MagicMock(),
+        start_time=time.time(),
+        orchestrator=orchestrator,
+        stream_fn=fake_stream_fn,
+    ):
+        chunks.append(chunk)
+
+    ledgers = _runtime_flow_ledgers(chunks)
+    assert ledgers
+    ledger = ledgers[0]
+    assert ledger["schema_version"] == RUNTIME_FLOW_LEDGER_SCHEMA_VERSION
+    assert ledger["request"]["request_id"] == "req-ledger-native"
+    assert ledger["request"]["session_id"] == "session-1"
+    assert ledger["request"]["user_id_hash"].startswith("sha256:")
+    assert ledger["route"]["lane"] == "native_turn"
+    assert ledger["runtime"]["provider"] == "nvidia"
+    assert ledger["runtime"]["model"] == "deepseek-ai/deepseek-v4-flash"
+    assert ledger["stream"]["event_counts"]["answer"] == 1
+    assert ledger["stream"]["metadata_seen"] is True
+    assert "Explain Rule 5" not in json.dumps(ledger, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_v3_events_flow_ledger_omits_uploaded_document_body():
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "maritime"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name="Minh"),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(
+        return_value=SimpleNamespace(
+            query="Create a lesson",
+            user_id="user-1",
+            session_id="session-1",
+            context={"conversation_history": ""},
+            domain_id="maritime",
+            thinking_effort=None,
+            provider=None,
+            model=None,
+        )
+    )
+
+    async def fake_stream_fn(**_kwargs):
+        yield SimpleNamespace(type="answer", content="Lesson draft preview")
+        yield SimpleNamespace(type="done", content={"processing_time": 0.1})
+
+    chunks = []
+    async for chunk in generate_stream_v3_events(
+        chat_request=_make_request(
+            message="Tao cho minh bai hoc",
+            user_context={
+                "host_context": {
+                    "surface": "lms_course_editor",
+                    "capabilities": ["lms", "host_action"],
+                },
+                "document_context": {
+                    "attachments": [
+                        {
+                            "name": "private.docx",
+                            "markdown": "SECRET DOCUMENT BODY ABOUT RULE 5",
+                        }
+                    ]
+                },
+            },
+        ),
+        request_headers={"X-Request-ID": "req-ledger-doc"},
+        background_save=MagicMock(),
+        start_time=time.time(),
+        orchestrator=orchestrator,
+        stream_fn=fake_stream_fn,
+    ):
+        chunks.append(chunk)
+
+    ledger = _runtime_flow_ledgers(chunks)[0]
+    assert ledger["context"]["document_context_present"] is True
+    assert ledger["context"]["uploaded_document_count"] == 1
+    assert ledger["host_actions"]["preview_required"] is True
+    ledger_json = json.dumps(ledger, ensure_ascii=False)
+    assert "SECRET DOCUMENT BODY" not in ledger_json
+    assert "Tao cho minh bai hoc" not in ledger_json
+
+
+@pytest.mark.asyncio
 async def test_generate_stream_v3_events_bypasses_context_build_for_pointy_highlight():
     orchestrator = MagicMock()
     prepared_turn = SimpleNamespace(
@@ -181,6 +324,10 @@ async def test_generate_stream_v3_events_bypasses_context_build_for_pointy_highl
     assert any("event: answer" in chunk for chunk in chunks)
     assert any("event: done" in chunk for chunk in chunks)
     assert any("v3-pointy_fast_path" in chunk for chunk in chunks)
+    ledgers = _runtime_flow_ledgers(chunks)
+    assert ledgers
+    assert ledgers[0]["route"]["lane"] == "pointy_fast_path"
+    assert "ui.highlight" in ledgers[0]["tools"]["observed"]
     orchestrator.build_multi_agent_execution_input.assert_not_called()
     orchestrator.finalize_response_turn.assert_called_once()
     assert (
@@ -231,6 +378,10 @@ async def test_generate_stream_v3_events_bypasses_provider_for_visual_fast_path(
     assert any("event: visual_open" in chunk for chunk in chunks)
     assert any("event: visual_commit" in chunk for chunk in chunks)
     assert any("v3-visual_fast_path" in chunk for chunk in chunks)
+    ledgers = _runtime_flow_ledgers(chunks)
+    assert ledgers
+    assert ledgers[0]["route"]["lane"] == "visual_fast_path"
+    assert "visual_runtime" in ledgers[0]["tools"]["observed"]
     orchestrator.build_multi_agent_execution_input.assert_not_called()
     orchestrator.finalize_response_turn.assert_called_once()
     assert (
@@ -829,6 +980,11 @@ async def test_generate_stream_v3_events_includes_request_id_and_routing_metadat
     assert '"request_id": "req-fast-social"' in metadata_chunk
     assert '"routing_metadata": {' in metadata_chunk
     assert '"fallback_direct_path"' in metadata_chunk
+    ledgers = _runtime_flow_ledgers(chunks)
+    assert ledgers
+    assert ledgers[0]["route"]["lane"] == "fallback"
+    assert ledgers[0]["runtime"]["fallback_used"] is True
+    assert ledgers[0]["runtime"]["model"] == "glm-5"
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,7 @@
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from app.engine.llm_providers.wiii_chat_model import _ViSpaceInjector
 
@@ -305,6 +305,7 @@ def emit_blocked_sse_events(
     session_id: str,
     processing_time: float,
     event_counter: int,
+    extra_metadata: Mapping[str, Any] | None = None,
 ) -> tuple[list[str], int]:
     """Emit the standard blocked-response SSE sequence."""
     chunks = []
@@ -324,6 +325,7 @@ def emit_blocked_sse_events(
             {
                 **(blocked_response.metadata or {}),
                 "session_id": session_id,
+                **dict(extra_metadata or {}),
             },
             event_id=event_counter,
         )

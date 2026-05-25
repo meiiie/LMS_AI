@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator, Awaitable, Mapping
 from app.core.config import settings
 from app.core.exceptions import ProviderUnavailableError
 from app.engine.llm_runtime_metadata import resolve_runtime_llm_metadata
+from app.engine.multi_agent.runtime_flow_ledger import RuntimeFlowLedger
 from app.services.llm_runtime_audit_service import record_llm_runtime_observation
 from app.services.chat_orchestrator_runtime import build_wiii_turn_request
 from app.services.model_switch_prompt_service import (
@@ -364,7 +365,12 @@ async def _stream_with_idle_heartbeats(
         yield event
 
 
-def _with_latency_metadata(event, tracker: _StreamLatencyTracker):
+def _with_runtime_flow_metadata(
+    event,
+    tracker: _StreamLatencyTracker,
+    flow_ledger: RuntimeFlowLedger,
+):
+    flow_ledger.record_event(event)
     if getattr(event, "type", None) != "metadata":
         return event
     content = getattr(event, "content", None)
@@ -375,6 +381,8 @@ def _with_latency_metadata(event, tracker: _StreamLatencyTracker):
 
     metadata = dict(content)
     metadata.setdefault("stream_latency", tracker.to_payload())
+    flow_ledger.observe_metadata(metadata)
+    metadata.setdefault("runtime_flow_ledger", flow_ledger.to_payload())
     return StreamEvent(
         type="metadata",
         content=metadata,
@@ -453,8 +461,13 @@ async def generate_stream_v3_events(
         or request_headers.get("x-request-id")
         or ""
     ).strip() or None
+    flow_ledger = RuntimeFlowLedger.from_chat_request(
+        chat_request=chat_request,
+        request_id=request_id,
+    )
 
     event_counter += 1
+    flow_ledger.record_wire_event("status")
     yield format_sse(
         "status",
         {
@@ -533,8 +546,13 @@ async def generate_stream_v3_events(
             node="system",
         ):
             if update.kind == "status":
+                update_event = _with_runtime_flow_metadata(
+                    update.value,
+                    latency_tracker,
+                    flow_ledger,
+                )
                 chunks, event_counter, should_stop = serialize_stream_event(
-                    event=update.value,
+                    event=update_event,
                     event_counter=event_counter,
                     enable_artifacts=settings.enable_artifacts,
                     presentation_state=presentation_state,
@@ -551,14 +569,25 @@ async def generate_stream_v3_events(
         resolved_domain_id = prepared_turn.request_scope.domain_id
         effective_session_id = prepared_turn.session_id
         effective_session_id_str = str(effective_session_id)
+        flow_ledger.mark_prepared_turn(
+            session_id=effective_session_id_str,
+            organization_id=resolved_org_id,
+            domain_id=resolved_domain_id,
+        )
 
         if prepared_turn.validation.blocked:
+            flow_ledger.mark_route("blocked", reason="prepared_turn_validation")
+            flow_ledger.record_wire_event("answer")
+            flow_ledger.record_wire_event("metadata")
             blocked_chunks, event_counter = (
                 emit_blocked_sse_events(
                     blocked_response=prepared_turn.validation.blocked_response,
                     session_id=effective_session_id_str,
                     processing_time=time.time() - start_time,
                     event_counter=event_counter,
+                    extra_metadata={
+                        "runtime_flow_ledger": flow_ledger.to_payload(),
+                    },
                 )
             )
             for chunk in blocked_chunks:
@@ -585,6 +614,10 @@ async def generate_stream_v3_events(
             visual_fast_path = None
 
         if visual_fast_path is not None:
+            flow_ledger.mark_route(
+                "visual_fast_path",
+                reason="structured_visual_fast_path",
+            )
             visual_started_ms = latency_tracker.elapsed_ms()
             visual_events = [
                 await create_thinking_start_event(
@@ -630,6 +663,11 @@ async def generate_stream_v3_events(
             ]
 
             for event in visual_events:
+                event = _with_runtime_flow_metadata(
+                    event,
+                    latency_tracker,
+                    flow_ledger,
+                )
                 chunks, event_counter, should_stop = serialize_stream_event(
                     event=event,
                     event_counter=event_counter,
@@ -658,7 +696,16 @@ async def generate_stream_v3_events(
                     continuity_channel="web",
                     transport_type="stream",
                 )
+                flow_ledger.mark_finalization(
+                    "saved",
+                    save_response_immediately=False,
+                )
             except Exception as finalize_err:
+                flow_ledger.mark_finalization(
+                    "failed",
+                    error=finalize_err,
+                    save_response_immediately=False,
+                )
                 logger.warning(
                     "[STREAM-V3] Visual fast-path finalization failed: %s",
                     finalize_err,
@@ -685,6 +732,10 @@ async def generate_stream_v3_events(
             else ""
         )
         if pointy_fast_path_action == pointy_highlight_action_name:
+            flow_ledger.mark_route(
+                "pointy_fast_path",
+                reason="pointy_prepared_fast_path",
+            )
             pointy_answer = _pointy_action_answer(pointy_fast_path)
             pointy_thinking = _pointy_action_thinking(pointy_fast_path)
             pointy_label = _pointy_action_label(pointy_fast_path)
@@ -749,6 +800,11 @@ async def generate_stream_v3_events(
             ]
 
             for event in pointy_events:
+                event = _with_runtime_flow_metadata(
+                    event,
+                    latency_tracker,
+                    flow_ledger,
+                )
                 chunks, event_counter, should_stop = serialize_stream_event(
                     event=event,
                     event_counter=event_counter,
@@ -777,7 +833,16 @@ async def generate_stream_v3_events(
                     continuity_channel="web",
                     transport_type="stream",
                 )
+                flow_ledger.mark_finalization(
+                    "saved",
+                    save_response_immediately=False,
+                )
             except Exception as finalize_err:
+                flow_ledger.mark_finalization(
+                    "failed",
+                    error=finalize_err,
+                    save_response_immediately=False,
+                )
                 logger.warning(
                     "[STREAM-V3] Pointy fast-path finalization failed: %s",
                     finalize_err,
@@ -790,6 +855,12 @@ async def generate_stream_v3_events(
 
         if not use_multi_agent:
             logger.warning("[STREAM-V3] Multi-Agent disabled, using sync fallback path")
+            flow_ledger.mark_route(
+                "fallback",
+                reason="multi_agent_disabled",
+                fallback_used=True,
+                fallback_reason="multi_agent_disabled",
+            )
             fallback_status = await create_status_event(
                 "Wiii đang mở đường trả lời nhanh...",
                 node="direct",
@@ -798,6 +869,11 @@ async def generate_stream_v3_events(
                     "subtype": "heartbeat",
                     "visibility": "status_only",
                 },
+            )
+            fallback_status = _with_runtime_flow_metadata(
+                fallback_status,
+                latency_tracker,
+                flow_ledger,
             )
             chunks, event_counter, should_stop = serialize_stream_event(
                 event=fallback_status,
@@ -898,6 +974,11 @@ async def generate_stream_v3_events(
             )
 
             for event in fallback_events:
+                event = _with_runtime_flow_metadata(
+                    event,
+                    latency_tracker,
+                    flow_ledger,
+                )
                 chunks, event_counter, should_stop = serialize_stream_event(
                     event=event,
                     event_counter=event_counter,
@@ -926,7 +1007,16 @@ async def generate_stream_v3_events(
                     continuity_channel="web",
                     transport_type="stream",
                 )
+                flow_ledger.mark_finalization(
+                    "saved",
+                    save_response_immediately=True,
+                )
             except Exception as finalize_err:
+                flow_ledger.mark_finalization(
+                    "failed",
+                    error=finalize_err,
+                    save_response_immediately=True,
+                )
                 logger.warning(
                     "[STREAM-V3] Fallback post-response finalization failed: %s",
                     finalize_err,
@@ -934,6 +1024,7 @@ async def generate_stream_v3_events(
             return
 
         _provider = requested_provider
+        flow_ledger.mark_route("native_turn", reason="multi_agent_stream")
         context_status = await create_status_event(
             "Wiii đang gom ngữ cảnh và trí nhớ...",
             node="context",
@@ -944,6 +1035,11 @@ async def generate_stream_v3_events(
                     request_id=request_id,
                 ),
             },
+        )
+        context_status = _with_runtime_flow_metadata(
+            context_status,
+            latency_tracker,
+            flow_ledger,
         )
         chunks, event_counter, should_stop = serialize_stream_event(
             event=context_status,
@@ -979,8 +1075,13 @@ async def generate_stream_v3_events(
                 node="context",
             ):
                 if update.kind == "status":
+                    update_event = _with_runtime_flow_metadata(
+                        update.value,
+                        latency_tracker,
+                        flow_ledger,
+                    )
                     chunks, event_counter, should_stop = serialize_stream_event(
-                        event=update.value,
+                        event=update_event,
                         event_counter=event_counter,
                         enable_artifacts=settings.enable_artifacts,
                         presentation_state=presentation_state,
@@ -995,6 +1096,7 @@ async def generate_stream_v3_events(
                 raise RuntimeError(
                     "build_multi_agent_execution_input did not return context"
                 )
+            flow_ledger.mark_execution_input(execution_input)
         except Exception as ctx_err:
             logger.warning(
                 "[STREAM-V3] Full context build failed, using minimal: %s",
@@ -1015,6 +1117,13 @@ async def generate_stream_v3_events(
                         request_id=request_id,
                     )
                 )
+                flow_ledger.mark_route(
+                    "native_turn",
+                    reason="minimal_context_after_build_failure",
+                    fallback_used=True,
+                    fallback_reason="context_build_failed",
+                )
+                flow_ledger.mark_execution_input(execution_input)
             except Exception:
                 latency_tracker.finish("minimal_execution_input", status="error")
                 raise
@@ -1058,6 +1167,11 @@ async def generate_stream_v3_events(
                 ),
             ]
             for early_event in early_thinking_events:
+                early_event = _with_runtime_flow_metadata(
+                    early_event,
+                    latency_tracker,
+                    flow_ledger,
+                )
                 chunks, event_counter, should_stop = serialize_stream_event(
                     event=early_event,
                     event_counter=event_counter,
@@ -1091,7 +1205,42 @@ async def generate_stream_v3_events(
                 request_id=request_id,
                 create_status_event=create_status_event,
             ):
-                event = _with_latency_metadata(event, latency_tracker)
+                if event.type == "done" and not flow_ledger.metadata_seen:
+                    metadata_event = await create_metadata_event(
+                        reasoning_trace={
+                            "method": "runtime_flow_ledger",
+                            "steps": ["runtime_completed_without_metadata"],
+                        },
+                        processing_time=time.time() - start_time,
+                        confidence=0,
+                        session_id=effective_session_id_str,
+                        request_id=request_id,
+                        routing_metadata={
+                            "method": "runtime_flow_ledger",
+                            "intent": "observability",
+                        },
+                        stream_latency=latency_tracker.to_payload(),
+                        streaming_version="v3-runtime_flow",
+                    )
+                    metadata_event = _with_runtime_flow_metadata(
+                        metadata_event,
+                        latency_tracker,
+                        flow_ledger,
+                    )
+                    metadata_chunks, event_counter, _ = serialize_stream_event(
+                        event=metadata_event,
+                        event_counter=event_counter,
+                        enable_artifacts=settings.enable_artifacts,
+                        presentation_state=presentation_state,
+                    )
+                    for chunk in metadata_chunks:
+                        yield chunk
+
+                event = _with_runtime_flow_metadata(
+                    event,
+                    latency_tracker,
+                    flow_ledger,
+                )
                 stream_current_agent = _stream_agent_for_finalization(
                     event,
                     stream_current_agent,
@@ -1173,7 +1322,16 @@ async def generate_stream_v3_events(
                 continuity_channel="web",
                 transport_type="stream",
             )
+            flow_ledger.mark_finalization(
+                "saved",
+                save_response_immediately=bool(early_stop_reason),
+            )
         except Exception as finalize_err:
+            flow_ledger.mark_finalization(
+                "failed",
+                error=finalize_err,
+                save_response_immediately=bool(early_stop_reason),
+            )
             logger.warning(
                 "[STREAM-V3] Post-response finalization failed: %s",
                 finalize_err,
@@ -1185,7 +1343,42 @@ async def generate_stream_v3_events(
             processing_time,
         )
         if not saw_done_event:
+            if not flow_ledger.metadata_seen:
+                metadata_event = await create_metadata_event(
+                    reasoning_trace={
+                        "method": "runtime_flow_ledger",
+                        "steps": ["runtime_ended_without_done_or_metadata"],
+                    },
+                    processing_time=processing_time,
+                    confidence=0,
+                    session_id=effective_session_id_str,
+                    request_id=request_id,
+                    routing_metadata={
+                        "method": "runtime_flow_ledger",
+                        "intent": "observability",
+                    },
+                    stream_latency=latency_tracker.to_payload(),
+                    streaming_version="v3-runtime_flow",
+                )
+                metadata_event = _with_runtime_flow_metadata(
+                    metadata_event,
+                    latency_tracker,
+                    flow_ledger,
+                )
+                metadata_chunks, event_counter, _ = serialize_stream_event(
+                    event=metadata_event,
+                    event_counter=event_counter,
+                    enable_artifacts=settings.enable_artifacts,
+                    presentation_state=presentation_state,
+                )
+                for chunk in metadata_chunks:
+                    yield chunk
             done_event = await create_done_event(processing_time)
+            done_event = _with_runtime_flow_metadata(
+                done_event,
+                latency_tracker,
+                flow_ledger,
+            )
             done_chunks, event_counter, _ = serialize_stream_event(
                 event=done_event,
                 event_counter=event_counter,
@@ -1196,6 +1389,10 @@ async def generate_stream_v3_events(
                 yield chunk
 
     except ProviderUnavailableError as exc:
+        flow_ledger.mark_route(
+            "provider_unavailable",
+            reason=exc.reason_code or "provider_unavailable",
+        )
         logger.warning(
             "[STREAM-V3] Requested provider unavailable: provider=%s reason=%s",
             exc.provider,
@@ -1223,6 +1420,11 @@ async def generate_stream_v3_events(
                 reason_code=exc.reason_code,
             )
         )
+        error_event = _with_runtime_flow_metadata(
+            error_event,
+            latency_tracker,
+            flow_ledger,
+        )
         error_chunks, event_counter, _ = serialize_stream_event(
             event=error_event,
             event_counter=event_counter,
@@ -1231,10 +1433,46 @@ async def generate_stream_v3_events(
         )
         for chunk in error_chunks:
             yield chunk
+        metadata_event = await create_metadata_event(
+            reasoning_trace={
+                "method": "provider_unavailable",
+                "steps": ["provider_selectability_rejected_request"],
+            },
+            processing_time=time.time() - start_time,
+            confidence=0,
+            model=None,
+            provider=exc.provider,
+            session_id=flow_ledger.session_id,
+            request_id=request_id,
+            routing_metadata={
+                "method": "provider_unavailable",
+                "reason_code": exc.reason_code,
+            },
+            stream_latency=latency_tracker.to_payload(),
+            streaming_version="v3-provider_unavailable",
+        )
+        metadata_event = _with_runtime_flow_metadata(
+            metadata_event,
+            latency_tracker,
+            flow_ledger,
+        )
+        metadata_chunks, event_counter, _ = serialize_stream_event(
+            event=metadata_event,
+            event_counter=event_counter,
+            enable_artifacts=settings.enable_artifacts,
+            presentation_state=presentation_state,
+        )
+        for chunk in metadata_chunks:
+            yield chunk
         done_event = await create_done_event(time.time() - start_time)
+        done_event = _with_runtime_flow_metadata(
+            done_event,
+            latency_tracker,
+            flow_ledger,
+        )
         done_chunks, _, _ = serialize_stream_event(
             event=done_event,
-            event_counter=event_counter + 1,
+            event_counter=event_counter,
             enable_artifacts=settings.enable_artifacts,
             presentation_state=presentation_state,
         )
