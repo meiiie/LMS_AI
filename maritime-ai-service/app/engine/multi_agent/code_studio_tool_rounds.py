@@ -655,8 +655,8 @@ async def execute_code_studio_tool_rounds_impl(
                 phase=round_phase,
                 cue=round_cue,
                 tool_names=round_tool_names,
-                next_action="Mo cong cu can thiet roi xac minh output co the dung that.",
-                observations=[f"Sap goi {len(round_tool_names)} cong cu trong vong nay."],
+                next_action="Mở công cụ cần thiết rồi xác minh đầu ra có thể dùng thật.",
+                observations=[f"Sắp gọi {len(round_tool_names)} công cụ trong vòng này."],
                 style_tags=["code-studio", "tooling"],
             )
         except Exception as rr_err:
@@ -885,8 +885,8 @@ async def execute_code_studio_tool_rounds_impl(
                 phase="act",
                 cue=round_cue,
                 tool_names=round_tool_names,
-                next_action="Rut gon thanh mot buoc thuc hien tiep theo roi moi chot.",
-                observations=["Da co them ket qua moi va dang can khau lai."],
+                next_action="Rút gọn thành một bước thực hiện tiếp theo rồi mới chốt.",
+                observations=["Đã có thêm kết quả mới và đang cần khâu lại."],
                 style_tags=["code-studio", "transition"],
             )
             await push_event(
@@ -908,7 +908,7 @@ async def execute_code_studio_tool_rounds_impl(
         phase="synthesize",
         cue=synthesis_cue,
         tool_names=synthesis_tool_names,
-        next_action="Noi ro da tao xong san pham nao, no dung de lam gi, va nguoi dung co the mo artifact ay ngay luc nay.",
+        next_action="Nói rõ đã tạo xong sản phẩm nào, nó dùng để làm gì, và người dùng có thể mở artifact đó ngay lúc này.",
         observations=synthesis_observations,
         style_tags=["code-studio", "synthesis"],
     )
