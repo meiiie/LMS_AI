@@ -120,7 +120,7 @@ Understand-Anything is now adopted as a supporting system-comprehension
 reference for Wiii, not as a runtime dependency and not as a replacement for
 Wiii Self-Harness. The focused audit is:
 
-- `WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-26.md`: source snapshot,
+- `WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-25.md`: source snapshot,
   bounded Wiii trial results, dependency hubs, guardrails, and adoption
   decision.
 

@@ -4,7 +4,7 @@ Status: Active reference audit
 
 Owner: Project leadership
 
-Created: 2026-05-26
+Created: 2026-05-25
 
 Related issue: #662
 
@@ -205,9 +205,13 @@ Open separate issues before expanding this slice:
 
 1. Add a small repo-owned wrapper that runs the deterministic scan/import-map
    into ignored output and prints the Wiii hotspot summary.
+   Owner: Project leadership. Target: 2026-06-05.
 2. Decide whether a generated knowledge graph should ever be versioned, and if
    so, define size limits, privacy policy, update cadence, and review rules.
+   Owner: Project leadership. Target: 2026-06-12.
 3. Re-run a scoped graph on `maritime-ai-service/app/engine/multi_agent` before
    the next large Core refactor.
+   Owner: Wiii Core maintainer. Target: 2026-06-05.
 4. Re-run a scoped graph on `wiii-desktop/src/components/chat` before the next
    frontend chat/visual/Code Studio UX refactor.
+   Owner: Wiii Host maintainer. Target: 2026-06-05.

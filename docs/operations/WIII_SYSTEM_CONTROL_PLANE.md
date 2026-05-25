@@ -33,7 +33,7 @@ It complements:
 - `docs/operations/WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md` for the
   OpenClaw-derived control-plane, runtime ledger, and chat-baseline
   requirements.
-- `docs/operations/WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-26.md` for
+- `docs/operations/WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-25.md` for
   the system-comprehension harness, deterministic source inventory, import-map
   hotspot, and scan guardrail decision.
 - `docs/operations/WIII_SELF_HARNESS.md` for static contract harnessing.

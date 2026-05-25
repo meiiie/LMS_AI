@@ -109,7 +109,7 @@
       "evidence": [
         {
           "kind": "docs",
-          "path": "docs/operations/WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-26.md",
+          "path": "docs/operations/WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-25.md",
           "must_contain": [
             "system-comprehension harness",
             "470cc01dc5f9236a93eb704afdd479cd5db79710",
@@ -133,7 +133,7 @@
           "kind": "docs",
           "path": "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md",
           "must_contain": [
-            "WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-26.md",
+            "WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-25.md",
             "2433",
             "3241",
             "123",
@@ -162,7 +162,7 @@
           "kind": "ci",
           "path": ".github/workflows/wiii-self-harness.yml",
           "must_contain": [
-            "docs/operations/WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-26.md",
+            "docs/operations/WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_*.md",
             ".understandignore",
             "Validate scenario manifest"
           ]
