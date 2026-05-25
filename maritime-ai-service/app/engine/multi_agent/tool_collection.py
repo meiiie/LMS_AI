@@ -245,10 +245,28 @@ def _strip_visual_tool_capabilities(
 
 
 def _tools_matching_visual_requirement(tools: list[Any], visual_requirement: Any) -> list[Any]:
-    required_names = set(getattr(visual_requirement, "required_tool_names", ()) or ())
+    return _tools_matching_names(
+        tools,
+        getattr(visual_requirement, "required_tool_names", ()) or (),
+    )
+
+
+def _tools_matching_names(tools: list[Any], tool_names: list[str] | tuple[str, ...]) -> list[Any]:
+    required_names = [
+        str(name or "").strip()
+        for name in tool_names
+        if str(name or "").strip()
+    ]
     if not required_names:
         return []
-    return [tool for tool in tools if _tool_name(tool) in required_names]
+
+    tools_by_name: dict[str, Any] = {}
+    for tool in tools:
+        name = _tool_name(tool)
+        if name and name not in tools_by_name:
+            tools_by_name[name] = tool
+
+    return [tools_by_name[name] for name in required_names if name in tools_by_name]
 
 
 _POINTY_OUTPUT_REQUEST_CUES: tuple[str, ...] = (
@@ -879,6 +897,7 @@ def _collect_code_studio_tools(query: str, user_role: str = "student"):
         visual_decision,
         structured_visuals_enabled=structured_visuals_enabled,
     )
+    required_tool_names = _code_studio_required_tool_names(query, user_role)
     _tools = filter_tools_for_role(_tools, user_role)
     _tools = filter_tools_for_visual_intent(
         _tools,
@@ -896,8 +915,18 @@ def _collect_code_studio_tools(query: str, user_role: str = "student"):
         and visual_requirement.presentation_intent in {"code_studio_app", "artifact"}
     ):
         preferred_tools = _tools_matching_visual_requirement(_tools, visual_requirement)
-        if preferred_tools:
-            _tools = preferred_tools
+        required_tools = _tools_matching_names(_tools, required_tool_names)
+        narrowed_tools = [*required_tools]
+        seen_names = {_tool_name(tool) for tool in narrowed_tools}
+        for tool in preferred_tools:
+            tool_name = _tool_name(tool)
+            if tool_name in seen_names:
+                continue
+            narrowed_tools.append(tool)
+            if tool_name:
+                seen_names.add(tool_name)
+        if narrowed_tools:
+            _tools = narrowed_tools
 
     force_tools = bool(_tools)
     return _tools, force_tools
