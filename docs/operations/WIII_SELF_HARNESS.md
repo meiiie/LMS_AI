@@ -38,6 +38,8 @@ The first scenario set covers the active product risk surface:
 
 - `system-flow-observability-map`: the control-plane map stays available and
   describes the active flow-monitoring ladder.
+- `memory-context-provenance-ledger`: Runtime Flow Ledger embeds privacy-safe
+  context provenance for conversation, document, memory, and host sources.
 - `visual-tool-capability-sync`: visual intent selects the right tool lane.
 - `code-studio-scaffold-boundary`: Code Studio scaffold fallback is typed and
   policy-gated.

@@ -6,6 +6,11 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from app.engine.multi_agent.context_provenance_ledger import (
+    build_context_provenance_ledger,
+    build_request_context_provenance_ledger,
+)
+
 
 RUNTIME_FLOW_LEDGER_SCHEMA_VERSION = "wiii.runtime_flow_ledger.v1"
 _MAX_TOKEN_LENGTH = 96
@@ -116,7 +121,12 @@ def _source_count(value: Any) -> int:
     if isinstance(value, (list, tuple)):
         return len(value)
     if isinstance(value, Mapping):
-        sources = value.get("sources") or value.get("source_refs")
+        sources = (
+            value.get("sources")
+            or value.get("source_refs")
+            or value.get("source_references")
+            or value.get("citations")
+        )
         if isinstance(sources, (list, tuple)):
             return len(sources)
     return 0
@@ -146,6 +156,59 @@ def _event_tool_name(event_type: str, content: Any) -> str | None:
     if event_type in {"tool_call", "tool_result", "host_action", "pointy_action"}:
         return event_type
     return None
+
+
+def _preserve_provenance_section(
+    provenance: dict[str, Any],
+    previous: Mapping[str, Any],
+    *,
+    section: str,
+    count_key: str,
+) -> None:
+    current_section = provenance.get(section)
+    previous_section = previous.get(section)
+    if not isinstance(current_section, Mapping) or not isinstance(
+        previous_section,
+        Mapping,
+    ):
+        return
+    if int(current_section.get(count_key) or 0) == 0 and int(
+        previous_section.get(count_key) or 0
+    ) > 0:
+        provenance[section] = dict(previous_section)
+
+
+def _preserve_request_provenance(
+    provenance: dict[str, Any],
+    previous: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(previous, Mapping):
+        return provenance
+    _preserve_provenance_section(
+        provenance,
+        previous,
+        section="documents",
+        count_key="usable_attachment_count",
+    )
+    current_host = provenance.get("host")
+    previous_host = previous.get("host")
+    if (
+        isinstance(current_host, Mapping)
+        and isinstance(previous_host, Mapping)
+        and not current_host.get("host_context_present")
+        and previous_host.get("host_context_present")
+    ):
+        provenance["host"] = dict(previous_host)
+    warnings = provenance.get("warnings")
+    documents = provenance.get("documents")
+    if isinstance(warnings, list) and isinstance(documents, Mapping):
+        if (
+            int(documents.get("usable_attachment_count") or 0) > 0
+            and int(documents.get("source_ref_count") or 0) == 0
+            and "document_context_without_source_refs" not in warnings
+        ):
+            warnings.append("document_context_without_source_refs")
+    return provenance
 
 
 @dataclass
@@ -181,6 +244,7 @@ class RuntimeFlowLedger:
     done_seen: bool = False
     source_ref_count: int = 0
     memory_context_count: int | None = None
+    context_provenance: dict[str, Any] | None = None
     preview_required: bool = False
     preview_emitted: bool = False
     approval_token_present: bool = False
@@ -210,6 +274,9 @@ class RuntimeFlowLedger:
             host_capabilities=host_capabilities,
             document_context_present=uploaded_count > 0,
             uploaded_document_count=uploaded_count,
+            context_provenance=build_request_context_provenance_ledger(
+                chat_request
+            ),
             preview_required=uploaded_count > 0 and "lms" in host_capabilities,
         )
 
@@ -247,11 +314,40 @@ class RuntimeFlowLedger:
             _context_value(execution_input, "model")
         )
         context = _plain_mapping(_context_value(execution_input, "context"))
-        source_refs = context.get("source_refs") or context.get("sources")
+        self.context_provenance = _preserve_request_provenance(
+            build_context_provenance_ledger(context),
+            self.context_provenance,
+        )
+        documents = self.context_provenance.get("documents", {})
+        if isinstance(documents, Mapping):
+            uploaded_count = int(documents.get("usable_attachment_count") or 0)
+            if uploaded_count > 0:
+                self.document_context_present = True
+                self.uploaded_document_count = max(
+                    self.uploaded_document_count,
+                    uploaded_count,
+                )
+            self.source_ref_count = max(
+                self.source_ref_count,
+                int(documents.get("source_ref_count") or 0),
+            )
+
+        source_refs = (
+            context.get("source_refs")
+            or context.get("sources")
+            or context.get("source_references")
+            or context.get("citations")
+        )
         self.source_ref_count = max(self.source_ref_count, _source_count(source_refs))
         memories = context.get("memories") or context.get("semantic_memories")
         if isinstance(memories, (list, tuple)):
             self.memory_context_count = len(memories)
+        memory = self.context_provenance.get("memory", {})
+        if isinstance(memory, Mapping) and isinstance(
+            memory.get("semantic_memory_count"),
+            int,
+        ):
+            self.memory_context_count = memory.get("semantic_memory_count")
 
     def record_event(self, event: Any) -> None:
         event_type = _safe_token(getattr(event, "type", None)) or "unknown"
@@ -386,6 +482,7 @@ class RuntimeFlowLedger:
                 "uploaded_document_count": self.uploaded_document_count,
                 "source_ref_count": self.source_ref_count,
                 "memory_context_count": self.memory_context_count,
+                "context_provenance": self.context_provenance,
             },
             "route": {
                 "lane": self.route_lane,
