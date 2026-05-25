@@ -23,10 +23,6 @@ from app.engine.llm_runtime_state import (
     get_llm_runtime_request_selectable_providers,
 )
 from app.engine.llm_provider_registry import create_provider, get_supported_provider_names
-from app.engine.llm_providers.ollama_provider import (
-    check_ollama_host_reachable,
-    reset_ollama_availability_cache,
-)
 from app.engine.model_catalog import (
     ChatModelMetadata,
     GOOGLE_DEFAULT_MODEL,
@@ -73,6 +69,20 @@ LLM_RUNTIME_AUDIT_KEY = "llm_runtime_audit"
 LLM_RUNTIME_AUDIT_DESCRIPTION = "Persisted LLM runtime discovery and capability audit"
 LLM_RUNTIME_AUDIT_SCHEMA_VERSION = 1
 LIVE_PROBE_TIMEOUT_SECONDS = 10.0
+
+
+def reset_ollama_availability_cache() -> None:
+    from app.engine.llm_providers.ollama_provider import (
+        reset_ollama_availability_cache,
+    )
+
+    reset_ollama_availability_cache()
+
+
+def check_ollama_host_reachable(*args: Any, **kwargs: Any) -> Any:
+    from app.engine.llm_providers.ollama_provider import check_ollama_host_reachable
+
+    return check_ollama_host_reachable(*args, **kwargs)
 
 _PROVIDER_EXPECTED_CAPABILITIES: dict[str, dict[str, bool]] = {
     "google": {

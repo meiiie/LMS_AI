@@ -537,7 +537,7 @@ class RuntimeFlowLedger:
         ):
             suppressed.append("pointy_action")
         if (
-            self.route_lane not in {"visual_fast_path", "native_turn"}
+            self.route_lane != "visual_fast_path"
             and "visual_runtime" not in self.observed_tools
         ):
             suppressed.append("visual_runtime")
