@@ -28,6 +28,9 @@ It complements:
 - `docs/architecture/WIII_CODEBASE_MAP.md` for source navigation.
 - `docs/operations/WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md` for external
   systems Wiii should compare against before deeper runtime changes.
+- `docs/operations/WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md` for the
+  OpenClaw-derived control-plane, runtime ledger, and chat-baseline
+  requirements.
 - `docs/operations/WIII_SELF_HARNESS.md` for static contract harnessing.
 - `docs/operations/WIII_LOCAL_E2E_HARNESS.md` for local browser entry.
 - `docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md` for pinned production
@@ -146,6 +149,8 @@ Proceed in this order unless production risk forces a hotfix:
    - Start with OpenClaw for gateway/session/tool/trace structure.
    - Convert findings into concrete Wiii flow-ledger and chat-baseline
      requirements.
+   - Current OpenClaw output:
+     `docs/operations/WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md`.
 
 2. **Chat stream baseline**
    - Run ordinary Vietnamese chat prompts with no document, no LMS, no visual,
