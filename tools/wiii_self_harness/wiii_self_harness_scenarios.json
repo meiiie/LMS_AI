@@ -25,6 +25,7 @@
         "The flow-monitoring ladder distinguishes existing evidence from gaps to close.",
         "The map states that production smoke does not prove deep LMS preview/apply acceptance.",
         "The map identifies a runtime flow ledger as the next monitoring implementation target.",
+        "The OpenClaw reference audit records control-plane patterns, non-copy boundaries, and chat-baseline requirements.",
         "The Self-Harness workflow re-runs when the control-plane document changes."
       ],
       "evidence": [
@@ -52,6 +53,17 @@
         },
         {
           "kind": "docs",
+          "path": "docs/operations/WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md",
+          "must_contain": [
+            "OpenClaw Patterns To Adopt",
+            "Do Not Copy",
+            "Runtime Flow Ledger v1",
+            "Chat Baseline Acceptance Harness",
+            "approval_token_hash"
+          ]
+        },
+        {
+          "kind": "docs",
           "path": "docs/operations/WIII_SELF_HARNESS.md",
           "must_contain": [
             "WIII_SYSTEM_CONTROL_PLANE.md",
@@ -63,6 +75,7 @@
           "path": ".github/workflows/wiii-self-harness.yml",
           "must_contain": [
             "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md",
+            "docs/operations/WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md",
             "Validate scenario manifest"
           ]
         }

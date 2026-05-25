@@ -32,8 +32,8 @@ Current local clones:
 
 | Project | Local path | Remote | Local HEAD | Clone mode | Why it is first-class |
 |---|---|---|---|---|---|
-| OpenHuman | `.Codex/external/reference-systems/openhuman` | `https://github.com/tinyhumansai/openhuman.git` | `f756893` | shallow, sparse, no submodules | living memory, local-first knowledge vault, typed integrations, background context ingestion, personal-agent UX |
-| OpenClaw | `.Codex/external/reference-systems/openclaw` | `https://github.com/openclaw/openclaw.git` | `dd375f9f` | shallow, sparse | gateway control plane, multi-channel routing, operator commands, session isolation, tool permission defaults, trace/doctor UX |
+| OpenHuman | `.Codex/external/reference-systems/openhuman` | `https://github.com/tinyhumansai/openhuman.git` | `5e31d3e` | shallow, sparse, no submodules | living memory, local-first knowledge vault, typed integrations, background context ingestion, personal-agent UX |
+| OpenClaw | `.Codex/external/reference-systems/openclaw` | `https://github.com/openclaw/openclaw.git` | `d967760` | shallow, sparse | gateway control plane, multi-channel routing, operator commands, session isolation, tool permission defaults, trace/doctor UX |
 
 If deeper audit needs full history or extra directories, expand the sparse
 checkout locally. Do not commit cloned files, generated indexes, or local audit
@@ -64,6 +64,12 @@ Wiii questions:
   that makes debugging harder?
 
 ### OpenClaw
+
+Focused audit:
+
+- `WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md`: source snapshot,
+  control-plane findings, Wiii Runtime Flow Ledger v1 requirements, and Chat
+  Baseline Acceptance Harness requirements.
 
 Use OpenClaw to audit Wiii's Host, Core, and governance surfaces.
 
