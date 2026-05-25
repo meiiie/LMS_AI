@@ -466,6 +466,7 @@
         "Lesson and course preview tool names are shared by one contract module.",
         "Preview payloads must carry source references or citations from the uploaded document.",
         "Apply is outside Wiii runtime mutation and requires host approval_token or preview token handling.",
+        "Frontend apply forwards approval_token only to the host apply request and keeps it out of Wiii audit payloads.",
         "Legacy direct course mutation is guarded by an explicit safe contract."
       ],
       "evidence": [
@@ -520,6 +521,35 @@
         },
         {
           "kind": "test",
+          "path": "maritime-ai-service/tests/unit/test_direct_tool_rounds_runtime.py",
+          "must_contain": [
+            "test_uploaded_document_preview_runs_host_action_without_planner_llm",
+            "host_action__authoring__preview_lesson_patch",
+            "host_action__authoring__apply_lesson_patch",
+            "uploaded document authoring must not apply before preview approval",
+            "source_references"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "wiii-desktop/src/__tests__/preview-panel-ui.test.tsx",
+          "must_contain": [
+            "forwards the LMS approval token when the host preview already confirmed apply",
+            "submitHostActionAudit",
+            "not.toContain(\"approval-lesson-1\")"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "wiii-desktop/src/__tests__/host-action-sse.test.ts",
+          "must_contain": [
+            "preserves LMS approval tokens from host preview responses",
+            "approval-from-lms-dialog",
+            "source_references"
+          ]
+        },
+        {
+          "kind": "test",
           "path": "maritime-ai-service/tests/unit/test_course_generation_flow.py",
           "must_contain": [
             "legacy_lms_mutation_confirmation_required",
@@ -532,6 +562,10 @@
         {
           "command": "cd maritime-ai-service; uv run --python 3.12 --extra dev pytest tests/unit/test_document_preview_contract.py tests/unit/test_document_context_api.py tests/unit/test_direct_node_document_preview_runtime.py tests/unit/test_course_generation_flow.py -q --tb=short",
           "purpose": "Prove uploaded document preview detection, forced host-action binding, source refs, and legacy mutation guard stay intact."
+        },
+        {
+          "command": "cd wiii-desktop; npx vitest run src/__tests__/preview-panel-ui.test.tsx src/__tests__/host-action-sse.test.ts",
+          "purpose": "Prove LMS preview/apply UI preserves source refs, forwards approval_token only to host apply, and excludes approval_token from Wiii audit payloads."
         }
       ]
     },

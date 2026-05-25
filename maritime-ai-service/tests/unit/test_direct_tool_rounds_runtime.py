@@ -1182,6 +1182,18 @@ async def test_uploaded_document_preview_runs_host_action_without_planner_llm():
         async def ainvoke(self, args):
             return self.invoke(args)
 
+    class FakeHostApplyTool:
+        name = "host_action__authoring__apply_lesson_patch"
+
+        def invoke(self, args):
+            captured["apply_args"] = dict(args)
+            raise AssertionError(
+                "uploaded document authoring must not apply before preview approval"
+            )
+
+        async def ainvoke(self, args):
+            return self.invoke(args)
+
     events: list[dict] = []
 
     async def push_event(event):
@@ -1235,7 +1247,7 @@ async def test_uploaded_document_preview_runs_host_action_without_planner_llm():
             llm_with_tools=object(),
             llm_auto=object(),
             messages=[],
-            tools=[FakeHostPreviewTool()],
+            tools=[FakeHostPreviewTool(), FakeHostApplyTool()],
             push_event=push_event,
             query=(
                 "Dua tren tai lieu Word vua upload, tao preview_lesson_patch "
@@ -1263,6 +1275,7 @@ async def test_uploaded_document_preview_runs_host_action_without_planner_llm():
     assert preview_args["source_references"][0]["page_end"] == 5
     assert [event["type"] for event in tool_call_events] == ["call", "host_action", "result"]
     assert any(event.get("type") == "host_action" for event in events)
+    assert "apply_args" not in captured
     assert "preview" in llm_response.content.lower()
 
 

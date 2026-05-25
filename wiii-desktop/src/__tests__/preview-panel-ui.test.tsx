@@ -282,6 +282,9 @@ describe("PreviewPanel host action operator flow", () => {
       success: true,
       data: {
         summary: "Applied with LMS approval.",
+        preview_token: "preview-lesson-1",
+        preview_kind: "lesson_patch",
+        approval_token: "approval-lesson-1",
       },
     });
     useHostContextStore.setState({
@@ -334,6 +337,21 @@ describe("PreviewPanel host action operator flow", () => {
       );
     });
     expect(await screen.findByText("Applied with LMS approval.")).toBeTruthy();
+
+    const { submitHostActionAudit } = await import("@/api/host-actions");
+    const submitAuditMock = vi.mocked(submitHostActionAudit);
+    await waitFor(() => {
+      expect(submitAuditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event_type: "apply_confirmed",
+          action: "authoring.apply_lesson_patch",
+          preview_kind: "lesson_patch",
+          preview_token: "preview-lesson-1",
+        }),
+      );
+    });
+    const auditPayload = submitAuditMock.mock.calls[0]?.[0];
+    expect(JSON.stringify(auditPayload)).not.toContain("approval-lesson-1");
   });
 
   it("forwards approval tokens that arrive through the host-action SSE preview item", async () => {
