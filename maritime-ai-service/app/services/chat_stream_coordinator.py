@@ -12,12 +12,7 @@ from app.core.config import settings
 from app.core.exceptions import ProviderUnavailableError
 from app.engine.llm_runtime_metadata import resolve_runtime_llm_metadata
 from app.engine.multi_agent.runtime_flow_ledger import RuntimeFlowLedger
-from app.services.llm_runtime_audit_service import record_llm_runtime_observation
 from app.services.chat_orchestrator_runtime import build_wiii_turn_request
-from app.services.model_switch_prompt_service import (
-    build_model_switch_prompt_for_failover,
-    build_model_switch_prompt_for_unavailable,
-)
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +32,28 @@ _FINALIZABLE_AGENT_NODES = {
     "grader",
     "colleague_agent",
 }
+
+
+def _record_llm_runtime_observation(**kwargs: Any) -> None:
+    from app.services.llm_runtime_audit_service import record_llm_runtime_observation
+
+    record_llm_runtime_observation(**kwargs)
+
+
+def build_model_switch_prompt_for_failover(**kwargs: Any) -> dict[str, Any]:
+    from app.services.model_switch_prompt_service import (
+        build_model_switch_prompt_for_failover,
+    )
+
+    return build_model_switch_prompt_for_failover(**kwargs)
+
+
+def build_model_switch_prompt_for_unavailable(**kwargs: Any) -> dict[str, Any]:
+    from app.services.model_switch_prompt_service import (
+        build_model_switch_prompt_for_unavailable,
+    )
+
+    return build_model_switch_prompt_for_unavailable(**kwargs)
 
 
 def _stream_agent_for_finalization(event: Any, current_agent: str = "") -> str:
@@ -240,11 +257,22 @@ class _StreamLatencyTracker:
         return details
 
     def to_payload(self) -> dict[str, Any]:
+        latency_ms_by_stage = {
+            str(item["stage"]): item["duration_ms"]
+            for item in self._timeline
+            if item.get("stage") and isinstance(item.get("duration_ms"), int)
+        }
         payload: dict[str, Any] = {
             "elapsed_ms": self.elapsed_ms(),
+            "latency_ms_by_stage": latency_ms_by_stage,
             "timeline": [dict(item) for item in self._timeline],
         }
         if self._active:
+            for stage, started_at in self._active.items():
+                latency_ms_by_stage.setdefault(
+                    stage,
+                    int((time.perf_counter() - started_at) * 1000),
+                )
             payload["active"] = [
                 {
                     "stage": stage,
@@ -371,7 +399,8 @@ def _with_runtime_flow_metadata(
     flow_ledger: RuntimeFlowLedger,
 ):
     flow_ledger.record_event(event)
-    if getattr(event, "type", None) != "metadata":
+    event_type = getattr(event, "type", None)
+    if event_type not in {"metadata", "done"}:
         return event
     content = getattr(event, "content", None)
     if not isinstance(content, dict):
@@ -379,13 +408,14 @@ def _with_runtime_flow_metadata(
 
     from app.engine.multi_agent.stream_utils import StreamEvent
 
-    metadata = dict(content)
-    metadata.setdefault("stream_latency", tracker.to_payload())
-    flow_ledger.observe_metadata(metadata)
-    metadata.setdefault("runtime_flow_ledger", flow_ledger.to_payload())
+    payload = dict(content)
+    payload.setdefault("stream_latency", tracker.to_payload())
+    if event_type == "metadata":
+        flow_ledger.observe_metadata(payload)
+    payload.setdefault("runtime_flow_ledger", flow_ledger.to_payload())
     return StreamEvent(
-        type="metadata",
-        content=metadata,
+        type=event_type,
+        content=payload,
         node=getattr(event, "node", None),
         step=getattr(event, "step", None),
         confidence=getattr(event, "confidence", None),
@@ -903,7 +933,7 @@ async def generate_stream_v3_events(
                 or ""
             )
             try:
-                record_llm_runtime_observation(
+                _record_llm_runtime_observation(
                     provider=runtime_llm["provider"],
                     success=bool(runtime_llm["provider"]),
                     model_name=runtime_llm["model"],
@@ -1131,6 +1161,7 @@ async def generate_stream_v3_events(
 
         accumulated_answer: list[str] = []
         saw_done_event = False
+        terminal_done_event = None
         stream_current_agent = ""
         answer_started = False
 
@@ -1205,36 +1236,12 @@ async def generate_stream_v3_events(
                 request_id=request_id,
                 create_status_event=create_status_event,
             ):
-                if event.type == "done" and not flow_ledger.metadata_seen:
-                    metadata_event = await create_metadata_event(
-                        reasoning_trace={
-                            "method": "runtime_flow_ledger",
-                            "steps": ["runtime_completed_without_metadata"],
-                        },
-                        processing_time=time.time() - start_time,
-                        confidence=0,
-                        session_id=effective_session_id_str,
-                        request_id=request_id,
-                        routing_metadata={
-                            "method": "runtime_flow_ledger",
-                            "intent": "observability",
-                        },
-                        stream_latency=latency_tracker.to_payload(),
-                        streaming_version="v3-runtime_flow",
-                    )
-                    metadata_event = _with_runtime_flow_metadata(
-                        metadata_event,
-                        latency_tracker,
-                        flow_ledger,
-                    )
-                    metadata_chunks, event_counter, _ = serialize_stream_event(
-                        event=metadata_event,
-                        event_counter=event_counter,
-                        enable_artifacts=settings.enable_artifacts,
-                        presentation_state=presentation_state,
-                    )
-                    for chunk in metadata_chunks:
-                        yield chunk
+                if event.type == "done":
+                    # Serialize terminal done after finalization so its ledger
+                    # reflects the durable save result.
+                    saw_done_event = True
+                    terminal_done_event = event
+                    break
 
                 event = _with_runtime_flow_metadata(
                     event,
@@ -1248,8 +1255,6 @@ async def generate_stream_v3_events(
                 if event.type == "answer":
                     accumulated_answer.append(event.content)
                     answer_started = True
-                elif event.type == "done":
-                    saw_done_event = True
                 elif early_context_thinking and event.type in {
                     "thinking_start",
                     "thinking_delta",
@@ -1278,13 +1283,6 @@ async def generate_stream_v3_events(
 
                 for chunk in chunks:
                     yield chunk
-
-                # `done` is a terminal wire event. Do not ask the underlying
-                # async generator for one more item just to observe
-                # StopAsyncIteration: the idle-heartbeat wrapper can otherwise
-                # hold the UI in a streaming state for another full idle tick.
-                if event.type == "done":
-                    break
 
                 if should_stop:
                     early_stop_reason = "should_stop_signal"
@@ -1387,6 +1385,51 @@ async def generate_stream_v3_events(
             )
             for chunk in done_chunks:
                 yield chunk
+        elif terminal_done_event is not None:
+            if not flow_ledger.metadata_seen:
+                metadata_event = await create_metadata_event(
+                    reasoning_trace={
+                        "method": "runtime_flow_ledger",
+                        "steps": ["runtime_completed_without_metadata"],
+                    },
+                    processing_time=processing_time,
+                    confidence=0,
+                    session_id=effective_session_id_str,
+                    request_id=request_id,
+                    routing_metadata={
+                        "method": "runtime_flow_ledger",
+                        "intent": "observability",
+                    },
+                    stream_latency=latency_tracker.to_payload(),
+                    streaming_version="v3-runtime_flow",
+                )
+                metadata_event = _with_runtime_flow_metadata(
+                    metadata_event,
+                    latency_tracker,
+                    flow_ledger,
+                )
+                metadata_chunks, event_counter, _ = serialize_stream_event(
+                    event=metadata_event,
+                    event_counter=event_counter,
+                    enable_artifacts=settings.enable_artifacts,
+                    presentation_state=presentation_state,
+                )
+                for chunk in metadata_chunks:
+                    yield chunk
+
+            done_event = _with_runtime_flow_metadata(
+                terminal_done_event,
+                latency_tracker,
+                flow_ledger,
+            )
+            done_chunks, event_counter, _ = serialize_stream_event(
+                event=done_event,
+                event_counter=event_counter,
+                enable_artifacts=settings.enable_artifacts,
+                presentation_state=presentation_state,
+            )
+            for chunk in done_chunks:
+                yield chunk
 
     except ProviderUnavailableError as exc:
         flow_ledger.mark_route(
@@ -1399,7 +1442,7 @@ async def generate_stream_v3_events(
             exc.reason_code,
         )
         try:
-            record_llm_runtime_observation(
+            _record_llm_runtime_observation(
                 provider=exc.provider,
                 success=False,
                 error=exc.message,

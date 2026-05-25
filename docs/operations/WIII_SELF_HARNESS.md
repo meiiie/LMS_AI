@@ -43,6 +43,9 @@ The first scenario set covers the active product risk surface:
   ignored.
 - `memory-context-provenance-ledger`: Runtime Flow Ledger embeds privacy-safe
   context provenance for conversation, document, memory, and host sources.
+- `chat-baseline-acceptance-harness`: ordinary Vietnamese chat remains on the
+  safe chat lane with terminal ledger, finalization, heartbeat, and tool
+  suppression evidence.
 - `visual-tool-capability-sync`: visual intent selects the right tool lane.
 - `code-studio-scaffold-boundary`: Code Studio scaffold fallback is typed and
   policy-gated.

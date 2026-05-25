@@ -6,6 +6,7 @@
     "system-flow-observability-map",
     "system-comprehension-reference-harness",
     "memory-context-provenance-ledger",
+    "chat-baseline-acceptance-harness",
     "visual-tool-capability-sync",
     "code-studio-scaffold-boundary",
     "lms-document-preview-apply-approval",
@@ -242,6 +243,89 @@
         {
           "command": "python tools/wiii_self_harness/run_wiii_self_harness.py",
           "purpose": "Prove the OpenHuman-derived provenance contract remains tied to runtime, test, and docs evidence."
+        }
+      ]
+    },
+    {
+      "id": "chat-baseline-acceptance-harness",
+      "title": "Ordinary chat baseline stays on the safe chat lane",
+      "status": "active",
+      "layer": "Wiii Core",
+      "risk": "high",
+      "owner": "Project leadership",
+      "active_product_path": true,
+      "contract": "Normal Vietnamese chat streams must complete through the non-tool chat lane with runtime-flow evidence, safe tool suppression, durable finalization, and no raw host/action payloads in the answer.",
+      "invariants": [
+        "Baseline chat records host_surface and native chat route evidence.",
+        "Host actions, Pointy, visual runtime, and Code Studio are suppressed when the user did not request them.",
+        "The terminal done event carries runtime_flow_ledger with done_seen=true.",
+        "The final answer is persisted through finalize_response_turn and does not expose raw provider, host-action, widget, or tool-call JSON.",
+        "No uploaded-document prompt asks for missing context instead of inventing document content.",
+        "Slow toolless provider streams emit heartbeat/status evidence and still finalize."
+      ],
+      "evidence": [
+        {
+          "kind": "docs",
+          "path": "docs/operations/WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md",
+          "must_contain": [
+            "Chat Baseline Acceptance Harness",
+            "Vietnamese greeting",
+            "Slow stream heartbeat",
+            "response_saved",
+            "latency_ms_by_stage"
+          ]
+        },
+        {
+          "kind": "runtime",
+          "path": "maritime-ai-service/app/services/chat_stream_coordinator.py",
+          "must_contain": [
+            "_with_runtime_flow_metadata",
+            "event_type not in {\"metadata\", \"done\"}",
+            "runtime_flow_ledger",
+            "stream_latency",
+            "latency_ms_by_stage",
+            "finalize_response_turn"
+          ]
+        },
+        {
+          "kind": "runtime",
+          "path": "maritime-ai-service/app/engine/multi_agent/runtime_flow_ledger.py",
+          "must_contain": [
+            "_refresh_suppressed_tools",
+            "host_action",
+            "pointy_action",
+            "visual_runtime",
+            "code_studio"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "maritime-ai-service/tests/unit/test_chat_baseline_acceptance_harness.py",
+          "must_contain": [
+            "test_chat_baseline_acceptance_scenarios_stay_on_safe_chat_lane",
+            "vietnamese_greeting",
+            "simple_factual_chat",
+            "inline_code_explanation",
+            "no_uploaded_document_request",
+            "lms_intent_without_lms_surface",
+            "test_chat_baseline_acceptance_records_slow_stream_heartbeat",
+            "SUPPRESSED_CHAT_TOOLS"
+          ]
+        },
+        {
+          "kind": "ci",
+          "path": ".github/workflows/wiii-self-harness.yml",
+          "must_contain": [
+            "maritime-ai-service/app/services/chat_stream_coordinator.py",
+            "maritime-ai-service/app/engine/multi_agent/runtime_flow_ledger.py",
+            "maritime-ai-service/tests/unit/test_chat_baseline_acceptance_harness.py"
+          ]
+        }
+      ],
+      "verification": [
+        {
+          "command": "cd maritime-ai-service; uv run --python 3.12 --extra dev pytest tests/unit/test_chat_baseline_acceptance_harness.py -q --tb=short",
+          "purpose": "Prove ordinary chat, no-document, no-LMS-surface, inline-code, and slow-stream baseline turns stay observable and tool-safe."
         }
       ]
     },

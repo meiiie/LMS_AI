@@ -25,10 +25,6 @@ from app.engine.model_catalog import (
     ZHIPU_DEFAULT_MODEL,
 )
 from app.engine.llm_provider_registry import get_supported_provider_names
-from app.services.llm_runtime_audit_service import (
-    get_persisted_llm_runtime_audit,
-    sanitize_llm_runtime_audit_payload,
-)
 from app.services.llm_selectability_cache_token import (
     bump_llm_selectability_cache_generation,
     get_llm_selectability_cache_generation,
@@ -107,6 +103,38 @@ class LLMPool:
     @staticmethod
     def get_provider_info(name: str):
         return get_llm_runtime_provider_info(name)
+
+
+def _load_runtime_audit_payload() -> tuple[Any, dict[str, Any]]:
+    try:
+        audit_record = get_persisted_llm_runtime_audit()
+        audit_payload = sanitize_llm_runtime_audit_payload(
+            audit_record.payload if audit_record else None
+        )
+    except ModuleNotFoundError as exc:
+        if exc.name != "openai":
+            raise
+        logger.debug(
+            "LLM runtime audit unavailable because optional provider SDK is missing: %s",
+            exc,
+        )
+        return None, {}
+
+    return audit_record, audit_payload
+
+
+def get_persisted_llm_runtime_audit() -> Any:
+    from app.services.llm_runtime_audit_service import get_persisted_llm_runtime_audit
+
+    return get_persisted_llm_runtime_audit()
+
+
+def sanitize_llm_runtime_audit_payload(payload: Any) -> dict[str, Any]:
+    from app.services.llm_runtime_audit_service import (
+        sanitize_llm_runtime_audit_payload,
+    )
+
+    return sanitize_llm_runtime_audit_payload(payload)
 
 
 @dataclass(frozen=True)
@@ -509,10 +537,7 @@ def get_llm_selectability_snapshot(
     active_provider = stats.get("active_provider")
     fallback_provider = stats.get("fallback_provider")
 
-    audit_record = get_persisted_llm_runtime_audit()
-    audit_payload = sanitize_llm_runtime_audit_payload(
-        audit_record.payload if audit_record else None
-    )
+    audit_record, audit_payload = _load_runtime_audit_payload()
     audit_updated_at = audit_payload.get("audit_updated_at")
     audit_providers = audit_payload.get("providers", {})
     audit_available = bool(audit_record and audit_record.persisted and audit_updated_at)

@@ -5,7 +5,17 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from app.engine.llm_providers.wiii_chat_model import _ViSpaceInjector
+try:
+    from app.engine.llm_providers.wiii_chat_model import _ViSpaceInjector
+except ModuleNotFoundError as exc:
+    if exc.name != "openai":
+        raise
+
+    class _ViSpaceInjector:
+        """No-op fallback when optional provider SDKs are not installed."""
+
+        def process(self, token: str) -> str:
+            return token
 
 # ── Soul Emotion Tag Stripper ──────────────────────────────────────────────
 # LLM sometimes emits <!--WIII_SOUL:...--> or <!-- WIII_SOUL:...--> tags
