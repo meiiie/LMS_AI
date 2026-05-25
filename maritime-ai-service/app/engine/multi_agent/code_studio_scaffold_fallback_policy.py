@@ -164,6 +164,14 @@ def _safe_failure_response(
     )
 
 
+def _scaffold_delivery_unavailable_response() -> str:
+    return (
+        "Mình đã giữ đúng lane Code Studio, nhưng lỗi xảy ra trước khi runtime "
+        "có thể gọi công cụ để mở preview thật. Mình dừng ở trạng thái an toàn "
+        "thay vì nói rằng đã tạo artifact."
+    )
+
+
 def _resolution_failure_decision(
     *,
     query: str,
@@ -195,6 +203,7 @@ def resolve_code_studio_scaffold_fallback(
     query: str,
     state: Any | None = None,
     reason: str = "unknown",
+    allow_scaffold_delivery: bool = True,
     resolve_visual_intent_fn: VisualIntentResolver = resolve_visual_intent,
     resolve_contract_fn: RuntimeContractResolver = resolve_visual_code_runtime_contract,
     build_caption_fn: CaptionBuilder = build_scaffold_visible_caption,
@@ -205,6 +214,9 @@ def resolve_code_studio_scaffold_fallback(
     Generic app/simulation fallbacks are intentionally suppressed: if the
     tool path cannot produce a real app preview, Wiii should fail visibly and
     safely instead of shipping a broad topic template.
+
+    ``allow_scaffold_delivery`` must be false for callsites that can only return
+    text and cannot dispatch ``tool_create_visual_code`` to open a real preview.
     """
     del state  # Reserved for future session-aware policy without changing call sites.
 
@@ -278,6 +290,17 @@ def resolve_code_studio_scaffold_fallback(
             metric_kind=metric_kind,
             callsite_reason=reason,
             policy_reason="app_requires_tool_generated_preview",
+            response_type="code_studio_scaffold_suppressed",
+            **intent.decision_fields(),
+        )
+
+    if not allow_scaffold_delivery:
+        return CodeStudioScaffoldFallbackDecision(
+            engage_scaffold=False,
+            response=_scaffold_delivery_unavailable_response(),
+            metric_kind=metric_kind,
+            callsite_reason=reason,
+            policy_reason="scaffold_delivery_unavailable",
             response_type="code_studio_scaffold_suppressed",
             **intent.decision_fields(),
         )

@@ -211,6 +211,7 @@ async def code_studio_node_impl(
             query=query,
             state=state,
             reason=f"node_outer_{type(e).__name__}",
+            allow_scaffold_delivery=False,
         )
         response = fallback_decision.response
         try:
