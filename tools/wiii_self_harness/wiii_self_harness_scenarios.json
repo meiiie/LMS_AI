@@ -3,6 +3,7 @@
   "version": 1,
   "description": "Repo-owned system harness for active Wiii product contracts. It validates that critical architecture scenarios remain explicit and tied to living runtime, test, docs, and CI evidence.",
   "required_scenarios": [
+    "system-flow-observability-map",
     "visual-tool-capability-sync",
     "code-studio-scaffold-boundary",
     "lms-document-preview-apply-approval",
@@ -10,6 +11,58 @@
     "frontend-visual-code-studio-shell"
   ],
   "scenarios": [
+    {
+      "id": "system-flow-observability-map",
+      "title": "System flow observability map stays current",
+      "status": "active",
+      "layer": "Governance",
+      "risk": "medium",
+      "owner": "Project leadership",
+      "active_product_path": true,
+      "contract": "Wiii system control plane maps layers, runtime flows, monitoring signals, and next execution order before runtime fixes begin.",
+      "invariants": [
+        "The control-plane map names Wiii layers, active runtime flows, and first debugging checkpoints.",
+        "The flow-monitoring ladder distinguishes existing evidence from gaps to close.",
+        "The map states that production smoke does not prove deep LMS preview/apply acceptance.",
+        "The map identifies a runtime flow ledger as the next monitoring implementation target.",
+        "The Self-Harness workflow re-runs when the control-plane document changes."
+      ],
+      "evidence": [
+        {
+          "kind": "docs",
+          "path": "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md",
+          "must_contain": [
+            "Control Plane Model",
+            "Active Runtime Flows",
+            "Flow Monitoring Ladder",
+            "runtime flow ledger",
+            "LMS document preview/apply acceptance"
+          ]
+        },
+        {
+          "kind": "docs",
+          "path": "docs/operations/WIII_SELF_HARNESS.md",
+          "must_contain": [
+            "WIII_SYSTEM_CONTROL_PLANE.md",
+            "system-flow-observability-map"
+          ]
+        },
+        {
+          "kind": "ci",
+          "path": ".github/workflows/wiii-self-harness.yml",
+          "must_contain": [
+            "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md",
+            "Validate scenario manifest"
+          ]
+        }
+      ],
+      "verification": [
+        {
+          "command": "python tools/wiii_self_harness/run_wiii_self_harness.py",
+          "purpose": "Prove the system control-plane map remains present and tied to the Self-Harness contract."
+        }
+      ]
+    },
     {
       "id": "visual-tool-capability-sync",
       "title": "Visual intent binds the correct tool capability",

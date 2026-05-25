@@ -28,8 +28,16 @@ The canonical manifest lives at:
 tools/wiii_self_harness/wiii_self_harness_scenarios.json
 ```
 
+The system-level operating map lives at:
+
+```text
+docs/operations/WIII_SYSTEM_CONTROL_PLANE.md
+```
+
 The first scenario set covers the active product risk surface:
 
+- `system-flow-observability-map`: the control-plane map stays available and
+  describes the active flow-monitoring ladder.
 - `visual-tool-capability-sync`: visual intent selects the right tool lane.
 - `code-studio-scaffold-boundary`: Code Studio scaffold fallback is typed and
   policy-gated.
@@ -113,3 +121,7 @@ Wiii Self-Harness does not:
 It is a deterministic guardrail for active product-path contracts. Runtime
 behavior still needs the focused verification commands listed by each scenario
 and the normal issue, branch, PR, risk, rollback, and review process.
+
+Use `WIII_SYSTEM_CONTROL_PLANE.md` before adding new scenarios. If the issue is
+not mapped to a Wiii layer, active runtime flow, and observable signal, it is
+not ready to become a durable Self-Harness scenario.
