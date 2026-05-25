@@ -251,6 +251,45 @@ def _tools_matching_visual_requirement(tools: list[Any], visual_requirement: Any
     return [tool for tool in tools if _tool_name(tool) in required_names]
 
 
+_POINTY_OUTPUT_REQUEST_CUES: tuple[str, ...] = (
+    "tao code",
+    "viet code",
+    "chay code",
+    "code python",
+    "code javascript",
+    "tao visual",
+    "ve visual",
+    "tao minh hoa",
+    "ve minh hoa",
+    "ve bieu do",
+    "tao bieu do",
+    "mo phong",
+    "simulation",
+    "tao app",
+    "tao widget",
+    "tao artifact",
+    "create code",
+    "write code",
+    "run code",
+    "create visual",
+    "make visual",
+    "draw chart",
+    "create chart",
+    "build app",
+    "build widget",
+    "create artifact",
+)
+
+
+def _should_suppress_pointy_for_output_request(query: str) -> bool:
+    """Keep Pointy out of code, visual, app, artifact, and simulation output turns."""
+
+    normalized = _normalize_for_intent(query)
+    if not normalized:
+        return False
+    return any(cue in normalized for cue in _POINTY_OUTPUT_REQUEST_CUES)
+
+
 def _is_host_ui_navigation_route(state: Optional[AgentState]) -> bool:
     if not isinstance(state, dict):
         return False
@@ -485,7 +524,8 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         force_skills = _force_skills_from_state(state)
         pointy_forced = "wiii-pointy" in force_skills
         host_ui_navigation = _is_host_ui_navigation_route(state)
-        if pointy_forced or host_ui_navigation or _needs_pointy(query):
+        pointy_requested = pointy_forced or host_ui_navigation or _needs_pointy(query)
+        if pointy_requested and not _should_suppress_pointy_for_output_request(query):
             try:
                 # v9.0 F18 (2026-05-07) — SeeAct enum-constrained tool.
                 # Build tool_pointy_show with `selector: Literal[<inventory>]`
