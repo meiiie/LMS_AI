@@ -43,6 +43,12 @@ scratch output.
 
 ### OpenHuman
 
+Focused audit:
+
+- `WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md`: source snapshot,
+  memory/context findings, Wiii Context Provenance Ledger v1 requirements, and
+  non-copy boundaries.
+
 Use OpenHuman to audit Wiii's Living, Data, and Host ambitions.
 
 What to study:

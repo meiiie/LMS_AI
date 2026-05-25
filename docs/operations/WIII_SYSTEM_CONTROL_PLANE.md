@@ -28,6 +28,8 @@ It complements:
 - `docs/architecture/WIII_CODEBASE_MAP.md` for source navigation.
 - `docs/operations/WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md` for external
   systems Wiii should compare against before deeper runtime changes.
+- `docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md` for the
+  OpenHuman-derived memory/context provenance and context-ledger requirements.
 - `docs/operations/WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md` for the
   OpenClaw-derived control-plane, runtime ledger, and chat-baseline
   requirements.
@@ -92,7 +94,7 @@ turn. Some signals already exist; missing signals are the next monitoring work.
 |---|---|---|---|
 | Edge/deploy | deploy SHA, image tag, VM state, public health | deploy workflow, release smoke, GCP VM status | keep a single release status note after stop/start events |
 | API ingress | request ID, user ID, org ID, session ID, endpoint | API headers and auth context | ensure the same correlation ID reaches stream metadata and logs |
-| Context build | host surface, document context, source refs, memory context | document context tests and preview contract | add an explicit context-summary event for debugging slow or wrong turns |
+| Context build | host surface, document context, source refs, memory context | document context tests, preview contract, Context Provenance Ledger v1 | add golden source-backed replay cases for uploaded document and memory turns |
 | Intent/routing | selected lane and reason | typed visual/tool requirements, Code Studio outcomes | emit a compact route decision record per turn |
 | Retrieval/memory | query scope, tenant filters, source IDs, citation count | repository tests and source-reference helpers | add golden source-backed replay cases for active LMS documents |
 | Provider/tool loop | provider/model, tool bound, tool started/result/error | tool events, visual telemetry, focused unit tests | centralize a turn ledger instead of scattering log-only evidence |
@@ -135,10 +137,12 @@ Wiii currently has three harness levels:
 | Local E2E Harness | browser/bootstrap smoke | local app can authenticate and reach chat UI | LMS production acceptance works |
 | Production Smoke | deployed release smoke | public health, embed, Pointy, structured visual SSE | deep document/LMS apply flow works |
 
-The missing layer is a runtime flow ledger: a compact per-turn record that links
+The runtime flow ledger now exists as the first compact per-turn record for
 request ID, session ID, route decision, provider/tool calls, SSE lifecycle,
-host-action IDs, source refs, and finalization status. That should be the next
-implementation target after the current documentation map is merged.
+host-action IDs, source refs, context provenance, and finalization status. The
+next gap is replay-backed acceptance: ordinary chat, uploaded document, visual,
+Code Studio, and Pointy no-action cases should assert the ledger facts instead
+of relying on logs.
 
 ## Next Execution Order
 
@@ -151,6 +155,8 @@ Proceed in this order unless production risk forces a hotfix:
      requirements.
    - Current OpenClaw output:
      `docs/operations/WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md`.
+   - Current OpenHuman output:
+     `docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md`.
 
 2. **Chat stream baseline**
    - Run ordinary Vietnamese chat prompts with no document, no LMS, no visual,

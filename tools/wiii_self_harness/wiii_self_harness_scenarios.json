@@ -4,6 +4,7 @@
   "description": "Repo-owned system harness for active Wiii product contracts. It validates that critical architecture scenarios remain explicit and tied to living runtime, test, docs, and CI evidence.",
   "required_scenarios": [
     "system-flow-observability-map",
+    "memory-context-provenance-ledger",
     "visual-tool-capability-sync",
     "code-studio-scaffold-boundary",
     "lms-document-preview-apply-approval",
@@ -24,7 +25,7 @@
         "The control-plane map names Wiii layers, active runtime flows, and first debugging checkpoints.",
         "The flow-monitoring ladder distinguishes existing evidence from gaps to close.",
         "The map states that production smoke does not prove deep LMS preview/apply acceptance.",
-        "The map identifies a runtime flow ledger as the next monitoring implementation target.",
+        "The map identifies ledger-backed replay as the next acceptance target after the runtime flow ledger.",
         "The OpenClaw reference audit records control-plane patterns, non-copy boundaries, and chat-baseline requirements.",
         "The Self-Harness workflow re-runs when the control-plane document changes."
       ],
@@ -75,6 +76,7 @@
           "path": ".github/workflows/wiii-self-harness.yml",
           "must_contain": [
             "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md",
+            "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md",
             "docs/operations/WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md",
             "Validate scenario manifest"
           ]
@@ -84,6 +86,76 @@
         {
           "command": "python tools/wiii_self_harness/run_wiii_self_harness.py",
           "purpose": "Prove the system control-plane map remains present and tied to the Self-Harness contract."
+        }
+      ]
+    },
+    {
+      "id": "memory-context-provenance-ledger",
+      "title": "Memory and context provenance stays inspectable",
+      "status": "active",
+      "layer": "Wiii Data",
+      "risk": "high",
+      "owner": "Project leadership",
+      "active_product_path": true,
+      "contract": "RuntimeFlowLedger embeds a privacy-safe Context Provenance Ledger v1 for conversation, document, memory, and host context sources.",
+      "invariants": [
+        "Context provenance is emitted as counts, bounded names, hashes, and warning codes, never raw prompt, memory, or uploaded document text.",
+        "Uploaded document context records attachment counts, parser names, media kinds, source-ref counts, and provenance warnings.",
+        "Memory context records typed memory counts when present and warns when only untyped semantic_context text is available.",
+        "Host context records declared surface and capabilities without granting new action permission.",
+        "The OpenHuman reference audit documents adopt and do-not-copy boundaries."
+      ],
+      "evidence": [
+        {
+          "kind": "docs",
+          "path": "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md",
+          "must_contain": [
+            "OpenHuman Patterns To Adopt",
+            "Memory Tree",
+            "Context Provenance Ledger v1",
+            "Do Not Copy",
+            "0e4729e7f2214f2fed3e23fb8d352018c0393fb3"
+          ]
+        },
+        {
+          "kind": "runtime",
+          "path": "maritime-ai-service/app/engine/multi_agent/context_provenance_ledger.py",
+          "must_contain": [
+            "CONTEXT_PROVENANCE_LEDGER_SCHEMA_VERSION",
+            "build_context_provenance_ledger",
+            "document_context_without_source_refs",
+            "memory_context_without_typed_items",
+            "raw_content_included"
+          ]
+        },
+        {
+          "kind": "runtime",
+          "path": "maritime-ai-service/app/engine/multi_agent/runtime_flow_ledger.py",
+          "must_contain": [
+            "build_context_provenance_ledger",
+            "build_request_context_provenance_ledger",
+            "context_provenance"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "maritime-ai-service/tests/unit/test_context_provenance_ledger.py",
+          "must_contain": [
+            "test_context_provenance_ledger_counts_sources_without_raw_content",
+            "test_context_provenance_ledger_warns_on_unprovenanced_context",
+            "test_runtime_flow_ledger_embeds_context_provenance_without_prompt_text",
+            "SECRET DOCUMENT BODY"
+          ]
+        }
+      ],
+      "verification": [
+        {
+          "command": "cd maritime-ai-service; python -m pytest tests/unit/test_context_provenance_ledger.py -q --tb=short",
+          "purpose": "Prove context provenance counts document, memory, source, and host inputs without leaking raw content."
+        },
+        {
+          "command": "python tools/wiii_self_harness/run_wiii_self_harness.py",
+          "purpose": "Prove the OpenHuman-derived provenance contract remains tied to runtime, test, and docs evidence."
         }
       ]
     },

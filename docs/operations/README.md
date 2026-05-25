@@ -22,6 +22,7 @@ Operational docs are different from exploratory reports:
 - `WIII_SYSTEM_CONTROL_PLANE.md`: whole-system operating map, active runtime flows, flow-monitoring ladder, and debugging protocol.
 - `WIII_SELF_HARNESS.md`: repository-owned static harness for active product-path contracts.
 - `WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md`: external systems audit baseline and ignored local clone workspace for OpenHuman, OpenClaw, and related references.
+- `WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md`: OpenHuman memory/context audit, Wiii Context Provenance Ledger v1 requirements, and non-copy boundaries.
 - `WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md`: OpenClaw control-plane audit, Wiii Runtime Flow Ledger v1 requirements, and Chat Baseline Acceptance Harness requirements.
 - `WIII_REPO_RECOVERY_AUDIT_2026-05-19.md`: temporary/history recovery record for the large WIP snapshot preserved before repository cleanup; durable guidance lives in `WIII_AGENTIC_CODEBASE_HARNESS.md` and follow-up tracking lives in issue #397.
 - `BYPASS_LOG.md`: audited record of branch-protection bypasses, rationale, and restored controls.
