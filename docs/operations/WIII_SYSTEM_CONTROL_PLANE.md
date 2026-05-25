@@ -33,6 +33,9 @@ It complements:
 - `docs/operations/WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md` for the
   OpenClaw-derived control-plane, runtime ledger, and chat-baseline
   requirements.
+- `docs/operations/WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-26.md` for
+  the system-comprehension harness, deterministic source inventory, import-map
+  hotspot, and scan guardrail decision.
 - `docs/operations/WIII_SELF_HARNESS.md` for static contract harnessing.
 - `docs/operations/WIII_LOCAL_E2E_HARNESS.md` for local browser entry.
 - `docs/operations/WIII_PRODUCT_RELEASE_RUNBOOK.md` for pinned production
@@ -54,6 +57,10 @@ As of 2026-05-25:
   operating state, not a code regression, until the VM is started again.
 - `tools/wiii_self_harness/run_wiii_self_harness.py` passes against the current
   scenario manifest.
+- Understand-Anything deterministic scan/import-map was trialed locally as a
+  supporting system-comprehension harness: `2433` tracked files, `3241`
+  internal import edges, and `123` semantic batches. Generated output stays in
+  ignored `.understand-anything/`.
 
 ## Control Plane Model
 
@@ -134,6 +141,7 @@ Wiii currently has three harness levels:
 | Harness | Purpose | What it proves | What it does not prove |
 |---|---|---|---|
 | Wiii Self-Harness | static contract manifest | critical evidence files and tokens still exist | runtime behavior works |
+| Understand-Anything Trial | source inventory and dependency graph | codebase size, dependency hubs, semantic batches, and scan pollution | runtime behavior, LMS safety, or product acceptance |
 | Local E2E Harness | browser/bootstrap smoke | local app can authenticate and reach chat UI | LMS production acceptance works |
 | Production Smoke | deployed release smoke | public health, embed, Pointy, structured visual SSE | deep document/LMS apply flow works |
 

@@ -38,6 +38,9 @@ The first scenario set covers the active product risk surface:
 
 - `system-flow-observability-map`: the control-plane map stays available and
   describes the active flow-monitoring ladder.
+- `system-comprehension-reference-harness`: Understand-Anything remains a
+  guarded, local-only comprehension reference with generated graph output
+  ignored.
 - `memory-context-provenance-ledger`: Runtime Flow Ledger embeds privacy-safe
   context provenance for conversation, document, memory, and host sources.
 - `visual-tool-capability-sync`: visual intent selects the right tool lane.
@@ -85,6 +88,10 @@ The runner is standard-library Python. It validates:
 
 It fails closed when a scenario is malformed, a file disappears, or a required
 contract token no longer exists in the evidence file.
+
+The comprehension-reference scenario is intentionally static. It validates the
+adoption decision, ignore rules, and workflow triggers; it does not require
+generated `.understand-anything/` output to exist.
 
 ## Extension Rules
 

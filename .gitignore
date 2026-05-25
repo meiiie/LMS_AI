@@ -76,6 +76,7 @@ test_*.txt
 /tools/*
 !/tools/wiii_self_harness/
 !/tools/wiii_self_harness/**
+tools/wiii_self_harness/__pycache__/
 
 # === pip install artifacts ===
 maritime-ai-service/=*
@@ -99,6 +100,8 @@ wiii-desktop/scripts/screenshots/
 **/.claude/
 .Codex/
 **/.Codex/
+.understand-anything/
+**/.understand-anything/
 /plans/
 
 # === Large data files ===

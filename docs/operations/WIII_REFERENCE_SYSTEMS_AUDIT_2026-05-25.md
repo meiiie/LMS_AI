@@ -34,6 +34,7 @@ Current local clones:
 |---|---|---|---|---|---|
 | OpenHuman | `.Codex/external/reference-systems/openhuman` | `https://github.com/tinyhumansai/openhuman.git` | `5e31d3e` | shallow, sparse, no submodules | living memory, local-first knowledge vault, typed integrations, background context ingestion, personal-agent UX |
 | OpenClaw | `.Codex/external/reference-systems/openclaw` | `https://github.com/openclaw/openclaw.git` | `d967760` | shallow, sparse | gateway control plane, multi-channel routing, operator commands, session isolation, tool permission defaults, trace/doctor UX |
+| Understand-Anything | `.Codex/external/reference-systems/understand-anything` | `https://github.com/Lum1104/Understand-Anything.git` | `470cc01` | shallow | system-comprehension harness, deterministic source inventory, import-map extraction, semantic batching, local architecture graph/dashboard |
 
 If deeper audit needs full history or extra directories, expand the sparse
 checkout locally. Do not commit cloned files, generated indexes, or local audit
@@ -113,6 +114,27 @@ These remain useful, but they are second-order for the immediate Wiii problem:
 Clone these only when the audit needs source-level comparison. For many
 questions, primary docs and targeted file reads are enough.
 
+## System-Comprehension Reference
+
+Understand-Anything is now adopted as a supporting system-comprehension
+reference for Wiii, not as a runtime dependency and not as a replacement for
+Wiii Self-Harness. The focused audit is:
+
+- `WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_2026-05-26.md`: source snapshot,
+  bounded Wiii trial results, dependency hubs, guardrails, and adoption
+  decision.
+
+Use it before broad subsystem audits to answer:
+
+- how many tracked files and source languages are in scope
+- which backend/frontend files are dependency hubs
+- which semantic batches should shape review order
+- whether generated files or local scratch are polluting comprehension output
+
+Do not commit generated `.understand-anything/` graph or intermediate output.
+Use `.understandignore` to keep scans focused on source, docs, contracts, and
+operations files.
+
 ## Audit Method
 
 For each reference system, capture only durable findings:
@@ -134,6 +156,8 @@ Before implementing more Wiii runtime fixes, run a focused audit of:
 1. OpenHuman memory/context ingestion.
 2. OpenClaw gateway/session/tool/trace model.
 3. Wiii chat stream baseline.
+4. Understand-Anything deterministic scan/import-map when the next subsystem
+   audit needs a fresh source inventory.
 
 The output should directly shape the next Wiii implementation slice:
 
