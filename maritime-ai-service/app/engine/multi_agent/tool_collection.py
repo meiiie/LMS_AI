@@ -21,8 +21,13 @@ from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.turn_path_governor import (
     TurnPathDecision,
     TurnPathSignals,
-    filter_tools_for_turn_path,
     resolve_turn_path_decision,
+)
+from app.engine.multi_agent.tool_policy_session import (
+    build_tool_policy_session,
+    filter_tools_for_policy_session,
+    finalize_tool_policy_visible_tools,
+    record_tool_policy_session,
 )
 
 logger = logging.getLogger(__name__)
@@ -592,6 +597,54 @@ def _record_turn_path_decision(
         state["_turn_path_decision"] = decision.to_metadata()
 
 
+def _record_empty_tool_policy_session(
+    *,
+    state: Optional[AgentState],
+    decision: TurnPathDecision,
+    query: str,
+    user_role: str,
+) -> None:
+    if not isinstance(state, dict):
+        return
+    record_tool_policy_session(
+        state,
+        build_tool_policy_session(
+            decision=decision,
+            state=state,
+            query=query,
+            user_role=user_role,
+            candidate_tool_names=(),
+        ),
+    )
+
+
+def _apply_tool_policy_session(
+    tools: list[Any],
+    *,
+    state: Optional[AgentState],
+    decision: TurnPathDecision,
+    query: str,
+    user_role: str,
+) -> list[Any]:
+    if not isinstance(state, dict):
+        return tools
+    session = build_tool_policy_session(
+        decision=decision,
+        state=state,
+        query=query,
+        user_role=user_role,
+        candidate_tool_names=[_tool_name(tool) for tool in tools],
+    )
+    record_tool_policy_session(state, session)
+    filtered = filter_tools_for_policy_session(
+        tools,
+        session,
+        tool_name=_tool_name,
+    )
+    finalize_tool_policy_visible_tools(state, filtered, tool_name=_tool_name)
+    return filtered
+
+
 def _should_use_no_tools_for_direct_prose(
     *,
     query: str,
@@ -671,6 +724,12 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
     )
     _record_turn_path_decision(state, turn_path_decision)
     if not turn_path_decision.bind_tools:
+        _record_empty_tool_policy_session(
+            state=state,
+            decision=turn_path_decision,
+            query=query,
+            user_role=user_role,
+        )
         return [], False
 
     _direct_tools = []
@@ -878,6 +937,13 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
 
     if _is_host_ui_navigation_route(state):
         scoped_host_tools = _host_action_tools(_direct_tools)
+        scoped_host_tools = _apply_tool_policy_session(
+            scoped_host_tools,
+            state=state,
+            decision=turn_path_decision,
+            query=query,
+            user_role=user_role,
+        )
         return scoped_host_tools, bool(scoped_host_tools)
 
     if _looks_like_document_preview_request(query, state):
@@ -885,6 +951,13 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         if preview_tools:
             logger.info(
                 "[DIRECT] Forcing LMS document preview host action for uploaded document context"
+            )
+            preview_tools = _apply_tool_policy_session(
+                preview_tools[:1],
+                state=state,
+                decision=turn_path_decision,
+                query=query,
+                user_role=user_role,
             )
             return preview_tools[:1], True
 
@@ -894,6 +967,12 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         "personal",
         "social",
     }:
+        _record_empty_tool_policy_session(
+            state=state,
+            decision=turn_path_decision,
+            query=query,
+            user_role=user_role,
+        )
         return [], False
 
     web_search_forced = "web-search" in force_skills
@@ -947,10 +1026,12 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         thinking_mode=thinking_mode,
     ):
         _direct_tools = _strip_visual_tool_capabilities(_direct_tools)
-    _direct_tools = filter_tools_for_turn_path(
+    _direct_tools = _apply_tool_policy_session(
         _direct_tools,
-        turn_path_decision,
-        tool_name=_tool_name,
+        state=state,
+        decision=turn_path_decision,
+        query=query,
+        user_role=user_role,
     )
     # Clear inline article/chart requests should stay tightly on the visual lane.
     # If there is no competing web/legal/news/datetime/LMS intent, bind only the
@@ -1005,6 +1086,12 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         visual_decision=visual_decision,
         force_tools=force_tools,
     ):
+        _record_empty_tool_policy_session(
+            state=state,
+            decision=turn_path_decision,
+            query=query,
+            user_role=user_role,
+        )
         return [], False
 
     # Agent handoff tool (Phase 3)
@@ -1019,6 +1106,7 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         except Exception:
             pass
 
+    finalize_tool_policy_visible_tools(state, _direct_tools, tool_name=_tool_name)
     return _direct_tools, force_tools
 
 
