@@ -25,6 +25,59 @@ class DirectNodeToolSelection:
     force_tools: bool
 
 
+def _turn_path_decision_metadata(state: AgentState) -> dict[str, Any]:
+    if not isinstance(state, dict):
+        return {}
+    metadata = state.get("_turn_path_decision")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _turn_path_allows_tool_name(state: AgentState, tool_name: str) -> bool:
+    decision = _turn_path_decision_metadata(state)
+    if not decision:
+        return True
+    if not bool(decision.get("bind_tools", True)):
+        return False
+
+    name = str(tool_name or "").strip()
+    if not name:
+        return False
+
+    forbidden_names = {
+        str(item or "").strip()
+        for item in decision.get("forbidden_tool_names", []) or []
+        if str(item or "").strip()
+    }
+    if name in forbidden_names:
+        return False
+
+    forbidden_prefixes = tuple(
+        str(item or "").strip()
+        for item in decision.get("forbidden_tool_prefixes", []) or []
+        if str(item or "").strip()
+    )
+    if any(name.startswith(prefix) for prefix in forbidden_prefixes):
+        return False
+
+    if bool(decision.get("allow_all_tools", True)):
+        return True
+
+    allowed_names = {
+        str(item or "").strip()
+        for item in decision.get("allowed_tool_names", []) or []
+        if str(item or "").strip()
+    }
+    if name in allowed_names:
+        return True
+
+    allowed_prefixes = tuple(
+        str(item or "").strip()
+        for item in decision.get("allowed_tool_prefixes", []) or []
+        if str(item or "").strip()
+    )
+    return any(name.startswith(prefix) for prefix in allowed_prefixes)
+
+
 def select_direct_node_tools(
     *,
     query: str,
@@ -61,9 +114,15 @@ def select_direct_node_tools(
 
     force_required_tools: list[str] = []
     if "wiii-pointy" in force_skills:
-        force_required_tools.extend(["tool_pointy_show", "tool_pointy_inventory"])
+        pointy_required = ["tool_pointy_show", "tool_pointy_inventory"]
+        force_required_tools.extend(
+            tool_name
+            for tool_name in pointy_required
+            if _turn_path_allows_tool_name(state, tool_name)
+        )
     if "web-search" in force_skills:
-        force_required_tools.append("tool_web_search")
+        if _turn_path_allows_tool_name(state, "tool_web_search"):
+            force_required_tools.append("tool_web_search")
     if force_required_tools:
         force_tools = True
         logger_obj.info("[DIRECT] Force-bound via @-mention: required=%s", force_required_tools)
@@ -109,5 +168,8 @@ def select_direct_node_tools(
         )
         if isinstance(state.get("routing_metadata"), dict):
             state["routing_metadata"]["doc_preview_runtime"] = doc_preview_debug
+
+    if not tools:
+        force_tools = False
 
     return DirectNodeToolSelection(tools=tools, force_tools=force_tools)
