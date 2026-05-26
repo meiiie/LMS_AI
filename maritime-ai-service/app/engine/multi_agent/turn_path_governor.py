@@ -11,6 +11,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
+from app.engine.tools.tool_capability_registry import (
+    HOST_ACTION_PREFIX,
+    LMS_DOCUMENT_PREVIEW_TOOL_NAMES,
+    POINTY_TOOL_PREFIX,
+    WEATHER_TOOL_NAMES,
+)
 
 TurnPathName = Literal[
     "casual_chat",
@@ -31,15 +37,8 @@ TurnPathName = Literal[
 ]
 
 
-POINTY_TOOL_PREFIXES: tuple[str, ...] = ("tool_pointy_",)
-HOST_ACTION_TOOL_PREFIXES: tuple[str, ...] = ("host_action__",)
-LMS_DOCUMENT_PREVIEW_TOOL_NAMES = frozenset(
-    {
-        "host_action__authoring__generate_course_from_document",
-        "host_action__authoring__preview_lesson_patch",
-    }
-)
-WEATHER_TOOL_NAMES = frozenset({"tool_current_weather"})
+POINTY_TOOL_PREFIXES: tuple[str, ...] = (POINTY_TOOL_PREFIX,)
+HOST_ACTION_TOOL_PREFIXES: tuple[str, ...] = (HOST_ACTION_PREFIX,)
 
 
 @dataclass(frozen=True, slots=True)

@@ -7,19 +7,18 @@ from typing import Any, Callable
 
 from app.core.config import settings
 from app.engine.multi_agent.document_preview_contract import (
-    LMS_AUTHORING_CAPABILITY_NAMES,
     lms_authoring_connection_status,
 )
 from app.engine.multi_agent.turn_path_governor import TurnPathDecision
+from app.engine.tools.tool_capability_registry import (
+    approval_required_tool_names_for,
+    tool_capability_metadata_for_names,
+    tool_requires_inactive_connection,
+)
 
 
 TOOL_POLICY_SESSION_VERSION = "tool_policy_session.v1"
 TOOL_POLICY_STATE_KEY = "_tool_policy_session"
-
-HOST_ACTION_PREFIX = "host_action__"
-LMS_AUTHORING_PREFIX = "host_action__authoring__"
-POINTY_PREFIX = "tool_pointy_"
-WEATHER_TOOL_NAME = "tool_current_weather"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +50,7 @@ class ToolPolicySession:
     visible_tool_names: frozenset[str] = frozenset()
     connection_status: dict[str, dict[str, Any]] | None = None
     approval_required_tool_names: frozenset[str] = frozenset()
+    tool_capabilities: dict[str, dict[str, Any]] | None = None
     allow_agent_handoff: bool = True
     allow_rag_delegation: bool = False
 
@@ -133,6 +133,7 @@ class ToolPolicySession:
             "visible_tool_names": sorted(self.visible_tool_names),
             "connection_status": dict(self.connection_status or {}),
             "approval_required_tool_names": sorted(self.approval_required_tool_names),
+            "tool_capabilities": dict(self.tool_capabilities or {}),
             "allow_agent_handoff": self.allow_agent_handoff,
             "allow_rag_delegation": self.allow_rag_delegation,
         }
@@ -158,15 +159,16 @@ class ToolPolicySession:
             approval_required_tool_names=_frozen_name_set(
                 metadata.get("approval_required_tool_names")
             ),
+            tool_capabilities=_plain_tool_capabilities(metadata.get("tool_capabilities")),
             allow_agent_handoff=bool(metadata.get("allow_agent_handoff", True)),
             allow_rag_delegation=bool(metadata.get("allow_rag_delegation", False)),
         )
 
     def _requires_inactive_connection(self, tool_name: str) -> bool:
-        if _is_lms_authoring_tool(tool_name):
-            status = (self.connection_status or {}).get("lms_authoring") or {}
-            return not bool(status.get("active"))
-        return False
+        return tool_requires_inactive_connection(
+            tool_name,
+            self.connection_status or {},
+        )
 
 
 def build_tool_policy_session(
@@ -183,9 +185,7 @@ def build_tool_policy_session(
         _normalize_tool_name(name) for name in candidate_tool_names if _normalize_tool_name(name)
     )
     connection_status = _connection_status_for_turn(state=state, query=query)
-    approval_required_names = frozenset(
-        name for name in normalized_candidates if _requires_approval_token(name)
-    )
+    approval_required_names = approval_required_tool_names_for(normalized_candidates)
     return ToolPolicySession(
         version=TOOL_POLICY_SESSION_VERSION,
         path=decision.path,
@@ -200,6 +200,7 @@ def build_tool_policy_session(
         candidate_tool_names=normalized_candidates,
         connection_status=connection_status,
         approval_required_tool_names=approval_required_names,
+        tool_capabilities=tool_capability_metadata_for_names(normalized_candidates),
         allow_agent_handoff=decision.allow_agent_handoff,
         allow_rag_delegation=decision.allow_rag_delegation,
     )
@@ -335,18 +336,6 @@ def _host_action_connection_status(state: dict[str, Any] | None) -> dict[str, An
     }
 
 
-def _is_lms_authoring_tool(tool_name: str) -> bool:
-    if not tool_name.startswith(LMS_AUTHORING_PREFIX):
-        return False
-    action_name = tool_name.removeprefix(HOST_ACTION_PREFIX).replace("__", ".")
-    return action_name in LMS_AUTHORING_CAPABILITY_NAMES
-
-
-def _requires_approval_token(tool_name: str) -> bool:
-    normalized = tool_name.strip().lower()
-    return normalized.endswith("apply_lesson_patch") or normalized.endswith("apply_course_plan")
-
-
 def _normalize_tool_name(value: Any) -> str:
     return str(value or "").strip()
 
@@ -370,4 +359,14 @@ def _plain_connection_status(value: Any) -> dict[str, dict[str, Any]]:
     for key, item in value.items():
         if isinstance(item, dict):
             plain[str(key)] = dict(item)
+    return plain
+
+
+def _plain_tool_capabilities(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict):
+        return {}
+    plain: dict[str, dict[str, Any]] = {}
+    for key, item in value.items():
+        if isinstance(item, dict):
+            plain[_normalize_tool_name(key)] = dict(item)
     return plain
