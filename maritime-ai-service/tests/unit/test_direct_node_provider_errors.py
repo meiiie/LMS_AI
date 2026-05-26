@@ -69,6 +69,21 @@ def _base_state():
     }
 
 
+def _mark_lms_authoring_connected(state):
+    context = state.setdefault("context", {})
+    context["lms_connector_id"] = "maritime-lms"
+    context["lms_external_id"] = "teacher-1"
+    context["host_context"] = {
+        "host_type": "lms",
+        "connector_id": "maritime-lms",
+        "host_user_id": "teacher-1",
+    }
+    host_capabilities = context.get("host_capabilities")
+    if isinstance(host_capabilities, dict):
+        host_capabilities["host_type"] = "lms"
+        host_capabilities["connector_id"] = "maritime-lms"
+
+
 @pytest.mark.asyncio
 async def test_direct_response_node_uses_pointy_fast_path_without_llm():
     state = _base_state()
@@ -163,6 +178,7 @@ async def test_direct_response_node_runs_document_preview_tool_before_llm():
             },
         }
     )
+    _mark_lms_authoring_connected(state)
 
     captured: dict[str, object] = {}
 
@@ -260,6 +276,7 @@ async def test_direct_response_node_rebinds_document_preview_tool_when_collectio
             },
         }
     )
+    _mark_lms_authoring_connected(state)
 
     captured: dict[str, object] = {}
 
@@ -359,6 +376,7 @@ async def test_direct_response_node_preflights_document_preview_before_tool_coll
             },
         }
     )
+    _mark_lms_authoring_connected(state)
 
     captured: dict[str, object] = {}
 
@@ -473,6 +491,7 @@ async def test_direct_response_node_preflights_document_course_plan_for_real_tea
             },
         }
     )
+    _mark_lms_authoring_connected(state)
 
     captured: dict[str, object] = {}
 
@@ -575,6 +594,7 @@ async def test_direct_response_node_preflights_short_teacher_bai_giang_request()
             },
         }
     )
+    _mark_lms_authoring_connected(state)
 
     captured: dict[str, object] = {}
 

@@ -14,6 +14,13 @@ DOCUMENT_PREVIEW_CAPABILITY_NAMES = {
     "authoring.generate_course_from_document",
 }
 
+LMS_AUTHORING_CAPABILITY_NAMES = {
+    "authoring.preview_lesson_patch",
+    "authoring.generate_course_from_document",
+    "authoring.apply_lesson_patch",
+    "authoring.apply_course_plan",
+}
+
 _COURSE_REQUEST_BLOCKERS = (
     "preview_lesson_patch",
     "lesson patch",
@@ -129,6 +136,138 @@ def as_plain_mapping(value: Any) -> dict[str, Any]:
         except Exception:
             return {}
     return {}
+
+
+def _first_plain_mapping(*values: Any) -> dict[str, Any]:
+    for value in values:
+        mapping = as_plain_mapping(value)
+        if mapping:
+            return mapping
+    return {}
+
+
+def _plain_state_context(state: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(state, dict):
+        return {}
+    return as_plain_mapping(state.get("context"))
+
+
+def _normalized_connection_value(value: Any) -> str:
+    return str(getattr(value, "value", value) or "").strip()
+
+
+def _normalized_connection_key(value: Any) -> str:
+    return _normalized_connection_value(value).lower()
+
+
+def lms_authoring_connection_status(
+    state: dict[str, Any] | None,
+    ctx: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return fail-closed LMS authoring connection status for this turn.
+
+    Host capabilities only describe what a page can do. For LMS authoring
+    actions, Wiii also needs an active LMS host session: LMS host type,
+    connector id, and a linked host/user identity. This mirrors external
+    integration gating: unconnected services should not expose live tools.
+    """
+
+    ctx = as_plain_mapping(ctx)
+    state_context = _plain_state_context(state)
+    state_map = state if isinstance(state, dict) else {}
+
+    host_context = _first_plain_mapping(
+        ctx.get("host_context"),
+        state_context.get("host_context"),
+        state_map.get("host_context"),
+    )
+    host_capabilities = _first_plain_mapping(
+        ctx.get("host_capabilities"),
+        state_context.get("host_capabilities"),
+        state_map.get("host_capabilities"),
+    )
+
+    host_type = _normalized_connection_key(
+        host_context.get("host_type") or host_capabilities.get("host_type")
+    )
+    if host_type != "lms":
+        return {
+            "active": False,
+            "reason": "missing_lms_host",
+            "host_type": host_type or None,
+        }
+
+    connector_id = _normalized_connection_value(
+        host_context.get("connector_id")
+        or host_capabilities.get("connector_id")
+        or ctx.get("lms_connector_id")
+        or state_context.get("lms_connector_id")
+    )
+    if not connector_id:
+        return {
+            "active": False,
+            "reason": "missing_lms_connector",
+            "host_type": host_type,
+        }
+
+    host_user_id = _normalized_connection_value(
+        host_context.get("host_user_id")
+        or ctx.get("lms_external_id")
+        or state_context.get("lms_external_id")
+    )
+    if not host_user_id:
+        return {
+            "active": False,
+            "reason": "missing_lms_identity",
+            "host_type": host_type,
+            "connector_id": connector_id,
+        }
+
+    return {
+        "active": True,
+        "reason": "active",
+        "host_type": host_type,
+        "connector_id": connector_id,
+        "host_user_id_present": True,
+    }
+
+
+def has_active_lms_authoring_connection(
+    state: dict[str, Any] | None,
+    ctx: dict[str, Any] | None,
+) -> bool:
+    return bool(lms_authoring_connection_status(state, ctx).get("active"))
+
+
+def filter_lms_authoring_capability_tools(
+    capabilities_tools: list[dict[str, Any]],
+    *,
+    state: dict[str, Any] | None,
+    ctx: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Drop LMS authoring tools when the current turn is not connected to LMS."""
+
+    if not capabilities_tools:
+        return []
+
+    lms_authoring_tools = [
+        tool
+        for tool in capabilities_tools
+        if str(tool.get("name") or "").strip().lower()
+        in LMS_AUTHORING_CAPABILITY_NAMES
+    ]
+    if not lms_authoring_tools:
+        return capabilities_tools
+
+    if has_active_lms_authoring_connection(state, ctx):
+        return capabilities_tools
+
+    return [
+        tool
+        for tool in capabilities_tools
+        if str(tool.get("name") or "").strip().lower()
+        not in LMS_AUTHORING_CAPABILITY_NAMES
+    ]
 
 
 def uploaded_document_attachments_from_context(ctx: dict[str, Any]) -> list[dict[str, Any]]:

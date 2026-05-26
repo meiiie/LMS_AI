@@ -336,6 +336,7 @@ class TestGenerateHostActionTools:
                         "action": "authoring.generate_course_from_document",
                         "data": {
                             "preview_token": "course-preview-1",
+                            "approval_token": "course-approval-1",
                             "preview_kind": "course_plan",
                         },
                     }
@@ -347,3 +348,45 @@ class TestGenerateHostActionTools:
 
         assert result["status"] == "action_requested"
         assert result["params"]["preview_token"] == "course-preview-1"
+        assert result["params"]["approval_token"] == "course-approval-1"
+
+    def test_lms_apply_requires_approval_token_after_preview(self):
+        from app.engine.context.action_tools import generate_host_action_tools
+
+        tools = generate_host_action_tools(
+            [
+                {
+                    "name": "authoring.apply_lesson_patch",
+                    "description": "Apply a confirmed lesson patch",
+                    "roles": ["teacher"],
+                    "requires_confirmation": True,
+                    "mutates_state": True,
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "preview_token": {"type": "string"},
+                            "approval_token": {"type": "string"},
+                        },
+                    },
+                }
+            ],
+            "teacher",
+            event_bus_id="bus-1",
+            approval_context={
+                "query": "dong y ap dung",
+                "host_action_feedback": {
+                    "last_action_result": {
+                        "action": "authoring.preview_lesson_patch",
+                        "data": {
+                            "preview_token": "lesson-preview-1",
+                            "preview_kind": "lesson_patch",
+                        },
+                    }
+                },
+            },
+        )
+
+        result = json.loads(tools[0].invoke({}))
+
+        assert result["status"] == "approval_token_required"
+        assert result["expected_preview_kind"] == "lesson_patch"

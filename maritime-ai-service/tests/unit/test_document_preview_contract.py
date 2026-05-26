@@ -5,7 +5,9 @@ from app.engine.multi_agent.document_preview_contract import (
     DOC_PREVIEW_HOST_ACTION_TOOL,
     document_preview_forced_tool_choice,
     extract_document_preview_capabilities,
+    filter_lms_authoring_capability_tools,
     has_document_preview_host_action_tool,
+    lms_authoring_connection_status,
     has_uploaded_document_context,
     looks_uploaded_document_course_request,
     looks_uploaded_document_lesson_preview_request,
@@ -95,3 +97,69 @@ def test_extract_document_preview_capabilities_from_state_and_context():
         "authoring.preview_lesson_patch",
         "authoring.generate_course_from_document",
     ]
+
+
+def test_lms_authoring_connection_requires_host_connector_and_identity():
+    state = {
+        "context": {
+            "lms_connector_id": "maritime-lms",
+            "lms_external_id": "teacher-1",
+            "host_context": {
+                "host_type": "lms",
+                "connector_id": "maritime-lms",
+                "host_user_id": "teacher-1",
+            },
+        },
+        "host_capabilities": {
+            "host_type": "lms",
+            "connector_id": "maritime-lms",
+            "tools": [{"name": "authoring.preview_lesson_patch"}],
+        },
+    }
+
+    status = lms_authoring_connection_status(state, state["context"])
+
+    assert status["active"] is True
+    assert status["connector_id"] == "maritime-lms"
+
+
+def test_filter_lms_authoring_capabilities_drops_tools_without_connection():
+    capabilities = [
+        {"name": "authoring.preview_lesson_patch"},
+        {"name": "authoring.apply_lesson_patch"},
+        {"name": "ui.highlight"},
+    ]
+
+    filtered = filter_lms_authoring_capability_tools(
+        capabilities,
+        state={"context": {}},
+        ctx={},
+    )
+
+    assert filtered == [{"name": "ui.highlight"}]
+
+
+def test_filter_lms_authoring_capabilities_keeps_tools_when_connected():
+    capabilities = [
+        {"name": "authoring.preview_lesson_patch"},
+        {"name": "authoring.apply_lesson_patch"},
+    ]
+    state = {
+        "context": {
+            "host_context": {
+                "host_type": "lms",
+                "connector_id": "maritime-lms",
+                "host_user_id": "teacher-1",
+            },
+        },
+        "host_capabilities": {
+            "host_type": "lms",
+            "connector_id": "maritime-lms",
+        },
+    }
+
+    assert filter_lms_authoring_capability_tools(
+        capabilities,
+        state=state,
+        ctx=state["context"],
+    ) == capabilities

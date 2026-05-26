@@ -60,6 +60,7 @@ def _extract_latest_preview(approval_context: dict[str, Any] | None) -> dict[str
 
     return {
         "preview_token": preview_token,
+        "approval_token": str(data.get("approval_token") or "").strip(),
         "preview_kind": str(data.get("preview_kind") or "").strip(),
         "action": str(last_result.get("action") or "").strip(),
         "summary": str(last_result.get("summary") or "").strip(),
@@ -77,6 +78,11 @@ def _expected_preview_kind(action_name: str) -> str | None:
     if normalized.endswith("apply_quiz"):
         return "quiz_publish"
     return None
+
+
+def _action_requires_approval_token(action_name: str) -> bool:
+    normalized = action_name.strip().lower()
+    return normalized.endswith("apply_lesson_patch") or normalized.endswith("apply_course_plan")
 
 
 def _format_input_contract(action_name: str, action_def: dict[str, Any]) -> str:
@@ -161,6 +167,13 @@ def generate_host_action_tools(
                             preview_token = str(latest_preview.get("preview_token") or "").strip()
                             if preview_token:
                                 params["preview_token"] = preview_token
+                    approval_token = str(params.get("approval_token") or "").strip()
+                    if not approval_token and latest_preview:
+                        latest_kind = str(latest_preview.get("preview_kind") or "").strip()
+                        if not expected_preview_kind or latest_kind == expected_preview_kind:
+                            approval_token = str(latest_preview.get("approval_token") or "").strip()
+                            if approval_token:
+                                params["approval_token"] = approval_token
 
                     if not explicit_confirmation:
                         return json.dumps({
@@ -176,6 +189,15 @@ def generate_host_action_tools(
                             "action": name,
                             "params": params,
                             "message": "A matching preview must exist before apply/publish can run.",
+                            "expected_preview_kind": expected_preview_kind,
+                        }, ensure_ascii=False)
+
+                    if _action_requires_approval_token(name) and not approval_token:
+                        return json.dumps({
+                            "status": "approval_token_required",
+                            "action": name,
+                            "params": params,
+                            "message": "A host-issued approval_token is required before LMS authoring apply can run.",
                             "expected_preview_kind": expected_preview_kind,
                         }, ensure_ascii=False)
 

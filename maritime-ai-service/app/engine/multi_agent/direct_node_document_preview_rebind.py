@@ -9,6 +9,7 @@ from app.engine.multi_agent.document_preview_contract import (
     as_plain_mapping as _as_plain_direct_mapping,
     document_preview_forced_tool_choice as _document_preview_forced_tool_choice,
     extract_document_preview_capabilities as _extract_document_preview_capabilities,
+    filter_lms_authoring_capability_tools as _filter_lms_authoring_capability_tools,
     has_document_preview_host_action_tool as _has_document_preview_host_action_tool,
 )
 
@@ -55,7 +56,11 @@ def _rebind_document_preview_host_action_tool(
             "tool_count": len(tools),
         }
 
-    preview_capabilities = _extract_document_preview_capabilities(state, ctx)
+    preview_capabilities = _filter_lms_authoring_capability_tools(
+        _extract_document_preview_capabilities(state, ctx),
+        state=state,
+        ctx=ctx,
+    )
     debug: dict[str, Any] = {
         "status": "missing_capability",
         "tool_count": len(tools),

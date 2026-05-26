@@ -23,6 +23,11 @@ flow before the teacher has reviewed a preview.
 
 Use the host action preview/apply lane for LMS authoring:
 
+- Wiii only exposes LMS authoring preview/apply actions when the current turn has
+  an active LMS host connection: `host_type="lms"`, a concrete `connector_id`,
+  and a linked LMS/host user identity. Uploaded documents in standalone Wiii may
+  still produce a draft/export artifact, but must not bind LMS preview/apply
+  tools.
 - Preview action: `authoring.preview_lesson_patch`
 - Apply action: `authoring.apply_lesson_patch`
 - Preview kind: `lesson_patch`
