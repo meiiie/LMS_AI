@@ -18,18 +18,28 @@ _HUNGER_CHATTER_MARKERS = (
 )
 
 _HUNGER_CHATTER_TASK_BLOCKERS = (
+    "audit",
     "bao nhieu",
+    "bat ",
     "canvas",
     "chart",
+    "chay",
     "code",
     "css",
+    "deploy",
+    "docker",
     "excel",
     "file",
+    "fix",
     "giai thich",
     "html",
     "huong dan",
     "javascript",
+    "kiem tra",
     "la gi",
+    "log",
+    "luong",
+    "model",
     "mo phong",
     "pdf",
     "phan tich",
@@ -38,6 +48,9 @@ _HUNGER_CHATTER_TASK_BLOCKERS = (
     "react",
     "search",
     "so sanh",
+    "sua",
+    "tat ",
+    "test",
     "tao anh",
     "the nao",
     "thay doi",
@@ -49,6 +62,31 @@ _HUNGER_CHATTER_TASK_BLOCKERS = (
     "word",
 )
 
+_CHATTER_FALSE_POSITIVE_BLOCKERS = (
+    "du an",
+    "do an",
+    "phuong an",
+    "vu an",
+    "ban an",
+)
+
+_SOCIAL_STATUS_CHATTER_MARKERS = (
+    "an com roi",
+    "an roi",
+    "da an",
+    "moi an",
+    "vua an",
+    "no roi",
+    "trua nay an",
+    "toi nay an",
+    "sang nay an",
+    "uong nuoc roi",
+    "moi uong nuoc",
+    "vua uong nuoc",
+    "di ngu roi",
+    "ngu roi",
+)
+
 
 def _looks_hunger_chatter_turn(normalized_query: str) -> bool:
     folded = _fold_direct_text(normalized_query)
@@ -56,12 +94,30 @@ def _looks_hunger_chatter_turn(normalized_query: str) -> bool:
         return False
     if any(marker in folded for marker in ("hay nho", "ghi nho", "nho rang", "luu lai")):
         return False
+    if any(marker in folded for marker in _CHATTER_FALSE_POSITIVE_BLOCKERS):
+        return False
     if any(marker in folded for marker in _HUNGER_CHATTER_TASK_BLOCKERS):
         return False
     tokens = [token for token in folded.split() if token]
     if len(tokens) > 40:
         return False
     return any(marker in folded for marker in _HUNGER_CHATTER_MARKERS)
+
+
+def _looks_social_status_chatter_turn(normalized_query: str) -> bool:
+    folded = _fold_direct_text(normalized_query)
+    if not folded:
+        return False
+    if any(marker in folded for marker in ("hay nho", "ghi nho", "nho rang", "luu lai")):
+        return False
+    if any(marker in folded for marker in _CHATTER_FALSE_POSITIVE_BLOCKERS):
+        return False
+    if any(marker in folded for marker in _HUNGER_CHATTER_TASK_BLOCKERS):
+        return False
+    tokens = [token for token in folded.split() if token]
+    if len(tokens) > 12:
+        return False
+    return any(marker in folded for marker in _SOCIAL_STATUS_CHATTER_MARKERS)
 
 
 def _build_hunger_chatter_answer(_query: str) -> str:
@@ -88,4 +144,26 @@ def _build_hunger_chatter_thinking(_query: str) -> str:
     return (
         "Cậu nói rất ngắn, nhưng mình nghe được một nhu cầu rất thật: bụng đói thì mọi thứ cũng tụt pin theo. "
         "Mình không cần làm màu ở đây; chỉ cần kéo cậu về một việc nhỏ có ích ngay, rồi ở lại cùng cậu tính tiếp."
+    )
+
+
+def _build_social_status_chatter_answer(_query: str) -> str:
+    folded = _fold_direct_text(_query)
+    if any(marker in folded for marker in ("ngu roi", "di ngu roi")):
+        return (
+            "Ổn rồi, vậy mình giữ nhịp nhẹ thôi. Khi cậu quay lại, mình sẽ tiếp tục từ đúng đoạn đang làm."
+        )
+    if any(marker in folded for marker in ("uong nuoc", "moi uong", "vua uong")):
+        return (
+            "Tốt rồi, có nước vào người thì đỡ hụt năng lượng hơn. Mình ở đây; cậu muốn mình tiếp tục phần nào?"
+        )
+    return (
+        "Ổn rồi, vậy là có sức hơn chút. Mình ở đây; cậu muốn nói tiếp vài câu hay quay lại phần đang làm của Wiii?"
+    )
+
+
+def _build_social_status_chatter_thinking(_query: str) -> str:
+    return (
+        "Đây là một cập nhật xã giao ngắn, không có yêu cầu tra cứu, công cụ, visual, code hay tài liệu. "
+        "Wiii đáp trực tiếp để tránh gọi provider chậm và tránh tạo câu trả lời cụt không có ích."
     )
