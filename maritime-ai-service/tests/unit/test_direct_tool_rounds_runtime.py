@@ -108,6 +108,19 @@ def test_explicit_web_search_returns_template_after_fetch_evidence():
     ) is False
 
 
+def test_clean_forced_web_search_query_strips_vietnamese_discourse_marker():
+    from app.engine.multi_agent.direct_web_search_policy import (
+        _clean_forced_web_search_query,
+    )
+
+    cleaned = _clean_forced_web_search_query(
+        "ý là thời tiết nóng đó. Bạn biết nay bao độ không"
+    )
+
+    assert cleaned == "thời tiết nóng đó. Bạn biết nay bao độ không"
+    assert not cleaned.lower().startswith("ý là")
+
+
 def test_build_direct_post_tool_search_template_response_for_forced_web(monkeypatch):
     from app.engine.multi_agent import direct_search_template_runtime as runtime
 
@@ -239,6 +252,14 @@ async def test_execute_forced_web_search_shortcut_emits_events(monkeypatch):
         "thinking_delta",
         "thinking_end",
     ]
+    thinking_text = " ".join(
+        str(event.get("content", ""))
+        for event in emitted
+        if event.get("type") == "thinking_delta"
+    )
+    assert "@web-search" not in thinking_text
+    assert "tool_web_search" not in thinking_text
+    assert "synthesizer" not in thinking_text.lower()
     assert tool_events[0]["type"] == "call"
     assert tool_events[0]["name"] == "tool_web_search"
     assert tool_events[1]["type"] == "result"

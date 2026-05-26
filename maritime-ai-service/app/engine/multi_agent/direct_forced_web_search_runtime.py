@@ -20,15 +20,14 @@ from app.engine.reasoning import record_thinking_snapshot
 
 
 _FORCED_WEB_SEARCH_FALLBACK = (
-    "Mình đã gọi web-search, nhưng chưa lấy được nguồn đủ rõ "
+    "Mình đã thử tra cứu web, nhưng chưa lấy được nguồn đủ rõ "
     "để tổng hợp chắc tay cho lượt này. Cậu thử đổi từ khóa "
     "hẹp hơn một chút nhé."
 )
 _FORCED_WEB_SEARCH_THINKING = (
-    "Mình nhận đây là lượt @web-search rõ ràng, nên ưu tiên gọi "
-    "tool_web_search trước khi viết câu trả lời. Mình chỉ tổng hợp "
-    "từ URL/snippet tool trả về; nếu synthesizer chậm hoặc rỗng thì "
-    "dùng fallback có nguồn thay vì trả lời bằng lời xin lỗi rỗng."
+    "Mình sẽ tra cứu web bằng truy vấn đã làm sạch, đọc URL/snippet trả về, "
+    "rồi chỉ tổng hợp phần có nguồn. Nếu kết quả quá mỏng, mình sẽ nói rõ "
+    "thay vì đoán."
 )
 
 

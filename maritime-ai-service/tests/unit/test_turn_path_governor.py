@@ -42,6 +42,30 @@ def test_turn_path_governor_narrows_visual_app_to_required_tool():
     assert decision.should_keep_tool_name("tool_pointy_show") is False
 
 
+def test_turn_path_governor_routes_weather_to_weather_tool_only():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(
+            normalized_query="y la thoi tiet nong do ban biet nay bao do khong",
+            needs_weather_lookup=True,
+            needs_web_search=True,
+            pointy_requested=True,
+            suppress_pointy_for_output=True,
+        )
+    )
+
+    assert decision.path == "weather_lookup"
+    assert decision.force_tools is True
+    assert decision.allow_all_tools is False
+    assert decision.should_keep_tool_name("tool_current_weather") is True
+    assert decision.should_keep_tool_name("tool_web_search") is False
+    assert decision.should_keep_tool_name("tool_pointy_show") is False
+
+
 def test_turn_path_filter_keeps_only_lms_document_preview_tools():
     from app.engine.multi_agent.turn_path_governor import (
         TurnPathSignals,
@@ -101,3 +125,31 @@ def test_collect_direct_tools_keeps_daily_status_off_search_path():
     assert tools == []
     assert force_tools is False
     assert state["_turn_path_decision"]["path"] == "casual_chat"
+
+
+def test_collect_direct_tools_routes_weather_followup_to_weather_tool():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        "ý là thời tiết nóng đó. Bạn biết nay bao độ không",
+        user_role="student",
+        state=state,
+    )
+    names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
+
+    assert force_tools is True
+    assert state["_turn_path_decision"]["path"] == "weather_lookup"
+    assert names == {"tool_current_weather"}
+
+
+def test_direct_required_tool_names_weather_prefers_weather_over_web():
+    from app.engine.multi_agent.tool_collection import _direct_required_tool_names
+
+    required = _direct_required_tool_names(
+        "ý là thời tiết nóng đó. Bạn biết nay bao độ không",
+        user_role="student",
+    )
+
+    assert "tool_current_weather" in required
+    assert "tool_web_search" not in required
