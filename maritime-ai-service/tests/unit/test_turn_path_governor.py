@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 
 def test_turn_path_governor_marks_plain_greeting_as_no_tool_chat():
     from app.engine.multi_agent.turn_path_governor import (
@@ -16,17 +18,25 @@ def test_turn_path_governor_marks_plain_greeting_as_no_tool_chat():
     assert decision.force_tools is False
 
 
-def test_turn_path_governor_marks_short_social_followup_as_no_tool_chat():
+@pytest.mark.parametrize(
+    "query",
+    [
+        "sao lai z",
+        "sao lo lung ?",
+        "the ngu di",
+    ],
+)
+def test_turn_path_governor_marks_short_social_followup_as_no_tool_chat(query):
     from app.engine.multi_agent.turn_path_governor import (
         TurnPathSignals,
         resolve_turn_path_decision,
     )
 
-    for query in ("sao lai z", "sao lo lung ?", "the ngu di"):
-        decision = resolve_turn_path_decision(TurnPathSignals(normalized_query=query))
-        assert decision.path == "casual_chat"
-        assert decision.bind_tools is False
-        assert decision.force_tools is False
+    decision = resolve_turn_path_decision(TurnPathSignals(normalized_query=query))
+
+    assert decision.path == "casual_chat"
+    assert decision.bind_tools is False
+    assert decision.force_tools is False
 
 
 def test_turn_path_governor_does_not_treat_task_query_as_social_followup():
@@ -161,7 +171,6 @@ def test_collect_direct_tools_keeps_short_social_followup_off_tool_path():
         "context": {},
         "routing_metadata": {
             "intent": "unknown",
-            "method": "rule_based_timeout",
         },
     }
     tools, force_tools = module._collect_direct_tools(

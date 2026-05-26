@@ -110,6 +110,7 @@ def resolve_direct_node_turn_policy(
         and (
             is_chatter_fast_path
             or is_social_fast_path
+            or is_social_followup_chatter
             or (
                 routing_intent == "social"
                 and short_token_count <= 6
