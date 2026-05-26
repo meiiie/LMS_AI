@@ -18,6 +18,7 @@ TurnPathName = Literal[
     "host_ui_navigation",
     "pointy_guidance",
     "lms_document_preview",
+    "weather_lookup",
     "web_search",
     "datetime_lookup",
     "lms_query",
@@ -38,6 +39,7 @@ LMS_DOCUMENT_PREVIEW_TOOL_NAMES = frozenset(
         "host_action__authoring__preview_lesson_patch",
     }
 )
+WEATHER_TOOL_NAMES = frozenset({"tool_current_weather"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +55,7 @@ class TurnPathSignals:
     host_ui_navigation: bool = False
     looks_document_preview: bool = False
     looks_reasoning_safety_meta: bool = False
+    needs_weather_lookup: bool = False
     needs_web_search: bool = False
     needs_datetime: bool = False
     needs_news_search: bool = False
@@ -174,6 +177,27 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             allow_agent_handoff=False,
         )
 
+    if signals.needs_weather_lookup and not signals.web_search_forced:
+        return TurnPathDecision(
+            path="weather_lookup",
+            reason="weather_current_conditions_request",
+            force_tools=True,
+            allow_all_tools=False,
+            allowed_tool_names=WEATHER_TOOL_NAMES,
+            forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
+            allow_agent_handoff=False,
+        )
+
+    if signals.needs_maritime_search and not signals.web_search_forced:
+        return TurnPathDecision(
+            path="maritime_search",
+            reason="maritime_domain_lookup",
+            force_tools=True,
+            allow_rag_delegation=True,
+            forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
+            allow_agent_handoff=False,
+        )
+
     if signals.web_search_forced or signals.needs_web_search or signals.needs_news_search or signals.needs_legal_search:
         return TurnPathDecision(
             path="web_search",
@@ -209,16 +233,6 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
         return TurnPathDecision(
             path="knowledge_search",
             reason="explicit_internal_knowledge_lookup",
-            force_tools=True,
-            allow_rag_delegation=True,
-            forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
-            allow_agent_handoff=False,
-        )
-
-    if signals.needs_maritime_search:
-        return TurnPathDecision(
-            path="maritime_search",
-            reason="maritime_domain_lookup",
             force_tools=True,
             allow_rag_delegation=True,
             forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
@@ -377,6 +391,7 @@ def _has_tool_or_output_signal(signals: TurnPathSignals) -> bool:
             signals.host_ui_navigation,
             signals.looks_document_preview,
             signals.looks_reasoning_safety_meta,
+            signals.needs_weather_lookup,
             signals.needs_web_search,
             signals.needs_datetime,
             signals.needs_news_search,

@@ -68,6 +68,22 @@ def _fold_tool_round_text(value: str) -> str:
     return " ".join(stripped.lower().replace("đ", "d").split())
 
 
+def _strip_vietnamese_discourse_prefix(text: str) -> str:
+    cleaned = str(text or "").strip()
+    prefix_pattern = re.compile(
+        r"(?i)^\s*(?:"
+        r"ý\s+là|y\s+la|ý\s+mình\s+là|y\s+minh\s+la|"
+        r"ý\s+tôi\s+là|y\s+toi\s+la|tức\s+là|tuc\s+la|"
+        r"nói\s+chung\s+là|noi\s+chung\s+la"
+        r")\s+"
+    )
+    previous = None
+    while cleaned and previous != cleaned:
+        previous = cleaned
+        cleaned = prefix_pattern.sub("", cleaned).strip()
+    return cleaned
+
+
 def _looks_explicit_web_search_query(query: str) -> bool:
     folded = _fold_tool_round_text(query)
     if not folded:
@@ -163,6 +179,7 @@ def _clean_forced_web_search_query(query: str) -> str:
     """Convert an explicit @web-search turn into a clean tool query."""
     text = str(query or "").strip()
     text = re.sub(r"(?i)@web-search\b", "", text).strip()
+    text = _strip_vietnamese_discourse_prefix(text)
     text = re.split(
         r"(?i)\b(?:trả\s+lời|tra\s+loi|answer|respond|reply)\b",
         text,

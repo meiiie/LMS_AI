@@ -38,6 +38,22 @@ _WEB_INTENT_KEYWORDS: list[str] = [
     "cuc hang hai",
 ]
 
+_WEATHER_LOOKUP_KEYWORDS: tuple[str, ...] = (
+    "thoi tiet",
+    "nhiet do",
+    "bao do",
+    "may do",
+    "nong khong",
+    "lanh khong",
+    "mua khong",
+    "co mua",
+    "du bao",
+    "do am",
+    "uv",
+    "weather",
+    "forecast",
+)
+
 # Keywords that signal the query needs current datetime
 _DATETIME_INTENT_KEYWORDS: list[str] = [
     "ngay may", "may gio", "hom nay la ngay",
@@ -275,6 +291,14 @@ def _needs_web_search(query: str) -> bool:
     """Detect if query requires web search (diacritics-insensitive)."""
     normalized = _normalize_for_intent(query)
     return any(kw in normalized for kw in _WEB_INTENT_KEYWORDS)
+
+
+def _needs_weather_lookup(query: str) -> bool:
+    """Detect current weather/temperature questions as their own tool lane."""
+    normalized = _normalize_for_intent(query)
+    if not normalized:
+        return False
+    return any(kw in normalized for kw in _WEATHER_LOOKUP_KEYWORDS)
 
 
 def _needs_datetime(query: str) -> bool:

@@ -306,10 +306,8 @@ class TestForcedToolChoice:
             from app.engine.multi_agent.graph import direct_response_node
             await direct_response_node(state)
 
-            # Normal chat: bind_tools called once (llm_auto = llm_with_tools)
-            mock_llm.bind_tools.assert_called_once()
-            call_kwargs = mock_llm.bind_tools.call_args
-            assert "tool_choice" not in (call_kwargs.kwargs or {})
+            # Path governor contract: plain greetings stay off the tool-schema path.
+            mock_llm.bind_tools.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_datetime_query_forces_tool_choice(self):

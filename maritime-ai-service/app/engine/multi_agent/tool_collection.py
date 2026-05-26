@@ -49,6 +49,10 @@ def _needs_web_search(query: str) -> bool:
     return _load_attr("app.engine.multi_agent.direct_intent", "_needs_web_search")(query)
 
 
+def _needs_weather_lookup(query: str) -> bool:
+    return _load_attr("app.engine.multi_agent.direct_intent", "_needs_weather_lookup")(query)
+
+
 def _needs_datetime(query: str) -> bool:
     return _load_attr("app.engine.multi_agent.direct_intent", "_needs_datetime")(query)
 
@@ -547,6 +551,7 @@ def _resolve_direct_turn_path_decision(
         host_ui_navigation=host_ui_navigation,
         looks_document_preview=_looks_like_document_preview_request(query, state),
         looks_reasoning_safety_meta=_looks_reasoning_safety_meta_turn(query),
+        needs_weather_lookup=_safe_intent_flag(_needs_weather_lookup, query),
         needs_web_search=_safe_intent_flag(_needs_web_search, query),
         needs_datetime=_safe_intent_flag(_needs_datetime, query),
         needs_news_search=_safe_intent_flag(_needs_news_search, query),
@@ -712,8 +717,18 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         # in prompt regularly times out (>45s). Bind only what query actually
         # needs. Always include datetime + general web_search + fetch_url
         # (cheap escalation). Specialty tools only when intent matches.
-        _direct_tools = [*_direct_tools, tool_current_datetime,
-                         tool_web_search, tool_fetch_url]
+        _direct_tools = [
+            *_direct_tools,
+            tool_current_datetime,
+            tool_web_search,
+            tool_fetch_url,
+        ]
+        if turn_path_decision.path == "weather_lookup":
+            tool_current_weather = _load_attr(
+                "app.engine.tools.utility_tools",
+                "tool_current_weather",
+            )
+            _direct_tools.append(tool_current_weather)
         # v2.8: force-bind via @web-search mention overrides news/legal gates.
         web_search_forced = "web-search" in force_skills
         if _needs_news_search(query) or web_search_forced:
@@ -1150,13 +1165,15 @@ def _direct_required_tool_names(query: str, user_role: str = "student") -> list[
     normalized = _normalize_for_intent(query)
     visual_decision = resolve_visual_intent(query)
 
+    if _needs_weather_lookup(query):
+        required.append("tool_current_weather")
     if _needs_datetime(query):
         required.append("tool_current_datetime")
     if _needs_news_search(query):
         required.append("tool_search_news")
     if _needs_legal_search(query):
         required.append("tool_search_legal")
-    if _needs_web_search(query):
+    if _needs_web_search(query) and not _needs_weather_lookup(query):
         if any(
             signal in normalized
             for signal in ("imo", "shipping", "maritime", "hang hai", "vinamarine", "cuc hang hai")

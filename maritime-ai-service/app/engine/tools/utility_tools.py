@@ -6,9 +6,12 @@ These tools provide calculation, datetime, and unit conversion capabilities.
 """
 
 import ast
+import asyncio
 import logging
 import math
 import operator
+import re
+import threading
 from datetime import datetime, timezone, timedelta
 
 from app.engine.tools.native_tool import tool
@@ -170,6 +173,111 @@ def tool_current_datetime() -> str:
     )
 
 
+_WEATHER_CITY_NOISE_MARKERS = (
+    "thoi tiet",
+    "nhiet do",
+    "bao do",
+    "may do",
+    "hom nay",
+    "nay",
+    "bay gio",
+    "hien tai",
+    "weather",
+    "forecast",
+)
+
+
+def _fold_weather_text(value: str) -> str:
+    import unicodedata
+
+    normalized = unicodedata.normalize("NFKD", str(value or "").lower())
+    stripped = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return " ".join(stripped.replace("đ", "d").split())
+
+
+def _clean_weather_city(city: str) -> str:
+    text = str(city or "").strip()
+    text = re.sub(
+        r"(?i)^\s*(?:ý\s+là|y\s+la|ý\s+mình\s+là|y\s+minh\s+la|tức\s+là|tuc\s+la)\s+",
+        "",
+        text,
+    ).strip(" .,:;!?-")
+    folded = _fold_weather_text(text)
+    if not text or len(text) > 80 or "?" in text:
+        return ""
+    if any(marker in folded for marker in _WEATHER_CITY_NOISE_MARKERS):
+        return ""
+    return text
+
+
+def _run_weather_async(factory):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(factory())
+
+    result: dict[str, object] = {}
+
+    def runner() -> None:
+        try:
+            result["value"] = asyncio.run(factory())
+        except BaseException as exc:  # noqa: BLE001
+            result["error"] = exc
+
+    thread = threading.Thread(target=runner, name="weather_tool", daemon=True)
+    thread.start()
+    thread.join()
+    error = result.get("error")
+    if isinstance(error, BaseException):
+        raise error
+    return result.get("value")
+
+
+@tool(description=(
+    "Lấy thời tiết hiện tại từ provider thời tiết đã cấu hình. "
+    "Chỉ truyền city khi người dùng nêu rõ địa điểm; nếu không, "
+    "dùng thành phố mặc định."
+))
+def tool_current_weather(city: str = "") -> str:
+    """Get current weather for the configured/default city."""
+    from app.core.config import settings
+    from app.engine.living_agent.weather_service import get_weather_service
+
+    resolved_city = _clean_weather_city(city) or settings.living_agent_weather_city
+    if not resolved_city:
+        return "Bạn muốn xem nhiệt độ ở thành phố nào?"
+
+    if (
+        not settings.living_agent_enable_weather
+        or not settings.living_agent_weather_api_key
+    ):
+        return (
+            "Wiii chưa có kết nối thời tiết trực tiếp, nên không nên đoán nhiệt độ. "
+            f"Thành phố mặc định hiện đang cấu hình là {resolved_city}. "
+            "Hãy bật cấu hình thời tiết hoặc cho mình địa điểm để mình xử lý "
+            "qua kênh dữ liệu phù hợp."
+        )
+
+    service = get_weather_service()
+    try:
+        weather = _run_weather_async(lambda: service.get_current(resolved_city))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[WEATHER] Current weather tool failed: %s", exc)
+        return (
+            f"Mình chưa lấy được thời tiết hiện tại cho {resolved_city}. "
+            "Bạn thử lại sau một chút nhé."
+        )
+
+    if not weather:
+        return (
+            f"Mình chưa lấy được thời tiết hiện tại cho {resolved_city}. "
+            "Không có dữ liệu đủ chắc để chốt nhiệt độ."
+        )
+
+    now = datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M UTC+7")
+    return f"Cập nhật {now}: {service.format_current_vi(weather)}"
+
+
 # =============================================================================
 # Initialization
 # =============================================================================
@@ -192,4 +300,11 @@ def init_utility_tools():
         description="Current date/time in Vietnam"
     )
 
-    logger.info("Utility tools registered: calculator, current_datetime")
+    registry.register(
+        tool_current_weather,
+        category=ToolCategory.UTILITY,
+        access=ToolAccess.READ,
+        description="Current weather from configured weather provider"
+    )
+
+    logger.info("Utility tools registered: calculator, current_datetime, current_weather")
