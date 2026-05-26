@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.models.schemas import UserRole
-from app.core.exceptions import ProviderUnavailableError
+from app.core.exceptions import (
+    ProviderStreamInterruptedError,
+    ProviderUnavailableError,
+)
 from app.engine.multi_agent.runtime_flow_ledger import RUNTIME_FLOW_LEDGER_SCHEMA_VERSION
 from app.engine.multi_agent.runtime_contracts import WiiiStreamEvent, WiiiTurnRequest
 from app.services.chat_orchestrator import AgentType
@@ -154,6 +157,66 @@ async def test_generate_stream_v3_events_finalizes_answer_after_stream():
         ]
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_v3_events_does_not_finalize_interrupted_provider_stream():
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "maritime"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name="Minh"),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(
+        return_value=SimpleNamespace(
+            query="Explain Rule 5",
+            user_id="user-1",
+            session_id="session-1",
+            context={"conversation_history": ""},
+            domain_id="maritime",
+            thinking_effort=None,
+            provider="nvidia",
+            model="qwen/qwen3-next-80b-a3b-instruct",
+        )
+    )
+    orchestrator.finalize_response_turn = MagicMock()
+
+    async def fake_stream_fn(**_kwargs):
+        yield SimpleNamespace(type="answer", content="À... vì mình thấy cậu đang")
+        raise ProviderStreamInterruptedError(
+            provider="nvidia",
+            model="qwen/qwen3-next-80b-a3b-instruct",
+            partial_chars=27,
+            details="peer closed connection without sending complete message body",
+        )
+
+    chunks = []
+    async for chunk in generate_stream_v3_events(
+        chat_request=_make_request(),
+        request_headers={"X-Request-ID": "req-provider-interrupt"},
+        background_save=MagicMock(),
+        start_time=time.time(),
+        orchestrator=orchestrator,
+        stream_fn=fake_stream_fn,
+    ):
+        chunks.append(chunk)
+
+    joined = "\n".join(chunks)
+    assert "event: answer" in joined
+    assert "À... vì mình thấy cậu đang" in joined
+    assert "event: error" in joined
+    error_payloads = _event_payloads(chunks, "error")
+    assert len(error_payloads) == 1
+    assert error_payloads[0]["type"] == "provider_stream_interrupted"
+    assert error_payloads[0]["provider"] == "nvidia"
+    assert error_payloads[0]["model"] == "qwen/qwen3-next-80b-a3b-instruct"
+    assert error_payloads[0]["reason_code"] == "provider_stream_interrupted"
+    assert error_payloads[0]["partial_chars"] == 27
+    assert error_payloads[0]["recoverable"] is True
+    assert "event: done" not in joined
+    orchestrator.finalize_response_turn.assert_not_called()
 
 
 @pytest.mark.asyncio

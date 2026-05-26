@@ -8,6 +8,7 @@ import logging
 import uuid
 from typing import Any, Optional
 
+from app.core.exceptions import ProviderStreamInterruptedError
 from app.core import config as app_config
 from app.core.config import settings
 from app.engine.openai_compatible_credentials import (
@@ -654,9 +655,18 @@ async def _stream_openai_compatible_answer_with_route_impl(
             exc,
             exc_info=True,
         )
+        reason_code = str(classified.get("reason_code") or "")
+        if emitted_answer and reason_code == "provider_stream_interrupted":
+            await _close_thinking_for_non_answer()
+            raise ProviderStreamInterruptedError(
+                provider=provider_name,
+                model=model_name or "",
+                partial_chars=len(emitted_answer),
+                details=str(exc),
+            ) from exc
         if emitted_answer:
             await _close_thinking_for_non_answer()
-            return make_assistant_message(emitted_answer), True
+            raise
         await _close_thinking_for_non_answer()
     logger.info(
         "[%s] Native stream result: provider=%s model=%s answer=%d chars",

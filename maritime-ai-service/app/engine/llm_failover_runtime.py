@@ -147,6 +147,7 @@ _FAILOVER_REASON_LABELS: dict[str, str] = {
     "host_down": "Host dịch vụ hoặc local runtime hiện không sẵn sàng.",
     "server_error": "Provider trả về lỗi máy chủ.",
     "timeout": "Provider phản hồi quá lâu và đã bị timeout.",
+    "provider_stream_interrupted": "Luồng phản hồi từ provider bị ngắt giữa chừng.",
 }
 
 
@@ -207,6 +208,15 @@ def classify_failover_reason_impl(
     ):
         reason_code = "auth_error"
         reason_category = "auth_error"
+    elif any(
+        marker in err_text
+        for marker in (
+            "incomplete chunked read",
+            "peer closed connection without sending complete message body",
+        )
+    ):
+        reason_code = "provider_stream_interrupted"
+        reason_category = "provider_stream_interrupted"
     elif any(
         marker in err_text
         for marker in (
