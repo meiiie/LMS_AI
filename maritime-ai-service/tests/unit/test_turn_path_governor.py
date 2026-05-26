@@ -200,6 +200,31 @@ def test_collect_direct_tools_routes_weather_followup_to_weather_tool():
     assert names == {"tool_current_weather"}
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "nay thoi tiet nong nhi",
+        "hom nay troi nong nhi",
+        "hom nay bao nhieu do",
+        "troi co mua khong",
+    ],
+)
+def test_collect_direct_tools_routes_weather_turns_to_weather_tool(query):
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        query,
+        user_role="student",
+        state=state,
+    )
+    names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
+
+    assert force_tools is True
+    assert state["_turn_path_decision"]["path"] == "weather_lookup"
+    assert names == {"tool_current_weather"}
+
+
 def test_collect_direct_tools_keeps_maritime_tool_on_maritime_path():
     from app.engine.multi_agent import tool_collection as module
 
@@ -227,3 +252,14 @@ def test_direct_required_tool_names_weather_prefers_weather_over_web():
 
     assert "tool_current_weather" in required
     assert "tool_web_search" not in required
+
+
+def test_direct_required_tool_names_temperature_question_prefers_weather_over_web():
+    from app.engine.multi_agent.tool_collection import _direct_required_tool_names
+
+    required = _direct_required_tool_names(
+        "hom nay bao nhieu do",
+        user_role="student",
+    )
+
+    assert required == ["tool_current_weather"]
