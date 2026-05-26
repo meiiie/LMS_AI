@@ -13,6 +13,59 @@ type BootstrapResult = {
   authenticatedBy: "dev-login-api";
 };
 
+export type ChatBaselineScenario = {
+  id: string;
+  prompt: string;
+  answerChunks: string[];
+  expectedText: string;
+  expectCodeBlock?: boolean;
+};
+
+export type ChatBaselineTurnCapture = {
+  scenarioId: string;
+  request: Record<string, unknown>;
+};
+
+export type ObservedChatBaselineEvent = {
+  id: string | null;
+  type: string;
+  data: Record<string, unknown> | null;
+  rawData: string;
+};
+
+export type ObservedChatBaselineStream = {
+  url: string;
+  status: number;
+  events: ObservedChatBaselineEvent[];
+  done: boolean;
+  error?: string;
+};
+
+type PersistedAssistantMessage = {
+  role?: string;
+  content?: string;
+  metadata?: Record<string, unknown>;
+};
+
+const CHAT_BASELINE_SUPPRESSED_TOOLS = [
+  "host_action",
+  "pointy_action",
+  "visual_runtime",
+  "code_studio",
+];
+
+const RAW_CHAT_BASELINE_MARKERS = [
+  '"tool_calls"',
+  '"function_call"',
+  '"host_action"',
+  '"pointy_action"',
+  '"visual_open"',
+  '"code_open"',
+  "<wiii-widget",
+  "[POINT:",
+  "runtime_flow_ledger",
+];
+
 function defaultServerUrl(): string {
   return process.env.WIII_PLAYWRIGHT_SERVER_URL || "http://127.0.0.1:8000";
 }
@@ -62,12 +115,389 @@ export function chatComposer(page: Page) {
   return page.locator('[data-wiii-id="chat-textarea"]').first();
 }
 
+export function assistantMessages(page: Page) {
+  return page.locator('[data-message-role="assistant"]');
+}
+
+export function lastAssistantMessage(page: Page) {
+  return assistantMessages(page).last();
+}
+
 export async function sendPrompt(page: Page, prompt: string): Promise<void> {
   const input = chatComposer(page);
   await input.waitFor({ state: "visible", timeout: 60_000 });
   await expect(input).toBeEnabled({ timeout: 60_000 });
   await input.fill(prompt);
   await input.press("Enter");
+}
+
+export async function waitForGenerationToSettle(page: Page): Promise<void> {
+  await expect
+    .poll(
+      async () => page.locator('[aria-label="Dừng tạo phản hồi"]').count(),
+      { timeout: 120_000, intervals: [500, 1_000, 1_500] },
+    )
+    .toBe(0);
+  await expect(chatComposer(page)).toBeEnabled({ timeout: 60_000 });
+}
+
+export async function expectNoBaselineToolSurfaces(page: Page): Promise<void> {
+  await expect(page.getByTestId("visual-block")).toHaveCount(0);
+  await expect(page.locator(".code-studio-card")).toHaveCount(0);
+  await expect(page.locator(".code-studio-panel")).toHaveCount(0);
+  await expect(page.locator('[aria-label^="Preview thao tác host"]')).toHaveCount(0);
+  await expect(page.locator(
+    '[data-wiii-pointy="overlay"], [data-wiii-pointy="target-ring"], [data-wiii-pointy="tooltip"]',
+  )).toHaveCount(0);
+}
+
+export function expectNoRawChatBaselinePayload(text: string): void {
+  for (const marker of RAW_CHAT_BASELINE_MARKERS) {
+    expect(text).not.toContain(marker);
+  }
+}
+
+function formatSseEvent(
+  id: number,
+  type: string,
+  data: Record<string, unknown>,
+): string {
+  return `id: ${id}\nevent: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+function createChatBaselineLedger(
+  request: Record<string, unknown>,
+  eventTypes: string[],
+  finalizationStatus: "pending" | "saved",
+) {
+  const eventCounts = eventTypes.reduce<Record<string, number>>((counts, type) => {
+    counts[type] = (counts[type] || 0) + 1;
+    return counts;
+  }, {});
+  return {
+    schema_version: "wiii.runtime_flow_ledger.v1",
+    request: {
+      request_id: "browser-chat-baseline",
+      session_id: typeof request.session_id === "string" ? request.session_id : null,
+      user_id_hash: "browser-harness-user",
+      organization_id_hash: null,
+      domain_id: typeof request.domain_id === "string" ? request.domain_id : null,
+      host_surface: "desktop_chat",
+      host_capabilities: [],
+    },
+    context: {
+      document_context_present: false,
+      uploaded_document_count: 0,
+      source_ref_count: 0,
+      memory_context_count: 0,
+      context_provenance: {
+        uploaded_documents: 0,
+        source_references: 0,
+        memory_items: 0,
+      },
+    },
+    route: {
+      lane: "native_turn",
+      reason: "browser_chat_baseline_acceptance",
+      selected_agent: "direct",
+      final_agent: "direct",
+    },
+    runtime: {
+      requested_provider: typeof request.provider === "string" ? request.provider : null,
+      requested_model: typeof request.model === "string" ? request.model : null,
+      provider: "browser-harness",
+      model: "browser-chat-baseline-mock",
+      runtime_authoritative: true,
+      fallback_used: false,
+      fallback_reason: null,
+      failover_used: false,
+    },
+    tools: {
+      observed: [],
+      suppressed: CHAT_BASELINE_SUPPRESSED_TOOLS,
+    },
+    stream: {
+      transport: "sse_v3",
+      event_counts: eventCounts,
+      event_sequence_tail: eventTypes.slice(-12),
+      metadata_seen: eventTypes.includes("metadata"),
+      done_seen: eventTypes.includes("done"),
+    },
+    host_actions: {
+      preview_required: false,
+      preview_emitted: false,
+      approval_token_present: false,
+      approval_token_hash: null,
+      apply_attempted: false,
+      mutation_blocked_reason: null,
+    },
+    finalization: {
+      status: finalizationStatus,
+      error_type: null,
+      save_response_immediately: false,
+    },
+  };
+}
+
+function parseChatRequestBody(raw: string | null): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return { parse_error: "invalid_json" };
+  }
+}
+
+export async function installChatBaselineStreamMock(
+  page: Page,
+  scenarios: ChatBaselineScenario[],
+) {
+  const captures: ChatBaselineTurnCapture[] = [];
+  const byPrompt = new Map(scenarios.map((scenario) => [scenario.prompt, scenario]));
+
+  await page.addInitScript(() => {
+    type BrowserObservedEvent = {
+      id: string | null;
+      type: string;
+      data: Record<string, unknown> | null;
+      rawData: string;
+    };
+    type BrowserObservedStream = {
+      url: string;
+      status: number;
+      events: BrowserObservedEvent[];
+      done: boolean;
+      error?: string;
+    };
+    type BrowserWindow = typeof window & {
+      __wiiiChatBaselineFetchWrapped?: boolean;
+      __wiiiChatBaselineObservedStreams?: BrowserObservedStream[];
+    };
+
+    const browserWindow = window as BrowserWindow;
+    if (browserWindow.__wiiiChatBaselineFetchWrapped) return;
+
+    browserWindow.__wiiiChatBaselineFetchWrapped = true;
+    const originalFetch = window.fetch.bind(window);
+    const observedStreams: BrowserObservedStream[] = [];
+    browserWindow.__wiiiChatBaselineObservedStreams = observedStreams;
+
+    const parseSseText = (text: string): BrowserObservedEvent[] => text
+      .split(/\r?\n\r?\n/)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .map((block) => {
+        let id: string | null = null;
+        let type = "message";
+        const dataLines: string[] = [];
+
+        for (const line of block.split(/\r?\n/)) {
+          if (line.startsWith("id:")) {
+            id = line.slice(3).trim();
+          } else if (line.startsWith("event:")) {
+            type = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            dataLines.push(line.slice(5).trimStart());
+          }
+        }
+
+        const rawData = dataLines.join("\n");
+        let data: Record<string, unknown> | null = null;
+        if (rawData) {
+          try {
+            const parsed = JSON.parse(rawData);
+            data = parsed && typeof parsed === "object"
+              ? parsed as Record<string, unknown>
+              : { value: parsed };
+          } catch {
+            data = { parse_error: "invalid_json", raw: rawData };
+          }
+        }
+
+        return { id, type, data, rawData };
+      });
+
+    const requestUrl = (input: Parameters<typeof fetch>[0]): string => {
+      if (typeof input === "string") return input;
+      if (input instanceof URL) return input.toString();
+      return input.url;
+    };
+
+    window.fetch = async (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ): Promise<Response> => {
+      const response = await originalFetch(input, init);
+      const url = requestUrl(input);
+
+      if (url.includes("/api/v1/chat/stream/v3")) {
+        const record: BrowserObservedStream = {
+          url,
+          status: response.status,
+          events: [],
+          done: false,
+        };
+        observedStreams.push(record);
+        response.clone().text()
+          .then((text) => {
+            record.events = parseSseText(text);
+            record.done = record.events.some((event) => event.type === "done");
+          })
+          .catch((error: unknown) => {
+            record.error = error instanceof Error ? error.message : String(error);
+          });
+      }
+
+      return response;
+    };
+  });
+
+  await page.route("**/api/v1/chat/stream/v3", async (route) => {
+    const request = parseChatRequestBody(route.request().postData());
+    const prompt = typeof request.message === "string" ? request.message : "";
+    const scenario = byPrompt.get(prompt);
+
+    if (!scenario) {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: `Unexpected chat-baseline prompt: ${prompt}` }),
+      });
+      return;
+    }
+
+    const eventTypes = [
+      "status",
+      ...scenario.answerChunks.map(() => "answer"),
+      "metadata",
+      "done",
+    ];
+    const metadataLedger = createChatBaselineLedger(
+      request,
+      eventTypes.filter((type) => type !== "done"),
+      "pending",
+    );
+    const terminalLedger = createChatBaselineLedger(request, eventTypes, "saved");
+    const sseEvents: Array<{ type: string; data: Record<string, unknown> }> = [
+      {
+        type: "status",
+        data: {
+          content: "Đang kiểm tra baseline chat...",
+          step: "browser_chat_baseline",
+          node: "browser_harness",
+          details: {
+            subtype: "status_only",
+            visibility: "status_only",
+          },
+        },
+      },
+      ...scenario.answerChunks.map((content) => ({
+        type: "answer",
+        data: { content },
+      })),
+      {
+        type: "metadata",
+        data: {
+          session_id: typeof request.session_id === "string" ? request.session_id : "browser-session",
+          thread_id: `browser-thread-${scenario.id}`,
+          processing_time: 0.12,
+          confidence: 1,
+          model: "browser-chat-baseline-mock",
+          runtime_authoritative: true,
+          routing_metadata: {
+            method: "browser_chat_baseline_acceptance",
+            intent: "ordinary_chat",
+          },
+          runtime_flow_ledger: metadataLedger,
+        },
+      },
+      {
+        type: "done",
+        data: {
+          status: "complete",
+          processing_time: 0.12,
+          runtime_flow_ledger: terminalLedger,
+        },
+      },
+    ];
+
+    captures.push({ scenarioId: scenario.id, request });
+
+    await route.fulfill({
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      },
+      body: sseEvents.map((event, index) => formatSseEvent(index + 1, event.type, event.data)).join(""),
+    });
+  });
+
+  return { captures };
+}
+
+export async function readObservedChatBaselineStreams(
+  page: Page,
+): Promise<ObservedChatBaselineStream[]> {
+  return page.evaluate(() => {
+    type BrowserWindow = typeof window & {
+      __wiiiChatBaselineObservedStreams?: ObservedChatBaselineStream[];
+    };
+    return (window as BrowserWindow).__wiiiChatBaselineObservedStreams || [];
+  });
+}
+
+export async function waitForObservedChatBaselineStream(
+  page: Page,
+  index: number,
+): Promise<ObservedChatBaselineStream> {
+  await expect
+    .poll(
+      async () => {
+        const stream = (await readObservedChatBaselineStreams(page))[index];
+        if (!stream) return `missing:${index}`;
+        if (stream.error) return `error:${stream.error}`;
+        return stream.done ? "done" : `pending:${stream.events.length}`;
+      },
+      { timeout: 30_000, intervals: [250, 500, 1_000] },
+    )
+    .toBe("done");
+
+  const stream = (await readObservedChatBaselineStreams(page))[index];
+  if (!stream) {
+    throw new Error(`Browser did not observe chat-baseline stream ${index}.`);
+  }
+  if (stream.error) {
+    throw new Error(`Browser failed to observe chat-baseline stream ${index}: ${stream.error}`);
+  }
+  return stream;
+}
+
+export async function readPersistedAssistantMessages(
+  page: Page,
+  userId: string,
+): Promise<PersistedAssistantMessage[]> {
+  return page.evaluate((uid) => {
+    const raw = localStorage.getItem(`wiii:conversations_${uid}.json`);
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      const conversations = parsed?.[`conversations_${uid}`];
+      if (!Array.isArray(conversations)) return [];
+      return conversations.flatMap((conversation: { messages?: unknown[] }) => {
+        const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+        return messages.filter((message: unknown) => (
+          Boolean(message)
+          && typeof message === "object"
+          && (message as { role?: unknown }).role === "assistant"
+        ));
+      });
+    } catch {
+      return [];
+    }
+  }, userId);
 }
 
 async function assertDevLoginEnabled(page: Page, serverUrl: string): Promise<void> {
@@ -84,7 +514,7 @@ async function assertDevLoginEnabled(page: Page, serverUrl: string): Promise<voi
   if (!data?.enabled) {
     throw new Error(
       "Local dev-login is disabled. The visual E2E harness requires " +
-        "ENABLE_DEV_LOGIN=true on the local backend.",
+        "ENABLE_DEV_LOGIN=true and ENVIRONMENT=development on the local backend.",
     );
   }
 }
