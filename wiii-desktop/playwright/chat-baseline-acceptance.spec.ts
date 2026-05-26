@@ -24,6 +24,17 @@ const CHAT_BASELINE_SCENARIOS: ChatBaselineScenario[] = [
       "và sẵn sàng cùng bạn làm tiếp.",
     ],
     expectedText: "Chào bạn, mình vẫn ở đây",
+    expectedTurnPath: "casual_chat",
+  },
+  {
+    id: "daily-status-no-search",
+    prompt: "hôm nay mình ăn cơm rồi",
+    answerChunks: [
+      "Vậy ổn rồi. Mình sẽ giữ nhịp trò chuyện nhẹ nhàng ",
+      "và không kéo câu này sang tìm kiếm hay công cụ.",
+    ],
+    expectedText: "không kéo câu này sang tìm kiếm hay công cụ",
+    expectedTurnPath: "casual_chat",
   },
   {
     id: "simple-factual-chat",
@@ -33,6 +44,7 @@ const CHAT_BASELINE_SCENARIOS: ChatBaselineScenario[] = [
       "SDK là bộ công cụ giúp lập trình viên dùng API đó dễ hơn.",
     ],
     expectedText: "API là giao diện để phần mềm gọi nhau",
+    expectedTurnPath: "casual_chat",
   },
   {
     id: "inline-code-explanation",
@@ -43,6 +55,7 @@ const CHAT_BASELINE_SCENARIOS: ChatBaselineScenario[] = [
       "```\n\nPromise giữ kết quả bất đồng bộ và gọi `.then` khi hoàn tất.",
     ],
     expectedText: "Promise.resolve",
+    expectedTurnPath: "casual_chat",
     expectCodeBlock: true,
   },
 ];
@@ -89,7 +102,10 @@ function expectSafeRequestShape(capture: ChatBaselineTurnCapture, scenario: Chat
   expect(userContext.code_studio_context).toBeUndefined();
 }
 
-function expectSafeLedger(ledger: Record<string, unknown> | undefined) {
+function expectSafeLedger(
+  ledger: Record<string, unknown> | undefined,
+  scenario: ChatBaselineScenario,
+) {
   expect(ledger).toBeTruthy();
 
   const request = nestedRecord(ledger, "request");
@@ -103,6 +119,10 @@ function expectSafeLedger(ledger: Record<string, unknown> | undefined) {
 
   const route = nestedRecord(ledger, "route");
   expect(route.lane).toBe("native_turn");
+  const turnPathDecision = nestedRecord(route, "turn_path_decision");
+  expect(turnPathDecision.path).toBe(scenario.expectedTurnPath);
+  expect(turnPathDecision.bind_tools).toBe(false);
+  expect(turnPathDecision.force_tools).toBe(false);
 
   const tools = nestedRecord(ledger, "tools");
   expect(tools.observed).toEqual([]);
@@ -120,8 +140,11 @@ function expectSafeLedger(ledger: Record<string, unknown> | undefined) {
   expect(hostActions.apply_attempted).toBe(false);
 }
 
-function expectTerminalLedger(ledger: Record<string, unknown> | undefined) {
-  expectSafeLedger(ledger);
+function expectTerminalLedger(
+  ledger: Record<string, unknown> | undefined,
+  scenario: ChatBaselineScenario,
+) {
+  expectSafeLedger(ledger, scenario);
   const stream = nestedRecord(ledger, "stream");
   expect(stream.metadata_seen).toBe(true);
   expect(stream.done_seen).toBe(true);
@@ -204,12 +227,16 @@ test.describe("browser chat-baseline acceptance", () => {
       await expectNoBaselineToolSurfaces(page);
 
       const terminalLedger = terminalLedgerFrom(observedStream);
-      expectTerminalLedger(terminalLedger);
+      expectTerminalLedger(terminalLedger, scenario);
 
       const persisted = await latestPersistedAssistant(page, bootstrap.userId, index + 1);
       expect(persisted.content).toContain(scenario.expectedText);
       expectNoRawChatBaselinePayload(persisted.content || "");
-      expectSafeLedger(asRecord(persisted.metadata?.runtime_flow_ledger));
+      const persistedTurnPath = asRecord(persisted.metadata?.turn_path_decision);
+      expect(persistedTurnPath.path).toBe(scenario.expectedTurnPath);
+      expect(persistedTurnPath.bind_tools).toBe(false);
+      expect(persistedTurnPath.force_tools).toBe(false);
+      expectSafeLedger(asRecord(persisted.metadata?.runtime_flow_ledger), scenario);
     }
   });
 });

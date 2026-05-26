@@ -18,6 +18,7 @@ export type ChatBaselineScenario = {
   prompt: string;
   answerChunks: string[];
   expectedText: string;
+  expectedTurnPath: string;
   expectCodeBlock?: boolean;
 };
 
@@ -64,6 +65,7 @@ const RAW_CHAT_BASELINE_MARKERS = [
   "<wiii-widget",
   "[POINT:",
   "runtime_flow_ledger",
+  "turn_path_decision",
 ];
 
 function defaultServerUrl(): string {
@@ -167,6 +169,7 @@ function formatSseEvent(
 
 function createChatBaselineLedger(
   request: Record<string, unknown>,
+  scenario: ChatBaselineScenario,
   eventTypes: string[],
   finalizationStatus: "pending" | "saved",
 ) {
@@ -201,6 +204,12 @@ function createChatBaselineLedger(
       reason: "browser_chat_baseline_acceptance",
       selected_agent: "direct",
       final_agent: "direct",
+      turn_path_decision: {
+        path: scenario.expectedTurnPath,
+        reason: "browser_chat_baseline_mock",
+        bind_tools: false,
+        force_tools: false,
+      },
     },
     runtime: {
       requested_provider: typeof request.provider === "string" ? request.provider : null,
@@ -375,10 +384,11 @@ export async function installChatBaselineStreamMock(
     ];
     const metadataLedger = createChatBaselineLedger(
       request,
+      scenario,
       eventTypes.filter((type) => type !== "done"),
       "pending",
     );
-    const terminalLedger = createChatBaselineLedger(request, eventTypes, "saved");
+    const terminalLedger = createChatBaselineLedger(request, scenario, eventTypes, "saved");
     const sseEvents: Array<{ type: string; data: Record<string, unknown> }> = [
       {
         type: "status",
@@ -408,6 +418,12 @@ export async function installChatBaselineStreamMock(
           routing_metadata: {
             method: "browser_chat_baseline_acceptance",
             intent: "ordinary_chat",
+          },
+          turn_path_decision: {
+            path: scenario.expectedTurnPath,
+            reason: "browser_chat_baseline_mock",
+            bind_tools: false,
+            force_tools: false,
           },
           runtime_flow_ledger: metadataLedger,
         },

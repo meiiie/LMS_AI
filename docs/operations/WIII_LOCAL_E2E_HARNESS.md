@@ -62,12 +62,15 @@ provider keys, production, or full Docker.
 The required evidence is:
 
 - ordinary Vietnamese prompts are submitted through `[data-wiii-id="chat-textarea"]`
+- a daily-status prompt containing "hôm nay" stays on chat instead of web search
 - final assistant answers render in `[data-message-role="assistant"]`
 - Markdown code renders as a chat code block, not Code Studio
 - stream events include `status`, `answer`, `metadata`, and terminal `done`
 - terminal `runtime_flow_ledger` says `host_surface=desktop_chat`,
   `route.lane=native_turn`, no observed tools, host/Pointy/visual/Code Studio
   suppressed, and `finalization.status=saved`
+- turn-path metadata is preserved in the stream/persisted message and reports
+  `casual_chat`, `bind_tools=false`, and `force_tools=false`
 - visible and persisted answers contain no raw provider/tool payload markers
 - no host action preview, Pointy spotlight/action surface, visual block, or
   Code Studio surface appears
