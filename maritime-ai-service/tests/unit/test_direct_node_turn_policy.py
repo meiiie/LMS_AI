@@ -52,6 +52,43 @@ def test_resolve_direct_node_turn_policy_short_social_chatter():
     assert result.direct_provider_override == "qwen"
 
 
+def test_resolve_direct_node_turn_policy_social_followup_keeps_recent_history():
+    state = {
+        "context": {"response_language": "vi"},
+        "routing_metadata": {"intent": "social", "method": "conservative_fast_path"},
+        "_routing_hint": {
+            "kind": "fast_chatter",
+            "intent": "social",
+            "shape": "social_followup",
+        },
+    }
+
+    result = resolve_direct_node_turn_policy(
+        **_base_policy_kwargs(query="sao lại z", state=state)
+    )
+
+    assert result.is_short_house_chatter is True
+    assert result.history_limit == 4
+    assert result.tools_context_override == ""
+    assert result.role_name == "direct_chatter_agent"
+
+
+def test_resolve_direct_node_turn_policy_social_followup_without_hint_uses_chatter():
+    state = {
+        "context": {"response_language": "vi"},
+        "routing_metadata": {"intent": "unknown"},
+    }
+
+    result = resolve_direct_node_turn_policy(
+        **_base_policy_kwargs(query="sao lại z", state=state)
+    )
+
+    assert result.is_short_house_chatter is True
+    assert result.history_limit == 4
+    assert result.tools_context_override == ""
+    assert result.role_name == "direct_chatter_agent"
+
+
 def test_resolve_direct_node_turn_policy_identity_keeps_context_history():
     state = {
         "context": {"response_language": "vi"},

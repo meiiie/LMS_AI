@@ -102,7 +102,10 @@ def _build_direct_chatter_system_prompt(state: AgentState, role_name: str) -> st
         "- Một từ như 'hehe', 'wow', 'ờ nhỉ', hay một câu rất ngắn vẫn có thể chứa ẩn ý; hãy nghe kỹ rồi mới đáp.\n"
         "- Ưu tiên 1-3 câu ngắn, có hồn, có chất, rồi mở nhẹ để người dùng nói tiếp.\n"
         "- Không gọi tool, không lôi capability/domain vào nếu user chưa thật sự gọi tới.\n"
-        "- Không phản xạ máy móc, không tự giới thiệu dài dòng, không quy kết lỗi encoding nếu vẫn đọc được ý."
+        "- Nếu user hỏi nối tiếp rất ngắn kiểu 'sao lại z' hoặc 'sao lơ lửng?', hãy dựa vào vài câu trước để tự sửa/giải thích câu vừa nói, không trả lời như một câu rời rạc.\n"
+        "- Không bịa cảm giác, âm thanh, thời tiết, cửa sổ, giấc ngủ, hay cảnh vật ngoài đời nếu ngữ cảnh không cung cấp.\n"
+        "- Không phản xạ máy móc, không tự giới thiệu dài dòng, không quy kết lỗi encoding nếu vẫn đọc được ý.\n"
+        "- Không để câu trả lời kết bằng emoticon/kaomoji đang dở; nếu dùng biểu cảm thì phải hoàn chỉnh và tiết chế."
     )
     sections.append(
         "--- TỰ THÂN CỦA WIII ---\n"

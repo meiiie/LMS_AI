@@ -193,6 +193,39 @@ class TestSupervisorRoute:
         mock_route.assert_not_awaited()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "thế ngủ đi",
+            "sao lại z",
+            "sao lơ lửng ?",
+        ],
+    )
+    async def test_route_short_social_followup_uses_fast_path(
+        self,
+        mock_llm,
+        query,
+    ):
+        sup = _make_supervisor(mock_llm)
+        state = {
+            "query": query,
+            "context": {},
+            "domain_config": {},
+        }
+
+        with patch.object(sup, "_route_structured", new=AsyncMock(return_value="direct")) as mock_route:
+            result = await sup.route(state)
+
+        assert result == "direct"
+        assert state["_routing_hint"] == {
+            "kind": "fast_chatter",
+            "intent": "social",
+            "shape": "social_followup",
+        }
+        assert state["routing_metadata"]["method"] == "conservative_fast_path"
+        mock_route.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_route_greeting_learning_request_does_not_use_fast_path(self, mock_llm, monkeypatch):
         from app.core.config import settings
 
