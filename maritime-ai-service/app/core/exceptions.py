@@ -79,3 +79,27 @@ class ProviderUnavailableError(WiiiException):
         super().__init__(message=message, details=details)
         self.provider = provider
         self.reason_code = reason_code
+
+
+class ProviderStreamInterruptedError(LLMError):
+    """Provider stream ended before a complete assistant answer was received."""
+
+    error_code = "PROVIDER_STREAM_INTERRUPTED"
+
+    def __init__(
+        self,
+        *,
+        provider: str,
+        model: str,
+        partial_chars: int = 0,
+        message: str = (
+            "Luồng phản hồi từ model bị ngắt giữa chừng. "
+            "Wiii chưa chốt câu trả lời này; bạn thử gửi lại hoặc đổi provider."
+        ),
+        details: Optional[str] = None,
+    ):
+        super().__init__(message=message, details=details)
+        self.provider = provider
+        self.model = model
+        self.partial_chars = max(0, int(partial_chars or 0))
+        self.reason_code = "provider_stream_interrupted"

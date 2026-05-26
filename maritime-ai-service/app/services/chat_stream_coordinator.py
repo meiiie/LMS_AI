@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Awaitable, Mapping
 
 from app.core.config import settings
-from app.core.exceptions import ProviderUnavailableError
+from app.core.exceptions import (
+    ProviderStreamInterruptedError,
+    ProviderUnavailableError,
+)
 from app.engine.llm_runtime_metadata import resolve_runtime_llm_metadata
 from app.engine.multi_agent.runtime_flow_ledger import RuntimeFlowLedger
 from app.services.chat_orchestrator_runtime import build_wiii_turn_request
@@ -1431,6 +1434,39 @@ async def generate_stream_v3_events(
             for chunk in done_chunks:
                 yield chunk
 
+    except ProviderStreamInterruptedError as exc:
+        flow_ledger.mark_route(
+            "provider_stream_interrupted",
+            reason=exc.reason_code,
+            fallback_used=False,
+            fallback_reason=exc.reason_code,
+        )
+        logger.warning(
+            "[STREAM-V3] Provider stream interrupted: provider=%s model=%s partial_chars=%s",
+            exc.provider,
+            exc.model,
+            exc.partial_chars,
+        )
+        error_event = await create_error_event(exc.message)
+        error_event.content["type"] = "provider_stream_interrupted"
+        error_event.content["provider"] = exc.provider
+        error_event.content["model"] = exc.model
+        error_event.content["reason_code"] = exc.reason_code
+        error_event.content["partial_chars"] = exc.partial_chars
+        error_event.content["recoverable"] = True
+        error_event = _with_runtime_flow_metadata(
+            error_event,
+            latency_tracker,
+            flow_ledger,
+        )
+        error_chunks, event_counter, _ = serialize_stream_event(
+            event=error_event,
+            event_counter=event_counter,
+            enable_artifacts=settings.enable_artifacts,
+            presentation_state=presentation_state,
+        )
+        for chunk in error_chunks:
+            yield chunk
     except ProviderUnavailableError as exc:
         flow_ledger.mark_route(
             "provider_unavailable",

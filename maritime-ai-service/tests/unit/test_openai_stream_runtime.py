@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.core.exceptions import ProviderStreamInterruptedError
 from app.engine.multi_agent.openai_stream_runtime import (
     _ainvoke_openai_compatible_chat_impl,
     _stream_openai_compatible_answer_with_route_impl,
@@ -499,24 +500,27 @@ async def test_native_direct_stream_partial_exception_does_not_mark_model_health
         chat = _FakeChat()
 
     try:
-        response, streamed = await _stream_openai_compatible_answer_with_route_impl(
-            SimpleNamespace(
-                provider="nvidia",
-                llm=SimpleNamespace(_wiii_tier_key="light", _wiii_model_name="deepseek-ai/deepseek-v4-flash"),
-            ),
-            messages=[{"role": "user", "content": "Hi Wiii"}],
-            push_event=_push_event,
-            node="direct",
-            thinking_stop_signal=None,
-            supports_native_answer_streaming=lambda provider: provider == "nvidia",
-            create_openai_compatible_stream_client=lambda _provider: _FakeClient(),
-            resolve_openai_stream_model_name=lambda *_args: "deepseek-ai/deepseek-v4-flash",
-            langchain_message_to_openai_payload=lambda message: message,
-            extract_openai_delta_text=lambda delta: ("", str(getattr(delta, "content", "") or "")),
-        )
+        with pytest.raises(ProviderStreamInterruptedError) as exc_info:
+            await _stream_openai_compatible_answer_with_route_impl(
+                SimpleNamespace(
+                    provider="nvidia",
+                    llm=SimpleNamespace(_wiii_tier_key="light", _wiii_model_name="deepseek-ai/deepseek-v4-flash"),
+                ),
+                messages=[{"role": "user", "content": "Hi Wiii"}],
+                push_event=_push_event,
+                node="direct",
+                thinking_stop_signal=None,
+                supports_native_answer_streaming=lambda provider: provider == "nvidia",
+                create_openai_compatible_stream_client=lambda _provider: _FakeClient(),
+                resolve_openai_stream_model_name=lambda *_args: "deepseek-ai/deepseek-v4-flash",
+                langchain_message_to_openai_payload=lambda message: message,
+                extract_openai_delta_text=lambda delta: ("", str(getattr(delta, "content", "") or "")),
+            )
 
-        assert streamed is True
-        assert response.content == "Xin chao"
+        assert exc_info.value.provider == "nvidia"
+        assert exc_info.value.model == "deepseek-ai/deepseek-v4-flash"
+        assert exc_info.value.partial_chars == len("Xin chao")
+        assert exc_info.value.reason_code == "provider_stream_interrupted"
         assert events == [{"type": "answer_delta", "content": "Xin chao", "node": "direct"}]
         assert is_model_degraded("nvidia", "deepseek-ai/deepseek-v4-flash") is True
     finally:
