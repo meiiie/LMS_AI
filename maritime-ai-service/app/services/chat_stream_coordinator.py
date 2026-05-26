@@ -16,6 +16,12 @@ from app.core.exceptions import (
 from app.engine.llm_runtime_metadata import resolve_runtime_llm_metadata
 from app.engine.multi_agent.runtime_flow_ledger import RuntimeFlowLedger
 from app.services.chat_orchestrator_runtime import build_wiii_turn_request
+from app.services.chat_runtime_lifecycle import (
+    ChatLifecycleName,
+    ChatRuntimeLifecycleEvent,
+    capability_snapshot_from_ledger_payload,
+    create_chat_lifecycle_event,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -499,6 +505,60 @@ async def generate_stream_v3_events(
         request_id=request_id,
     )
 
+    def _payload_section(payload: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+        section = payload.get(key)
+        return section if isinstance(section, Mapping) else {}
+
+    def _serialize_coordinator_event(event) -> tuple[list[str], bool]:
+        nonlocal event_counter
+        event = _with_runtime_flow_metadata(
+            event,
+            latency_tracker,
+            flow_ledger,
+        )
+        chunks, event_counter, should_stop = serialize_stream_event(
+            event=event,
+            event_counter=event_counter,
+            enable_artifacts=settings.enable_artifacts,
+            presentation_state=presentation_state,
+        )
+        return chunks, should_stop
+
+    def _serialize_lifecycle_event(
+        *,
+        name: str,
+        phase: str,
+        status: str,
+        message: str,
+        node: str = "system",
+        lane: str | None = None,
+        reason: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> tuple[list[str], bool]:
+        ledger_payload = flow_ledger.to_payload()
+        route_payload = _payload_section(ledger_payload, "route")
+        request_payload = _payload_section(ledger_payload, "request")
+        return _serialize_coordinator_event(
+            create_chat_lifecycle_event(
+                ChatRuntimeLifecycleEvent(
+                    name=name,
+                    phase=phase,
+                    status=status,
+                    message=message,
+                    request_id=request_id,
+                    session_id=str(request_payload.get("session_id") or "")
+                    or None,
+                    lane=lane or str(route_payload.get("lane") or "") or None,
+                    reason=reason or str(route_payload.get("reason") or "") or None,
+                    node=node,
+                    capabilities=capability_snapshot_from_ledger_payload(
+                        ledger_payload
+                    ),
+                    metadata=metadata or {},
+                )
+            )
+        )
+
     event_counter += 1
     flow_ledger.record_wire_event("status")
     yield format_sse(
@@ -514,6 +574,18 @@ async def generate_stream_v3_events(
         },
         event_id=event_counter,
     )
+    chunks, should_stop = _serialize_lifecycle_event(
+        name=ChatLifecycleName.CHAT_ACCEPTED,
+        phase="accepted",
+        status="started",
+        message="Đã nhận lượt chat.",
+        node="system",
+        metadata={"transport": "sse_v3"},
+    )
+    for chunk in chunks:
+        yield chunk
+    if should_stop:
+        return
 
     fb_cookie = request_headers.get("x-facebook-cookie", "")
     if fb_cookie and settings.enable_facebook_cookie:
@@ -607,9 +679,51 @@ async def generate_stream_v3_events(
             organization_id=resolved_org_id,
             domain_id=resolved_domain_id,
         )
+        chunks, should_stop = _serialize_lifecycle_event(
+            name=ChatLifecycleName.TURN_PREPARED,
+            phase="prepared",
+            status="ready",
+            message="Đã mở phiên và kiểm tra quyền truy cập.",
+            node="system",
+            metadata={
+                "domain_id": resolved_domain_id,
+                "organization_id_present": bool(resolved_org_id),
+            },
+        )
+        for chunk in chunks:
+            yield chunk
+        if should_stop:
+            return
 
         if prepared_turn.validation.blocked:
             flow_ledger.mark_route("blocked", reason="prepared_turn_validation")
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.PATH_SELECTED,
+                phase="routing",
+                status="blocked",
+                message="Lượt này bị chặn bởi kiểm tra an toàn.",
+                node="system",
+                lane="blocked",
+                reason="prepared_turn_validation",
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.CAPABILITY_CHECKED,
+                phase="capability",
+                status="blocked",
+                message="Không bind tool vì lượt đã bị chặn.",
+                node="system",
+                lane="blocked",
+                reason="prepared_turn_validation",
+                metadata={"bound_tools": []},
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
             flow_ledger.record_wire_event("answer")
             flow_ledger.record_wire_event("metadata")
             blocked_chunks, event_counter = (
@@ -623,8 +737,23 @@ async def generate_stream_v3_events(
                     },
                 )
             )
-            for chunk in blocked_chunks:
+            for chunk in blocked_chunks[:-1]:
                 yield chunk
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.CHAT_DONE,
+                phase="done",
+                status="blocked",
+                message="Lượt chat đã kết thúc ở bước kiểm tra an toàn.",
+                node="system",
+                lane="blocked",
+                reason="prepared_turn_validation",
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
+            if blocked_chunks:
+                yield blocked_chunks[-1]
             return
 
         finalization_context = prepared_turn.chat_context
@@ -651,6 +780,34 @@ async def generate_stream_v3_events(
                 "visual_fast_path",
                 reason="structured_visual_fast_path",
             )
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.PATH_SELECTED,
+                phase="routing",
+                status="selected",
+                message="Đã chọn lane minh họa trực quan.",
+                node="visual_fast_path",
+                lane="visual_fast_path",
+                reason="structured_visual_fast_path",
+                metadata={"bound_tools": ["visual_runtime"]},
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.CAPABILITY_CHECKED,
+                phase="capability",
+                status="ready",
+                message="Đã khóa capability cho runtime minh họa.",
+                node="visual_fast_path",
+                lane="visual_fast_path",
+                reason="structured_visual_fast_path",
+                metadata={"bound_tools": ["visual_runtime"]},
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
             visual_started_ms = latency_tracker.elapsed_ms()
             visual_events = [
                 await create_thinking_start_event(
@@ -692,7 +849,6 @@ async def generate_stream_v3_events(
                     stream_latency=latency_tracker.to_payload(),
                     streaming_version="v3-visual_fast_path",
                 ),
-                await create_done_event(time.time() - start_time),
             ]
 
             for event in visual_events:
@@ -743,6 +899,48 @@ async def generate_stream_v3_events(
                     "[STREAM-V3] Visual fast-path finalization failed: %s",
                     finalize_err,
                 )
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=(
+                    ChatLifecycleName.FINALIZATION_FAILED
+                    if flow_ledger.finalization_status == "failed"
+                    else ChatLifecycleName.FINALIZATION_COMPLETED
+                ),
+                phase="finalization",
+                status=flow_ledger.finalization_status,
+                message="Đã hoàn tất bước lưu trạng thái lượt trả lời.",
+                node="visual_fast_path",
+                lane="visual_fast_path",
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.CHAT_DONE,
+                phase="done",
+                status="complete",
+                message="Lượt chat đã hoàn tất.",
+                node="visual_fast_path",
+                lane="visual_fast_path",
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
+            done_event = await create_done_event(time.time() - start_time)
+            done_event = _with_runtime_flow_metadata(
+                done_event,
+                latency_tracker,
+                flow_ledger,
+            )
+            done_chunks, event_counter, _ = serialize_stream_event(
+                event=done_event,
+                event_counter=event_counter,
+                enable_artifacts=settings.enable_artifacts,
+                presentation_state=presentation_state,
+            )
+            for chunk in done_chunks:
+                yield chunk
             return
 
         pointy_highlight_action_name = "ui.highlight"
@@ -769,6 +967,34 @@ async def generate_stream_v3_events(
                 "pointy_fast_path",
                 reason="pointy_prepared_fast_path",
             )
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.PATH_SELECTED,
+                phase="routing",
+                status="selected",
+                message="Đã chọn lane chỉ vị trí trên giao diện.",
+                node="pointy_fast_path",
+                lane="pointy_fast_path",
+                reason="pointy_prepared_fast_path",
+                metadata={"bound_tools": ["pointy_action"]},
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.CAPABILITY_CHECKED,
+                phase="capability",
+                status="ready",
+                message="Đã khóa capability Pointy an toàn.",
+                node="pointy_fast_path",
+                lane="pointy_fast_path",
+                reason="pointy_prepared_fast_path",
+                metadata={"bound_tools": ["pointy_action"]},
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
             pointy_answer = _pointy_action_answer(pointy_fast_path)
             pointy_thinking = _pointy_action_thinking(pointy_fast_path)
             pointy_label = _pointy_action_label(pointy_fast_path)
@@ -829,7 +1055,6 @@ async def generate_stream_v3_events(
                     stream_latency=latency_tracker.to_payload(),
                     streaming_version="v3-pointy_fast_path",
                 ),
-                await create_done_event(time.time() - start_time),
             ]
 
             for event in pointy_events:
@@ -880,6 +1105,48 @@ async def generate_stream_v3_events(
                     "[STREAM-V3] Pointy fast-path finalization failed: %s",
                     finalize_err,
                 )
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=(
+                    ChatLifecycleName.FINALIZATION_FAILED
+                    if flow_ledger.finalization_status == "failed"
+                    else ChatLifecycleName.FINALIZATION_COMPLETED
+                ),
+                phase="finalization",
+                status=flow_ledger.finalization_status,
+                message="Đã hoàn tất bước lưu trạng thái lượt trả lời.",
+                node="pointy_fast_path",
+                lane="pointy_fast_path",
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.CHAT_DONE,
+                phase="done",
+                status="complete",
+                message="Lượt chat đã hoàn tất.",
+                node="pointy_fast_path",
+                lane="pointy_fast_path",
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
+            done_event = await create_done_event(time.time() - start_time)
+            done_event = _with_runtime_flow_metadata(
+                done_event,
+                latency_tracker,
+                flow_ledger,
+            )
+            done_chunks, event_counter, _ = serialize_stream_event(
+                event=done_event,
+                event_counter=event_counter,
+                enable_artifacts=settings.enable_artifacts,
+                presentation_state=presentation_state,
+            )
+            for chunk in done_chunks:
+                yield chunk
             logger.info(
                 "[STREAM-V3] Completed in %.3fs (prepared pointy fast path)",
                 time.time() - start_time,
@@ -894,6 +1161,34 @@ async def generate_stream_v3_events(
                 fallback_used=True,
                 fallback_reason="multi_agent_disabled",
             )
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.PATH_SELECTED,
+                phase="routing",
+                status="selected",
+                message="Đã chọn lane trả lời dự phòng.",
+                node="direct",
+                lane="fallback",
+                reason="multi_agent_disabled",
+                metadata={"fallback_used": True, "bound_tools": []},
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.CAPABILITY_CHECKED,
+                phase="capability",
+                status="ready",
+                message="Không bind tool cho lane trả lời dự phòng.",
+                node="direct",
+                lane="fallback",
+                reason="multi_agent_disabled",
+                metadata={"bound_tools": []},
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
             fallback_status = await create_status_event(
                 "Wiii đang mở đường trả lời nhanh...",
                 node="direct",
@@ -1002,7 +1297,6 @@ async def generate_stream_v3_events(
                         routing_metadata=fallback_meta.get("routing_metadata"),
                         **extra_meta,
                     ),
-                    await create_done_event(processing_time),
                 ]
             )
 
@@ -1054,10 +1348,65 @@ async def generate_stream_v3_events(
                     "[STREAM-V3] Fallback post-response finalization failed: %s",
                     finalize_err,
                 )
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=(
+                    ChatLifecycleName.FINALIZATION_FAILED
+                    if flow_ledger.finalization_status == "failed"
+                    else ChatLifecycleName.FINALIZATION_COMPLETED
+                ),
+                phase="finalization",
+                status=flow_ledger.finalization_status,
+                message="Đã hoàn tất bước lưu trạng thái lượt trả lời.",
+                node="direct",
+                lane="fallback",
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.CHAT_DONE,
+                phase="done",
+                status="complete",
+                message="Lượt chat đã hoàn tất.",
+                node="direct",
+                lane="fallback",
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
+            done_event = await create_done_event(processing_time)
+            done_event = _with_runtime_flow_metadata(
+                done_event,
+                latency_tracker,
+                flow_ledger,
+            )
+            done_chunks, event_counter, _ = serialize_stream_event(
+                event=done_event,
+                event_counter=event_counter,
+                enable_artifacts=settings.enable_artifacts,
+                presentation_state=presentation_state,
+            )
+            for chunk in done_chunks:
+                yield chunk
             return
 
         _provider = requested_provider
         flow_ledger.mark_route("native_turn", reason="multi_agent_stream")
+        chunks, should_stop = _serialize_lifecycle_event(
+            name=ChatLifecycleName.PATH_SELECTED,
+            phase="routing",
+            status="selected",
+            message="Đã chọn lane runtime chính.",
+            node="runtime",
+            lane="native_turn",
+            reason="multi_agent_stream",
+        )
+        for chunk in chunks:
+            yield chunk
+        if should_stop:
+            return
         context_status = await create_status_event(
             "Wiii đang gom ngữ cảnh và trí nhớ...",
             node="context",
@@ -1130,6 +1479,19 @@ async def generate_stream_v3_events(
                     "build_multi_agent_execution_input did not return context"
                 )
             flow_ledger.mark_execution_input(execution_input)
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.CAPABILITY_CHECKED,
+                phase="capability",
+                status="ready",
+                message="Đã kiểm tra capability và tool bridge cho lượt này.",
+                node="context",
+                lane="native_turn",
+                reason="multi_agent_stream",
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
         except Exception as ctx_err:
             logger.warning(
                 "[STREAM-V3] Full context build failed, using minimal: %s",
@@ -1161,12 +1523,25 @@ async def generate_stream_v3_events(
                 latency_tracker.finish("minimal_execution_input", status="error")
                 raise
             latency_tracker.finish("minimal_execution_input")
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.CAPABILITY_CHECKED,
+                phase="capability",
+                status="degraded",
+                message="Đã dùng context tối thiểu sau khi gom ngữ cảnh đầy đủ lỗi.",
+                node="context",
+                lane="native_turn",
+                reason="minimal_context_after_build_failure",
+                metadata={"fallback_used": True},
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
 
         accumulated_answer: list[str] = []
         saw_done_event = False
         terminal_done_event = None
         stream_current_agent = ""
-        answer_started = False
 
         latency_tracker.start("build_turn_request")
         try:
@@ -1257,7 +1632,6 @@ async def generate_stream_v3_events(
                 )
                 if event.type == "answer":
                     accumulated_answer.append(event.content)
-                    answer_started = True
                 elif early_context_thinking and event.type in {
                     "thinking_start",
                     "thinking_delta",
@@ -1338,6 +1712,23 @@ async def generate_stream_v3_events(
                 finalize_err,
             )
 
+        chunks, should_stop = _serialize_lifecycle_event(
+            name=(
+                ChatLifecycleName.FINALIZATION_FAILED
+                if flow_ledger.finalization_status == "failed"
+                else ChatLifecycleName.FINALIZATION_COMPLETED
+            ),
+            phase="finalization",
+            status=flow_ledger.finalization_status,
+            message="Đã hoàn tất bước lưu trạng thái lượt trả lời.",
+            node=stream_current_agent or "runtime",
+            lane=flow_ledger.route_lane,
+        )
+        for chunk in chunks:
+            yield chunk
+        if should_stop:
+            return
+
         processing_time = time.time() - start_time
         logger.info(
             "[STREAM-V3] Completed in %.3fs (full graph)",
@@ -1374,6 +1765,18 @@ async def generate_stream_v3_events(
                 )
                 for chunk in metadata_chunks:
                     yield chunk
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.CHAT_DONE,
+                phase="done",
+                status="complete",
+                message="Lượt chat đã hoàn tất.",
+                node=stream_current_agent or "runtime",
+                lane=flow_ledger.route_lane,
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
             done_event = await create_done_event(processing_time)
             done_event = _with_runtime_flow_metadata(
                 done_event,
@@ -1420,6 +1823,18 @@ async def generate_stream_v3_events(
                 for chunk in metadata_chunks:
                     yield chunk
 
+            chunks, should_stop = _serialize_lifecycle_event(
+                name=ChatLifecycleName.CHAT_DONE,
+                phase="done",
+                status="complete",
+                message="Lượt chat đã hoàn tất.",
+                node=stream_current_agent or "runtime",
+                lane=flow_ledger.route_lane,
+            )
+            for chunk in chunks:
+                yield chunk
+            if should_stop:
+                return
             done_event = _with_runtime_flow_metadata(
                 terminal_done_event,
                 latency_tracker,
@@ -1447,6 +1862,24 @@ async def generate_stream_v3_events(
             exc.model,
             exc.partial_chars,
         )
+        chunks, should_stop = _serialize_lifecycle_event(
+            name=ChatLifecycleName.CHAT_ERROR,
+            phase="error",
+            status="failed",
+            message="Provider stream bị ngắt trước khi hoàn tất.",
+            node="runtime",
+            lane="provider_stream_interrupted",
+            reason=exc.reason_code,
+            metadata={
+                "provider": exc.provider,
+                "model": exc.model,
+                "recoverable": True,
+            },
+        )
+        for chunk in chunks:
+            yield chunk
+        if should_stop:
+            return
         error_event = await create_error_event(exc.message)
         error_event.content["type"] = "provider_stream_interrupted"
         error_event.content["provider"] = exc.provider
@@ -1477,6 +1910,23 @@ async def generate_stream_v3_events(
             exc.provider,
             exc.reason_code,
         )
+        chunks, should_stop = _serialize_lifecycle_event(
+            name=ChatLifecycleName.CHAT_ERROR,
+            phase="error",
+            status="failed",
+            message="Provider được chọn chưa sẵn sàng cho lượt này.",
+            node="runtime",
+            lane="provider_unavailable",
+            reason=exc.reason_code or "provider_unavailable",
+            metadata={
+                "provider": exc.provider,
+                "reason_code": exc.reason_code,
+            },
+        )
+        for chunk in chunks:
+            yield chunk
+        if should_stop:
+            return
         try:
             _record_llm_runtime_observation(
                 provider=exc.provider,
@@ -1562,6 +2012,20 @@ async def generate_stream_v3_events(
 
         tb = traceback.format_exc()
         logger.error("[STREAM-V3] Error: %s\n%s", exc, tb)
+        chunks, should_stop = _serialize_lifecycle_event(
+            name=ChatLifecycleName.CHAT_ERROR,
+            phase="error",
+            status="failed",
+            message="Runtime gặp lỗi nội bộ khi xử lý lượt chat.",
+            node="runtime",
+            lane=flow_ledger.route_lane,
+            reason=type(exc).__name__,
+            metadata={"error_type": type(exc).__name__},
+        )
+        for chunk in chunks:
+            yield chunk
+        if should_stop:
+            return
         error_chunks, _ = emit_internal_error_sse_events(
             processing_time=time.time() - start_time,
         )

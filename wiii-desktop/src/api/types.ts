@@ -413,6 +413,37 @@ export interface SSEStatusEvent {
   presentation?: PresentationMode;
 }
 
+export interface SSEChatLifecycleEvent {
+  schema_version: string;
+  event_name: string;
+  phase: string;
+  status: string;
+  message: string;
+  request_id?: string;
+  session_id?: string;
+  lane?: string;
+  reason?: string;
+  node?: string;
+  step?: string;
+  capabilities?: {
+    host_surface?: string;
+    host_capabilities?: string[];
+    observed_tools?: string[];
+    suppressed_tools?: string[];
+    preview_required?: boolean;
+    preview_emitted?: boolean;
+    approval_token_present?: boolean;
+    apply_attempted?: boolean;
+  };
+  metadata?: Record<string, unknown>;
+  details?: Record<string, unknown>;
+  display_role?: DisplayRole;
+  sequence_id?: number;
+  step_id?: string;
+  step_state?: StepState;
+  presentation?: PresentationMode;
+}
+
 export interface SSEDomainNoticeEvent {
   content: string;
   display_role?: DisplayRole;
@@ -506,6 +537,7 @@ export type SSEEventType =
   | "answer"
   | "sources"
   | "metadata"
+  | "chat_lifecycle"
   | "done"
   | "error"
   | "tool_call"

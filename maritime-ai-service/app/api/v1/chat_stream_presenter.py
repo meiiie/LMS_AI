@@ -139,6 +139,7 @@ PRESENTATION_BY_EVENT: dict[str, str] = {
     "preview": "compact",
     "action_text": "compact",
     "status": "compact",
+    "chat_lifecycle": "compact",
     "answer": "compact",
     "artifact": "compact",
     "code_open": "compact",
@@ -253,7 +254,7 @@ def _step_state_for_event(event_type: str) -> str | None:
         "visual_patch",
     }:
         return "live"
-    if event_type in {"answer", "artifact", "visual", "visual_commit", "visual_dispose", "sources", "metadata", "done", "error"}:
+    if event_type in {"answer", "artifact", "chat_lifecycle", "visual", "visual_commit", "visual_dispose", "sources", "metadata", "done", "error"}:
         return "completed"
     return None
 
@@ -423,6 +424,25 @@ def serialize_stream_event(
         )
         return [
             format_sse("status", data, event_id=event_counter)
+        ], event_counter, False
+
+    if event_type == "chat_lifecycle":
+        payload = dict(event.content) if isinstance(event.content, Mapping) else {}
+        if event.node:
+            payload.setdefault("node", event.node)
+        if event.step:
+            payload.setdefault("step", event.step)
+        if event.details:
+            payload.setdefault("details", event.details)
+        data = _apply_presentation_metadata(
+            payload=payload,
+            event_type=event_type,
+            event_counter=event_counter,
+            event=event,
+            presentation_state=presentation_state,
+        )
+        return [
+            format_sse("chat_lifecycle", data, event_id=event_counter)
         ], event_counter, False
 
     if event_type == "thinking":

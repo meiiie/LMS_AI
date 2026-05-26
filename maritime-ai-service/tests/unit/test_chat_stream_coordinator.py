@@ -13,6 +13,10 @@ from app.core.exceptions import (
 )
 from app.engine.multi_agent.runtime_flow_ledger import RUNTIME_FLOW_LEDGER_SCHEMA_VERSION
 from app.engine.multi_agent.runtime_contracts import WiiiStreamEvent, WiiiTurnRequest
+from app.services.chat_runtime_lifecycle import (
+    CHAT_RUNTIME_LIFECYCLE_SCHEMA_VERSION,
+    ChatLifecycleName,
+)
 from app.services.chat_orchestrator import AgentType
 from app.services.chat_orchestrator import RequestScope
 from app.services.output_processor import ProcessingResult
@@ -44,6 +48,20 @@ def _event_payloads(chunks, event_name):
                 payloads.append(json.loads(line.removeprefix("data: ")))
                 break
     return payloads
+
+
+def _event_names(chunks):
+    names = []
+    for chunk in chunks:
+        for line in chunk.splitlines():
+            if line.startswith("event: "):
+                names.append(line.removeprefix("event: "))
+                break
+    return names
+
+
+def _lifecycle_payloads(chunks):
+    return _event_payloads(chunks, "chat_lifecycle")
 
 
 def _runtime_flow_ledgers(chunks):
@@ -83,10 +101,22 @@ async def test_generate_stream_v3_events_emits_blocked_sequence():
         chunks.append(chunk)
 
     assert chunks[0] == "retry: 3000\n\n"
-    assert "event: status" in chunks[1]
-    assert "event: answer" in chunks[2]
-    assert "event: metadata" in chunks[3]
-    assert "event: done" in chunks[4]
+    events = _event_names(chunks)
+    assert events[0] == "status"
+    assert "chat_lifecycle" in events
+    assert "answer" in events
+    assert "metadata" in events
+    assert events[-1] == "done"
+    lifecycle_names = [
+        payload["event_name"] for payload in _lifecycle_payloads(chunks)
+    ]
+    assert lifecycle_names[:4] == [
+        ChatLifecycleName.CHAT_ACCEPTED,
+        ChatLifecycleName.TURN_PREPARED,
+        ChatLifecycleName.PATH_SELECTED,
+        ChatLifecycleName.CAPABILITY_CHECKED,
+    ]
+    assert _lifecycle_payloads(chunks)[2]["lane"] == "blocked"
     ledgers = _runtime_flow_ledgers(chunks)
     assert ledgers
     assert ledgers[0]["schema_version"] == RUNTIME_FLOW_LEDGER_SCHEMA_VERSION
@@ -157,6 +187,80 @@ async def test_generate_stream_v3_events_finalizes_answer_after_stream():
         ]
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_v3_events_emits_typed_lifecycle_for_native_path():
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "general"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name="Minh"),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(
+        return_value=SimpleNamespace(
+            query="short chat",
+            user_id="user-1",
+            session_id="session-1",
+            context={
+                "conversation_history": "",
+                "source_refs": [],
+                "memories": [],
+            },
+            domain_id="general",
+            thinking_effort=None,
+            provider="nvidia",
+            model="qwen/qwen3-next-80b-a3b-instruct",
+        )
+    )
+
+    async def fake_stream_fn(**_kwargs):
+        yield SimpleNamespace(type="answer", content="Xin chào.")
+        yield SimpleNamespace(type="metadata", content={"provider": "nvidia"})
+        yield SimpleNamespace(type="done", content={"processing_time": 0.2})
+
+    chunks = []
+    async for chunk in generate_stream_v3_events(
+        chat_request=_make_request(
+            message="short chat",
+            user_context={"host_context": {"surface": "desktop_chat"}},
+        ),
+        request_headers={"X-Request-ID": "req-lifecycle"},
+        background_save=MagicMock(),
+        start_time=time.time(),
+        orchestrator=orchestrator,
+        stream_fn=fake_stream_fn,
+    ):
+        chunks.append(chunk)
+
+    lifecycle = _lifecycle_payloads(chunks)
+    names = [payload["event_name"] for payload in lifecycle]
+    assert names == [
+        ChatLifecycleName.CHAT_ACCEPTED,
+        ChatLifecycleName.TURN_PREPARED,
+        ChatLifecycleName.PATH_SELECTED,
+        ChatLifecycleName.CAPABILITY_CHECKED,
+        ChatLifecycleName.FINALIZATION_COMPLETED,
+        ChatLifecycleName.CHAT_DONE,
+    ]
+    assert all(
+        payload["schema_version"] == CHAT_RUNTIME_LIFECYCLE_SCHEMA_VERSION
+        for payload in lifecycle
+    )
+    path_payload = lifecycle[2]
+    assert path_payload["lane"] == "native_turn"
+    assert path_payload["reason"] == "multi_agent_stream"
+    capability_payload = lifecycle[3]
+    assert capability_payload["capabilities"]["host_surface"] == "desktop_chat"
+    assert "host_action" in capability_payload["capabilities"]["suppressed_tools"]
+    assert capability_payload["capabilities"]["observed_tools"] == []
+    assert lifecycle[-1]["status"] == "complete"
+
+    lifecycle_json = json.dumps(lifecycle, ensure_ascii=False)
+    assert "short chat" not in lifecycle_json
+    assert "user-1" not in lifecycle_json
 
 
 @pytest.mark.asyncio

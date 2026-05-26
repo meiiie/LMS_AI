@@ -6,7 +6,7 @@
  *   data: <json>\n
  *   \n
  *
- * Event types: thinking, answer, sources, metadata, done, error
+ * Supported event types are defined by SSEEventHandler below.
  */
 import type {
   SSEThinkingEvent,
@@ -18,6 +18,7 @@ import type {
   SSEToolCallEvent,
   SSEToolResultEvent,
   SSEStatusEvent,
+  SSEChatLifecycleEvent,
   SSEThinkingStartEvent,
   SSEThinkingEndEvent,
   SSEDomainNoticeEvent,
@@ -47,6 +48,7 @@ export interface SSEEventHandler {
   onToolCall: (data: SSEToolCallEvent) => void;
   onToolResult: (data: SSEToolResultEvent) => void;
   onStatus: (data: SSEStatusEvent) => void;
+  onChatLifecycle?: (data: SSEChatLifecycleEvent) => void;
   onThinkingStart?: (data: SSEThinkingStartEvent) => void;
   onThinkingEnd?: (data: SSEThinkingEndEvent) => void;
   onDomainNotice?: (data: SSEDomainNoticeEvent) => void;
@@ -265,6 +267,9 @@ function dispatchEvent(
     }
     case "status":
       handlers.onStatus(data as SSEStatusEvent);
+      break;
+    case "chat_lifecycle":
+      handlers.onChatLifecycle?.(data as SSEChatLifecycleEvent);
       break;
     case "thinking_delta": {
       // Sprint 153b: Guard — content must be string
