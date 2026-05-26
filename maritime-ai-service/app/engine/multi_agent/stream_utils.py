@@ -30,6 +30,7 @@ class StreamEventType:
     ANSWER = "answer"           # Response tokens (streamed real-time)
     SOURCES = "sources"         # Citation list with image_url
     METADATA = "metadata"       # reasoning_trace, confidence, timing
+    CHAT_LIFECYCLE = "chat_lifecycle"  # Typed chat runtime lifecycle/progress
     THINKING_DELTA = "thinking_delta"   # Incremental thinking token (real-time)
     THINKING_START = "thinking_start"  # Thinking block opened (lifecycle)
     THINKING_END = "thinking_end"      # Thinking block closed (lifecycle)

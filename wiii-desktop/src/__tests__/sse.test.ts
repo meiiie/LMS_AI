@@ -33,6 +33,7 @@ function createHandlers(): SSEEventHandler & { calls: Record<string, unknown[]> 
     tool_call: [],
     tool_result: [],
     status: [],
+    chat_lifecycle: [],
     visual: [],
     visual_open: [],
     visual_patch: [],
@@ -52,6 +53,7 @@ function createHandlers(): SSEEventHandler & { calls: Record<string, unknown[]> 
     onToolCall: (data) => calls.tool_call.push(data),
     onToolResult: (data) => calls.tool_result.push(data),
     onStatus: (data) => calls.status.push(data),
+    onChatLifecycle: (data) => calls.chat_lifecycle.push(data),
     onVisual: (data) => calls.visual.push(data),
     onVisualOpen: (data) => calls.visual_open.push(data),
     onVisualPatch: (data) => calls.visual_patch.push(data),
@@ -444,6 +446,33 @@ describe("SSE Parser", () => {
       step: "routing",
       node: "supervisor",
     });
+  });
+
+  it("should parse chat lifecycle events without warning as unknown", async () => {
+    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stream = createStream([
+      'event: chat_lifecycle\ndata: {"schema_version":"wiii.chat_runtime_lifecycle.v1","event_name":"path.selected","phase":"routing","status":"selected","message":"Đã chọn lane runtime chính.","lane":"native_turn","capabilities":{"host_surface":"desktop_chat","suppressed_tools":["host_action"]}}\n\n',
+    ]);
+
+    const handlers = createHandlers();
+    const result = await parseSSEStream(stream, handlers);
+
+    expect(handlers.calls.chat_lifecycle).toHaveLength(1);
+    expect(handlers.calls.chat_lifecycle[0]).toMatchObject({
+      event_name: "path.selected",
+      phase: "routing",
+      lane: "native_turn",
+      capabilities: {
+        host_surface: "desktop_chat",
+        suppressed_tools: ["host_action"],
+      },
+    });
+    expect(result.eventOrder).toEqual(["chat_lifecycle"]);
+    expect(consoleSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("Unknown event type")
+    );
+
+    consoleSpy.mockRestore();
   });
 
   it("should handle tool_call and tool_result in sequence", async () => {

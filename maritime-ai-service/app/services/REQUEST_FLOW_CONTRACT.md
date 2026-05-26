@@ -213,6 +213,32 @@ The streaming path may emit intermediate events, but it should preserve the same
 
 Streaming-specific transport behavior does not create a separate business contract.
 
+### Streaming Lifecycle Observability
+
+`/api/v1/chat/stream/v3` emits additive `chat_lifecycle` SSE events so clients
+and acceptance harnesses can observe the live turn without parsing display copy
+or waiting for terminal metadata.
+
+Lifecycle payloads use schema `wiii.chat_runtime_lifecycle.v1` and include:
+
+- `chat.accepted`
+- `turn.prepared`
+- `path.selected`
+- `capability.checked`
+- `finalization.completed` or `finalization.failed`
+- `chat.done`
+- `chat.error`
+
+Rules:
+
+- lifecycle events are observational only and must not drive LMS mutation
+- lifecycle payloads must stay privacy-safe; do not include prompt text,
+  raw document content, full user identifiers, secrets, or provider tokens
+- path and capability state should be emitted from typed runtime state, not
+  inferred from Vietnamese status labels
+- existing `status`, `thinking`, `answer`, `metadata`, and `done` consumers must
+  keep working when a client ignores `chat_lifecycle`
+
 Policy note:
 
 - sync `/api/v1/chat` and streaming `/api/v1/chat/stream/v3` both use the
