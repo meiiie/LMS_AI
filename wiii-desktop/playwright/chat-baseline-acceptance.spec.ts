@@ -160,6 +160,85 @@ function terminalLedgerFrom(stream: ObservedChatBaselineStream): Record<string, 
   return ledger && typeof ledger === "object" ? ledger as Record<string, unknown> : undefined;
 }
 
+function chatLifecycleEventsFromStream(
+  stream: ObservedChatBaselineStream,
+): Record<string, unknown>[] {
+  return stream.events
+    .filter((event) => event.type === "chat_lifecycle")
+    .map((event) => asRecord(event.data));
+}
+
+function chatLifecycleEventsFromMetadata(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown>[] {
+  const lifecycle = metadata?.chat_lifecycle;
+  expect(Array.isArray(lifecycle)).toBe(true);
+  return (lifecycle as unknown[]).map((event) => asRecord(event));
+}
+
+function expectOptionalArrayValue(
+  record: Record<string, unknown>,
+  key: string,
+): unknown[] {
+  const value = record[key];
+  if (typeof value === "undefined") return [];
+  expect(Array.isArray(value)).toBe(true);
+  return value as unknown[];
+}
+
+function expectChatLifecycleTelemetry(
+  events: Record<string, unknown>[],
+  scenario: ChatBaselineScenario,
+) {
+  expect(events.map((event) => event.event_name)).toEqual([
+    "path.selected",
+    "capability.checked",
+    "finalization.completed",
+    "chat.done",
+  ]);
+
+  const pathSelected = events[0];
+  expect(pathSelected.schema_version).toBe("wiii.chat_runtime_lifecycle.v1");
+  expect(pathSelected.phase).toBe("routing");
+  expect(pathSelected.status).toBe("selected");
+  expect(pathSelected.lane).toBe("native_turn");
+
+  const capabilities = nestedRecord(pathSelected, "capabilities");
+  expect(capabilities.host_surface).toBe("desktop_chat");
+  expect(expectOptionalArrayValue(capabilities, "observed_tools")).toEqual([]);
+  expect(expectOptionalArrayValue(capabilities, "suppressed_tools")).toEqual(
+    expect.arrayContaining([
+      "host_action",
+      "pointy_action",
+      "visual_runtime",
+      "code_studio",
+    ]),
+  );
+  expect(capabilities.preview_required).toBe(false);
+  expect(capabilities.preview_emitted).toBe(false);
+  expect(capabilities.approval_token_present).toBe(false);
+  expect(capabilities.apply_attempted).toBe(false);
+
+  const metadata = nestedRecord(pathSelected, "metadata");
+  expect(metadata.model).toBe("browser-chat-baseline-mock");
+  expect(metadata.turn_path).toBe(scenario.expectedTurnPath);
+  expect(metadata.runtime_authoritative).toBe(true);
+
+  const capabilityChecked = events[1];
+  expect(capabilityChecked.phase).toBe("capability");
+  expect(capabilityChecked.status).toBe("allowed");
+  const finalization = events[2];
+  expect(finalization.phase).toBe("finalization");
+  expect(finalization.status).toBe("completed");
+  const terminal = events[3];
+  expect(terminal.phase).toBe("terminal");
+  expect(terminal.status).toBe("completed");
+
+  const serialized = JSON.stringify(events);
+  expect(serialized).not.toContain("raw_payload");
+  expect(serialized).not.toContain('"function_call"');
+}
+
 async function latestPersistedAssistant(
   page: Page,
   userId: string,
@@ -208,11 +287,20 @@ test.describe("browser chat-baseline acceptance", () => {
       expect(observedStream.status).toBe(200);
 
       const observedEvents = eventTypes(observedStream);
-      expect(observedEvents).toEqual(expect.arrayContaining(["status", "answer", "metadata", "done"]));
+      expect(observedEvents).toEqual(expect.arrayContaining([
+        "chat_lifecycle",
+        "status",
+        "answer",
+        "metadata",
+        "done",
+      ]));
+      expect(observedEvents.filter((eventType) => eventType === "chat_lifecycle")).toHaveLength(4);
+      expect(observedEvents.indexOf("chat_lifecycle")).toBeLessThan(observedEvents.indexOf("answer"));
       expect(observedEvents[observedEvents.length - 1]).toBe("done");
       for (const eventType of DISALLOWED_BASELINE_EVENTS) {
         expect(observedEvents).not.toContain(eventType);
       }
+      expectChatLifecycleTelemetry(chatLifecycleEventsFromStream(observedStream), scenario);
 
       const assistant = lastAssistantMessage(page);
       await expect(assistant).toContainText(scenario.expectedText, { timeout: 30_000 });
@@ -237,6 +325,10 @@ test.describe("browser chat-baseline acceptance", () => {
       expect(persistedTurnPath.bind_tools).toBe(false);
       expect(persistedTurnPath.force_tools).toBe(false);
       expectSafeLedger(asRecord(persisted.metadata?.runtime_flow_ledger), scenario);
+      expectChatLifecycleTelemetry(
+        chatLifecycleEventsFromMetadata(persisted.metadata),
+        scenario,
+      );
     }
   });
 });
