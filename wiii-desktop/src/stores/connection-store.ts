@@ -13,6 +13,7 @@ interface ConnectionState {
   serverVersion: string | null;
   lastCheckedAt: string | null;
   errorMessage: string | null;
+  consecutiveFailures: number;
   pollIntervalId: ReturnType<typeof setInterval> | null;
   /** Fires once when connection recovers from disconnected → connected */
   onReconnect: (() => void) | null;
@@ -25,15 +26,17 @@ interface ConnectionState {
 }
 
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
-  status: "disconnected",
+  status: "checking",
   serverVersion: null,
   lastCheckedAt: null,
   errorMessage: null,
+  consecutiveFailures: 0,
   pollIntervalId: null,
   onReconnect: null,
 
   checkHealth: async () => {
     const prevStatus = get().status;
+    const prevFailures = get().consecutiveFailures;
     set({ status: "checking" });
     try {
       const health = await checkHealth();
@@ -43,16 +46,20 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         serverVersion: health.version ?? null,
         lastCheckedAt: new Date().toISOString(),
         errorMessage: null,
+        consecutiveFailures: 0,
       });
       // Detect reconnection: was disconnected/degraded, now connected
       if (newStatus === "connected" && (prevStatus === "disconnected" || prevStatus === "degraded")) {
         get().onReconnect?.();
       }
     } catch (err) {
+      const consecutiveFailures = prevFailures + 1;
+      const shouldDisconnect = prevStatus === "disconnected" || consecutiveFailures >= 2;
       set({
-        status: "disconnected",
+        status: shouldDisconnect ? "disconnected" : "degraded",
         lastCheckedAt: new Date().toISOString(),
         errorMessage: err instanceof Error ? err.message : "Unknown error",
+        consecutiveFailures,
       });
     }
   },

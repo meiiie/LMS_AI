@@ -46,6 +46,7 @@ beforeEach(() => {
     serverVersion: null,
     lastCheckedAt: null,
     errorMessage: null,
+    consecutiveFailures: 0,
     pollIntervalId: null,
   });
 });
@@ -157,6 +158,53 @@ describe("ConnectionBadge — Reconnect logic", () => {
 
     expect(useConnectionStore.getState().status).toBe("disconnected");
     expect(useConnectionStore.getState().errorMessage).toBe("Connection refused");
+  });
+
+  it("should treat a single connected-state health failure as degraded", async () => {
+    useConnectionStore.setState({
+      status: "connected",
+      consecutiveFailures: 0,
+    });
+    vi.mocked(healthApi.checkHealth).mockRejectedValue(
+      new Error("Backend hot reload")
+    );
+
+    await useConnectionStore.getState().checkHealth();
+
+    expect(useConnectionStore.getState().status).toBe("degraded");
+    expect(useConnectionStore.getState().consecutiveFailures).toBe(1);
+  });
+
+  it("should mark disconnected after repeated health failures", async () => {
+    useConnectionStore.setState({
+      status: "degraded",
+      consecutiveFailures: 1,
+    });
+    vi.mocked(healthApi.checkHealth).mockRejectedValue(
+      new Error("Connection refused")
+    );
+
+    await useConnectionStore.getState().checkHealth();
+
+    expect(useConnectionStore.getState().status).toBe("disconnected");
+    expect(useConnectionStore.getState().consecutiveFailures).toBe(2);
+  });
+
+  it("should reset failure count after successful health check", async () => {
+    useConnectionStore.setState({
+      status: "degraded",
+      consecutiveFailures: 1,
+    });
+    vi.mocked(healthApi.checkHealth).mockResolvedValue({
+      status: "ok",
+      version: "1.0.0",
+      environment: "development",
+    });
+
+    await useConnectionStore.getState().checkHealth();
+
+    expect(useConnectionStore.getState().status).toBe("connected");
+    expect(useConnectionStore.getState().consecutiveFailures).toBe(0);
   });
 
   it("should set degraded for non-ok health response", async () => {
