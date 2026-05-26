@@ -10,6 +10,7 @@ const backendURL =
 export default defineConfig({
   testDir: "./playwright",
   testMatch: [
+    "chat-baseline-acceptance.spec.ts",
     "local-chat-harness.spec.ts",
     "visual-runtime.spec.ts",
     "code-studio-runtime.spec.ts",

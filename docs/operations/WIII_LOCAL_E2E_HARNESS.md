@@ -4,14 +4,15 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-05-24
+Last updated: 2026-05-26
 
 ## Purpose
 
 The local E2E harness exists to prove that Wiii can enter the real chat UI on
-localhost before longer visual, Code Studio, LMS, or voice scenarios run. A
-test failure should say whether auth/bootstrap is broken or whether the product
-runtime under test is broken.
+localhost and complete a deterministic browser chat baseline before longer
+visual, Code Studio, LMS, or voice scenarios run. A test failure should say
+whether auth/bootstrap, browser stream assembly, or the product runtime under
+test is broken.
 
 ## Contract
 
@@ -45,6 +46,32 @@ $env:WIII_PLAYWRIGHT_BASE_URL="http://127.0.0.1:1430"
 npx playwright test -c playwright.visual.config.ts playwright/local-chat-harness.spec.ts
 ```
 
+## Chat Baseline Acceptance Command
+
+```bash
+cd wiii-desktop
+npx playwright test -c playwright.visual.config.ts playwright/chat-baseline-acceptance.spec.ts
+```
+
+This test uses the real browser UI, dev-login bootstrap, chat composer,
+frontend SSE parser, stream buffers, Markdown renderer, and chat persistence.
+It mocks only the `/api/v1/chat/stream/v3` SSE response at the Playwright
+network boundary so the acceptance signal is deterministic and does not require
+provider keys, production, or full Docker.
+
+The required evidence is:
+
+- ordinary Vietnamese prompts are submitted through `[data-wiii-id="chat-textarea"]`
+- final assistant answers render in `[data-message-role="assistant"]`
+- Markdown code renders as a chat code block, not Code Studio
+- stream events include `status`, `answer`, `metadata`, and terminal `done`
+- terminal `runtime_flow_ledger` says `host_surface=desktop_chat`,
+  `route.lane=native_turn`, no observed tools, host/Pointy/visual/Code Studio
+  suppressed, and `finalization.status=saved`
+- visible and persisted answers contain no raw provider/tool payload markers
+- no host action preview, Pointy spotlight/action surface, visual block, or
+  Code Studio surface appears
+
 ## Visual Runtime Command
 
 ```bash
@@ -52,17 +79,19 @@ cd wiii-desktop
 npx playwright test -c playwright.visual.config.ts
 ```
 
-This runs the lightweight auth harness first, then the visual runtime and Code
-Studio runtime specs.
+This runs the chat baseline acceptance, lightweight auth harness, visual
+runtime, and Code Studio runtime specs.
 
 ## Expected Evidence
 
 - `local-chat-harness.spec.ts` reaches `[data-wiii-id="chat-textarea"]`.
+- `chat-baseline-acceptance.spec.ts` sends real UI prompts and proves
+  prompt-to-answer browser assembly with a deterministic SSE baseline.
 - Login screen text is absent after bootstrap.
 - Backend `/api/v1/auth/dev-login/status` reports enabled for the local test
   server.
 - If a test stops at login, treat it as harness/auth failure before debugging
-  visual runtime.
+  chat, visual runtime, or Code Studio behavior.
 
 ## Rollback
 
