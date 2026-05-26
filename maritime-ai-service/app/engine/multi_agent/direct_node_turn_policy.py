@@ -15,6 +15,9 @@ from app.engine.multi_agent.direct_node_thinking_effort import (
     _resolve_direct_thinking_effort,
 )
 from app.engine.multi_agent.direct_reasoning import _is_codebase_analysis_query
+from app.engine.multi_agent.social_followup_policy import (
+    looks_short_social_followup_turn,
+)
 from app.engine.multi_agent.state import AgentState
 
 
@@ -90,9 +93,16 @@ def resolve_direct_node_turn_policy(
         routing_method == "always_on_chatter_fast_path"
         or (hint_kind == "fast_chatter" and hint_shape in {"reaction", "vague_banter"})
     )
+    is_social_followup_chatter = (
+        not is_identity_turn
+        and (
+            (hint_kind == "fast_chatter" and hint_shape == "social_followup")
+            or looks_short_social_followup_turn(normalized_query)
+        )
+    )
     is_social_fast_path = (
         routing_method == "always_on_social_fast_path"
-        or (hint_kind == "fast_chatter" and hint_shape == "social")
+        or (hint_kind == "fast_chatter" and hint_shape in {"social", "social_followup"})
     )
     visual_decision = resolve_visual_intent(query)
     is_short_house_chatter = (
@@ -109,7 +119,7 @@ def resolve_direct_node_turn_policy(
             )
         )
     )
-    history_limit = 0 if is_short_house_chatter else 10
+    history_limit = 4 if is_social_followup_chatter else (0 if is_short_house_chatter else 10)
     tools_context_override = "" if is_short_house_chatter else None
     role_name = (
         "direct_chatter_agent"

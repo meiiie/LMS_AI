@@ -112,6 +112,9 @@ def test_direct_chatter_messages_also_get_visible_thinking_supplement():
     assert "native thinking" in system_prompt
     assert "<thinking>...</thinking>" in system_prompt
     assert "colregs" in system_prompt
+    assert "sao lại z" in system_prompt
+    assert "không bịa cảm giác" in system_prompt
+    assert "cửa sổ" in system_prompt
 
 
 def test_direct_chatter_identity_still_receives_living_context_prompt():

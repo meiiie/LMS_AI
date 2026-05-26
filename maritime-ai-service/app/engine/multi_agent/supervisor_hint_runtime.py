@@ -9,6 +9,9 @@ from app.engine.multi_agent.direct_node_chatter_runtime import (
 )
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.direct_intent import _looks_selfhood_followup_turn
+from app.engine.multi_agent.social_followup_policy import (
+    looks_short_social_followup_turn,
+)
 from app.engine.multi_agent.visual_intent_resolver import resolve_visual_intent
 
 _NORMALIZED_SOCIAL_PREFIXES = (
@@ -311,7 +314,11 @@ def _looks_hunger_chatter_impl(normalized: str) -> bool:
 
 def is_obvious_social_turn_impl(query: str) -> bool:
     normalized = _normalize_router_text_impl(query)
-    return _looks_clear_social_impl(normalized) or _looks_hunger_chatter_impl(normalized)
+    return (
+        _looks_clear_social_impl(normalized)
+        or _looks_hunger_chatter_impl(normalized)
+        or looks_short_social_followup_turn(normalized)
+    )
 
 
 def classify_fast_chatter_turn_impl(query: str) -> tuple[str, str] | None:
@@ -324,6 +331,8 @@ def classify_fast_chatter_turn_impl(query: str) -> tuple[str, str] | None:
         return ("social", "hunger_chatter")
     if _looks_social_status_chatter_turn(normalized):
         return ("social", "social_status")
+    if looks_short_social_followup_turn(normalized):
+        return ("social", "social_followup")
     if _looks_clear_social_impl(normalized):
         return ("social", "social")
     tokens = [token for token in re.sub(r"[^\w\s]", " ", normalized).split() if token]

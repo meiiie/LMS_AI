@@ -11,6 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
+from app.engine.multi_agent.social_followup_policy import (
+    looks_short_social_followup_turn,
+)
 from app.engine.tools.tool_capability_registry import (
     HOST_ACTION_PREFIX,
     LMS_DOCUMENT_PREVIEW_TOOL_NAMES,
@@ -357,6 +360,11 @@ def _looks_casual_chat(signals: TurnPathSignals) -> bool:
         "hom qua toi",
     )
     if any(cue in normalized for cue in casual_cues):
+        return True
+
+    if not _has_tool_or_output_signal(signals) and looks_short_social_followup_turn(
+        normalized
+    ):
         return True
 
     if _has_tool_or_output_signal(signals):

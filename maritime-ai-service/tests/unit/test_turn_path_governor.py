@@ -16,6 +16,33 @@ def test_turn_path_governor_marks_plain_greeting_as_no_tool_chat():
     assert decision.force_tools is False
 
 
+def test_turn_path_governor_marks_short_social_followup_as_no_tool_chat():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    for query in ("sao lai z", "sao lo lung ?", "the ngu di"):
+        decision = resolve_turn_path_decision(TurnPathSignals(normalized_query=query))
+        assert decision.path == "casual_chat"
+        assert decision.bind_tools is False
+        assert decision.force_tools is False
+
+
+def test_turn_path_governor_does_not_treat_task_query_as_social_followup():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(normalized_query="sao lai colreg rule 15 ap dung")
+    )
+
+    assert decision.path == "direct_prose"
+    assert decision.bind_tools is True
+
+
 def test_turn_path_governor_narrows_visual_app_to_required_tool():
     from app.engine.multi_agent.turn_path_governor import (
         TurnPathSignals,
@@ -118,6 +145,27 @@ def test_collect_direct_tools_keeps_daily_status_off_search_path():
     state = {"context": {}}
     tools, force_tools = module._collect_direct_tools(
         "Hôm nay mình ăn cơm rồi",
+        user_role="student",
+        state=state,
+    )
+
+    assert tools == []
+    assert force_tools is False
+    assert state["_turn_path_decision"]["path"] == "casual_chat"
+
+
+def test_collect_direct_tools_keeps_short_social_followup_off_tool_path():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {
+        "context": {},
+        "routing_metadata": {
+            "intent": "unknown",
+            "method": "rule_based_timeout",
+        },
+    }
+    tools, force_tools = module._collect_direct_tools(
+        "sao lơ lửng ?",
         user_role="student",
         state=state,
     )
