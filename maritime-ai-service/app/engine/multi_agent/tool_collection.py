@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from app.core.config import settings
 from app.engine.multi_agent.document_preview_contract import (
+    filter_lms_authoring_capability_tools as _filter_lms_authoring_capability_tools,
     looks_uploaded_document_course_request as _contract_looks_uploaded_document_course_request,
     looks_uploaded_document_lesson_preview_request as _contract_looks_uploaded_document_lesson_preview_request,
 )
@@ -644,6 +645,12 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
     try:
         if state is not None:
             capabilities_tools = _host_capability_tools_from_state(state)
+            state_context = state.get("context") if isinstance(state.get("context"), dict) else {}
+            capabilities_tools = _filter_lms_authoring_capability_tools(
+                capabilities_tools,
+                state=state,
+                ctx=state_context,
+            )
             host_actions_enabled = getattr(settings, "enable_host_actions", False)
             safe_doc_preview_fallback = (
                 not host_actions_enabled
