@@ -520,6 +520,153 @@ class TestProductSearchAgentNode:
         assert result["current_agent"] == "product_search_agent"
         assert len(result["tools_used"]) == 1
 
+    @pytest.mark.asyncio
+    async def test_react_loop_records_visible_tool_policy(self, monkeypatch):
+        from app.engine.multi_agent.agents import product_search_runtime as runtime
+
+        class _Tool:
+            def __init__(self, name: str):
+                self.name = name
+
+        class _Settings:
+            enable_query_planner = False
+            enable_product_preview_cards = False
+            product_preview_max_cards = 0
+            enable_curated_product_cards = False
+            product_search_max_iterations = 1
+
+        response = MagicMock()
+        response.tool_calls = []
+        response.content = "done"
+
+        llm = MagicMock()
+        llm.bind_tools = MagicMock(return_value=llm)
+        llm.ainvoke = AsyncMock(return_value=response)
+
+        node = MagicMock()
+        node._llm = llm
+        node._llm_with_tools = llm
+        node._tools = [_Tool("tool_search_google_shopping"), _Tool("tool_search_shopee")]
+        node._extract_text.side_effect = lambda content: str(content)
+        node._extract_thinking.return_value = ""
+
+        monkeypatch.setattr(runtime, "get_settings", lambda: _Settings())
+        monkeypatch.setattr(runtime, "build_wiii_runtime_prompt", lambda **_kwargs: "")
+        monkeypatch.setattr(runtime, "filter_tools_for_role", lambda tools, _role: list(tools))
+        monkeypatch.setattr(
+            runtime,
+            "select_runtime_tools",
+            lambda tools, **_kwargs: [tool for tool in tools if tool.name == "tool_search_shopee"],
+        )
+        monkeypatch.setattr(runtime, "get_effective_provider_impl", lambda _state: None)
+
+        state = {"context": {"user_role": "student"}}
+        result, tools_used, _thinking, _streamed = await runtime.react_loop_impl(
+            node,
+            query="tim iphone cu",
+            context={"user_role": "student"},
+            state=state,
+            max_iterations_default=1,
+            chunk_size=40,
+            chunk_delay=0,
+            product_result_tools=set(),
+            product_search_required_tools=lambda *_args, **_kwargs: ["tool_search_shopee"],
+        )
+
+        policy = state["_tool_policy_session"]
+        assert result == "done"
+        assert tools_used == []
+        assert policy["path"] == "product_search"
+        assert policy["reason"] == "product_search_tool_setup"
+        assert policy["candidate_tool_names"] == [
+            "tool_search_google_shopping",
+            "tool_search_shopee",
+        ]
+        assert policy["visible_tool_names"] == ["tool_search_shopee"]
+        assert policy["tool_capabilities"]["tool_search_shopee"]["group"] == "product_search"
+
+    @pytest.mark.asyncio
+    async def test_react_loop_denies_out_of_policy_product_tool(self, monkeypatch):
+        from app.engine.multi_agent.agents import product_search_runtime as runtime
+
+        class _Tool:
+            def __init__(self, name: str):
+                self.name = name
+
+        class _Settings:
+            enable_query_planner = False
+            enable_product_preview_cards = False
+            product_preview_max_cards = 0
+            enable_curated_product_cards = False
+            product_search_max_iterations = 2
+
+        stale_response = MagicMock()
+        stale_response.tool_calls = [
+            {"name": "tool_search_google_shopping", "args": {"query": "iphone"}, "id": "stale"}
+        ]
+        stale_response.content = ""
+        final_response = MagicMock()
+        final_response.tool_calls = []
+        final_response.content = "done"
+
+        llm = MagicMock()
+        llm.bind_tools = MagicMock(return_value=llm)
+        llm.ainvoke = AsyncMock(side_effect=[stale_response, final_response])
+
+        node = MagicMock()
+        node._llm = llm
+        node._llm_with_tools = llm
+        node._tools = [_Tool("tool_search_google_shopping"), _Tool("tool_search_shopee")]
+        node._extract_text.side_effect = lambda content: str(content)
+        node._extract_thinking.return_value = ""
+
+        state = {
+            "context": {"user_role": "student"},
+            "_tool_policy_session": {
+                "version": "tool_policy_session.v1",
+                "path": "product_search",
+                "reason": "product_search_tool_setup",
+                "bind_tools": True,
+                "force_tools": False,
+                "allow_all_tools": False,
+                "allowed_tool_names": ["tool_search_shopee"],
+                "allowed_tool_prefixes": [],
+                "forbidden_tool_names": [],
+                "forbidden_tool_prefixes": [],
+                "candidate_tool_names": ["tool_search_google_shopping", "tool_search_shopee"],
+                "visible_tool_names": ["tool_search_shopee"],
+                "connection_status": {},
+                "approval_required_tool_names": [],
+            },
+        }
+
+        monkeypatch.setattr(runtime, "get_settings", lambda: _Settings())
+        monkeypatch.setattr(runtime, "build_wiii_runtime_prompt", lambda **_kwargs: "")
+        monkeypatch.setattr(runtime, "filter_tools_for_role", lambda tools, _role: list(tools))
+        monkeypatch.setattr(runtime, "select_runtime_tools", lambda tools, **_kwargs: list(tools))
+        monkeypatch.setattr(runtime, "get_effective_provider_impl", lambda _state: None)
+        monkeypatch.setattr(runtime, "record_tool_policy_session", lambda *_args, **_kwargs: None)
+
+        async def fail_invoke(*_args, **_kwargs):
+            raise AssertionError("denied product tool must not be invoked")
+
+        monkeypatch.setattr(runtime, "invoke_tool_with_runtime", fail_invoke)
+
+        result, tools_used, _thinking, _streamed = await runtime.react_loop_impl(
+            node,
+            query="tim iphone cu",
+            context={"user_role": "student"},
+            state=state,
+            max_iterations_default=2,
+            chunk_size=40,
+            chunk_delay=0,
+            product_result_tools=set(),
+            product_search_required_tools=lambda *_args, **_kwargs: [],
+        )
+
+        assert result == "done"
+        assert tools_used == []
+
     def test_lazy_import_in_agents_init(self):
         """agents/__init__.py lazy import works for ProductSearchAgentNode."""
         from app.engine.multi_agent.agents import _ATTR_MAP

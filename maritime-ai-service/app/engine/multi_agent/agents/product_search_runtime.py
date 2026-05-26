@@ -32,9 +32,18 @@ from app.engine.multi_agent.agents.product_search_runtime_bindings import (
     select_runtime_tools,
 )
 from app.engine.multi_agent.graph_runtime_helpers import _get_requested_model, _remember_runtime_target
+from app.engine.multi_agent.tool_policy_session import (
+    build_visible_tool_policy_session,
+    record_tool_policy_session,
+    resolve_tool_policy_denial,
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+def _tool_name(tool: object) -> str:
+    return str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "").strip()
 
 
 def init_llm_impl(node) -> None:
@@ -86,6 +95,7 @@ async def react_loop_impl(
         node._tools,
         (context or {}).get("user_role", "student"),
     )
+    candidate_tool_names = [_tool_name(tool) for tool in active_tools]
     llm_to_use = node._llm_with_tools
 
     async def _push(event):
@@ -223,6 +233,16 @@ async def react_loop_impl(
             )
     except Exception as selection_err:
         logger.debug("[PRODUCT_SEARCH] Runtime tool selection skipped: %s", selection_err)
+
+    policy_session = build_visible_tool_policy_session(
+        path="product_search",
+        reason="product_search_tool_setup",
+        state=state,
+        query=query,
+        candidate_tool_names=candidate_tool_names,
+        visible_tool_names=[_tool_name(tool) for tool in active_tools],
+    )
+    record_tool_policy_session(state, policy_session)
 
     runtime_llm_source = node._llm
     llm_to_use = node._llm.bind_tools(active_tools) if node._llm and active_tools else node._llm_with_tools
@@ -367,6 +387,62 @@ BƯỚC 3: So sánh giá và tổng hợp kết quả.
             tool_name = tool_call.get("name", "unknown")
             tool_args = tool_call.get("args", {})
             tool_id = tool_call.get("id", f"tc_{iteration}")
+            if not isinstance(tool_args, dict):
+                tool_args = {"value": tool_args}
+                tool_call["args"] = tool_args
+
+            policy_denial = resolve_tool_policy_denial(state, str(tool_name or "").strip())
+            if policy_denial is not None:
+                policy_decision, policy_message = policy_denial
+                policy_payload = {
+                    "allowed": False,
+                    "path": policy_decision.path,
+                    "reason": policy_decision.reason,
+                }
+                logger.warning(
+                    "[PRODUCT_SEARCH] Tool policy denied tool=%r path=%s reason=%s",
+                    tool_name,
+                    policy_decision.path,
+                    policy_decision.reason,
+                )
+                await _push(
+                    {
+                        "type": "tool_call",
+                        "content": {
+                            "name": tool_name,
+                            "args": tool_args,
+                            "id": tool_id,
+                            "policy": policy_payload,
+                        },
+                        "node": "product_search_agent",
+                    }
+                )
+                await _push(
+                    {
+                        "type": "tool_result",
+                        "content": {
+                            "name": tool_name,
+                            "result": str(policy_message)[:500],
+                            "id": tool_id,
+                        },
+                        "node": "product_search_agent",
+                    }
+                )
+                messages.append(
+                    Message(
+                        role="assistant",
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id=str(tool_id),
+                                name=str(tool_name or ""),
+                                arguments=tool_args,
+                            )
+                        ],
+                    )
+                )
+                messages.append(Message(role="tool", content=str(policy_message), tool_call_id=tool_id))
+                continue
 
             await _push(
                 {

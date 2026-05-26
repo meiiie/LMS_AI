@@ -282,6 +282,21 @@ def tool_policy_session_from_state(state: dict[str, Any] | None) -> ToolPolicySe
     return None
 
 
+def resolve_tool_policy_denial(
+    state: dict[str, Any] | None,
+    tool_name: str,
+) -> tuple[ToolPolicyDecision, str] | None:
+    """Return a policy denial decision/message for a runtime tool call."""
+
+    session = tool_policy_session_from_state(state)
+    if session is None:
+        return None
+    decision = session.decision_for(tool_name)
+    if decision.allowed:
+        return None
+    return decision, tool_policy_denial_message(decision)
+
+
 def filter_tools_for_policy_session(
     tools: list[Any],
     session: ToolPolicySession,

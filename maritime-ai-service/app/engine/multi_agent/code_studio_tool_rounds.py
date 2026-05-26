@@ -24,8 +24,7 @@ from app.engine.multi_agent.code_studio_template_scaffold import (
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.tool_policy_session import (
     ToolPolicyDecision,
-    tool_policy_denial_message,
-    tool_policy_session_from_state,
+    resolve_tool_policy_denial,
 )
 from app.engine.runtime.runtime_metrics import inc_counter
 
@@ -96,13 +95,7 @@ def _code_studio_tool_policy_denial(
     state: Optional[AgentState],
     tool_name: str,
 ) -> tuple[ToolPolicyDecision, str] | None:
-    session = tool_policy_session_from_state(state)
-    if session is None:
-        return None
-    decision = session.decision_for(str(tool_name or "").strip())
-    if decision.allowed:
-        return None
-    return decision, tool_policy_denial_message(decision)
+    return resolve_tool_policy_denial(state, str(tool_name or "").strip())
 
 
 def _build_streamed_code_html_tool_round_outcome(

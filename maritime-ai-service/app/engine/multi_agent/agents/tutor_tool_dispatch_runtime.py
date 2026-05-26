@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Sequence
 
 from app.engine.messages import Message, ToolCall
+from app.engine.multi_agent.tool_policy_session import resolve_tool_policy_denial
 from app.engine.multi_agent.visual_events import (
     _emit_visual_commit_events,
     _maybe_emit_visual_event,
@@ -164,6 +165,72 @@ def _record_tool_use(
             "description": description,
             "iteration": iteration + 1,
         }
+    )
+
+
+async def deny_tutor_tool_call_by_policy(
+    *,
+    state: dict[str, Any] | None,
+    tool_call: dict[str, Any],
+    iteration: int,
+    messages: list[Any],
+    push: Callable[[dict[str, Any]], Awaitable[None]],
+    phase_transition_count: int,
+    logger_obj: Any,
+) -> TutorToolDispatchResult | None:
+    """Emit a visible policy denial when tutor receives an out-of-session tool call."""
+
+    tool_name = str(tool_call.get("name", "") or "")
+    tool_args = tool_call.get("args", {}) or {}
+    if not isinstance(tool_args, dict):
+        tool_args = {"value": tool_args}
+        tool_call["args"] = tool_args
+    tool_id = str(tool_call.get("id") or f"call_{iteration}")
+
+    denial = resolve_tool_policy_denial(state, tool_name.strip())
+    if denial is None:
+        return None
+
+    decision, message = denial
+    policy_payload = {
+        "allowed": False,
+        "path": decision.path,
+        "reason": decision.reason,
+    }
+    logger_obj.warning(
+        "[TUTOR_AGENT] Tool policy denied tool=%r path=%s reason=%s",
+        tool_name,
+        decision.path,
+        decision.reason,
+    )
+    await push(
+        {
+            "type": "tool_call",
+            "content": {
+                "name": tool_name,
+                "args": tool_args,
+                "id": tool_id,
+                "policy": policy_payload,
+            },
+            "node": "tutor_agent",
+        }
+    )
+    await _emit_tool_result(
+        push=push,
+        tool_name=tool_name,
+        result=message,
+        tool_id=tool_id,
+    )
+    _append_tool_observation(
+        messages=messages,
+        tool_call=tool_call,
+        tool_id=tool_id,
+        result=message,
+    )
+    return TutorToolDispatchResult(
+        phase_transition_count=phase_transition_count,
+        tool_result_text=message,
+        tool_args=tool_args,
     )
 
 

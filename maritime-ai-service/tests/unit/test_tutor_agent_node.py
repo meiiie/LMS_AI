@@ -462,9 +462,15 @@ class TestTutorProcess:
 
         bound_tools = mock_llm.bind_tools.call_args[0][0]
         bound_names = [tool.name for tool in bound_tools]
+        policy = state["_tool_policy_session"]
 
         assert "tool_generate_visual" in bound_names
         assert "tool_generate_interactive_chart" not in bound_names
+        assert policy["path"] == "tutor"
+        assert policy["reason"] == "tutor_tool_setup"
+        assert "tool_generate_visual" in policy["visible_tool_names"]
+        assert "tool_generate_interactive_chart" not in policy["visible_tool_names"]
+        assert policy["tool_capabilities"]["tool_generate_visual"]["group"] == "visual"
         assert result["tutor_output"] == "Visual answer"
 
     def test_build_system_prompt_mentions_structured_visual_priority(self, mock_llm, base_state):
@@ -616,6 +622,68 @@ class TestReactLoop:
         assert "Rule 13" in response
         assert len(tools_used) == 1
         assert tools_used[0]["name"] == "tool_knowledge_search"
+
+    @pytest.mark.asyncio
+    async def test_tool_policy_denies_stale_tutor_tool_without_dispatch(self, mock_llm):
+        stale_tool_response = MagicMock()
+        stale_tool_response.tool_calls = [
+            {"name": "tool_web_search", "args": {"query": "outside policy"}, "id": "call_stale"}
+        ]
+        stale_tool_response.content = ""
+
+        final_response = MagicMock()
+        final_response.tool_calls = []
+        final_response.content = "Final tutor answer"
+
+        mock_llm.ainvoke.side_effect = [stale_tool_response, final_response]
+        node = _make_tutor(llm=mock_llm, llm_with_tools=mock_llm)
+        state = {
+            "_tool_policy_session": {
+                "version": "tool_policy_session.v1",
+                "path": "tutor",
+                "reason": "tutor_tool_setup",
+                "bind_tools": True,
+                "force_tools": False,
+                "allow_all_tools": False,
+                "allowed_tool_names": ["tool_knowledge_search"],
+                "allowed_tool_prefixes": [],
+                "forbidden_tool_names": [],
+                "forbidden_tool_prefixes": [],
+                "candidate_tool_names": ["tool_knowledge_search", "tool_web_search"],
+                "visible_tool_names": ["tool_knowledge_search"],
+                "connection_status": {},
+                "approval_required_tool_names": [],
+            }
+        }
+
+        with patch(
+            "app.engine.multi_agent.agents.tutor_node.extract_thinking_from_response",
+            return_value=("Final tutor answer", None),
+        ), patch(
+            "app.engine.multi_agent.agents.tutor_node.clear_retrieved_sources",
+        ), patch(
+            "app.engine.multi_agent.agents.tutor_node.get_last_retrieved_sources",
+            return_value=[],
+        ), patch(
+            "app.engine.multi_agent.agents.tutor_node.get_last_native_thinking",
+            return_value=None,
+        ), patch(
+            "app.engine.multi_agent.agents.tutor_node.get_last_confidence",
+            return_value=(0.0, False),
+        ), patch(
+            "app.engine.multi_agent.agents.tutor_node.dispatch_tutor_tool_call",
+            AsyncMock(side_effect=AssertionError("denied tool must not dispatch")),
+        ) as dispatch_mock:
+            response, sources, tools_used, _thinking, _streamed = await node._react_loop(
+                "Explain Rule 13",
+                {},
+                state=state,
+            )
+
+        assert response == "Final tutor answer"
+        assert sources == []
+        assert tools_used == []
+        dispatch_mock.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_tool_call_sync_collects_public_tutor_thinking_for_state_parity(self, mock_llm):

@@ -9,6 +9,10 @@ from app.engine.tools.runtime_context import (
     filter_tools_for_role,
 )
 from app.engine.multi_agent.graph_runtime_helpers import _copy_runtime_metadata
+from app.engine.multi_agent.tool_policy_session import (
+    build_visible_tool_policy_session,
+    record_tool_policy_session,
+)
 from app.engine.multi_agent.visual_intent_resolver import (
     filter_tools_for_visual_intent,
 )
@@ -26,6 +30,10 @@ class PreparedTutorRequest:
     visual_decision: Any
     active_tools: list[Any]
     runtime_context_base: Any
+
+
+def _tool_name(tool: Any) -> str:
+    return str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "").strip()
 
 
 def build_tutor_tools(
@@ -173,6 +181,7 @@ def prepare_tutor_request(
         visual_decision,
         structured_visuals_enabled=getattr(settings_obj, "enable_structured_visuals", False),
     )
+    candidate_tool_names = [_tool_name(tool) for tool in active_tools]
 
     try:
         from app.engine.skills.skill_recommender import select_runtime_tools
@@ -203,6 +212,7 @@ def prepare_tutor_request(
         logger_obj.debug("[TUTOR_AGENT] Runtime tool selection skipped: %s", exc)
 
     llm_with_tools_for_request = None
+    visible_tools_for_policy = list(active_tools)
     if llm_for_request:
         if visual_decision.force_tool:
             required_visual_names = set(required_visual_tool_names_fn(visual_decision))
@@ -212,6 +222,7 @@ def prepare_tutor_request(
                 if getattr(tool, "name", "") in required_visual_names
             ]
             if visual_tools_only:
+                visible_tools_for_policy = list(visual_tools_only)
                 forced_choice = resolve_tool_choice_fn(True, visual_tools_only, provider_override)
                 llm_with_tools_for_request = _copy_runtime_metadata(
                     llm_for_request,
@@ -247,6 +258,17 @@ def prepare_tutor_request(
         node="tutor_agent",
         source="agentic_loop",
     )
+
+    policy_session = build_visible_tool_policy_session(
+        path="tutor",
+        reason="tutor_tool_setup",
+        state=state,
+        query=query,
+        candidate_tool_names=candidate_tool_names,
+        visible_tool_names=[_tool_name(tool) for tool in visible_tools_for_policy],
+        force_tools=bool(getattr(visual_decision, "force_tool", False)),
+    )
+    record_tool_policy_session(state, policy_session)
 
     return PreparedTutorRequest(
         thinking_effort=thinking_effort,

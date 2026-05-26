@@ -6,7 +6,7 @@ Owner: Backend maintainers
 
 Last updated: 2026-05-26
 
-Applies to: Direct chat tool binding, runtime tool execution, host actions, LMS authoring, Pointy, web/search, weather, visual tools
+Applies to: Direct chat tool binding, runtime tool execution, host actions, LMS authoring, Pointy, web/search, weather, product search, tutor, visual tools
 
 ## Purpose
 
@@ -33,9 +33,10 @@ Every direct chat turn should have a `ToolPolicySession` in `AgentState` when
 tool selection is evaluated.
 
 Runtimes that already perform their own tool selection, such as Code Studio,
-should record the same contract with `build_visible_tool_policy_session`: the
-candidate set is the collected tool inventory, and the visible set is the
-runtime-selected tool bundle actually bound to the model.
+tutor, and product search, should record the same contract with
+`build_visible_tool_policy_session`: the candidate set is the collected tool
+inventory, and the visible set is the runtime-selected tool bundle actually
+bound to the model.
 
 The session records:
 
@@ -56,12 +57,12 @@ The session records:
 The capability registry records:
 
 - capability group: web search, weather, LMS authoring, host action, Pointy,
-  visual, knowledge search, utility, or Code Studio output;
+  product search, visual, knowledge search, utility, or Code Studio output;
 - permission level: read, write, or host control;
 - required connection: LMS authoring, weather provider, or host actions;
 - whether the tool mutates state or requires host-issued approval evidence;
-- intended surface scope, such as direct chat, tutor, Code Studio, host, LMS, or
-  visual runtime.
+- intended surface scope, such as direct chat, tutor, product search,
+  Code Studio, host, LMS, or visual runtime.
 
 ## Runtime Rules
 
