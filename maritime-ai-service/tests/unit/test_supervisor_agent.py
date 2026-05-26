@@ -160,7 +160,19 @@ class TestSupervisorRoute:
         mock_route.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_route_short_social_status_uses_fast_path(self, mock_llm):
+    async def test_route_short_social_status_uses_fast_path_without_feature_flag(
+        self,
+        mock_llm,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+
+        monkeypatch.setattr(
+            settings,
+            "enable_conservative_fast_routing",
+            False,
+            raising=False,
+        )
         sup = _make_supervisor(mock_llm)
         state = {
             "query": "trưa nay ăn cơm rồi",
@@ -177,7 +189,7 @@ class TestSupervisorRoute:
             "intent": "social",
             "shape": "social_status",
         }
-        assert state["routing_metadata"]["method"] == "conservative_fast_path"
+        assert state["routing_metadata"]["method"] == "always_on_social_status_fast_path"
         mock_route.assert_not_awaited()
 
     @pytest.mark.asyncio
