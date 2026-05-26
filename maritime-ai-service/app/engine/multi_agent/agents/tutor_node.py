@@ -51,6 +51,7 @@ from app.engine.multi_agent.agents.tutor_request_runtime import (
 )
 from app.engine.multi_agent.agents.tutor_runtime import initialize_tutor_llm
 from app.engine.multi_agent.agents.tutor_tool_dispatch_runtime import (
+    deny_tutor_tool_call_by_policy,
     dispatch_tutor_tool_call,
 )
 from app.engine.multi_agent.graph_surface_runtime import (
@@ -1373,6 +1374,22 @@ class TutorAgentNode:
                 tool_name = tool_call.get("name", "")
                 tool_args = tool_call.get("args", {})
                 tool_id = tool_call.get("id", f"call_{iteration}")
+
+                denied_dispatch = await deny_tutor_tool_call_by_policy(
+                    state=state,
+                    tool_call=tool_call,
+                    iteration=iteration,
+                    messages=messages,
+                    push=_push,
+                    phase_transition_count=_phase_transition_count,
+                    logger_obj=logger,
+                )
+                if denied_dispatch is not None:
+                    _phase_transition_count = denied_dispatch.phase_transition_count
+                    last_tool_name_seen = str(tool_name or "")
+                    last_tool_result_text = denied_dispatch.tool_result_text
+                    last_tool_args = denied_dispatch.tool_args
+                    continue
 
                 # Sprint 69: Push tool_call event
                 await _push({

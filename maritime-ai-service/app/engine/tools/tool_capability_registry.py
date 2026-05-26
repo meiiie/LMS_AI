@@ -21,6 +21,7 @@ ToolCapabilityGroup = Literal[
     "lms_authoring",
     "host_action",
     "pointy",
+    "product_search",
     "visual",
     "code_studio_output",
 ]
@@ -32,6 +33,7 @@ ToolSurfaceScope = Literal[
     "code_studio",
     "host",
     "lms",
+    "product_search",
     "visual",
 ]
 
@@ -67,6 +69,27 @@ LMS_DOCUMENT_PREVIEW_TOOL_NAMES = frozenset(
     {
         DOC_PREVIEW_HOST_ACTION_TOOL,
         DOC_COURSE_HOST_ACTION_TOOL,
+    }
+)
+PRODUCT_SEARCH_TOOL_NAMES = frozenset(
+    {
+        "tool_search_google_shopping",
+        "tool_search_shopee",
+        "tool_search_tiktok_shop",
+        "tool_search_lazada",
+        "tool_search_facebook_marketplace",
+        "tool_search_instagram_shopping",
+        "tool_search_facebook_search",
+        "tool_search_facebook_group",
+        "tool_search_facebook_groups_auto",
+        "tool_search_websosanh",
+        "tool_search_all_web",
+        "tool_fetch_product_detail",
+        "tool_identify_product_from_image",
+        "tool_dealer_search",
+        "tool_international_search",
+        "tool_extract_contacts",
+        "tool_generate_product_report",
     }
 )
 
@@ -287,6 +310,15 @@ TOOL_CAPABILITIES: dict[str, ToolCapability] = {
     "tool_check_course_progress": _capability("tool_check_course_progress", "lms_query"),
     "tool_get_class_overview": _capability("tool_get_class_overview", "lms_query"),
     "tool_find_at_risk_students": _capability("tool_find_at_risk_students", "lms_query"),
+    **{
+        name: _capability(
+            name,
+            "product_search",
+            permission="write" if name == "tool_generate_product_report" else "read",
+            surface_scopes=("product_search",),
+        )
+        for name in sorted(PRODUCT_SEARCH_TOOL_NAMES)
+    },
     "tool_pointy_show": _capability(
         "tool_pointy_show",
         "pointy",

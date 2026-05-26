@@ -35,6 +35,31 @@ def test_tool_capability_registry_records_policy_groups():
     }
 
 
+def test_tool_capability_registry_records_product_search_tools():
+    from app.engine.tools.tool_capability_registry import (
+        PRODUCT_SEARCH_TOOL_NAMES,
+        lookup_tool_capability,
+        tool_capability_metadata_for_names,
+    )
+
+    assert "tool_search_websosanh" in PRODUCT_SEARCH_TOOL_NAMES
+    search_tool = lookup_tool_capability("tool_search_websosanh")
+    assert search_tool is not None
+    assert search_tool.group == "product_search"
+    assert search_tool.surface_scopes == ("product_search",)
+
+    report_tool = lookup_tool_capability("tool_generate_product_report")
+    assert report_tool is not None
+    assert report_tool.group == "product_search"
+    assert report_tool.permission == "write"
+
+    metadata = tool_capability_metadata_for_names(
+        {"tool_search_websosanh", "tool_generate_product_report"}
+    )
+    assert metadata["tool_search_websosanh"]["group"] == "product_search"
+    assert metadata["tool_generate_product_report"]["permission"] == "write"
+
+
 def test_tool_capability_registry_handles_dynamic_host_actions():
     from app.engine.tools.tool_capability_registry import (
         host_action_name_from_tool_name,
