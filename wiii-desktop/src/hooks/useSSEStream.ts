@@ -1003,6 +1003,14 @@ export function useSSEStream() {
           charStore.setMoodEnabled(true);
         }
       },
+      onChatLifecycle: (data) => {
+        traceEvent("chat_lifecycle", {
+          event_name: data.event_name,
+          lane: data.lane,
+          status: data.status,
+        });
+        useChatStore.getState().addChatLifecycleEvent(data);
+      },
       onDone: () => {
         traceEvent("done");
         // Some backend paths (notably source-backed web synthesis) emit the

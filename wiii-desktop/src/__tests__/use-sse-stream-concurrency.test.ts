@@ -131,6 +131,8 @@ beforeEach(() => {
     streamingBlocks: [],
     streamingStartTime: null,
     streamingSteps: [],
+    streamingLifecycleEvents: [],
+    lastCompletedLifecycleEvents: [],
     streamingDomainNotice: "",
     streamingPhases: [],
     streamingPreviews: [],
@@ -250,5 +252,102 @@ describe("useSSEStream concurrency", () => {
       provider: "openrouter",
       model: "qwen/qwen3.6-plus:free",
     });
+  });
+
+  it("captures chat lifecycle telemetry without displaying raw lifecycle payloads", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    sendMessageStreamMock.mockImplementationOnce(async (_request, handlers) => {
+      handlers.onChatLifecycle?.({
+        schema_version: "wiii.chat_runtime_lifecycle.v1",
+        event_name: "path.selected",
+        phase: "routing",
+        status: "selected",
+        message: "Path selected",
+        lane: "native_turn",
+        capabilities: {
+          host_surface: "desktop_chat",
+          observed_tools: ["tool_web_search"],
+          suppressed_tools: ["host_action"],
+          preview_required: false,
+        },
+        metadata: {
+          model: "qwen/qwen3-next-80b-a3b-instruct",
+          raw_payload: { should_not: "persist" },
+        },
+        details: {
+          reason_code: "native_runtime",
+          raw_payload: { should_not: "persist" },
+        },
+      });
+      handlers.onAnswer({ content: "Lifecycle observed." });
+      handlers.onMetadata({
+        processing_time: 0.2,
+        model: "qwen/qwen3-next-80b-a3b-instruct",
+        agent_type: "direct",
+      });
+      handlers.onDone();
+      return {
+        lastEventId: null,
+        sawDone: true,
+        eventOrder: ["chat_lifecycle", "answer", "metadata", "done"],
+      };
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("hello");
+      await Promise.resolve();
+    });
+
+    const state = useChatStore.getState();
+    expect(state.streamingLifecycleEvents).toHaveLength(0);
+    expect(state.lastCompletedLifecycleEvents).toHaveLength(1);
+    expect(state.lastCompletedLifecycleEvents[0]).toMatchObject({
+      event_name: "path.selected",
+      lane: "native_turn",
+      status: "selected",
+      capabilities: {
+        observed_tools: ["tool_web_search"],
+        suppressed_tools: ["host_action"],
+      },
+      metadata: {
+        model: "qwen/qwen3-next-80b-a3b-instruct",
+      },
+      details: {
+        reason_code: "native_runtime",
+      },
+      received_at_ms: expect.any(Number),
+    });
+    expect(state.lastCompletedLifecycleEvents[0]?.metadata).not.toHaveProperty(
+      "raw_payload",
+    );
+    expect(state.lastCompletedLifecycleEvents[0]?.details).not.toHaveProperty(
+      "raw_payload",
+    );
+
+    const conversation = state.activeConversation();
+    const assistantMessages =
+      conversation?.messages.filter((message) => message.role === "assistant") ||
+      [];
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]?.content).toContain("Lifecycle observed.");
+    expect(assistantMessages[0]?.content).not.toContain("Path selected");
+
+    const lifecycleMetadata = assistantMessages[0]?.metadata?.chat_lifecycle as
+      | unknown[]
+      | undefined;
+    expect(Array.isArray(lifecycleMetadata)).toBe(true);
+    expect(lifecycleMetadata).toHaveLength(1);
+    expect(lifecycleMetadata?.[0]).toMatchObject({
+      event_name: "path.selected",
+      phase: "routing",
+      received_at_ms: expect.any(Number),
+    });
+
+    useChatStore.getState().startStreaming();
+    expect(useChatStore.getState().streamingLifecycleEvents).toHaveLength(0);
+    expect(useChatStore.getState().lastCompletedLifecycleEvents).toHaveLength(0);
+    useChatStore.getState().clearStreaming();
   });
 });
