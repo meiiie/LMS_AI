@@ -118,6 +118,24 @@ _LEGAL_INTENT_KEYWORDS: list[str] = [
     "nghi quyet", "quyet dinh so", "van ban quy pham",
 ]
 
+_MARITIME_INTENT_KEYWORDS: tuple[str, ...] = (
+    "colreg",
+    "colregs",
+    "solas",
+    "marpol",
+    "imo",
+    "hang hai",
+    "tau bien",
+    "tau thuyen",
+    "cang bien",
+    "vinamarine",
+    "cuc hang hai",
+    "quy tac tranh va",
+    "den hang hai",
+    "phao tieu",
+    "luong hang hai",
+)
+
 _ANALYSIS_INTENT_KEYWORDS: list[str] = [
     "python",
     "code python",
@@ -357,6 +375,14 @@ def _needs_legal_search(query: str) -> bool:
     """Detect if query needs legal search (Sprint 102)."""
     normalized = _normalize_for_intent(query)
     return any(kw in normalized for kw in _LEGAL_INTENT_KEYWORDS)
+
+
+def _needs_maritime_search(query: str) -> bool:
+    """Detect if query should expose the maritime-specific search path."""
+    normalized = _normalize_for_intent(query)
+    if not normalized:
+        return False
+    return any(kw in normalized for kw in _MARITIME_INTENT_KEYWORDS)
 
 
 def _needs_analysis_tool(query: str) -> bool:

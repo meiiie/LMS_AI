@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from importlib import import_module
 import logging
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from app.core.config import settings
@@ -17,6 +18,12 @@ from app.engine.multi_agent.document_preview_contract import (
     looks_uploaded_document_lesson_preview_request as _contract_looks_uploaded_document_lesson_preview_request,
 )
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.turn_path_governor import (
+    TurnPathDecision,
+    TurnPathSignals,
+    filter_tools_for_turn_path,
+    resolve_turn_path_decision,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +59,10 @@ def _needs_news_search(query: str) -> bool:
 
 def _needs_legal_search(query: str) -> bool:
     return _load_attr("app.engine.multi_agent.direct_intent", "_needs_legal_search")(query)
+
+
+def _needs_maritime_search(query: str) -> bool:
+    return _load_attr("app.engine.multi_agent.direct_intent", "_needs_maritime_search")(query)
 
 
 def _needs_pointy(query: str) -> bool:
@@ -287,6 +298,11 @@ _POINTY_OUTPUT_REQUEST_CUES: tuple[str, ...] = (
     "tao app",
     "tao widget",
     "tao artifact",
+    "tao bai hoc",
+    "tao bai giang",
+    "tao khoa hoc",
+    "tao course",
+    "tao lesson",
     "create code",
     "write code",
     "run code",
@@ -297,6 +313,11 @@ _POINTY_OUTPUT_REQUEST_CUES: tuple[str, ...] = (
     "build app",
     "build widget",
     "create artifact",
+    "create lesson",
+    "generate lesson",
+    "create course",
+    "generate course",
+    "course draft",
 )
 
 
@@ -307,6 +328,25 @@ def _should_suppress_pointy_for_output_request(query: str) -> bool:
     if not normalized:
         return False
     return any(cue in normalized for cue in _POINTY_OUTPUT_REQUEST_CUES)
+
+
+def _prefers_code_execution_lane_from_normalized(normalized_query: str) -> bool:
+    return any(
+        token in normalized_query
+        for token in (
+            "python",
+            "code python",
+            "chay python",
+            "chay code",
+            "viet code",
+            "doan code",
+            "sandbox",
+            "pandas",
+            "xlsx",
+            "excel bang python",
+            "matplotlib",
+        )
+    )
 
 
 def _is_host_ui_navigation_route(state: Optional[AgentState]) -> bool:
@@ -427,6 +467,126 @@ def _safe_document_preview_capability_tools(
     ]
 
 
+def _safe_intent_flag(fn, query: str, *, default: bool = False) -> bool:
+    try:
+        return bool(fn(query))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[DIRECT] Turn-path signal failed for %s: %s", getattr(fn, "__name__", fn), exc)
+        return default
+
+
+def _default_visual_decision() -> Any:
+    return SimpleNamespace(
+        force_tool=False,
+        mode="text",
+        visual_type=None,
+        preferred_tool=None,
+        presentation_intent="text",
+    )
+
+
+def _safe_resolve_visual_decision(query: str) -> Any:
+    try:
+        return resolve_visual_intent(query)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[DIRECT] Visual intent unavailable for turn path: %s", exc)
+        return _default_visual_decision()
+
+
+def _safe_build_visual_requirement(
+    visual_decision: Any,
+    *,
+    structured_visuals_enabled: bool,
+) -> Any:
+    try:
+        return build_visual_tool_requirement(
+            visual_decision,
+            structured_visuals_enabled=structured_visuals_enabled,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[DIRECT] Visual tool requirement unavailable for turn path: %s", exc)
+        return SimpleNamespace(
+            force_tool=False,
+            mode=str(getattr(visual_decision, "mode", "text") or "text"),
+            presentation_intent=str(
+                getattr(visual_decision, "presentation_intent", "text") or "text"
+            ),
+            required_tool_names=(),
+        )
+
+
+def _resolve_direct_turn_path_decision(
+    *,
+    query: str,
+    state: Optional[AgentState],
+    visual_decision: Any,
+    visual_requirement: Any,
+    thinking_mode: str,
+    force_skills: set[str],
+) -> TurnPathDecision:
+    normalized_query = ""
+    try:
+        normalized_query = _normalize_for_intent(query)
+    except Exception:  # noqa: BLE001
+        normalized_query = str(query or "").lower().strip()
+
+    host_ui_navigation = _is_host_ui_navigation_route(state)
+    pointy_forced = "wiii-pointy" in force_skills
+    pointy_requested = (
+        pointy_forced
+        or host_ui_navigation
+        or _safe_intent_flag(_needs_pointy, query)
+    )
+    signals = TurnPathSignals(
+        normalized_query=normalized_query,
+        routing_intent=_routing_intent(state),
+        thinking_mode=thinking_mode,
+        force_skills=frozenset(force_skills),
+        web_search_forced="web-search" in force_skills,
+        pointy_forced=pointy_forced,
+        host_ui_navigation=host_ui_navigation,
+        looks_document_preview=_looks_like_document_preview_request(query, state),
+        looks_reasoning_safety_meta=_looks_reasoning_safety_meta_turn(query),
+        needs_web_search=_safe_intent_flag(_needs_web_search, query),
+        needs_datetime=_safe_intent_flag(_needs_datetime, query),
+        needs_news_search=_safe_intent_flag(_needs_news_search, query),
+        needs_legal_search=_safe_intent_flag(_needs_legal_search, query),
+        needs_lms_query=_safe_intent_flag(_needs_lms_query, query),
+        needs_direct_knowledge_search=_safe_intent_flag(
+            _needs_direct_knowledge_search,
+            query,
+        ),
+        needs_analysis_tool=_safe_intent_flag(_needs_analysis_tool, query),
+        prefers_code_execution_lane=_prefers_code_execution_lane_from_normalized(
+            normalized_query
+        ),
+        needs_maritime_search=_safe_intent_flag(_needs_maritime_search, query),
+        pointy_requested=pointy_requested,
+        suppress_pointy_for_output=_should_suppress_pointy_for_output_request(query),
+        visual_force_tool=bool(getattr(visual_requirement, "force_tool", False)),
+        visual_mode=str(
+            getattr(visual_requirement, "mode", None)
+            or getattr(visual_decision, "mode", "")
+            or ""
+        ),
+        visual_presentation_intent=str(
+            getattr(visual_requirement, "presentation_intent", "") or ""
+        ),
+        visual_required_tool_names=tuple(
+            getattr(visual_requirement, "required_tool_names", ()) or ()
+        ),
+    )
+    return resolve_turn_path_decision(signals)
+
+
+def _record_turn_path_decision(
+    state: Optional[AgentState],
+    decision: TurnPathDecision,
+) -> None:
+    if isinstance(state, dict):
+        state["_turn_path_decision"] = decision.to_metadata()
+
+
 def _should_use_no_tools_for_direct_prose(
     *,
     query: str,
@@ -484,6 +644,30 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
             - tools_list: List of available tools
             - force_tools: Whether to force tool calling (intent detected)
     """
+    force_skills = _force_skills_from_state(state)
+    structured_visuals_enabled = getattr(settings, "enable_structured_visuals", False)
+    visual_decision = _safe_resolve_visual_decision(query)
+    visual_requirement = _safe_build_visual_requirement(
+        visual_decision,
+        structured_visuals_enabled=structured_visuals_enabled,
+    )
+    try:
+        thinking_mode = _infer_direct_thinking_mode(query, state, [])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[DIRECT] Thinking mode unavailable for turn path: %s", exc)
+        thinking_mode = ""
+    turn_path_decision = _resolve_direct_turn_path_decision(
+        query=query,
+        state=state,
+        visual_decision=visual_decision,
+        visual_requirement=visual_requirement,
+        thinking_mode=thinking_mode,
+        force_skills=force_skills,
+    )
+    _record_turn_path_decision(state, turn_path_decision)
+    if not turn_path_decision.bind_tools:
+        return [], False
+
     _direct_tools = []
     try:
         if settings.enable_character_tools:
@@ -531,7 +715,7 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         _direct_tools = [*_direct_tools, tool_current_datetime,
                          tool_web_search, tool_fetch_url]
         # v2.8: force-bind via @web-search mention overrides news/legal gates.
-        web_search_forced = "web-search" in _force_skills_from_state(state)
+        web_search_forced = "web-search" in force_skills
         if _needs_news_search(query) or web_search_forced:
             _direct_tools.append(tool_search_news)
         if _needs_legal_search(query) or web_search_forced:
@@ -540,7 +724,6 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         # intent (`_needs_pointy`) HOẶC explicit `@wiii-pointy` mention
         # (force_skills override, v2.8). Force-bind bypasses keyword
         # gates → user controls invocation explicitly.
-        force_skills = _force_skills_from_state(state)
         pointy_forced = "wiii-pointy" in force_skills
         host_ui_navigation = _is_host_ui_navigation_route(state)
         pointy_requested = pointy_forced or host_ui_navigation or _needs_pointy(query)
@@ -591,15 +774,10 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         # Maritime is the default domain — bind tool only when query mentions
         # maritime/COLREGs/SOLAS/ship terminology so generic queries stay light.
         try:
-            _needs_maritime = _load_attr(
-                "app.engine.multi_agent.direct_intent",
-                "_needs_maritime_search",
-            )
-            if _needs_maritime(query):
+            if _needs_maritime_search(query):
                 _direct_tools.append(tool_search_maritime)
         except Exception:  # noqa: BLE001
-            # If helper missing, default to including maritime (safe for domain).
-            _direct_tools.append(tool_search_maritime)
+            logger.debug("[DIRECT] Maritime search intent unavailable")
     except Exception as _e:
         logger.debug("[DIRECT] Utility/web search tools unavailable: %s", _e)
 
@@ -621,7 +799,10 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         str(getattr(t, "name", "") or getattr(t, "__name__", ""))
         for t in _direct_tools
     }
-    if "tool_knowledge_search" not in _bound_tool_names:
+    if (
+        turn_path_decision.allow_rag_delegation
+        and "tool_knowledge_search" not in _bound_tool_names
+    ):
         try:
             tool_rag_knowledge = _load_attr(
                 "app.engine.tools.agent_tools",
@@ -700,7 +881,6 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
     }:
         return [], False
 
-    force_skills = _force_skills_from_state(state)
     web_search_forced = "web-search" in force_skills
 
     # Structured visuals re-enable lightweight inline diagram/chart tools for direct,
@@ -729,29 +909,9 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
     except Exception as _e:
         logger.debug("[DIRECT] Visual tools unavailable: %s", _e)
 
-    visual_decision = resolve_visual_intent(query)
-    structured_visuals_enabled = getattr(settings, "enable_structured_visuals", False)
-    visual_requirement = build_visual_tool_requirement(
-        visual_decision,
-        structured_visuals_enabled=structured_visuals_enabled,
-    )
-    thinking_mode = _infer_direct_thinking_mode(query, state, [])
     normalized_query = _normalize_for_intent(query)
-    _prefers_code_execution_lane = any(
-        token in normalized_query
-        for token in (
-            "python",
-            "code python",
-            "chay python",
-            "chay code",
-            "viet code",
-            "doan code",
-            "sandbox",
-            "pandas",
-            "xlsx",
-            "excel bang python",
-            "matplotlib",
-        )
+    _prefers_code_execution_lane = _prefers_code_execution_lane_from_normalized(
+        normalized_query
     )
     _direct_tools = filter_tools_for_role(_direct_tools, user_role)
     _direct_tools = filter_tools_for_visual_intent(
@@ -772,6 +932,11 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         thinking_mode=thinking_mode,
     ):
         _direct_tools = _strip_visual_tool_capabilities(_direct_tools)
+    _direct_tools = filter_tools_for_turn_path(
+        _direct_tools,
+        turn_path_decision,
+        tool_name=_tool_name,
+    )
     # Clear inline article/chart requests should stay tightly on the visual lane.
     # If there is no competing web/legal/news/datetime/LMS intent, bind only the
     # preferred visual tool so the first tool call is deterministic and the
@@ -811,6 +976,8 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
             query=query[:180],
         )
     force_tools = bool(_direct_tools) and (
+        turn_path_decision.force_tools
+        or
         web_search_forced
         or _needs_web_search(query) or _needs_datetime(query)
         or _needs_news_search(query) or _needs_legal_search(query)
@@ -826,7 +993,11 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         return [], False
 
     # Agent handoff tool (Phase 3)
-    if getattr(settings, "enable_agent_handoffs", True) and not force_tools:
+    if (
+        turn_path_decision.allow_agent_handoff
+        and getattr(settings, "enable_agent_handoffs", True)
+        and not force_tools
+    ):
         try:
             from app.engine.multi_agent.handoff_tools import handoff_to_agent
             _direct_tools.append(handoff_to_agent)
@@ -995,6 +1166,8 @@ def _direct_required_tool_names(query: str, user_role: str = "student") -> list[
             required.append("tool_web_search")
     if _needs_direct_knowledge_search(query):
         required.append("tool_knowledge_search")
+    if _needs_maritime_search(query):
+        required.append("tool_search_maritime")
     # WAVE-001: browser_snapshot and execute_python removed from direct.
     # These capabilities now live exclusively in code_studio_agent.
 

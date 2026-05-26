@@ -180,6 +180,25 @@ def test_collect_direct_tools_suppresses_forced_pointy_for_simulation_output_req
     assert "tool_pointy_show" not in names
     assert "tool_pointy_clear" not in names
     assert "tool_pointy_inventory" not in names
+    assert names == ["tool_create_visual_code"]
+
+
+def test_collect_direct_tools_suppresses_forced_pointy_for_lesson_output_request(monkeypatch):
+    from app.engine.multi_agent import tool_collection as module
+
+    _patch_visual_collection_modules(monkeypatch, module)
+
+    tools, force_tools = module._collect_direct_tools(
+        "@wiii-pointy tao bai hoc ngan ve ky nang hoc tap",
+        user_role="teacher",
+        state={
+            "routing_metadata": {"intent": "general"},
+            "context": {"force_skills": ["wiii-pointy"]},
+        },
+    )
+
+    assert tools == []
+    assert force_tools is False
 
 
 def test_collect_code_studio_tools_uses_visual_requirement_for_simulation(monkeypatch):
