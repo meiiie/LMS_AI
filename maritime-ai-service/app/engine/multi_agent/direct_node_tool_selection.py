@@ -16,6 +16,10 @@ from app.engine.multi_agent.direct_node_uploaded_context import (
     _looks_uploaded_document_preview_request,
 )
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.tool_policy_session import (
+    finalize_tool_policy_visible_tools,
+    tool_policy_session_from_state,
+)
 from app.engine.multi_agent.tool_collection import _force_skills_from_state
 
 
@@ -33,6 +37,10 @@ def _turn_path_decision_metadata(state: AgentState) -> dict[str, Any]:
 
 
 def _turn_path_allows_tool_name(state: AgentState, tool_name: str) -> bool:
+    policy_session = tool_policy_session_from_state(state)
+    if policy_session is not None:
+        return policy_session.should_expose_tool(tool_name)
+
     decision = _turn_path_decision_metadata(state)
     if not decision:
         return True
@@ -171,5 +179,11 @@ def select_direct_node_tools(
 
     if not tools:
         force_tools = False
+
+    finalize_tool_policy_visible_tools(
+        state,
+        tools,
+        tool_name=lambda tool: str(getattr(tool, "name", getattr(tool, "__name__", "")) or ""),
+    )
 
     return DirectNodeToolSelection(tools=tools, force_tools=force_tools)

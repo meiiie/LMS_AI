@@ -81,6 +81,7 @@ async def execute_direct_tool_round(
             tool_round=tool_round,
             tools=tools,
             query=query,
+            state=state,
             push_event=push_event,
             tool_call_events=tool_call_events,
             get_tool_by_name=get_tool_by_name,
