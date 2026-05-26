@@ -34,9 +34,11 @@ import type {
   PreviewBlockData,
   ArtifactData,
   ArtifactBlockData,
+  ChatLifecycleTelemetryEvent,
   ToolExecutionBlockData,
   ChatDocumentAttachment,
   ImageInput,
+  SSEChatLifecycleEvent,
   VisualPayload,
   VisualBlockData,
   VisualSessionState,
@@ -45,6 +47,10 @@ import type {
 
 const BASE_STORE_NAME = "conversations.json";
 const BASE_STORE_KEY = "conversations";
+const MAX_CHAT_LIFECYCLE_EVENTS = 48;
+const MAX_CHAT_LIFECYCLE_RECORD_KEYS = 16;
+const MAX_CHAT_LIFECYCLE_ARRAY_ITEMS = 16;
+const MAX_CHAT_LIFECYCLE_STRING_CHARS = 240;
 
 /**
  * Sprint 218: Per-user conversation storage.
@@ -162,6 +168,8 @@ interface ChatState {
   // Streaming state — timer + pipeline steps (Sprint 63)
   streamingStartTime: number | null;
   streamingSteps: StreamingStep[];
+  streamingLifecycleEvents: ChatLifecycleTelemetryEvent[];
+  lastCompletedLifecycleEvents: ChatLifecycleTelemetryEvent[];
 
   // Sprint 80b: Domain notice for off-domain content
   streamingDomainNotice: string;
@@ -212,6 +220,7 @@ interface ChatState {
   setStreamingStep: (step: string) => void;
   setStreamingSources: (sources: SourceInfo[]) => void;
   addStreamingStep: (label: string, node?: string) => void;
+  addChatLifecycleEvent: (event: SSEChatLifecycleEvent) => void;
   appendThinkingDelta: (
     delta: string,
     node?: string,
@@ -415,9 +424,19 @@ function mergeStreamMetadataIntoMessage(
   message: Message,
   metadata: ChatResponseMetadata,
 ): void {
+  const existingLifecycle = Array.isArray(message.metadata?.chat_lifecycle)
+    ? (message.metadata.chat_lifecycle as ChatLifecycleTelemetryEvent[])
+    : [];
+  const mergedMetadata = metadata.chat_lifecycle
+    ? metadata
+    : (mergeChatLifecycleMetadata(metadata, existingLifecycle) as
+        | ChatResponseMetadata
+        | undefined);
   message.reasoning_trace = metadata.reasoning_trace;
-  message.metadata = metadata;
-  message.suggested_questions = extractSuggestedQuestions(metadata);
+  message.metadata = mergedMetadata || metadata;
+  message.suggested_questions = extractSuggestedQuestions(
+    mergedMetadata || metadata,
+  );
   const metadataThinking = normalizeThinkingSnapshot(
     metadata.thinking_lifecycle?.final_text ||
       metadata.thinking_content ||
@@ -619,6 +638,167 @@ function summarizeWidgetFeedback(feedback: WidgetFeedbackItem): string {
     return `${feedback.correct_count}/${feedback.total_count} dung`;
   }
   return feedback.widget_kind.replaceAll("_", " ");
+}
+
+function clampChatLifecycleString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > MAX_CHAT_LIFECYCLE_STRING_CHARS
+    ? `${trimmed.slice(0, MAX_CHAT_LIFECYCLE_STRING_CHARS - 3)}...`
+    : trimmed;
+}
+
+function sanitizeChatLifecycleStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const output = value
+    .map((item) => clampChatLifecycleString(item))
+    .filter((item): item is string => Boolean(item))
+    .slice(0, MAX_CHAT_LIFECYCLE_ARRAY_ITEMS);
+  return output.length > 0 ? output : undefined;
+}
+
+function sanitizeChatLifecycleRecord(
+  value: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const output: Record<string, unknown> = {};
+  for (const [key, rawValue] of Object.entries(value).slice(
+    0,
+    MAX_CHAT_LIFECYCLE_RECORD_KEYS,
+  )) {
+    if (typeof rawValue === "string") {
+      const normalized = clampChatLifecycleString(rawValue);
+      if (normalized) output[key] = normalized;
+      continue;
+    }
+    if (
+      typeof rawValue === "number" ||
+      typeof rawValue === "boolean" ||
+      rawValue === null
+    ) {
+      output[key] = rawValue;
+      continue;
+    }
+    const strings = sanitizeChatLifecycleStringArray(rawValue);
+    if (strings) output[key] = strings;
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+}
+
+function sanitizeChatLifecycleCapabilities(
+  capabilities: SSEChatLifecycleEvent["capabilities"],
+): SSEChatLifecycleEvent["capabilities"] | undefined {
+  if (!capabilities) return undefined;
+  const output: NonNullable<SSEChatLifecycleEvent["capabilities"]> = {};
+  const hostSurface = clampChatLifecycleString(capabilities.host_surface);
+  if (hostSurface) output.host_surface = hostSurface;
+  const hostCapabilities = sanitizeChatLifecycleStringArray(
+    capabilities.host_capabilities,
+  );
+  if (hostCapabilities) output.host_capabilities = hostCapabilities;
+  const observedTools = sanitizeChatLifecycleStringArray(
+    capabilities.observed_tools,
+  );
+  if (observedTools) output.observed_tools = observedTools;
+  const suppressedTools = sanitizeChatLifecycleStringArray(
+    capabilities.suppressed_tools,
+  );
+  if (suppressedTools) output.suppressed_tools = suppressedTools;
+  if (typeof capabilities.preview_required === "boolean") {
+    output.preview_required = capabilities.preview_required;
+  }
+  if (typeof capabilities.preview_emitted === "boolean") {
+    output.preview_emitted = capabilities.preview_emitted;
+  }
+  if (typeof capabilities.approval_token_present === "boolean") {
+    output.approval_token_present = capabilities.approval_token_present;
+  }
+  if (typeof capabilities.apply_attempted === "boolean") {
+    output.apply_attempted = capabilities.apply_attempted;
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+}
+
+function normalizeChatLifecycleEvent(
+  event: SSEChatLifecycleEvent,
+): ChatLifecycleTelemetryEvent {
+  const normalized: ChatLifecycleTelemetryEvent = {
+    schema_version:
+      clampChatLifecycleString(event.schema_version) || "unknown",
+    event_name: clampChatLifecycleString(event.event_name) || "unknown",
+    phase: clampChatLifecycleString(event.phase) || "unknown",
+    status: clampChatLifecycleString(event.status) || "unknown",
+    message: clampChatLifecycleString(event.message) || "",
+    received_at_ms: Date.now(),
+  };
+  const requestId = clampChatLifecycleString(event.request_id);
+  if (requestId) normalized.request_id = requestId;
+  const sessionId = clampChatLifecycleString(event.session_id);
+  if (sessionId) normalized.session_id = sessionId;
+  const lane = clampChatLifecycleString(event.lane);
+  if (lane) normalized.lane = lane;
+  const reason = clampChatLifecycleString(event.reason);
+  if (reason) normalized.reason = reason;
+  const node = clampChatLifecycleString(event.node);
+  if (node) normalized.node = node;
+  const step = clampChatLifecycleString(event.step);
+  if (step) normalized.step = step;
+  const capabilities = sanitizeChatLifecycleCapabilities(event.capabilities);
+  if (capabilities) normalized.capabilities = capabilities;
+  const metadata = sanitizeChatLifecycleRecord(event.metadata);
+  if (metadata) normalized.metadata = metadata;
+  const details = sanitizeChatLifecycleRecord(event.details);
+  if (details) normalized.details = details;
+  if (event.display_role) normalized.display_role = event.display_role;
+  if (typeof event.sequence_id === "number") {
+    normalized.sequence_id = event.sequence_id;
+  }
+  if (event.step_id) normalized.step_id = event.step_id;
+  if (event.step_state) normalized.step_state = event.step_state;
+  if (event.presentation) normalized.presentation = event.presentation;
+  return normalized;
+}
+
+function cloneChatLifecycleEvents(
+  events: ChatLifecycleTelemetryEvent[],
+): ChatLifecycleTelemetryEvent[] {
+  return events.map((event) => ({
+    ...event,
+    capabilities: event.capabilities
+      ? {
+          ...event.capabilities,
+          host_capabilities: event.capabilities.host_capabilities
+            ? [...event.capabilities.host_capabilities]
+            : undefined,
+          observed_tools: event.capabilities.observed_tools
+            ? [...event.capabilities.observed_tools]
+            : undefined,
+          suppressed_tools: event.capabilities.suppressed_tools
+            ? [...event.capabilities.suppressed_tools]
+            : undefined,
+        }
+      : undefined,
+    metadata: event.metadata ? { ...event.metadata } : undefined,
+    details: event.details ? { ...event.details } : undefined,
+  }));
+}
+
+function mergeChatLifecycleMetadata(
+  metadata: Record<string, unknown> | undefined,
+  lifecycleEvents: ChatLifecycleTelemetryEvent[],
+): Record<string, unknown> | undefined {
+  if (lifecycleEvents.length === 0) return metadata;
+  const existingEvents = Array.isArray(metadata?.chat_lifecycle)
+    ? (metadata?.chat_lifecycle as ChatLifecycleTelemetryEvent[])
+    : [];
+  return {
+    ...(metadata || {}),
+    chat_lifecycle: cloneChatLifecycleEvents([
+      ...existingEvents,
+      ...lifecycleEvents,
+    ]).slice(-MAX_CHAT_LIFECYCLE_EVENTS),
+  };
 }
 
 function matchesVisualBlockSession(
@@ -850,6 +1030,7 @@ function resetStreamingDraft(state: ChatState): void {
   state.streamingBlocks = [];
   state.streamingStartTime = null;
   state.streamingSteps = [];
+  state.streamingLifecycleEvents = [];
   state.streamingDomainNotice = "";
   state.streamingPhases = [];
   state.streamingPreviews = [];
@@ -873,6 +1054,8 @@ export const useChatStore = create<ChatState>()(
     streamingBlocks: [],
     streamingStartTime: null,
     streamingSteps: [],
+    streamingLifecycleEvents: [],
+    lastCompletedLifecycleEvents: [],
     streamingDomainNotice: "",
     streamingPhases: [],
     streamingPreviews: [],
@@ -1086,6 +1269,7 @@ export const useChatStore = create<ChatState>()(
         state.streamingStartTime = Date.now();
         state.streamError = "";
         state.streamCompletedAt = null;
+        state.lastCompletedLifecycleEvents = [];
       });
     },
 
@@ -1222,6 +1406,18 @@ export const useChatStore = create<ChatState>()(
     addStreamingStep: (label, node) => {
       set((state) => {
         state.streamingSteps.push({ label, node, timestamp: Date.now() });
+      });
+    },
+
+    addChatLifecycleEvent: (event) => {
+      const normalized = normalizeChatLifecycleEvent(event);
+      set((state) => {
+        state.streamingLifecycleEvents.push(normalized);
+        const overflow =
+          state.streamingLifecycleEvents.length - MAX_CHAT_LIFECYCLE_EVENTS;
+        if (overflow > 0) {
+          state.streamingLifecycleEvents.splice(0, overflow);
+        }
       });
     },
 
@@ -2073,6 +2269,7 @@ export const useChatStore = create<ChatState>()(
         streamingDomainNotice,
         streamingPreviews,
         streamingArtifacts,
+        streamingLifecycleEvents,
         pendingStreamMetadata,
         visualSessions,
       } = get();
@@ -2080,7 +2277,15 @@ export const useChatStore = create<ChatState>()(
       // Sprint 153b: Guard against double finalization.
       if (!isStreaming || !activeConversationId) return;
 
-      const effectiveMetadata = metadata ?? pendingStreamMetadata ?? undefined;
+      const lifecycleSnapshot = cloneChatLifecycleEvents(
+        streamingLifecycleEvents,
+      );
+      const effectiveMetadata = mergeChatLifecycleMetadata(
+        (metadata ?? pendingStreamMetadata ?? undefined) as
+          | Record<string, unknown>
+          | undefined,
+        lifecycleSnapshot,
+      ) as ChatResponseMetadata | undefined;
       const suggestedQuestions = extractSuggestedQuestions(effectiveMetadata);
 
       // Close any remaining open thinking blocks (immutable copy for message)
@@ -2158,6 +2363,7 @@ export const useChatStore = create<ChatState>()(
         resetStreamingDraft(state);
         state.streamError = "";
         state.streamCompletedAt = Date.now();
+        state.lastCompletedLifecycleEvents = lifecycleSnapshot;
 
         const conv = state.conversations.find(
           (c) => c.id === activeConversationId,
@@ -2179,15 +2385,22 @@ export const useChatStore = create<ChatState>()(
     },
 
     setStreamError: (error, metadata) => {
-      const { activeConversationId } = get();
+      const { activeConversationId, streamingLifecycleEvents } = get();
       if (!activeConversationId) return;
+      const lifecycleSnapshot = cloneChatLifecycleEvents(
+        streamingLifecycleEvents,
+      );
+      const errorMetadata = mergeChatLifecycleMetadata(
+        metadata,
+        lifecycleSnapshot,
+      );
 
       const message: Message = {
         id: uuidv4(),
         role: "assistant",
         content: `Lỗi: ${error}`,
         timestamp: new Date().toISOString(),
-        metadata,
+        metadata: errorMetadata,
       };
 
       set((state) => {
@@ -2195,6 +2408,7 @@ export const useChatStore = create<ChatState>()(
         resetStreamingDraft(state);
         state.streamError = error;
         state.streamCompletedAt = null;
+        state.lastCompletedLifecycleEvents = lifecycleSnapshot;
 
         const conv = state.conversations.find(
           (c) => c.id === activeConversationId,
@@ -2227,6 +2441,7 @@ export const useChatStore = create<ChatState>()(
         resetStreamingDraft(state);
         state.streamError = "";
         state.streamCompletedAt = null;
+        state.lastCompletedLifecycleEvents = [];
       });
     },
 
@@ -2341,6 +2556,7 @@ export const useChatStore = create<ChatState>()(
         state.isLoaded = true;
         state.visualSessions = {};
         resetStreamingDraft(state);
+        state.lastCompletedLifecycleEvents = [];
       });
     },
 
@@ -2360,6 +2576,7 @@ export const useChatStore = create<ChatState>()(
           state.isLoaded = true;
           state.visualSessions = {};
           resetStreamingDraft(state);
+          state.lastCompletedLifecycleEvents = [];
         });
       } catch (err) {
         console.warn(
@@ -2372,6 +2589,7 @@ export const useChatStore = create<ChatState>()(
           state.isLoaded = true;
           state.visualSessions = {};
           resetStreamingDraft(state);
+          state.lastCompletedLifecycleEvents = [];
         });
       }
     },

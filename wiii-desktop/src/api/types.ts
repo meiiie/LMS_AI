@@ -278,6 +278,7 @@ export interface ChatResponseMetadata {
   thinking_content?: string;
   thinking?: string;
   thinking_lifecycle?: ThinkingLifecycleSnapshot;
+  chat_lifecycle?: ChatLifecycleTelemetryEvent[];
   failover?: FailoverMetadata | null;
   model_switch_prompt?: ModelSwitchPrompt | null;
   topics_accessed?: string[];
@@ -442,6 +443,10 @@ export interface SSEChatLifecycleEvent {
   step_id?: string;
   step_state?: StepState;
   presentation?: PresentationMode;
+}
+
+export interface ChatLifecycleTelemetryEvent extends SSEChatLifecycleEvent {
+  received_at_ms: number;
 }
 
 export interface SSEDomainNoticeEvent {
