@@ -109,12 +109,15 @@ class StreamChunk:
 # ---------------------------------------------------------------------------
 
 
-def _coerce_to_openai_messages(messages: Iterable[Any]) -> list[dict]:
-    """Accept native ``Message``, plain dict, or LC ``BaseMessage`` and emit OpenAI dicts.
+def _coerce_to_openai_messages(messages: Iterable[Any] | str) -> list[dict]:
+    """Accept user text, native ``Message``, plain dict, or LC ``BaseMessage``.
 
     Phase 1 migrated SEND-side callers to dict; some history slices still pass
     raw LC objects through unchanged. Phase 9b will remove the latter.
     """
+    if isinstance(messages, str):
+        return [{"role": "user", "content": messages}]
+
     out: list[dict] = []
     for m in messages:
         if isinstance(m, dict):
@@ -419,12 +422,12 @@ class WiiiChatModel(BaseModel):
     # ------------------------------------------------------------------ #
     def _build_api_kwargs(
         self,
-        messages: Iterable[Any],
+        messages: Iterable[Any] | str,
         kwargs: dict[str, Any],
         *,
         stream: bool = False,
     ) -> dict[str, Any]:
-        oa_msgs = _coerce_to_openai_messages(list(messages))
+        oa_msgs = _coerce_to_openai_messages(messages)
 
         api_kwargs: dict[str, Any] = {
             "model": self.model,
@@ -458,7 +461,7 @@ class WiiiChatModel(BaseModel):
 
         return _strip_unsupported_params(api_kwargs, self.base_url)
 
-    async def ainvoke(self, messages: Iterable[Any], **kwargs: Any) -> Message:
+    async def ainvoke(self, messages: Iterable[Any] | str, **kwargs: Any) -> Message:
         """Async invoke. Returns a native ``Message`` with ``.content`` + ``.tool_calls``."""
         client = self._get_client()
         api_kwargs = self._build_api_kwargs(messages, kwargs, stream=False)
@@ -481,7 +484,7 @@ class WiiiChatModel(BaseModel):
 
         return from_openai_response(response.choices[0].message)
 
-    def invoke(self, messages: Iterable[Any], **kwargs: Any) -> Message:
+    def invoke(self, messages: Iterable[Any] | str, **kwargs: Any) -> Message:
         """Sync invoke — bridges to ``ainvoke`` via thread-pool when in async context."""
         try:
             loop = asyncio.get_running_loop()
@@ -501,7 +504,7 @@ class WiiiChatModel(BaseModel):
     # ------------------------------------------------------------------ #
     async def astream(
         self,
-        messages: Iterable[Any],
+        messages: Iterable[Any] | str,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         """Async stream. Yields ``StreamChunk`` (with ``.content`` + ``.message`` shim)."""
@@ -596,7 +599,7 @@ class _StructuredOutputWrapper(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
-    def _build_messages_with_instruction(self, messages: Iterable[Any]) -> list[Any]:
+    def _build_messages_with_instruction(self, messages: Iterable[Any] | str) -> list[Any]:
         try:
             schema_text = json.dumps(
                 self.output_schema.model_json_schema(),
@@ -611,7 +614,11 @@ class _StructuredOutputWrapper(BaseModel):
         if schema_text:
             instruction = f"{instruction}\nSchema: {schema_text}"
 
-        as_list = list(messages)
+        as_list: list[Any]
+        if isinstance(messages, str):
+            as_list = [{"role": "user", "content": messages}]
+        else:
+            as_list = list(messages)
         if as_list and isinstance(as_list[0], dict) and as_list[0].get("role") == "system":
             head = dict(as_list[0])
             head["content"] = (head.get("content") or "") + "\n\n" + instruction
@@ -637,7 +644,7 @@ class _StructuredOutputWrapper(BaseModel):
                 text = text[4:].strip()
         return text.strip()
 
-    async def ainvoke(self, messages: Iterable[Any], **kwargs: Any) -> Any:
+    async def ainvoke(self, messages: Iterable[Any] | str, **kwargs: Any) -> Any:
         prepared = self._build_messages_with_instruction(messages)
         response = await self.llm.ainvoke(prepared, **kwargs)
 
@@ -661,7 +668,7 @@ class _StructuredOutputWrapper(BaseModel):
 
         return self.output_schema.model_validate(data)
 
-    def invoke(self, messages: Iterable[Any], **kwargs: Any) -> Any:
+    def invoke(self, messages: Iterable[Any] | str, **kwargs: Any) -> Any:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:

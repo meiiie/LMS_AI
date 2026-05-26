@@ -221,10 +221,12 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
 def _latest_runtime_observation_succeeded(state: dict[str, Any]) -> bool:
     observed_at = _parse_iso_datetime(state.get("last_runtime_observation_at"))
     success_at = _parse_iso_datetime(state.get("last_runtime_success_at"))
+    if observed_at is None:
+        return success_at is not None
+    if _is_preflight_provider_unavailable_observation(state):
+        return True
     if success_at is None:
         return False
-    if observed_at is None:
-        return True
     return success_at >= observed_at
 
 
@@ -248,6 +250,11 @@ def _probe_success_supersedes_observation(state: Mapping[str, Any]) -> bool:
 def _latest_runtime_observation_failed(state: Mapping[str, Any]) -> bool:
     observed_at = _parse_iso_datetime(state.get("last_runtime_observation_at"))
     if observed_at is None:
+        return False
+    if (
+        _is_preflight_provider_unavailable_observation(state)
+        and _live_streaming_probe_supersedes_host_down_signal(state)
+    ):
         return False
     if _probe_success_supersedes_observation(state):
         return False
@@ -315,6 +322,36 @@ def _collect_signal_texts(state: dict[str, Any]) -> str:
         if text:
             parts.append(text)
     return " | ".join(parts).lower()
+
+
+def _is_preflight_provider_unavailable_observation(state: Mapping[str, Any]) -> bool:
+    source = str(state.get("last_runtime_source") or "").strip().lower()
+    note = str(state.get("last_runtime_note") or "").strip().lower()
+    if source not in {"chat_stream:error", "chat_sync:error"}:
+        return False
+    return "requested provider" in note and "unavailable" in note
+
+
+def _live_streaming_probe_supersedes_host_down_signal(state: Mapping[str, Any]) -> bool:
+    """Treat a fresh successful streaming probe as authoritative for reachability."""
+    if state.get("streaming_supported") is not True:
+        return False
+    if str(state.get("streaming_source") or "").strip().lower() != "live_probe":
+        return False
+
+    probe_success_at = _parse_iso_datetime(state.get("last_live_probe_success_at"))
+    if probe_success_at is None:
+        return False
+
+    observed_at = _parse_iso_datetime(state.get("last_runtime_observation_at"))
+    if (
+        observed_at is not None
+        and probe_success_at < observed_at
+        and not _is_preflight_provider_unavailable_observation(state)
+    ):
+        return False
+
+    return True
 
 
 def _has_provider_audit_truth(state: dict[str, Any]) -> bool:
@@ -488,9 +525,6 @@ def _resolve_disabled_reason(
         else:
             return "busy"
 
-    if provider == "ollama" and any(marker in signal_text for marker in _HOST_DOWN_MARKERS):
-        return "host_down"
-
     capability_reason = _resolve_required_capability_reason(state, provider=provider)
     if capability_reason is not None:
         if (
@@ -501,8 +535,17 @@ def _resolve_disabled_reason(
             return None
         return capability_reason
 
-    if runtime_available and _latest_runtime_observation_succeeded(state):
+    if _latest_runtime_observation_succeeded(state):
         return None
+
+    if provider == "ollama" and any(marker in signal_text for marker in _HOST_DOWN_MARKERS):
+        if _live_streaming_probe_supersedes_host_down_signal(state):
+            logger.info(
+                "[LLM_SELECTABILITY] Ignoring Ollama host-down marker after "
+                "successful live streaming probe",
+            )
+        else:
+            return "host_down"
 
     if not runtime_available:
         if provider == "ollama":
@@ -602,7 +645,7 @@ def get_llm_selectability_snapshot(
                 )
                 if capability_reason is None and provider_state.get("selected_model_in_catalog", False):
                     reason_code = None
-            if reason_code is None and runtime_available:
+            if reason_code is None:
                 state = "selectable"
             else:
                 state = "disabled"
@@ -642,6 +685,14 @@ def get_llm_selectability_snapshot(
 def get_provider_selectability(provider: str) -> Optional[ProviderSelectability]:
     normalized = str(provider).strip().lower()
     for item in get_llm_selectability_snapshot():
+        if item.provider == normalized:
+            return item
+    return None
+
+
+def _refresh_provider_selectability(provider: str) -> Optional[ProviderSelectability]:
+    normalized = str(provider).strip().lower()
+    for item in get_llm_selectability_snapshot(force_refresh=True):
         if item.provider == normalized:
             return item
     return None
@@ -719,6 +770,16 @@ def ensure_provider_is_selectable(provider: str | None) -> ProviderSelectability
         return None
 
     item = get_provider_selectability(normalized)
+    if (
+        normalized == "ollama"
+        and item is not None
+        and item.state == "disabled"
+        and item.reason_code == "host_down"
+    ):
+        refreshed = _refresh_provider_selectability(normalized)
+        if refreshed is not None:
+            item = refreshed
+
     if item is not None and item.state == "selectable":
         return item
     # Explicit user pin: allow degraded-but-routable states (e.g.

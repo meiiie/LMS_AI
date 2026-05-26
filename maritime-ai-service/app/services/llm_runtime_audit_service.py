@@ -619,7 +619,9 @@ def record_llm_runtime_observation(
         )
 
     payload["audit_updated_at"] = now_iso
-    return persist_llm_runtime_audit_snapshot(payload)
+    record = persist_llm_runtime_audit_snapshot(payload)
+    bump_llm_selectability_cache_generation()
+    return record
 
 
 def record_runtime_discovery_snapshot(catalog: Mapping[str, Any]) -> Optional[LlmRuntimeAuditRecord]:
