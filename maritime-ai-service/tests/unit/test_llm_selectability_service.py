@@ -320,6 +320,298 @@ def test_probe_failed_capability_does_not_disable_otherwise_healthy_provider(
     assert zhipu.reason_code is None
 
 
+@patch("app.services.llm_selectability_service.get_supported_provider_names")
+@patch("app.services.llm_selectability_service.settings")
+@patch("app.services.llm_selectability_service.LLMPool.get_provider_info")
+@patch("app.services.llm_selectability_service.LLMPool.get_stats")
+def test_ollama_partial_probe_timeout_does_not_override_streaming_success(
+    mock_stats,
+    mock_provider_info,
+    mock_settings,
+    mock_supported_providers,
+):
+    from app.services.llm_selectability_service import (
+        get_llm_selectability_snapshot,
+        invalidate_llm_selectability_cache,
+    )
+
+    invalidate_llm_selectability_cache()
+    mock_supported_providers.return_value = ("ollama",)
+    mock_settings.use_multi_agent = False
+    mock_settings.google_model = "gemini-3.1-flash-lite-preview"
+    mock_settings.zhipu_model = "glm-4.5-air"
+    mock_settings.ollama_model = "qwen3:4b"
+    mock_settings.llm_provider = "ollama"
+    mock_settings.openai_base_url = None
+    mock_settings.openai_model = "gpt-5-mini"
+    mock_stats.return_value = {
+        "request_selectable_providers": ["ollama"],
+        "active_provider": "ollama",
+        "fallback_provider": None,
+    }
+    mock_provider_info.return_value = _provider(configured=True, available=False)
+
+    record = LlmRuntimeAuditRecord(
+        payload={
+            "schema_version": 1,
+            "audit_updated_at": "2026-05-26T04:23:47+00:00",
+            "last_live_probe_at": "2026-05-26T04:23:26+00:00",
+            "providers": {
+                "ollama": {
+                    "provider": "ollama",
+                    "selected_model": "qwen3:4b",
+                    "selected_model_in_catalog": True,
+                    "model_count": 2,
+                    "last_discovery_attempt_at": "2026-05-26T04:23:26+00:00",
+                    "last_live_probe_attempt_at": "2026-05-26T04:23:26+00:00",
+                    "last_live_probe_success_at": "2026-05-26T04:23:26+00:00",
+                    "last_live_probe_error": "tool calling: timeout; structured output: timeout",
+                    "last_runtime_observation_at": "2026-05-26T04:30:12+00:00",
+                    "last_runtime_success_at": "2026-05-26T04:29:50+00:00",
+                    "last_runtime_error": "May chu local hien chua san sang.",
+                    "last_runtime_note": "chat_stream:error: requested provider ollama unavailable (host_down).",
+                    "last_runtime_source": "chat_stream:error",
+                    "tool_calling_supported": None,
+                    "tool_calling_source": "probe_failed",
+                    "structured_output_supported": None,
+                    "structured_output_source": "probe_failed",
+                    "streaming_supported": True,
+                    "streaming_source": "live_probe",
+                    "degraded_reasons": ["Live capability probe failed."],
+                },
+            },
+        },
+        updated_at=datetime(2026, 5, 26, 4, 23, tzinfo=timezone.utc),
+        persisted=True,
+    )
+
+    with patch(
+        "app.services.llm_selectability_service.get_persisted_llm_runtime_audit",
+        return_value=record,
+    ):
+        snapshot = get_llm_selectability_snapshot(force_refresh=True)
+
+    ollama = next(item for item in snapshot if item.provider == "ollama")
+    assert ollama.state == "selectable"
+    assert ollama.reason_code is None
+
+
+@patch("app.services.llm_selectability_service.get_supported_provider_names")
+@patch("app.services.llm_selectability_service.settings")
+@patch("app.services.llm_selectability_service.LLMPool.get_provider_info")
+@patch("app.services.llm_selectability_service.LLMPool.get_stats")
+def test_ollama_runtime_success_overrides_partial_probe_timeout(
+    mock_stats,
+    mock_provider_info,
+    mock_settings,
+    mock_supported_providers,
+):
+    from app.services.llm_selectability_service import (
+        get_llm_selectability_snapshot,
+        invalidate_llm_selectability_cache,
+    )
+
+    invalidate_llm_selectability_cache()
+    mock_supported_providers.return_value = ("ollama",)
+    mock_settings.use_multi_agent = False
+    mock_settings.ollama_model = "qwen3:4b"
+    mock_settings.llm_provider = "ollama"
+    mock_settings.google_model = "gemini-3.1-flash-lite-preview"
+    mock_settings.zhipu_model = "glm-4.5-air"
+    mock_settings.openai_base_url = None
+    mock_settings.openai_model = "gpt-5-mini"
+    mock_stats.return_value = {
+        "request_selectable_providers": ["ollama"],
+        "active_provider": "ollama",
+        "fallback_provider": None,
+    }
+    mock_provider_info.return_value = _provider(configured=True, available=True)
+
+    record = LlmRuntimeAuditRecord(
+        payload={
+            "schema_version": 1,
+            "audit_updated_at": "2026-05-26T04:49:08+00:00",
+            "providers": {
+                "ollama": {
+                    "provider": "ollama",
+                    "selected_model": "qwen3:4b",
+                    "selected_model_in_catalog": True,
+                    "model_count": 2,
+                    "last_live_probe_success_at": "2026-05-26T04:23:26+00:00",
+                    "last_live_probe_error": "tool calling: timeout; structured output: timeout",
+                    "last_runtime_observation_at": "2026-05-26T04:49:08+00:00",
+                    "last_runtime_success_at": "2026-05-26T04:49:08+00:00",
+                    "last_runtime_error": None,
+                    "last_runtime_note": "chat_sync: completed via ollama/qwen3:4b.",
+                    "last_runtime_source": "chat_sync",
+                    "tool_calling_supported": None,
+                    "tool_calling_source": "probe_failed",
+                    "structured_output_supported": None,
+                    "structured_output_source": "probe_failed",
+                    "streaming_supported": True,
+                    "streaming_source": "live_probe",
+                    "degraded_reasons": ["Live capability probe failed."],
+                },
+            },
+        },
+        updated_at=datetime(2026, 5, 26, 4, 49, tzinfo=timezone.utc),
+        persisted=True,
+    )
+
+    with patch(
+        "app.services.llm_selectability_service.get_persisted_llm_runtime_audit",
+        return_value=record,
+    ):
+        snapshot = get_llm_selectability_snapshot(force_refresh=True)
+
+    ollama = next(item for item in snapshot if item.provider == "ollama")
+    assert ollama.state == "selectable"
+    assert ollama.reason_code is None
+
+
+@patch("app.services.llm_selectability_service.get_supported_provider_names")
+@patch("app.services.llm_selectability_service.settings")
+@patch("app.services.llm_selectability_service.LLMPool.get_provider_info")
+@patch("app.services.llm_selectability_service.LLMPool.get_stats")
+def test_ollama_preflight_unavailable_does_not_override_streaming_success_without_runtime_success(
+    mock_stats,
+    mock_provider_info,
+    mock_settings,
+    mock_supported_providers,
+):
+    from app.services.llm_selectability_service import (
+        get_llm_selectability_snapshot,
+        invalidate_llm_selectability_cache,
+    )
+
+    invalidate_llm_selectability_cache()
+    mock_supported_providers.return_value = ("ollama",)
+    mock_settings.use_multi_agent = False
+    mock_settings.ollama_model = "qwen3:4b"
+    mock_settings.llm_provider = "ollama"
+    mock_settings.google_model = "gemini-3.1-flash-lite-preview"
+    mock_settings.zhipu_model = "glm-4.5-air"
+    mock_settings.openai_base_url = None
+    mock_settings.openai_model = "gpt-5-mini"
+    mock_stats.return_value = {
+        "request_selectable_providers": ["ollama"],
+        "active_provider": "ollama",
+        "fallback_provider": None,
+    }
+    mock_provider_info.return_value = _provider(configured=True, available=False)
+
+    record = LlmRuntimeAuditRecord(
+        payload={
+            "schema_version": 1,
+            "audit_updated_at": "2026-05-26T04:49:08+00:00",
+            "providers": {
+                "ollama": {
+                    "provider": "ollama",
+                    "selected_model": "qwen3:4b",
+                    "selected_model_in_catalog": True,
+                    "model_count": 2,
+                    "last_live_probe_attempt_at": "2026-05-26T04:23:26+00:00",
+                    "last_live_probe_success_at": "2026-05-26T04:23:26+00:00",
+                    "last_live_probe_error": "tool calling: timeout; structured output: timeout",
+                    "last_runtime_observation_at": "2026-05-26T04:49:08+00:00",
+                    "last_runtime_error": "May chu local hien chua san sang.",
+                    "last_runtime_note": "chat_stream:error: requested provider ollama unavailable (host_down).",
+                    "last_runtime_source": "chat_stream:error",
+                    "tool_calling_supported": None,
+                    "tool_calling_source": "probe_failed",
+                    "structured_output_supported": None,
+                    "structured_output_source": "probe_failed",
+                    "streaming_supported": True,
+                    "streaming_source": "live_probe",
+                    "degraded_reasons": ["Live capability probe failed."],
+                },
+            },
+        },
+        updated_at=datetime(2026, 5, 26, 4, 49, tzinfo=timezone.utc),
+        persisted=True,
+    )
+
+    with patch(
+        "app.services.llm_selectability_service.get_persisted_llm_runtime_audit",
+        return_value=record,
+    ):
+        snapshot = get_llm_selectability_snapshot(force_refresh=True)
+
+    ollama = next(item for item in snapshot if item.provider == "ollama")
+    assert ollama.state == "selectable"
+    assert ollama.reason_code is None
+
+
+@patch("app.services.llm_selectability_service.get_supported_provider_names")
+@patch("app.services.llm_selectability_service.settings")
+@patch("app.services.llm_selectability_service.LLMPool.get_provider_info")
+@patch("app.services.llm_selectability_service.LLMPool.get_stats")
+def test_runtime_success_does_not_bypass_required_capability_gating(
+    mock_stats,
+    mock_provider_info,
+    mock_settings,
+    mock_supported_providers,
+):
+    from app.services.llm_selectability_service import (
+        get_llm_selectability_snapshot,
+        invalidate_llm_selectability_cache,
+    )
+
+    invalidate_llm_selectability_cache()
+    mock_supported_providers.return_value = ("google",)
+    mock_settings.use_multi_agent = True
+    mock_settings.google_model = "gemini-3.1-flash-lite-preview"
+    mock_settings.zhipu_model = "glm-4.5-air"
+    mock_settings.ollama_model = "qwen3:8b"
+    mock_settings.llm_provider = "google"
+    mock_settings.openai_base_url = None
+    mock_settings.openai_model = "gpt-5-mini"
+    mock_stats.return_value = {
+        "request_selectable_providers": ["google"],
+        "active_provider": "google",
+        "fallback_provider": None,
+    }
+    mock_provider_info.return_value = _provider(configured=True, available=True)
+
+    record = LlmRuntimeAuditRecord(
+        payload={
+            "schema_version": 1,
+            "audit_updated_at": "2026-05-26T04:49:08+00:00",
+            "providers": {
+                "google": {
+                    "provider": "google",
+                    "selected_model": "gemini-3.1-flash-lite-preview",
+                    "selected_model_in_catalog": True,
+                    "model_count": 3,
+                    "last_runtime_observation_at": "2026-05-26T04:49:08+00:00",
+                    "last_runtime_success_at": "2026-05-26T04:49:08+00:00",
+                    "last_runtime_error": None,
+                    "last_runtime_note": "chat_sync: completed via google/gemini-3.1-flash-lite-preview.",
+                    "last_runtime_source": "chat_sync",
+                    "streaming_supported": True,
+                    "streaming_source": "live_probe",
+                    "structured_output_supported": False,
+                    "structured_output_source": "live_probe",
+                    "tool_calling_supported": True,
+                    "tool_calling_source": "live_probe",
+                },
+            },
+        },
+        updated_at=datetime(2026, 5, 26, 4, 49, tzinfo=timezone.utc),
+        persisted=True,
+    )
+
+    with patch(
+        "app.services.llm_selectability_service.get_persisted_llm_runtime_audit",
+        return_value=record,
+    ):
+        snapshot = get_llm_selectability_snapshot(force_refresh=True)
+
+    google = next(item for item in snapshot if item.provider == "google")
+    assert google.state == "disabled"
+    assert google.reason_code == "capability_missing"
+
+
 @patch("app.services.llm_selectability_service.settings")
 @patch("app.services.llm_selectability_service.LLMPool.get_provider_info")
 @patch("app.services.llm_selectability_service.LLMPool.get_stats")
@@ -946,6 +1238,55 @@ def test_ensure_provider_is_selectable_allows_capability_missing_for_explicit_pi
     ):
         result = ensure_provider_is_selectable("nvidia")
     assert result is pinned_capable
+
+
+def test_ensure_provider_is_selectable_refreshes_stale_ollama_host_down():
+    from app.services.llm_selectability_service import (
+        ensure_provider_is_selectable,
+        ProviderSelectability,
+    )
+
+    stale_host_down = ProviderSelectability(
+        provider="ollama",
+        display_name="Ollama",
+        state="disabled",
+        reason_code="host_down",
+        reason_label="May chu local hien chua san sang.",
+        selected_model="qwen3:4b",
+        strict_pin=True,
+        verified_at="2026-05-26T04:23:26+00:00",
+        available=False,
+        configured=True,
+        request_selectable=True,
+        is_primary=True,
+        is_fallback=False,
+    )
+    refreshed = ProviderSelectability(
+        provider="ollama",
+        display_name="Ollama",
+        state="selectable",
+        reason_code=None,
+        reason_label=None,
+        selected_model="qwen3:4b",
+        strict_pin=True,
+        verified_at="2026-05-26T04:41:20+00:00",
+        available=True,
+        configured=True,
+        request_selectable=True,
+        is_primary=True,
+        is_fallback=False,
+    )
+
+    with patch(
+        "app.services.llm_selectability_service.get_provider_selectability",
+        return_value=stale_host_down,
+    ), patch(
+        "app.services.llm_selectability_service._refresh_provider_selectability",
+        return_value=refreshed,
+    ):
+        result = ensure_provider_is_selectable("ollama")
+
+    assert result is refreshed
 
 
 def test_ensure_provider_is_selectable_still_rejects_hidden_provider():

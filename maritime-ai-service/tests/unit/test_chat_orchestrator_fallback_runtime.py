@@ -183,7 +183,9 @@ class TestProcessWithDirectLlmImpl:
         llm.ainvoke = AsyncMock(return_value=SimpleNamespace(content="assistant text"))
         get_llm_light_fn = MagicMock(return_value=llm)
         extract_thinking = MagicMock(return_value=("Hello there", "Thinking here"))
-        resolve_runtime = MagicMock(return_value={"provider": "google"})
+        resolve_runtime = MagicMock(
+            return_value={"provider": "google", "model": "gemini-test"}
+        )
         context = SimpleNamespace(message="Hi")
 
         result = await process_with_direct_llm_impl(
@@ -198,9 +200,87 @@ class TestProcessWithDirectLlmImpl:
         assert result == FakeProcessingResult(
             message="Hello there",
             agent_type="direct",
-            metadata={"mode": "local_direct_llm", "provider": "google"},
+            metadata={
+                "mode": "local_direct_llm",
+                "provider": "google",
+                "model": "gemini-test",
+                "_execution_provider": "google",
+                "_execution_model": "gemini-test",
+                "runtime_authoritative": True,
+            },
             thinking="Thinking here",
         )
+        llm.ainvoke.assert_awaited_once_with([{"role": "user", "content": "Hi"}])
+
+    @pytest.mark.asyncio
+    async def test_builds_processing_result_prefers_llm_authoritative_override(self):
+        llm = MagicMock()
+        llm._wiii_provider_name = "openai"
+        llm.model = "gpt-4o"
+        llm.ainvoke = AsyncMock(return_value=SimpleNamespace(content="assistant text"))
+        get_llm_light_fn = MagicMock(return_value=llm)
+        extract_thinking = MagicMock(return_value=("Hello there", None))
+        resolve_runtime = MagicMock(
+            return_value={
+                "provider": "google",
+                "model": "gemini-test",
+                "_execution_provider": "zhipu",
+                "_execution_model": "glm-4.5-air",
+            }
+        )
+        context = SimpleNamespace(message="Hi")
+
+        result = await process_with_direct_llm_impl(
+            context=context,
+            get_llm_light_fn=get_llm_light_fn,
+            extract_thinking_from_response_fn=extract_thinking,
+            resolve_runtime_llm_metadata_fn=resolve_runtime,
+            processing_result_cls=FakeProcessingResult,
+            agent_type_direct="direct",
+        )
+
+        assert result.metadata == {
+            "mode": "local_direct_llm",
+            "provider": "openai",
+            "model": "gpt-4o",
+            "_execution_provider": "openai",
+            "_execution_model": "gpt-4o",
+            "runtime_authoritative": True,
+        }
+        llm.ainvoke.assert_awaited_once_with([{"role": "user", "content": "Hi"}])
+
+    @pytest.mark.asyncio
+    async def test_builds_processing_result_from_execution_metadata_only(self):
+        llm = MagicMock()
+        llm.ainvoke = AsyncMock(return_value=SimpleNamespace(content="assistant text"))
+        get_llm_light_fn = MagicMock(return_value=llm)
+        extract_thinking = MagicMock(return_value=("Hello there", None))
+        resolve_runtime = MagicMock(
+            return_value={
+                "_execution_provider": "zhipu",
+                "_execution_model": "glm-4.5-air",
+            }
+        )
+        context = SimpleNamespace(message="Hi")
+
+        result = await process_with_direct_llm_impl(
+            context=context,
+            get_llm_light_fn=get_llm_light_fn,
+            extract_thinking_from_response_fn=extract_thinking,
+            resolve_runtime_llm_metadata_fn=resolve_runtime,
+            processing_result_cls=FakeProcessingResult,
+            agent_type_direct="direct",
+        )
+
+        assert result.metadata == {
+            "mode": "local_direct_llm",
+            "provider": "zhipu",
+            "model": "glm-4.5-air",
+            "_execution_provider": "zhipu",
+            "_execution_model": "glm-4.5-air",
+            "runtime_authoritative": True,
+        }
+        llm.ainvoke.assert_awaited_once_with([{"role": "user", "content": "Hi"}])
 
 
 class TestProcessWithoutMultiAgentImpl:
@@ -246,7 +326,9 @@ class TestProcessWithoutMultiAgentImpl:
             logger_obj=logger_obj,
             should_use_local_direct_llm_fallback=False,
             process_with_direct_llm_fn=AsyncMock(),
-            resolve_runtime_llm_metadata_fn=MagicMock(return_value={"provider": "google"}),
+            resolve_runtime_llm_metadata_fn=MagicMock(
+                return_value={"provider": "google", "model": "gemini-test"}
+            ),
             processing_result_cls=FakeProcessingResult,
             agent_type_rag="rag",
         )
@@ -255,7 +337,14 @@ class TestProcessWithoutMultiAgentImpl:
             message="rag answer",
             agent_type="rag",
             sources=[{"title": "Doc"}],
-            metadata={"mode": "fallback_rag", "provider": "google"},
+            metadata={
+                "mode": "fallback_rag",
+                "provider": "google",
+                "model": "gemini-test",
+                "_execution_provider": "google",
+                "_execution_model": "gemini-test",
+                "runtime_authoritative": True,
+            },
             thinking="rag thinking",
         )
 

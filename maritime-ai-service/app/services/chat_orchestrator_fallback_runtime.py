@@ -76,6 +76,35 @@ def should_use_local_direct_llm_fallback_impl(*, settings_obj) -> bool:
     return provider == "ollama" and not settings_obj.google_api_key
 
 
+def _runtime_text(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
+def _authoritative_runtime_metadata(runtime_llm: dict | None, llm=None) -> dict:
+    metadata = dict(runtime_llm or {})
+    provider = _runtime_text(getattr(llm, "_wiii_provider_name", None)) or _runtime_text(
+        metadata.get("_execution_provider")
+    ) or _runtime_text(
+        metadata.get("provider")
+    )
+    model = _runtime_text(getattr(llm, "model", None)) or _runtime_text(
+        metadata.get("_execution_model")
+    ) or _runtime_text(metadata.get("model"))
+
+    if provider:
+        metadata["provider"] = provider
+        metadata["_execution_provider"] = provider
+    if model:
+        metadata["model"] = model
+        metadata["_execution_model"] = model
+    if provider and model:
+        metadata["runtime_authoritative"] = True
+    return metadata
+
+
 async def process_with_direct_llm_impl(
     *,
     context,
@@ -87,15 +116,19 @@ async def process_with_direct_llm_impl(
 ):
     """Generate a local-first response without RAG when cloud retrieval is unavailable."""
     llm = get_llm_light_fn()
-    response = await llm.ainvoke(context.message)
+    response = await llm.ainvoke([{"role": "user", "content": context.message}])
     message, thinking = extract_thinking_from_response_fn(response.content)
+    runtime_llm = _authoritative_runtime_metadata(
+        resolve_runtime_llm_metadata_fn(),
+        llm=llm,
+    )
 
     return processing_result_cls(
         message=message,
         agent_type=agent_type_direct,
         metadata={
             "mode": "local_direct_llm",
-            **resolve_runtime_llm_metadata_fn(),
+            **runtime_llm,
         },
         thinking=thinking,
     )
@@ -126,7 +159,7 @@ async def process_without_multi_agent_impl(
             user_role=context.user_role.value,
             limit=5,
         )
-        runtime_llm = resolve_runtime_llm_metadata_fn()
+        runtime_llm = _authoritative_runtime_metadata(resolve_runtime_llm_metadata_fn())
         return processing_result_cls(
             message=rag_result.content,
             agent_type=agent_type_rag,

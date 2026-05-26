@@ -293,7 +293,9 @@ def test_record_llm_runtime_observation_tracks_failover_route_and_success():
     with patch(
         "app.services.llm_runtime_audit_service.get_admin_runtime_settings_repository",
         return_value=repo,
-    ):
+    ), patch(
+        "app.services.llm_runtime_audit_service.bump_llm_selectability_cache_generation",
+    ) as bump_cache:
         record = record_llm_runtime_observation(
             provider="openrouter",
             success=True,
@@ -312,6 +314,7 @@ def test_record_llm_runtime_observation_tracks_failover_route_and_success():
         )
 
     assert record is not None
+    bump_cache.assert_called_once_with()
     google_state = persisted_payload["providers"]["google"]
     openrouter_state = persisted_payload["providers"]["openrouter"]
     assert google_state["last_runtime_error"] == "Provider vuot gioi han hoac dang bi quota/rate limit."
