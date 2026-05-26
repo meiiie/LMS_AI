@@ -91,3 +91,111 @@ def test_select_direct_node_tools_forces_web_search_and_must_include(monkeypatch
     assert ctx["force_skills"] == ["web-search"]
     assert "tool_web_search" in captured["must_include"]
     assert captured["user_role"] == "teacher"
+
+
+def test_select_direct_node_tools_respects_governor_when_pointy_is_suppressed(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_select_runtime_tools(
+        tools: list[Any],
+        *,
+        query: str,
+        intent: str | None,
+        user_role: str,
+        max_tools: int,
+        must_include: list[str],
+    ) -> list[Any]:
+        captured["must_include"] = must_include
+        return tools
+
+    monkeypatch.setattr(
+        "app.engine.skills.skill_recommender.select_runtime_tools",
+        fake_select_runtime_tools,
+    )
+
+    state: dict[str, Any] = {
+        "_turn_path_decision": {
+            "path": "direct_prose",
+            "bind_tools": False,
+            "allow_all_tools": False,
+            "forbidden_tool_prefixes": ["tool_pointy_"],
+        },
+        "context": {"force_skills": ["wiii-pointy"]},
+        "routing_metadata": {"intent": "general"},
+    }
+
+    result = select_direct_node_tools(
+        query="@wiii-pointy tao bai hoc ngan ve ky nang hoc tap",
+        state=state,
+        ctx={"user_role": "teacher"},
+        routing_intent="general",
+        is_short_house_chatter=False,
+        is_identity_turn=False,
+        is_emotional_support_turn=False,
+        is_codebase_source_turn=False,
+        explicit_web_search_turn=False,
+        has_uploaded_document_context=False,
+        needs_web_search=lambda _query: False,
+        collect_direct_tools=lambda *_args, **_kwargs: ([], False),
+        direct_required_tool_names=lambda _query, _role: [],
+        logger_obj=logging.getLogger(__name__),
+    )
+
+    assert result.tools == []
+    assert result.force_tools is False
+    assert captured["must_include"] == []
+
+
+def test_select_direct_node_tools_force_binds_pointy_when_governor_allows_it(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_select_runtime_tools(
+        tools: list[Any],
+        *,
+        query: str,
+        intent: str | None,
+        user_role: str,
+        max_tools: int,
+        must_include: list[str],
+    ) -> list[Any]:
+        captured["must_include"] = must_include
+        return tools
+
+    monkeypatch.setattr(
+        "app.engine.skills.skill_recommender.select_runtime_tools",
+        fake_select_runtime_tools,
+    )
+
+    tools = [_Tool("tool_pointy_show"), _Tool("tool_pointy_inventory")]
+    state: dict[str, Any] = {
+        "_turn_path_decision": {
+            "path": "pointy_guidance",
+            "bind_tools": True,
+            "allow_all_tools": False,
+            "allowed_tool_prefixes": ["tool_pointy_"],
+        },
+        "context": {"force_skills": ["wiii-pointy"]},
+        "routing_metadata": {"intent": "host_ui_navigation"},
+    }
+
+    result = select_direct_node_tools(
+        query="@wiii-pointy chi vao nut gui",
+        state=state,
+        ctx={"user_role": "student"},
+        routing_intent="host_ui_navigation",
+        is_short_house_chatter=False,
+        is_identity_turn=False,
+        is_emotional_support_turn=False,
+        is_codebase_source_turn=False,
+        explicit_web_search_turn=False,
+        has_uploaded_document_context=False,
+        needs_web_search=lambda _query: False,
+        collect_direct_tools=lambda *_args, **_kwargs: (tools, False),
+        direct_required_tool_names=lambda _query, _role: [],
+        logger_obj=logging.getLogger(__name__),
+    )
+
+    assert result.tools == tools
+    assert result.force_tools is True
+    assert "tool_pointy_show" in captured["must_include"]
+    assert "tool_pointy_inventory" in captured["must_include"]
