@@ -537,6 +537,7 @@ export type SSEEventType =
   | "answer"
   | "sources"
   | "metadata"
+  | "chat_lifecycle"
   | "done"
   | "error"
   | "tool_call"

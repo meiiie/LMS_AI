@@ -6,7 +6,7 @@
  *   data: <json>\n
  *   \n
  *
- * Event types: thinking, answer, sources, metadata, done, error
+ * Supported event types are defined by SSEEventHandler below.
  */
 import type {
   SSEThinkingEvent,

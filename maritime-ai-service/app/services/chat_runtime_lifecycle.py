@@ -32,9 +32,24 @@ class ChatLifecycleName:
 
 _MAX_ITEMS = 24
 _MAX_STRING_LENGTH = 128
+_ELLIPSIS = "..."
+_ALLOWED_METADATA_KEYS = {
+    "bound_tools",
+    "domain_id",
+    "error_type",
+    "fallback_used",
+    "model",
+    "organization_id_present",
+    "provider",
+    "reason_code",
+    "recoverable",
+    "transport",
+}
 
 
 def _safe_string(value: Any, *, max_length: int = _MAX_STRING_LENGTH) -> str | None:
+    if max_length <= 0:
+        return None
     if value is None:
         return None
     text = str(value).strip()
@@ -42,7 +57,9 @@ def _safe_string(value: Any, *, max_length: int = _MAX_STRING_LENGTH) -> str | N
         return None
     text = " ".join(text.split())
     if len(text) > max_length:
-        return text[: max_length - 1] + "..."
+        if max_length <= len(_ELLIPSIS):
+            return _ELLIPSIS[:max_length]
+        return text[: max_length - len(_ELLIPSIS)] + _ELLIPSIS
     return text
 
 
@@ -63,6 +80,30 @@ def _safe_mapping(value: Any) -> Mapping[str, Any]:
     if isinstance(value, Mapping):
         return value
     return {}
+
+
+def _safe_metadata_value(value: Any) -> Any:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return value
+    if isinstance(value, str):
+        return _safe_string(value)
+    if isinstance(value, (list, tuple, set)):
+        return _safe_string_list(value)
+    return "<redacted>"
+
+
+def _safe_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for key, value in metadata.items():
+        key_text = str(key)
+        if key_text not in _ALLOWED_METADATA_KEYS or value is None:
+            continue
+        safe_value = _safe_metadata_value(value)
+        if safe_value is not None:
+            safe[key_text] = safe_value
+    return safe
 
 
 def capability_snapshot_from_ledger_payload(
@@ -122,11 +163,9 @@ class ChatRuntimeLifecycleEvent:
         if self.capabilities is not None:
             payload["capabilities"] = dict(self.capabilities)
         if self.metadata:
-            payload["metadata"] = {
-                str(key): value
-                for key, value in self.metadata.items()
-                if value is not None
-            }
+            metadata = _safe_metadata(self.metadata)
+            if metadata:
+                payload["metadata"] = metadata
         return payload
 
 
