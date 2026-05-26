@@ -655,7 +655,8 @@ async def _stream_openai_compatible_answer_with_route_impl(
             exc,
             exc_info=True,
         )
-        if emitted_answer:
+        reason_code = str(classified.get("reason_code") or "")
+        if emitted_answer and reason_code == "provider_stream_interrupted":
             await _close_thinking_for_non_answer()
             raise ProviderStreamInterruptedError(
                 provider=provider_name,
@@ -663,6 +664,9 @@ async def _stream_openai_compatible_answer_with_route_impl(
                 partial_chars=len(emitted_answer),
                 details=str(exc),
             ) from exc
+        if emitted_answer:
+            await _close_thinking_for_non_answer()
+            raise
         await _close_thinking_for_non_answer()
     logger.info(
         "[%s] Native stream result: provider=%s model=%s answer=%d chars",

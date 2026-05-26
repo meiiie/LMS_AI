@@ -207,7 +207,14 @@ async def test_generate_stream_v3_events_does_not_finalize_interrupted_provider_
     assert "event: answer" in joined
     assert "À... vì mình thấy cậu đang" in joined
     assert "event: error" in joined
-    assert "provider_stream_interrupted" in joined
+    error_payloads = _event_payloads(chunks, "error")
+    assert len(error_payloads) == 1
+    assert error_payloads[0]["type"] == "provider_stream_interrupted"
+    assert error_payloads[0]["provider"] == "nvidia"
+    assert error_payloads[0]["model"] == "qwen/qwen3-next-80b-a3b-instruct"
+    assert error_payloads[0]["reason_code"] == "provider_stream_interrupted"
+    assert error_payloads[0]["partial_chars"] == 27
+    assert error_payloads[0]["recoverable"] is True
     assert "event: done" not in joined
     orchestrator.finalize_response_turn.assert_not_called()
 

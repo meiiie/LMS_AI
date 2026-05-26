@@ -22,6 +22,7 @@ _DEGRADING_REASON_CODES = {
     "provider_unavailable",
     "host_down",
     "auth_error",
+    "provider_stream_interrupted",
 }
 
 
