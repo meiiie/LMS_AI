@@ -319,7 +319,7 @@ class TestDirectNodeCharacterTools:
             assert "tool_character_note" in names
             assert "tool_current_datetime" in names
             assert "tool_web_search" in names
-            assert "tool_search_maritime" in names
+            assert "tool_search_maritime" not in names
 
     @pytest.mark.asyncio
     async def test_no_character_tools_when_disabled(self):

@@ -693,10 +693,6 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
             "app.engine.tools.utility_tools",
             "tool_current_datetime",
         )
-        tool_current_weather = _load_attr(
-            "app.engine.tools.utility_tools",
-            "tool_current_weather",
-        )
         tool_web_search = _load_attr(
             "app.engine.tools.web_search_tools",
             "tool_web_search",
@@ -724,10 +720,15 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         _direct_tools = [
             *_direct_tools,
             tool_current_datetime,
-            tool_current_weather,
             tool_web_search,
             tool_fetch_url,
         ]
+        if turn_path_decision.path == "weather_lookup":
+            tool_current_weather = _load_attr(
+                "app.engine.tools.utility_tools",
+                "tool_current_weather",
+            )
+            _direct_tools.append(tool_current_weather)
         # v2.8: force-bind via @web-search mention overrides news/legal gates.
         web_search_forced = "web-search" in force_skills
         if _needs_news_search(query) or web_search_forced:

@@ -188,6 +188,16 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             allow_agent_handoff=False,
         )
 
+    if signals.needs_maritime_search and not signals.web_search_forced:
+        return TurnPathDecision(
+            path="maritime_search",
+            reason="maritime_domain_lookup",
+            force_tools=True,
+            allow_rag_delegation=True,
+            forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
+            allow_agent_handoff=False,
+        )
+
     if signals.web_search_forced or signals.needs_web_search or signals.needs_news_search or signals.needs_legal_search:
         return TurnPathDecision(
             path="web_search",
@@ -223,16 +233,6 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
         return TurnPathDecision(
             path="knowledge_search",
             reason="explicit_internal_knowledge_lookup",
-            force_tools=True,
-            allow_rag_delegation=True,
-            forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
-            allow_agent_handoff=False,
-        )
-
-    if signals.needs_maritime_search:
-        return TurnPathDecision(
-            path="maritime_search",
-            reason="maritime_domain_lookup",
             force_tools=True,
             allow_rag_delegation=True,
             forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
@@ -391,6 +391,7 @@ def _has_tool_or_output_signal(signals: TurnPathSignals) -> bool:
             signals.host_ui_navigation,
             signals.looks_document_preview,
             signals.looks_reasoning_safety_meta,
+            signals.needs_weather_lookup,
             signals.needs_web_search,
             signals.needs_datetime,
             signals.needs_news_search,
