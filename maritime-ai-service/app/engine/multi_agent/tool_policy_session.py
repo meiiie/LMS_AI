@@ -206,6 +206,45 @@ def build_tool_policy_session(
     )
 
 
+def build_visible_tool_policy_session(
+    *,
+    path: str,
+    reason: str,
+    state: dict[str, Any] | None,
+    query: str = "",
+    candidate_tool_names: list[str] | tuple[str, ...] | set[str] = (),
+    visible_tool_names: list[str] | tuple[str, ...] | set[str] | None = None,
+    force_tools: bool = False,
+) -> ToolPolicySession:
+    """Build a policy session for runtimes that already selected visible tools."""
+
+    normalized_candidates = frozenset(
+        _normalize_tool_name(name) for name in candidate_tool_names if _normalize_tool_name(name)
+    )
+    normalized_visible = frozenset(
+        _normalize_tool_name(name)
+        for name in (visible_tool_names if visible_tool_names is not None else normalized_candidates)
+        if _normalize_tool_name(name)
+    )
+    connection_status = _connection_status_for_turn(state=state, query=query)
+    return ToolPolicySession(
+        version=TOOL_POLICY_SESSION_VERSION,
+        path=str(path or "unknown"),
+        reason=str(reason or ""),
+        bind_tools=bool(normalized_visible),
+        force_tools=bool(force_tools),
+        allow_all_tools=False,
+        allowed_tool_names=normalized_visible,
+        candidate_tool_names=normalized_candidates,
+        visible_tool_names=normalized_visible,
+        connection_status=connection_status,
+        approval_required_tool_names=approval_required_tool_names_for(normalized_candidates),
+        tool_capabilities=tool_capability_metadata_for_names(normalized_candidates),
+        allow_agent_handoff=False,
+        allow_rag_delegation=False,
+    )
+
+
 def record_tool_policy_session(
     state: dict[str, Any] | None,
     session: ToolPolicySession,

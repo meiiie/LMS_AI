@@ -7,6 +7,10 @@ import logging
 from typing import Any, Callable
 
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.tool_policy_session import (
+    build_visible_tool_policy_session,
+    record_tool_policy_session,
+)
 from app.engine.skills.skill_recommender import select_runtime_tools
 
 
@@ -26,6 +30,10 @@ BuildVisualToolRuntimeMetadata = Callable[[AgentState, str], dict[str, Any]]
 RuntimeToolSelector = Callable[..., list[Any] | None]
 
 
+def _tool_name(tool: Any) -> str:
+    return str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "").strip()
+
+
 def prepare_code_studio_tool_setup(
     *,
     effective_query: str,
@@ -43,6 +51,7 @@ def prepare_code_studio_tool_setup(
 
     user_role = str(ctx.get("user_role", "student") or "student")
     tools, force_tools = collect_code_studio_tools(effective_query, user_role)
+    candidate_tool_names = [_tool_name(tool) for tool in tools if _tool_name(tool)]
 
     try:
         selected_tools = select_runtime_tools_fn(
@@ -70,6 +79,19 @@ def prepare_code_studio_tool_setup(
             "[CODE_STUDIO] Runtime tool selection skipped: %s",
             selection_error,
         )
+
+    record_tool_policy_session(
+        state,
+        build_visible_tool_policy_session(
+            path="code_studio",
+            reason="code_studio_tool_setup",
+            state=state,
+            query=effective_query,
+            candidate_tool_names=candidate_tool_names,
+            visible_tool_names=[_tool_name(tool) for tool in tools if _tool_name(tool)],
+            force_tools=force_tools,
+        ),
+    )
 
     runtime_context_base = build_tool_runtime_context_fn(
         event_bus_id=bus_id,
