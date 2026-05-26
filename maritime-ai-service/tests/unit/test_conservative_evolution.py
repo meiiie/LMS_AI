@@ -780,6 +780,28 @@ class TestConservativeFastRouting:
         assert "COLREG" not in _build_hunger_chatter_answer(query)
         assert "bao cao" in _fold_direct_text(_build_hunger_chatter_answer(query))
 
+    def test_short_social_status_routes_to_fast_social_without_task_bleed(self):
+        from app.engine.multi_agent.direct_node_chatter_runtime import (
+            _build_social_status_chatter_answer,
+            _looks_social_status_chatter_turn,
+        )
+        from app.engine.multi_agent.supervisor_hint_runtime import (
+            classify_fast_chatter_turn_impl,
+        )
+
+        assert classify_fast_chatter_turn_impl("trưa nay ăn cơm rồi") == (
+            "social",
+            "social_status",
+        )
+        assert _looks_social_status_chatter_turn("trua nay an com roi") is True
+        assert _looks_social_status_chatter_turn("du an roi") is False
+        assert (
+            _looks_social_status_chatter_turn("trua nay an com roi, kiem tra log")
+            is False
+        )
+        assert _looks_social_status_chatter_turn("tao code mo phong luc an com") is False
+        assert "Wiii" in _build_social_status_chatter_answer("trưa nay ăn cơm rồi")
+
     def test_reasoning_safety_meta_turn_is_detected(self):
         from app.engine.multi_agent.supervisor_runtime_support import (
             _looks_reasoning_safety_meta_turn,

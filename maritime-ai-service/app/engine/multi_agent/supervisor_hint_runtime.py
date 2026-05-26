@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import re
 
+from app.engine.multi_agent.direct_node_chatter_runtime import (
+    _looks_social_status_chatter_turn,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.direct_intent import _looks_selfhood_followup_turn
 from app.engine.multi_agent.visual_intent_resolver import resolve_visual_intent
@@ -319,6 +322,8 @@ def classify_fast_chatter_turn_impl(query: str) -> tuple[str, str] | None:
         return None
     if _looks_hunger_chatter_impl(normalized):
         return ("social", "hunger_chatter")
+    if _looks_social_status_chatter_turn(normalized):
+        return ("social", "social_status")
     if _looks_clear_social_impl(normalized):
         return ("social", "social")
     tokens = [token for token in re.sub(r"[^\w\s]", " ", normalized).split() if token]

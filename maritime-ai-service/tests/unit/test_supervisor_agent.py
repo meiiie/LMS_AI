@@ -122,7 +122,11 @@ class TestSupervisorRoute:
             "domain_config": {},
         }
 
-        with patch.object(sup, "_route_structured", new=AsyncMock(return_value="direct")) as mock_route:
+        with patch.object(
+            sup,
+            "_route_structured",
+            new=AsyncMock(return_value="direct"),
+        ) as mock_route:
             result = await sup.route(state)
 
         assert result == "direct"
@@ -151,6 +155,27 @@ class TestSupervisorRoute:
             "kind": "fast_chatter",
             "intent": "social",
             "shape": "social",
+        }
+        assert state["routing_metadata"]["method"] == "conservative_fast_path"
+        mock_route.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_route_short_social_status_uses_fast_path(self, mock_llm):
+        sup = _make_supervisor(mock_llm)
+        state = {
+            "query": "trưa nay ăn cơm rồi",
+            "context": {},
+            "domain_config": {},
+        }
+
+        with patch.object(sup, "_route_structured", new=AsyncMock(return_value="direct")) as mock_route:
+            result = await sup.route(state)
+
+        assert result == "direct"
+        assert state["_routing_hint"] == {
+            "kind": "fast_chatter",
+            "intent": "social",
+            "shape": "social_status",
         }
         assert state["routing_metadata"]["method"] == "conservative_fast_path"
         mock_route.assert_not_awaited()

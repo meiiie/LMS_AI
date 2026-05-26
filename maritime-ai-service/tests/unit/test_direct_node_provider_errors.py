@@ -741,6 +741,36 @@ async def test_direct_response_node_uses_hunger_chatter_fast_path_without_llm():
 
 
 @pytest.mark.asyncio
+async def test_direct_response_node_uses_social_status_fast_path_without_llm():
+    state = _base_state()
+    state.update(
+        {
+            "query": "trưa nay ăn cơm rồi",
+            "routing_metadata": {
+                "method": "structured",
+                "intent": "social",
+            },
+        }
+    )
+
+    kwargs = _base_direct_kwargs()
+    kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
+
+    with patch(
+        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+        side_effect=AssertionError("social status fast path should not call an LLM"),
+    ):
+        result = await direct_response_node_impl(
+            state,
+            **kwargs,
+        )
+
+    assert "có sức hơn chút" in result["final_response"]
+    assert "provider chậm" in result["thinking_content"]
+    assert "(๑" not in result["final_response"]
+
+
+@pytest.mark.asyncio
 async def test_direct_response_node_uses_self_feeling_probe_without_llm():
     state = _base_state()
     state.update(
