@@ -123,6 +123,35 @@ def test_lms_authoring_connection_requires_host_connector_and_identity():
     assert status["connector_id"] == "maritime-lms"
 
 
+def test_lms_authoring_connection_merges_metadata_sources_by_field():
+    state = {
+        "context": {
+            "lms_external_id": "teacher-1",
+            "host_capabilities": {
+                "connector_id": "maritime-lms",
+            },
+        },
+        "host_context": {
+            "host_user_id": "",
+        },
+        "host_capabilities": {
+            "host_type": "lms",
+            "tools": [{"name": "authoring.preview_lesson_patch"}],
+        },
+    }
+    ctx = {
+        "host_context": {
+            "host_type": "lms",
+        },
+        "host_capabilities": {},
+    }
+
+    status = lms_authoring_connection_status(state, ctx)
+
+    assert status["active"] is True
+    assert status["connector_id"] == "maritime-lms"
+
+
 def test_filter_lms_authoring_capabilities_drops_tools_without_connection():
     capabilities = [
         {"name": "authoring.preview_lesson_patch"},

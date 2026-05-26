@@ -85,6 +85,37 @@ def _action_requires_approval_token(action_name: str) -> bool:
     return normalized.endswith("apply_lesson_patch") or normalized.endswith("apply_course_plan")
 
 
+def _latest_preview_matches(
+    latest_preview: dict[str, Any] | None,
+    expected_preview_kind: str | None,
+) -> bool:
+    if not latest_preview:
+        return False
+    latest_kind = str(latest_preview.get("preview_kind") or "").strip()
+    return not expected_preview_kind or latest_kind == expected_preview_kind
+
+
+def _populate_latest_preview_tokens(
+    params: dict[str, Any],
+    latest_preview: dict[str, Any] | None,
+    expected_preview_kind: str | None,
+) -> tuple[str, str]:
+    preview_token = str(params.get("preview_token") or "").strip()
+    approval_token = str(params.get("approval_token") or "").strip()
+
+    if _latest_preview_matches(latest_preview, expected_preview_kind):
+        if not preview_token:
+            preview_token = str(latest_preview.get("preview_token") or "").strip()
+            if preview_token:
+                params["preview_token"] = preview_token
+        if not approval_token:
+            approval_token = str(latest_preview.get("approval_token") or "").strip()
+            if approval_token:
+                params["approval_token"] = approval_token
+
+    return preview_token, approval_token
+
+
 def _format_input_contract(action_name: str, action_def: dict[str, Any]) -> str:
     input_schema = action_def.get("input_schema")
     if not isinstance(input_schema, dict):
@@ -158,23 +189,18 @@ def generate_host_action_tools(
         def _make_tool_fn(name: str, br: HostActionBridge, bus_id: str, definition: dict[str, Any]):
             def tool_fn(**kwargs: Any) -> str:
                 params = dict(kwargs)
-                if definition.get("requires_confirmation") and definition.get("mutates_state"):
-                    expected_preview_kind = _expected_preview_kind(name)
-                    preview_token = str(params.get("preview_token") or "").strip()
-                    if not preview_token and latest_preview:
-                        latest_kind = str(latest_preview.get("preview_kind") or "").strip()
-                        if not expected_preview_kind or latest_kind == expected_preview_kind:
-                            preview_token = str(latest_preview.get("preview_token") or "").strip()
-                            if preview_token:
-                                params["preview_token"] = preview_token
-                    approval_token = str(params.get("approval_token") or "").strip()
-                    if not approval_token and latest_preview:
-                        latest_kind = str(latest_preview.get("preview_kind") or "").strip()
-                        if not expected_preview_kind or latest_kind == expected_preview_kind:
-                            approval_token = str(latest_preview.get("approval_token") or "").strip()
-                            if approval_token:
-                                params["approval_token"] = approval_token
+                expected_preview_kind = _expected_preview_kind(name)
+                preview_token, approval_token = _populate_latest_preview_tokens(
+                    params,
+                    latest_preview,
+                    expected_preview_kind,
+                )
+                declared_mutation = bool(
+                    definition.get("requires_confirmation") and definition.get("mutates_state")
+                )
+                requires_lms_approval_token = _action_requires_approval_token(name)
 
+                if declared_mutation or requires_lms_approval_token:
                     if not explicit_confirmation:
                         return json.dumps({
                             "status": "approval_required",
@@ -192,14 +218,14 @@ def generate_host_action_tools(
                             "expected_preview_kind": expected_preview_kind,
                         }, ensure_ascii=False)
 
-                    if _action_requires_approval_token(name) and not approval_token:
-                        return json.dumps({
-                            "status": "approval_token_required",
-                            "action": name,
-                            "params": params,
-                            "message": "A host-issued approval_token is required before LMS authoring apply can run.",
-                            "expected_preview_kind": expected_preview_kind,
-                        }, ensure_ascii=False)
+                if requires_lms_approval_token and not approval_token:
+                    return json.dumps({
+                        "status": "approval_token_required",
+                        "action": name,
+                        "params": params,
+                        "message": "A host-issued approval_token is required before LMS authoring apply can run.",
+                        "expected_preview_kind": expected_preview_kind,
+                    }, ensure_ascii=False)
 
                 request_id = br.emit_action_request(name, params, bus_id)
                 return json.dumps({

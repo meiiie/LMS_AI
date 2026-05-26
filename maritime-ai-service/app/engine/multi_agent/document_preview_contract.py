@@ -138,12 +138,14 @@ def as_plain_mapping(value: Any) -> dict[str, Any]:
     return {}
 
 
-def _first_plain_mapping(*values: Any) -> dict[str, Any]:
-    for value in values:
+def _merge_plain_mappings(*values: Any) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for value in reversed(values):
         mapping = as_plain_mapping(value)
-        if mapping:
-            return mapping
-    return {}
+        for key, item in mapping.items():
+            if item is not None and item != "":
+                merged[key] = item
+    return merged
 
 
 def _plain_state_context(state: dict[str, Any] | None) -> dict[str, Any]:
@@ -176,12 +178,12 @@ def lms_authoring_connection_status(
     state_context = _plain_state_context(state)
     state_map = state if isinstance(state, dict) else {}
 
-    host_context = _first_plain_mapping(
+    host_context = _merge_plain_mappings(
         ctx.get("host_context"),
         state_context.get("host_context"),
         state_map.get("host_context"),
     )
-    host_capabilities = _first_plain_mapping(
+    host_capabilities = _merge_plain_mappings(
         ctx.get("host_capabilities"),
         state_context.get("host_capabilities"),
         state_map.get("host_capabilities"),

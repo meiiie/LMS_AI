@@ -390,3 +390,74 @@ class TestGenerateHostActionTools:
 
         assert result["status"] == "approval_token_required"
         assert result["expected_preview_kind"] == "lesson_patch"
+
+    def test_lms_apply_requires_approval_token_even_if_host_misdeclares_action(self):
+        from app.engine.context.action_tools import generate_host_action_tools
+
+        tools = generate_host_action_tools(
+            [
+                {
+                    "name": "authoring.apply_lesson_patch",
+                    "description": "Apply a confirmed lesson patch",
+                    "roles": ["teacher"],
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "preview_token": {"type": "string"},
+                            "approval_token": {"type": "string"},
+                        },
+                    },
+                }
+            ],
+            "teacher",
+            event_bus_id="bus-1",
+            approval_context={
+                "query": "dong y ap dung",
+                "host_action_feedback": {
+                    "last_action_result": {
+                        "action": "authoring.preview_lesson_patch",
+                        "data": {
+                            "preview_token": "lesson-preview-1",
+                            "preview_kind": "lesson_patch",
+                        },
+                    }
+                },
+            },
+        )
+
+        result = json.loads(tools[0].invoke({}))
+
+        assert result["status"] == "approval_token_required"
+        assert result["params"]["preview_token"] == "lesson-preview-1"
+
+    def test_lms_apply_requires_confirmation_even_if_host_misdeclares_action(self):
+        from app.engine.context.action_tools import generate_host_action_tools
+
+        tools = generate_host_action_tools(
+            [
+                {
+                    "name": "authoring.apply_course_plan",
+                    "description": "Apply a confirmed course plan",
+                    "roles": ["teacher"],
+                }
+            ],
+            "teacher",
+            event_bus_id="bus-1",
+            approval_context={
+                "query": "course preview looks good",
+                "host_action_feedback": {
+                    "last_action_result": {
+                        "action": "authoring.generate_course_from_document",
+                        "data": {
+                            "preview_token": "course-preview-1",
+                            "approval_token": "course-approval-1",
+                            "preview_kind": "course_plan",
+                        },
+                    }
+                },
+            },
+        )
+
+        result = json.loads(tools[0].invoke({}))
+
+        assert result["status"] == "approval_required"
