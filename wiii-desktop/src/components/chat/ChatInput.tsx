@@ -33,6 +33,7 @@ import { getWelcomePlaceholder } from "@/lib/greeting";
 import { DomainSelector } from "./DomainSelector";
 import { ModelSelector } from "./ModelSelector";
 import { PointyModeToggle } from "./PointyModeToggle";
+import { CapabilityStatusBar } from "./CapabilityStatusBar";
 import { MentionPicker } from "./MentionPicker";
 import { MentionMirror } from "./MentionMirror";
 import type { ChatDocumentAttachment, ChatDocumentContext, ImageInput } from "@/api/types";
@@ -621,6 +622,7 @@ export function ChatInput({ onSend, onCancel, editingMessage, onClearEdit, cente
       <div className="w-full">
         <div className="input-card">
           <div className="m-3.5 flex flex-col gap-3">
+            <CapabilityStatusBar compact />
             {/* Sprint 179: Image preview strip */}
             {images.length > 0 && (
               <div className="flex gap-2 flex-wrap">
@@ -742,6 +744,7 @@ export function ChatInput({ onSend, onCancel, editingMessage, onClearEdit, cente
   return (
     <div className="chat-composer-shell px-4 py-3">
       <div className="chat-lane">
+        <CapabilityStatusBar />
         {/* Edit mode banner */}
         {editingMessage && onClearEdit && (
           <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-lg bg-[var(--accent-light)] text-[var(--accent)] text-xs">
