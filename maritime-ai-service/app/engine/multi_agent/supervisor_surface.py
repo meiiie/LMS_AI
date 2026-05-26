@@ -228,6 +228,12 @@ def _finalize_routing_reasoning_impl(
     if normalized_method == "always_on_social_fast_path":
         return "Đây là một nhịp xã giao rất rõ, nên mình đáp ngay để giữ cuộc trò chuyện tự nhiên."
 
+    if normalized_method == "always_on_social_status_fast_path":
+        return (
+            "Đây là một cập nhật sinh hoạt rất ngắn, không có yêu cầu tra cứu hay công cụ, "
+            "nên Wiii đáp trực tiếp."
+        )
+
     if normalized_method == "always_on_chatter_fast_path":
         return "Đây là một nhịp trò chuyện rất ngắn và ít thông tin, nên mình giữ nó ở lane đáp trực tiếp."
 

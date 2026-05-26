@@ -318,6 +318,29 @@ class SupervisorAgent:
 
         routing_hint = state.get("_routing_hint") or {}
         if (
+            isinstance(routing_hint, dict)
+            and routing_hint.get("kind") == "fast_chatter"
+            and routing_hint.get("shape") == "social_status"
+        ):
+            agent = AgentType.DIRECT.value
+            intent = str(routing_hint.get("intent") or "social")
+            method = "always_on_social_status_fast_path"
+            state["routing_metadata"] = {
+                "intent": intent,
+                "confidence": 1.0,
+                "reasoning": _finalize_routing_reasoning(
+                    raw_reasoning="obvious short social status update",
+                    method=method,
+                    chosen_agent=agent,
+                    intent=intent,
+                    query=query,
+                ),
+                "llm_reasoning": "",
+                "method": method,
+                "final_agent": agent,
+            }
+            return agent
+        if (
             settings.enable_conservative_fast_routing
             and (not routing_hint or routing_hint.get("kind") == "fast_chatter")
         ):
