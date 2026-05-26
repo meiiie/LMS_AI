@@ -248,6 +248,85 @@ function createChatBaselineLedger(
   };
 }
 
+function createChatLifecycleEvent(
+  eventName: string,
+  phase: string,
+  status: string,
+  message: string,
+  request: Record<string, unknown>,
+  scenario: ChatBaselineScenario,
+): Record<string, unknown> {
+  return {
+    schema_version: "wiii.chat_runtime_lifecycle.v1",
+    event_name: eventName,
+    phase,
+    status,
+    message,
+    request_id: "browser-chat-baseline",
+    session_id: typeof request.session_id === "string" ? request.session_id : "browser-session",
+    lane: "native_turn",
+    reason: "browser_chat_baseline_acceptance",
+    node: "browser_harness",
+    capabilities: {
+      host_surface: "desktop_chat",
+      host_capabilities: [],
+      observed_tools: [],
+      suppressed_tools: CHAT_BASELINE_SUPPRESSED_TOOLS,
+      preview_required: false,
+      preview_emitted: false,
+      approval_token_present: false,
+      apply_attempted: false,
+    },
+    metadata: {
+      provider: "browser-harness",
+      model: "browser-chat-baseline-mock",
+      bound_tools: [],
+      turn_path: scenario.expectedTurnPath,
+      runtime_authoritative: true,
+    },
+  };
+}
+
+function createChatBaselineLifecycleEvents(
+  request: Record<string, unknown>,
+  scenario: ChatBaselineScenario,
+): Array<Record<string, unknown>> {
+  return [
+    createChatLifecycleEvent(
+      "path.selected",
+      "routing",
+      "selected",
+      "Browser baseline selected ordinary chat lane.",
+      request,
+      scenario,
+    ),
+    createChatLifecycleEvent(
+      "capability.checked",
+      "capability",
+      "allowed",
+      "Browser baseline suppressed tool-capable surfaces.",
+      request,
+      scenario,
+    ),
+    createChatLifecycleEvent(
+      "finalization.completed",
+      "finalization",
+      "completed",
+      "Browser baseline assistant message finalized.",
+      request,
+      scenario,
+    ),
+    createChatLifecycleEvent(
+      "chat.done",
+      "terminal",
+      "completed",
+      "Browser baseline stream completed.",
+      request,
+      scenario,
+    ),
+  ];
+}
+
 function parseChatRequestBody(raw: string | null): Record<string, unknown> {
   if (!raw) return {};
   try {
@@ -376,7 +455,9 @@ export async function installChatBaselineStreamMock(
       return;
     }
 
+    const lifecycleEvents = createChatBaselineLifecycleEvents(request, scenario);
     const eventTypes = [
+      ...lifecycleEvents.map(() => "chat_lifecycle"),
       "status",
       ...scenario.answerChunks.map(() => "answer"),
       "metadata",
@@ -390,6 +471,10 @@ export async function installChatBaselineStreamMock(
     );
     const terminalLedger = createChatBaselineLedger(request, scenario, eventTypes, "saved");
     const sseEvents: Array<{ type: string; data: Record<string, unknown> }> = [
+      ...lifecycleEvents.map((data) => ({
+        type: "chat_lifecycle",
+        data,
+      })),
       {
         type: "status",
         data: {
