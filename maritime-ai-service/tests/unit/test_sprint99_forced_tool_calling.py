@@ -92,9 +92,9 @@ class TestNeedsWebSearch:
         from app.engine.multi_agent.graph import _needs_web_search
         assert _needs_web_search("các sự kiện nổi bật") is True
 
-    def test_thoi_tiet(self):
+    def test_weather_keyword_uses_weather_policy_not_generic_web(self):
         from app.engine.multi_agent.graph import _needs_web_search
-        assert _needs_web_search("thời tiết Hà Nội hôm nay") is True
+        assert _needs_web_search("thoi tiet Ha Noi hom nay") is False
 
     def test_gia_vang(self):
         from app.engine.multi_agent.graph import _needs_web_search

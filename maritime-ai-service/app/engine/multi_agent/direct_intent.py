@@ -23,9 +23,12 @@ _WEB_INTENT_KEYWORDS: list[str] = [
     # News / current events
     "tin tuc", "ban tin", "news", "thoi su",
     "su kien", "cap nhat", "update", "bao chi",
+    "hom nay co gi hot", "hom nay co gi moi", "hom nay co tin gi",
+    "co tin gi moi", "co gi moi khong", "what happened today",
+    "news today", "today news", "today's news",
     # Temporal signals (today, recently, latest)
-    "hom nay", "ngay hom nay", "moi nhat", "moi day", "gan day",
-    "latest", "today", "thoi tiet", "gia vang", "ty gia",
+    "moi nhat", "moi day", "gan day",
+    "latest", "gia vang", "ty gia",
     # Explicit search verbs
     "tra cuu", "look up", "find out",
     # Sprint 102: Legal search signals
@@ -42,7 +45,9 @@ _WEATHER_LOOKUP_KEYWORDS: tuple[str, ...] = (
     "thoi tiet",
     "nhiet do",
     "bao do",
+    "bao nhieu do",
     "may do",
+    "nhieu do",
     "nong khong",
     "lanh khong",
     "mua khong",
@@ -52,6 +57,36 @@ _WEATHER_LOOKUP_KEYWORDS: tuple[str, ...] = (
     "uv",
     "weather",
     "forecast",
+)
+
+_WEATHER_TEMPORAL_CONTEXT_KEYWORDS: tuple[str, ...] = (
+    "hom nay",
+    "ngay hom nay",
+    "nay",
+    "bay gio",
+    "hien tai",
+    "luc nay",
+    "sang nay",
+    "trua nay",
+    "chieu nay",
+    "toi nay",
+    "dem nay",
+    "khuya nay",
+)
+
+_WEATHER_CURRENT_CONDITION_KEYWORDS: tuple[str, ...] = (
+    "troi nong",
+    "troi lanh",
+    "troi ret",
+    "troi mua",
+    "troi nang",
+    "troi am",
+    "troi oi",
+    "nong qua",
+    "lanh qua",
+    "ret qua",
+    "mua qua",
+    "nang qua",
 )
 
 # Keywords that signal the query needs current datetime
@@ -298,7 +333,12 @@ def _needs_weather_lookup(query: str) -> bool:
     normalized = _normalize_for_intent(query)
     if not normalized:
         return False
-    return any(kw in normalized for kw in _WEATHER_LOOKUP_KEYWORDS)
+    if any(kw in normalized for kw in _WEATHER_LOOKUP_KEYWORDS):
+        return True
+    return (
+        any(kw in normalized for kw in _WEATHER_TEMPORAL_CONTEXT_KEYWORDS)
+        and any(kw in normalized for kw in _WEATHER_CURRENT_CONDITION_KEYWORDS)
+    )
 
 
 def _needs_datetime(query: str) -> bool:
