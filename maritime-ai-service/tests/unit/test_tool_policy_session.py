@@ -54,6 +54,8 @@ def test_tool_policy_session_records_visible_weather_tool_only():
     assert final_session is not None
     assert final_session.path == "weather_lookup"
     assert final_session.visible_tool_names == frozenset({"tool_current_weather"})
+    assert final_session.tool_capabilities is not None
+    assert final_session.tool_capabilities["tool_current_weather"]["group"] == "weather"
     assert final_session.decision_for("tool_current_weather").allowed is True
     assert final_session.decision_for("tool_web_search").allowed is False
 
@@ -84,8 +86,36 @@ def test_tool_policy_session_denies_lms_authoring_without_connection():
 
     assert session.connection_status is not None
     assert session.connection_status["lms_authoring"]["active"] is False
+    assert session.tool_capabilities is not None
+    assert (
+        session.tool_capabilities["host_action__authoring__apply_lesson_patch"][
+            "requires_approval"
+        ]
+        is True
+    )
     assert session.should_expose_tool("host_action__authoring__preview_lesson_patch") is False
     assert "host_action__authoring__apply_lesson_patch" in session.approval_required_tool_names
+
+
+def test_tool_policy_session_denies_generic_host_action_without_connection():
+    from app.engine.multi_agent.tool_policy_session import ToolPolicySession
+
+    session = ToolPolicySession(
+        version="tool_policy_session.v1",
+        path="host_ui_navigation",
+        reason="routing_intent_host_ui_navigation",
+        bind_tools=True,
+        force_tools=True,
+        allow_all_tools=False,
+        allowed_tool_prefixes=("host_action__",),
+        candidate_tool_names=frozenset({"host_action__dashboard__focus_widget"}),
+        connection_status={"host_actions": {"active": False}},
+    )
+
+    assert session.should_expose_tool("host_action__dashboard__focus_widget") is False
+    decision = session.decision_for("host_action__dashboard__focus_widget")
+    assert decision.allowed is False
+    assert decision.reason == "not_allowed_by_path_policy"
 
 
 @pytest.mark.asyncio

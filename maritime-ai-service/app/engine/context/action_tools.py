@@ -9,6 +9,10 @@ import re
 from typing import Any
 
 from app.engine.tools.native_tool import StructuredTool
+from app.engine.tools.tool_capability_registry import (
+    host_action_requires_approval_token,
+    host_action_tool_name,
+)
 
 from app.engine.context.action_bridge import HostActionBridge
 
@@ -22,13 +26,6 @@ _EXPLICIT_CONFIRM_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
-
-
-def host_action_tool_name(action_name: str) -> str:
-    """Map dotted/slashed action names to OpenAI-safe tool names."""
-    normalized = re.sub(r"[^a-zA-Z0-9_-]+", "__", action_name.strip())
-    normalized = normalized.strip("_") or "host_action"
-    return f"host_action__{normalized}"
 
 
 def _query_explicitly_confirms(query: str) -> bool:
@@ -81,8 +78,7 @@ def _expected_preview_kind(action_name: str) -> str | None:
 
 
 def _action_requires_approval_token(action_name: str) -> bool:
-    normalized = action_name.strip().lower()
-    return normalized.endswith("apply_lesson_patch") or normalized.endswith("apply_course_plan")
+    return host_action_requires_approval_token(action_name)
 
 
 def _latest_preview_matches(

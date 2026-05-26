@@ -6,20 +6,12 @@ import unicodedata
 from collections.abc import Callable
 from typing import Any
 
-DOC_PREVIEW_HOST_ACTION_TOOL = "host_action__authoring__preview_lesson_patch"
-DOC_COURSE_HOST_ACTION_TOOL = "host_action__authoring__generate_course_from_document"
-
-DOCUMENT_PREVIEW_CAPABILITY_NAMES = {
-    "authoring.preview_lesson_patch",
-    "authoring.generate_course_from_document",
-}
-
-LMS_AUTHORING_CAPABILITY_NAMES = {
-    "authoring.preview_lesson_patch",
-    "authoring.generate_course_from_document",
-    "authoring.apply_lesson_patch",
-    "authoring.apply_course_plan",
-}
+from app.engine.tools.tool_capability_registry import (
+    DOC_COURSE_HOST_ACTION_TOOL,
+    DOC_PREVIEW_HOST_ACTION_TOOL,
+    DOCUMENT_PREVIEW_CAPABILITY_NAMES,
+    LMS_AUTHORING_CAPABILITY_NAMES,
+)
 
 _COURSE_REQUEST_BLOCKERS = (
     "preview_lesson_patch",

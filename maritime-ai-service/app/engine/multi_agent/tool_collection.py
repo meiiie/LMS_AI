@@ -29,6 +29,13 @@ from app.engine.multi_agent.tool_policy_session import (
     finalize_tool_policy_visible_tools,
     record_tool_policy_session,
 )
+from app.engine.tools.tool_capability_registry import (
+    DOC_COURSE_HOST_ACTION_TOOL,
+    DOC_PREVIEW_HOST_ACTION_TOOL,
+    DOCUMENT_PREVIEW_CAPABILITY_NAMES,
+    HOST_ACTION_PREFIX,
+    POINTY_TOOL_PREFIX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -414,12 +421,12 @@ def _document_preview_host_action_tools(tools: list[Any]) -> list[Any]:
     course_tools = [
         tool
         for tool in tools
-        if _tool_name(tool).lower() == "host_action__authoring__generate_course_from_document"
+        if _tool_name(tool).lower() == DOC_COURSE_HOST_ACTION_TOOL
     ]
     lesson_tools = [
         tool
         for tool in tools
-        if _tool_name(tool).lower() == "host_action__authoring__preview_lesson_patch"
+        if _tool_name(tool).lower() == DOC_PREVIEW_HOST_ACTION_TOOL
     ]
     return course_tools + lesson_tools
 
@@ -429,9 +436,9 @@ def _preferred_document_preview_host_action_tools(
     query: str,
     state: Optional[AgentState],
 ) -> list[Any]:
-    preferred = "host_action__authoring__generate_course_from_document" if (
+    preferred = DOC_COURSE_HOST_ACTION_TOOL if (
         _looks_like_document_course_preview_request(query, state)
-    ) else "host_action__authoring__preview_lesson_patch"
+    ) else DOC_PREVIEW_HOST_ACTION_TOOL
     return [
         tool
         for tool in tools
@@ -468,11 +475,7 @@ def _safe_document_preview_capability_tools(
     return [
         tool
         for tool in capabilities_tools
-        if str(tool.get("name") or "").strip().lower()
-        in {
-            "authoring.preview_lesson_patch",
-            "authoring.generate_course_from_document",
-        }
+        if str(tool.get("name") or "").strip().lower() in DOCUMENT_PREVIEW_CAPABILITY_NAMES
     ]
 
 
@@ -688,7 +691,7 @@ def _host_action_tools(tools: list[Any]) -> list[Any]:
     way Wiii answers "where is X" / "click Y" questions on STANDALONE
     Wiii desktop / Wiii web — there is no host_action bridge there.
     """
-    allowed_prefixes = ("host_action__", "tool_pointy_")
+    allowed_prefixes = (HOST_ACTION_PREFIX, POINTY_TOOL_PREFIX)
     return [tool for tool in tools if _tool_name(tool).startswith(allowed_prefixes)]
 
 

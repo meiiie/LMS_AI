@@ -22,6 +22,11 @@ The canonical backend shape is:
 query/context -> TurnPathDecision -> ToolPolicySession -> bound tools -> execution guard
 ```
 
+`ToolCapabilityRegistry` is the policy metadata source underneath that shape.
+Tool construction remains in the native tool modules, but connection,
+approval, mutation, group, and surface-scope metadata must come from
+`app.engine.tools.tool_capability_registry`.
+
 ## Required Contract
 
 Every direct chat turn should have a `ToolPolicySession` in `AgentState` when
@@ -40,6 +45,18 @@ The session records:
 - `connection_status`: fail-closed service status such as LMS authoring
   connection, host capability presence, and weather provider availability.
 - `approval_required_tool_names`: tools that require preview/approval evidence.
+- `tool_capabilities`: serialized registry metadata for candidate tools, used
+  for auditability and later loop migration.
+
+The capability registry records:
+
+- capability group: web search, weather, LMS authoring, host action, Pointy,
+  visual, knowledge search, utility, or Code Studio output;
+- permission level: read, write, or host control;
+- required connection: LMS authoring, weather provider, or host actions;
+- whether the tool mutates state or requires host-issued approval evidence;
+- intended surface scope, such as direct chat, tutor, Code Studio, host, LMS, or
+  visual runtime.
 
 ## Runtime Rules
 
