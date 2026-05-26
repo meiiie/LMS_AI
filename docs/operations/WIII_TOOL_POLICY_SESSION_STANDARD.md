@@ -32,6 +32,11 @@ approval, mutation, group, and surface-scope metadata must come from
 Every direct chat turn should have a `ToolPolicySession` in `AgentState` when
 tool selection is evaluated.
 
+Runtimes that already perform their own tool selection, such as Code Studio,
+should record the same contract with `build_visible_tool_policy_session`: the
+candidate set is the collected tool inventory, and the visible set is the
+runtime-selected tool bundle actually bound to the model.
+
 The session records:
 
 - `path`: active path such as `casual_chat`, `weather_lookup`, `web_search`,

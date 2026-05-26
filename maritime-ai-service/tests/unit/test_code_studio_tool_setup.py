@@ -14,6 +14,12 @@ def test_prepare_code_studio_tool_setup_selects_tools_and_builds_runtime_context
     ]
     selected_tools = [original_tools[0]]
     runtime_context = SimpleNamespace(runtime="ctx")
+    state = {
+        "routing_metadata": {"intent": "visual_app"},
+        "session_id": "session-1",
+        "organization_id": "org-1",
+        "user_id": "user-1",
+    }
 
     def select_runtime_tools_fn(tools, **kwargs):
         assert tools == original_tools
@@ -38,12 +44,7 @@ def test_prepare_code_studio_tool_setup_selects_tools_and_builds_runtime_context
 
     result = prepare_code_studio_tool_setup(
         effective_query="build a simulation",
-        state={
-            "routing_metadata": {"intent": "visual_app"},
-            "session_id": "session-1",
-            "organization_id": "org-1",
-            "user_id": "user-1",
-        },
+        state=state,
         ctx={"user_role": "teacher", "request_id": "req-1"},
         bus_id="bus-1",
         collect_code_studio_tools=lambda _query, _role: (original_tools, True),
@@ -58,18 +59,27 @@ def test_prepare_code_studio_tool_setup_selects_tools_and_builds_runtime_context
     assert result.tools == selected_tools
     assert result.force_tools is True
     assert result.runtime_context_base is runtime_context
+    policy = state["_tool_policy_session"]
+    assert policy["path"] == "code_studio"
+    assert policy["candidate_tool_names"] == [
+        "tool_create_visual_code",
+        "tool_python",
+    ]
+    assert policy["visible_tool_names"] == ["tool_create_visual_code"]
+    assert policy["tool_capabilities"]["tool_create_visual_code"]["group"] == "visual"
 
 
 def test_prepare_code_studio_tool_setup_keeps_tools_when_selection_fails() -> None:
     tools = [SimpleNamespace(name="tool_create_visual_code")]
     logger = MagicMock()
+    state = {}
 
     def select_runtime_tools_fn(*_args, **_kwargs):
         raise RuntimeError("selector unavailable")
 
     result = prepare_code_studio_tool_setup(
         effective_query="build a simulation",
-        state={},
+        state=state,
         ctx={},
         bus_id=None,
         collect_code_studio_tools=lambda _query, _role: (tools, False),
@@ -83,4 +93,5 @@ def test_prepare_code_studio_tool_setup_keeps_tools_when_selection_fails() -> No
     assert result.tools == tools
     assert result.force_tools is False
     assert result.runtime_context_base["user_role"] == "student"
+    assert state["_tool_policy_session"]["visible_tool_names"] == ["tool_create_visual_code"]
     logger.debug.assert_called_once()

@@ -22,6 +22,11 @@ from app.engine.multi_agent.code_studio_template_scaffold import (
     build_code_studio_scaffold,
 )
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.tool_policy_session import (
+    ToolPolicyDecision,
+    tool_policy_denial_message,
+    tool_policy_session_from_state,
+)
 from app.engine.runtime.runtime_metrics import inc_counter
 
 logger = logging.getLogger(__name__)
@@ -85,6 +90,19 @@ def _normalize_tc(tc: object) -> dict:
         "name": str(getattr(tc, "name", "") or ""),
         "args": getattr(tc, "arguments", None) or getattr(tc, "args", {}) or {},
     }
+
+
+def _code_studio_tool_policy_denial(
+    state: Optional[AgentState],
+    tool_name: str,
+) -> tuple[ToolPolicyDecision, str] | None:
+    session = tool_policy_session_from_state(state)
+    if session is None:
+        return None
+    decision = session.decision_for(str(tool_name or "").strip())
+    if decision.allowed:
+        return None
+    return decision, tool_policy_denial_message(decision)
 
 
 def _build_streamed_code_html_tool_round_outcome(
@@ -702,10 +720,68 @@ async def execute_code_studio_tool_rounds_impl(
             tc_id = tc_dict.get("id") or f"tc_{tool_round}"
             tc_name = tc_dict.get("name", "unknown")
             tc_args = tc_dict.get("args") or {}
+            policy_denial = _code_studio_tool_policy_denial(state, str(tc_name))
             logger.info(
                 "[CODE_STUDIO] Invoking tool %s (id=%s, args_keys=%s)",
                 tc_name, tc_id, list(tc_args.keys()) if isinstance(tc_args, dict) else "?",
             )
+            if policy_denial is not None:
+                policy_decision, result = policy_denial
+                policy_metadata = {
+                    "allowed": False,
+                    "path": policy_decision.path,
+                    "reason": policy_decision.reason,
+                }
+                logger.warning(
+                    "[CODE_STUDIO] Tool policy denied tool=%r path=%s reason=%s",
+                    tc_name,
+                    policy_decision.path,
+                    policy_decision.reason,
+                )
+                await push_event({
+                    "type": "tool_call",
+                    "content": {
+                        "name": tc_name,
+                        "args": sanitize_code_studio_tool_call_args_for_stream(
+                            tc_name,
+                            tc_args,
+                        ),
+                        "id": tc_id,
+                        "policy": policy_metadata,
+                    },
+                    "node": "code_studio_agent",
+                })
+                tool_call_events.append(
+                    {
+                        "type": "call",
+                        "name": tc_name,
+                        "args": tc_args,
+                        "id": tc_id,
+                        "policy": policy_metadata,
+                    }
+                )
+                await push_event(
+                    {
+                        "type": "tool_result",
+                        "content": {
+                            "name": tc_name,
+                            "result": summarize_tool_result_for_stream(tc_name, result),
+                            "id": tc_id,
+                        },
+                        "node": "code_studio_agent",
+                    }
+                )
+                tool_call_events.append(
+                    {
+                        "type": "result",
+                        "name": tc_name,
+                        "result": str(result),
+                        "id": tc_id,
+                        "policy": policy_metadata,
+                    }
+                )
+                messages.append(_TM(content=str(result), tool_call_id=tc_id))
+                continue
             await push_event({
                 "type": "tool_call",
                 "content": {
