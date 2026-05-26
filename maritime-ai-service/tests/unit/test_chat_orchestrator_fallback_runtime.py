@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.chat_orchestrator_fallback_runtime import (
+    build_fast_chatter_result_impl,
     persist_chat_message_impl,
     process_with_direct_llm_impl,
     process_without_multi_agent_impl,
@@ -284,10 +285,66 @@ class TestProcessWithDirectLlmImpl:
 
 
 class TestProcessWithoutMultiAgentImpl:
+    def test_fast_chatter_result_handles_plain_greeting_without_rag(self):
+        context = SimpleNamespace(message="Xin chào Wiii")
+
+        result = build_fast_chatter_result_impl(
+            context=context,
+            processing_result_cls=FakeProcessingResult,
+            agent_type_direct="direct",
+        )
+
+        assert result is not None
+        assert result.agent_type == "direct"
+        assert "Chào" in result.message
+        assert result.metadata["provider"] == "deterministic"
+        assert result.metadata["routing_metadata"]["method"] == "fast_chatter"
+
+    def test_fast_chatter_result_does_not_bypass_document_context(self):
+        context = SimpleNamespace(
+            message="Xin chào Wiii",
+            document_context={"document_ids": ["doc-1"]},
+        )
+
+        result = build_fast_chatter_result_impl(
+            context=context,
+            processing_result_cls=FakeProcessingResult,
+            agent_type_direct="direct",
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_fallback_uses_fast_chatter_for_greeting_before_rag(self):
+        logger_obj = MagicMock()
+        rag_agent = MagicMock()
+        rag_agent.query = AsyncMock()
+
+        result = await process_without_multi_agent_impl(
+            context=SimpleNamespace(message="Xin chào Wiii"),
+            rag_agent=rag_agent,
+            output_processor=MagicMock(),
+            logger_obj=logger_obj,
+            should_use_local_direct_llm_fallback=False,
+            process_with_direct_llm_fn=AsyncMock(),
+            resolve_runtime_llm_metadata_fn=MagicMock(return_value={}),
+            processing_result_cls=FakeProcessingResult,
+            agent_type_rag="rag",
+            agent_type_direct="direct",
+        )
+
+        assert result.agent_type == "direct"
+        assert result.metadata["provider"] == "deterministic"
+        assert "searched for information" not in result.message.lower()
+        rag_agent.query.assert_not_awaited()
+
     @pytest.mark.asyncio
     async def test_uses_direct_llm_path_when_flag_enabled(self):
         logger_obj = MagicMock()
-        context = SimpleNamespace(message="Hi", user_role=SimpleNamespace(value="student"))
+        context = SimpleNamespace(
+            message="Explain COLREG Rule 5",
+            user_role=SimpleNamespace(value="student"),
+        )
         process_with_direct_llm_fn = AsyncMock(return_value=FakeProcessingResult("hello", "direct"))
 
         result = await process_without_multi_agent_impl(
@@ -320,7 +377,10 @@ class TestProcessWithoutMultiAgentImpl:
         )
 
         result = await process_without_multi_agent_impl(
-            context=SimpleNamespace(message="Hi", user_role=SimpleNamespace(value="student")),
+            context=SimpleNamespace(
+                message="Explain COLREG Rule 5",
+                user_role=SimpleNamespace(value="student"),
+            ),
             rag_agent=rag_agent,
             output_processor=output_processor,
             logger_obj=logger_obj,
@@ -352,7 +412,10 @@ class TestProcessWithoutMultiAgentImpl:
     async def test_raises_when_no_agent_available(self):
         with pytest.raises(RuntimeError, match="No processing agent available"):
             await process_without_multi_agent_impl(
-                context=SimpleNamespace(message="Hi", user_role=SimpleNamespace(value="student")),
+                context=SimpleNamespace(
+                    message="Explain COLREG Rule 5",
+                    user_role=SimpleNamespace(value="student"),
+                ),
                 rag_agent=None,
                 output_processor=MagicMock(),
                 logger_obj=MagicMock(),
