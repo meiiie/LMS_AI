@@ -76,8 +76,11 @@ describe("Sprint 192: ui-store activeView", () => {
 
   it("closeWiiiConnect returns to chat", () => {
     useUIStore.getState().openWiiiConnect();
+    useUIStore.setState({ commandPaletteOpen: true });
     useUIStore.getState().closeWiiiConnect();
-    expect(useUIStore.getState().activeView).toBe("chat");
+    const state = useUIStore.getState();
+    expect(state.activeView).toBe("chat");
+    expect(state.commandPaletteOpen).toBe(false);
   });
 
   it("navigateToChat returns to chat from any view", () => {

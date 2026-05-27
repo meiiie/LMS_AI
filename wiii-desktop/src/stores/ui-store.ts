@@ -139,7 +139,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   openSoulBridge: () => set({ activeView: "soul-bridge" as ActiveView, commandPaletteOpen: false }),
   closeSoulBridge: () => set({ activeView: "chat" as ActiveView }),
   openWiiiConnect: () => set({ activeView: "wiii-connect" as ActiveView, commandPaletteOpen: false }),
-  closeWiiiConnect: () => set({ activeView: "chat" as ActiveView }),
+  closeWiiiConnect: () => set({ activeView: "chat" as ActiveView, commandPaletteOpen: false }),
   navigateToChat: () => set({ activeView: "chat" as ActiveView, orgManagerTargetOrgId: null }),
   closeAll: () =>
     set({ activeView: "chat" as ActiveView, commandPaletteOpen: false, sourcesPanelOpen: false, characterPanelOpen: false, previewPanelOpen: false, selectedPreviewId: null, artifactPanelOpen: false, selectedArtifactId: null, _ephemeralArtifact: null, orgManagerTargetOrgId: null, codeStudioPanelOpen: false }),

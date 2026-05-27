@@ -392,8 +392,8 @@ function ProviderRoadmap() {
         <Lock size={16} className="text-text-secondary" aria-hidden="true" />
         <h3 className="text-sm font-semibold text-text">Provider adapter chưa bật</h3>
       </div>
-      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-surface">
-        <table className="w-full min-w-[720px] text-left text-sm">
+      <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-surface">
+        <table className="w-full min-w-[640px] text-left text-sm">
           <thead className="border-b border-[var(--border)] bg-surface-secondary text-xs uppercase text-text-tertiary">
             <tr>
               <th className="px-3 py-2 font-medium">Provider</th>
@@ -484,8 +484,8 @@ function PathPolicyTable({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-surface">
-      <table className="w-full min-w-[860px] text-left text-sm">
+    <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-surface">
+      <table className="w-full min-w-[760px] text-left text-sm">
         <thead className="border-b border-[var(--border)] bg-surface-secondary text-xs uppercase text-text-tertiary">
           <tr>
             <th className="px-3 py-2 font-medium">Path</th>
@@ -549,7 +549,7 @@ function RuntimeSection({
     ["Tool bị chặn", toolGroupSummary(runtimePath?.suppressedTools)],
     ["Preview", runtimePath?.previewRequired ? "Cần preview" : "Không"],
     ["Apply", runtimePath?.approvalTokenPresent ? "Có approval evidence" : "Không"],
-    ["Nhận lúc", runtimePath?.receivedAtMs ? formatDateTime(new Date(runtimePath.receivedAtMs).toISOString()) : "Chưa có"],
+    ["Nhận lúc", runtimePath?.receivedAtMs != null ? formatDateTime(new Date(runtimePath.receivedAtMs).toISOString()) : "Chưa có"],
   ];
 
   return (

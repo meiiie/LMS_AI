@@ -77,7 +77,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       {
         id: "open-wiii-connect",
         label: "Wiii Connect",
-        description: "Connection registry",
+        description: "Quản lý kết nối",
         icon: <PlugZap size={16} />,
         action: () => { openWiiiConnect(); onClose(); },
         category: "action",
