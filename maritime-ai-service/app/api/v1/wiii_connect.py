@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.engine.wiii_connect import (
+    WiiiConnectCallbackRequest,
     WiiiConnectSessionStartRequest,
     begin_connection_session,
     get_wiii_connect_provider_entry,
+    provider_callback_decision,
     provider_connection_status,
     provider_registry_public_metadata,
     scope_grant_from_mapping,
@@ -71,4 +73,29 @@ async def start_wiii_connect_provider_session(
         request_metadata_keys=tuple(body.request_metadata.keys()),
     )
     decision = begin_connection_session(entry, request)
+    return decision.to_public_metadata()
+
+
+@router.get("/providers/{slug}/callback")
+async def receive_wiii_connect_provider_callback(
+    slug: str,
+    request: Request,
+    state: str | None = None,
+    code: str | None = None,
+    error: str | None = None,
+    surface: str = "desktop",
+) -> dict[str, object]:
+    """Return a fail-closed callback decision without exchanging credentials."""
+
+    callback_request = WiiiConnectCallbackRequest(
+        provider_slug=slug.strip().lower().replace("-", "_"),
+        surface=surface,
+        state_present=bool(state),
+        code_present=bool(code),
+        error_present=bool(error),
+        request_metadata_keys=tuple(request.query_params.keys()),
+    )
+    decision = provider_callback_decision(slug, callback_request)
+    if decision is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
     return decision.to_public_metadata()

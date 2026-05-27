@@ -109,3 +109,46 @@ async def test_wiii_connect_session_api_404_for_unknown_provider(app):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "unknown_wiii_connect_provider"
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_callback_api_blocks_and_redacts_oauth_values(app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/wiii-connect/providers/facebook/callback",
+            params={
+                "state": "secret-state-value",
+                "code": "oauth-code-value",
+                "client_secret": "secret-value",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["version"] == "wiii_connect_callback.v1"
+    assert payload["status"] == "blocked"
+    assert payload["reason"] == "provider_disabled"
+    assert payload["vault_ref_issued"] is False
+    assert payload["audit_event"]["request"]["state_present"] is True
+    assert payload["audit_event"]["request"]["code_present"] is True
+    assert "redacted_sensitive_field" in serialized
+    assert "secret-state-value" not in serialized
+    assert "oauth-code-value" not in serialized
+    assert "client_secret" not in serialized
+    assert "secret-value" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_callback_api_404_for_unknown_provider(app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/wiii-connect/providers/not-real/callback")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "unknown_wiii_connect_provider"

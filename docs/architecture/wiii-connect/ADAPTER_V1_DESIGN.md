@@ -57,11 +57,18 @@ The connection-session control contract lives in:
 maritime-ai-service/app/engine/wiii_connect/connection_sessions.py
 ```
 
+The OAuth callback/vault boundary contract lives in:
+
+```text
+maritime-ai-service/app/engine/wiii_connect/callback_boundary.py
+```
+
 Current session/status API projections:
 
 ```text
 GET  /api/v1/wiii-connect/providers/{slug}/status
 POST /api/v1/wiii-connect/providers/{slug}/sessions
+GET  /api/v1/wiii-connect/providers/{slug}/callback
 ```
 
 Frontend surfaces should consume this registry/snapshot projection instead of
@@ -128,6 +135,19 @@ must keep that provider disabled and non-agent-ready.
 - returns `blocked` or `ready`;
 - returns an authorization URL only when a provider adapter supplies one;
 - current Composio registry entries return `blocked/provider_disabled`.
+
+`WiiiConnectCallbackRequest`
+
+- records only callback shape: state/code/error presence and sanitized key names;
+- never returns OAuth code, state value, token, client secret, or raw provider
+  payload.
+
+`WiiiConnectCallbackDecision`
+
+- returns `blocked` or `accepted`;
+- blocks disabled providers, provider errors, missing state, missing code, missing
+  vault, or missing provider adapter;
+- issues a vault reference only after vault and provider adapter are both ready.
 
 ## Lifecycle States
 
@@ -212,6 +232,8 @@ Before real Composio OAuth is enabled:
 - session start must return a backend decision first, not let the frontend call
   Composio directly;
 - disabled providers must return a blocked decision with missing requirements;
+- callback handling must stay blocked until state/code validation, vault storage,
+  and provider adapter exchange are ready;
 - callback/webhook handling must bind provider account to Wiii org/user;
 - credential material must be stored in an encrypted vault or provider-managed
   backend secret store;
@@ -235,9 +257,9 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 
 ## Next Slices
 
-1. Add OAuth callback/token-exchange placeholder that is still fail-closed until
-   vault storage exists.
-2. Add encrypted vault integration or provider-managed secret reference storage.
+1. Add encrypted vault integration or provider-managed secret reference storage.
+2. Add provider adapter abstraction that can supply authorization URLs and token
+   exchange only behind vault policy.
 3. Add frontend connection modal that uses Wiii backend routes only.
 4. Persist provider registry and connection records behind backend-owned storage.
 5. Add browser acceptance for connect, poll, disconnect, gated scope, and denied
