@@ -45,6 +45,12 @@ The backend-owned provider catalog lives in:
 maritime-ai-service/app/engine/wiii_connect/provider_registry.py
 ```
 
+The read-only API projection lives at:
+
+```text
+GET /api/v1/wiii-connect/providers
+```
+
 Frontend surfaces should consume this registry/snapshot projection instead of
 inventing a separate external-provider source of truth. Until a provider has
 OAuth, vault, scoped action catalog, gateway, and audit support, the registry

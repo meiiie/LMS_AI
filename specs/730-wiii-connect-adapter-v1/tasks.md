@@ -29,8 +29,9 @@
 
 - [ ] T014 Add persistent provider registry API.
 - [x] T014 Add backend-owned static provider registry for disabled Composio catalog.
-- [ ] T015 Add persistent provider registry API.
-- [ ] T016 Add OAuth start/callback routes for disabled Composio adapter.
-- [ ] T017 Add vault integration or provider-managed secret reference storage.
-- [ ] T018 Add frontend connection modal using Wiii backend routes.
-- [ ] T019 Add browser acceptance for connect, poll, disconnect, gated scope, and denied execute cases.
+- [x] T015 Add read-only provider registry API.
+- [ ] T016 Add persistent provider registry API.
+- [ ] T017 Add OAuth start/callback routes for disabled Composio adapter.
+- [ ] T018 Add vault integration or provider-managed secret reference storage.
+- [ ] T019 Add frontend connection modal using Wiii backend routes.
+- [ ] T020 Add browser acceptance for connect, poll, disconnect, gated scope, and denied execute cases.
