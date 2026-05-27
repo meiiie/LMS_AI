@@ -5,11 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Callable
 
-from app.core.config import settings
-from app.engine.multi_agent.document_preview_contract import (
-    lms_authoring_connection_status,
-)
 from app.engine.multi_agent.turn_path_governor import TurnPathDecision
+from app.engine.wiii_connect.snapshot import build_wiii_connect_snapshot
 from app.engine.tools.tool_capability_registry import (
     approval_required_tool_names_for,
     tool_capability_metadata_for_names,
@@ -344,50 +341,7 @@ def _connection_status_for_turn(
     state: dict[str, Any] | None,
     query: str,
 ) -> dict[str, dict[str, Any]]:
-    lms_status = lms_authoring_connection_status(
-        state,
-        (state or {}).get("context") if isinstance((state or {}).get("context"), dict) else {},
-    )
-    return {
-        "lms_authoring": lms_status,
-        "weather": _weather_connection_status(),
-        "host_actions": _host_action_connection_status(state),
-        "query": {
-            "active": bool(str(query or "").strip()),
-            "reason": "present" if str(query or "").strip() else "missing_query",
-        },
-    }
-
-
-def _weather_connection_status() -> dict[str, Any]:
-    enabled = bool(getattr(settings, "living_agent_enable_weather", False))
-    has_provider = bool(str(getattr(settings, "living_agent_weather_api_key", "") or "").strip())
-    active = enabled and has_provider
-    return {
-        "active": active,
-        "reason": "active" if active else "missing_weather_provider",
-        "fail_closed_tool": True,
-        "default_city": str(getattr(settings, "living_agent_weather_city", "") or "").strip() or None,
-    }
-
-
-def _host_action_connection_status(state: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(state, dict):
-        return {"active": False, "reason": "missing_state"}
-    host_capabilities = state.get("host_capabilities")
-    if not isinstance(host_capabilities, dict):
-        context = state.get("context")
-        if isinstance(context, dict):
-            host_capabilities = context.get("host_capabilities")
-    if not isinstance(host_capabilities, dict):
-        return {"active": False, "reason": "missing_host_capabilities"}
-    tools = host_capabilities.get("tools")
-    tool_count = len(tools) if isinstance(tools, list) else 0
-    return {
-        "active": tool_count > 0,
-        "reason": "active" if tool_count > 0 else "missing_host_tools",
-        "tool_count": tool_count,
-    }
+    return build_wiii_connect_snapshot(state=state, query=query).connection_status_map()
 
 
 def _normalize_tool_name(value: Any) -> str:
