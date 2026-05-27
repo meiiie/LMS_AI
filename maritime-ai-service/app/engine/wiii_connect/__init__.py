@@ -29,6 +29,13 @@ from .callback_boundary import (
     provider_callback_decision,
     provider_callback_decision_for_entry,
 )
+from .composio_adapter import (
+    WIII_CONNECT_COMPOSIO_ADAPTER_VERSION,
+    WiiiConnectComposioAdapterConfig,
+    build_composio_adapter_config,
+    build_composio_provider_adapter_capability,
+    parse_composio_auth_config_map,
+)
 from .connection_sessions import (
     WIII_CONNECT_SESSION_CONTRACT_VERSION,
     WiiiConnectConnectionSessionAuditEvent,
@@ -86,6 +93,7 @@ __all__ = [
     "WIII_CONNECT_ADAPTER_VERSION",
     "WIII_CONNECT_AUDIT_LEDGER_VERSION",
     "WIII_CONNECT_CALLBACK_CONTRACT_VERSION",
+    "WIII_CONNECT_COMPOSIO_ADAPTER_VERSION",
     "WIII_CONNECT_PROVIDER_ADAPTER_VERSION",
     "WIII_CONNECT_PERSISTENT_STORAGE_VERSION",
     "WIII_CONNECT_SESSION_CONTRACT_VERSION",
@@ -98,6 +106,7 @@ __all__ = [
     "WiiiConnectCallbackAuditEvent",
     "WiiiConnectCallbackDecision",
     "WiiiConnectCallbackRequest",
+    "WiiiConnectComposioAdapterConfig",
     "WiiiConnectConnectionSessionAuditEvent",
     "WiiiConnectConnectionRecordV1",
     "WiiiConnectExecutionDecision",
@@ -125,6 +134,8 @@ __all__ = [
     "WiiiPathCapabilityRecord",
     "audit_ledger_status_public_metadata",
     "begin_connection_session",
+    "build_composio_adapter_config",
+    "build_composio_provider_adapter_capability",
     "build_wiii_connect_snapshot",
     "build_audit_ledger_record",
     "decide_external_execution",
@@ -138,6 +149,7 @@ __all__ = [
     "is_connection_baseline_ready",
     "list_wiii_connect_provider_registry",
     "normalize_connection_state",
+    "parse_composio_auth_config_map",
     "provider_adapter_status_public_metadata",
     "provider_callback_decision",
     "provider_callback_decision_for_entry",

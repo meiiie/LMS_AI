@@ -132,7 +132,9 @@ Before Wiii enables Composio:
 
 ## Current Wiii Position
 
-Wiii now has a V0 snapshot/dashboard and a V1 policy contract. It still needs
-provider persistence, OAuth endpoints, vault integration, provider-specific
-adapter clients, and end-to-end browser acceptance before Composio can be
-enabled for real users.
+Wiii now has a V0 snapshot/dashboard, V1 policy contract, provider registry,
+callback/vault boundary, durable connection/audit storage, controlled storage
+probe, and Composio adapter configuration status. It still needs real OAuth
+endpoint implementation, vault/provider-managed secret reference integration,
+provider-specific adapter clients, and end-to-end browser acceptance before
+Composio can be enabled for real users.

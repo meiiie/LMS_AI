@@ -12,6 +12,7 @@ from app.engine.wiii_connect import (
     WiiiConnectCallbackRequest,
     WiiiConnectSessionStartRequest,
     audit_ledger_status_public_metadata,
+    build_composio_provider_adapter_capability,
     begin_connection_session,
     decide_authorization_url,
     default_persistent_storage_status_metadata,
@@ -91,7 +92,9 @@ async def get_wiii_connect_storage_status(
 async def get_wiii_connect_provider_adapter_status() -> dict[str, object]:
     """Return privacy-safe Wiii Connect provider adapter readiness metadata."""
 
-    return provider_adapter_status_public_metadata()
+    return provider_adapter_status_public_metadata(
+        adapter_capabilities=(build_composio_provider_adapter_capability(),),
+    )
 
 
 @router.get("/providers/{slug}/status")

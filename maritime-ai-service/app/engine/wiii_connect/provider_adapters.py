@@ -187,14 +187,19 @@ def default_provider_adapter_capability(
 
 def provider_adapter_status_public_metadata(
     provider_kinds: Iterable[ProviderKind] | None = None,
+    adapter_capabilities: Iterable[WiiiConnectProviderAdapterCapability] | None = None,
 ) -> dict[str, Any]:
     """Return privacy-safe adapter readiness metadata for UI/API."""
 
     kinds = tuple(provider_kinds or _DEFAULT_PROVIDER_KINDS)
+    overrides = {
+        capability.provider_kind: capability
+        for capability in (adapter_capabilities or ())
+    }
     return {
         "version": WIII_CONNECT_PROVIDER_ADAPTER_VERSION,
         "adapters": [
-            default_provider_adapter_capability(kind).to_public_metadata()
+            overrides.get(kind, default_provider_adapter_capability(kind)).to_public_metadata()
             for kind in kinds
         ],
     }
