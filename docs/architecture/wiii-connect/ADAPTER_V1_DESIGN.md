@@ -76,6 +76,13 @@ The provider adapter readiness and authorization URL contract lives in:
 maritime-ai-service/app/engine/wiii_connect/provider_adapters.py
 ```
 
+The durable storage contract and schema live in:
+
+```text
+maritime-ai-service/app/engine/wiii_connect/persistent_storage.py
+maritime-ai-service/alembic/versions/049_create_wiii_connect_storage.py
+```
+
 Current session/status API projections:
 
 ```text
@@ -209,6 +216,17 @@ must keep that provider disabled and non-agent-ready.
 - rejects adapter/provider-kind mismatch before any OAuth handoff;
 - direct session callers may not bypass adapter policy by passing a URL.
 
+`WiiiConnectPersistentStorage`
+
+- writes per-org, per-user connection records to `wiii_connect_connections`;
+- appends privacy-safe provider/session/callback/vault/execution events to
+  `wiii_connect_audit_ledger`;
+- requires explicit `organization_id` and `user_id` before writing;
+- stores only public vault-reference metadata, never raw vault paths or secret
+  material;
+- fails softly when the database or migration is unavailable, keeping providers
+  blocked instead of allowing un-audited execution.
+
 ## Lifecycle States
 
 Adapter V1 normalizes provider states into:
@@ -301,7 +319,10 @@ Before real Composio OAuth is enabled:
 - credential material must be stored in an encrypted vault or provider-managed
   backend secret store;
 - every session/callback/vault/execution decision must produce a privacy-safe
-  ledger record shape before durable persistence is added;
+  ledger record shape and be eligible for durable append before provider
+  execution is allowed;
+- durable persistence must bind every connection/audit write to a Wiii
+  organization and user boundary;
 - frontend may receive connect URLs and state labels, not tokens;
 - stale pending/error OAuth rows must be cleaned up or expired safely;
 - provider errors must be sanitized before reaching UI or chat.
@@ -322,7 +343,8 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 
 ## Next Slices
 
-1. Add durable audit ledger persistence and per-org connection records.
+1. Wire Wiii Connect status/authorization decisions to the durable store with a
+   controlled DB probe, not per-render UI guessing.
 2. Add encrypted vault integration or provider-managed secret reference storage.
 3. Add provider adapter implementation/configuration for one provider broker
    without enabling broad action execution.

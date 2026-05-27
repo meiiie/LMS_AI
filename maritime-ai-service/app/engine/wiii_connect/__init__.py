@@ -50,6 +50,13 @@ from .provider_adapters import (
     default_provider_adapter_capability,
     provider_adapter_status_public_metadata,
 )
+from .persistent_storage import (
+    WIII_CONNECT_PERSISTENT_STORAGE_VERSION,
+    WiiiConnectPersistentStorage,
+    WiiiConnectPersistentStorageStatus,
+    default_persistent_storage_status_metadata,
+    get_wiii_connect_persistent_storage,
+)
 from .vault import (
     WIII_CONNECT_VAULT_CONTRACT_VERSION,
     WiiiConnectVaultAuditEvent,
@@ -80,6 +87,7 @@ __all__ = [
     "WIII_CONNECT_AUDIT_LEDGER_VERSION",
     "WIII_CONNECT_CALLBACK_CONTRACT_VERSION",
     "WIII_CONNECT_PROVIDER_ADAPTER_VERSION",
+    "WIII_CONNECT_PERSISTENT_STORAGE_VERSION",
     "WIII_CONNECT_SESSION_CONTRACT_VERSION",
     "WIII_CONNECT_VAULT_CONTRACT_VERSION",
     "WiiiConnectAuthorizationUrlAuditEvent",
@@ -98,6 +106,8 @@ __all__ = [
     "WiiiConnectProviderAdapterCapability",
     "WiiiConnectProviderConnectionStatus",
     "WiiiConnectProviderRegistryEntry",
+    "WiiiConnectPersistentStorage",
+    "WiiiConnectPersistentStorageStatus",
     "WiiiConnectRequiredField",
     "WiiiConnectScopeGrant",
     "WiiiConnectSessionStartDecision",
@@ -121,8 +131,10 @@ __all__ = [
     "decide_authorization_url",
     "decide_vault_secret_write",
     "default_provider_adapter_capability",
+    "default_persistent_storage_status_metadata",
     "default_wiii_connect_vault_capability",
     "get_wiii_connect_provider_entry",
+    "get_wiii_connect_persistent_storage",
     "is_connection_baseline_ready",
     "list_wiii_connect_provider_registry",
     "normalize_connection_state",
