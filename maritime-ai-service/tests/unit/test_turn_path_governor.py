@@ -46,11 +46,91 @@ def test_turn_path_governor_does_not_treat_task_query_as_social_followup():
     )
 
     decision = resolve_turn_path_decision(
-        TurnPathSignals(normalized_query="sao lai colreg rule 15 ap dung")
+        TurnPathSignals(
+            normalized_query="sao lai colreg rule 15 ap dung",
+            needs_maritime_search=True,
+        )
+    )
+
+    assert decision.path == "maritime_search"
+    assert decision.bind_tools is True
+    assert decision.force_tools is True
+
+
+def test_turn_path_governor_defaults_plain_direct_prose_to_no_tool():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(normalized_query="giai thich ngan ve cach hoc tot hon")
     )
 
     assert decision.path == "direct_prose"
+    assert decision.reason == "default_direct_prose_no_tool"
+    assert decision.bind_tools is False
+    assert decision.allow_agent_handoff is False
+
+
+def test_turn_path_governor_keeps_low_signal_noise_off_tool_path():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(
+            normalized_query=(
+                "flow noi chuyen thuong van bi keo sang search tool "
+                + ("r" * 128)
+            )
+        )
+    )
+
+    assert decision.path == "direct_prose"
+    assert decision.reason == "low_signal_noise_no_tool"
+    assert decision.bind_tools is False
+
+
+def test_turn_path_governor_marks_wiii_pipeline_meta_as_no_tool_direct_prose():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(
+            normalized_query="wiii flow noi chuyen sai route, kiem tra pipeline",
+            looks_wiii_pipeline_meta=True,
+        )
+    )
+
+    assert decision.path == "direct_prose"
+    assert decision.reason == "wiii_pipeline_meta_no_tool"
+    assert decision.bind_tools is False
+
+
+def test_turn_path_governor_scopes_character_memory_tools():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(
+            normalized_query="ten toi la an",
+            needs_character_memory_tool=True,
+        )
+    )
+
+    assert decision.path == "direct_prose"
+    assert decision.reason == "character_memory_tool_request"
     assert decision.bind_tools is True
+    assert decision.force_tools is False
+    assert decision.allow_all_tools is False
+    assert decision.should_keep_tool_name("tool_character_note") is True
+    assert decision.should_keep_tool_name("tool_web_search") is False
 
 
 def test_turn_path_governor_narrows_visual_app_to_required_tool():
@@ -182,6 +262,82 @@ def test_collect_direct_tools_keeps_short_social_followup_off_tool_path():
     assert tools == []
     assert force_tools is False
     assert state["_turn_path_decision"]["path"] == "casual_chat"
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "flow noi chuyen thuong van bi keo sang search/tool",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sao lai z " + ("R" * 256),
+    ],
+)
+def test_collect_direct_tools_keeps_plain_meta_and_noise_off_tool_path(query):
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        query,
+        user_role="student",
+        state=state,
+    )
+
+    assert tools == []
+    assert force_tools is False
+    assert state["_turn_path_decision"]["path"] == "direct_prose"
+    assert state["_turn_path_decision"]["bind_tools"] is False
+    assert state["_tool_policy_session"]["visible_tool_names"] == []
+
+
+def test_collect_direct_tools_marks_wiii_pipeline_meta_as_no_tool():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        "Wiii flow noi chuyen bi sai route, kiem tra pipeline tool policy.",
+        user_role="student",
+        state=state,
+    )
+
+    assert tools == []
+    assert force_tools is False
+    assert state["_turn_path_decision"]["path"] == "direct_prose"
+    assert state["_turn_path_decision"]["reason"] == "wiii_pipeline_meta_no_tool"
+
+
+def test_collect_direct_tools_keeps_explicit_web_search_path():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        "hom nay co gi hot?",
+        user_role="student",
+        state=state,
+    )
+    names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
+
+    assert force_tools is True
+    assert state["_turn_path_decision"]["path"] == "web_search"
+    assert "tool_web_search" in names
+    assert "tool_current_weather" not in names
+
+
+def test_collect_direct_tools_scopes_personal_fact_to_character_tools():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        "Ten toi la An",
+        user_role="student",
+        state=state,
+    )
+    names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
+
+    assert force_tools is False
+    assert state["_turn_path_decision"]["reason"] == "character_memory_tool_request"
+    assert "tool_character_note" in names
+    assert "tool_character_log_experience" in names
+    assert "tool_web_search" not in names
 
 
 def test_collect_direct_tools_routes_weather_followup_to_weather_tool():

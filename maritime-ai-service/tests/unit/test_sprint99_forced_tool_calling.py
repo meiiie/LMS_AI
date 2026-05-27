@@ -310,6 +310,62 @@ class TestForcedToolChoice:
             mock_llm.bind_tools.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_plain_meta_complaint_does_not_bind_tools(self):
+        """No-tool direct prose must not expose broad tools to the model."""
+        from app.engine.multi_agent.state import AgentState
+
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = "Mình sẽ kiểm tra luồng trực tiếp."
+        mock_response.tool_calls = []
+        mock_llm.bind_tools.return_value = mock_llm
+        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+
+        state: AgentState = {
+            "query": "flow noi chuyen thuong van bi keo sang search/tool",
+            "context": {"is_follow_up": False},
+            "current_agent": "",
+            "final_response": "",
+            "agent_outputs": {},
+        }
+
+        with patched_direct_node_runtime(
+                "Mình sẽ kiểm tra luồng trực tiếp.",
+                mock_llm=mock_llm,
+                patch_bind=False,
+                collect_tools=None,
+             ), \
+             patch("app.prompts.prompt_loader.get_prompt_loader") as mock_pl, \
+             patch("app.engine.multi_agent.graph.settings") as mock_settings, \
+             patch("app.engine.multi_agent.graph._get_or_create_tracer") as mock_tracer_fn, \
+             patch("app.engine.multi_agent.graph._get_domain_greetings", return_value={}):
+
+            mock_settings.app_name = "Wiii"
+            mock_settings.default_domain = "maritime"
+            mock_settings.enable_character_tools = False
+            mock_settings.enable_code_execution = False
+
+            mock_loader = MagicMock()
+            mock_loader.get_identity.return_value = {
+                "identity": {
+                    "voice": {"emoji_usage": "emoji"},
+                    "personality": {"summary": "nice"},
+                    "response_style": {"avoid": []},
+                }
+            }
+            mock_loader.build_system_prompt.return_value = "Bạn là Wiii, trợ lý đa lĩnh vực."
+            mock_pl.return_value = mock_loader
+
+            mock_tracer = MagicMock()
+            mock_tracer_fn.return_value = mock_tracer
+
+            from app.engine.multi_agent.graph import direct_response_node
+            await direct_response_node(state)
+
+            mock_llm.bind_tools.assert_not_called()
+            assert state["_turn_path_decision"]["reason"] == "default_direct_prose_no_tool"
+
+    @pytest.mark.asyncio
     async def test_datetime_query_forces_tool_choice(self):
         """When query asks for time/date, bind_tools gets tool_choice='any'."""
         from app.engine.multi_agent.state import AgentState
