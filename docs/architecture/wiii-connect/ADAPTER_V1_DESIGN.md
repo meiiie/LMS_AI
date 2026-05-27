@@ -91,6 +91,7 @@ POST /api/v1/wiii-connect/providers/{slug}/sessions
 POST /api/v1/wiii-connect/providers/{slug}/authorization-url
 GET  /api/v1/wiii-connect/providers/{slug}/callback
 GET  /api/v1/wiii-connect/provider-adapters/status
+GET  /api/v1/wiii-connect/storage/status
 GET  /api/v1/wiii-connect/vault/status
 GET  /api/v1/wiii-connect/audit-ledger/status
 ```
@@ -226,6 +227,8 @@ must keep that provider disabled and non-agent-ready.
   material;
 - fails softly when the database or migration is unavailable, keeping providers
   blocked instead of allowing un-audited execution.
+- is exposed through controlled status/probe APIs with database probing disabled
+  by default, so normal UI renders do not block on storage connectivity.
 
 ## Lifecycle States
 
@@ -312,6 +315,9 @@ Before real Composio OAuth is enabled:
   Composio directly;
 - authorization URLs must come from a bound provider adapter decision, not from
   raw frontend input or ad hoc session arguments;
+- authorization URL decisions may consume durable audit readiness only from an
+  explicit storage probe or backend-controlled storage status, never from
+  frontend claims;
 - disabled providers must return a blocked decision with missing requirements;
 - callback handling must stay blocked until state/code validation, vault storage,
   and provider adapter exchange are ready;
@@ -343,13 +349,11 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 
 ## Next Slices
 
-1. Wire Wiii Connect status/authorization decisions to the durable store with a
-   controlled DB probe, not per-render UI guessing.
-2. Add encrypted vault integration or provider-managed secret reference storage.
-3. Add provider adapter implementation/configuration for one provider broker
+1. Add encrypted vault integration or provider-managed secret reference storage.
+2. Add provider adapter implementation/configuration for one provider broker
    without enabling broad action execution.
-4. Add frontend connection modal that uses Wiii backend routes only.
-5. Persist provider registry and connection records behind backend-owned storage.
-6. Add browser acceptance for connect, poll, disconnect, gated scope, and denied
+3. Add frontend connection modal that uses Wiii backend routes only.
+4. Persist provider registry and connection records behind backend-owned storage.
+5. Add browser acceptance for connect, poll, disconnect, gated scope, and denied
    execute cases.
-7. Enable one low-risk read-only Composio action before any write action.
+6. Enable one low-risk read-only Composio action before any write action.

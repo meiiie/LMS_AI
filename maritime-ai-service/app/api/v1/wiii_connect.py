@@ -14,7 +14,9 @@ from app.engine.wiii_connect import (
     audit_ledger_status_public_metadata,
     begin_connection_session,
     decide_authorization_url,
+    default_persistent_storage_status_metadata,
     get_wiii_connect_provider_entry,
+    get_wiii_connect_persistent_storage,
     provider_adapter_status_public_metadata,
     provider_callback_decision,
     provider_connection_status,
@@ -35,6 +37,7 @@ class WiiiConnectStartSessionBody(BaseModel):
     surface: str = "desktop"
     redirect_uri: str | None = None
     state_present: bool = False
+    probe_database: bool = False
     requested_scopes: dict[str, bool] = Field(default_factory=dict)
     request_metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -54,10 +57,34 @@ async def get_wiii_connect_vault_status() -> dict[str, object]:
 
 
 @router.get("/audit-ledger/status")
-async def get_wiii_connect_audit_ledger_status() -> dict[str, object]:
+async def get_wiii_connect_audit_ledger_status(
+    probe_database: bool = False,
+) -> dict[str, object]:
     """Return privacy-safe Wiii Connect audit ledger readiness metadata."""
 
-    return audit_ledger_status_public_metadata()
+    storage = _wiii_connect_storage_status_metadata(probe_database=probe_database)
+    persistent = bool(storage.get("persistent") and storage.get("audit_ledger_ready"))
+    metadata = audit_ledger_status_public_metadata(
+        persistent=persistent,
+        backend=str(storage.get("backend") or "memory_contract")
+        if probe_database
+        else "memory_contract",
+    )
+    metadata["storage"] = storage
+    return metadata
+
+
+@router.get("/storage/status")
+async def get_wiii_connect_storage_status(
+    probe_database: bool = False,
+) -> dict[str, object]:
+    """Return Wiii Connect durable storage status.
+
+    Database probing is opt-in so normal UI renders do not block on local or
+    production database connectivity checks.
+    """
+
+    return _wiii_connect_storage_status_metadata(probe_database=probe_database)
 
 
 @router.get("/provider-adapters/status")
@@ -122,7 +149,18 @@ async def create_wiii_connect_provider_authorization_url(
         redirect_uri_present=bool(body.redirect_uri),
         request_metadata_keys=tuple(body.request_metadata.keys()),
     )
-    decision = decide_authorization_url(entry, request)
+    storage = _wiii_connect_storage_status_metadata(
+        probe_database=body.probe_database,
+    )
+    decision = decide_authorization_url(
+        entry,
+        request,
+        audit_ledger_metadata={
+            "persistent": bool(
+                storage.get("persistent") and storage.get("audit_ledger_ready")
+            )
+        },
+    )
     return decision.to_public_metadata()
 
 
@@ -149,3 +187,16 @@ async def receive_wiii_connect_provider_callback(
     if decision is None:
         raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
     return decision.to_public_metadata()
+
+
+def _wiii_connect_storage_status_metadata(
+    *,
+    probe_database: bool,
+) -> dict[str, Any]:
+    if not probe_database:
+        return default_persistent_storage_status_metadata()
+    return (
+        get_wiii_connect_persistent_storage()
+        .status(probe_database=True)
+        .to_public_metadata()
+    )

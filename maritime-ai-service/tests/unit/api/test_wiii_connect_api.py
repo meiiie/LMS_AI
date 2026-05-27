@@ -75,6 +75,121 @@ async def test_wiii_connect_vault_and_audit_status_apis_are_privacy_safe(app):
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_storage_status_api_does_not_probe_by_default(
+    app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+
+    def _raise_if_called():
+        raise AssertionError("storage probe should be opt-in")
+
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        _raise_if_called,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/wiii-connect/storage/status")
+        audit_response = await client.get("/wiii-connect/audit-ledger/status")
+
+    assert response.status_code == 200
+    assert audit_response.status_code == 200
+    payload = response.json()
+    audit_payload = audit_response.json()
+
+    assert payload["version"] == "wiii_connect_persistent_storage.v1"
+    assert payload["persistent"] is False
+    assert payload["reason"] == "database_probe_not_requested"
+    assert audit_payload["persistent"] is False
+    assert audit_payload["storage"]["reason"] == "database_probe_not_requested"
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_storage_probe_is_explicit_and_privacy_safe(
+    app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+
+    class FakeStorage:
+        calls = 0
+
+        def status(self, *, probe_database: bool = True):
+            self.calls += 1
+            assert probe_database is True
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                reason="ready",
+            )
+
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        storage_response = await client.get(
+            "/wiii-connect/storage/status",
+            params={"probe_database": "true"},
+        )
+        audit_response = await client.get(
+            "/wiii-connect/audit-ledger/status",
+            params={"probe_database": "true"},
+        )
+        authorization_response = await client.post(
+            "/wiii-connect/providers/facebook/authorization-url",
+            json={
+                "surface": "desktop",
+                "redirect_uri": "https://wiii.example.test/callback",
+                "state_present": True,
+                "probe_database": True,
+            },
+        )
+
+    assert storage_response.status_code == 200
+    assert audit_response.status_code == 200
+    assert authorization_response.status_code == 200
+    assert fake_storage.calls == 3
+
+    storage_payload = storage_response.json()
+    audit_payload = audit_response.json()
+    authorization_payload = authorization_response.json()
+    serialized = json.dumps(
+        {
+            "storage": storage_payload,
+            "audit": audit_payload,
+            "authorization": authorization_payload,
+        },
+        sort_keys=True,
+    )
+
+    assert storage_payload["persistent"] is True
+    assert storage_payload["reason"] == "ready"
+    assert audit_payload["persistent"] is True
+    assert audit_payload["storage"]["audit_ledger_ready"] is True
+    assert authorization_payload["reason"] == "provider_disabled"
+    assert "access_token" not in serialized
+    assert "refresh_token" not in serialized
+    assert "client_secret" not in serialized
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_provider_adapter_status_api_is_fail_closed(app):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
