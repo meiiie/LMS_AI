@@ -17,6 +17,7 @@ import {
   Network,
   PlugZap,
   Route,
+  Search,
   Server,
   Workflow,
   type LucideIcon,
@@ -32,7 +33,9 @@ import {
   buildCapabilityStatusViewModel,
   runtimePathFromLifecycleEvents,
   type CapabilityDashboardSection,
+  type CapabilityStatusItemId,
   type CapabilityStatusTone,
+  type CapabilityStatusViewModel,
   type RuntimePathSnapshot,
 } from "@/lib/capability-status";
 import { useChatStore } from "@/stores/chat-store";
@@ -40,13 +43,90 @@ import { useConnectionStore } from "@/stores/connection-store";
 import { useHostContextStore } from "@/stores/host-context-store";
 import { useUIStore } from "@/stores/ui-store";
 
-type ConnectTab = "connections" | "paths" | "runtime";
+type ConnectTab = "catalog" | "connections" | "paths" | "runtime";
+type ProviderFilter = "wiii_native" | "composio" | "channels" | "mcp" | "workflow";
+type CatalogCategory =
+  | "all"
+  | "runtime"
+  | "chat"
+  | "productivity"
+  | "automation"
+  | "social"
+  | "learning"
+  | "platform";
+
+interface NativeCatalogDefinition {
+  slug: string;
+  label: string;
+  description: string;
+  category: Exclude<CatalogCategory, "all">;
+  icon: LucideIcon;
+  fallbackId?: CapabilityStatusItemId;
+}
+
+interface ExternalCatalogDefinition {
+  id: string;
+  provider: Exclude<ProviderFilter, "wiii_native">;
+  label: string;
+  description: string;
+  category: Exclude<CatalogCategory, "all">;
+  icon: LucideIcon;
+  requirements: string[];
+}
+
+interface CatalogCard {
+  id: string;
+  provider: ProviderFilter;
+  providerLabel: string;
+  label: string;
+  description: string;
+  category: Exclude<CatalogCategory, "all">;
+  categoryLabel: string;
+  icon: LucideIcon;
+  tone: CapabilityStatusTone;
+  status: string;
+  statusDetail: string;
+  agentReady: boolean;
+  connected: boolean;
+  connection?: WiiiConnectRuntimeConnection;
+  detailRows: Array<[string, string]>;
+  requirements?: string[];
+  disabledReason?: string;
+}
 
 const tabs: FullPageTab[] = [
-  { id: "connections", label: "Kết nối", icon: <PlugZap size={15} /> },
+  { id: "catalog", label: "Danh bạ", icon: <PlugZap size={15} /> },
+  { id: "connections", label: "Snapshot", icon: <Database size={15} /> },
   { id: "paths", label: "Path policy", icon: <Route size={15} /> },
   { id: "runtime", label: "Runtime", icon: <Activity size={15} /> },
 ];
+
+const providerFilters: Array<{
+  id: ProviderFilter;
+  label: string;
+  hint: string;
+}> = [
+  { id: "wiii_native", label: "Wiii native", hint: "Runtime nội bộ" },
+  { id: "composio", label: "Composio", hint: "OAuth broker" },
+  { id: "channels", label: "Channels", hint: "Kênh chat" },
+  { id: "mcp", label: "MCP Servers", hint: "Tool server" },
+  { id: "workflow", label: "Workflow", hint: "Tự động hóa" },
+];
+
+const categoryFilters: Array<{ id: CatalogCategory; label: string }> = [
+  { id: "all", label: "Tất cả" },
+  { id: "chat", label: "Chat" },
+  { id: "productivity", label: "Năng suất" },
+  { id: "automation", label: "Công cụ & tự động" },
+  { id: "social", label: "Xã hội" },
+  { id: "learning", label: "Học tập" },
+  { id: "platform", label: "Nền tảng" },
+  { id: "runtime", label: "Runtime" },
+];
+
+const categoryLabelById = Object.fromEntries(
+  categoryFilters.map((category) => [category.id, category.label]),
+) as Record<CatalogCategory, string>;
 
 const connectionIconBySlug: Record<string, LucideIcon> = {
   server: Server,
@@ -60,6 +140,285 @@ const connectionIconBySlug: Record<string, LucideIcon> = {
   visual_runtime: Network,
   code_studio: Code2,
 };
+
+const nativeCatalogDefinitions: NativeCatalogDefinition[] = [
+  {
+    slug: "server",
+    label: "Máy chủ Wiii",
+    description: "Backend API, SSE và health check của phiên Wiii hiện tại.",
+    category: "runtime",
+    icon: Server,
+    fallbackId: "server",
+  },
+  {
+    slug: "host",
+    label: "Host desktop/LMS",
+    description: "Ngữ cảnh host mà Wiii đang nhận từ desktop, embed hoặc LMS.",
+    category: "platform",
+    icon: Cable,
+    fallbackId: "host",
+  },
+  {
+    slug: "host_actions",
+    label: "Hành động host",
+    description: "Các hành động host được phép preview/request trong surface hiện tại.",
+    category: "automation",
+    icon: Workflow,
+    fallbackId: "host_actions",
+  },
+  {
+    slug: "lms_authoring",
+    label: "LMS soạn bài",
+    description: "Preview/apply bài học qua LMS, luôn cần approval_token khi ghi dữ liệu.",
+    category: "learning",
+    icon: GraduationCap,
+    fallbackId: "lms_authoring",
+  },
+  {
+    slug: "document_corpus",
+    label: "Tài liệu đã tải lên",
+    description: "Nguồn tài liệu dùng cho trả lời có căn cứ và trích dẫn.",
+    category: "learning",
+    icon: FileText,
+  },
+  {
+    slug: "pointy",
+    label: "Pointy",
+    description: "Target inventory và điều khiển UI khi path hiện tại cho phép.",
+    category: "platform",
+    icon: MousePointer2,
+    fallbackId: "pointy",
+  },
+  {
+    slug: "web_search",
+    label: "Tìm kiếm web",
+    description: "Tra cứu web khi user có intent live/current/search rõ ràng.",
+    category: "runtime",
+    icon: Globe2,
+  },
+  {
+    slug: "weather",
+    label: "Thời tiết",
+    description: "Tra thời tiết khi câu hỏi cần dữ liệu hiện tại hoặc vị trí.",
+    category: "runtime",
+    icon: CloudSun,
+  },
+  {
+    slug: "visual_runtime",
+    label: "Visual runtime",
+    description: "Runtime cho hình minh họa, chart và mô phỏng nội tuyến.",
+    category: "learning",
+    icon: Network,
+  },
+  {
+    slug: "code_studio",
+    label: "Code Studio",
+    description: "Tạo và hiển thị app/artifact code trong đúng path.",
+    category: "automation",
+    icon: Code2,
+  },
+];
+
+const externalCatalogDefinitions: ExternalCatalogDefinition[] = [
+  {
+    id: "facebook",
+    provider: "composio",
+    label: "Facebook",
+    description: "Đăng, đọc và quản lý nội dung Facebook qua broker OAuth.",
+    category: "social",
+    icon: Globe2,
+    requirements: ["OAuth app hoặc Composio toolkit", "Token vault", "Scope policy", "Execution audit"],
+  },
+  {
+    id: "gmail",
+    provider: "composio",
+    label: "Gmail",
+    description: "Đọc/tạo email khi người dùng cấp quyền rõ ràng.",
+    category: "productivity",
+    icon: FileText,
+    requirements: ["OAuth consent", "Scope read/write tách riêng", "Vault mã hóa", "Preview trước khi gửi"],
+  },
+  {
+    id: "google-calendar",
+    provider: "composio",
+    label: "Google Calendar",
+    description: "Lịch cá nhân và lịch nhóm, không tự ghi nếu chưa xác nhận.",
+    category: "productivity",
+    icon: Workflow,
+    requirements: ["OAuth calendar scopes", "Permission gate", "Preview sự kiện", "Audit trail"],
+  },
+  {
+    id: "google-drive",
+    provider: "composio",
+    label: "Google Drive",
+    description: "Tìm, đọc hoặc tạo file Drive theo scope được cấp.",
+    category: "productivity",
+    icon: FileText,
+    requirements: ["Drive scopes tối thiểu", "File access boundary", "Vault", "Source reference"],
+  },
+  {
+    id: "notion",
+    provider: "composio",
+    label: "Notion",
+    description: "Tra cứu workspace và tạo trang khi đã kết nối.",
+    category: "productivity",
+    icon: Database,
+    requirements: ["Notion OAuth", "Workspace allow-list", "Preview mutation", "Audit"],
+  },
+  {
+    id: "slack",
+    provider: "composio",
+    label: "Slack",
+    description: "Đọc kênh và soạn tin nhắn với xác nhận người dùng.",
+    category: "chat",
+    icon: Network,
+    requirements: ["Workspace install", "Channel scopes", "Preview tin nhắn", "Rate-limit policy"],
+  },
+  {
+    id: "github",
+    provider: "composio",
+    label: "GitHub",
+    description: "Tạo issue, đọc PR hoặc thao tác repo qua quyền hẹp.",
+    category: "platform",
+    icon: Code2,
+    requirements: ["GitHub App/OAuth", "Repo allow-list", "Write confirmation", "Audit"],
+  },
+  {
+    id: "airtable",
+    provider: "composio",
+    label: "Airtable",
+    description: "Đọc/cập nhật base sau khi đã có policy theo workspace.",
+    category: "productivity",
+    icon: Database,
+    requirements: ["Workspace connection", "Schema sync", "Write preview", "Audit"],
+  },
+  {
+    id: "asana",
+    provider: "composio",
+    label: "Asana",
+    description: "Tạo hoặc cập nhật task khi path được phép.",
+    category: "productivity",
+    icon: Workflow,
+    requirements: ["Project allow-list", "Task preview", "Token vault", "Audit"],
+  },
+  {
+    id: "telegram",
+    provider: "channels",
+    label: "Telegram",
+    description: "Kênh nhắn tin để Wiii nhận/gửi message khi có adapter.",
+    category: "chat",
+    icon: Network,
+    requirements: ["Bot token vault", "Webhook gateway", "User binding", "Message audit"],
+  },
+  {
+    id: "discord",
+    provider: "channels",
+    label: "Discord",
+    description: "Kết nối server/channel cho trợ lý nhóm.",
+    category: "chat",
+    icon: Network,
+    requirements: ["Discord app", "Guild allow-list", "Role policy", "Audit"],
+  },
+  {
+    id: "messenger",
+    provider: "channels",
+    label: "Messenger",
+    description: "Tin nhắn Facebook Page sau khi app qua review.",
+    category: "chat",
+    icon: Globe2,
+    requirements: ["Meta app review", "Page token vault", "Webhook verify", "Permission audit"],
+  },
+  {
+    id: "zalo",
+    provider: "channels",
+    label: "Zalo OA",
+    description: "Kênh Zalo Official Account cho thị trường Việt Nam.",
+    category: "chat",
+    icon: Network,
+    requirements: ["Zalo app/OA", "Webhook gateway", "User consent", "Audit"],
+  },
+  {
+    id: "email-channel",
+    provider: "channels",
+    label: "Email channel",
+    description: "Nhận/gửi email như một kênh hội thoại riêng.",
+    category: "chat",
+    icon: FileText,
+    requirements: ["Inbound gateway", "SMTP policy", "Preview send", "Audit"],
+  },
+  {
+    id: "local-mcp",
+    provider: "mcp",
+    label: "MCP cục bộ",
+    description: "Server MCP chạy trên máy người dùng, cần permission gate.",
+    category: "platform",
+    icon: Server,
+    requirements: ["Server registry", "Tool allow-list", "Permission gate", "Per-call audit"],
+  },
+  {
+    id: "remote-mcp",
+    provider: "mcp",
+    label: "MCP từ xa",
+    description: "MCP server remote được quản lý qua tenant/org policy.",
+    category: "platform",
+    icon: Network,
+    requirements: ["Auth handshake", "Tenant isolation", "Tool schema review", "Audit"],
+  },
+  {
+    id: "browser-mcp",
+    provider: "mcp",
+    label: "Browser MCP",
+    description: "Điều khiển browser theo path và confirmation rõ ràng.",
+    category: "automation",
+    icon: Globe2,
+    requirements: ["Surface binding", "Action preview", "Click safety", "Audit"],
+  },
+  {
+    id: "filesystem-mcp",
+    provider: "mcp",
+    label: "Filesystem MCP",
+    description: "Đọc/ghi file qua phạm vi thư mục được cấp quyền.",
+    category: "automation",
+    icon: FileText,
+    requirements: ["Workspace boundary", "Mutation preview", "Path allow-list", "Audit"],
+  },
+  {
+    id: "activepieces",
+    provider: "workflow",
+    label: "Activepieces",
+    description: "Bridge workflow mã nguồn mở cho automation có kiểm soát.",
+    category: "automation",
+    icon: Workflow,
+    requirements: ["Workflow adapter", "Input contract", "Approval gate", "Run ledger"],
+  },
+  {
+    id: "n8n",
+    provider: "workflow",
+    label: "n8n",
+    description: "Chạy workflow tự host hoặc cloud qua Wiii policy.",
+    category: "automation",
+    icon: Workflow,
+    requirements: ["Webhook auth", "Workflow allow-list", "Preview data", "Run audit"],
+  },
+  {
+    id: "windmill",
+    provider: "workflow",
+    label: "Windmill",
+    description: "Script/workflow runner cho tác vụ nội bộ.",
+    category: "automation",
+    icon: Code2,
+    requirements: ["Script registry", "Secrets boundary", "Confirmation", "Audit"],
+  },
+  {
+    id: "pipedream",
+    provider: "workflow",
+    label: "Pipedream",
+    description: "Workflow cloud broker khi cần tích hợp nhanh.",
+    category: "automation",
+    icon: PlugZap,
+    requirements: ["Provider account", "Token policy", "Run preview", "Audit"],
+  },
+];
 
 const statusToneClasses: Record<CapabilityStatusTone, string> = {
   ok: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -81,6 +440,7 @@ const providerKindLabels: Record<string, string> = {
   mcp: "MCP",
   custom_oauth: "OAuth riêng",
   workflow: "Workflow",
+  channels: "Channels",
 };
 
 const mutationPolicyLabels: Record<string, string> = {
@@ -236,6 +596,138 @@ function snapshotStats(snapshot: WiiiConnectRuntimeSnapshot | null) {
   };
 }
 
+function categoryLabel(category: CatalogCategory): string {
+  return categoryLabelById[category] ?? "Khác";
+}
+
+function buildNativeCatalogCards(
+  snapshot: WiiiConnectRuntimeSnapshot | null,
+  fallbackModel: CapabilityStatusViewModel,
+): CatalogCard[] {
+  const bySlug = new Map((snapshot?.connections ?? []).map((connection) => [connection.slug, connection]));
+  const fallbackById = new Map(fallbackModel.items.map((item) => [item.id, item]));
+
+  return nativeCatalogDefinitions.map((definition) => {
+    const connection = bySlug.get(definition.slug);
+    if (connection) {
+      const tone = connectionTone(connection);
+      const counts = connectionCounts(connection);
+      const detailRows: Array<[string, string]> = [
+        ["Provider", providerKindLabels[connection.provider_kind ?? ""] ?? compactText(connection.provider_kind, "Provider")],
+        ["Agent-ready", connection.agent_ready ? "Có" : "Chưa"],
+        ["Scope", scopeSummary(connection.scopes)],
+        ["Capability", capabilityCount(connection)],
+        ["Path dùng", pathList(connection.required_for_paths)],
+        ["Nguồn", compactText(connection.source)],
+        ["Kiểm tra", formatDateTime(connection.last_checked_at)],
+      ];
+      if (counts) detailRows.push(["Tài nguyên", counts]);
+      if (connection.reason) detailRows.push(["Lý do", compactText(connection.reason)]);
+      return {
+        id: `native-${definition.slug}`,
+        provider: "wiii_native",
+        providerLabel: "Wiii native",
+        label: connection.label || definition.label,
+        description: definition.description,
+        category: definition.category,
+        categoryLabel: categoryLabel(definition.category),
+        icon: connectionIconBySlug[connection.slug] ?? definition.icon,
+        tone,
+        status: statusLabel(connection.status),
+        statusDetail: connection.agent_ready ? "Sẵn sàng cho agent" : "Chưa đủ điều kiện agent-ready",
+        agentReady: Boolean(connection.agent_ready),
+        connected: tone === "ok",
+        connection,
+        detailRows,
+      };
+    }
+
+    const fallback = definition.fallbackId
+      ? fallbackById.get(definition.fallbackId)
+      : undefined;
+    if (fallback) {
+      return {
+        id: `native-${definition.slug}`,
+        provider: "wiii_native",
+        providerLabel: "Wiii native",
+        label: definition.label,
+        description: definition.description,
+        category: definition.category,
+        categoryLabel: categoryLabel(definition.category),
+        icon: definition.icon,
+        tone: fallback.tone,
+        status: fallback.value,
+        statusDetail: "Đang đọc từ fallback client vì chưa có snapshot backend.",
+        agentReady: fallback.tone === "ok",
+        connected: fallback.tone === "ok",
+        detailRows: [
+          ["Nguồn", "Fallback client"],
+          ["Trạng thái", fallback.value],
+          ["Ghi chú", fallback.title],
+        ],
+      };
+    }
+
+    return {
+      id: `native-${definition.slug}`,
+      provider: "wiii_native",
+      providerLabel: "Wiii native",
+      label: definition.label,
+      description: definition.description,
+      category: definition.category,
+      categoryLabel: categoryLabel(definition.category),
+      icon: definition.icon,
+      tone: snapshot ? "off" : "pending",
+      status: snapshot ? "Chưa khai báo" : "Chưa có snapshot",
+      statusDetail: snapshot
+        ? "Backend snapshot chưa khai báo connection này."
+        : "Chờ chat_lifecycle.wiii_connect từ lượt runtime.",
+      agentReady: false,
+      connected: false,
+      detailRows: [
+        ["Nguồn", snapshot ? "Snapshot backend" : "Chưa có snapshot"],
+        ["Trạng thái", snapshot ? "Chưa khai báo" : "Đang chờ"],
+      ],
+    };
+  });
+}
+
+function buildExternalCatalogCards(): CatalogCard[] {
+  return externalCatalogDefinitions.map((definition) => ({
+    id: `${definition.provider}-${definition.id}`,
+    provider: definition.provider,
+    providerLabel: providerKindLabels[definition.provider] ?? definition.provider,
+    label: definition.label,
+    description: definition.description,
+    category: definition.category,
+    categoryLabel: categoryLabel(definition.category),
+    icon: definition.icon,
+    tone: "off",
+    status: "Chưa bật",
+    statusDetail: "Wiii chưa có adapter, vault và permission gate cho kết nối này.",
+    agentReady: false,
+    connected: false,
+    detailRows: [
+      ["Provider", providerKindLabels[definition.provider] ?? definition.provider],
+      ["Trạng thái", "Chưa có kết nối thật trong Wiii"],
+      ["Agent-ready", "Chưa"],
+      ["Mutation", "Bị chặn cho đến khi có adapter và audit"],
+    ],
+    requirements: definition.requirements,
+    disabledReason: "Cần thiết kế adapter/vault/policy trước khi bật Connect.",
+  }));
+}
+
+function buildConnectionCatalogCards(
+  snapshot: WiiiConnectRuntimeSnapshot | null,
+  fallbackModel: CapabilityStatusViewModel,
+): CatalogCard[] {
+  return [
+    ...buildNativeCatalogCards(snapshot, fallbackModel),
+    ...buildExternalCatalogCards(),
+  ];
+}
+
 function SummaryMetric({
   icon: icon,
   label,
@@ -268,6 +760,250 @@ function StatusPill({ tone, children }: { tone: CapabilityStatusTone; children: 
       <span className={`h-1.5 w-1.5 rounded-full ${statusDotClasses[tone]}`} aria-hidden="true" />
       {children}
     </span>
+  );
+}
+
+function ConnectionDetailPanel({ card }: { card: CatalogCard | null }) {
+  if (!card) {
+    return (
+      <aside className="rounded-lg border border-dashed border-[var(--border)] bg-surface-secondary p-4 text-sm text-text-secondary">
+        Chọn một kết nối để xem trạng thái, scope và điều kiện bật.
+      </aside>
+    );
+  }
+
+  const Icon = card.icon;
+
+  return (
+    <aside className="rounded-lg border border-[var(--border)] bg-surface p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-surface-secondary text-text-secondary">
+            <Icon size={19} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="truncate text-base font-semibold text-text">{card.label}</h3>
+            <p className="mt-1 text-sm text-text-secondary">{card.description}</p>
+          </div>
+        </div>
+        <StatusPill tone={card.tone}>{card.status}</StatusPill>
+      </div>
+
+      <dl className="mt-4 grid gap-2 text-xs">
+        {card.detailRows.map(([label, value]) => (
+          <div key={`${card.id}-${label}`} className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+            <dt className="text-text-tertiary">{label}</dt>
+            <dd className="mt-0.5 break-words font-medium text-text">{value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {card.requirements && card.requirements.length > 0 && (
+        <div className="mt-4 rounded-md border border-[var(--border)] bg-surface-secondary px-3 py-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-text-tertiary">
+            <Lock size={13} aria-hidden="true" />
+            Điều kiện bật
+          </div>
+          <ul className="space-y-1.5 text-sm text-text-secondary">
+            {card.requirements.map((requirement) => (
+              <li key={`${card.id}-${requirement}`} className="flex gap-2">
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400" aria-hidden="true" />
+                <span>{requirement}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <button
+        type="button"
+        disabled
+        className="mt-4 inline-flex h-9 items-center justify-center rounded-md border border-[var(--border)] bg-surface-secondary px-3 text-sm font-medium text-text-tertiary"
+      >
+        {card.provider === "wiii_native" ? "Quan sát từ runtime" : "Chưa thể kết nối"}
+      </button>
+      <p className="mt-2 text-xs text-text-tertiary">
+        {card.disabledReason ?? card.statusDetail}
+      </p>
+    </aside>
+  );
+}
+
+function ConnectionCatalog({
+  snapshot,
+  fallbackModel,
+}: {
+  snapshot: WiiiConnectRuntimeSnapshot | null;
+  fallbackModel: CapabilityStatusViewModel;
+}) {
+  const [provider, setProvider] = useState<ProviderFilter>("wiii_native");
+  const [category, setCategory] = useState<CatalogCategory>("all");
+  const [query, setQuery] = useState("");
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+
+  const cards = useMemo(
+    () => buildConnectionCatalogCards(snapshot, fallbackModel),
+    [snapshot, fallbackModel],
+  );
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredCards = cards.filter((card) => {
+    if (card.provider !== provider) return false;
+    if (category !== "all" && card.category !== category) return false;
+    if (!normalizedQuery) return true;
+    return [card.label, card.description, card.categoryLabel, card.providerLabel]
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedQuery);
+  });
+
+  const selectedCard =
+    filteredCards.find((card) => card.id === selectedCardId) ?? filteredCards[0] ?? null;
+
+  return (
+    <section className="space-y-4">
+      <div className="rounded-lg border border-[var(--border)] bg-surface p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <PlugZap size={16} className="text-text-secondary" aria-hidden="true" />
+              <h2 className="text-sm font-semibold text-text">Danh bạ kết nối</h2>
+            </div>
+            <p className="mt-1 max-w-3xl text-sm text-text-secondary">
+              Danh bạ kết nối giống OpenHuman: chọn provider trước, xem trạng thái thật,
+              rồi mới mở adapter khi Wiii có vault, permission gate và audit.
+            </p>
+          </div>
+          <StatusPill tone={snapshot ? "ok" : "pending"}>
+            {snapshot ? "Đọc từ snapshot backend" : "Đang dùng fallback local"}
+          </StatusPill>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {providerFilters.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                setProvider(item.id);
+                setSelectedCardId(null);
+              }}
+              className={`inline-flex min-h-9 items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                provider === item.id
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-[var(--border)] bg-surface-secondary text-text-secondary hover:text-text"
+              }`}
+              aria-pressed={provider === item.id}
+            >
+              <span>{item.label}</span>
+              <span className="hidden text-xs font-normal text-text-tertiary sm:inline">
+                {item.hint}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(240px,420px)_1fr]">
+          <label className="relative block">
+            <span className="sr-only">Tìm kết nối</span>
+            <Search
+              size={16}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary"
+              aria-hidden="true"
+            />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="h-10 w-full rounded-md border border-[var(--border)] bg-surface-secondary pl-9 pr-3 text-sm text-text outline-none focus:border-primary"
+              placeholder="Tìm kết nối..."
+            />
+          </label>
+
+          <div className="flex flex-wrap gap-2">
+            {categoryFilters.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setCategory(item.id);
+                  setSelectedCardId(null);
+                }}
+                className={`inline-flex min-h-9 items-center rounded-md border px-3 py-1.5 text-sm ${
+                  category === item.id
+                    ? "border-primary/40 bg-primary/10 text-primary"
+                    : "border-[var(--border)] bg-surface-secondary text-text-secondary hover:text-text"
+                }`}
+                aria-pressed={category === item.id}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+          {filteredCards.map((card) => {
+            const Icon = card.icon;
+            const selected = selectedCard?.id === card.id;
+            return (
+              <button
+                key={card.id}
+                type="button"
+                onClick={() => setSelectedCardId(card.id)}
+                className={`min-h-[168px] rounded-lg border bg-surface p-4 text-left transition-colors ${
+                  selected
+                    ? "border-primary/50 ring-2 ring-primary/10"
+                    : "border-[var(--border)] hover:border-primary/30"
+                }`}
+                aria-pressed={selected}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-surface-secondary text-text-secondary">
+                      <Icon size={19} aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-semibold text-text">{card.label}</h3>
+                      <p className="mt-0.5 truncate text-xs text-text-tertiary">
+                        {card.providerLabel} · {card.categoryLabel}
+                      </p>
+                    </div>
+                  </div>
+                  <StatusPill tone={card.tone}>{card.status}</StatusPill>
+                </div>
+                <p className="mt-3 line-clamp-2 text-sm text-text-secondary">
+                  {card.description}
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                  <div className="min-w-0 rounded-md bg-surface-secondary px-2 py-2">
+                    <div className="text-text-tertiary">Agent-ready</div>
+                    <div className="mt-0.5 truncate font-medium text-text">
+                      {card.agentReady ? "Có" : "Chưa"}
+                    </div>
+                  </div>
+                  <div className="min-w-0 rounded-md bg-surface-secondary px-2 py-2">
+                    <div className="text-text-tertiary">Điều khiển</div>
+                    <div className="mt-0.5 truncate font-medium text-text">
+                      {card.connected ? "Theo policy" : "Fail-closed"}
+                    </div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+
+          {filteredCards.length === 0 && (
+            <div className="rounded-lg border border-dashed border-[var(--border)] bg-surface-secondary px-4 py-8 text-sm text-text-secondary sm:col-span-2 2xl:col-span-3">
+              Không tìm thấy kết nối phù hợp với bộ lọc hiện tại.
+            </div>
+          )}
+        </div>
+
+        <ConnectionDetailPanel card={selectedCard} />
+      </div>
+    </section>
   );
 }
 
@@ -594,7 +1330,7 @@ function RuntimeSection({
 }
 
 export function WiiiConnectPage() {
-  const [activeTab, setActiveTab] = useState<ConnectTab>("connections");
+  const [activeTab, setActiveTab] = useState<ConnectTab>("catalog");
   const navigateToChat = useUIStore((state) => state.navigateToChat);
   const connectionStatus = useConnectionStore((state) => state.status);
   const serverVersion = useConnectionStore((state) => state.serverVersion);
@@ -699,6 +1435,10 @@ export function WiiiConnectPage() {
             />
           </div>
         </section>
+
+        {activeTab === "catalog" && (
+          <ConnectionCatalog snapshot={snapshot} fallbackModel={fallbackModel} />
+        )}
 
         {activeTab === "connections" && (
           <>

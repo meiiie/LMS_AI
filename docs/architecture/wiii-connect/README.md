@@ -113,14 +113,17 @@ third-party OAuth console yet.
 
 The page must:
 
+- present a Connections catalog with provider tabs (`Wiii native`, `Composio`,
+  `Channels`, `MCP Servers`, and workflow bridges), category filters, search,
+  connection cards, and a read-only detail panel;
 - read only the sanitized `chat_lifecycle.capabilities.wiii_connect` snapshot;
 - show connection status, agent-ready state, scopes, counts, warnings, and path
   policy in grouped UI;
 - summarize tool/provider state without exposing raw tool schemas, provider
   payloads, document text, approval token values, OAuth tokens, or API keys;
 - show external providers such as Composio, MCP, custom OAuth, and workflow
-  bridges as disabled until a vault, permission gate, and provider adapter
-  exist;
+  bridges as disabled catalog entries until a vault, permission gate, provider
+  adapter, and execution audit exist;
 - stay observational until backend execution gateways and reviewable adapter
   contracts are implemented.
 
@@ -168,7 +171,8 @@ this repository.
 2. Update `ToolPolicySession` to consume the snapshot as the source of
    connection status instead of building ad hoc connection maps.
 3. Extend the frontend Wiii Connect page/runtime dashboard to display the same
-   snapshot, grouped by provider and path.
+   snapshot, grouped by provider and path. Initial catalog UX now exists; keep
+   it read-only until real provider adapters exist.
 4. Add tests proving that LMS apply, Pointy, web/weather, document-grounded
    chat, and visual/Code Studio paths bind only the right tools.
 5. Add a Composio adapter only after the native Wiii snapshot is stable.

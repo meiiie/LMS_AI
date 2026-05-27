@@ -102,6 +102,7 @@ describe("WiiiConnectPage", () => {
 
     expect(screen.getByTestId("wiii-connect-page")).toBeTruthy();
     expect(screen.getByText("Document corpus")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Document corpus/i }));
     expect(screen.getByText("2 capability")).toBeTruthy();
     expect(screen.getByText(/1 file/)).toBeTruthy();
     expect(screen.queryByText("document.read")).toBeNull();
@@ -116,7 +117,7 @@ describe("WiiiConnectPage", () => {
     expect(screen.getByText("Cần approval_token")).toBeTruthy();
   });
 
-  it("shows local fallback and disabled external adapters before a backend snapshot exists", () => {
+  it("shows a fail-closed connection catalog before a backend snapshot exists", () => {
     useHostContextStore.getState().setCapabilities({
       host_type: "desktop",
       host_name: "Wiii Desktop",
@@ -125,11 +126,27 @@ describe("WiiiConnectPage", () => {
 
     render(<WiiiConnectPage />);
 
-    expect(screen.getByText("Chưa có snapshot")).toBeTruthy();
-    expect(screen.getByText("Fallback cục bộ")).toBeTruthy();
-    expect(screen.getByText("Provider adapter chưa bật")).toBeTruthy();
-    expect(screen.getAllByText("Composio").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Adapter chưa bật").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Chưa có snapshot").length).toBeGreaterThan(0);
+    expect(screen.getByText("Danh bạ kết nối")).toBeTruthy();
+    expect(screen.getByText("Đang dùng fallback local")).toBeTruthy();
+    expect(screen.getAllByText("Máy chủ Wiii").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Composio/i }));
+    expect(screen.getByRole("button", { name: /Facebook/i })).toBeTruthy();
+    expect(screen.getAllByText("Chưa bật").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Facebook/i }));
+    expect(screen.getByText("Token vault")).toBeTruthy();
+    const disabledConnectButton = screen.getByRole("button", {
+      name: "Chưa thể kết nối",
+    }) as HTMLButtonElement;
+    expect(disabledConnectButton.disabled).toBe(true);
+
+    fireEvent.change(screen.getByPlaceholderText("Tìm kết nối..."), {
+      target: { value: "facebook" },
+    });
+    expect(screen.getByRole("button", { name: /Facebook/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Gmail/i })).toBeNull();
     expect(screen.queryByText("ui.highlight")).toBeNull();
   });
 });

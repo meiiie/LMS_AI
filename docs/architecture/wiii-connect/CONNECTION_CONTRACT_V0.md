@@ -197,6 +197,9 @@ show raw tool schema payloads in chat.
 The desktop shell has a first-class `Wiii Connect` page for the same projection.
 It is a read-only V0 control-plane view:
 
+- the default `Danh bạ` view is a Connections catalog with provider tabs,
+  category filters, search, cards, and a detail panel so users can see Wiii
+  native capabilities next to future Composio/channel/MCP/workflow adapters;
 - connection cards show provider kind, status, agent-ready state, scopes,
   capability counts, path usage, safe count metadata, and warnings;
 - path policy shows required connection slugs, allowed/forbidden tool groups,
@@ -204,7 +207,9 @@ It is a read-only V0 control-plane view:
 - runtime diagnostics summarize observed/suppressed tool groups instead of raw
   tool names;
 - external provider adapters are visible only as disabled rows until Wiii has a
-  vault, permission gate, adapter contract, and execution audit for them.
+  vault, permission gate, adapter contract, and execution audit for them. They
+  must not show as connected just because another product such as OpenHuman can
+  connect through Composio.
 
 This page must not become a separate source of truth. Backend runtime policy,
 SSE lifecycle metadata, chat dashboard chips, and the Wiii Connect page should
