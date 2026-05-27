@@ -26,6 +26,8 @@ It complements:
 
 - `docs/WIII_PROJECT_MENTAL_MODEL.md` for the five-layer product model.
 - `docs/architecture/WIII_CODEBASE_MAP.md` for source navigation.
+- `docs/architecture/wiii-connect/README.md` for the emerging connection and
+  capability boundary.
 - `docs/operations/WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md` for external
   systems Wiii should compare against before deeper runtime changes.
 - `docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md` for the
@@ -67,13 +69,15 @@ As of 2026-05-25:
 
 ## Control Plane Model
 
-Wiii should be operated through five product layers and one governance layer:
+Wiii should be operated through five product layers, one connection/capability
+layer, and one governance layer:
 
 | Layer | Owns | Typical failure symptom | First place to inspect |
 |---|---|---|---|
 | Wiii Core | turn routing, provider calls, tool loops, SSE events | wrong lane, silence, raw payloads, slow turn | `maritime-ai-service/app/services/chat_*`, `app/engine/multi_agent/**` |
 | Wiii Living | continuity, identity, post-turn memory behavior | Wiii forgets, repeats, or changes persona incoherently | memory/living services and post-turn hooks |
 | Wiii Host | desktop, embed, LMS, Pointy, visual/code frames | preview missing, Pointy wrong action, visual clipped | `wiii-desktop/src/**`, LMS/host bridge modules |
+| Wiii Connect | connection registry, capability snapshot, provider adapters, path gating | tool appears on wrong path, connected state unclear, external action not auditable | `tool_policy_session.py`, `tool_capability_registry.py`, `docs/architecture/wiii-connect/**` |
 | Wiii Org | auth, membership, tenant boundaries, permissions | wrong user/org, auth loop, cross-tenant risk | `app/auth/**`, org middleware, repositories |
 | Wiii Data | PostgreSQL, pgvector, MinIO, Valkey, migrations | missing history, citations, uploads, memory, or source refs | repositories, migrations, document context paths |
 | Governance | issue/branch/PR/release/harness controls | risky or unreviewable changes keep landing | `.github/**`, `docs/operations/**`, `tools/wiii_self_harness/**`, `tools/wiii_understand_harness/**` |
@@ -108,6 +112,7 @@ turn. Some signals already exist; missing signals are the next monitoring work.
 | Intent/routing | selected lane and reason | typed visual/tool requirements, Code Studio outcomes | emit a compact route decision record per turn |
 | Retrieval/memory | query scope, tenant filters, source IDs, citation count | repository tests and source-reference helpers | add golden source-backed replay cases for active LMS documents |
 | Provider/tool loop | provider/model, tool bound, tool started/result/error | tool events, visual telemetry, focused unit tests | centralize a turn ledger instead of scattering log-only evidence |
+| Connection/capability | connected provider slugs, scopes, path-ready status, suppressed tools | `ToolPolicySession`, frontend capability status bar | consolidate into Wiii Connect snapshot |
 | SSE assembly | event order, first useful chunk, final `done` | stream coordinator tests and production smoke | assert sync/stream parity for high-risk lanes |
 | Frontend assembly | visible answer, previews, sources, visual frames | Vitest, local E2E harness, visual frame tests | browser acceptance matrix for authenticated LMS/visual flows |
 | Host mutation | preview request ID, approval token hash, apply result | host action audit route, token hash tests | real LMS test course acceptance run |
@@ -182,23 +187,32 @@ Proceed in this order unless production risk forces a hotfix:
    - Ask for a lesson in Vietnamese.
    - Verify preview, source refs, citations, `approval_token`, and final draft.
 
-4. **Runtime flow ledger**
+4. **Wiii Connect V0 snapshot**
+   - Consolidate current server, host, LMS, document, Pointy, weather/search,
+     visual, Code Studio, and external adapter status into a privacy-safe
+     capability snapshot.
+   - Keep it in-repo until at least two native providers and one external
+     adapter share the same shape.
+   - Use the snapshot to feed tool policy before adding a standalone
+     `wiii-connect` repository.
+
+5. **Runtime flow ledger**
    - Add a typed, privacy-safe turn trace surface.
    - Keep it log/metadata first; avoid a dashboard until the schema is stable.
    - Include route decision, selected tools, source counts, visual/host events,
      provider/model, and finalization status.
 
-5. **Stream and route replay cases**
+6. **Stream and route replay cases**
    - Add golden replay scenarios for uploaded document, visual, Code Studio,
      RAG, and Pointy no-action cases.
    - Keep production smoke lightweight; keep mutation acceptance isolated.
 
-6. **Frontend acceptance matrix**
+7. **Frontend acceptance matrix**
    - Authenticated LMS/embed browser run.
    - Visual/Code Studio frame screenshots.
    - Markdown/code streaming and source-reference visibility.
 
-7. **Living/memory audit**
+8. **Living/memory audit**
    - Map post-turn hooks and memory write/read paths.
    - Add tenant-safe replay checks before changing memory behavior.
 
