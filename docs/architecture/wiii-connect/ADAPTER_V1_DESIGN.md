@@ -39,6 +39,17 @@ The implemented backend contract lives in:
 maritime-ai-service/app/engine/wiii_connect/adapter_v1.py
 ```
 
+The backend-owned provider catalog lives in:
+
+```text
+maritime-ai-service/app/engine/wiii_connect/provider_registry.py
+```
+
+Frontend surfaces should consume this registry/snapshot projection instead of
+inventing a separate external-provider source of truth. Until a provider has
+OAuth, vault, scoped action catalog, gateway, and audit support, the registry
+must keep that provider disabled and non-agent-ready.
+
 ## Core Entities
 
 `WiiiConnectProviderRegistryEntry`
