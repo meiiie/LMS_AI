@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+import json
+
+
+class _FakeResult:
+    def __init__(self, row=None):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+
+class _FakeSession:
+    def __init__(self, row=None):
+        self.row = row
+        self.executions = []
+        self.commits = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, statement, params=None):
+        self.executions.append(
+            {
+                "statement": str(statement),
+                "params": dict(params or {}),
+            }
+        )
+        return _FakeResult(self.row)
+
+    def commit(self):
+        self.commits += 1
+
+
+def test_persistent_storage_status_reports_ready_when_tables_exist():
+    from app.engine.wiii_connect.persistent_storage import WiiiConnectPersistentStorage
+
+    session = _FakeSession(
+        row=("wiii_connect_connections", "wiii_connect_audit_ledger"),
+    )
+    storage = WiiiConnectPersistentStorage(session_factory=lambda: session)
+
+    status = storage.status()
+    metadata = status.to_public_metadata()
+
+    assert metadata["version"] == "wiii_connect_persistent_storage.v1"
+    assert metadata["persistent"] is True
+    assert metadata["connection_table_ready"] is True
+    assert metadata["audit_ledger_ready"] is True
+    assert metadata["reason"] == "ready"
+
+
+def test_persistent_audit_append_stores_redacted_metadata_only():
+    from app.engine.wiii_connect.audit_ledger import build_audit_ledger_record
+    from app.engine.wiii_connect.persistent_storage import WiiiConnectPersistentStorage
+
+    session = _FakeSession()
+    storage = WiiiConnectPersistentStorage(session_factory=lambda: session)
+    record = build_audit_ledger_record(
+        event_kind="provider",
+        provider_slug="facebook",
+        status="blocked",
+        reason="provider_disabled",
+        surface="desktop",
+        metadata={
+            "account_id": "page_1",
+            "access_token": "secret-value",
+            "nested": {"client_secret": "secret-value", "safe": "ok"},
+        },
+    )
+
+    assert storage.append_audit_record(
+        record,
+        organization_id="org_1",
+        user_id="user_1",
+    )
+    params = session.executions[-1]["params"]
+    metadata = json.loads(params["metadata"])
+    serialized = json.dumps(params, sort_keys=True, default=str)
+
+    assert params["organization_id"] == "org_1"
+    assert params["user_id"] == "user_1"
+    assert params["provider_slug"] == "facebook"
+    assert metadata["account_id"] == "page_1"
+    assert metadata["nested"]["safe"] == "ok"
+    assert "redacted_sensitive_field" in serialized
+    assert "access_token" not in serialized
+    assert "client_secret" not in serialized
+    assert "secret-value" not in serialized
+    assert session.commits == 1
+
+
+def test_connection_upsert_stores_only_public_vault_ref_metadata():
+    from app.engine.wiii_connect.adapter_v1 import (
+        WiiiConnectConnectionRecordV1,
+        WiiiConnectScopeGrant,
+        WiiiConnectVaultSecretRef,
+    )
+    from app.engine.wiii_connect.persistent_storage import WiiiConnectPersistentStorage
+
+    session = _FakeSession()
+    storage = WiiiConnectPersistentStorage(session_factory=lambda: session)
+    connection = WiiiConnectConnectionRecordV1(
+        connection_id="conn_1",
+        provider_slug="facebook",
+        state="connected",
+        scopes=WiiiConnectScopeGrant(read=True, write=True),
+        vault_ref=WiiiConnectVaultSecretRef(
+            provider_slug="facebook",
+            connection_id="conn_1",
+            vault_key_id="vault://tenant/private/oauth-token-secret",
+            secret_version="v1",
+        ),
+        account_label="Wiii Page",
+        external_account_ref="page_1",
+    )
+
+    assert storage.upsert_connection_record(
+        connection,
+        organization_id="org_1",
+        user_id="user_1",
+        provider_kind="composio",
+    )
+    params = session.executions[-1]["params"]
+    vault_ref = json.loads(params["vault_ref"])
+    scopes = json.loads(params["scopes"])
+    serialized = json.dumps(params, sort_keys=True, default=str)
+
+    assert params["organization_id"] == "org_1"
+    assert params["user_id"] == "user_1"
+    assert params["provider_kind"] == "composio"
+    assert params["state"] == "connected"
+    assert scopes["read"] is True
+    assert scopes["write"] is True
+    assert vault_ref["vault_ref_present"] is True
+    assert vault_ref["secret_version"] == "v1"
+    assert "oauth-token-secret" not in serialized
+    assert "vault://tenant/private" not in serialized
+    assert session.commits == 1
+
+
+def test_persistent_storage_rejects_missing_owner_boundary():
+    from app.engine.wiii_connect.audit_ledger import build_audit_ledger_record
+    from app.engine.wiii_connect.persistent_storage import WiiiConnectPersistentStorage
+
+    session = _FakeSession()
+    storage = WiiiConnectPersistentStorage(session_factory=lambda: session)
+    record = build_audit_ledger_record(
+        event_kind="provider",
+        provider_slug="facebook",
+        status="blocked",
+        reason="provider_disabled",
+    )
+
+    assert storage.append_audit_record(record, organization_id="", user_id="user_1") is False
+    assert session.executions == []
