@@ -63,12 +63,21 @@ The OAuth callback/vault boundary contract lives in:
 maritime-ai-service/app/engine/wiii_connect/callback_boundary.py
 ```
 
+The vault policy and audit ledger contracts live in:
+
+```text
+maritime-ai-service/app/engine/wiii_connect/vault.py
+maritime-ai-service/app/engine/wiii_connect/audit_ledger.py
+```
+
 Current session/status API projections:
 
 ```text
 GET  /api/v1/wiii-connect/providers/{slug}/status
 POST /api/v1/wiii-connect/providers/{slug}/sessions
 GET  /api/v1/wiii-connect/providers/{slug}/callback
+GET  /api/v1/wiii-connect/vault/status
+GET  /api/v1/wiii-connect/audit-ledger/status
 ```
 
 Frontend surfaces should consume this registry/snapshot projection instead of
@@ -148,6 +157,26 @@ must keep that provider disabled and non-agent-ready.
 - blocks disabled providers, provider errors, missing state, missing code, missing
   vault, or missing provider adapter;
 - issues a vault reference only after vault and provider adapter are both ready.
+
+`WiiiConnectVaultCapability`
+
+- reports whether a vault backend is enabled and can accept external secrets;
+- default status is disabled/fail-closed;
+- public metadata never exposes vault namespaces, key IDs, or secret material.
+
+`WiiiConnectVaultSecretWriteDecision`
+
+- decides whether OAuth/API/provider secret material may enter a vault adapter;
+- blocks disabled providers, disabled vaults, missing secret material, unsupported
+  secret kinds, and non-accepting vault backends;
+- returns only an opaque `WiiiConnectVaultSecretRef` when ready.
+
+`WiiiConnectAuditLedgerRecord`
+
+- normalizes session, callback, vault, provider, and execution audit events;
+- recursively redacts sensitive keys before public projection;
+- current contract is storage-agnostic and reports persistent storage as not yet
+  configured.
 
 ## Lifecycle States
 
@@ -237,6 +266,8 @@ Before real Composio OAuth is enabled:
 - callback/webhook handling must bind provider account to Wiii org/user;
 - credential material must be stored in an encrypted vault or provider-managed
   backend secret store;
+- every session/callback/vault/execution decision must produce a privacy-safe
+  ledger record shape before durable persistence is added;
 - frontend may receive connect URLs and state labels, not tokens;
 - stale pending/error OAuth rows must be cleaned up or expired safely;
 - provider errors must be sanitized before reaching UI or chat.
@@ -257,11 +288,12 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 
 ## Next Slices
 
-1. Add encrypted vault integration or provider-managed secret reference storage.
-2. Add provider adapter abstraction that can supply authorization URLs and token
+1. Add durable audit ledger persistence and per-org connection records.
+2. Add encrypted vault integration or provider-managed secret reference storage.
+3. Add provider adapter abstraction that can supply authorization URLs and token
    exchange only behind vault policy.
-3. Add frontend connection modal that uses Wiii backend routes only.
-4. Persist provider registry and connection records behind backend-owned storage.
-5. Add browser acceptance for connect, poll, disconnect, gated scope, and denied
+4. Add frontend connection modal that uses Wiii backend routes only.
+5. Persist provider registry and connection records behind backend-owned storage.
+6. Add browser acceptance for connect, poll, disconnect, gated scope, and denied
    execute cases.
-6. Enable one low-risk read-only Composio action before any write action.
+7. Enable one low-risk read-only Composio action before any write action.

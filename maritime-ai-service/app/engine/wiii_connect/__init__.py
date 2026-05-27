@@ -14,6 +14,13 @@ from .adapter_v1 import (
     is_connection_baseline_ready,
     normalize_connection_state,
 )
+from .audit_ledger import (
+    WIII_CONNECT_AUDIT_LEDGER_VERSION,
+    WiiiConnectAuditLedgerRecord,
+    WiiiConnectInMemoryAuditLedger,
+    audit_ledger_status_public_metadata,
+    build_audit_ledger_record,
+)
 from .callback_boundary import (
     WIII_CONNECT_CALLBACK_CONTRACT_VERSION,
     WiiiConnectCallbackAuditEvent,
@@ -33,6 +40,16 @@ from .connection_sessions import (
     provider_connection_status_for_entry,
     scope_grant_from_mapping,
 )
+from .vault import (
+    WIII_CONNECT_VAULT_CONTRACT_VERSION,
+    WiiiConnectVaultAuditEvent,
+    WiiiConnectVaultCapability,
+    WiiiConnectVaultSecretWriteDecision,
+    WiiiConnectVaultSecretWriteRequest,
+    decide_vault_secret_write,
+    default_wiii_connect_vault_capability,
+    vault_status_public_metadata,
+)
 from .provider_registry import (
     WIII_CONNECT_PROVIDER_REGISTRY_VERSION,
     get_wiii_connect_provider_entry,
@@ -50,9 +67,12 @@ from .snapshot import (
 
 __all__ = [
     "WIII_CONNECT_ADAPTER_VERSION",
+    "WIII_CONNECT_AUDIT_LEDGER_VERSION",
     "WIII_CONNECT_CALLBACK_CONTRACT_VERSION",
     "WIII_CONNECT_SESSION_CONTRACT_VERSION",
+    "WIII_CONNECT_VAULT_CONTRACT_VERSION",
     "WiiiConnectAuditEvent",
+    "WiiiConnectAuditLedgerRecord",
     "WiiiConnectCallbackAuditEvent",
     "WiiiConnectCallbackDecision",
     "WiiiConnectCallbackRequest",
@@ -60,22 +80,31 @@ __all__ = [
     "WiiiConnectConnectionRecordV1",
     "WiiiConnectExecutionDecision",
     "WiiiConnectExecutionRequest",
+    "WiiiConnectInMemoryAuditLedger",
     "WiiiConnectProviderConnectionStatus",
     "WiiiConnectProviderRegistryEntry",
     "WiiiConnectRequiredField",
     "WiiiConnectScopeGrant",
     "WiiiConnectSessionStartDecision",
     "WiiiConnectSessionStartRequest",
+    "WiiiConnectVaultAuditEvent",
+    "WiiiConnectVaultCapability",
     "WiiiConnectVaultSecretRef",
+    "WiiiConnectVaultSecretWriteDecision",
+    "WiiiConnectVaultSecretWriteRequest",
     "WIII_CONNECT_PROVIDER_REGISTRY_VERSION",
     "WIII_CONNECT_SNAPSHOT_VERSION",
     "WiiiConnectionRecord",
     "WiiiConnectionScopes",
     "WiiiConnectionSnapshot",
     "WiiiPathCapabilityRecord",
+    "audit_ledger_status_public_metadata",
     "begin_connection_session",
     "build_wiii_connect_snapshot",
+    "build_audit_ledger_record",
     "decide_external_execution",
+    "decide_vault_secret_write",
+    "default_wiii_connect_vault_capability",
     "get_wiii_connect_provider_entry",
     "is_connection_baseline_ready",
     "list_wiii_connect_provider_registry",
@@ -86,4 +115,5 @@ __all__ = [
     "provider_connection_status_for_entry",
     "provider_registry_public_metadata",
     "scope_grant_from_mapping",
+    "vault_status_public_metadata",
 ]

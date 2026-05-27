@@ -10,12 +10,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.engine.wiii_connect import (
     WiiiConnectCallbackRequest,
     WiiiConnectSessionStartRequest,
+    audit_ledger_status_public_metadata,
     begin_connection_session,
     get_wiii_connect_provider_entry,
     provider_callback_decision,
     provider_connection_status,
     provider_registry_public_metadata,
     scope_grant_from_mapping,
+    vault_status_public_metadata,
 )
 
 
@@ -38,6 +40,20 @@ async def list_wiii_connect_providers() -> dict[str, object]:
     """Return the privacy-safe Wiii Connect provider catalog."""
 
     return provider_registry_public_metadata()
+
+
+@router.get("/vault/status")
+async def get_wiii_connect_vault_status() -> dict[str, object]:
+    """Return privacy-safe Wiii Connect vault readiness metadata."""
+
+    return vault_status_public_metadata()
+
+
+@router.get("/audit-ledger/status")
+async def get_wiii_connect_audit_ledger_status() -> dict[str, object]:
+    """Return privacy-safe Wiii Connect audit ledger readiness metadata."""
+
+    return audit_ledger_status_public_metadata()
 
 
 @router.get("/providers/{slug}/status")

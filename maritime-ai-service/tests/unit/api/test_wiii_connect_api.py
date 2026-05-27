@@ -46,6 +46,35 @@ async def test_wiii_connect_provider_registry_api_is_privacy_safe(app):
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_vault_and_audit_status_apis_are_privacy_safe(app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        vault_response = await client.get("/wiii-connect/vault/status")
+        audit_response = await client.get("/wiii-connect/audit-ledger/status")
+
+    assert vault_response.status_code == 200
+    assert audit_response.status_code == 200
+    vault_payload = vault_response.json()
+    audit_payload = audit_response.json()
+    serialized = json.dumps(
+        {"vault": vault_payload, "audit": audit_payload},
+        sort_keys=True,
+    )
+
+    assert vault_payload["version"] == "wiii_connect_vault.v1"
+    assert vault_payload["enabled"] is False
+    assert vault_payload["can_store_external_secret"] is False
+    assert audit_payload["version"] == "wiii_connect_audit_ledger.v1"
+    assert audit_payload["enabled"] is True
+    assert audit_payload["persistent"] is False
+    assert "access_token" not in serialized
+    assert "refresh_token" not in serialized
+    assert "client_secret" not in serialized
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_provider_status_api_is_fail_closed(app):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
