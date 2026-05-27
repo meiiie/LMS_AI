@@ -1,13 +1,22 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fetchWiiiConnectProviders } from "@/api/wiii-connect";
 import { WiiiConnectPage } from "@/components/connect/WiiiConnectPage";
 import { useChatStore } from "@/stores/chat-store";
 import { useConnectionStore } from "@/stores/connection-store";
 import { useHostContextStore } from "@/stores/host-context-store";
 import { useUIStore } from "@/stores/ui-store";
 
+vi.mock("@/api/wiii-connect", () => ({
+  fetchWiiiConnectProviders: vi.fn(),
+}));
+
+const mockFetchWiiiConnectProviders = vi.mocked(fetchWiiiConnectProviders);
+
 describe("WiiiConnectPage", () => {
   beforeEach(() => {
+    mockFetchWiiiConnectProviders.mockReset();
+    mockFetchWiiiConnectProviders.mockRejectedValue(new Error("offline"));
     useHostContextStore.getState().clear();
     useConnectionStore.setState({
       status: "connected",
@@ -148,5 +157,36 @@ describe("WiiiConnectPage", () => {
     expect(screen.getByRole("button", { name: /Facebook/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Gmail/i })).toBeNull();
     expect(screen.queryByText("ui.highlight")).toBeNull();
+  });
+
+  it("uses backend provider registry when available", async () => {
+    mockFetchWiiiConnectProviders.mockResolvedValue({
+      version: "wiii_connect_provider_registry.v1",
+      adapter_version: "wiii_connect_adapter.v1",
+      providers: [
+        {
+          slug: "facebook",
+          label: "Facebook",
+          provider_kind: "composio",
+          auth_mode: "oauth2",
+          enabled: false,
+          agent_ready: false,
+          category: "social",
+          description: "Facebook provider from backend registry.",
+          requirements: ["execution_gateway", "audit_ledger"],
+          action_count: 0,
+        },
+      ],
+    });
+
+    render(<WiiiConnectPage />);
+
+    expect(await screen.findByText("Registry backend")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Composio/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Facebook/i }));
+    expect(screen.getAllByText("Facebook provider from backend registry.").length).toBeGreaterThan(0);
+    expect(screen.getByText("execution_gateway")).toBeTruthy();
+    expect(screen.getByText("audit_ledger")).toBeTruthy();
+    expect(screen.getByText("Backend registry")).toBeTruthy();
   });
 });
