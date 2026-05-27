@@ -2,9 +2,9 @@
 
 Status: Draft contract implemented
 
-Owner: Architecture maintainers
+Owner: Project leadership
 
-Created: 2026-05-28
+Created: 2026-05-27
 
 Related issue: #730
 

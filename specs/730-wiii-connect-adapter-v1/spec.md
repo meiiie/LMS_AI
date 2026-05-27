@@ -1,7 +1,7 @@
 # Feature Specification: Wiii Connect Adapter V1
 
 **Feature Branch**: `codex/730-audit-wiii-connect-adapter-v1`
-**Created**: 2026-05-28
+**Created**: 2026-05-27
 **Status**: Draft
 **Input**: User request to audit OpenHuman Connections/Composio and design Wiii
 Connect Adapter V1 before enabling real Composio execution.
@@ -17,12 +17,12 @@ the agent can already act through it.
 OAuth state from becoming accidental execution permission.
 
 **Independent Test**: Unit tests normalize provider statuses and prove pending
-connections are not agent-ready.
+connections are not baseline-ready.
 
 **Acceptance Scenarios**:
 
 1. Given a Composio-style `PENDING` connection, when Wiii normalizes it, then
-   the state is `waiting` and agent-ready is false.
+   the state is `waiting` and baseline-ready is false.
 2. Given an `ACTIVE` connection for an enabled provider, when Wiii normalizes it,
    then the state is `connected` but gateway checks still decide execution.
 

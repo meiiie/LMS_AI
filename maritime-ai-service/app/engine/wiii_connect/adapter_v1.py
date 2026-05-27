@@ -135,8 +135,11 @@ class WiiiConnectProviderRegistryEntry:
             normalized = pattern.strip().upper()
             if not normalized:
                 continue
-            if normalized.endswith("*") and action.startswith(normalized[:-1]):
-                return True
+            if normalized.endswith("*"):
+                prefix = normalized[:-1]
+                if prefix and action.startswith(prefix):
+                    return True
+                continue
             if action == normalized:
                 return True
         return False
@@ -309,11 +312,16 @@ def normalize_connection_state(status: str | None) -> ConnectionLifecycleState:
     return "disconnected"
 
 
-def is_connection_agent_ready(
+def is_connection_baseline_ready(
     entry: WiiiConnectProviderRegistryEntry,
     connection: WiiiConnectConnectionRecordV1 | None,
 ) -> bool:
-    """Return true only when registry and live connection both permit agents."""
+    """Return true when registry and live connection pass baseline readiness.
+
+    This is not a final execution decision. Call ``decide_external_execution``
+    with the active path/action request before exposing a provider action to an
+    agent.
+    """
 
     return bool(
         entry.enabled

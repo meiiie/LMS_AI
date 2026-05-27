@@ -11,7 +11,7 @@ from .adapter_v1 import (
     WiiiConnectScopeGrant,
     WiiiConnectVaultSecretRef,
     decide_external_execution,
-    is_connection_agent_ready,
+    is_connection_baseline_ready,
     normalize_connection_state,
 )
 from .snapshot import (
@@ -40,6 +40,6 @@ __all__ = [
     "WiiiPathCapabilityRecord",
     "build_wiii_connect_snapshot",
     "decide_external_execution",
-    "is_connection_agent_ready",
+    "is_connection_baseline_ready",
     "normalize_connection_state",
 ]

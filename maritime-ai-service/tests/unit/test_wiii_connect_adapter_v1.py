@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 
-def test_composio_connection_state_normalization_and_agent_ready_gate():
+
+def test_composio_connection_state_normalization_and_baseline_gate():
     from app.engine.wiii_connect.adapter_v1 import (
         WiiiConnectConnectionRecordV1,
         WiiiConnectProviderRegistryEntry,
-        is_connection_agent_ready,
+        is_connection_baseline_ready,
         normalize_connection_state,
     )
 
@@ -28,7 +30,7 @@ def test_composio_connection_state_normalization_and_agent_ready_gate():
     assert pending.state == "waiting"
     assert normalize_connection_state("ACTIVE") == "connected"
     assert normalize_connection_state("FAILED") == "error"
-    assert is_connection_agent_ready(entry, pending) is False
+    assert is_connection_baseline_ready(entry, pending) is False
 
 
 def test_external_execute_requires_connection_action_path_scope_and_approval():
@@ -83,6 +85,26 @@ def test_external_execute_requires_connection_action_path_scope_and_approval():
     assert wrong_path.allowed is False
     assert wrong_path.reason == "path_not_allowed"
 
+    missing_scope_connection = WiiiConnectConnectionRecordV1(
+        connection_id="conn_2",
+        provider_slug="facebook",
+        state="connected",
+        scopes=WiiiConnectScopeGrant(read=True, write=False, apply=False),
+    )
+    missing_scope = decide_external_execution(
+        entry,
+        missing_scope_connection,
+        WiiiConnectExecutionRequest(
+            provider_slug="facebook",
+            action_slug="FACEBOOK_CREATE_POST",
+            path="external_app_action",
+            mutation="apply",
+        ),
+    )
+    assert missing_scope.allowed is False
+    assert missing_scope.reason == "missing_scope"
+    assert missing_scope.required_scopes == ("apply",)
+
     missing_approval = decide_external_execution(
         entry,
         connection,
@@ -113,6 +135,23 @@ def test_external_execute_requires_connection_action_path_scope_and_approval():
     )
     assert allowed.allowed is True
     assert allowed.reason == "allowed"
+
+
+def test_wildcard_only_action_allowlist_stays_fail_closed():
+    from app.engine.wiii_connect.adapter_v1 import WiiiConnectProviderRegistryEntry
+
+    entry = WiiiConnectProviderRegistryEntry(
+        slug="github",
+        label="GitHub",
+        provider_kind="composio",
+        auth_mode="oauth2",
+        enabled=True,
+        agent_ready=True,
+        action_allowlist=("*", "GITHUB_GET_*"),
+    )
+
+    assert entry.allows_action("GITHUB_GET_REPO") is True
+    assert entry.allows_action("SLACK_SEND_MESSAGE") is False
 
 
 def test_public_metadata_does_not_expose_vault_key_or_raw_secret_values():
@@ -150,15 +189,15 @@ def test_public_metadata_does_not_expose_vault_key_or_raw_secret_values():
         ),
     )
 
-    serialized = str(
-        {
-            "entry": entry.to_public_metadata(),
-            "connection": connection.to_public_metadata(),
-            "vault": connection.vault_ref.to_public_metadata(),
-        }
-    )
+    metadata = {
+        "entry": entry.to_public_metadata(),
+        "connection": connection.to_public_metadata(),
+        "vault": connection.vault_ref.to_public_metadata(),
+    }
+    serialized = json.dumps(metadata, sort_keys=True)
 
+    assert metadata["connection"]["vault_ref_present"] is True
+    assert metadata["vault"]["vault_ref_present"] is True
+    assert metadata["entry"]["required_fields"][0]["key"] == "client_secret"
     assert "oauth-token-secret" not in serialized
     assert "vault://tenant/private" not in serialized
-    assert "vault_ref_present" in serialized
-    assert "client_secret" in serialized
