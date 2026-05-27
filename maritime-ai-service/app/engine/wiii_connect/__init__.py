@@ -14,6 +14,17 @@ from .adapter_v1 import (
     is_connection_baseline_ready,
     normalize_connection_state,
 )
+from .connection_sessions import (
+    WIII_CONNECT_SESSION_CONTRACT_VERSION,
+    WiiiConnectConnectionSessionAuditEvent,
+    WiiiConnectProviderConnectionStatus,
+    WiiiConnectSessionStartDecision,
+    WiiiConnectSessionStartRequest,
+    begin_connection_session,
+    provider_connection_status,
+    provider_connection_status_for_entry,
+    scope_grant_from_mapping,
+)
 from .provider_registry import (
     WIII_CONNECT_PROVIDER_REGISTRY_VERSION,
     get_wiii_connect_provider_entry,
@@ -31,13 +42,18 @@ from .snapshot import (
 
 __all__ = [
     "WIII_CONNECT_ADAPTER_VERSION",
+    "WIII_CONNECT_SESSION_CONTRACT_VERSION",
     "WiiiConnectAuditEvent",
+    "WiiiConnectConnectionSessionAuditEvent",
     "WiiiConnectConnectionRecordV1",
     "WiiiConnectExecutionDecision",
     "WiiiConnectExecutionRequest",
+    "WiiiConnectProviderConnectionStatus",
     "WiiiConnectProviderRegistryEntry",
     "WiiiConnectRequiredField",
     "WiiiConnectScopeGrant",
+    "WiiiConnectSessionStartDecision",
+    "WiiiConnectSessionStartRequest",
     "WiiiConnectVaultSecretRef",
     "WIII_CONNECT_PROVIDER_REGISTRY_VERSION",
     "WIII_CONNECT_SNAPSHOT_VERSION",
@@ -45,11 +61,15 @@ __all__ = [
     "WiiiConnectionScopes",
     "WiiiConnectionSnapshot",
     "WiiiPathCapabilityRecord",
+    "begin_connection_session",
     "build_wiii_connect_snapshot",
     "decide_external_execution",
     "get_wiii_connect_provider_entry",
     "is_connection_baseline_ready",
     "list_wiii_connect_provider_registry",
     "normalize_connection_state",
+    "provider_connection_status",
+    "provider_connection_status_for_entry",
     "provider_registry_public_metadata",
+    "scope_grant_from_mapping",
 ]
