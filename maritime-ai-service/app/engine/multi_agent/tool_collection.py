@@ -146,6 +146,17 @@ def _looks_reasoning_safety_meta_turn(query: str) -> bool:
         return False
 
 
+def _looks_wiii_pipeline_meta_turn(query: str) -> bool:
+    try:
+        normalized = _normalize_for_intent(query)
+        return _load_attr(
+            "app.engine.multi_agent.supervisor_runtime_support",
+            "_looks_wiii_pipeline_meta_turn",
+        )(normalized)
+    except Exception:
+        return False
+
+
 def _infer_direct_thinking_mode(
     query: str,
     state: Optional[AgentState] = None,
@@ -559,6 +570,7 @@ def _resolve_direct_turn_path_decision(
         host_ui_navigation=host_ui_navigation,
         looks_document_preview=_looks_like_document_preview_request(query, state),
         looks_reasoning_safety_meta=_looks_reasoning_safety_meta_turn(query),
+        looks_wiii_pipeline_meta=_looks_wiii_pipeline_meta_turn(query),
         needs_weather_lookup=_safe_intent_flag(_needs_weather_lookup, query),
         needs_web_search=_safe_intent_flag(_needs_web_search, query),
         needs_datetime=_safe_intent_flag(_needs_datetime, query),
@@ -657,6 +669,8 @@ def _should_use_no_tools_for_direct_prose(
 ) -> bool:
     """Keep plain prose direct turns off the heavy tool-schema path."""
     if _looks_reasoning_safety_meta_turn(query):
+        return True
+    if _looks_wiii_pipeline_meta_turn(query):
         return True
     if force_tools:
         return False

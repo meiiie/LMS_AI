@@ -9,6 +9,7 @@ capability exposure in the same block.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Callable, Literal
 
 from app.engine.multi_agent.social_followup_policy import (
@@ -57,6 +58,7 @@ class TurnPathSignals:
     host_ui_navigation: bool = False
     looks_document_preview: bool = False
     looks_reasoning_safety_meta: bool = False
+    looks_wiii_pipeline_meta: bool = False
     needs_weather_lookup: bool = False
     needs_web_search: bool = False
     needs_datetime: bool = False
@@ -150,6 +152,15 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             allow_agent_handoff=False,
         )
 
+    if signals.looks_wiii_pipeline_meta:
+        return TurnPathDecision(
+            path="direct_prose",
+            reason="wiii_pipeline_meta_no_tool",
+            bind_tools=False,
+            allow_all_tools=False,
+            allow_agent_handoff=False,
+        )
+
     if signals.looks_document_preview:
         return TurnPathDecision(
             path="lms_document_preview",
@@ -174,6 +185,17 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
         return TurnPathDecision(
             path="casual_chat",
             reason="plain_casual_chat",
+            bind_tools=False,
+            allow_all_tools=False,
+            allow_agent_handoff=False,
+        )
+
+    if not _has_tool_or_output_signal(signals) and _looks_low_signal_noise(
+        signals.normalized_query
+    ):
+        return TurnPathDecision(
+            path="direct_prose",
+            reason="low_signal_noise_no_tool",
             bind_tools=False,
             allow_all_tools=False,
             allow_agent_handoff=False,
@@ -312,7 +334,10 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
 
     return TurnPathDecision(
         path="direct_prose",
-        reason="default_direct_prose",
+        reason="default_direct_prose_no_tool",
+        bind_tools=False,
+        allow_all_tools=False,
+        allow_agent_handoff=False,
         allow_rag_delegation=False,
     )
 
@@ -388,6 +413,27 @@ def _looks_casual_chat(signals: TurnPathSignals) -> bool:
     return normalized.startswith(greeting_prefixes) and not any(
         cue in normalized for cue in action_cues
     )
+
+
+def _looks_low_signal_noise(normalized_query: str) -> bool:
+    """Detect repeated paste/key noise so it stays off broad tool binding."""
+    normalized = str(normalized_query or "").strip()
+    if not normalized:
+        return False
+
+    compact = re.sub(r"\s+", "", normalized)
+    if len(compact) < 48:
+        return False
+
+    if re.search(r"([a-z0-9])\1{31,}", compact):
+        return True
+
+    tokens = [token for token in normalized.split() if token]
+    if any(len(token) >= 48 and len(set(token)) <= 4 for token in tokens):
+        return True
+
+    alnum = [char for char in compact if char.isalnum()]
+    return len(alnum) >= 160 and (len(set(alnum)) / len(alnum)) <= 0.08
 
 
 def _has_tool_or_output_signal(signals: TurnPathSignals) -> bool:
