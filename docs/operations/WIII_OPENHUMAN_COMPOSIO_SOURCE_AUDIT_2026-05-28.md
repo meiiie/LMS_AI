@@ -19,13 +19,20 @@ for the Adapter V1 gateway, vault, scope policy, and audit ledger.
 
 ## Official Composio Runtime Model
 
-Current Composio docs describe a session-based model:
+Current Composio docs describe a session/connected-account model:
 
 - a session is scoped to a user ID, tool access, authentication, and execution
   state;
 - connected accounts are stored under the app's user ID, so executions use the
   right user's account;
 - Connect Links or `session.authorize()` initiate authentication;
+- Composio-managed OAuth should use hosted Connect Link rather than the older
+  `initiate()` path; the REST endpoint is
+  `POST /api/v3.1/connected_accounts/link`;
+- Connect Link requires `auth_config_id` and a stable app user ID, and may take
+  a callback URL;
+- successful Connect Link responses include a hosted `redirect_url`, while Wiii
+  should not expose or store `link_token` in public metadata;
 - connected account responses mask sensitive credential fields by default;
 - sessions can be configured with allowed toolkits, auth configs, connected
   accounts, and optionally a workbench;
@@ -134,7 +141,8 @@ Before Wiii enables Composio:
 
 Wiii now has a V0 snapshot/dashboard, V1 policy contract, provider registry,
 callback/vault boundary, durable connection/audit storage, controlled storage
-probe, and Composio adapter configuration status. It still needs real OAuth
-endpoint implementation, vault/provider-managed secret reference integration,
-provider-specific adapter clients, and end-to-end browser acceptance before
-Composio can be enabled for real users.
+probe, Composio adapter configuration status, and an authenticated Connect Link
+client path that calls Composio only after policy preflight passes. It still
+needs callback reconciliation, connection listing/polling, frontend modal UX,
+curated action catalog, execution gateway, and end-to-end browser acceptance
+before Composio actions can be enabled for real users.

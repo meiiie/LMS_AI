@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import httpx
+import pytest
+
 
 def test_default_provider_adapter_status_is_unbound_and_secret_free():
     from app.engine.wiii_connect.provider_adapters import (
@@ -98,6 +101,113 @@ def test_composio_adapter_config_parses_without_exposing_secret_values():
     assert metadata["config"]["auth_config_count"] == 1
     assert metadata["config"]["provider_slugs"] == ["facebook"]
     assert "secret-value" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_composio_connect_link_client_uses_v31_and_redacts_payload():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        create_composio_connect_link,
+    )
+
+    captured = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["api_key"] = request.headers.get("x-api-key")
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            201,
+            json={
+                "link_token": "secret-link-token",
+                "redirect_url": "https://composio.example.test/connect/session",
+                "expires_at": "2026-05-28T00:00:00Z",
+                "connected_account_id": "ca_secret",
+            },
+        )
+
+    config = WiiiConnectComposioAdapterConfig(
+        enabled=True,
+        api_key="secret-api-key",
+        api_key_present=True,
+        base_url="https://backend.composio.dev",
+        api_version="v3.1",
+        auth_config_by_provider={"facebook": "authcfg_fb"},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await create_composio_connect_link(
+            config=config,
+            provider_slug="facebook",
+            user_id="wiii_user_hash",
+            callback_url="https://wiii.example.test/callback",
+            http_client=client,
+        )
+
+    metadata = result.to_audit_metadata()
+    serialized = json.dumps(
+        {"metadata": metadata, "public_config": config.to_public_metadata()},
+        sort_keys=True,
+    )
+
+    assert captured["url"] == (
+        "https://backend.composio.dev/api/v3.1/connected_accounts/link"
+    )
+    assert captured["api_key"] == "secret-api-key"
+    assert captured["body"] == {
+        "auth_config_id": "authcfg_fb",
+        "user_id": "wiii_user_hash",
+        "callback_url": "https://wiii.example.test/callback",
+    }
+    assert result.ready is True
+    assert result.redirect_url == "https://composio.example.test/connect/session"
+    assert metadata["redirect_url_present"] is True
+    assert metadata["connected_account_ref_present"] is True
+    assert "secret-api-key" not in serialized
+    assert "secret-link-token" not in serialized
+    assert "ca_secret" not in serialized
+    assert "authcfg_fb" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_composio_connect_link_client_sanitizes_provider_errors():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        create_composio_connect_link,
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={
+                "error": {
+                    "message": "Invalid API key secret-api-key",
+                    "access_token": "secret-token",
+                }
+            },
+        )
+
+    config = WiiiConnectComposioAdapterConfig(
+        enabled=True,
+        api_key="secret-api-key",
+        api_key_present=True,
+        auth_config_by_provider={"facebook": "authcfg_fb"},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await create_composio_connect_link(
+            config=config,
+            provider_slug="facebook",
+            user_id="wiii_user_hash",
+            callback_url="https://wiii.example.test/callback",
+            http_client=client,
+        )
+
+    serialized = json.dumps(result.to_audit_metadata(), sort_keys=True)
+
+    assert result.ready is False
+    assert result.redirect_url == ""
+    assert result.reason == "provider_response_rejected"
+    assert "secret-api-key" not in serialized
+    assert "secret-token" not in serialized
 
 
 def test_provider_adapter_status_accepts_backend_capability_override():
