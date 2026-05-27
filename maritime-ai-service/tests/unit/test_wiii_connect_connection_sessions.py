@@ -63,6 +63,10 @@ def test_ready_session_requires_adapter_authorization_url_even_when_entry_enable
         begin_connection_session,
         provider_connection_status_for_entry,
     )
+    from app.engine.wiii_connect.provider_adapters import (
+        WiiiConnectAuthorizationUrlDecision,
+        WiiiConnectProviderAdapterCapability,
+    )
 
     entry = WiiiConnectProviderRegistryEntry(
         slug="internal_test",
@@ -79,16 +83,39 @@ def test_ready_session_requires_adapter_authorization_url_even_when_entry_enable
         entry,
         WiiiConnectSessionStartRequest(provider_slug="internal_test"),
     )
-    ready = begin_connection_session(
+    direct_url = begin_connection_session(
         entry,
         WiiiConnectSessionStartRequest(provider_slug="internal_test"),
         authorization_url="https://connect.example.test/session/123",
+    )
+    ready = begin_connection_session(
+        entry,
+        WiiiConnectSessionStartRequest(provider_slug="internal_test"),
+        authorization_decision=WiiiConnectAuthorizationUrlDecision(
+            status="ready",
+            reason="authorization_url_issued",
+            provider_slug="internal_test",
+            label="Internal Test",
+            provider_kind="composio",
+            auth_mode="oauth2",
+            authorization_url="https://connect.example.test/session/123",
+            adapter=WiiiConnectProviderAdapterCapability(
+                provider_kind="composio",
+                adapter_name="composio_adapter",
+                bound=True,
+                configured=True,
+                can_create_authorization_url=True,
+                reason="ready",
+            ),
+        ),
     )
 
     assert status.can_start_authorization is False
     assert status.reason == "provider_adapter_not_bound"
     assert blocked.ready is False
     assert blocked.reason == "provider_adapter_not_bound"
+    assert direct_url.ready is False
+    assert direct_url.reason == "provider_adapter_not_bound"
     assert ready.ready is True
     assert ready.reason == "authorization_url_issued"
     assert ready.authorization_url == "https://connect.example.test/session/123"

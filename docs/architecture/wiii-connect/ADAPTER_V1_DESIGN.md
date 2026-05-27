@@ -70,12 +70,20 @@ maritime-ai-service/app/engine/wiii_connect/vault.py
 maritime-ai-service/app/engine/wiii_connect/audit_ledger.py
 ```
 
+The provider adapter readiness and authorization URL contract lives in:
+
+```text
+maritime-ai-service/app/engine/wiii_connect/provider_adapters.py
+```
+
 Current session/status API projections:
 
 ```text
 GET  /api/v1/wiii-connect/providers/{slug}/status
 POST /api/v1/wiii-connect/providers/{slug}/sessions
+POST /api/v1/wiii-connect/providers/{slug}/authorization-url
 GET  /api/v1/wiii-connect/providers/{slug}/callback
+GET  /api/v1/wiii-connect/provider-adapters/status
 GET  /api/v1/wiii-connect/vault/status
 GET  /api/v1/wiii-connect/audit-ledger/status
 ```
@@ -178,6 +186,29 @@ must keep that provider disabled and non-agent-ready.
 - current contract is storage-agnostic and reports persistent storage as not yet
   configured.
 
+`WiiiConnectProviderAdapterCapability`
+
+- reports whether an adapter implementation is bound and configured;
+- reports which operations are available: authorization URL creation, callback
+  exchange, and action execution;
+- defaults every external provider kind to unbound and not authorization-ready.
+
+`WiiiConnectAuthorizationUrlRequest`
+
+- records only safe authorization request shape: state presence, redirect URI
+  presence, requested scope flags, and sanitized metadata key names;
+- does not store OAuth state, OAuth code, redirect URI value, token, client
+  secret, or provider payload.
+
+`WiiiConnectAuthorizationUrlDecision`
+
+- returns `blocked` or `ready`;
+- requires enabled provider, agent-ready registry entry, backend-created state,
+  backend-bound redirect URI, bound/configured adapter, vault capability,
+  persistent audit ledger, and an adapter-supplied authorization URL;
+- rejects adapter/provider-kind mismatch before any OAuth handoff;
+- direct session callers may not bypass adapter policy by passing a URL.
+
 ## Lifecycle States
 
 Adapter V1 normalizes provider states into:
@@ -239,7 +270,8 @@ Composio should enter Wiii through this contract:
 ```text
 Composio toolkit catalog
   -> Wiii registry entry
-Composio connect link / session authorize
+Composio adapter capability
+  -> Wiii authorization URL decision
   -> Wiii OAuth/session handoff
 Composio connected account
   -> Wiii connection record
@@ -260,6 +292,8 @@ Before real Composio OAuth is enabled:
 - Wiii backend must create authorization sessions with state and nonce;
 - session start must return a backend decision first, not let the frontend call
   Composio directly;
+- authorization URLs must come from a bound provider adapter decision, not from
+  raw frontend input or ad hoc session arguments;
 - disabled providers must return a blocked decision with missing requirements;
 - callback handling must stay blocked until state/code validation, vault storage,
   and provider adapter exchange are ready;
@@ -290,8 +324,8 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 
 1. Add durable audit ledger persistence and per-org connection records.
 2. Add encrypted vault integration or provider-managed secret reference storage.
-3. Add provider adapter abstraction that can supply authorization URLs and token
-   exchange only behind vault policy.
+3. Add provider adapter implementation/configuration for one provider broker
+   without enabling broad action execution.
 4. Add frontend connection modal that uses Wiii backend routes only.
 5. Persist provider registry and connection records behind backend-owned storage.
 6. Add browser acceptance for connect, poll, disconnect, gated scope, and denied

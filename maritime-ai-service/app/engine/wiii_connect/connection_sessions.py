@@ -15,6 +15,7 @@ from .adapter_v1 import (
     WiiiConnectProviderRegistryEntry,
     WiiiConnectScopeGrant,
 )
+from .provider_adapters import WiiiConnectAuthorizationUrlDecision
 from .provider_registry import get_wiii_connect_provider_entry
 
 
@@ -26,6 +27,14 @@ SessionDecisionReason = Literal[
     "provider_not_agent_ready",
     "missing_connect_prerequisites",
     "provider_adapter_not_bound",
+    "provider_adapter_mismatch",
+    "provider_adapter_not_configured",
+    "provider_adapter_cannot_authorize",
+    "missing_state",
+    "missing_redirect_uri",
+    "vault_not_configured",
+    "audit_ledger_not_persistent",
+    "authorization_url_missing",
     "authorization_url_issued",
 ]
 SessionAuditStage = Literal["status_checked", "start_requested"]
@@ -183,17 +192,35 @@ def begin_connection_session(
     entry: WiiiConnectProviderRegistryEntry,
     request: WiiiConnectSessionStartRequest,
     *,
+    authorization_decision: WiiiConnectAuthorizationUrlDecision | None = None,
     authorization_url: str | None = None,
 ) -> WiiiConnectSessionStartDecision:
     """Decide whether Wiii may start provider authorization for this request."""
 
     missing_requirements = tuple(entry.requirements)
     reason = _session_block_reason(entry, missing_requirements)
-    if reason == "authorization_url_issued" and not authorization_url:
-        reason = "provider_adapter_not_bound"
+    required_next = missing_requirements
+    session_authorization_url = ""
+
+    if reason == "authorization_url_issued":
+        if authorization_decision is None:
+            reason = "provider_adapter_not_bound"
+            required_next = ("bind_provider_adapter",)
+        elif not authorization_decision.ready:
+            reason = _session_reason_from_authorization_decision(
+                authorization_decision
+            )
+            required_next = tuple(authorization_decision.required_next)
+        else:
+            session_authorization_url = authorization_decision.authorization_url
+            if not session_authorization_url:
+                reason = "authorization_url_missing"
+                required_next = ("adapter_return_authorization_url",)
 
     status: SessionDecisionStatus = (
-        "ready" if reason == "authorization_url_issued" and authorization_url else "blocked"
+        "ready"
+        if reason == "authorization_url_issued" and session_authorization_url
+        else "blocked"
     )
     audit_event = WiiiConnectConnectionSessionAuditEvent(
         stage="start_requested",
@@ -207,8 +234,8 @@ def begin_connection_session(
         label=entry.label,
         provider_kind=entry.provider_kind,
         auth_mode=entry.auth_mode,
-        authorization_url=authorization_url if status == "ready" else "",
-        required_next=missing_requirements,
+        authorization_url=session_authorization_url if status == "ready" else "",
+        required_next=required_next,
         audit_event=audit_event,
     )
 
@@ -237,6 +264,26 @@ def _session_block_reason(
     if missing_requirements:
         return "missing_connect_prerequisites"
     return "authorization_url_issued"
+
+
+def _session_reason_from_authorization_decision(
+    decision: WiiiConnectAuthorizationUrlDecision,
+) -> SessionDecisionReason:
+    if decision.reason in {
+        "provider_disabled",
+        "provider_not_agent_ready",
+        "provider_adapter_mismatch",
+        "provider_adapter_not_bound",
+        "provider_adapter_not_configured",
+        "provider_adapter_cannot_authorize",
+        "missing_state",
+        "missing_redirect_uri",
+        "vault_not_configured",
+        "audit_ledger_not_persistent",
+        "authorization_url_missing",
+    }:
+        return decision.reason
+    return "provider_adapter_not_bound"
 
 
 def _safe_metadata_key(key: str) -> str:

@@ -8,11 +8,14 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.engine.wiii_connect import (
+    WiiiConnectAuthorizationUrlRequest,
     WiiiConnectCallbackRequest,
     WiiiConnectSessionStartRequest,
     audit_ledger_status_public_metadata,
     begin_connection_session,
+    decide_authorization_url,
     get_wiii_connect_provider_entry,
+    provider_adapter_status_public_metadata,
     provider_callback_decision,
     provider_connection_status,
     provider_registry_public_metadata,
@@ -31,6 +34,7 @@ class WiiiConnectStartSessionBody(BaseModel):
 
     surface: str = "desktop"
     redirect_uri: str | None = None
+    state_present: bool = False
     requested_scopes: dict[str, bool] = Field(default_factory=dict)
     request_metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -54,6 +58,13 @@ async def get_wiii_connect_audit_ledger_status() -> dict[str, object]:
     """Return privacy-safe Wiii Connect audit ledger readiness metadata."""
 
     return audit_ledger_status_public_metadata()
+
+
+@router.get("/provider-adapters/status")
+async def get_wiii_connect_provider_adapter_status() -> dict[str, object]:
+    """Return privacy-safe Wiii Connect provider adapter readiness metadata."""
+
+    return provider_adapter_status_public_metadata()
 
 
 @router.get("/providers/{slug}/status")
@@ -89,6 +100,29 @@ async def start_wiii_connect_provider_session(
         request_metadata_keys=tuple(body.request_metadata.keys()),
     )
     decision = begin_connection_session(entry, request)
+    return decision.to_public_metadata()
+
+
+@router.post("/providers/{slug}/authorization-url")
+async def create_wiii_connect_provider_authorization_url(
+    slug: str,
+    body: WiiiConnectStartSessionBody | None = None,
+) -> dict[str, object]:
+    """Return the provider adapter decision before exposing a connect URL."""
+
+    entry = get_wiii_connect_provider_entry(slug)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
+    body = body or WiiiConnectStartSessionBody()
+    request = WiiiConnectAuthorizationUrlRequest(
+        provider_slug=entry.slug,
+        surface=body.surface,
+        requested_scopes=scope_grant_from_mapping(body.requested_scopes),
+        state_present=body.state_present,
+        redirect_uri_present=bool(body.redirect_uri),
+        request_metadata_keys=tuple(body.request_metadata.keys()),
+    )
+    decision = decide_authorization_url(entry, request)
     return decision.to_public_metadata()
 
 
