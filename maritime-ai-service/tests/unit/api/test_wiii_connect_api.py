@@ -43,3 +43,69 @@ async def test_wiii_connect_provider_registry_api_is_privacy_safe(app):
     assert "api_key" not in serialized
     assert "approval_token" not in serialized
     assert "vault://" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_provider_status_api_is_fail_closed(app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/wiii-connect/providers/facebook/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["version"] == "wiii_connect_session.v1"
+    assert payload["provider_slug"] == "facebook"
+    assert payload["can_start_authorization"] is False
+    assert payload["reason"] == "provider_disabled"
+    assert "execution_gateway" in payload["missing_requirements"]
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_session_start_api_blocks_without_leaking_secrets(app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/wiii-connect/providers/facebook/sessions",
+            json={
+                "surface": "desktop",
+                "redirect_uri": "https://wiii.example.test/callback",
+                "requested_scopes": {"read": True, "write": True},
+                "request_metadata": {
+                    "access_token": "secret-value",
+                    "client_secret": "secret-value",
+                    "workspace_id": "workspace_1",
+                },
+                "refresh_token": "secret-value",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["version"] == "wiii_connect_session.v1"
+    assert payload["status"] == "blocked"
+    assert payload["reason"] == "provider_disabled"
+    assert payload["authorization_url"] == ""
+    assert payload["audit_event"]["request"]["requested_scopes"]["write"] is True
+    assert "redacted_sensitive_field" in serialized
+    assert "workspace_id" in serialized
+    assert "access_token" not in serialized
+    assert "refresh_token" not in serialized
+    assert "client_secret" not in serialized
+    assert "secret-value" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_session_api_404_for_unknown_provider(app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post("/wiii-connect/providers/not-real/sessions")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "unknown_wiii_connect_provider"

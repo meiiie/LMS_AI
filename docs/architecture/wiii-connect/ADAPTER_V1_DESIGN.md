@@ -51,6 +51,19 @@ The read-only API projection lives at:
 GET /api/v1/wiii-connect/providers
 ```
 
+The connection-session control contract lives in:
+
+```text
+maritime-ai-service/app/engine/wiii_connect/connection_sessions.py
+```
+
+Current session/status API projections:
+
+```text
+GET  /api/v1/wiii-connect/providers/{slug}/status
+POST /api/v1/wiii-connect/providers/{slug}/sessions
+```
+
 Frontend surfaces should consume this registry/snapshot projection instead of
 inventing a separate external-provider source of truth. Until a provider has
 OAuth, vault, scoped action catalog, gateway, and audit support, the registry
@@ -97,6 +110,24 @@ must keep that provider disabled and non-agent-ready.
 `WiiiConnectAuditEvent`
 
 - privacy-safe event around request, deny, start, success, and failure stages.
+
+`WiiiConnectSessionStartRequest`
+
+- provider slug, UI surface, requested scope flags, and safe request-shape keys;
+- stores redirect URI presence only, not the URI value;
+- redacts sensitive request metadata keys before public/audit projection.
+
+`WiiiConnectProviderConnectionStatus`
+
+- provider authorization readiness for UI;
+- `can_start_authorization` remains false until registry, agent readiness,
+  provider adapter, vault, scope policy, execution gateway, and audit are ready.
+
+`WiiiConnectSessionStartDecision`
+
+- returns `blocked` or `ready`;
+- returns an authorization URL only when a provider adapter supplies one;
+- current Composio registry entries return `blocked/provider_disabled`.
 
 ## Lifecycle States
 
@@ -178,6 +209,9 @@ agent receive curated action schemas for the selected provider.
 Before real Composio OAuth is enabled:
 
 - Wiii backend must create authorization sessions with state and nonce;
+- session start must return a backend decision first, not let the frontend call
+  Composio directly;
+- disabled providers must return a blocked decision with missing requirements;
 - callback/webhook handling must bind provider account to Wiii org/user;
 - credential material must be stored in an encrypted vault or provider-managed
   backend secret store;
@@ -201,10 +235,11 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 
 ## Next Slices
 
-1. Persist provider registry and connection records behind backend API routes.
-2. Add OAuth session start/callback endpoints for a disabled Composio adapter.
-3. Add encrypted vault integration or provider-managed secret reference storage.
-4. Add frontend connection modal that uses Wiii backend routes only.
+1. Add OAuth callback/token-exchange placeholder that is still fail-closed until
+   vault storage exists.
+2. Add encrypted vault integration or provider-managed secret reference storage.
+3. Add frontend connection modal that uses Wiii backend routes only.
+4. Persist provider registry and connection records behind backend-owned storage.
 5. Add browser acceptance for connect, poll, disconnect, gated scope, and denied
    execute cases.
 6. Enable one low-risk read-only Composio action before any write action.
