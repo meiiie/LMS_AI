@@ -105,6 +105,25 @@ Wiii Connect V0 should stay small:
 - Keep all mutating tools behind preview and approval evidence.
 - Record enough metadata in runtime ledgers to debug wrong-path behavior.
 
+## Current UX Surface
+
+The first product-facing Wiii Connect surface lives inside the desktop shell as
+the `Wiii Connect` page. It is an observability and governance page, not a
+third-party OAuth console yet.
+
+The page must:
+
+- read only the sanitized `chat_lifecycle.capabilities.wiii_connect` snapshot;
+- show connection status, agent-ready state, scopes, counts, warnings, and path
+  policy in grouped UI;
+- summarize tool/provider state without exposing raw tool schemas, provider
+  payloads, document text, approval token values, OAuth tokens, or API keys;
+- show external providers such as Composio, MCP, custom OAuth, and workflow
+  bridges as disabled until a vault, permission gate, and provider adapter
+  exist;
+- stay observational until backend execution gateways and reviewable adapter
+  contracts are implemented.
+
 V0 must not:
 
 - Build native Facebook/Gmail OAuth connectors.
@@ -148,8 +167,8 @@ this repository.
    tool policy state.
 2. Update `ToolPolicySession` to consume the snapshot as the source of
    connection status instead of building ad hoc connection maps.
-3. Extend the frontend runtime dashboard to display the same snapshot, grouped
-   by provider and path.
+3. Extend the frontend Wiii Connect page/runtime dashboard to display the same
+   snapshot, grouped by provider and path.
 4. Add tests proving that LMS apply, Pointy, web/weather, document-grounded
    chat, and visual/Code Studio paths bind only the right tools.
 5. Add a Composio adapter only after the native Wiii snapshot is stable.

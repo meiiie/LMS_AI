@@ -12,6 +12,7 @@ import {
   Sun,
   Sidebar,
   Sparkles,
+  PlugZap,
 } from "lucide-react";
 import { useChatStore } from "@/stores/chat-store";
 import { useUIStore } from "@/stores/ui-store";
@@ -41,7 +42,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const listRef = useRef<HTMLDivElement>(null);
 
   const { conversations, setActiveConversation, createConversation } = useChatStore();
-  const { toggleSidebar, openSettings } = useUIStore();
+  const { toggleSidebar, openSettings, openWiiiConnect } = useUIStore();
   const theme = useSettingsStore((s) => s.settings.theme);
   const { activeDomainId } = useDomainStore();
   const { activeOrgId } = useOrgStore();
@@ -71,6 +72,14 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         description: "Ctrl+,",
         icon: <Settings size={16} />,
         action: () => { openSettings(); onClose(); },
+        category: "action",
+      },
+      {
+        id: "open-wiii-connect",
+        label: "Wiii Connect",
+        description: "Quản lý kết nối",
+        icon: <PlugZap size={16} />,
+        action: () => { openWiiiConnect(); onClose(); },
         category: "action",
       },
       {
@@ -112,7 +121,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     }));
 
     return [...actions, ...convItems];
-  }, [conversations, theme, createConversation, toggleSidebar, openSettings, setActiveConversation, onClose, activeDomainId, activeOrgId]);
+  }, [conversations, theme, createConversation, toggleSidebar, openSettings, openWiiiConnect, setActiveConversation, onClose, activeDomainId, activeOrgId]);
 
   // Filter by query
   const filtered = useMemo(() => {

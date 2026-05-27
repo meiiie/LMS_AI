@@ -5,7 +5,7 @@
  */
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Plus, Trash2, Settings, MessageSquare, Search, Pin, PinOff, Pencil, Shield, Building2, LogOut, User, Network, PanelLeftClose, PanelLeft, MoreHorizontal } from "lucide-react";
+import { Plus, Trash2, Settings, MessageSquare, Search, Pin, PinOff, Pencil, Shield, Building2, LogOut, User, Network, PlugZap, PanelLeftClose, PanelLeft, MoreHorizontal } from "lucide-react";
 import { useChatStore } from "@/stores/chat-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useDomainStore } from "@/stores/domain-store";
@@ -39,7 +39,7 @@ export function Sidebar() {
     pinConversation,
     unpinConversation,
   } = useChatStore();
-  const { sidebarOpen, toggleSidebar, activeView, openSettings, openAdminPanel, openOrgManagerPanel, openSoulBridge, navigateToChat } = useUIStore();
+  const { sidebarOpen, toggleSidebar, activeView, openSettings, openAdminPanel, openOrgManagerPanel, openSoulBridge, openWiiiConnect, navigateToChat } = useUIStore();
   const { isSystemAdmin, isOrgAdmin } = useOrgStore();
   const { activeDomainId } = useDomainStore();
   const { activeOrgId } = useOrgStore();
@@ -218,6 +218,16 @@ export function Sidebar() {
           </button>
         )}
 
+        {/* Wiii Connect */}
+        <button
+          onClick={openWiiiConnect}
+          className={iconBtnClass(activeView === "wiii-connect")}
+          title="Wiii Connect"
+          aria-label="Mở Wiii Connect"
+        >
+          <PlugZap size={18} />
+        </button>
+
         {/* Sprint 216: Soul Bridge */}
         <button
           onClick={openSoulBridge}
@@ -348,6 +358,18 @@ export function Sidebar() {
 
       {/* Sprint 231h: User profile footer — click avatar → dropdown menu (Claude.ai pattern) */}
       <div className="px-2 py-2 border-t border-border relative">
+        <button
+          onClick={openWiiiConnect}
+          className={`mb-1 flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm transition-colors ${
+            activeView === "wiii-connect"
+              ? "bg-[var(--accent)]/10 text-[var(--accent)] font-medium"
+              : "text-text-secondary hover:bg-surface-tertiary hover:text-text"
+          }`}
+          aria-current={activeView === "wiii-connect" ? "page" : undefined}
+        >
+          <PlugZap size={15} />
+          <span className="truncate">Wiii Connect</span>
+        </button>
         {isAuthenticated && (
           <>
             <button
@@ -421,6 +443,14 @@ export function Sidebar() {
                           Quản lý tổ chức
                         </button>
                       )}
+                      <button
+                        onClick={() => { openWiiiConnect(); setUserMenuOpen(false); }}
+                        className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-tertiary transition-colors"
+                        role="menuitem"
+                      >
+                        <PlugZap size={15} />
+                        Wiii Connect
+                      </button>
                       <button
                         onClick={() => { openSoulBridge(); setUserMenuOpen(false); }}
                         className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-tertiary transition-colors"

@@ -67,6 +67,11 @@ const SoulBridgePanel = lazy(async () => {
   return { default: mod.SoulBridgePanel };
 });
 
+const WiiiConnectPage = lazy(async () => {
+  const mod = await import("@/components/connect/WiiiConnectPage");
+  return { default: mod.WiiiConnectPage };
+});
+
 const CodeStudioPanel = lazy(async () => {
   const mod = await import("./CodeStudioPanel");
   return { default: mod.CodeStudioPanel };
@@ -251,6 +256,7 @@ export function AppShell() {
               {activeView === "org-admin" && <OrgAdminView />}
               {activeView === "settings" && <SettingsView />}
               {activeView === "soul-bridge" && <SoulBridgePanel />}
+              {activeView === "wiii-connect" && <WiiiConnectPage />}
             </Suspense>
           )}
         </main>

@@ -69,8 +69,22 @@ describe("Sprint 192: ui-store activeView", () => {
     expect(useUIStore.getState().activeView).toBe("chat");
   });
 
+  it("openWiiiConnect sets activeView to wiii-connect", () => {
+    useUIStore.getState().openWiiiConnect();
+    expect(useUIStore.getState().activeView).toBe("wiii-connect");
+  });
+
+  it("closeWiiiConnect returns to chat", () => {
+    useUIStore.getState().openWiiiConnect();
+    useUIStore.setState({ commandPaletteOpen: true });
+    useUIStore.getState().closeWiiiConnect();
+    const state = useUIStore.getState();
+    expect(state.activeView).toBe("chat");
+    expect(state.commandPaletteOpen).toBe(false);
+  });
+
   it("navigateToChat returns to chat from any view", () => {
-    const views: ActiveView[] = ["system-admin", "org-admin", "settings"];
+    const views: ActiveView[] = ["system-admin", "org-admin", "settings", "wiii-connect"];
     for (const view of views) {
       useUIStore.setState({ activeView: view });
       useUIStore.getState().navigateToChat();
