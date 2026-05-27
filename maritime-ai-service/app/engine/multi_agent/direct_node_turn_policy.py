@@ -91,7 +91,11 @@ def resolve_direct_node_turn_policy(
     is_emotional_support_turn = _looks_emotional_support_turn(query)
     is_chatter_fast_path = (
         routing_method == "always_on_chatter_fast_path"
-        or (hint_kind == "fast_chatter" and hint_shape in {"reaction", "vague_banter"})
+        or (
+            hint_kind == "fast_chatter"
+            and hint_shape
+            in {"hunger_chatter", "reaction", "social_status", "vague_banter"}
+        )
     )
     is_social_followup_chatter = (
         not is_identity_turn
@@ -102,7 +106,10 @@ def resolve_direct_node_turn_policy(
     )
     is_social_fast_path = (
         routing_method == "always_on_social_fast_path"
-        or (hint_kind == "fast_chatter" and hint_shape in {"social", "social_followup"})
+        or (
+            hint_kind == "fast_chatter"
+            and hint_shape in {"social", "social_followup", "social_status"}
+        )
     )
     visual_decision = resolve_visual_intent(query)
     is_short_house_chatter = (

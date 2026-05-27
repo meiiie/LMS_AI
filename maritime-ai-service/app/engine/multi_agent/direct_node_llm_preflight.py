@@ -56,7 +56,12 @@ def select_direct_node_llm(
 ) -> DirectNodeLlmSelection:
     """Choose the direct-node LLM without binding tools or executing it."""
 
-    direct_node_id = "direct_identity" if is_identity_turn else "direct"
+    if is_identity_turn:
+        direct_node_id = "direct_identity"
+    elif is_short_house_chatter:
+        direct_node_id = "direct_chatter"
+    else:
+        direct_node_id = "direct"
     native_direct_possible = (
         not bool(ctx.get("images") or [])
         and not is_short_house_chatter

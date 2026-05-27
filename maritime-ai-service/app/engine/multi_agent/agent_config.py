@@ -21,6 +21,7 @@ from app.engine.multi_agent.agent_runtime_profiles import (
     resolve_agent_runtime_profile_group,
     sanitize_agent_runtime_profiles,
 )
+from app.engine.model_catalog import NVIDIA_DEEPSEEK_FLASH_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,13 @@ _DEFAULT_CONFIGS: Dict[str, AgentNodeConfig] = {
     "grader": AgentNodeConfig("grader", tier="moderate"),
     "memory": AgentNodeConfig("memory", tier="light", temperature=0.5),
     "direct": AgentNodeConfig("direct", tier="light", enable_agentic_loop=True),
+    "direct_chatter": AgentNodeConfig(
+        "direct_chatter",
+        provider="nvidia",
+        model=NVIDIA_DEEPSEEK_FLASH_MODEL,
+        tier="light",
+        temperature=0.7,
+    ),
     "direct_identity": AgentNodeConfig("direct_identity", tier="deep"),
     "code_studio_agent": AgentNodeConfig(
         "code_studio_agent",

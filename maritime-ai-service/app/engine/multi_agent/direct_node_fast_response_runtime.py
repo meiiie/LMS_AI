@@ -4,14 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from app.engine.multi_agent.direct_node_chatter_runtime import (
-    _build_hunger_chatter_answer,
-    _build_hunger_chatter_thinking,
-    _build_social_status_chatter_answer,
-    _build_social_status_chatter_thinking,
-    _looks_hunger_chatter_turn,
-    _looks_social_status_chatter_turn,
-)
 from app.engine.multi_agent.direct_node_meta_fast_paths import (
     _build_reasoning_safety_meta_answer,
     _build_reasoning_safety_meta_thinking,
@@ -257,35 +249,6 @@ def resolve_direct_node_fast_response(
                     ),
                 )
                 return DirectNodeFastResponse(response, "session_memory_recall")
-        elif (
-            _looks_hunger_chatter_turn(normalized_for_fast)
-            and not _looks_session_memory_write_turn(normalized_for_fast)
-            and not dependencies.needs_web_search(query)
-            and not dependencies.needs_datetime(query)
-        ):
-            response = _build_hunger_chatter_answer(query)
-            _record_fast_thinking(
-                state=state,
-                thinking=_build_hunger_chatter_thinking(query),
-                provenance="deterministic_hunger_chatter",
-                record_thinking_snapshot_fn=dependencies.record_thinking_snapshot_fn,
-            )
-            return DirectNodeFastResponse(response, "hunger_chatter")
-        elif (
-            not request.has_uploaded_document_context
-            and _looks_social_status_chatter_turn(normalized_for_fast)
-            and not _looks_session_memory_write_turn(normalized_for_fast)
-            and not dependencies.needs_web_search(query)
-            and not dependencies.needs_datetime(query)
-        ):
-            response = _build_social_status_chatter_answer(query)
-            _record_fast_thinking(
-                state=state,
-                thinking=_build_social_status_chatter_thinking(query),
-                provenance="deterministic_social_status_chatter",
-                record_thinking_snapshot_fn=dependencies.record_thinking_snapshot_fn,
-            )
-            return DirectNodeFastResponse(response, "social_status_chatter")
     except Exception as exc:  # noqa: BLE001
         if dependencies.logger_obj is not None:
             dependencies.logger_obj.debug(
