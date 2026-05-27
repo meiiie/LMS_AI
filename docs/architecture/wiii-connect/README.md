@@ -175,4 +175,9 @@ this repository.
    it read-only until real provider adapters exist.
 4. Add tests proving that LMS apply, Pointy, web/weather, document-grounded
    chat, and visual/Code Studio paths bind only the right tools.
-5. Add a Composio adapter only after the native Wiii snapshot is stable.
+5. Use `ADAPTER_V1_DESIGN.md` as the contract for external providers. Composio
+   remains disabled until registry, vault, OAuth/session callback, scope
+   policy, execution gateway, and audit ledger are implemented against that
+   contract.
+6. Add a Composio adapter only after the native Wiii snapshot and Adapter V1
+   gateway are stable.
