@@ -66,6 +66,7 @@ def _build_router() -> APIRouter:
         ("app.api.v1.llm_status.router", "LLM Status"),
         ("app.api.v1.document_context.router", "Document Context"),
         ("app.api.v1.host_actions.router", "Host Action Audit"),
+        ("app.api.v1.wiii_connect.router", "Wiii Connect"),
         ("app.api.v1.voice.router", "Voice"),
         ("app.api.v1.soul_bridge.router", "Soul Bridge"),
         ("app.api.v1.living_agent.router", "Living Agent"),
