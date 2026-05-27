@@ -93,3 +93,41 @@ def test_callback_requires_state_code_vault_and_adapter_before_accepting():
     assert accepted.accepted is True
     assert accepted.vault_ref_issued is True
     assert accepted.connection_id == "pending_connection_ref"
+
+
+def test_callback_accepts_vault_capability_without_boolean_override():
+    from app.engine.wiii_connect.adapter_v1 import WiiiConnectProviderRegistryEntry
+    from app.engine.wiii_connect.callback_boundary import (
+        WiiiConnectCallbackRequest,
+        provider_callback_decision_for_entry,
+    )
+    from app.engine.wiii_connect.vault import WiiiConnectVaultCapability
+
+    entry = WiiiConnectProviderRegistryEntry(
+        slug="internal_test",
+        label="Internal Test",
+        provider_kind="composio",
+        auth_mode="oauth2",
+        enabled=True,
+        agent_ready=True,
+        requirements=(),
+    )
+    decision = provider_callback_decision_for_entry(
+        entry,
+        WiiiConnectCallbackRequest(
+            provider_slug="internal_test",
+            state_present=True,
+            code_present=True,
+        ),
+        vault_capability=WiiiConnectVaultCapability(
+            enabled=True,
+            backend="provider_managed",
+            accepts_secret_material=True,
+            provider_managed=True,
+            reason="ready",
+        ),
+        provider_adapter_bound=True,
+    )
+
+    assert decision.accepted is True
+    assert decision.reason == "accepted"

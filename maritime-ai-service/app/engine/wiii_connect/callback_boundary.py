@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from .adapter_v1 import WiiiConnectProviderRegistryEntry
 from .provider_registry import get_wiii_connect_provider_entry
+from .vault import WiiiConnectVaultCapability
 
 
 WIII_CONNECT_CALLBACK_CONTRACT_VERSION = "wiii_connect_callback.v1"
@@ -113,6 +114,7 @@ def provider_callback_decision(
     request: WiiiConnectCallbackRequest,
     *,
     vault_ready: bool = False,
+    vault_capability: WiiiConnectVaultCapability | None = None,
     provider_adapter_bound: bool = False,
 ) -> WiiiConnectCallbackDecision | None:
     """Return a callback decision for a registry provider slug."""
@@ -124,6 +126,7 @@ def provider_callback_decision(
         entry,
         request,
         vault_ready=vault_ready,
+        vault_capability=vault_capability,
         provider_adapter_bound=provider_adapter_bound,
     )
 
@@ -133,6 +136,7 @@ def provider_callback_decision_for_entry(
     request: WiiiConnectCallbackRequest,
     *,
     vault_ready: bool = False,
+    vault_capability: WiiiConnectVaultCapability | None = None,
     provider_adapter_bound: bool = False,
 ) -> WiiiConnectCallbackDecision:
     """Decide whether a callback may be exchanged and persisted."""
@@ -140,7 +144,7 @@ def provider_callback_decision_for_entry(
     reason = _callback_reason(
         entry,
         request,
-        vault_ready=vault_ready,
+        vault_ready=_resolved_vault_ready(vault_ready, vault_capability),
         provider_adapter_bound=provider_adapter_bound,
     )
     status: CallbackDecisionStatus = "accepted" if reason == "accepted" else "blocked"
@@ -178,6 +182,13 @@ def _callback_reason(
     if not provider_adapter_bound:
         return "provider_adapter_not_bound"
     return "accepted"
+
+
+def _resolved_vault_ready(
+    vault_ready: bool,
+    vault_capability: WiiiConnectVaultCapability | None,
+) -> bool:
+    return bool(vault_ready or (vault_capability and vault_capability.can_store_external_secret))
 
 
 def _safe_metadata_key(key: str) -> str:
