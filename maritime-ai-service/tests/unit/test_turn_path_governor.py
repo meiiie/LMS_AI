@@ -111,6 +111,28 @@ def test_turn_path_governor_marks_wiii_pipeline_meta_as_no_tool_direct_prose():
     assert decision.bind_tools is False
 
 
+def test_turn_path_governor_scopes_character_memory_tools():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(
+            normalized_query="ten toi la an",
+            needs_character_memory_tool=True,
+        )
+    )
+
+    assert decision.path == "direct_prose"
+    assert decision.reason == "character_memory_tool_request"
+    assert decision.bind_tools is True
+    assert decision.force_tools is False
+    assert decision.allow_all_tools is False
+    assert decision.should_keep_tool_name("tool_character_note") is True
+    assert decision.should_keep_tool_name("tool_web_search") is False
+
+
 def test_turn_path_governor_narrows_visual_app_to_required_tool():
     from app.engine.multi_agent.turn_path_governor import (
         TurnPathSignals,
@@ -298,6 +320,24 @@ def test_collect_direct_tools_keeps_explicit_web_search_path():
     assert state["_turn_path_decision"]["path"] == "web_search"
     assert "tool_web_search" in names
     assert "tool_current_weather" not in names
+
+
+def test_collect_direct_tools_scopes_personal_fact_to_character_tools():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        "Ten toi la An",
+        user_role="student",
+        state=state,
+    )
+    names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
+
+    assert force_tools is False
+    assert state["_turn_path_decision"]["reason"] == "character_memory_tool_request"
+    assert "tool_character_note" in names
+    assert "tool_character_log_experience" in names
+    assert "tool_web_search" not in names
 
 
 def test_collect_direct_tools_routes_weather_followup_to_weather_tool():

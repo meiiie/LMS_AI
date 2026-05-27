@@ -260,8 +260,8 @@ class TestDirectNodeCharacterTools:
     """Sprint 97: Character tools bound and dispatched in direct node."""
 
     @pytest.mark.asyncio
-    async def test_tools_bound_when_enabled(self):
-        """bind_tools should be called when enable_character_tools=True."""
+    async def test_plain_direct_prose_does_not_bind_character_tools_when_enabled(self):
+        """Plain direct prose should stay off tools even when character tools are enabled."""
         from app.engine.multi_agent.state import AgentState
 
         state: AgentState = {
@@ -309,21 +309,12 @@ class TestDirectNodeCharacterTools:
             from app.engine.multi_agent.graph import direct_response_node
             await direct_response_node(state)
 
-            mock_llm.bind_tools.assert_called_once()
-            bound_tools = mock_llm.bind_tools.call_args[0][0]
-            assert len(bound_tools) >= 9
-            bound_names = {getattr(tool, "name", "") for tool in bound_tools}
-            assert "tool_character_note" in bound_names
-            assert "tool_character_log_experience" in bound_names
-            names = [t.name for t in bound_tools]
-            assert "tool_character_note" in names
-            assert "tool_current_datetime" in names
-            assert "tool_web_search" in names
-            assert "tool_search_maritime" not in names
+            mock_llm.bind_tools.assert_not_called()
+            assert state["_turn_path_decision"]["reason"] == "default_direct_prose_no_tool"
 
     @pytest.mark.asyncio
     async def test_no_character_tools_when_disabled(self):
-        """When enable_character_tools=False, only web_search tool should be bound."""
+        """Plain direct prose stays no-tool when character tools are disabled."""
         from app.engine.multi_agent.state import AgentState
 
         state: AgentState = {
@@ -369,13 +360,8 @@ class TestDirectNodeCharacterTools:
             from app.engine.multi_agent.graph import direct_response_node
             await direct_response_node(state)
 
-            # Utility tools always bound even without character tools
-            mock_llm.bind_tools.assert_called_once()
-            bound_tools = mock_llm.bind_tools.call_args[0][0]
-            names = [t.name for t in bound_tools]
-            assert "tool_current_datetime" in names
-            assert "tool_web_search" in names
-            assert "tool_character_note" not in names
+            mock_llm.bind_tools.assert_not_called()
+            assert state["_turn_path_decision"]["reason"] == "default_direct_prose_no_tool"
 
     @pytest.mark.asyncio
     async def test_tool_dispatch_works(self):

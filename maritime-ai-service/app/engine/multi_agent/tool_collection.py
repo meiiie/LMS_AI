@@ -39,6 +39,18 @@ from app.engine.tools.tool_capability_registry import (
 
 logger = logging.getLogger(__name__)
 
+_CHARACTER_MEMORY_FACT_MARKERS: tuple[str, ...] = (
+    "goi toi la",
+    "goi minh la",
+    "minh ten la",
+    "my name is",
+    "ten cua minh la",
+    "ten cua toi la",
+    "ten minh la",
+    "ten toi la",
+    "toi ten la",
+)
+
 
 def _load_attr(module_name: str, attr_name: str):
     """Load a helper lazily to reduce static tool-collection coupling."""
@@ -153,6 +165,25 @@ def _looks_wiii_pipeline_meta_turn(query: str) -> bool:
             "app.engine.multi_agent.supervisor_runtime_support",
             "_looks_wiii_pipeline_meta_turn",
         )(normalized)
+    except Exception:
+        return False
+
+
+def _looks_character_memory_tool_turn(query: str) -> bool:
+    try:
+        normalized = _normalize_for_intent(query)
+    except Exception:
+        normalized = str(query or "").lower().strip()
+    if not normalized:
+        return False
+    if any(marker in normalized for marker in _CHARACTER_MEMORY_FACT_MARKERS):
+        return True
+    try:
+        support = "app.engine.multi_agent.supervisor_runtime_support"
+        return bool(
+            _load_attr(support, "_looks_memory_write_turn")(normalized)
+            or _load_attr(support, "_looks_session_memory_write_turn")(normalized)
+        )
     except Exception:
         return False
 
@@ -581,6 +612,7 @@ def _resolve_direct_turn_path_decision(
             _needs_direct_knowledge_search,
             query,
         ),
+        needs_character_memory_tool=_looks_character_memory_tool_turn(query),
         needs_analysis_tool=_safe_intent_flag(_needs_analysis_tool, query),
         prefers_code_execution_lane=_prefers_code_execution_lane_from_normalized(
             normalized_query
@@ -673,6 +705,8 @@ def _should_use_no_tools_for_direct_prose(
     if _looks_wiii_pipeline_meta_turn(query):
         return True
     if force_tools:
+        return False
+    if _looks_character_memory_tool_turn(query):
         return False
     if _routing_intent(state) not in {
         "general",

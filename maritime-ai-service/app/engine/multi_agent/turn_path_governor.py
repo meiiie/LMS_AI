@@ -43,6 +43,13 @@ TurnPathName = Literal[
 
 POINTY_TOOL_PREFIXES: tuple[str, ...] = (POINTY_TOOL_PREFIX,)
 HOST_ACTION_TOOL_PREFIXES: tuple[str, ...] = (HOST_ACTION_PREFIX,)
+CHARACTER_MEMORY_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "tool_character_note",
+        "tool_character_read",
+        "tool_character_log_experience",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +73,7 @@ class TurnPathSignals:
     needs_legal_search: bool = False
     needs_lms_query: bool = False
     needs_direct_knowledge_search: bool = False
+    needs_character_memory_tool: bool = False
     needs_analysis_tool: bool = False
     prefers_code_execution_lane: bool = False
     needs_maritime_search: bool = False
@@ -263,6 +271,15 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             allow_agent_handoff=False,
         )
 
+    if signals.needs_character_memory_tool:
+        return TurnPathDecision(
+            path="direct_prose",
+            reason="character_memory_tool_request",
+            allow_all_tools=False,
+            allowed_tool_names=CHARACTER_MEMORY_TOOL_NAMES,
+            allow_agent_handoff=False,
+        )
+
     if signals.prefers_code_execution_lane:
         return TurnPathDecision(
             path="code_execution",
@@ -451,6 +468,7 @@ def _has_tool_or_output_signal(signals: TurnPathSignals) -> bool:
             signals.needs_legal_search,
             signals.needs_lms_query,
             signals.needs_direct_knowledge_search,
+            signals.needs_character_memory_tool,
             signals.needs_analysis_tool,
             signals.prefers_code_execution_lane,
             signals.needs_maritime_search,
