@@ -14,6 +14,14 @@ from .adapter_v1 import (
     is_connection_baseline_ready,
     normalize_connection_state,
 )
+from .callback_boundary import (
+    WIII_CONNECT_CALLBACK_CONTRACT_VERSION,
+    WiiiConnectCallbackAuditEvent,
+    WiiiConnectCallbackDecision,
+    WiiiConnectCallbackRequest,
+    provider_callback_decision,
+    provider_callback_decision_for_entry,
+)
 from .connection_sessions import (
     WIII_CONNECT_SESSION_CONTRACT_VERSION,
     WiiiConnectConnectionSessionAuditEvent,
@@ -42,8 +50,12 @@ from .snapshot import (
 
 __all__ = [
     "WIII_CONNECT_ADAPTER_VERSION",
+    "WIII_CONNECT_CALLBACK_CONTRACT_VERSION",
     "WIII_CONNECT_SESSION_CONTRACT_VERSION",
     "WiiiConnectAuditEvent",
+    "WiiiConnectCallbackAuditEvent",
+    "WiiiConnectCallbackDecision",
+    "WiiiConnectCallbackRequest",
     "WiiiConnectConnectionSessionAuditEvent",
     "WiiiConnectConnectionRecordV1",
     "WiiiConnectExecutionDecision",
@@ -68,6 +80,8 @@ __all__ = [
     "is_connection_baseline_ready",
     "list_wiii_connect_provider_registry",
     "normalize_connection_state",
+    "provider_callback_decision",
+    "provider_callback_decision_for_entry",
     "provider_connection_status",
     "provider_connection_status_for_entry",
     "provider_registry_public_metadata",
