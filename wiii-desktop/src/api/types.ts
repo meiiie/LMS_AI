@@ -452,6 +452,31 @@ export interface WiiiConnectRuntimeSnapshot {
   warnings?: string[];
 }
 
+export interface WiiiConnectProviderRegistryEntry {
+  version?: string;
+  slug: string;
+  label: string;
+  provider_kind: string;
+  auth_mode?: string;
+  enabled?: boolean;
+  agent_ready?: boolean;
+  category?: string;
+  description?: string;
+  allowed_paths?: string[];
+  action_count?: number;
+  requirements?: string[];
+  required_fields?: Array<Record<string, unknown>>;
+  default_scopes?: Record<string, boolean>;
+  source?: string;
+  warnings?: string[];
+}
+
+export interface WiiiConnectProviderRegistryResponse {
+  version: string;
+  adapter_version?: string;
+  providers: WiiiConnectProviderRegistryEntry[];
+}
+
 export interface SSEChatLifecycleEvent {
   schema_version: string;
   event_name: string;

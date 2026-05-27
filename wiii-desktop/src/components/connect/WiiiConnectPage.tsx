@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Activity,
@@ -24,10 +24,12 @@ import {
   XCircle,
 } from "lucide-react";
 import type {
+  WiiiConnectProviderRegistryEntry,
   WiiiConnectRuntimeConnection,
   WiiiConnectRuntimePathCapability,
   WiiiConnectRuntimeSnapshot,
 } from "@/api/types";
+import { fetchWiiiConnectProviders } from "@/api/wiii-connect";
 import { FullPageView, type FullPageTab } from "@/components/layout/FullPageView";
 import {
   buildCapabilityStatusViewModel,
@@ -72,6 +74,9 @@ interface ExternalCatalogDefinition {
   category: Exclude<CatalogCategory, "all">;
   icon: LucideIcon;
   requirements: string[];
+  source?: "backend" | "local";
+  authMode?: string;
+  actionCount?: number;
 }
 
 interface CatalogCard {
@@ -600,6 +605,80 @@ function categoryLabel(category: CatalogCategory): string {
   return categoryLabelById[category] ?? "Khác";
 }
 
+function toCatalogCategory(value: unknown): Exclude<CatalogCategory, "all"> {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (
+    normalized === "runtime" ||
+    normalized === "chat" ||
+    normalized === "productivity" ||
+    normalized === "automation" ||
+    normalized === "social" ||
+    normalized === "learning" ||
+    normalized === "platform"
+  ) {
+    return normalized;
+  }
+  return "automation";
+}
+
+function toProviderFilter(value: unknown): Exclude<ProviderFilter, "wiii_native"> | null {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (
+    normalized === "composio" ||
+    normalized === "channels" ||
+    normalized === "mcp" ||
+    normalized === "workflow"
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+function iconForExternalProvider(
+  slug: string,
+  provider: Exclude<ProviderFilter, "wiii_native">,
+): LucideIcon {
+  const normalized = slug.toLowerCase();
+  if (provider === "mcp") return normalized.includes("local") ? Server : Network;
+  if (provider === "workflow") return normalized.includes("script") ? Code2 : Workflow;
+  if (provider === "channels") return normalized.includes("email") ? FileText : Network;
+  if (normalized.includes("github")) return Code2;
+  if (normalized.includes("drive") || normalized.includes("gmail")) return FileText;
+  if (normalized.includes("calendar") || normalized.includes("asana")) return Workflow;
+  if (normalized.includes("notion") || normalized.includes("airtable")) return Database;
+  return Globe2;
+}
+
+function registryEntriesToExternalDefinitions(
+  entries: WiiiConnectProviderRegistryEntry[] | null,
+): ExternalCatalogDefinition[] | null {
+  if (!entries || entries.length === 0) return null;
+  const definitions = entries
+    .map((entry): ExternalCatalogDefinition | null => {
+      const provider = toProviderFilter(entry.provider_kind);
+      if (!provider) return null;
+      return {
+        id: entry.slug,
+        provider,
+        label: entry.label || entry.slug,
+        description:
+          entry.description ||
+          "Provider do backend registry khai báo; adapter vẫn fail-closed cho đến khi có vault, policy và audit.",
+        category: toCatalogCategory(entry.category),
+        icon: iconForExternalProvider(entry.slug, provider),
+        requirements:
+          entry.requirements && entry.requirements.length > 0
+            ? entry.requirements
+            : ["Vault", "Scope policy", "Execution gateway", "Audit ledger"],
+        source: "backend",
+        authMode: entry.auth_mode,
+        actionCount: entry.action_count,
+      };
+    })
+    .filter((definition): definition is ExternalCatalogDefinition => definition !== null);
+  return definitions.length > 0 ? definitions : null;
+}
+
 function buildNativeCatalogCards(
   snapshot: WiiiConnectRuntimeSnapshot | null,
   fallbackModel: CapabilityStatusViewModel,
@@ -692,39 +771,55 @@ function buildNativeCatalogCards(
   });
 }
 
-function buildExternalCatalogCards(): CatalogCard[] {
-  return externalCatalogDefinitions.map((definition) => ({
-    id: `${definition.provider}-${definition.id}`,
-    provider: definition.provider,
-    providerLabel: providerKindLabels[definition.provider] ?? definition.provider,
-    label: definition.label,
-    description: definition.description,
-    category: definition.category,
-    categoryLabel: categoryLabel(definition.category),
-    icon: definition.icon,
-    tone: "off",
-    status: "Chưa bật",
-    statusDetail: "Wiii chưa có adapter, vault và permission gate cho kết nối này.",
-    agentReady: false,
-    connected: false,
-    detailRows: [
-      ["Provider", providerKindLabels[definition.provider] ?? definition.provider],
-      ["Trạng thái", "Chưa có kết nối thật trong Wiii"],
-      ["Agent-ready", "Chưa"],
-      ["Mutation", "Bị chặn cho đến khi có adapter và audit"],
-    ],
-    requirements: definition.requirements,
-    disabledReason: "Cần thiết kế adapter/vault/policy trước khi bật Connect.",
-  }));
+function buildExternalCatalogCards(
+  providerRegistry: WiiiConnectProviderRegistryEntry[] | null,
+): CatalogCard[] {
+  const definitions =
+    registryEntriesToExternalDefinitions(providerRegistry) ?? externalCatalogDefinitions;
+
+  return definitions.map((definition) => {
+    const fromBackend = definition.source === "backend";
+    return {
+      id: `${definition.provider}-${definition.id}`,
+      provider: definition.provider,
+      providerLabel: providerKindLabels[definition.provider] ?? definition.provider,
+      label: definition.label,
+      description: definition.description,
+      category: definition.category,
+      categoryLabel: categoryLabel(definition.category),
+      icon: definition.icon,
+      tone: "off" as CapabilityStatusTone,
+      status: "Chưa bật",
+      statusDetail: fromBackend
+        ? "Backend registry đã khai báo provider này; adapter vẫn bị khóa cho đến khi có vault, policy và audit."
+        : "Wiii chưa có adapter, vault và permission gate cho kết nối này.",
+      agentReady: false,
+      connected: false,
+      detailRows: [
+        ["Provider", providerKindLabels[definition.provider] ?? definition.provider],
+        ["Nguồn", fromBackend ? "Backend registry" : "Local fallback"],
+        ["Auth", compactText(definition.authMode, "Chưa khai báo")],
+        ["Action", definition.actionCount != null ? `${definition.actionCount}` : "Chưa khai báo"],
+        ["Trạng thái", "Chưa có kết nối thật trong Wiii"],
+        ["Agent-ready", "Chưa"],
+        ["Mutation", "Bị chặn cho đến khi có adapter và audit"],
+      ],
+      requirements: definition.requirements,
+      disabledReason: fromBackend
+        ? "Provider có trong registry backend nhưng execution gateway chưa cho phép connect/call thật."
+        : "Cần thiết kế adapter/vault/policy trước khi bật Connect.",
+    };
+  });
 }
 
 function buildConnectionCatalogCards(
   snapshot: WiiiConnectRuntimeSnapshot | null,
   fallbackModel: CapabilityStatusViewModel,
+  providerRegistry: WiiiConnectProviderRegistryEntry[] | null,
 ): CatalogCard[] {
   return [
     ...buildNativeCatalogCards(snapshot, fallbackModel),
-    ...buildExternalCatalogCards(),
+    ...buildExternalCatalogCards(providerRegistry),
   ];
 }
 
@@ -832,9 +927,13 @@ function ConnectionDetailPanel({ card }: { card: CatalogCard | null }) {
 function ConnectionCatalog({
   snapshot,
   fallbackModel,
+  providerRegistry,
+  providerRegistryLoaded,
 }: {
   snapshot: WiiiConnectRuntimeSnapshot | null;
   fallbackModel: CapabilityStatusViewModel;
+  providerRegistry: WiiiConnectProviderRegistryEntry[] | null;
+  providerRegistryLoaded: boolean;
 }) {
   const [provider, setProvider] = useState<ProviderFilter>("wiii_native");
   const [category, setCategory] = useState<CatalogCategory>("all");
@@ -842,8 +941,8 @@ function ConnectionCatalog({
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
 
   const cards = useMemo(
-    () => buildConnectionCatalogCards(snapshot, fallbackModel),
-    [snapshot, fallbackModel],
+    () => buildConnectionCatalogCards(snapshot, fallbackModel, providerRegistry),
+    [snapshot, fallbackModel, providerRegistry],
   );
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -874,8 +973,12 @@ function ConnectionCatalog({
               rồi mới mở adapter khi Wiii có vault, permission gate và audit.
             </p>
           </div>
-          <StatusPill tone={snapshot ? "ok" : "pending"}>
-            {snapshot ? "Đọc từ snapshot backend" : "Đang dùng fallback local"}
+          <StatusPill tone={providerRegistryLoaded || snapshot ? "ok" : "pending"}>
+            {providerRegistryLoaded
+              ? "Registry backend"
+              : snapshot
+                ? "Đọc từ snapshot backend"
+                : "Đang dùng fallback local"}
           </StatusPill>
         </div>
 
@@ -1331,6 +1434,8 @@ function RuntimeSection({
 
 export function WiiiConnectPage() {
   const [activeTab, setActiveTab] = useState<ConnectTab>("catalog");
+  const [providerRegistry, setProviderRegistry] = useState<WiiiConnectProviderRegistryEntry[] | null>(null);
+  const [providerRegistryLoaded, setProviderRegistryLoaded] = useState(false);
   const navigateToChat = useUIStore((state) => state.navigateToChat);
   const connectionStatus = useConnectionStore((state) => state.status);
   const serverVersion = useConnectionStore((state) => state.serverVersion);
@@ -1344,6 +1449,24 @@ export function WiiiConnectPage() {
   const lastCompletedLifecycleEvents = useChatStore(
     (state) => state.lastCompletedLifecycleEvents,
   );
+
+  useEffect(() => {
+    let mounted = true;
+    fetchWiiiConnectProviders()
+      .then((response) => {
+        if (!mounted) return;
+        setProviderRegistry(response.providers ?? []);
+        setProviderRegistryLoaded(true);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setProviderRegistry(null);
+        setProviderRegistryLoaded(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const runtimePath = useMemo(
     () =>
@@ -1437,7 +1560,12 @@ export function WiiiConnectPage() {
         </section>
 
         {activeTab === "catalog" && (
-          <ConnectionCatalog snapshot={snapshot} fallbackModel={fallbackModel} />
+          <ConnectionCatalog
+            snapshot={snapshot}
+            fallbackModel={fallbackModel}
+            providerRegistry={providerRegistry}
+            providerRegistryLoaded={providerRegistryLoaded}
+          />
         )}
 
         {activeTab === "connections" && (
