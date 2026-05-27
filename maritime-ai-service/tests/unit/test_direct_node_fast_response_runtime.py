@@ -125,6 +125,26 @@ def test_fast_response_uploaded_document_fact_uses_document_context():
     assert calls[0]["kwargs"]["provenance"] == "deterministic_uploaded_file_context_fact"
 
 
+def test_fast_response_leaves_casual_chatter_for_provider_direct_path():
+    calls, record_snapshot = _record_snapshot_calls()
+    state: dict = {
+        "routing_metadata": {"method": "conservative_fast_path", "intent": "social"}
+    }
+
+    for query in ("đói phết", "trưa nay ăn cơm rồi"):
+        result = _resolve_fast_response(
+            query=query,
+            state=state,
+            ctx={},
+            has_uploaded_document_context=False,
+            record_snapshot=record_snapshot,
+        )
+
+        assert result is None
+
+    assert calls == []
+
+
 def test_fast_response_returns_none_for_regular_learning_turn():
     calls, record_snapshot = _record_snapshot_calls()
     state: dict = {"routing_metadata": {"intent": "learning"}}

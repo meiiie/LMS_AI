@@ -192,10 +192,32 @@ class TestAgentConfigRegistry:
         AgentConfigRegistry.initialize()
         expected = {
             "tutor_agent", "rag_agent", "supervisor",
-            "guardian", "grader", "memory", "direct", "direct_identity", "synthesizer",
+            "guardian", "grader", "memory", "direct", "direct_chatter",
+            "direct_identity", "synthesizer",
             "code_studio_agent",
         }
         assert set(AgentConfigRegistry._configs.keys()) == expected
+
+    def test_direct_chatter_uses_nvidia_flash_model_when_nvidia_selected(self):
+        from app.engine.model_catalog import NVIDIA_DEEPSEEK_FLASH_MODEL
+
+        mock_llm = MagicMock()
+        AgentConfigRegistry.initialize()
+
+        with patch.object(
+            AgentConfigRegistry,
+            "_get_or_create_model_llm_for_provider",
+            return_value=mock_llm,
+        ) as mock_create:
+            result = AgentConfigRegistry.get_llm(
+                "direct_chatter",
+                provider_override="nvidia",
+            )
+
+        assert result is mock_llm
+        mock_create.assert_called_once()
+        assert mock_create.call_args.args[0] == "nvidia"
+        assert mock_create.call_args.args[1] == NVIDIA_DEEPSEEK_FLASH_MODEL
 
     def test_direct_identity_uses_creative_profile_model_for_zhipu(self):
         mock_llm = MagicMock()

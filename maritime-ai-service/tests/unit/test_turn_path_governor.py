@@ -21,6 +21,7 @@ def test_turn_path_governor_marks_plain_greeting_as_no_tool_chat():
 @pytest.mark.parametrize(
     "query",
     [
+        "noi de",
         "sao lai z",
         "sao lo lung ?",
         "the ngu di",

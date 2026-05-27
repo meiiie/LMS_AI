@@ -89,6 +89,30 @@ def test_resolve_direct_node_turn_policy_social_followup_without_hint_uses_chatt
     assert result.role_name == "direct_chatter_agent"
 
 
+def test_resolve_direct_node_turn_policy_hunger_and_status_hints_use_chatter():
+    for shape, query in (
+        ("hunger_chatter", "minh dang doi qua a ma nay nong dieng"),
+        ("social_status", "trua nay an com roi"),
+    ):
+        state = {
+            "context": {"response_language": "vi"},
+            "routing_metadata": {"intent": "social", "method": "conservative_fast_path"},
+            "_routing_hint": {
+                "kind": "fast_chatter",
+                "intent": "social",
+                "shape": shape,
+            },
+        }
+
+        result = resolve_direct_node_turn_policy(
+            **_base_policy_kwargs(query=query, state=state)
+        )
+
+        assert result.is_short_house_chatter is True
+        assert result.tools_context_override == ""
+        assert result.role_name == "direct_chatter_agent"
+
+
 def test_resolve_direct_node_turn_policy_identity_keeps_context_history():
     state = {
         "context": {"response_language": "vi"},

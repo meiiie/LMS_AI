@@ -25,7 +25,7 @@ AGENT_RUNTIME_GROUP_NODES: dict[str, tuple[str, ...]] = {
     "routing": ("supervisor",),
     "safety": ("guardian",),
     "knowledge": ("rag_agent", "tutor_agent", "synthesizer"),
-    "utility": ("direct", "memory"),
+    "utility": ("direct", "direct_chatter", "memory"),
     "evaluation": (
         "grader",
         "retrieval_grader",

@@ -196,6 +196,7 @@ class TestSupervisorRoute:
     @pytest.mark.parametrize(
         "query",
         [
+            "noi de",
             "thế ngủ đi",
             "sao lại z",
             "sao lơ lửng ?",

@@ -1,6 +1,6 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -731,7 +731,7 @@ async def test_direct_response_node_uses_reasoning_safety_fast_path_without_llm(
 
 
 @pytest.mark.asyncio
-async def test_direct_response_node_uses_hunger_chatter_fast_path_without_llm():
+async def test_direct_response_node_routes_hunger_chatter_to_provider_pipeline():
     state = _base_state()
     state.update(
         {
@@ -747,21 +747,22 @@ async def test_direct_response_node_uses_hunger_chatter_fast_path_without_llm():
     kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
 
     with patch(
-        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
-        side_effect=AssertionError("hunger chatter fast path should not call an LLM"),
-    ):
+        "app.engine.multi_agent.direct_node_runtime.execute_direct_node_llm_pipeline",
+        new=AsyncMock(
+            return_value=SimpleNamespace(response="model-backed hunger reply")
+        ),
+    ) as mock_pipeline:
         result = await direct_response_node_impl(
             state,
             **kwargs,
         )
 
-    assert "5-10 phút" in result["final_response"]
-    assert "tụt pin" in result["thinking_content"]
-    assert result["final_response"] != "(´｡• ᵕ •｡`) >_"
+    assert result["final_response"] == "model-backed hunger reply"
+    mock_pipeline.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_direct_response_node_uses_social_status_fast_path_without_llm():
+async def test_direct_response_node_routes_social_status_to_provider_pipeline():
     state = _base_state()
     state.update(
         {
@@ -777,17 +778,18 @@ async def test_direct_response_node_uses_social_status_fast_path_without_llm():
     kwargs["looks_identity_selfhood_turn"] = lambda *_args, **_kwargs: False
 
     with patch(
-        "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
-        side_effect=AssertionError("social status fast path should not call an LLM"),
-    ):
+        "app.engine.multi_agent.direct_node_runtime.execute_direct_node_llm_pipeline",
+        new=AsyncMock(
+            return_value=SimpleNamespace(response="model-backed status reply")
+        ),
+    ) as mock_pipeline:
         result = await direct_response_node_impl(
             state,
             **kwargs,
         )
 
-    assert "có sức hơn chút" in result["final_response"]
-    assert "provider chậm" in result["thinking_content"]
-    assert "(๑" not in result["final_response"]
+    assert result["final_response"] == "model-backed status reply"
+    mock_pipeline.assert_awaited_once()
 
 
 @pytest.mark.asyncio

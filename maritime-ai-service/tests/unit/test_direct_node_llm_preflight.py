@@ -82,6 +82,32 @@ def test_select_direct_node_llm_falls_back_when_native_provider_unsupported() ->
     assert calls == ["native", "standard"]
 
 
+def test_select_direct_node_llm_uses_chatter_node_for_short_house_chatter() -> None:
+    standard_llm = _Llm(provider="qwen")
+    calls: list[tuple[str, str]] = []
+
+    result = select_direct_node_llm(
+        is_identity_turn=False,
+        ctx={},
+        is_short_house_chatter=True,
+        is_emotional_support_turn=False,
+        use_house_voice_direct=True,
+        is_codebase_source_turn=False,
+        response_present=False,
+        thinking_effort="low",
+        direct_provider_override="nvidia",
+        requested_model=None,
+        get_native_llm=lambda *args, **_kwargs: calls.append(("native", args[0])),
+        get_llm=lambda *args, **_kwargs: calls.append(("standard", args[0])) or standard_llm,
+        supports_native_answer_streaming=lambda _provider: True,
+    )
+
+    assert result.direct_node_id == "direct_chatter"
+    assert result.native_direct_possible is False
+    assert result.llm is standard_llm
+    assert calls == [("standard", "direct_chatter")]
+
+
 def test_maybe_build_uploaded_visual_guard_clears_images_for_text_only_provider() -> None:
     ctx = {"images": [{"url": "frame.png"}]}
 
