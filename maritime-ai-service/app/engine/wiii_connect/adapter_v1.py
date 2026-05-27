@@ -114,8 +114,11 @@ class WiiiConnectProviderRegistryEntry:
     auth_mode: AuthMode
     enabled: bool = False
     agent_ready: bool = False
+    category: str = "integration"
+    description: str = ""
     allowed_paths: tuple[str, ...] = ("external_app_action",)
     action_allowlist: tuple[str, ...] = ()
+    requirements: tuple[str, ...] = ()
     required_fields: tuple[WiiiConnectRequiredField, ...] = ()
     default_scopes: WiiiConnectScopeGrant = field(default_factory=WiiiConnectScopeGrant)
     source: str = "wiii_connect_registry"
@@ -153,8 +156,11 @@ class WiiiConnectProviderRegistryEntry:
             "auth_mode": self.auth_mode,
             "enabled": self.enabled,
             "agent_ready": self.agent_ready,
+            "category": self.category,
+            "description": self.description,
             "allowed_paths": list(self.allowed_paths),
             "action_count": len(self.action_allowlist),
+            "requirements": list(self.requirements),
             "required_fields": [
                 field.to_public_metadata() for field in self.required_fields
             ],

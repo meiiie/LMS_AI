@@ -16,6 +16,9 @@ from app.core.config import settings
 from app.engine.multi_agent.document_preview_contract import (
     lms_authoring_connection_status,
 )
+from app.engine.wiii_connect.provider_registry import (
+    list_wiii_connect_provider_registry,
+)
 
 
 WIII_CONNECT_SNAPSHOT_VERSION = "wiii_connect_snapshot.v0"
@@ -212,6 +215,7 @@ def build_wiii_connect_snapshot(
         _weather_connection(now),
         _visual_runtime_connection(now),
         _code_studio_connection(now),
+        *_external_provider_connections(now),
     )
     warnings = tuple(
         warning
@@ -479,6 +483,38 @@ def _code_studio_connection(now: str) -> WiiiConnectionRecord:
         reason="native_available",
         last_checked_at=now,
     )
+
+
+def _external_provider_connections(now: str) -> tuple[WiiiConnectionRecord, ...]:
+    records: list[WiiiConnectionRecord] = []
+    for entry in list_wiii_connect_provider_registry():
+        records.append(
+            WiiiConnectionRecord(
+                slug=entry.slug,
+                label=entry.label,
+                provider_kind=entry.provider_kind,
+                status="not_connected" if entry.enabled else "disabled",
+                agent_ready=False,
+                scopes=WiiiConnectionScopes(),
+                capabilities=(),
+                required_for_paths=tuple(entry.allowed_paths),
+                source="wiii_connect_provider_registry",
+                reason=(
+                    "provider_not_connected"
+                    if entry.enabled
+                    else "provider_adapter_disabled"
+                ),
+                last_checked_at=now,
+                warnings=tuple(entry.warnings),
+                details={
+                    "auth_mode": entry.auth_mode,
+                    "category": entry.category,
+                    "action_count": len(entry.action_allowlist),
+                    "requirement_count": len(entry.requirements),
+                },
+            )
+        )
+    return tuple(records)
 
 
 def _context_from_state(state: dict[str, Any] | None) -> dict[str, Any]:

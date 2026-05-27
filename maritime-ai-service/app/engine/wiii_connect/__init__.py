@@ -14,6 +14,12 @@ from .adapter_v1 import (
     is_connection_baseline_ready,
     normalize_connection_state,
 )
+from .provider_registry import (
+    WIII_CONNECT_PROVIDER_REGISTRY_VERSION,
+    get_wiii_connect_provider_entry,
+    list_wiii_connect_provider_registry,
+    provider_registry_public_metadata,
+)
 from .snapshot import (
     WIII_CONNECT_SNAPSHOT_VERSION,
     WiiiConnectionRecord,
@@ -33,6 +39,7 @@ __all__ = [
     "WiiiConnectRequiredField",
     "WiiiConnectScopeGrant",
     "WiiiConnectVaultSecretRef",
+    "WIII_CONNECT_PROVIDER_REGISTRY_VERSION",
     "WIII_CONNECT_SNAPSHOT_VERSION",
     "WiiiConnectionRecord",
     "WiiiConnectionScopes",
@@ -40,6 +47,9 @@ __all__ = [
     "WiiiPathCapabilityRecord",
     "build_wiii_connect_snapshot",
     "decide_external_execution",
+    "get_wiii_connect_provider_entry",
     "is_connection_baseline_ready",
+    "list_wiii_connect_provider_registry",
     "normalize_connection_state",
+    "provider_registry_public_metadata",
 ]

@@ -179,5 +179,8 @@ this repository.
    remains disabled until registry, vault, OAuth/session callback, scope
    policy, execution gateway, and audit ledger are implemented against that
    contract.
-6. Add a Composio adapter only after the native Wiii snapshot and Adapter V1
+6. Keep the backend `provider_registry.py` as the source of truth for disabled
+   external provider catalog entries; frontend catalog state should converge on
+   this projection.
+7. Add a Composio adapter only after the native Wiii snapshot and Adapter V1
    gateway are stable.
