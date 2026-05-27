@@ -168,7 +168,7 @@ def provider_connection_status_for_entry(
 ) -> WiiiConnectProviderConnectionStatus:
     """Project one registry entry into connection-session readiness metadata."""
 
-    missing_requirements = tuple(entry.requirements)
+    missing_requirements = entry.connection_requirements()
     reason = _session_block_reason(entry, missing_requirements)
     if reason == "authorization_url_issued":
         reason = "provider_adapter_not_bound"
@@ -196,7 +196,7 @@ def begin_connection_session(
 ) -> WiiiConnectSessionStartDecision:
     """Decide whether Wiii may start provider authorization for this request."""
 
-    missing_requirements = tuple(entry.requirements)
+    missing_requirements = entry.connection_requirements()
     reason = _session_block_reason(entry, missing_requirements)
     required_next = missing_requirements
     session_authorization_url = ""

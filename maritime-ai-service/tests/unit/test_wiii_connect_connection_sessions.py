@@ -14,7 +14,8 @@ def test_disabled_provider_status_is_fail_closed_and_privacy_safe():
     assert metadata["provider_slug"] == "facebook"
     assert metadata["can_start_authorization"] is False
     assert metadata["reason"] == "provider_disabled"
-    assert "encrypted_vault_ref" in metadata["missing_requirements"]
+    assert "provider_managed_vault_ref" in metadata["missing_requirements"]
+    assert "execution_gateway" not in metadata["missing_requirements"]
 
     serialized = json.dumps(metadata, sort_keys=True)
     assert "access_token" not in serialized

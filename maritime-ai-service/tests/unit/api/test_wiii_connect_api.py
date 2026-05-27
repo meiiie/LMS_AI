@@ -225,7 +225,8 @@ async def test_wiii_connect_provider_status_api_is_fail_closed(app):
     assert payload["provider_slug"] == "facebook"
     assert payload["can_start_authorization"] is False
     assert payload["reason"] == "provider_disabled"
-    assert "execution_gateway" in payload["missing_requirements"]
+    assert "provider_managed_vault_ref" in payload["missing_requirements"]
+    assert "execution_gateway" not in payload["missing_requirements"]
 
 
 @pytest.mark.asyncio

@@ -119,10 +119,33 @@ class WiiiConnectProviderRegistryEntry:
     allowed_paths: tuple[str, ...] = ("external_app_action",)
     action_allowlist: tuple[str, ...] = ()
     requirements: tuple[str, ...] = ()
+    connect_requirements: tuple[str, ...] = ()
+    agent_ready_requirements: tuple[str, ...] = ()
     required_fields: tuple[WiiiConnectRequiredField, ...] = ()
     default_scopes: WiiiConnectScopeGrant = field(default_factory=WiiiConnectScopeGrant)
     source: str = "wiii_connect_registry"
     warnings: tuple[str, ...] = ()
+
+    def connection_requirements(self) -> tuple[str, ...]:
+        """Return prerequisites that block starting OAuth/Connect Link."""
+
+        if self.connect_requirements:
+            return self.connect_requirements
+        if self.agent_ready_requirements:
+            return ()
+        return self.requirements
+
+    def all_requirements(self) -> tuple[str, ...]:
+        """Return stable public requirements without duplicating entries."""
+
+        result: list[str] = []
+        for requirement in (
+            self.requirements
+            or self.connect_requirements + self.agent_ready_requirements
+        ):
+            if requirement and requirement not in result:
+                result.append(requirement)
+        return tuple(result)
 
     def allows_action(self, action_slug: str) -> bool:
         """Return true when an action is in the curated allowlist.
@@ -160,7 +183,9 @@ class WiiiConnectProviderRegistryEntry:
             "description": self.description,
             "allowed_paths": list(self.allowed_paths),
             "action_count": len(self.action_allowlist),
-            "requirements": list(self.requirements),
+            "requirements": list(self.all_requirements()),
+            "connect_requirements": list(self.connection_requirements()),
+            "agent_ready_requirements": list(self.agent_ready_requirements),
             "required_fields": [
                 field.to_public_metadata() for field in self.required_fields
             ],

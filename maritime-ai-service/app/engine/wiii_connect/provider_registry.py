@@ -19,13 +19,21 @@ from .adapter_v1 import (
 WIII_CONNECT_PROVIDER_REGISTRY_VERSION = "wiii_connect_provider_registry.v1"
 
 
-_DISABLED_COMPOSIO_REQUIREMENTS = (
+_DISABLED_COMPOSIO_CONNECT_REQUIREMENTS = (
     "oauth_or_connect_link",
-    "encrypted_vault_ref",
+    "provider_managed_vault_ref",
+    "audit_ledger",
+)
+
+_DISABLED_COMPOSIO_AGENT_READY_REQUIREMENTS = (
     "scope_policy",
     "curated_action_catalog",
     "execution_gateway",
-    "audit_ledger",
+)
+
+_DISABLED_COMPOSIO_REQUIREMENTS = (
+    _DISABLED_COMPOSIO_CONNECT_REQUIREMENTS
+    + _DISABLED_COMPOSIO_AGENT_READY_REQUIREMENTS
 )
 
 
@@ -38,6 +46,8 @@ _PROVIDER_REGISTRY: tuple[WiiiConnectProviderRegistryEntry, ...] = (
         category="social",
         description="Facebook Pages/content via a brokered OAuth adapter.",
         requirements=_DISABLED_COMPOSIO_REQUIREMENTS,
+        connect_requirements=_DISABLED_COMPOSIO_CONNECT_REQUIREMENTS,
+        agent_ready_requirements=_DISABLED_COMPOSIO_AGENT_READY_REQUIREMENTS,
         warnings=("adapter_disabled",),
     ),
     WiiiConnectProviderRegistryEntry(
@@ -48,6 +58,8 @@ _PROVIDER_REGISTRY: tuple[WiiiConnectProviderRegistryEntry, ...] = (
         category="productivity",
         description="Gmail read/write actions with explicit scope gates.",
         requirements=_DISABLED_COMPOSIO_REQUIREMENTS,
+        connect_requirements=_DISABLED_COMPOSIO_CONNECT_REQUIREMENTS,
+        agent_ready_requirements=_DISABLED_COMPOSIO_AGENT_READY_REQUIREMENTS,
         warnings=("adapter_disabled",),
     ),
     WiiiConnectProviderRegistryEntry(
@@ -58,6 +70,8 @@ _PROVIDER_REGISTRY: tuple[WiiiConnectProviderRegistryEntry, ...] = (
         category="productivity",
         description="Calendar lookup and event drafting through Composio.",
         requirements=_DISABLED_COMPOSIO_REQUIREMENTS,
+        connect_requirements=_DISABLED_COMPOSIO_CONNECT_REQUIREMENTS,
+        agent_ready_requirements=_DISABLED_COMPOSIO_AGENT_READY_REQUIREMENTS,
         warnings=("adapter_disabled",),
     ),
     WiiiConnectProviderRegistryEntry(
@@ -68,6 +82,8 @@ _PROVIDER_REGISTRY: tuple[WiiiConnectProviderRegistryEntry, ...] = (
         category="productivity",
         description="Drive file lookup and source reference workflows.",
         requirements=_DISABLED_COMPOSIO_REQUIREMENTS,
+        connect_requirements=_DISABLED_COMPOSIO_CONNECT_REQUIREMENTS,
+        agent_ready_requirements=_DISABLED_COMPOSIO_AGENT_READY_REQUIREMENTS,
         warnings=("adapter_disabled",),
     ),
     WiiiConnectProviderRegistryEntry(
@@ -78,6 +94,8 @@ _PROVIDER_REGISTRY: tuple[WiiiConnectProviderRegistryEntry, ...] = (
         category="productivity",
         description="Notion workspace search and page drafting.",
         requirements=_DISABLED_COMPOSIO_REQUIREMENTS,
+        connect_requirements=_DISABLED_COMPOSIO_CONNECT_REQUIREMENTS,
+        agent_ready_requirements=_DISABLED_COMPOSIO_AGENT_READY_REQUIREMENTS,
         warnings=("adapter_disabled",),
     ),
     WiiiConnectProviderRegistryEntry(
@@ -88,6 +106,8 @@ _PROVIDER_REGISTRY: tuple[WiiiConnectProviderRegistryEntry, ...] = (
         category="chat",
         description="Slack workspace/channel read and message drafting.",
         requirements=_DISABLED_COMPOSIO_REQUIREMENTS,
+        connect_requirements=_DISABLED_COMPOSIO_CONNECT_REQUIREMENTS,
+        agent_ready_requirements=_DISABLED_COMPOSIO_AGENT_READY_REQUIREMENTS,
         warnings=("adapter_disabled",),
     ),
     WiiiConnectProviderRegistryEntry(
@@ -98,6 +118,8 @@ _PROVIDER_REGISTRY: tuple[WiiiConnectProviderRegistryEntry, ...] = (
         category="platform",
         description="GitHub issue, PR, and repository workflows.",
         requirements=_DISABLED_COMPOSIO_REQUIREMENTS,
+        connect_requirements=_DISABLED_COMPOSIO_CONNECT_REQUIREMENTS,
+        agent_ready_requirements=_DISABLED_COMPOSIO_AGENT_READY_REQUIREMENTS,
         warnings=("adapter_disabled",),
     ),
     WiiiConnectProviderRegistryEntry(
@@ -108,6 +130,8 @@ _PROVIDER_REGISTRY: tuple[WiiiConnectProviderRegistryEntry, ...] = (
         category="productivity",
         description="Airtable base lookup and record drafting.",
         requirements=_DISABLED_COMPOSIO_REQUIREMENTS,
+        connect_requirements=_DISABLED_COMPOSIO_CONNECT_REQUIREMENTS,
+        agent_ready_requirements=_DISABLED_COMPOSIO_AGENT_READY_REQUIREMENTS,
         warnings=("adapter_disabled",),
     ),
     WiiiConnectProviderRegistryEntry(
@@ -118,6 +142,8 @@ _PROVIDER_REGISTRY: tuple[WiiiConnectProviderRegistryEntry, ...] = (
         category="productivity",
         description="Asana project/task lookup and task drafting.",
         requirements=_DISABLED_COMPOSIO_REQUIREMENTS,
+        connect_requirements=_DISABLED_COMPOSIO_CONNECT_REQUIREMENTS,
+        agent_ready_requirements=_DISABLED_COMPOSIO_AGENT_READY_REQUIREMENTS,
         warnings=("adapter_disabled",),
     ),
 )

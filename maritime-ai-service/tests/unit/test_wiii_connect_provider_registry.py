@@ -18,11 +18,21 @@ def test_provider_registry_exposes_disabled_composio_catalog_without_secrets():
     assert by_slug["gmail"]["agent_ready"] is False
     assert by_slug["github"]["requirements"] == [
         "oauth_or_connect_link",
-        "encrypted_vault_ref",
+        "provider_managed_vault_ref",
+        "audit_ledger",
         "scope_policy",
         "curated_action_catalog",
         "execution_gateway",
+    ]
+    assert by_slug["github"]["connect_requirements"] == [
+        "oauth_or_connect_link",
+        "provider_managed_vault_ref",
         "audit_ledger",
+    ]
+    assert by_slug["github"]["agent_ready_requirements"] == [
+        "scope_policy",
+        "curated_action_catalog",
+        "execution_gateway",
     ]
 
     serialized = json.dumps(metadata, sort_keys=True)
