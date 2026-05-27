@@ -7,6 +7,8 @@ Use this folder for repository-level documentation that explains the product, th
 - `../README.md`: repository overview and deployment model
 - `WIII_PROJECT_MENTAL_MODEL.md`: one-page product and system mental model
 - `architecture/WIII_CODEBASE_MAP.md`: concise codebase map for maintainers and coding agents
+- `architecture/wiii-connect/README.md`: Wiii Connect blueprint for connection registry, capability governor, provider adapters, and extraction criteria
+- `architecture/wiii-connect/CONNECTION_CONTRACT_V0.md`: first Wiii Connect connection and path capability contract
 - `WIII_ARCHITECTURE_AUDIT.md`: opinionated audit of architectural center, strengths, and risk areas
 - `WIII_TECHNICAL_SIMPLIFICATION_ROADMAP.md`: phased simplification plan and first landed slice
 - `operations/WIII_AGENTIC_CODEBASE_HARNESS.md`: large-codebase agent workflow, context layering, and WIP recovery pattern

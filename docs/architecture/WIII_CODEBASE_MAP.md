@@ -14,7 +14,8 @@ architecture references.
 
 Wiii is a multi-surface agentic AI platform with a FastAPI backend, a React/Tauri
 desktop and embed frontend, organization-aware data boundaries, retrieval and
-memory, LMS host actions, visual artifacts, and voice.
+memory, LMS host actions, visual artifacts, voice, and an emerging Wiii Connect
+capability boundary.
 
 ## Top-Level Folders
 
@@ -23,6 +24,7 @@ memory, LMS host actions, visual artifacts, and voice.
 | `maritime-ai-service/` | FastAPI backend, orchestration, RAG, tools, memory, LMS, deploy assets | Highest-risk runtime surface |
 | `wiii-desktop/` | React 18, Tauri v2, embed app, chat UX, Pointy, voice controls | User-visible behavior and stream rendering |
 | `docs/` | Architecture, operations, integration, release, governance | Durable knowledge belongs here |
+| `docs/architecture/wiii-connect/` | Wiii Connect blueprint and connection/capability contracts | Incubation docs before any standalone repo extraction |
 | `specs/` | Spec Kit artifacts for architecture-sensitive work | Use for multi-phase or contract changes |
 | `.github/` | GitHub Actions, templates, CodeRabbit, CODEOWNERS | Merge safety and review automation |
 | `.agents/skills/` | Repo-local Codex skills | Skills should be focused and loaded on demand |
@@ -30,13 +32,14 @@ memory, LMS host actions, visual artifacts, and voice.
 | `scripts/` | Repository-level helper scripts | Avoid adding one-off local probes here |
 | `chaos/`, `loadtest/` | Stress and load tooling | Run only when task requires it |
 
-## Five-Layer Product Model
+## Product Layer Model
 
 | Layer | Meaning | Main code areas |
 |---|---|---|
 | Core | Decide and execute the current turn | chat services, multi-agent runtime, tool loop |
 | Living | Maintain continuity and identity over time | memory, emotion, reflection, post-turn hooks |
 | Host | Understand where Wiii is operating | desktop, embed, LMS, Pointy, host actions |
+| Connect | Decide which connected capabilities can be used now | tool policy, host capabilities, future Wiii Connect contracts |
 | Org | Enforce ownership and tenant boundaries | auth, org middleware, settings, repositories |
 | Data | Preserve durable state and retrieval substrate | PostgreSQL, pgvector, repositories, migrations |
 
@@ -47,11 +50,12 @@ The normal chat turn should be read in this order:
 1. FastAPI route receives request and auth context.
 2. `ChatOrchestrator` prepares the turn.
 3. Context, org, host, history, document, and memory state are assembled.
-4. Multi-agent runtime chooses direct, RAG, tool, visual, LMS, or other lanes.
-5. Tools and retrieval execute with tenant and host constraints.
-6. Backend emits sync response or SSE V3 events.
-7. Frontend assembles visible answer, previews, sources, and artifacts.
-8. Post-turn hooks update continuity outside the critical response path.
+4. Connection and capability status gates which tools can be visible.
+5. Multi-agent runtime chooses direct, RAG, tool, visual, LMS, or other lanes.
+6. Tools and retrieval execute with tenant, host, and capability constraints.
+7. Backend emits sync response or SSE V3 events.
+8. Frontend assembles visible answer, previews, sources, and artifacts.
+9. Post-turn hooks update continuity outside the critical response path.
 
 ## Backend Navigation
 
@@ -66,6 +70,7 @@ The normal chat turn should be read in this order:
 | Routing and supervisor behavior | `maritime-ai-service/app/engine/multi_agent/supervisor*.py` |
 | Direct prompt assembly | `maritime-ai-service/app/engine/multi_agent/direct_prompts.py` (main assembly)<br>Tool binding: `direct_prompt_tool_binding.py`<br>Tool-context prompt builders: `direct_prompt_tool_context.py`<br>Turn contract and forced-skill prompt helpers: `direct_prompt_turn_contracts.py` |
 | Tool registry | `maritime-ai-service/app/engine/tools/registry.py` and `maritime-ai-service/app/engine/multi_agent/tool_collection.py` |
+| Tool policy and connection status | `maritime-ai-service/app/engine/multi_agent/tool_policy_session.py`, `maritime-ai-service/app/engine/tools/tool_capability_registry.py`, `docs/architecture/wiii-connect/CONNECTION_CONTRACT_V0.md` |
 | LMS host actions | `maritime-ai-service/app/engine/context/action_tools.py`, `maritime-ai-service/app/engine/tools/lms_tools.py` |
 | Document context | `maritime-ai-service/app/api/v1/document_context.py`, document runtime helpers |
 | Uploaded-document preview/course contract | `maritime-ai-service/app/engine/multi_agent/document_preview_contract.py` |
@@ -94,6 +99,7 @@ Keep these contracts explicit and tested:
 - agent turn lifecycle
 - native provider stream lifecycle
 - tool call dispatch and result handling
+- connection and capability snapshots before tool binding
 - document context provenance and source references
 - host action preview/apply approval
 - SSE V3 event names and order

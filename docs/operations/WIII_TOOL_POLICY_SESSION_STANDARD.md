@@ -27,6 +27,12 @@ Tool construction remains in the native tool modules, but connection,
 approval, mutation, group, and surface-scope metadata must come from
 `app.engine.tools.tool_capability_registry`.
 
+Wiii Connect is the next consolidation layer for the same contract. The current
+`connection_status` map is the V0 seed of the Wiii Connect capability snapshot
+documented in `docs/architecture/wiii-connect/CONNECTION_CONTRACT_V0.md`.
+Policy work should extend that snapshot rather than adding unrelated
+service-specific status maps.
+
 ## Required Contract
 
 Every direct chat turn should have a `ToolPolicySession` in `AgentState` when
@@ -88,6 +94,10 @@ Policy changes should include focused tests for:
 - narrow path dominance over broad fallback paths;
 - connection-gated host/LMS tools;
 - no raw internal tool names leaking into user-facing prose.
+
+When Wiii Connect snapshot code lands, also test that snapshots contain only
+status, scopes, counts, and warning codes, never tokens, raw uploaded document
+content, prompt text, or provider payloads.
 
 Recommended commands:
 
