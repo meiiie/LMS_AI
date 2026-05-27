@@ -414,6 +414,44 @@ export interface SSEStatusEvent {
   presentation?: PresentationMode;
 }
 
+export interface WiiiConnectRuntimeConnection {
+  id?: string | null;
+  provider_kind?: string;
+  slug: string;
+  label: string;
+  status: string;
+  active?: boolean;
+  agent_ready?: boolean;
+  scopes?: Record<string, boolean>;
+  capabilities?: string[];
+  required_for_paths?: string[];
+  source?: string;
+  last_checked_at?: string | null;
+  reason?: string;
+  warnings?: string[];
+  [key: string]: unknown;
+}
+
+export interface WiiiConnectRuntimePathCapability {
+  path: string;
+  allowed_connection_slugs?: string[];
+  required_connection_slugs?: string[];
+  allowed_tool_groups?: string[];
+  forbidden_tool_groups?: string[];
+  mutation_policy?: string;
+  delegation_policy?: string;
+  [key: string]: unknown;
+}
+
+export interface WiiiConnectRuntimeSnapshot {
+  version: string;
+  generated_at?: string;
+  surface?: string;
+  connections?: WiiiConnectRuntimeConnection[];
+  path_capabilities?: WiiiConnectRuntimePathCapability[];
+  warnings?: string[];
+}
+
 export interface SSEChatLifecycleEvent {
   schema_version: string;
   event_name: string;
@@ -435,6 +473,7 @@ export interface SSEChatLifecycleEvent {
     preview_emitted?: boolean;
     approval_token_present?: boolean;
     apply_attempted?: boolean;
+    wiii_connect?: WiiiConnectRuntimeSnapshot;
   };
   metadata?: Record<string, unknown>;
   details?: Record<string, unknown>;

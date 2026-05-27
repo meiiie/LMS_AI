@@ -15,6 +15,7 @@ from app.core.exceptions import (
 )
 from app.engine.llm_runtime_metadata import resolve_runtime_llm_metadata
 from app.engine.multi_agent.runtime_flow_ledger import RuntimeFlowLedger
+from app.engine.wiii_connect.snapshot import build_wiii_connect_snapshot
 from app.services.chat_orchestrator_runtime import build_wiii_turn_request
 from app.services.chat_runtime_lifecycle import (
     ChatLifecycleName,
@@ -63,6 +64,34 @@ def build_model_switch_prompt_for_unavailable(**kwargs: Any) -> dict[str, Any]:
     )
 
     return build_model_switch_prompt_for_unavailable(**kwargs)
+
+
+def _mapping_from_value(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    if hasattr(value, "model_dump"):
+        dumped = value.model_dump()
+        return dict(dumped) if isinstance(dumped, Mapping) else {}
+    if hasattr(value, "dict"):
+        dumped = value.dict()
+        return dict(dumped) if isinstance(dumped, Mapping) else {}
+    return {}
+
+
+def _request_attr(source: Any, key: str) -> Any:
+    if isinstance(source, Mapping):
+        return source.get(key)
+    return getattr(source, key, None)
+
+
+def _state_for_wiii_connect_snapshot(chat_request: Any) -> dict[str, Any]:
+    user_context = _mapping_from_value(_request_attr(chat_request, "user_context"))
+    context: dict[str, Any] = {}
+    for key in ("host_context", "host_capabilities", "document_context"):
+        value = _mapping_from_value(user_context.get(key))
+        if value:
+            context[key] = value
+    return {"context": context}
 
 
 def _stream_agent_for_finalization(event: Any, current_agent: str = "") -> str:
@@ -504,6 +533,11 @@ async def generate_stream_v3_events(
         chat_request=chat_request,
         request_id=request_id,
     )
+    wiii_connect_snapshot = build_wiii_connect_snapshot(
+        state=_state_for_wiii_connect_snapshot(chat_request),
+        query=str(getattr(chat_request, "message", "") or ""),
+        surface=flow_ledger.host_surface,
+    ).to_metadata()
 
     def _payload_section(payload: Mapping[str, Any], key: str) -> Mapping[str, Any]:
         section = payload.get(key)
@@ -552,7 +586,8 @@ async def generate_stream_v3_events(
                     reason=reason or str(route_payload.get("reason") or "") or None,
                     node=node,
                     capabilities=capability_snapshot_from_ledger_payload(
-                        ledger_payload
+                        ledger_payload,
+                        wiii_connect_snapshot=wiii_connect_snapshot,
                     ),
                     metadata=metadata or {},
                 )

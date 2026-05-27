@@ -43,6 +43,9 @@ import type {
   VisualBlockData,
   VisualSessionState,
   WidgetFeedbackItem,
+  WiiiConnectRuntimeConnection,
+  WiiiConnectRuntimePathCapability,
+  WiiiConnectRuntimeSnapshot,
 } from "@/api/types";
 
 const BASE_STORE_NAME = "conversations.json";
@@ -686,6 +689,134 @@ function sanitizeChatLifecycleRecord(
   return Object.keys(output).length > 0 ? output : undefined;
 }
 
+const WIII_CONNECT_CONNECTION_KEYS = new Set([
+  "id",
+  "provider_kind",
+  "slug",
+  "label",
+  "status",
+  "active",
+  "agent_ready",
+  "scopes",
+  "capabilities",
+  "required_for_paths",
+  "source",
+  "last_checked_at",
+  "reason",
+  "warnings",
+  "host_type",
+  "connector_id",
+  "resource_count",
+  "surface_count",
+  "tool_count",
+  "mutating_tool_count",
+  "attachment_count",
+  "document_count",
+  "source_ref_count",
+  "target_count",
+  "fail_closed_tool",
+  "default_city",
+]);
+
+const WIII_CONNECT_PATH_KEYS = new Set([
+  "path",
+  "allowed_connection_slugs",
+  "required_connection_slugs",
+  "allowed_tool_groups",
+  "forbidden_tool_groups",
+  "mutation_policy",
+  "delegation_policy",
+]);
+
+function sanitizeWiiiConnectScopes(value: unknown): Record<string, boolean> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const output: Record<string, boolean> = {};
+  for (const key of ["read", "preview", "write", "apply", "admin"]) {
+    const rawValue = (value as Record<string, unknown>)[key];
+    if (typeof rawValue === "boolean") output[key] = rawValue;
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+}
+
+function sanitizeWiiiConnectRecord(
+  value: unknown,
+  allowedKeys: Set<string>,
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+  for (const key of allowedKeys) {
+    const rawValue = source[key];
+    if (rawValue === undefined) continue;
+    if (key === "scopes") {
+      const scopes = sanitizeWiiiConnectScopes(rawValue);
+      if (scopes) output[key] = scopes;
+      continue;
+    }
+    if (typeof rawValue === "string") {
+      const normalized = clampChatLifecycleString(rawValue);
+      if (normalized) output[key] = normalized;
+      continue;
+    }
+    if (
+      typeof rawValue === "number" ||
+      typeof rawValue === "boolean" ||
+      rawValue === null
+    ) {
+      output[key] = rawValue;
+      continue;
+    }
+    const strings = sanitizeChatLifecycleStringArray(rawValue);
+    if (strings) output[key] = strings;
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+}
+
+function sanitizeWiiiConnectSnapshot(
+  value: unknown,
+): WiiiConnectRuntimeSnapshot | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  const version = clampChatLifecycleString(source.version);
+  if (!version) return undefined;
+  const snapshot: WiiiConnectRuntimeSnapshot = { version };
+  const generatedAt = clampChatLifecycleString(source.generated_at);
+  if (generatedAt) snapshot.generated_at = generatedAt;
+  const surface = clampChatLifecycleString(source.surface);
+  if (surface) snapshot.surface = surface;
+
+  if (Array.isArray(source.connections)) {
+    const connections = source.connections
+      .map((item) => sanitizeWiiiConnectRecord(item, WIII_CONNECT_CONNECTION_KEYS))
+      .filter((item): item is WiiiConnectRuntimeConnection => {
+        return Boolean(
+          item &&
+          typeof item.slug === "string" &&
+          typeof item.label === "string" &&
+          typeof item.status === "string",
+        );
+      })
+      .slice(0, MAX_CHAT_LIFECYCLE_ARRAY_ITEMS);
+    if (connections.length > 0) snapshot.connections = connections;
+  }
+
+  if (Array.isArray(source.path_capabilities)) {
+    const pathCapabilities = source.path_capabilities
+      .map((item) => sanitizeWiiiConnectRecord(item, WIII_CONNECT_PATH_KEYS))
+      .filter((item): item is WiiiConnectRuntimePathCapability => {
+        return Boolean(item && typeof item.path === "string");
+      })
+      .slice(0, MAX_CHAT_LIFECYCLE_ARRAY_ITEMS);
+    if (pathCapabilities.length > 0) {
+      snapshot.path_capabilities = pathCapabilities;
+    }
+  }
+
+  const warnings = sanitizeChatLifecycleStringArray(source.warnings);
+  if (warnings) snapshot.warnings = warnings;
+  return snapshot;
+}
+
 function sanitizeChatLifecycleCapabilities(
   capabilities: SSEChatLifecycleEvent["capabilities"],
 ): SSEChatLifecycleEvent["capabilities"] | undefined {
@@ -717,6 +848,8 @@ function sanitizeChatLifecycleCapabilities(
   if (typeof capabilities.apply_attempted === "boolean") {
     output.apply_attempted = capabilities.apply_attempted;
   }
+  const wiiiConnect = sanitizeWiiiConnectSnapshot(capabilities.wiii_connect);
+  if (wiiiConnect) output.wiii_connect = wiiiConnect;
   return Object.keys(output).length > 0 ? output : undefined;
 }
 
@@ -776,6 +909,42 @@ function cloneChatLifecycleEvents(
             : undefined,
           suppressed_tools: event.capabilities.suppressed_tools
             ? [...event.capabilities.suppressed_tools]
+            : undefined,
+          wiii_connect: event.capabilities.wiii_connect
+            ? {
+                ...event.capabilities.wiii_connect,
+                connections: event.capabilities.wiii_connect.connections
+                  ? event.capabilities.wiii_connect.connections.map((connection) => ({
+                      ...connection,
+                      capabilities: connection.capabilities ? [...connection.capabilities] : undefined,
+                      required_for_paths: connection.required_for_paths
+                        ? [...connection.required_for_paths]
+                        : undefined,
+                      warnings: connection.warnings ? [...connection.warnings] : undefined,
+                      scopes: connection.scopes ? { ...connection.scopes } : undefined,
+                    }))
+                  : undefined,
+                path_capabilities: event.capabilities.wiii_connect.path_capabilities
+                  ? event.capabilities.wiii_connect.path_capabilities.map((path) => ({
+                      ...path,
+                      allowed_connection_slugs: path.allowed_connection_slugs
+                        ? [...path.allowed_connection_slugs]
+                        : undefined,
+                      required_connection_slugs: path.required_connection_slugs
+                        ? [...path.required_connection_slugs]
+                        : undefined,
+                      allowed_tool_groups: path.allowed_tool_groups
+                        ? [...path.allowed_tool_groups]
+                        : undefined,
+                      forbidden_tool_groups: path.forbidden_tool_groups
+                        ? [...path.forbidden_tool_groups]
+                        : undefined,
+                    }))
+                  : undefined,
+                warnings: event.capabilities.wiii_connect.warnings
+                  ? [...event.capabilities.wiii_connect.warnings]
+                  : undefined,
+              }
             : undefined,
         }
       : undefined,

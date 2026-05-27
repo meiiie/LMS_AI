@@ -2,6 +2,7 @@ import type {
   HostCapabilities,
   HostContext,
 } from "@/stores/host-context-store";
+import type { WiiiConnectRuntimeConnection, WiiiConnectRuntimeSnapshot } from "@/api/types";
 
 export type RuntimeConnectionStatus =
   | "connected"
@@ -39,6 +40,7 @@ export interface RuntimePathSnapshot {
   previewEmitted?: boolean;
   approvalTokenPresent?: boolean;
   applyAttempted?: boolean;
+  wiiiConnect?: WiiiConnectRuntimeSnapshot | null;
   receivedAtMs?: number;
 }
 
@@ -50,6 +52,7 @@ export interface CapabilityDashboardMetric {
 
 export type CapabilityDashboardSectionId =
   | CapabilityStatusItemId
+  | "wiii_connect"
   | "path";
 
 export interface CapabilityDashboardSection {
@@ -165,6 +168,30 @@ function formatToolGroupSummary(names: string[] | undefined): string {
     }),
   );
   return `${names.length} tool (${Array.from(groups).join(", ")})`;
+}
+
+function isWiiiConnectReady(connection: WiiiConnectRuntimeConnection): boolean {
+  return connection.agent_ready === true || connection.active === true || connection.status === "connected";
+}
+
+function wiiiConnectConnectionTone(
+  connection: WiiiConnectRuntimeConnection,
+): CapabilityStatusTone {
+  if (connection.status === "error" || connection.status === "expired") return "warn";
+  if (connection.status === "pending" || connection.status === "preview") return "pending";
+  if (connection.status === "disabled" || connection.status === "not_connected") return "off";
+  return isWiiiConnectReady(connection) ? "ok" : "warn";
+}
+
+function formatConnectionStatus(status: string | undefined): string {
+  if (status === "connected") return "Đã kết nối";
+  if (status === "preview") return "Preview";
+  if (status === "pending") return "Đang chờ";
+  if (status === "expired") return "Hết hạn";
+  if (status === "error") return "Lỗi";
+  if (status === "disabled") return "Tắt";
+  if (status === "not_connected") return "Chưa nối";
+  return compactValue(status, "Không rõ");
 }
 
 function serverStatusItem(status: RuntimeConnectionStatus): CapabilityStatusItem {
@@ -481,6 +508,71 @@ function buildPointySection(
   };
 }
 
+function buildWiiiConnectSection(
+  snapshot: WiiiConnectRuntimeSnapshot | null | undefined,
+): CapabilityDashboardSection {
+  if (!snapshot) {
+    return {
+      id: "wiii_connect",
+      title: "Wiii Connect",
+      summary: "Chưa có snapshot",
+      tone: "pending",
+      metrics: [
+        { label: "Snapshot", value: "Chưa có" },
+        { label: "Nguồn", value: "Chờ chat_lifecycle" },
+      ],
+    };
+  }
+
+  const connections = snapshot.connections ?? [];
+  const readyCount = connections.filter(isWiiiConnectReady).length;
+  const warningCount = (snapshot.warnings?.length ?? 0)
+    + connections.reduce((total, connection) => total + (connection.warnings?.length ?? 0), 0);
+  const pathCount = snapshot.path_capabilities?.length ?? 0;
+  const metrics: CapabilityDashboardMetric[] = [
+    { label: "Phiên bản", value: compactValue(snapshot.version) },
+    { label: "Surface", value: compactValue(snapshot.surface, "Không rõ") },
+    {
+      label: "Agent-ready",
+      value: `${readyCount}/${connections.length} kết nối`,
+      tone: readyCount > 0 ? "ok" : "pending",
+    },
+    {
+      label: "Cảnh báo",
+      value: warningCount > 0 ? `${warningCount} cảnh báo` : "Không",
+      tone: warningCount > 0 ? "warn" : "ok",
+    },
+    {
+      label: "Path policy",
+      value: pathCount > 0 ? `${pathCount} path` : "Chưa có",
+      tone: pathCount > 0 ? "ok" : "pending",
+    },
+  ];
+
+  for (const connection of connections.slice(0, 10)) {
+    const status = formatConnectionStatus(connection.status);
+    const detailCount = [
+      typeof connection.attachment_count === "number" ? `${connection.attachment_count} file` : "",
+      typeof connection.source_ref_count === "number" ? `${connection.source_ref_count} nguồn` : "",
+      typeof connection.target_count === "number" ? `${connection.target_count} target` : "",
+      typeof connection.tool_count === "number" ? `${connection.tool_count} tool` : "",
+    ].filter(Boolean);
+    metrics.push({
+      label: compactValue(connection.label || connection.slug),
+      value: detailCount.length > 0 ? `${status} · ${detailCount.join(", ")}` : status,
+      tone: wiiiConnectConnectionTone(connection),
+    });
+  }
+
+  return {
+    id: "wiii_connect",
+    title: "Wiii Connect",
+    summary: `${readyCount}/${connections.length} sẵn sàng`,
+    tone: warningCount > 0 ? "warn" : readyCount > 0 ? "ok" : "pending",
+    metrics,
+  };
+}
+
 function buildPathSection(
   runtimePath: RuntimePathSnapshot | null | undefined,
 ): CapabilityDashboardSection {
@@ -556,6 +648,7 @@ export function buildCapabilityStatusViewModel(
       buildHostActionSection(byId.get("host_actions")!, input.capabilities),
       buildLmsAuthoringSection(byId.get("lms_authoring")!, input, toolNames),
       buildPointySection(byId.get("pointy")!, input.currentContext, toolNames, input.isEmbedded),
+      buildWiiiConnectSection(input.runtimePath?.wiiiConnect),
       buildPathSection(input.runtimePath),
     ],
     summary: overall.summary,

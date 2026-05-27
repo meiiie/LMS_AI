@@ -269,6 +269,28 @@ describe("useSSEStream concurrency", () => {
           observed_tools: ["tool_web_search"],
           suppressed_tools: ["host_action"],
           preview_required: false,
+          wiii_connect: {
+            version: "wiii_connect_snapshot.v0",
+            surface: "desktop_chat",
+            connections: [
+              {
+                slug: "document_corpus",
+                label: "Document corpus",
+                status: "connected",
+                active: true,
+                agent_ready: true,
+                attachment_count: 1,
+                filename: "private.docx",
+                approval_token: "must-not-persist",
+              },
+            ],
+            path_capabilities: [
+              {
+                path: "document_grounded_answer",
+                raw_prompt: "must-not-persist",
+              },
+            ],
+          },
         },
         metadata: {
           model: "qwen/qwen3-next-80b-a3b-instruct",
@@ -310,6 +332,16 @@ describe("useSSEStream concurrency", () => {
       capabilities: {
         observed_tools: ["tool_web_search"],
         suppressed_tools: ["host_action"],
+        wiii_connect: {
+          version: "wiii_connect_snapshot.v0",
+          connections: [
+            {
+              slug: "document_corpus",
+              label: "Document corpus",
+              attachment_count: 1,
+            },
+          ],
+        },
       },
       metadata: {
         model: "qwen/qwen3-next-80b-a3b-instruct",
@@ -325,6 +357,12 @@ describe("useSSEStream concurrency", () => {
     expect(state.lastCompletedLifecycleEvents[0]?.details).not.toHaveProperty(
       "raw_payload",
     );
+    const sanitizedLifecycle = JSON.stringify(
+      state.lastCompletedLifecycleEvents[0]?.capabilities,
+    );
+    expect(sanitizedLifecycle).not.toContain("private.docx");
+    expect(sanitizedLifecycle).not.toContain("approval_token");
+    expect(sanitizedLifecycle).not.toContain("raw_prompt");
 
     const conversation = state.activeConversation();
     const assistantMessages =

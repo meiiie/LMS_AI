@@ -106,15 +106,144 @@ def _safe_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
     return safe
 
 
+_ALLOWED_WIII_CONNECT_CONNECTION_KEYS = {
+    "id",
+    "provider_kind",
+    "slug",
+    "label",
+    "status",
+    "active",
+    "agent_ready",
+    "scopes",
+    "capabilities",
+    "required_for_paths",
+    "source",
+    "last_checked_at",
+    "reason",
+    "warnings",
+    "host_type",
+    "connector_id",
+    "resource_count",
+    "surface_count",
+    "tool_count",
+    "mutating_tool_count",
+    "attachment_count",
+    "document_count",
+    "source_ref_count",
+    "target_count",
+    "fail_closed_tool",
+    "default_city",
+}
+_ALLOWED_WIII_CONNECT_PATH_KEYS = {
+    "path",
+    "allowed_connection_slugs",
+    "required_connection_slugs",
+    "allowed_tool_groups",
+    "forbidden_tool_groups",
+    "mutation_policy",
+    "delegation_policy",
+}
+_WIII_CONNECT_SCOPE_KEYS = {"read", "preview", "write", "apply", "admin"}
+
+
+def _safe_bool_mapping(value: Any, allowed_keys: set[str]) -> dict[str, bool]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        key: bool(value.get(key))
+        for key in allowed_keys
+        if isinstance(value.get(key), bool)
+    }
+
+
+def _safe_wiii_connect_record(
+    value: Any,
+    *,
+    allowed_keys: set[str],
+) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    record: dict[str, Any] = {}
+    for key in allowed_keys:
+        raw_value = value.get(key)
+        if raw_value is None:
+            continue
+        if key == "scopes":
+            scopes = _safe_bool_mapping(raw_value, _WIII_CONNECT_SCOPE_KEYS)
+            if scopes:
+                record[key] = scopes
+            continue
+        if isinstance(raw_value, bool | int | float):
+            record[key] = raw_value
+            continue
+        if isinstance(raw_value, str):
+            text = _safe_string(raw_value)
+            if text:
+                record[key] = text
+            continue
+        strings = _safe_string_list(raw_value)
+        if strings:
+            record[key] = strings
+    return record if record else None
+
+
+def _safe_wiii_connect_snapshot(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    snapshot: dict[str, Any] = {}
+    for key in ("version", "generated_at", "surface"):
+        text = _safe_string(value.get(key))
+        if text:
+            snapshot[key] = text
+
+    connections = value.get("connections")
+    if isinstance(connections, (list, tuple)):
+        safe_connections: list[dict[str, Any]] = []
+        for item in connections:
+            record = _safe_wiii_connect_record(
+                item,
+                allowed_keys=_ALLOWED_WIII_CONNECT_CONNECTION_KEYS,
+            )
+            if record:
+                safe_connections.append(record)
+            if len(safe_connections) >= _MAX_ITEMS:
+                break
+        if safe_connections:
+            snapshot["connections"] = safe_connections
+
+    path_capabilities = value.get("path_capabilities")
+    if isinstance(path_capabilities, (list, tuple)):
+        safe_paths: list[dict[str, Any]] = []
+        for item in path_capabilities:
+            record = _safe_wiii_connect_record(
+                item,
+                allowed_keys=_ALLOWED_WIII_CONNECT_PATH_KEYS,
+            )
+            if record:
+                safe_paths.append(record)
+            if len(safe_paths) >= _MAX_ITEMS:
+                break
+        if safe_paths:
+            snapshot["path_capabilities"] = safe_paths
+
+    warnings = _safe_string_list(value.get("warnings"))
+    if warnings:
+        snapshot["warnings"] = warnings
+
+    return snapshot if snapshot else None
+
+
 def capability_snapshot_from_ledger_payload(
     ledger_payload: Mapping[str, Any],
+    *,
+    wiii_connect_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return the lifecycle-safe capability/tool subset from a flow ledger."""
 
     request = _safe_mapping(ledger_payload.get("request"))
     tools = _safe_mapping(ledger_payload.get("tools"))
     host_actions = _safe_mapping(ledger_payload.get("host_actions"))
-    return {
+    payload: dict[str, Any] = {
         "host_surface": _safe_string(request.get("host_surface")) or "unknown",
         "host_capabilities": _safe_string_list(request.get("host_capabilities")),
         "observed_tools": _safe_string_list(tools.get("observed")),
@@ -124,6 +253,10 @@ def capability_snapshot_from_ledger_payload(
         "approval_token_present": bool(host_actions.get("approval_token_present")),
         "apply_attempted": bool(host_actions.get("apply_attempted")),
     }
+    safe_wiii_connect = _safe_wiii_connect_snapshot(wiii_connect_snapshot)
+    if safe_wiii_connect:
+        payload["wiii_connect"] = safe_wiii_connect
+    return payload
 
 
 @dataclass(frozen=True)
