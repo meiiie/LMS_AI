@@ -25,11 +25,15 @@ import {
 } from "lucide-react";
 import type {
   WiiiConnectProviderRegistryEntry,
+  WiiiConnectSessionStartDecision,
   WiiiConnectRuntimeConnection,
   WiiiConnectRuntimePathCapability,
   WiiiConnectRuntimeSnapshot,
 } from "@/api/types";
-import { fetchWiiiConnectProviders } from "@/api/wiii-connect";
+import {
+  fetchWiiiConnectProviders,
+  startWiiiConnectProviderSession,
+} from "@/api/wiii-connect";
 import { FullPageView, type FullPageTab } from "@/components/layout/FullPageView";
 import {
   buildCapabilityStatusViewModel,
@@ -81,6 +85,7 @@ interface ExternalCatalogDefinition {
 
 interface CatalogCard {
   id: string;
+  providerSlug: string;
   provider: ProviderFilter;
   providerLabel: string;
   label: string;
@@ -94,6 +99,7 @@ interface CatalogCard {
   agentReady: boolean;
   connected: boolean;
   connection?: WiiiConnectRuntimeConnection;
+  registrySource?: "backend" | "local";
   detailRows: Array<[string, string]>;
   requirements?: string[];
   disabledReason?: string;
@@ -704,6 +710,7 @@ function buildNativeCatalogCards(
       if (connection.reason) detailRows.push(["Lý do", compactText(connection.reason)]);
       return {
         id: `native-${definition.slug}`,
+        providerSlug: definition.slug,
         provider: "wiii_native",
         providerLabel: "Wiii native",
         label: connection.label || definition.label,
@@ -727,6 +734,7 @@ function buildNativeCatalogCards(
     if (fallback) {
       return {
         id: `native-${definition.slug}`,
+        providerSlug: definition.slug,
         provider: "wiii_native",
         providerLabel: "Wiii native",
         label: definition.label,
@@ -749,6 +757,7 @@ function buildNativeCatalogCards(
 
     return {
       id: `native-${definition.slug}`,
+      providerSlug: definition.slug,
       provider: "wiii_native",
       providerLabel: "Wiii native",
       label: definition.label,
@@ -781,6 +790,7 @@ function buildExternalCatalogCards(
     const fromBackend = definition.source === "backend";
     return {
       id: `${definition.provider}-${definition.id}`,
+      providerSlug: definition.id,
       provider: definition.provider,
       providerLabel: providerKindLabels[definition.provider] ?? definition.provider,
       label: definition.label,
@@ -795,6 +805,7 @@ function buildExternalCatalogCards(
         : "Wiii chưa có adapter, vault và permission gate cho kết nối này.",
       agentReady: false,
       connected: false,
+      registrySource: definition.source ?? "local",
       detailRows: [
         ["Provider", providerKindLabels[definition.provider] ?? definition.provider],
         ["Nguồn", fromBackend ? "Backend registry" : "Local fallback"],
@@ -858,7 +869,26 @@ function StatusPill({ tone, children }: { tone: CapabilityStatusTone; children: 
   );
 }
 
-function ConnectionDetailPanel({ card }: { card: CatalogCard | null }) {
+function sessionDecisionTone(
+  decision: WiiiConnectSessionStartDecision | undefined,
+): CapabilityStatusTone {
+  if (!decision) return "off";
+  return decision.status === "ready" ? "ok" : "warn";
+}
+
+function ConnectionDetailPanel({
+  card,
+  sessionDecision,
+  sessionLoading,
+  sessionError,
+  onRequestSession,
+}: {
+  card: CatalogCard | null;
+  sessionDecision?: WiiiConnectSessionStartDecision;
+  sessionLoading?: boolean;
+  sessionError?: string;
+  onRequestSession?: (card: CatalogCard) => Promise<void>;
+}) {
   if (!card) {
     return (
       <aside className="rounded-lg border border-dashed border-[var(--border)] bg-surface-secondary p-4 text-sm text-text-secondary">
@@ -868,6 +898,10 @@ function ConnectionDetailPanel({ card }: { card: CatalogCard | null }) {
   }
 
   const Icon = card.icon;
+  const canRequestSession =
+    card.provider !== "wiii_native" &&
+    card.registrySource === "backend" &&
+    Boolean(onRequestSession);
 
   return (
     <aside className="rounded-lg border border-[var(--border)] bg-surface p-4">
@@ -910,12 +944,68 @@ function ConnectionDetailPanel({ card }: { card: CatalogCard | null }) {
         </div>
       )}
 
+      {sessionDecision && (
+        <div className="mt-4 rounded-md border border-[var(--border)] bg-surface-secondary px-3 py-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase text-text-tertiary">
+              Quyết định backend
+            </div>
+            <StatusPill tone={sessionDecisionTone(sessionDecision)}>
+              {sessionDecision.status}
+            </StatusPill>
+          </div>
+          <dl className="grid gap-2 text-xs">
+            <div>
+              <dt className="text-text-tertiary">Lý do</dt>
+              <dd className="mt-0.5 font-medium text-text">{sessionDecision.reason}</dd>
+            </div>
+            <div>
+              <dt className="text-text-tertiary">Authorization URL</dt>
+              <dd className="mt-0.5 font-medium text-text">
+                {sessionDecision.authorization_url ? "Sẵn sàng từ backend" : "Không phát hành"}
+              </dd>
+            </div>
+          </dl>
+          {sessionDecision.required_next && sessionDecision.required_next.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {sessionDecision.required_next.map((requirement) => (
+                <span
+                  key={`${card.id}-decision-${requirement}`}
+                  className="rounded-md border border-[var(--border)] bg-surface px-2 py-1 text-xs text-text-secondary"
+                >
+                  {requirement}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {sessionError && (
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {sessionError}
+        </div>
+      )}
+
       <button
         type="button"
-        disabled
-        className="mt-4 inline-flex h-9 items-center justify-center rounded-md border border-[var(--border)] bg-surface-secondary px-3 text-sm font-medium text-text-tertiary"
+        disabled={!canRequestSession || sessionLoading}
+        onClick={() => {
+          if (canRequestSession) void onRequestSession?.(card);
+        }}
+        className={`mt-4 inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm font-medium ${
+          canRequestSession
+            ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15"
+            : "border-[var(--border)] bg-surface-secondary text-text-tertiary"
+        }`}
       >
-        {card.provider === "wiii_native" ? "Quan sát từ runtime" : "Chưa thể kết nối"}
+        {card.provider === "wiii_native"
+          ? "Quan sát từ runtime"
+          : canRequestSession
+            ? sessionLoading
+              ? "Đang kiểm tra..."
+              : "Kiểm tra khả năng kết nối"
+            : "Chưa thể kết nối"}
       </button>
       <p className="mt-2 text-xs text-text-tertiary">
         {card.disabledReason ?? card.statusDetail}
@@ -939,6 +1029,11 @@ function ConnectionCatalog({
   const [category, setCategory] = useState<CatalogCategory>("all");
   const [query, setQuery] = useState("");
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [sessionDecisions, setSessionDecisions] = useState<
+    Record<string, WiiiConnectSessionStartDecision>
+  >({});
+  const [sessionErrors, setSessionErrors] = useState<Record<string, string>>({});
+  const [sessionLoadingSlug, setSessionLoadingSlug] = useState<string | null>(null);
 
   const cards = useMemo(
     () => buildConnectionCatalogCards(snapshot, fallbackModel, providerRegistry),
@@ -958,6 +1053,35 @@ function ConnectionCatalog({
 
   const selectedCard =
     filteredCards.find((card) => card.id === selectedCardId) ?? filteredCards[0] ?? null;
+
+  const requestSessionDecision = async (card: CatalogCard) => {
+    if (card.provider === "wiii_native" || card.registrySource !== "backend") return;
+    const slug = card.providerSlug;
+    setSessionLoadingSlug(slug);
+    setSessionErrors((current) => {
+      const next = { ...current };
+      delete next[slug];
+      return next;
+    });
+    try {
+      const decision = await startWiiiConnectProviderSession(slug, {
+        surface: "desktop",
+        requested_scopes: { read: true },
+        request_metadata: {
+          source: "wiii_connect_page",
+          provider: card.provider,
+        },
+      });
+      setSessionDecisions((current) => ({ ...current, [slug]: decision }));
+    } catch {
+      setSessionErrors((current) => ({
+        ...current,
+        [slug]: "Không thể kiểm tra kết nối từ backend.",
+      }));
+    } finally {
+      setSessionLoadingSlug((current) => (current === slug ? null : current));
+    }
+  };
 
   return (
     <section className="space-y-4">
@@ -1104,7 +1228,13 @@ function ConnectionCatalog({
           )}
         </div>
 
-        <ConnectionDetailPanel card={selectedCard} />
+        <ConnectionDetailPanel
+          card={selectedCard}
+          sessionDecision={selectedCard ? sessionDecisions[selectedCard.providerSlug] : undefined}
+          sessionLoading={selectedCard ? sessionLoadingSlug === selectedCard.providerSlug : false}
+          sessionError={selectedCard ? sessionErrors[selectedCard.providerSlug] : undefined}
+          onRequestSession={requestSessionDecision}
+        />
       </div>
     </section>
   );

@@ -1,6 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchWiiiConnectProviders } from "@/api/wiii-connect";
+import {
+  fetchWiiiConnectProviders,
+  startWiiiConnectProviderSession,
+} from "@/api/wiii-connect";
 import { WiiiConnectPage } from "@/components/connect/WiiiConnectPage";
 import { useChatStore } from "@/stores/chat-store";
 import { useConnectionStore } from "@/stores/connection-store";
@@ -9,14 +12,18 @@ import { useUIStore } from "@/stores/ui-store";
 
 vi.mock("@/api/wiii-connect", () => ({
   fetchWiiiConnectProviders: vi.fn(),
+  startWiiiConnectProviderSession: vi.fn(),
 }));
 
 const mockFetchWiiiConnectProviders = vi.mocked(fetchWiiiConnectProviders);
+const mockStartWiiiConnectProviderSession = vi.mocked(startWiiiConnectProviderSession);
 
 describe("WiiiConnectPage", () => {
   beforeEach(() => {
     mockFetchWiiiConnectProviders.mockReset();
     mockFetchWiiiConnectProviders.mockRejectedValue(new Error("offline"));
+    mockStartWiiiConnectProviderSession.mockReset();
+    mockStartWiiiConnectProviderSession.mockRejectedValue(new Error("offline"));
     useHostContextStore.getState().clear();
     useConnectionStore.setState({
       status: "connected",
@@ -188,5 +195,72 @@ describe("WiiiConnectPage", () => {
     expect(screen.getByText("execution_gateway")).toBeTruthy();
     expect(screen.getByText("audit_ledger")).toBeTruthy();
     expect(screen.getByText("Backend registry")).toBeTruthy();
+  });
+
+  it("requests backend session decision for backend registry providers", async () => {
+    mockFetchWiiiConnectProviders.mockResolvedValue({
+      version: "wiii_connect_provider_registry.v1",
+      adapter_version: "wiii_connect_adapter.v1",
+      providers: [
+        {
+          slug: "facebook",
+          label: "Facebook",
+          provider_kind: "composio",
+          auth_mode: "oauth2",
+          enabled: false,
+          agent_ready: false,
+          category: "social",
+          description: "Facebook provider from backend registry.",
+          requirements: ["execution_gateway", "audit_ledger"],
+          action_count: 0,
+        },
+      ],
+    });
+    mockStartWiiiConnectProviderSession.mockResolvedValue({
+      version: "wiii_connect_session.v1",
+      status: "blocked",
+      reason: "provider_disabled",
+      provider_slug: "facebook",
+      label: "Facebook",
+      provider_kind: "composio",
+      auth_mode: "oauth2",
+      authorization_url: "",
+      required_next: ["encrypted_vault_ref", "execution_gateway"],
+      audit_event: {
+        version: "wiii_connect_session.v1",
+        stage: "start_requested",
+        reason: "provider_disabled",
+        created_at: "2026-05-28T00:00:00Z",
+        request: {
+          provider_slug: "facebook",
+          surface: "desktop",
+          requested_scopes: { read: true },
+          redirect_uri_present: false,
+          request_metadata_keys: ["source", "provider"],
+        },
+      },
+    });
+
+    render(<WiiiConnectPage />);
+
+    expect(await screen.findByText("Registry backend")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Composio/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Facebook/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Kiểm tra khả năng kết nối" }));
+
+    expect(mockStartWiiiConnectProviderSession).toHaveBeenCalledWith("facebook", {
+      surface: "desktop",
+      requested_scopes: { read: true },
+      request_metadata: {
+        source: "wiii_connect_page",
+        provider: "composio",
+      },
+    });
+    expect(await screen.findByText("Quyết định backend")).toBeTruthy();
+    expect(screen.getByText("provider_disabled")).toBeTruthy();
+    expect(screen.getByText("encrypted_vault_ref")).toBeTruthy();
+    expect(screen.getByText("Không phát hành")).toBeTruthy();
+    expect(screen.queryByText("access_token")).toBeNull();
+    expect(screen.queryByText("secret-value")).toBeNull();
   });
 });
