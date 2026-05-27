@@ -1,4 +1,3 @@
-import type { ChatLifecycleTelemetryEvent } from "@/api/types";
 import {
   Cable,
   ChevronDown,
@@ -13,10 +12,10 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   buildCapabilityStatusViewModel,
+  runtimePathFromLifecycleEvents,
   type CapabilityDashboardSection,
   type CapabilityStatusItem,
   type CapabilityStatusTone,
-  type RuntimePathSnapshot,
 } from "@/lib/capability-status";
 import { useChatStore } from "@/stores/chat-store";
 import { useConnectionStore } from "@/stores/connection-store";
@@ -116,46 +115,6 @@ function computePanelPosition(anchor: HTMLElement | null): PanelPosition {
   return { top, left, width, maxHeight };
 }
 
-function latestLifecycleEvent(
-  streamingEvents: ChatLifecycleTelemetryEvent[],
-  completedEvents: ChatLifecycleTelemetryEvent[],
-): ChatLifecycleTelemetryEvent | null {
-  const source = streamingEvents.length > 0 ? streamingEvents : completedEvents;
-  for (let index = source.length - 1; index >= 0; index -= 1) {
-    const event = source[index];
-    if (event) return event;
-  }
-  return null;
-}
-
-function runtimePathFromLifecycle(
-  streamingEvents: ChatLifecycleTelemetryEvent[],
-  completedEvents: ChatLifecycleTelemetryEvent[],
-): RuntimePathSnapshot | null {
-  const event = latestLifecycleEvent(streamingEvents, completedEvents);
-  if (!event) return null;
-  return {
-    lane: event.lane,
-    eventName: event.event_name,
-    phase: event.phase,
-    status: event.status,
-    message: event.message,
-    hostSurface: event.capabilities?.host_surface,
-    observedTools: event.capabilities?.observed_tools
-      ? [...event.capabilities.observed_tools]
-      : undefined,
-    suppressedTools: event.capabilities?.suppressed_tools
-      ? [...event.capabilities.suppressed_tools]
-      : undefined,
-    previewRequired: event.capabilities?.preview_required,
-    previewEmitted: event.capabilities?.preview_emitted,
-    approvalTokenPresent: event.capabilities?.approval_token_present,
-    applyAttempted: event.capabilities?.apply_attempted,
-    wiiiConnect: event.capabilities?.wiii_connect ?? null,
-    receivedAtMs: event.received_at_ms,
-  };
-}
-
 export function CapabilityStatusBar({ compact = false }: CapabilityStatusBarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [panelPosition, setPanelPosition] = useState<PanelPosition>(
@@ -179,7 +138,7 @@ export function CapabilityStatusBar({ compact = false }: CapabilityStatusBarProp
 
   const runtimePath = useMemo(
     () =>
-      runtimePathFromLifecycle(
+      runtimePathFromLifecycleEvents(
         streamingLifecycleEvents,
         lastCompletedLifecycleEvents,
       ),

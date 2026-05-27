@@ -7,7 +7,13 @@ import { create } from "zustand";
 import type { ArtifactData } from "@/api/types";
 
 /** Sprint 192: Main content view — chat or full-page admin/settings */
-export type ActiveView = "chat" | "system-admin" | "org-admin" | "settings" | "soul-bridge";
+export type ActiveView =
+  | "chat"
+  | "system-admin"
+  | "org-admin"
+  | "settings"
+  | "soul-bridge"
+  | "wiii-connect";
 
 interface UIState {
   /** Sprint 192: Which view is displayed in the main content area */
@@ -63,6 +69,9 @@ interface UIState {
   /** Sprint 216: Soul Bridge panel */
   openSoulBridge: () => void;
   closeSoulBridge: () => void;
+  /** Wiii Connect capability page */
+  openWiiiConnect: () => void;
+  closeWiiiConnect: () => void;
   /** Code Studio panel actions */
   openCodeStudio: () => void;
   closeCodeStudio: () => void;
@@ -129,6 +138,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   closeCodeStudio: () => set({ codeStudioPanelOpen: false }),
   openSoulBridge: () => set({ activeView: "soul-bridge" as ActiveView, commandPaletteOpen: false }),
   closeSoulBridge: () => set({ activeView: "chat" as ActiveView }),
+  openWiiiConnect: () => set({ activeView: "wiii-connect" as ActiveView, commandPaletteOpen: false }),
+  closeWiiiConnect: () => set({ activeView: "chat" as ActiveView }),
   navigateToChat: () => set({ activeView: "chat" as ActiveView, orgManagerTargetOrgId: null }),
   closeAll: () =>
     set({ activeView: "chat" as ActiveView, commandPaletteOpen: false, sourcesPanelOpen: false, characterPanelOpen: false, previewPanelOpen: false, selectedPreviewId: null, artifactPanelOpen: false, selectedArtifactId: null, _ephemeralArtifact: null, orgManagerTargetOrgId: null, codeStudioPanelOpen: false }),

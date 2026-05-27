@@ -192,6 +192,24 @@ Frontend storage must sanitize the projection again before persisting lifecycle
 metadata. The UI may summarize connection rows and path counts, but should not
 show raw tool schema payloads in chat.
 
+## Desktop UX Projection
+
+The desktop shell has a first-class `Wiii Connect` page for the same projection.
+It is a read-only V0 control-plane view:
+
+- connection cards show provider kind, status, agent-ready state, scopes,
+  capability counts, path usage, safe count metadata, and warnings;
+- path policy shows required connection slugs, allowed/forbidden tool groups,
+  mutation policy, and delegation policy;
+- runtime diagnostics summarize observed/suppressed tool groups instead of raw
+  tool names;
+- external provider adapters are visible only as disabled rows until Wiii has a
+  vault, permission gate, adapter contract, and execution audit for them.
+
+This page must not become a separate source of truth. Backend runtime policy,
+SSE lifecycle metadata, chat dashboard chips, and the Wiii Connect page should
+continue to read the same sanitized snapshot shape.
+
 ## Implementation Order
 
 1. Add typed backend snapshot builders around current runtime status.

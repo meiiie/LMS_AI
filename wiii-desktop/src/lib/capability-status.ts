@@ -1,8 +1,12 @@
 import type {
+  WiiiConnectRuntimeConnection,
+  WiiiConnectRuntimeSnapshot,
+  ChatLifecycleTelemetryEvent,
+} from "@/api/types";
+import type {
   HostCapabilities,
   HostContext,
 } from "@/stores/host-context-store";
-import type { WiiiConnectRuntimeConnection, WiiiConnectRuntimeSnapshot } from "@/api/types";
 
 export type RuntimeConnectionStatus =
   | "connected"
@@ -42,6 +46,46 @@ export interface RuntimePathSnapshot {
   applyAttempted?: boolean;
   wiiiConnect?: WiiiConnectRuntimeSnapshot | null;
   receivedAtMs?: number;
+}
+
+export function latestRuntimeLifecycleEvent(
+  streamingEvents: ChatLifecycleTelemetryEvent[],
+  completedEvents: ChatLifecycleTelemetryEvent[],
+): ChatLifecycleTelemetryEvent | null {
+  const source = streamingEvents.length > 0 ? streamingEvents : completedEvents;
+  for (let index = source.length - 1; index >= 0; index -= 1) {
+    const event = source[index];
+    if (event) return event;
+  }
+  return null;
+}
+
+export function runtimePathFromLifecycleEvents(
+  streamingEvents: ChatLifecycleTelemetryEvent[],
+  completedEvents: ChatLifecycleTelemetryEvent[],
+): RuntimePathSnapshot | null {
+  const event = latestRuntimeLifecycleEvent(streamingEvents, completedEvents);
+  if (!event) return null;
+  return {
+    lane: event.lane,
+    eventName: event.event_name,
+    phase: event.phase,
+    status: event.status,
+    message: event.message,
+    hostSurface: event.capabilities?.host_surface,
+    observedTools: event.capabilities?.observed_tools
+      ? [...event.capabilities.observed_tools]
+      : undefined,
+    suppressedTools: event.capabilities?.suppressed_tools
+      ? [...event.capabilities.suppressed_tools]
+      : undefined,
+    previewRequired: event.capabilities?.preview_required,
+    previewEmitted: event.capabilities?.preview_emitted,
+    approvalTokenPresent: event.capabilities?.approval_token_present,
+    applyAttempted: event.capabilities?.apply_attempted,
+    wiiiConnect: event.capabilities?.wiii_connect ?? null,
+    receivedAtMs: event.received_at_ms,
+  };
 }
 
 export interface CapabilityDashboardMetric {
