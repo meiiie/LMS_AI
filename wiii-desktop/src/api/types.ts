@@ -477,6 +477,54 @@ export interface WiiiConnectProviderRegistryResponse {
   providers: WiiiConnectProviderRegistryEntry[];
 }
 
+export interface WiiiConnectProviderConnectionStatus {
+  version: string;
+  provider_slug: string;
+  label: string;
+  provider_kind: string;
+  auth_mode: string;
+  enabled: boolean;
+  agent_ready: boolean;
+  can_start_authorization: boolean;
+  reason: string;
+  missing_requirements: string[];
+  warnings?: string[];
+}
+
+export interface WiiiConnectSessionStartBody {
+  surface?: string;
+  redirect_uri?: string | null;
+  requested_scopes?: Record<string, boolean>;
+  request_metadata?: Record<string, unknown>;
+}
+
+export interface WiiiConnectSessionAuditEvent {
+  version: string;
+  stage: string;
+  reason: string;
+  created_at: string;
+  request: {
+    provider_slug: string;
+    surface: string;
+    requested_scopes: Record<string, boolean>;
+    redirect_uri_present: boolean;
+    request_metadata_keys: string[];
+  };
+}
+
+export interface WiiiConnectSessionStartDecision {
+  version: string;
+  status: "blocked" | "ready" | string;
+  reason: string;
+  provider_slug: string;
+  label: string;
+  provider_kind: string;
+  auth_mode: string;
+  authorization_url?: string;
+  required_next?: string[];
+  audit_event?: WiiiConnectSessionAuditEvent | null;
+}
+
 export interface SSEChatLifecycleEvent {
   schema_version: string;
   event_name: string;
