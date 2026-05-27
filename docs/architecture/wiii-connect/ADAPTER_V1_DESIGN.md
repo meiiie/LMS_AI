@@ -108,6 +108,10 @@ must keep that provider disabled and non-agent-ready.
 
 - provider slug, kind, auth mode, enabled state;
 - whether it is agent-ready;
+- connection requirements such as Connect Link, provider-managed vault ref, and
+  audit readiness;
+- agent-ready requirements such as scope policy, curated action catalog, and
+  execution gateway;
 - path allowlist;
 - curated action allowlist;
 - provider-specific required fields;
@@ -337,6 +341,8 @@ Before real Composio OAuth is enabled:
   explicit storage probe or backend-controlled storage status, never from
   frontend claims;
 - disabled providers must return a blocked decision with missing requirements;
+- missing connection requirements block OAuth/session start, while missing
+  agent-ready requirements only block tool/action exposure;
 - callback handling must stay blocked until state/code validation, vault storage,
   and provider adapter exchange are ready;
 - callback/webhook handling must bind provider account to Wiii org/user;

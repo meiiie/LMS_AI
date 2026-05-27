@@ -510,7 +510,7 @@ def _external_provider_connections(now: str) -> tuple[WiiiConnectionRecord, ...]
                     "auth_mode": entry.auth_mode,
                     "category": entry.category,
                     "action_count": len(entry.action_allowlist),
-                    "requirement_count": len(entry.requirements),
+                    "requirement_count": len(entry.all_requirements()),
                 },
             )
         )
