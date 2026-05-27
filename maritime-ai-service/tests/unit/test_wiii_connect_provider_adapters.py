@@ -175,7 +175,7 @@ def test_authorization_url_requires_shape_adapter_vault_audit_and_url():
         provider_kind="composio",
         auth_mode="oauth2",
         enabled=True,
-        agent_ready=True,
+        agent_ready=False,
         requirements=(),
     )
     valid_request = WiiiConnectAuthorizationUrlRequest(

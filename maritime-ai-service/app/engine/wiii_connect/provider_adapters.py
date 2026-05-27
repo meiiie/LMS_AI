@@ -29,7 +29,6 @@ WIII_CONNECT_PROVIDER_ADAPTER_VERSION = "wiii_connect_provider_adapter.v1"
 AdapterDecisionStatus = Literal["blocked", "ready"]
 AdapterDecisionReason = Literal[
     "provider_disabled",
-    "provider_not_agent_ready",
     "missing_state",
     "missing_redirect_uri",
     "provider_adapter_mismatch",
@@ -264,8 +263,6 @@ def _authorization_reason(
 ) -> AdapterDecisionReason:
     if not entry.enabled:
         return "provider_disabled"
-    if not entry.agent_ready:
-        return "provider_not_agent_ready"
     if not request.state_present:
         return "missing_state"
     if not request.redirect_uri_present:
@@ -290,8 +287,6 @@ def _authorization_reason(
 def _required_next_for_reason(reason: AdapterDecisionReason) -> tuple[str, ...]:
     if reason == "provider_disabled":
         return ("enable_provider_registry_entry",)
-    if reason == "provider_not_agent_ready":
-        return ("mark_provider_agent_ready",)
     if reason == "missing_state":
         return ("create_backend_state_nonce",)
     if reason == "missing_redirect_uri":
