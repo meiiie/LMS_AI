@@ -169,6 +169,29 @@ Existing Wiii code already has several pieces of this direction:
 Wiii Connect V0 should consolidate these pieces behind one snapshot instead of
 creating a parallel status system.
 
+## SSE Runtime Projection
+
+The first frontend-facing projection is additive on the existing SSE V3
+`chat_lifecycle` event:
+
+```text
+chat_lifecycle.capabilities.wiii_connect = WiiiConnectionSnapshot
+```
+
+This projection is for observability and browser acceptance only. It must use
+the same privacy rules as the backend snapshot:
+
+- no raw document text or filenames
+- no raw user prompt
+- no provider request/response bodies
+- no API keys, OAuth tokens, or approval token values
+- only connection status, capability labels, path policy, counts, warnings, and
+  safe reason codes
+
+Frontend storage must sanitize the projection again before persisting lifecycle
+metadata. The UI may summarize connection rows and path counts, but should not
+show raw tool schema payloads in chat.
+
 ## Implementation Order
 
 1. Add typed backend snapshot builders around current runtime status.

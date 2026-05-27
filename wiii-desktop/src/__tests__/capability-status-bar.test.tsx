@@ -107,6 +107,28 @@ describe("CapabilityStatusBar", () => {
             host_surface: "desktop_chat",
             observed_tools: ["memory.lookup"],
             suppressed_tools: ["host_action"],
+            wiii_connect: {
+              version: "wiii_connect_snapshot.v0",
+              surface: "desktop_chat",
+              connections: [
+                {
+                  slug: "document_corpus",
+                  label: "Document corpus",
+                  status: "connected",
+                  active: true,
+                  agent_ready: true,
+                  capabilities: ["document.read"],
+                  attachment_count: 1,
+                  source_ref_count: 2,
+                },
+              ],
+              path_capabilities: [
+                {
+                  path: "document_grounded_answer",
+                  required_connection_slugs: ["document_corpus"],
+                },
+              ],
+            },
           },
           received_at_ms: 1779825600000,
         },
@@ -119,10 +141,14 @@ describe("CapabilityStatusBar", () => {
 
     expect(screen.getByTestId("capability-dashboard-section-path")).toBeTruthy();
     expect(screen.getAllByText("native_turn").length).toBeGreaterThan(0);
-    expect(screen.getByText("desktop_chat")).toBeTruthy();
+    expect(screen.getAllByText("desktop_chat").length).toBeGreaterThan(0);
     expect(screen.getByText("1 tool (Memory)")).toBeTruthy();
     expect(screen.getByText("1 tool (Host)")).toBeTruthy();
+    expect(screen.getByTestId("capability-dashboard-section-wiii_connect")).toBeTruthy();
+    expect(screen.getByText("Document corpus")).toBeTruthy();
+    expect(screen.getByText(/1 file/)).toBeTruthy();
     expect(screen.queryByText("host_action")).toBeNull();
+    expect(screen.queryByText("document.read")).toBeNull();
   });
 
   it("shows disconnected server and missing host action bridge", () => {

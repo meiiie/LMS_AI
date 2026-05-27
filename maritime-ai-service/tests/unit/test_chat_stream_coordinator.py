@@ -437,6 +437,19 @@ async def test_generate_stream_v3_events_flow_ledger_omits_uploaded_document_bod
     ledger_json = json.dumps(ledger, ensure_ascii=False)
     assert "SECRET DOCUMENT BODY" not in ledger_json
     assert "Tao cho minh bai hoc" not in ledger_json
+    wiii_connect_snapshots = [
+        payload["capabilities"].get("wiii_connect")
+        for payload in _lifecycle_payloads(chunks)
+        if isinstance(payload.get("capabilities"), dict)
+        and isinstance(payload["capabilities"].get("wiii_connect"), dict)
+    ]
+    assert wiii_connect_snapshots
+    snapshot_json = json.dumps(wiii_connect_snapshots, ensure_ascii=False)
+    assert "wiii_connect_snapshot.v0" in snapshot_json
+    assert "document_corpus" in snapshot_json
+    assert "SECRET DOCUMENT BODY" not in snapshot_json
+    assert "private.docx" not in snapshot_json
+    assert "Tao cho minh bai hoc" not in snapshot_json
 
 
 @pytest.mark.asyncio

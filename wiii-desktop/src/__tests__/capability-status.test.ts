@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCapabilityStatuses } from "@/lib/capability-status";
+import { buildCapabilityStatuses, buildCapabilityStatusViewModel } from "@/lib/capability-status";
 
 describe("buildCapabilityStatuses", () => {
   it("marks standalone Wiii as personal host with local Pointy", () => {
@@ -89,5 +89,55 @@ describe("buildCapabilityStatuses", () => {
       value: "Đang chờ",
       tone: "pending",
     });
+  });
+
+  it("summarizes backend Wiii Connect snapshot without exposing raw tool names", () => {
+    const viewModel = buildCapabilityStatusViewModel({
+      connectionStatus: "connected",
+      capabilities: null,
+      currentContext: null,
+      isEmbedded: false,
+      runtimePath: {
+        lane: "native_turn",
+        wiiiConnect: {
+          version: "wiii_connect_snapshot.v0",
+          surface: "desktop_chat",
+          connections: [
+            {
+              slug: "document_corpus",
+              label: "Document corpus",
+              status: "connected",
+              active: true,
+              agent_ready: true,
+              capabilities: ["document.read"],
+              attachment_count: 1,
+              source_ref_count: 2,
+            },
+            {
+              slug: "weather",
+              label: "Weather",
+              status: "disabled",
+              active: false,
+              agent_ready: false,
+              reason: "missing_weather_provider",
+            },
+          ],
+          path_capabilities: [
+            {
+              path: "lms_document_apply",
+              mutation_policy: "approval_token_required",
+            },
+          ],
+        },
+      },
+    });
+
+    const section = viewModel.sections.find((item) => item.id === "wiii_connect");
+    expect(section).toBeTruthy();
+    expect(section?.summary).toContain("1/2");
+    expect(section?.metrics.some((metric) => metric.value.includes("1 file"))).toBe(true);
+    const serialized = JSON.stringify(section);
+    expect(serialized).not.toContain("document.read");
+    expect(serialized).not.toContain("approval_token_required");
   });
 });

@@ -4,6 +4,7 @@ import {
   ChevronDown,
   GraduationCap,
   MousePointer2,
+  Network,
   Route,
   Server,
   Workflow,
@@ -56,6 +57,7 @@ const sectionIconById: Record<CapabilityDashboardSection["id"], typeof Server> =
   host_actions: Workflow,
   lms_authoring: GraduationCap,
   pointy: MousePointer2,
+  wiii_connect: Network,
   path: Route,
 };
 
@@ -149,6 +151,7 @@ function runtimePathFromLifecycle(
     previewEmitted: event.capabilities?.preview_emitted,
     approvalTokenPresent: event.capabilities?.approval_token_present,
     applyAttempted: event.capabilities?.apply_attempted,
+    wiiiConnect: event.capabilities?.wiii_connect ?? null,
     receivedAtMs: event.received_at_ms,
   };
 }
