@@ -184,6 +184,7 @@ FEATURE_TIER_GROUPS: Final[dict[FeatureTier, frozenset[str]]] = {
             "enable_visual_page_capture",
             "enable_visual_product_search",
             "enable_visual_rag",
+            "enable_wiii_connect_composio",
             "living_agent_enable_autonomy_graduation",
             "living_agent_enable_briefing",
             "living_agent_enable_dynamic_goals",
