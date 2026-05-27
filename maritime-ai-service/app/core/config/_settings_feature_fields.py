@@ -391,6 +391,31 @@ class FeatureSettingsMixin:
         ),
     )
 
+    # Wiii Connect external provider adapters
+    enable_wiii_connect_composio: bool = Field(
+        default=False,
+        description="Enable the Wiii-owned Composio provider adapter configuration path",
+    )
+    composio_api_key: Optional[str] = Field(
+        default=None,
+        description="Composio project API key for backend-only adapter calls",
+        repr=False,
+    )
+    composio_base_url: str = Field(
+        default="https://backend.composio.dev",
+        description="Composio backend base URL",
+    )
+    composio_api_version: str = Field(
+        default="v3.1",
+        description="Composio backend API version used by connect-link calls",
+    )
+    composio_auth_config_map: str = Field(
+        default="",
+        description=(
+            "JSON object or comma list mapping provider slug to Composio auth_config_id"
+        ),
+    )
+
     # SoulBridge (Sprint 213)
     enable_soul_bridge: bool = Field(default=False, description="Enable cross-service soul-to-soul communication bridge (WebSocket + HTTP)")
     soul_bridge_peers: str = Field(default="", description="Comma-separated peer entries: 'peer_id=url' or 'url' (e.g., 'bro=http://localhost:8001')")

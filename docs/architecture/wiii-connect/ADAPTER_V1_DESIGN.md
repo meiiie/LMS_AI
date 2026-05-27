@@ -74,6 +74,7 @@ The provider adapter readiness and authorization URL contract lives in:
 
 ```text
 maritime-ai-service/app/engine/wiii_connect/provider_adapters.py
+maritime-ai-service/app/engine/wiii_connect/composio_adapter.py
 ```
 
 The durable storage contract and schema live in:
@@ -201,6 +202,14 @@ must keep that provider disabled and non-agent-ready.
   exchange, and action execution;
 - defaults every external provider kind to unbound and not authorization-ready.
 
+`WiiiConnectComposioAdapterConfig`
+
+- reads backend-only Composio settings without exposing `composio_api_key`;
+- supports provider-to-`auth_config_id` maps via JSON or comma-separated text;
+- reports disabled, missing API key, missing auth config map, or configured
+  status as provider adapter capability metadata;
+- still keeps action execution disabled until gateway/curated-action enablement.
+
 `WiiiConnectAuthorizationUrlRequest`
 
 - records only safe authorization request shape: state presence, redirect URI
@@ -310,6 +319,8 @@ agent receive curated action schemas for the selected provider.
 
 Before real Composio OAuth is enabled:
 
+- backend settings must explicitly set `enable_wiii_connect_composio`, provide a
+  Composio project API key, and map provider slugs to Composio auth config IDs;
 - Wiii backend must create authorization sessions with state and nonce;
 - session start must return a backend decision first, not let the frontend call
   Composio directly;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 
 def test_default_provider_adapter_status_is_unbound_and_secret_free():
@@ -20,6 +21,110 @@ def test_default_provider_adapter_status_is_unbound_and_secret_free():
     assert "access_token" not in serialized
     assert "refresh_token" not in serialized
     assert "client_secret" not in serialized
+
+
+def test_composio_adapter_config_parses_without_exposing_secret_values():
+    from app.engine.wiii_connect.composio_adapter import (
+        build_composio_adapter_config,
+        build_composio_provider_adapter_capability,
+        parse_composio_auth_config_map,
+    )
+
+    parsed_json = parse_composio_auth_config_map(
+        '{"facebook": "authcfg_fb", "google-drive": "authcfg_drive"}',
+    )
+    parsed_text = parse_composio_auth_config_map(
+        "facebook=authcfg_fb,gmail:authcfg_gmail",
+    )
+    disabled = build_composio_provider_adapter_capability(
+        settings_obj=SimpleNamespace(
+            enable_wiii_connect_composio=False,
+            composio_api_key="secret-value",
+            composio_auth_config_map='{"facebook": "authcfg_fb"}',
+        ),
+    )
+    missing_key = build_composio_provider_adapter_capability(
+        settings_obj=SimpleNamespace(
+            enable_wiii_connect_composio=True,
+            composio_api_key="",
+            composio_auth_config_map='{"facebook": "authcfg_fb"}',
+        ),
+    )
+    missing_auth_config = build_composio_provider_adapter_capability(
+        settings_obj=SimpleNamespace(
+            enable_wiii_connect_composio=True,
+            composio_api_key="secret-value",
+            composio_auth_config_map="",
+        ),
+    )
+    configured_settings = SimpleNamespace(
+        enable_wiii_connect_composio=True,
+        composio_api_key="secret-value",
+        composio_base_url="https://backend.composio.dev/",
+        composio_api_version="v3.1",
+        composio_auth_config_map='{"facebook": "authcfg_fb"}',
+    )
+    config = build_composio_adapter_config(configured_settings)
+    configured = build_composio_provider_adapter_capability(config)
+    metadata = {
+        "config": config.to_public_metadata(),
+        "disabled": disabled.to_public_metadata(),
+        "missing_key": missing_key.to_public_metadata(),
+        "missing_auth_config": missing_auth_config.to_public_metadata(),
+        "configured": configured.to_public_metadata(),
+    }
+    serialized = json.dumps(metadata, sort_keys=True)
+
+    assert parsed_json == {
+        "facebook": "authcfg_fb",
+        "google_drive": "authcfg_drive",
+    }
+    assert parsed_text == {
+        "facebook": "authcfg_fb",
+        "gmail": "authcfg_gmail",
+    }
+    assert disabled.bound is False
+    assert disabled.reason == "provider_adapter_not_bound"
+    assert missing_key.bound is True
+    assert missing_key.configured is False
+    assert "missing_composio_api_key" in missing_key.warnings
+    assert missing_auth_config.configured is False
+    assert "missing_composio_auth_config_map" in missing_auth_config.warnings
+    assert configured.bound is True
+    assert configured.configured is True
+    assert configured.can_create_authorization_url is True
+    assert configured.can_exchange_callback is True
+    assert configured.can_execute_actions is False
+    assert metadata["config"]["auth_config_count"] == 1
+    assert metadata["config"]["provider_slugs"] == ["facebook"]
+    assert "secret-value" not in serialized
+
+
+def test_provider_adapter_status_accepts_backend_capability_override():
+    from app.engine.wiii_connect.provider_adapters import (
+        WiiiConnectProviderAdapterCapability,
+        provider_adapter_status_public_metadata,
+    )
+
+    metadata = provider_adapter_status_public_metadata(
+        adapter_capabilities=(
+            WiiiConnectProviderAdapterCapability(
+                provider_kind="composio",
+                adapter_name="composio_adapter",
+                bound=True,
+                configured=True,
+                can_create_authorization_url=True,
+                can_exchange_callback=True,
+                reason="ready",
+            ),
+        ),
+    )
+    by_kind = {adapter["provider_kind"]: adapter for adapter in metadata["adapters"]}
+
+    assert by_kind["composio"]["bound"] is True
+    assert by_kind["composio"]["configured"] is True
+    assert by_kind["composio"]["authorization_ready"] is True
+    assert by_kind["mcp"]["bound"] is False
 
 
 def test_disabled_provider_authorization_url_decision_blocks_and_redacts_keys():
