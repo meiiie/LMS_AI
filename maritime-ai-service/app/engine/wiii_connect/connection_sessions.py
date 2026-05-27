@@ -24,7 +24,6 @@ WIII_CONNECT_SESSION_CONTRACT_VERSION = "wiii_connect_session.v1"
 SessionDecisionStatus = Literal["blocked", "ready"]
 SessionDecisionReason = Literal[
     "provider_disabled",
-    "provider_not_agent_ready",
     "missing_connect_prerequisites",
     "provider_adapter_not_bound",
     "provider_adapter_mismatch",
@@ -259,8 +258,6 @@ def _session_block_reason(
 ) -> SessionDecisionReason:
     if not entry.enabled:
         return "provider_disabled"
-    if not entry.agent_ready:
-        return "provider_not_agent_ready"
     if missing_requirements:
         return "missing_connect_prerequisites"
     return "authorization_url_issued"
@@ -271,7 +268,6 @@ def _session_reason_from_authorization_decision(
 ) -> SessionDecisionReason:
     if decision.reason in {
         "provider_disabled",
-        "provider_not_agent_ready",
         "provider_adapter_mismatch",
         "provider_adapter_not_bound",
         "provider_adapter_not_configured",

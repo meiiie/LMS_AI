@@ -58,6 +58,29 @@ def test_external_execute_requires_connection_action_path_scope_and_approval():
         state="connected",
         scopes=WiiiConnectScopeGrant(read=True, write=True, apply=True),
     )
+    connect_only_entry = WiiiConnectProviderRegistryEntry(
+        slug="facebook",
+        label="Facebook",
+        provider_kind="composio",
+        auth_mode="oauth2",
+        enabled=True,
+        agent_ready=False,
+        allowed_paths=("external_app_action",),
+        action_allowlist=("FACEBOOK_CREATE_POST",),
+    )
+
+    not_agent_ready = decide_external_execution(
+        connect_only_entry,
+        connection,
+        WiiiConnectExecutionRequest(
+            provider_slug="facebook",
+            action_slug="FACEBOOK_CREATE_POST",
+            path="external_app_action",
+            mutation="write",
+        ),
+    )
+    assert not_agent_ready.allowed is False
+    assert not_agent_ready.reason == "provider_not_agent_ready"
 
     uncurated = decide_external_execution(
         entry,

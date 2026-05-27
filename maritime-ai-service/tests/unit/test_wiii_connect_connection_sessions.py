@@ -56,7 +56,7 @@ def test_session_start_redacts_sensitive_request_metadata_keys():
     assert "secret-value" not in serialized
 
 
-def test_ready_session_requires_adapter_authorization_url_even_when_entry_enabled():
+def test_ready_session_requires_adapter_authorization_url_not_agent_ready():
     from app.engine.wiii_connect.adapter_v1 import WiiiConnectProviderRegistryEntry
     from app.engine.wiii_connect.connection_sessions import (
         WiiiConnectSessionStartRequest,
@@ -74,7 +74,7 @@ def test_ready_session_requires_adapter_authorization_url_even_when_entry_enable
         provider_kind="composio",
         auth_mode="oauth2",
         enabled=True,
-        agent_ready=True,
+        agent_ready=False,
         requirements=(),
     )
 

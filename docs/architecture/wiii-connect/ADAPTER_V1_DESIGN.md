@@ -220,9 +220,11 @@ must keep that provider disabled and non-agent-ready.
 `WiiiConnectAuthorizationUrlDecision`
 
 - returns `blocked` or `ready`;
-- requires enabled provider, agent-ready registry entry, backend-created state,
-  backend-bound redirect URI, bound/configured adapter, vault capability,
-  persistent audit ledger, and an adapter-supplied authorization URL;
+- requires enabled provider, backend-created state, backend-bound redirect URI,
+  bound/configured adapter, vault capability, persistent audit ledger, and an
+  adapter-supplied authorization URL;
+- does not require `agent_ready`; users may connect accounts before Wiii exposes
+  curated actions to agents;
 - rejects adapter/provider-kind mismatch before any OAuth handoff;
 - direct session callers may not bypass adapter policy by passing a URL.
 
@@ -265,7 +267,9 @@ Composio-like statuses map as follows:
 
 ## Agent-Ready Gate
 
-`connected` is only transport/auth state. `agent_ready` requires all of:
+`connected` is only transport/auth state. A provider may be enabled for
+connection without being `agent_ready`. `agent_ready` is required for execution
+and requires all of:
 
 1. provider registry entry is enabled;
 2. provider registry entry is marked agent-ready;
@@ -321,6 +325,9 @@ Before real Composio OAuth is enabled:
 
 - backend settings must explicitly set `enable_wiii_connect_composio`, provide a
   Composio project API key, and map provider slugs to Composio auth config IDs;
+- provider connection readiness must stay separate from `agent_ready`; account
+  connection can be enabled before any curated action schema is exposed to an
+  agent;
 - Wiii backend must create authorization sessions with state and nonce;
 - session start must return a backend decision first, not let the frontend call
   Composio directly;
