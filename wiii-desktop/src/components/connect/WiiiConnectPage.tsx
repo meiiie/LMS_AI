@@ -22,6 +22,7 @@ import {
   Route,
   Search,
   Server,
+  Unplug,
   Workflow,
   type LucideIcon,
   XCircle,
@@ -30,6 +31,7 @@ import type {
   WiiiConnectAuthorizationUrlDecision,
   WiiiConnectProviderConnectionListResponse,
   WiiiConnectProviderConnectionRecord,
+  WiiiConnectProviderDisconnectResponse,
   WiiiConnectProviderRegistryEntry,
   WiiiConnectSessionStartDecision,
   WiiiConnectRuntimeConnection,
@@ -39,6 +41,7 @@ import type {
 import {
   buildWiiiConnectProviderCallbackUrl,
   createWiiiConnectProviderAuthorizationUrl,
+  disconnectWiiiConnectProviderConnection,
   fetchWiiiConnectProviderConnections,
   fetchWiiiConnectProviders,
   startWiiiConnectProviderSession,
@@ -119,6 +122,13 @@ interface ProviderConnectionListState {
   loading: boolean;
   error?: string;
   lastFetchedAt?: string;
+}
+
+interface ProviderDisconnectState {
+  response?: WiiiConnectProviderDisconnectResponse;
+  loading: boolean;
+  error?: string;
+  lastUpdatedAt?: string;
 }
 
 const tabs: FullPageTab[] = [
@@ -589,6 +599,57 @@ function compactText(value: unknown, fallback = "Chưa có"): string {
   return text.length > 72 ? `${text.slice(0, 69)}...` : text;
 }
 
+function disconnectResultTone(
+  response: WiiiConnectProviderDisconnectResponse | undefined,
+): CapabilityStatusTone {
+  if (!response) return "off";
+  if (response.local_disabled) return "ok";
+  if (response.status === "blocked") return "warn";
+  return response.status === "failed" ? "warn" : "off";
+}
+
+function locallyDisabledConnection(
+  connection: WiiiConnectProviderConnectionRecord,
+  reason = "user_disconnect_requested",
+): WiiiConnectProviderConnectionRecord {
+  return {
+    ...connection,
+    state: "disabled",
+    active: false,
+    scopes: {},
+    reason,
+    warnings: Array.from(new Set([...(connection.warnings ?? []), "disconnected_by_user"])),
+  };
+}
+
+function responseWithLocallyDisabledConnection(
+  response: WiiiConnectProviderConnectionListResponse | undefined,
+  connection: WiiiConnectProviderConnectionRecord,
+  reason = "user_disconnect_requested",
+): WiiiConnectProviderConnectionListResponse {
+  const disabled = locallyDisabledConnection(connection, reason);
+  if (!response) {
+    return {
+      version: "wiii_connect_connection_list.v1",
+      status: "ready",
+      reason,
+      provider_slug: connection.provider_slug,
+      provider_kind: "composio",
+      connection_count: 1,
+      connections: [disabled],
+    };
+  }
+  return {
+    ...response,
+    status: "ready",
+    reason,
+    connection_count: Math.max(response.connection_count, 1),
+    connections: response.connections.map((item) =>
+      item.connection_id === connection.connection_id ? disabled : item,
+    ),
+  };
+}
+
 function formatCount(value: unknown, label: string): string | null {
   if (typeof value !== "number") return null;
   return `${value} ${label}`;
@@ -961,24 +1022,31 @@ function ConnectionDetailPanel({
   authorizationDecision,
   sessionLoading,
   authorizationLoading,
+  disconnectState,
   sessionError,
   authorizationError,
   connectionList,
   onRequestSession,
   onRequestAuthorization,
   onRefreshConnections,
+  onDisconnectConnection,
 }: {
   card: CatalogCard | null;
   sessionDecision?: WiiiConnectSessionStartDecision;
   authorizationDecision?: WiiiConnectAuthorizationUrlDecision;
   sessionLoading?: boolean;
   authorizationLoading?: boolean;
+  disconnectState?: ProviderDisconnectState;
   sessionError?: string;
   authorizationError?: string;
   connectionList?: ProviderConnectionListState;
   onRequestSession?: (card: CatalogCard) => Promise<void>;
   onRequestAuthorization?: (card: CatalogCard) => Promise<void>;
   onRefreshConnections?: (card: CatalogCard) => Promise<unknown>;
+  onDisconnectConnection?: (
+    card: CatalogCard,
+    connection: WiiiConnectProviderConnectionRecord,
+  ) => Promise<void>;
 }) {
   if (!card) {
     return (
@@ -1002,6 +1070,12 @@ function ConnectionDetailPanel({
     card.registrySource === "backend" &&
     Boolean(onRefreshConnections);
   const providerConnection = primaryProviderConnection(connectionList?.response);
+  const canDisconnectConnection =
+    card.provider !== "wiii_native" &&
+    card.registrySource === "backend" &&
+    Boolean(providerConnection?.connection_id) &&
+    providerConnection?.state !== "disabled" &&
+    Boolean(onDisconnectConnection);
 
   return (
     <aside className="rounded-lg border border-[var(--border)] bg-surface p-4">
@@ -1176,6 +1250,49 @@ function ConnectionDetailPanel({
         </div>
       )}
 
+      {disconnectState?.response && (
+        <div className="mt-4 rounded-md border border-[var(--border)] bg-surface-secondary px-3 py-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase text-text-tertiary">
+              Ngắt kết nối
+            </div>
+            <span data-testid="wiii-connect-disconnect-status">
+              <StatusPill tone={disconnectResultTone(disconnectState.response)}>
+                {disconnectState.response.local_disabled ? "Đã khóa local" : disconnectState.response.status}
+              </StatusPill>
+            </span>
+          </div>
+          <dl className="grid gap-2 text-xs">
+            <div>
+              <dt className="text-text-tertiary">Lý do</dt>
+              <dd className="mt-0.5 font-medium text-text">
+                {disconnectState.response.reason}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-text-tertiary">Provider cleanup</dt>
+              <dd className="mt-0.5 font-medium text-text">
+                {disconnectState.response.status === "succeeded" ? "Đã gửi yêu cầu" : "Chờ xử lý"}
+              </dd>
+            </div>
+            {disconnectState.lastUpdatedAt && (
+              <div>
+                <dt className="text-text-tertiary">Cập nhật</dt>
+                <dd className="mt-0.5 font-medium text-text">
+                  {formatDateTime(disconnectState.lastUpdatedAt)}
+                </dd>
+              </div>
+            )}
+          </dl>
+        </div>
+      )}
+
+      {disconnectState?.error && (
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {disconnectState.error}
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
@@ -1221,6 +1338,33 @@ function ConnectionDetailPanel({
             aria-hidden="true"
           />
           Làm mới trạng thái
+        </button>
+
+        <button
+          type="button"
+          data-testid="wiii-connect-disconnect-button"
+          disabled={!canDisconnectConnection || disconnectState?.loading}
+          onClick={() => {
+            if (canDisconnectConnection && providerConnection) {
+              void onDisconnectConnection?.(card, providerConnection);
+            }
+          }}
+          className={`inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium ${
+            canDisconnectConnection
+              ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+              : "border-[var(--border)] bg-surface-secondary text-text-tertiary"
+          }`}
+        >
+          {disconnectState?.loading ? (
+            <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Unplug size={14} aria-hidden="true" />
+          )}
+          {disconnectState?.loading
+            ? "Đang ngắt..."
+            : providerConnection?.state === "disabled"
+              ? "Đã ngắt"
+              : "Ngắt kết nối"}
         </button>
 
         <button
@@ -1272,6 +1416,9 @@ function ConnectionCatalog({
   const [authorizationLoadingSlug, setAuthorizationLoadingSlug] = useState<string | null>(null);
   const [providerConnectionLists, setProviderConnectionLists] = useState<
     Record<string, ProviderConnectionListState>
+  >({});
+  const [disconnectStates, setDisconnectStates] = useState<
+    Record<string, ProviderDisconnectState>
   >({});
   const connectionPollTokenRef = useRef(0);
 
@@ -1366,6 +1513,62 @@ function ConnectionCatalog({
         },
       }));
       return null;
+    }
+  };
+
+  const disconnectProviderConnection = async (
+    card: CatalogCard,
+    connection: WiiiConnectProviderConnectionRecord,
+  ) => {
+    if (card.provider === "wiii_native" || card.registrySource !== "backend") return;
+    const slug = card.providerSlug;
+    connectionPollTokenRef.current += 1;
+    setDisconnectStates((current) => ({
+      ...current,
+      [slug]: {
+        ...current[slug],
+        loading: true,
+        error: undefined,
+      },
+    }));
+    try {
+      const response = await disconnectWiiiConnectProviderConnection(
+        slug,
+        connection.connection_id,
+      );
+      setDisconnectStates((current) => ({
+        ...current,
+        [slug]: {
+          response,
+          loading: false,
+          lastUpdatedAt: new Date().toISOString(),
+        },
+      }));
+      if (response.local_disabled) {
+        setProviderConnectionLists((current) => ({
+          ...current,
+          [slug]: {
+            ...current[slug],
+            response: responseWithLocallyDisabledConnection(
+              current[slug]?.response,
+              connection,
+              "user_disconnect_requested",
+            ),
+            loading: false,
+            lastFetchedAt: new Date().toISOString(),
+          },
+        }));
+      }
+    } catch {
+      setDisconnectStates((current) => ({
+        ...current,
+        [slug]: {
+          ...current[slug],
+          loading: false,
+          error: "Không thể ngắt kết nối từ backend.",
+          lastUpdatedAt: new Date().toISOString(),
+        },
+      }));
     }
   };
 
@@ -1571,12 +1774,14 @@ function ConnectionCatalog({
           authorizationDecision={selectedCard ? authorizationDecisions[selectedCard.providerSlug] : undefined}
           sessionLoading={selectedCard ? sessionLoadingSlug === selectedCard.providerSlug : false}
           authorizationLoading={selectedCard ? authorizationLoadingSlug === selectedCard.providerSlug : false}
+          disconnectState={selectedCard ? disconnectStates[selectedCard.providerSlug] : undefined}
           sessionError={selectedCard ? sessionErrors[selectedCard.providerSlug] : undefined}
           authorizationError={selectedCard ? authorizationErrors[selectedCard.providerSlug] : undefined}
           connectionList={selectedCard ? providerConnectionLists[selectedCard.providerSlug] : undefined}
           onRequestSession={requestSessionDecision}
           onRequestAuthorization={requestAuthorizationUrl}
           onRefreshConnections={refreshProviderConnections}
+          onDisconnectConnection={disconnectProviderConnection}
         />
       </div>
     </section>

@@ -3,6 +3,7 @@ import type {
   WiiiConnectAuthorizationUrlDecision,
   WiiiConnectProviderConnectionListResponse,
   WiiiConnectProviderConnectionStatus,
+  WiiiConnectProviderDisconnectResponse,
   WiiiConnectProviderRegistryResponse,
   WiiiConnectSessionStartBody,
   WiiiConnectSessionStartDecision,
@@ -49,6 +50,15 @@ export async function fetchWiiiConnectProviderConnections(
     {
       probe_database: options.probeDatabase === false ? "false" : "true",
     },
+  );
+}
+
+export async function disconnectWiiiConnectProviderConnection(
+  slug: string,
+  connectionId: string,
+): Promise<WiiiConnectProviderDisconnectResponse> {
+  return getClient().delete<WiiiConnectProviderDisconnectResponse>(
+    `/api/v1/wiii-connect/providers/${encodeURIComponent(slug)}/connections/${encodeURIComponent(connectionId)}`,
   );
 }
 

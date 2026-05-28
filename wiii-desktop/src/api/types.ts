@@ -583,6 +583,18 @@ export interface WiiiConnectProviderConnectionListResponse {
   storage?: Record<string, unknown> | null;
 }
 
+export interface WiiiConnectProviderDisconnectResponse {
+  version: string;
+  status: "blocked" | "succeeded" | "failed" | string;
+  reason: string;
+  provider_slug: string;
+  provider_kind: string;
+  connection_present: boolean;
+  local_disabled: boolean;
+  provider?: Record<string, unknown> | null;
+  storage?: Record<string, unknown> | null;
+}
+
 export interface SSEChatLifecycleEvent {
   schema_version: string;
   event_name: string;
