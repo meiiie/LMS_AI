@@ -42,6 +42,7 @@ SENSITIVE_EXACT_KEYS = {
     "code",
     "connected_account_id",
     "connection_id",
+    "connection_ref",
     "credential",
     "password",
     "redirect_url",
@@ -324,7 +325,12 @@ def _looks_sensitive_string(value: str) -> bool:
         return True
     if "access_token=" in lowered or "refresh_token=" in lowered:
         return True
-    if "wiii_state=" in lowered or "connected_account_id=" in lowered:
+    if (
+        "wiii_state=" in lowered
+        or "connected_account_id=" in lowered
+        or "connection_ref=" in lowered
+        or "connection_id=" in lowered
+    ):
         return True
     return False
 

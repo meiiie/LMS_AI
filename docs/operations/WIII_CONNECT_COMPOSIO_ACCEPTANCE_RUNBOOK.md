@@ -97,8 +97,9 @@ python scripts/wiii_connect_composio_acceptance.py --backend-url http://localhos
 The JSON includes check names, pass/fail status, elapsed time, target label,
 deployed commit, and whether a connection was selected for action execution. It
 intentionally strips bearer tokens, Connect URLs, callback state, raw connection
-IDs, vault references, and provider payloads. Do not commit generated evidence
-files; attach or summarize the sanitized output in the issue/PR when needed.
+IDs, opaque connection refs, vault references, and provider payloads. Do not
+commit generated evidence files; attach or summarize the sanitized output in
+the issue/PR when needed.
 
 For local dev-login:
 
