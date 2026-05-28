@@ -47,3 +47,26 @@ def test_action_catalog_redacts_sensitive_argument_keys():
     assert "redacted_sensitive_field" in metadata["argument_keys"]
     assert "access_token" not in serialized
     assert "client_secret" not in serialized
+
+
+def test_action_catalog_can_project_runtime_enabled_curated_action():
+    from app.engine.wiii_connect.action_catalog import (
+        action_catalog_public_metadata,
+        configured_action_slugs_for_provider,
+    )
+
+    enabled = configured_action_slugs_for_provider(
+        "gmail",
+        enabled_slugs=("GMAIL_FETCH_EMAILS",),
+    )
+    metadata = action_catalog_public_metadata(
+        provider_slug="gmail",
+        enabled_slugs=enabled,
+    )
+
+    assert enabled == ("GMAIL_FETCH_EMAILS",)
+    assert metadata["enabled_action_count"] == 1
+    assert metadata["actions"][0]["enabled"] is True
+    assert "runtime_enabled_requires_live_schema_verification" in metadata["actions"][0][
+        "warnings"
+    ]

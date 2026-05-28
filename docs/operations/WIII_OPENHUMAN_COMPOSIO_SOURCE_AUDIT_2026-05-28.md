@@ -13,9 +13,12 @@ Related issue: #730
 This audit records the OpenHuman and Composio patterns Wiii should adopt before
 enabling real third-party actions through Wiii Connect.
 
-It does not mean Wiii has enabled Composio. Wiii currently has a read-only
-catalog and runtime status surface. Real OAuth and provider execution must wait
-for the Adapter V1 gateway, vault, scope policy, and audit ledger.
+It does not mean Wiii has fully enabled Composio for users. Wiii now has a
+read-only catalog, runtime status surface, backend-owned Connect Link flow,
+connection polling, execution gateway, schema verification boundary, and
+read-only execute adapter. Real usage still requires production Composio
+credentials, provider auth configs, a live connected account, and acceptance
+against that account.
 
 ## Official Composio Runtime Model
 
@@ -38,6 +41,9 @@ Current Composio docs describe a session/connected-account model:
   accounts, and optionally a workbench;
 - Composio Connect also exposes meta tools for search, schema fetch, multi
   execute, connection management, wait-for-connection, and remote workbench.
+- Current REST tool endpoints include `GET /api/v3.1/tools/{tool_slug}` for
+  detailed input/output metadata and `POST /api/v3.1/tools/execute/{tool_slug}`
+  for execution with `connected_account_id`, `user_id`, and `arguments`.
 
 Sources:
 
@@ -153,12 +159,24 @@ agent-ready execution state. Wiii now also has an authenticated execution
 gateway preflight endpoint that fetches the stored org/user connection record,
 checks path/action/scope/evidence/adapter/audit policy, and appends a
 privacy-safe execution ledger record without calling Composio action execution.
-Wiii also has a curated action catalog contract with a disabled
+Wiii also has a curated action catalog contract with a
 `GMAIL_FETCH_EMAILS` read-only candidate, so future action exposure has a
 reviewable allowlist rather than a broad Composio tool dump. This candidate was
 chosen because current Composio Gmail docs list it as an available tool, while
-current Facebook docs still describe Facebook actions as coming soon. Wiii still
-needs live Composio schema verification, provider execution adapter enablement
-for one low-risk read-only action, disconnect/reconnect controls, and
-end-to-end acceptance against real Composio credentials before Composio actions
-can be enabled for real users.
+current Facebook docs still describe Facebook actions as coming soon.
+
+The backend now has the first read-only execution boundary for that candidate:
+deployment must set `enable_wiii_connect_composio_readonly_execute` plus
+`composio_readonly_action_allowlist`; Wiii then fetches the live Composio tool
+schema, requires the normal gateway decision to be allowed, calls the Composio
+execute endpoint only from the backend, and records sanitized started plus
+completion audit events. This is deliberately not a broad Composio enablement:
+write/apply actions, Composio meta-tools, direct frontend Composio calls, raw
+schemas, raw provider outputs, provider tokens, and Composio API keys remain
+outside public/chat metadata.
+
+Remaining work before enabling Composio for real users: configure production
+Composio project credentials and auth config IDs, connect a live Gmail account,
+run browser/backend acceptance through Wiii's `/execute` endpoint, add
+disconnect/reconnect controls, and decide whether Wiii should keep using
+Composio as an adapter or graduate specific providers to Wiii-owned OAuth apps.
