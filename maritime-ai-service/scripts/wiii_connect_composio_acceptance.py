@@ -345,7 +345,7 @@ class WiiiConnectComposioAcceptance:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.token = ""
-        self.selected_connection_id = ""
+        self.selected_connection_ref = ""
         self.passed = 0
         self.failed = 0
         self.started_at = datetime.now(UTC)
@@ -517,12 +517,12 @@ class WiiiConnectComposioAcceptance:
                         getattr(self.args, "execute_readonly", False)
                     ),
                     "disconnect": bool(getattr(self.args, "disconnect", False)),
-                    "explicit_connection_selected": bool(
-                        getattr(self.args, "connection_id", "")
+                    "explicit_connection_ref_selected": bool(
+                        getattr(self.args, "connection_ref", "")
                     ),
                     "connection_selected_for_action": bool(
-                        getattr(self.args, "connection_id", "")
-                        or self.selected_connection_id
+                        getattr(self.args, "connection_ref", "")
+                        or self.selected_connection_ref
                     ),
                     "arguments_present": bool(
                         parse_json_argument_object(
@@ -724,14 +724,14 @@ class WiiiConnectComposioAcceptance:
     def activation_readiness_payload(
         self,
         *,
-        connection_id: str = "",
+        connection_ref: str = "",
     ) -> dict[str, Any]:
         params = {
             "probe_database": "true",
             "action_slug": self.args.action,
         }
-        if connection_id:
-            params["connection_ref"] = connection_id
+        if connection_ref:
+            params["connection_ref"] = connection_ref
         query = urllib.parse.urlencode(params)
         return request_bytes(
             "GET",
@@ -756,18 +756,18 @@ class WiiiConnectComposioAcceptance:
         )
 
     def check_activation_ready_to_execute(self) -> str:
-        connection_id = self.connection_id_for_action()
-        payload = self.activation_readiness_payload(connection_id=connection_id)
+        connection_ref = self.connection_ref_for_action()
+        payload = self.activation_readiness_payload(connection_ref=connection_ref)
         assert_activation_ready(
             payload,
             flag="ready_to_execute_readonly",
             label="read-only execution-ready",
         )
-        return f"ready_to_execute_readonly=true connection={opaque_ref(connection_id)}"
+        return f"ready_to_execute_readonly=true connection={opaque_ref(connection_ref)}"
 
     def check_activation_readiness_report(self) -> str:
-        connection_id = (self.args.connection_id or "").strip()
-        payload = self.activation_readiness_payload(connection_id=connection_id)
+        connection_ref = (self.args.connection_ref or "").strip()
+        payload = self.activation_readiness_payload(connection_ref=connection_ref)
         print_activation_readiness_report(payload)
         return f"blockers={activation_blocker_summary(payload)}"
 
@@ -823,13 +823,13 @@ class WiiiConnectComposioAcceptance:
             ):
                 raise AcceptanceFailure("No active connected account was returned")
             return "ready; no active account required for this run"
-        self.selected_connection_id = str(
+        self.selected_connection_ref = str(
             connection.get("connection_ref") or connection.get("connection_id") or ""
         )
-        return f"active_connection={opaque_ref(self.selected_connection_id)}"
+        return f"active_connection={opaque_ref(self.selected_connection_ref)}"
 
     def check_execution_gateway_allowed(self) -> str:
-        connection_id = self.connection_id_for_action()
+        connection_ref = self.connection_ref_for_action()
         payload = request_bytes(
             "POST",
             self.api_url(
@@ -838,7 +838,7 @@ class WiiiConnectComposioAcceptance:
             headers=self.auth_headers(),
             payload={
                 "surface": "acceptance_harness",
-                "connection_ref": connection_id,
+                "connection_ref": connection_ref,
                 "action_slug": self.args.action,
                 "path": "external_app_action",
                 "mutation": "read",
@@ -850,10 +850,10 @@ class WiiiConnectComposioAcceptance:
             raise AcceptanceFailure(
                 f"Gateway did not allow read-only action: reason={payload.get('reason')!r}"
             )
-        return f"allowed connection={opaque_ref(connection_id)}"
+        return f"allowed connection={opaque_ref(connection_ref)}"
 
     def check_readonly_execution(self) -> str:
-        connection_id = self.connection_id_for_action()
+        connection_ref = self.connection_ref_for_action()
         payload = request_bytes(
             "POST",
             self.api_url(
@@ -862,7 +862,7 @@ class WiiiConnectComposioAcceptance:
             headers=self.auth_headers(),
             payload={
                 "surface": "acceptance_harness",
-                "connection_ref": connection_id,
+                "connection_ref": connection_ref,
                 "action_slug": self.args.action,
                 "path": "external_app_action",
                 "mutation": "read",
@@ -886,12 +886,12 @@ class WiiiConnectComposioAcceptance:
         return f"succeeded data_keys={execution.get('data_keys', [])}"
 
     def check_disconnect(self) -> str:
-        connection_id = self.connection_id_for_action()
+        connection_ref = self.connection_ref_for_action()
         payload = request_bytes(
             "DELETE",
             self.api_url(
                 f"/api/v1/wiii-connect/providers/{urllib.parse.quote(self.args.provider)}"
-                f"/connections/{urllib.parse.quote(connection_id)}"
+                f"/connections/{urllib.parse.quote(connection_ref)}"
             ),
             headers=self.auth_headers(),
             payload={"surface": "acceptance_harness"},
@@ -906,7 +906,7 @@ class WiiiConnectComposioAcceptance:
             raise AcceptanceFailure(
                 f"Provider disconnect did not succeed: {json_for_log(payload)}"
             )
-        return f"local_disabled=true connection={opaque_ref(connection_id)}"
+        return f"local_disabled=true connection={opaque_ref(connection_ref)}"
 
     def argument_keys(self) -> list[str]:
         if self.args.argument_keys:
@@ -920,12 +920,12 @@ class WiiiConnectComposioAcceptance:
     def arguments(self) -> dict[str, Any]:
         return parse_json_argument_object(self.args.arguments_json)
 
-    def connection_id_for_action(self) -> str:
-        candidate = (self.args.connection_id or self.selected_connection_id).strip()
+    def connection_ref_for_action(self) -> str:
+        candidate = (self.args.connection_ref or self.selected_connection_ref).strip()
         if not candidate:
             raise AcceptanceFailure(
                 "No connected account selected. Run with --expect-connected after OAuth "
-                "or pass --connection-id explicitly."
+                "or pass --connection-ref explicitly."
             )
         return candidate
 
@@ -972,7 +972,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--require-execution-ready", action="store_true")
     parser.add_argument("--execute-readonly", action="store_true")
     parser.add_argument("--disconnect", action="store_true")
-    parser.add_argument("--connection-id", default="")
+    parser.add_argument(
+        "--connection-ref",
+        default="",
+        help="Opaque Wiii connection_ref selected from the backend connection list.",
+    )
+    parser.add_argument(
+        "--connection-id",
+        dest="connection_ref",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--argument-keys", default="")
     parser.add_argument("--arguments-json", default="{}")
     parser.add_argument(
