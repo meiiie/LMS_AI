@@ -10,13 +10,15 @@ Connect Adapter V1 contract. This slice adds deterministic policy objects and
 unit tests, while keeping real Composio OAuth/execution disabled until vault and
 runtime endpoints exist.
 
-Status update 2026-05-28: follow-up slices have implemented the runtime
+Status update 2026-05-29: follow-up slices have implemented the runtime
 endpoints, provider-managed vault references, durable connection/audit storage,
 Composio Connect Link and callback boundary, activation readiness, read-only
 execution gateway, desktop Wiii Connect surface, and operator acceptance
-harness. Live Composio enablement is still pending #780 because it requires
-real Composio credentials, provider auth config IDs, and browser acceptance
-against a connected account.
+harness. Local #780 acceptance passed with real Composio
+credentials, a Gmail auth config, a live connected Gmail account, read-only
+Gmail execution, browser Wiii Connect evidence, and Facebook connection-only
+OAuth. Production or staging rollout still requires the same acceptance run
+against that target environment before enabling general users.
 
 ## Technical Context
 

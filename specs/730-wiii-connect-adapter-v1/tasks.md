@@ -2,10 +2,11 @@
 
 **Input**: Design documents from `specs/730-wiii-connect-adapter-v1/`
 **Prerequisites**: `plan.md`, `spec.md`
-**Status Update 2026-05-28**: Adapter V1 contract and Wiii-owned Composio
-control plane are implemented through follow-up slices. Live Composio
-acceptance remains pending in #780 because it requires real Composio
-credentials, a provider auth config, and a live connected account.
+**Status Update 2026-05-29**: Adapter V1 contract and Wiii-owned Composio
+control plane are implemented through follow-up slices. Local live Composio
+acceptance in #780 passed with real credentials, a Gmail auth config, a live
+connected account, read-only Gmail execution, browser Wiii Connect evidence,
+and Facebook connection-only OAuth.
 
 ## Phase 1: Audit And Design
 
@@ -45,11 +46,13 @@ credentials, a provider auth config, and a live connected account.
 - [x] T020 Add backend/operator acceptance harness for readiness, Connect Link,
       connection polling, denied execute, optional read-only execute, and
       disconnect checks.
-- [ ] T021 Run live Composio acceptance with real credentials, Gmail auth
-      config, and a connected account. Tracked by #780.
-- [ ] T022 Run browser acceptance against the live connected Gmail account and
+- [x] T021 Run live Composio acceptance with real credentials, Gmail auth
+      config, and a connected account. Local #780 evidence passed on
+      2026-05-29: readiness/gateway 12/12 and read-only execute 13/13.
+- [x] T022 Run browser acceptance against the live connected Gmail account and
       confirm Wiii Connect shows connected/agent-ready state without raw
-      connection IDs, provider payloads, or secrets. Tracked by #780.
+      connection IDs, provider payloads, or secrets. Local #780 browser smoke
+      passed on 2026-05-29.
 
 ## Current Evidence
 

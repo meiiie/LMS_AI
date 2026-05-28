@@ -1,6 +1,6 @@
 # Wiii Connect Adapter V1 Design
 
-Status: Draft contract implemented
+Status: Draft contract implemented; local live acceptance passed
 
 Owner: Project leadership
 
@@ -395,11 +395,14 @@ without guessing from logs.
   returns `allowed`, the live schema check passes, required schema argument
   keys are present, and started/succeeded/failed audit records can be appended.
 
-The first catalog candidate is `GMAIL_FETCH_EMAILS`, a disabled read-only Gmail
-action listed in current Composio docs. It is intentionally not agent-ready
-until Wiii validates the exact live Composio action schema for the configured
-Gmail auth config. Facebook remains a connection/catalog provider, but current
-Composio Facebook docs do not expose a ready Facebook action for Wiii to enable.
+The first catalog candidate is `GMAIL_FETCH_EMAILS`, a read-only Gmail action
+listed in current Composio docs. It stays disabled unless backend runtime flags
+explicitly enable Wiii Connect Composio read-only execution and the provider
+allowlist names the action. Local #780 acceptance validated the live Composio
+schema, Wiii-owned scope policy, explicit `connection_ref` selection, execution
+gateway, and read-only execute path for a connected Gmail account. Facebook
+remains a connection/catalog provider, but current Composio Facebook docs do
+not expose a ready Facebook action for Wiii to enable.
 
 ## Lifecycle States
 
@@ -581,20 +584,26 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 ## Next Slices
 
 1. Add a curated Composio action catalog contract for one low-risk read-only
-   provider action. Done for the disabled contract candidate; still needs live
-   acceptance with real credentials before rollout.
+   provider action. Done for Gmail; local live acceptance passed with real
+   credentials and a connected account.
 2. Bind Composio adapter `can_execute_actions` only for that curated read-only
-   action and keep writes disabled. Done for the backend boundary; still needs
-   real Composio credentials and acceptance against a live Gmail connection.
+   action and keep writes disabled. Done for the backend boundary; local live
+   Gmail execution acceptance passed.
 3. Add disconnect/delete/reconnect lifecycle controls behind the same policy.
-   Backend disconnect and desktop lifecycle controls are implemented; live
-   provider acceptance is still pending.
+   Backend disconnect and desktop lifecycle controls are implemented. Facebook
+   connection-only OAuth/listing acceptance passed locally; optional disconnect
+   remains an explicit operator run when cleanup is desired.
 4. Add acceptance for connect, denied execute, gated scope, and reconnect cases.
    A backend/operator harness now exists at
    `maritime-ai-service/scripts/wiii_connect_composio_acceptance.py` for
    adapter/storage/audit/connect/list/read-only-execute/disconnect checks. Live
-   browser acceptance with real Composio credentials and a connected Gmail
-   account is still pending before rollout.
+   local Gmail browser acceptance passed: Wiii Connect rendered connected,
+   Agent-ready/read-only readiness, gateway allowed, and no raw `wcn_*`, auth
+   config, token, API key, or client secret markers.
 5. Expire stale local OAuth rows before real rollout. Done for stale
    `authorizing`, `waiting`, and `error` rows at the durable storage/API
-   boundary; live acceptance remains pending.
+   boundary.
+
+For production or staging, Composio remains a controlled rollout: configure the
+same flags/secrets in the target environment and rerun #780 acceptance against
+that deployed backend before enabling general users.
