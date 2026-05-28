@@ -4,8 +4,9 @@ import json
 
 
 class _FakeResult:
-    def __init__(self, row=None):
+    def __init__(self, row=None, *, rowcount: int = 0):
         self._row = row
+        self.rowcount = rowcount
 
     def mappings(self):
         return self
@@ -15,8 +16,9 @@ class _FakeResult:
 
 
 class _FakeSession:
-    def __init__(self, row=None):
+    def __init__(self, row=None, *, rowcount: int = 0):
         self.row = row
+        self.rowcount = rowcount
         self.executions = []
         self.commits = 0
 
@@ -33,7 +35,7 @@ class _FakeSession:
                 "params": dict(params or {}),
             }
         )
-        return _FakeResult(self.row)
+        return _FakeResult(self.row, rowcount=self.rowcount)
 
     def commit(self):
         self.commits += 1
@@ -199,5 +201,54 @@ def test_persistent_storage_rejects_missing_owner_boundary():
         reason="provider_disabled",
     )
 
-    assert storage.append_audit_record(record, organization_id="", user_id="user_1") is False
+    assert (
+        storage.append_audit_record(record, organization_id="", user_id="user_1")
+        is False
+    )
+    assert session.executions == []
+
+
+def test_expire_stale_pending_connections_is_org_user_provider_scoped():
+    from app.engine.wiii_connect.persistent_storage import WiiiConnectPersistentStorage
+
+    session = _FakeSession(rowcount=2)
+    storage = WiiiConnectPersistentStorage(session_factory=lambda: session)
+
+    expired = storage.expire_stale_pending_connections(
+        organization_id="org_1",
+        user_id="user_1",
+        provider_slug="google-drive",
+        ttl_seconds=120,
+    )
+
+    assert expired == 2
+    sql = session.executions[-1]["statement"]
+    params = session.executions[-1]["params"]
+    assert "UPDATE wiii_connect_connections" in sql
+    assert "state = 'expired'" in sql
+    assert "state IN ('authorizing', 'waiting', 'error')" in sql
+    assert "organization_id = :organization_id" in sql
+    assert "user_id = :user_id" in sql
+    assert "provider_slug = :provider_slug" in sql
+    assert params["organization_id"] == "org_1"
+    assert params["user_id"] == "user_1"
+    assert params["provider_slug"] == "google_drive"
+    assert "expired_by_wiii_connect_cleanup" in params["expiry_warning"]
+    assert session.commits == 1
+
+
+def test_expire_stale_pending_connections_rejects_missing_owner():
+    from app.engine.wiii_connect.persistent_storage import WiiiConnectPersistentStorage
+
+    session = _FakeSession()
+    storage = WiiiConnectPersistentStorage(session_factory=lambda: session)
+
+    assert (
+        storage.expire_stale_pending_connections(
+            organization_id="",
+            user_id="user_1",
+            provider_slug="gmail",
+        )
+        == 0
+    )
     assert session.executions == []

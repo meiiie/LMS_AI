@@ -505,6 +505,9 @@ Before real Composio OAuth is enabled:
 - provider polling must not reanimate a locally disabled
   `user_disconnect_requested` row if Composio still reports the account active
   during cleanup or eventual consistency windows;
+- stale `authorizing`, `waiting`, and `error` local OAuth rows are expired by
+  the backend under the Wiii org/user/provider boundary before readiness,
+  listing, or execution checks rely on local connection state;
 - authorization URL decisions may consume durable audit readiness only from an
   explicit storage probe or backend-controlled storage status, never from
   frontend claims;
@@ -530,7 +533,9 @@ Before real Composio OAuth is enabled:
 - durable persistence must bind every connection/audit write to a Wiii
   organization and user boundary;
 - frontend may receive connect URLs and state labels, not tokens;
-- stale pending/error OAuth rows must be cleaned up or expired safely;
+- stale pending/error OAuth rows must be cleaned up or expired safely; the
+  current backend policy marks stale `authorizing`, `waiting`, and `error`
+  rows as `expired` before readiness/listing/execution control-plane checks;
 - provider errors must be sanitized before reaching UI or chat;
 - Composio action execution must remain disabled unless the provider has a
   curated read-only action allowlist, live schema verification, scope policy,
@@ -567,3 +572,6 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
    adapter/storage/audit/connect/list/read-only-execute/disconnect checks. Live
    browser acceptance with real Composio credentials and a connected Gmail
    account is still pending before rollout.
+5. Expire stale local OAuth rows before real rollout. Done for stale
+   `authorizing`, `waiting`, and `error` rows at the durable storage/API
+   boundary; live acceptance remains pending.

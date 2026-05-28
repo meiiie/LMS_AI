@@ -310,6 +310,7 @@ async def test_wiii_connect_activation_readiness_api_reports_ready_without_leaks
 
     class FakeStorage:
         fetches = 0
+        expires = 0
 
         def status(self, *, probe_database: bool = True):
             assert probe_database is True
@@ -320,6 +321,21 @@ async def test_wiii_connect_activation_readiness_api_reports_ready_without_leaks
                 audit_ledger_ready=True,
                 reason="ready",
             )
+
+        def expire_stale_pending_connections(
+            self,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_slug: str,
+            ttl_seconds: int,
+        ):
+            self.expires += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_slug == "gmail"
+            assert ttl_seconds >= 60
+            return 1
 
         def get_connection_record(
             self,
@@ -405,6 +421,7 @@ async def test_wiii_connect_activation_readiness_api_reports_ready_without_leaks
     assert gates["curated_readonly_action"]["ready"] is True
     assert gates["execution_gateway"]["ready"] is True
     assert fake_storage.fetches == 1
+    assert fake_storage.expires == 1
     assert "ca_active" not in serialized
     assert "secret-api-key" not in serialized
     assert "authcfg_gmail" not in serialized
