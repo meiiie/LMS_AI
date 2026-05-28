@@ -1678,14 +1678,29 @@ function ConnectionCatalog({
     ) {
       return;
     }
-    const state = providerReadinessStates[selectedCard.providerSlug];
-    if (state?.loading || state?.response || state?.error) return;
+    const slug = selectedCard.providerSlug;
+    const connectionState = providerConnectionLists[slug];
+    if (connectionState?.loading) return;
+    if (!connectionState?.response && !connectionState?.error) {
+      void refreshProviderConnections(selectedCard).then((response) => {
+        if (!response) void refreshActivationReadiness(selectedCard);
+      });
+      return;
+    }
+    const readinessState = providerReadinessStates[slug];
+    if (readinessState?.loading || readinessState?.response || readinessState?.error) return;
     void refreshActivationReadiness(selectedCard);
   }, [
     selectedCard?.id,
     selectedCard?.provider,
     selectedCard?.providerSlug,
     selectedCard?.registrySource,
+    providerConnectionLists[selectedCard?.providerSlug ?? ""]?.loading,
+    providerConnectionLists[selectedCard?.providerSlug ?? ""]?.response,
+    providerConnectionLists[selectedCard?.providerSlug ?? ""]?.error,
+    providerReadinessStates[selectedCard?.providerSlug ?? ""]?.loading,
+    providerReadinessStates[selectedCard?.providerSlug ?? ""]?.response,
+    providerReadinessStates[selectedCard?.providerSlug ?? ""]?.error,
   ]);
 
   const requestSessionDecision = async (card: CatalogCard) => {

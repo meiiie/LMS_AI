@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildWiiiConnectProviderCallbackUrl,
@@ -310,6 +310,117 @@ describe("WiiiConnectPage", () => {
     });
     expect(screen.queryByText("secret-api-key")).toBeNull();
     expect(screen.queryByText("api_key")).toBeNull();
+    expect(screen.queryByText("access_token")).toBeNull();
+  });
+
+  it("auto-syncs backend provider connections when a provider is selected", async () => {
+    mockFetchWiiiConnectProviders.mockResolvedValue({
+      version: "wiii_connect_provider_registry.v1",
+      adapter_version: "wiii_connect_adapter.v1",
+      providers: [
+        {
+          slug: "facebook",
+          label: "Facebook",
+          provider_kind: "composio",
+          auth_mode: "oauth2",
+          enabled: true,
+          agent_ready: false,
+          category: "social",
+          description: "Facebook provider from backend registry.",
+          requirements: ["curated_action_catalog"],
+          connect_requirements: ["provider_managed_vault_ref", "durable_audit_ledger"],
+          agent_ready_requirements: ["execution_gateway"],
+          action_count: 0,
+        },
+      ],
+    });
+    mockFetchWiiiConnectProviderConnections.mockResolvedValue({
+      version: "wiii_connect_connection_list.v1",
+      status: "ready",
+      reason: "listed",
+      provider_slug: "facebook",
+      provider_kind: "composio",
+      connection_count: 1,
+      connections: [
+        {
+          version: "wiii_connect_adapter.v1",
+          connection_ref: "wcn_public_1",
+          provider_slug: "facebook",
+          state: "connected",
+          active: true,
+          scopes: { read: true, write: false },
+          vault_ref_present: true,
+          account_label: "Wiii Facebook Page",
+          external_account_ref_present: true,
+          last_checked_at: "2026-05-28T00:00:00Z",
+          reason: "provider_listed",
+          warnings: [],
+        },
+      ],
+      provider: { status: "ready", access_token: "secret-token" },
+      storage: { persistent: true },
+    });
+    mockFetchWiiiConnectProviderActivationReadiness.mockResolvedValue({
+      version: "wiii_connect_activation_readiness.v1",
+      status: "blocked",
+      provider_slug: "facebook",
+      provider_kind: "composio",
+      ready_to_connect: true,
+      ready_to_execute_readonly: false,
+      gates: [
+        {
+          key: "local_connection",
+          ready: true,
+          reason: "ready",
+          required_next: [],
+        },
+        {
+          key: "execution_gateway",
+          ready: false,
+          reason: "provider_not_agent_ready",
+          required_next: ["enable_provider_agent_policy"],
+        },
+      ],
+      connection: {
+        present: true,
+        provider_slug: "facebook",
+        state: "connected",
+        active: true,
+        scopes: { read: true },
+        vault_ref_present: true,
+        reason: "ready",
+      },
+      execution_gateway: {
+        status: "blocked",
+        reason: "provider_not_agent_ready",
+      },
+      provider: { access_token: "secret-token" },
+      storage: { persistent: true },
+    });
+
+    const { container } = render(<WiiiConnectPage />);
+
+    expect(await screen.findByText("Registry backend")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Composio/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Facebook/i }));
+
+    expect(await screen.findByText("Connection thật")).toBeTruthy();
+    expect(screen.getAllByText("Wiii Facebook Page").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Đã kết nối").length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(mockFetchWiiiConnectProviderConnections).toHaveBeenCalledWith("facebook", {
+        probeDatabase: true,
+      });
+    });
+    await waitFor(() => {
+      expect(mockFetchWiiiConnectProviderActivationReadiness).toHaveBeenCalledWith("facebook", {
+        actionSlug: "GMAIL_FETCH_EMAILS",
+        connectionRef: "wcn_public_1",
+        probeDatabase: true,
+      });
+    });
+    expect(container.textContent).not.toContain("wcn_public_1");
+    expect(container.textContent).not.toContain("secret-token");
     expect(screen.queryByText("access_token")).toBeNull();
   });
 
