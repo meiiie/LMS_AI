@@ -2,6 +2,10 @@
 
 **Input**: Design documents from `specs/730-wiii-connect-adapter-v1/`
 **Prerequisites**: `plan.md`, `spec.md`
+**Status Update 2026-05-28**: Adapter V1 contract and Wiii-owned Composio
+control plane are implemented through follow-up slices. Live Composio
+acceptance remains pending in #780 because it requires real Composio
+credentials, a provider auth config, and a live connected account.
 
 ## Phase 1: Audit And Design
 
@@ -27,11 +31,48 @@
 
 ## Phase 4: Next Slices
 
-- [ ] T014 Add persistent provider registry API.
 - [x] T014 Add backend-owned static provider registry for disabled Composio catalog.
-- [x] T015 Add read-only provider registry API.
-- [ ] T016 Add persistent provider registry API.
-- [ ] T017 Add OAuth start/callback routes for disabled Composio adapter.
-- [ ] T018 Add vault integration or provider-managed secret reference storage.
-- [ ] T019 Add frontend connection modal using Wiii backend routes.
-- [ ] T020 Add browser acceptance for connect, poll, disconnect, gated scope, and denied execute cases.
+- [x] T015 Add read-only provider registry and action catalog APIs.
+- [x] T016 Decide persistent provider registry is out of scope for Adapter V1;
+      the static backend registry remains the source of truth until provider
+      onboarding needs runtime admin writes.
+- [x] T017 Add authenticated Composio Connect Link and callback routes behind
+      Wiii backend policy.
+- [x] T018 Add provider-managed vault reference storage and durable
+      connection/audit storage.
+- [x] T019 Add frontend Wiii Connect surface using Wiii backend routes for
+      provider registry, readiness, Connect Link, polling, and disconnect.
+- [x] T020 Add backend/operator acceptance harness for readiness, Connect Link,
+      connection polling, denied execute, optional read-only execute, and
+      disconnect checks.
+- [ ] T021 Run live Composio acceptance with real credentials, Gmail auth
+      config, and a connected account. Tracked by #780.
+- [ ] T022 Run browser acceptance against the live connected Gmail account and
+      confirm Wiii Connect shows connected/agent-ready state without raw
+      connection IDs, provider payloads, or secrets. Tracked by #780.
+
+## Current Evidence
+
+- Provider registry and API:
+  `maritime-ai-service/app/engine/wiii_connect/provider_registry.py`,
+  `maritime-ai-service/app/api/v1/wiii_connect.py`,
+  `tests/unit/api/test_wiii_connect_api.py`.
+- OAuth/session/callback boundary:
+  `maritime-ai-service/app/engine/wiii_connect/connection_sessions.py`,
+  `callback_state.py`, `callback_boundary.py`, and
+  `app/api/v1/wiii_connect.py`.
+- Vault and durable storage:
+  `maritime-ai-service/app/engine/wiii_connect/vault.py`,
+  `persistent_storage.py`, and
+  `alembic/versions/049_create_wiii_connect_storage.py`.
+- Scope policy, curated action catalog, and execution gateway:
+  `adapter_v1.py`, `action_catalog.py`, `execution_gateway.py`, and
+  `activation_readiness.py`.
+- Composio provider adapter:
+  `composio_adapter.py`.
+- Frontend Wiii Connect surface:
+  `wiii-desktop/src/components/connect/WiiiConnectPage.tsx` and
+  `wiii-desktop/src/__tests__/wiii-connect-page.test.tsx`.
+- Operator acceptance harness:
+  `maritime-ai-service/scripts/wiii_connect_composio_acceptance.py` and
+  `docs/operations/WIII_CONNECT_COMPOSIO_ACCEPTANCE_RUNBOOK.md`.

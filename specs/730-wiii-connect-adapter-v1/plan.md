@@ -10,12 +10,21 @@ Connect Adapter V1 contract. This slice adds deterministic policy objects and
 unit tests, while keeping real Composio OAuth/execution disabled until vault and
 runtime endpoints exist.
 
+Status update 2026-05-28: follow-up slices have implemented the runtime
+endpoints, provider-managed vault references, durable connection/audit storage,
+Composio Connect Link and callback boundary, activation readiness, read-only
+execution gateway, desktop Wiii Connect surface, and operator acceptance
+harness. Live Composio enablement is still pending #780 because it requires
+real Composio credentials, provider auth config IDs, and browser acceptance
+against a connected account.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11+
 **Primary Dependencies**: FastAPI backend codebase, dataclasses, pytest
-**Storage**: None in this slice; future slices need persistent registry,
-connection records, vault references, and audit ledger.
+**Storage**: Adapter V1 now has durable connection records and audit ledger
+storage in `wiii_connect_connections` and `wiii_connect_audit_ledger`.
+Provider registry remains static backend configuration by design for V1.
 **Testing**: pytest unit tests
 **Target Platform**: Wiii backend service
 **Project Type**: backend contract and architecture docs
