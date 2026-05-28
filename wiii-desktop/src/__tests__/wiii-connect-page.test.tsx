@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildWiiiConnectProviderCallbackUrl,
   createWiiiConnectProviderAuthorizationUrl,
+  disconnectWiiiConnectProviderConnection,
   fetchWiiiConnectProviderConnections,
   fetchWiiiConnectProviders,
   startWiiiConnectProviderSession,
@@ -16,6 +17,7 @@ import { useUIStore } from "@/stores/ui-store";
 vi.mock("@/api/wiii-connect", () => ({
   buildWiiiConnectProviderCallbackUrl: vi.fn(),
   createWiiiConnectProviderAuthorizationUrl: vi.fn(),
+  disconnectWiiiConnectProviderConnection: vi.fn(),
   fetchWiiiConnectProviderConnections: vi.fn(),
   fetchWiiiConnectProviders: vi.fn(),
   startWiiiConnectProviderSession: vi.fn(),
@@ -27,6 +29,7 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
 
 const mockBuildWiiiConnectProviderCallbackUrl = vi.mocked(buildWiiiConnectProviderCallbackUrl);
 const mockCreateWiiiConnectProviderAuthorizationUrl = vi.mocked(createWiiiConnectProviderAuthorizationUrl);
+const mockDisconnectWiiiConnectProviderConnection = vi.mocked(disconnectWiiiConnectProviderConnection);
 const mockFetchWiiiConnectProviderConnections = vi.mocked(fetchWiiiConnectProviderConnections);
 const mockFetchWiiiConnectProviders = vi.mocked(fetchWiiiConnectProviders);
 const mockStartWiiiConnectProviderSession = vi.mocked(startWiiiConnectProviderSession);
@@ -39,6 +42,8 @@ describe("WiiiConnectPage", () => {
     mockBuildWiiiConnectProviderCallbackUrl.mockReturnValue("http://localhost:8080/api/v1/wiii-connect/providers/facebook/callback");
     mockCreateWiiiConnectProviderAuthorizationUrl.mockReset();
     mockCreateWiiiConnectProviderAuthorizationUrl.mockRejectedValue(new Error("offline"));
+    mockDisconnectWiiiConnectProviderConnection.mockReset();
+    mockDisconnectWiiiConnectProviderConnection.mockRejectedValue(new Error("offline"));
     mockFetchWiiiConnectProviderConnections.mockReset();
     mockFetchWiiiConnectProviderConnections.mockRejectedValue(new Error("offline"));
     mockStartWiiiConnectProviderSession.mockReset();
@@ -385,6 +390,115 @@ describe("WiiiConnectPage", () => {
     expect(screen.getAllByText("Đã kết nối").length).toBeGreaterThan(0);
     expect(screen.queryByText("access_token")).toBeNull();
     expect(screen.queryByText("secret-value")).toBeNull();
+
+    openSpy.mockRestore();
+  });
+
+  it("disconnects a provider connection through Wiii backend and keeps payloads sanitized", async () => {
+    mockFetchWiiiConnectProviders.mockResolvedValue({
+      version: "wiii_connect_provider_registry.v1",
+      adapter_version: "wiii_connect_adapter.v1",
+      providers: [
+        {
+          slug: "facebook",
+          label: "Facebook",
+          provider_kind: "composio",
+          auth_mode: "oauth2",
+          enabled: true,
+          agent_ready: false,
+          category: "social",
+          description: "Facebook provider from backend registry.",
+          requirements: ["curated_action_catalog"],
+          connect_requirements: ["provider_managed_vault_ref", "durable_audit_ledger"],
+          agent_ready_requirements: ["execution_gateway"],
+          action_count: 0,
+        },
+      ],
+    });
+    mockCreateWiiiConnectProviderAuthorizationUrl.mockResolvedValue({
+      version: "wiii_connect_provider_adapter.v1",
+      status: "ready",
+      reason: "authorization_url_issued",
+      provider_slug: "facebook",
+      label: "Facebook",
+      provider_kind: "composio",
+      auth_mode: "oauth2",
+      authorization_url: "https://composio.example/connect/safe",
+      adapter: {
+        version: "wiii_connect_provider_adapter.v1",
+        provider_kind: "composio",
+        adapter_name: "composio",
+        bound: true,
+        configured: true,
+        can_create_authorization_url: true,
+        can_exchange_callback: true,
+        can_execute_actions: false,
+        authorization_ready: true,
+        reason: "configured",
+        warnings: [],
+      },
+      required_next: [],
+      audit_event: null,
+    });
+    mockFetchWiiiConnectProviderConnections.mockResolvedValue({
+      version: "wiii_connect_connection_list.v1",
+      status: "ready",
+      reason: "listed",
+      provider_slug: "facebook",
+      provider_kind: "composio",
+      connection_count: 1,
+      connections: [
+        {
+          version: "wiii_connect_adapter.v1",
+          connection_id: "conn_public_1",
+          provider_slug: "facebook",
+          state: "connected",
+          active: true,
+          scopes: { read: true, write: false },
+          vault_ref_present: true,
+          account_label: "Wiii Facebook Page",
+          external_account_ref: "fb_page_public",
+          last_checked_at: "2026-05-28T00:00:00Z",
+          reason: "provider_listed",
+          warnings: [],
+        },
+      ],
+      provider: { status: "ready", access_token: "secret-token" },
+      storage: { persistent: true },
+    });
+    mockDisconnectWiiiConnectProviderConnection.mockResolvedValue({
+      version: "wiii_connect_disconnect.v1",
+      status: "succeeded",
+      reason: "ready",
+      provider_slug: "facebook",
+      provider_kind: "composio",
+      connection_present: true,
+      local_disabled: true,
+      provider: { status: "succeeded", connection_ref_present: true },
+      storage: { persistent: true },
+    });
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    render(<WiiiConnectPage />);
+
+    expect(await screen.findByText("Registry backend")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Composio/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Facebook/i }));
+    fireEvent.click(screen.getByRole("button", { name: /qua Wiii$/ }));
+    expect((await screen.findAllByText("Wiii Facebook Page")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByTestId("wiii-connect-disconnect-button"));
+
+    expect(mockDisconnectWiiiConnectProviderConnection).toHaveBeenCalledWith(
+      "facebook",
+      "conn_public_1",
+    );
+    expect((await screen.findByTestId("wiii-connect-disconnect-status")).textContent).toContain("local");
+    expect(screen.getByTestId("wiii-connect-disconnect-button").textContent?.toLowerCase()).toContain("ng");
+    expect(screen.getAllByText("user_disconnect_requested").length).toBeGreaterThan(0);
+    expect(screen.queryByText("conn_public_1")).toBeNull();
+    expect(screen.queryByText("secret-token")).toBeNull();
+    expect(screen.queryByText("access_token")).toBeNull();
 
     openSpy.mockRestore();
   });

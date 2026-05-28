@@ -188,5 +188,6 @@ this repository.
    write/apply action. The backend boundary now supports one curated Gmail
    read-only action behind config, schema verification, gateway, and audit; it
    also supports backend-owned disconnect that disables local Wiii state before
-   provider cleanup. The remaining work is live credential acceptance and
-   frontend disconnect/reconnect UX.
+   provider cleanup. The desktop Wiii Connect page can now call the backend
+   disconnect boundary and keep reconnect on the backend Connect Link path. The
+   remaining work is live credential acceptance.

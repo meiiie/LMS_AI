@@ -542,7 +542,7 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
    action and keep writes disabled. Done for the backend boundary; still needs
    real Composio credentials and acceptance against a live Gmail connection.
 3. Add disconnect/delete/reconnect lifecycle controls behind the same policy.
-   Backend disconnect is implemented; frontend controls and live-provider
-   acceptance are still pending.
+   Backend disconnect and desktop lifecycle controls are implemented; live
+   provider acceptance is still pending.
 4. Add browser acceptance for connect, denied execute, gated scope, and
    reconnect cases.
