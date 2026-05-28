@@ -746,6 +746,187 @@ def test_readiness_report_only_does_not_run_live_connect_or_execute(monkeypatch)
     assert "complete_provider_oauth" in output
 
 
+def test_connect_phase_run_issues_connect_link(monkeypatch) -> None:
+    calls: list[str] = []
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+            readiness_report_only=False,
+            skip_connect_link=False,
+            expect_connected=False,
+            require_execution_ready=False,
+            execute_readonly=False,
+            disconnect=False,
+        )
+    )
+
+    monkeypatch.setattr(
+        harness,
+        "check_backend_health",
+        lambda: calls.append("health") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "authenticate",
+        lambda: calls.append("auth") or setattr(harness, "token", "token") or "auth",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_provider_registry",
+        lambda: calls.append("registry") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_adapter_readiness",
+        lambda: calls.append("adapter") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_storage_readiness",
+        lambda: calls.append("storage") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_audit_readiness",
+        lambda: calls.append("audit") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_curated_actions",
+        lambda: calls.append("actions") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_activation_ready_to_connect",
+        lambda: calls.append("connect_ready") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_gateway_blocks_missing_connection",
+        lambda: calls.append("gateway_block") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_connect_link",
+        lambda: calls.append("connect_link") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_connections",
+        lambda: calls.append("connections") or "ok",
+    )
+
+    assert harness.run() == 0
+
+    assert "connect_link" in calls
+
+
+def test_post_oauth_run_does_not_issue_new_connect_link(monkeypatch) -> None:
+    calls: list[str] = []
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+            readiness_report_only=False,
+            skip_connect_link=False,
+            expect_connected=True,
+            require_execution_ready=True,
+            execute_readonly=False,
+            disconnect=False,
+        )
+    )
+
+    def forbidden_connect_link() -> str:
+        raise AssertionError("post-OAuth acceptance must not create a new link")
+
+    monkeypatch.setattr(
+        harness,
+        "check_backend_health",
+        lambda: calls.append("health") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "authenticate",
+        lambda: calls.append("auth") or setattr(harness, "token", "token") or "auth",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_provider_registry",
+        lambda: calls.append("registry") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_adapter_readiness",
+        lambda: calls.append("adapter") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_storage_readiness",
+        lambda: calls.append("storage") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_audit_readiness",
+        lambda: calls.append("audit") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_curated_actions",
+        lambda: calls.append("actions") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_activation_ready_to_connect",
+        lambda: calls.append("connect_ready") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_gateway_blocks_missing_connection",
+        lambda: calls.append("gateway_block") or "ok",
+    )
+    monkeypatch.setattr(harness, "check_connect_link", forbidden_connect_link)
+    monkeypatch.setattr(
+        harness,
+        "check_connections",
+        lambda: calls.append("connections") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_activation_ready_to_execute",
+        lambda: calls.append("execute_ready") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_execution_gateway_allowed",
+        lambda: calls.append("gateway_allowed") or "ok",
+    )
+
+    assert harness.run() == 0
+
+    assert "connect_link" not in calls
+    assert calls == [
+        "health",
+        "auth",
+        "registry",
+        "adapter",
+        "storage",
+        "audit",
+        "actions",
+        "connect_ready",
+        "gateway_block",
+        "connections",
+        "execute_ready",
+        "gateway_allowed",
+    ]
+
+
 def test_check_record_redacts_connection_ref_query_strings() -> None:
     harness = acceptance.WiiiConnectComposioAcceptance(
         SimpleNamespace(connection_ref="", selected_connection_ref="")

@@ -483,7 +483,7 @@ class WiiiConnectComposioAcceptance:
                     "gateway fail-closed control",
                     self.check_gateway_blocks_missing_connection,
                 )
-                if not self.args.skip_connect_link:
+                if self.should_issue_connect_link():
                     self.run_check("connect link preflight", self.check_connect_link)
                 self.run_check("connection listing", self.check_connections)
                 if self.args.require_execution_ready or self.args.execute_readonly:
@@ -523,6 +523,18 @@ class WiiiConnectComposioAcceptance:
             "elapsed_seconds": round(float(elapsed), 3),
             "detail": redact_for_log(str(detail or "")),
         }
+
+    def should_issue_connect_link(self) -> bool:
+        """Issue Connect Links only during the initial connection phase."""
+
+        if self.args.skip_connect_link:
+            return False
+        return not (
+            self.args.expect_connected
+            or self.args.require_execution_ready
+            or self.args.execute_readonly
+            or self.args.disconnect
+        )
 
     def evidence_payload(self) -> dict[str, Any]:
         parsed_backend = urllib.parse.urlsplit(self.args.backend_url)
