@@ -216,6 +216,39 @@ def first_connected_connection(payload: dict[str, Any]) -> dict[str, Any] | None
     return None
 
 
+def activation_blocker_summary(payload: dict[str, Any]) -> str:
+    """Return a compact, redacted summary of failed activation gates."""
+
+    gates = payload.get("gates")
+    if not isinstance(gates, list):
+        return "gates_missing"
+    blockers: list[str] = []
+    for gate in gates:
+        if not isinstance(gate, dict) or gate.get("ready") is True:
+            continue
+        key = str(gate.get("key") or "unknown")
+        reason = str(gate.get("reason") or "blocked")
+        blockers.append(f"{key}:{reason}")
+    return ", ".join(blockers[:8]) or "none"
+
+
+def assert_activation_ready(
+    payload: dict[str, Any],
+    *,
+    flag: str,
+    label: str,
+) -> None:
+    """Fail closed unless one readiness flag is explicitly true."""
+
+    if payload.get(flag) is True:
+        return
+    raise AcceptanceFailure(
+        f"Activation readiness does not report {label}: "
+        f"{flag}={payload.get(flag)!r} status={payload.get('status')!r} "
+        f"blockers={activation_blocker_summary(payload)}"
+    )
+
+
 def normalize_provider(value: str) -> str:
     return str(value or "").strip().lower().replace("-", "_")
 
@@ -292,6 +325,10 @@ class WiiiConnectComposioAcceptance:
             self.run_check("audit readiness", self.check_audit_readiness)
             self.run_check("curated actions", self.check_curated_actions)
             self.run_check(
+                "activation readiness connect",
+                self.check_activation_ready_to_connect,
+            )
+            self.run_check(
                 "gateway fail-closed control",
                 self.check_gateway_blocks_missing_connection,
             )
@@ -299,6 +336,10 @@ class WiiiConnectComposioAcceptance:
                 self.run_check("connect link preflight", self.check_connect_link)
             self.run_check("connection listing", self.check_connections)
             if self.args.require_execution_ready or self.args.execute_readonly:
+                self.run_check(
+                    "activation readiness execution",
+                    self.check_activation_ready_to_execute,
+                )
                 self.run_check(
                     "execution gateway allowed",
                     self.check_execution_gateway_allowed,
@@ -476,6 +517,50 @@ class WiiiConnectComposioAcceptance:
         if payload.get("status") == "allowed":
             raise AcceptanceFailure("Gateway allowed execution without a connection")
         return f"blocked reason={payload.get('reason')}"
+
+    def activation_readiness_payload(
+        self,
+        *,
+        connection_id: str = "",
+    ) -> dict[str, Any]:
+        params = {
+            "probe_database": "true",
+            "action_slug": self.args.action,
+        }
+        if connection_id:
+            params["connection_id"] = connection_id
+        query = urllib.parse.urlencode(params)
+        return request_bytes(
+            "GET",
+            self.api_url(
+                f"/api/v1/wiii-connect/providers/{urllib.parse.quote(self.args.provider)}"
+                f"/activation-readiness?{query}"
+            ),
+            headers=self.auth_headers(),
+            timeout=self.args.timeout,
+        ).json()
+
+    def check_activation_ready_to_connect(self) -> str:
+        payload = self.activation_readiness_payload()
+        assert_activation_ready(
+            payload,
+            flag="ready_to_connect",
+            label="connect-ready",
+        )
+        return (
+            "ready_to_connect=true "
+            f"ready_to_execute_readonly={bool(payload.get('ready_to_execute_readonly'))}"
+        )
+
+    def check_activation_ready_to_execute(self) -> str:
+        connection_id = self.connection_id_for_action()
+        payload = self.activation_readiness_payload(connection_id=connection_id)
+        assert_activation_ready(
+            payload,
+            flag="ready_to_execute_readonly",
+            label="read-only execution-ready",
+        )
+        return f"ready_to_execute_readonly=true connection={opaque_ref(connection_id)}"
 
     def check_connect_link(self) -> str:
         payload = request_bytes(

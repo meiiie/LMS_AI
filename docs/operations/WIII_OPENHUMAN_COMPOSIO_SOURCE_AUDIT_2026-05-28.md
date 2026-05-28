@@ -207,6 +207,10 @@ This is the Wiii-side equivalent of the OpenHuman connection discipline: the UI
 and operators can see whether a provider is ready to connect and separately
 whether it is ready for read-only agent execution, while raw connection IDs,
 vault references, auth configs, API keys, and provider payloads remain hidden.
+The live acceptance harness now treats this projection as a required gate:
+`ready_to_connect=true` is required before Connect Link issuance, and
+`ready_to_execute_readonly=true` is required when operator acceptance asks for
+execution readiness or read-only provider execution.
 
 Remaining work before enabling Composio for real users: configure production
 Composio project credentials and auth config IDs, connect a live Gmail account,

@@ -97,6 +97,84 @@ def test_catalog_helpers_fail_closed_when_required_items_are_missing() -> None:
     assert acceptance.first_connected_connection({"connections": []}) is None
 
 
+def test_activation_readiness_helpers_report_blockers() -> None:
+    payload = {
+        "status": "blocked",
+        "ready_to_connect": False,
+        "gates": [
+            {"key": "provider_adapter", "ready": True, "reason": "ready"},
+            {
+                "key": "local_connection",
+                "ready": False,
+                "reason": "connection_missing",
+            },
+        ],
+    }
+
+    assert acceptance.activation_blocker_summary(payload) == (
+        "local_connection:connection_missing"
+    )
+    with pytest.raises(acceptance.AcceptanceFailure, match="ready_to_connect"):
+        acceptance.assert_activation_ready(
+            payload,
+            flag="ready_to_connect",
+            label="connect-ready",
+        )
+
+    acceptance.assert_activation_ready(
+        {"ready_to_connect": True},
+        flag="ready_to_connect",
+        label="connect-ready",
+    )
+
+
+def test_activation_readiness_payload_uses_backend_endpoint(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def json(self):
+            return {
+                "ready_to_connect": True,
+                "ready_to_execute_readonly": False,
+                "gates": [],
+            }
+
+    def fake_request_bytes(method, url, *, headers=None, payload=None, timeout=15.0):
+        captured["method"] = method
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        captured["payload"] = payload
+        return FakeResponse()
+
+    monkeypatch.setattr(acceptance, "request_bytes", fake_request_bytes)
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+        )
+    )
+    harness.token = "token"
+
+    payload = harness.activation_readiness_payload(connection_id="ca_live")
+
+    assert payload["ready_to_connect"] is True
+    assert captured["method"] == "GET"
+    assert captured["headers"] == {"Authorization": "Bearer token"}
+    assert captured["payload"] is None
+    url = str(captured["url"])
+    assert url.startswith(
+        "http://localhost:8080/api/v1/wiii-connect/providers/gmail/"
+        "activation-readiness?"
+    )
+    assert "probe_database=true" in url
+    assert "action_slug=GMAIL_FETCH_EMAILS" in url
+    assert "connection_id=ca_live" in url
+
+
 def test_connection_id_for_action_requires_selected_or_explicit_connection() -> None:
     harness = acceptance.WiiiConnectComposioAcceptance(
         SimpleNamespace(connection_id="", selected_connection_id="")
