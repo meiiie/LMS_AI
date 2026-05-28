@@ -70,6 +70,18 @@ The acceptance harness enforces the same projection automatically:
   activation readiness to report `ready_to_execute_readonly=true` for the
   selected connection before provider execution.
 
+Before secrets are available, operators can run a dry readiness report that
+does not issue a Connect Link, list provider accounts, execute provider actions,
+or disconnect anything:
+
+```powershell
+python scripts/wiii_connect_composio_acceptance.py --backend-url http://localhost:8080 --auth-mode dev-login --provider gmail --readiness-report-only
+```
+
+The report prints `ready_to_connect`, `ready_to_execute_readonly`, and failed
+activation gates with `required_next` hints. It is designed for preflight and
+environment setup; it is not a substitute for the live acceptance sequence.
+
 For local dev-login:
 
 ```powershell

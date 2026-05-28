@@ -211,6 +211,11 @@ The live acceptance harness now treats this projection as a required gate:
 `ready_to_connect=true` is required before Connect Link issuance, and
 `ready_to_execute_readonly=true` is required when operator acceptance asks for
 execution readiness or read-only provider execution.
+The same harness also has a dry readiness-report mode for setup work before
+real credentials are present. That mode calls only Wiii's activation-readiness
+projection, prints failed gates plus `required_next` hints, and deliberately
+does not issue Connect Links, list provider accounts, execute provider actions,
+or disconnect accounts.
 
 Remaining work before enabling Composio for real users: configure production
 Composio project credentials and auth config IDs, connect a live Gmail account,

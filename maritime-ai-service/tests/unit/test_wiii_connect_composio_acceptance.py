@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import importlib.util
 import sys
 from pathlib import Path
@@ -128,6 +129,44 @@ def test_activation_readiness_helpers_report_blockers() -> None:
     )
 
 
+def test_activation_readiness_report_lines_are_redacted() -> None:
+    payload = {
+        "provider_slug": "gmail",
+        "status": "blocked",
+        "ready_to_connect": False,
+        "ready_to_execute_readonly": False,
+        "gates": [
+            {
+                "key": "provider_adapter",
+                "ready": False,
+                "reason": "missing_composio_api_key",
+                "required_next": [
+                    "configure_composio_adapter",
+                    "https://callback.example/?wiii_state=secret",
+                ],
+                "metadata": {"api_key": "secret-value"},
+            },
+            {
+                "key": "local_connection",
+                "ready": False,
+                "reason": "connection_missing",
+                "required_next": ["complete_provider_oauth"],
+            },
+        ],
+    }
+
+    report = "\n".join(acceptance.activation_readiness_report_lines(payload))
+
+    assert "provider=gmail" in report
+    assert "ready_to_connect=False" in report
+    assert "provider_adapter" in report
+    assert "configure_composio_adapter" in report
+    assert "local_connection: connection_missing" in report
+    assert "secret-value" not in report
+    assert "wiii_state=secret" not in report
+    assert "missing_composio_api_key" not in report
+
+
 def test_activation_readiness_payload_uses_backend_endpoint(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -173,6 +212,74 @@ def test_activation_readiness_payload_uses_backend_endpoint(monkeypatch) -> None
     assert "probe_database=true" in url
     assert "action_slug=GMAIL_FETCH_EMAILS" in url
     assert "connection_id=ca_live" in url
+
+
+def test_readiness_report_only_does_not_run_live_connect_or_execute(monkeypatch) -> None:
+    calls: list[str] = []
+    printed: list[str] = []
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+            readiness_report_only=True,
+            connection_id="",
+        )
+    )
+
+    def backend_health() -> str:
+        calls.append("health")
+        return "ok"
+
+    def authenticate() -> str:
+        calls.append("auth")
+        harness.token = "token"
+        return "bearer"
+
+    def report_payload(*, connection_id: str = ""):
+        calls.append(f"report:{connection_id or 'none'}")
+        return {
+            "provider_slug": "gmail",
+            "status": "blocked",
+            "ready_to_connect": False,
+            "ready_to_execute_readonly": False,
+            "gates": [
+                {
+                    "key": "local_connection",
+                    "ready": False,
+                    "reason": "connection_missing",
+                    "required_next": ["complete_provider_oauth"],
+                }
+            ],
+        }
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("live connect/execution path should not run")
+
+    monkeypatch.setattr(harness, "check_backend_health", backend_health)
+    monkeypatch.setattr(harness, "authenticate", authenticate)
+    monkeypatch.setattr(harness, "activation_readiness_payload", report_payload)
+    monkeypatch.setattr(harness, "check_connect_link", forbidden)
+    monkeypatch.setattr(harness, "check_connections", forbidden)
+    monkeypatch.setattr(harness, "check_execution_gateway_allowed", forbidden)
+    monkeypatch.setattr(harness, "check_readonly_execution", forbidden)
+    monkeypatch.setattr(harness, "check_disconnect", forbidden)
+    monkeypatch.setattr(
+        builtins,
+        "print",
+        lambda *values, **kwargs: printed.append(
+            " ".join(str(value) for value in values)
+        ),
+    )
+
+    assert harness.run() == 0
+
+    output = "\n".join(printed)
+    assert calls == ["health", "auth", "report:none"]
+    assert "[REPORT] activation readiness" in output
+    assert "complete_provider_oauth" in output
 
 
 def test_connection_id_for_action_requires_selected_or_explicit_connection() -> None:
