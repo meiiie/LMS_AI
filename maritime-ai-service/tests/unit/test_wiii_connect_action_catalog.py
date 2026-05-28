@@ -10,20 +10,20 @@ def test_action_catalog_exposes_disabled_read_only_candidate_without_secrets():
         enabled_action_slugs_for_provider,
     )
 
-    metadata = action_catalog_public_metadata(provider_slug="facebook")
-    summary = action_catalog_summary_for_provider("facebook")
+    metadata = action_catalog_public_metadata(provider_slug="gmail")
+    summary = action_catalog_summary_for_provider("gmail")
     serialized = json.dumps(metadata, sort_keys=True)
 
     assert metadata["version"] == "wiii_connect_action_catalog.v1"
     assert metadata["action_count"] == 1
     assert metadata["enabled_action_count"] == 0
-    assert metadata["actions"][0]["slug"] == "FACEBOOK_GET_PAGE_PROFILE"
+    assert metadata["actions"][0]["slug"] == "GMAIL_FETCH_EMAILS"
     assert metadata["actions"][0]["mutation"] == "read"
     assert metadata["actions"][0]["enabled"] is False
     assert summary["catalog_action_count"] == 1
     assert summary["enabled_action_count"] == 0
     assert summary["read_only_action_count"] == 1
-    assert enabled_action_slugs_for_provider("facebook") == ()
+    assert enabled_action_slugs_for_provider("gmail") == ()
     assert "access_token" not in serialized
     assert "refresh_token" not in serialized
     assert "client_secret" not in serialized

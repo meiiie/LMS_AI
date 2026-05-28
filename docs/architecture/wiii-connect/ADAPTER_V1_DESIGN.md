@@ -327,10 +327,11 @@ never receives provider tokens or raw payloads.
 - currently performs preflight only. It does not call Composio action execution
   until a curated action catalog and provider execution adapter are enabled.
 
-The first catalog candidate is `FACEBOOK_GET_PAGE_PROFILE`, a disabled
-read-only Facebook action placeholder. It is intentionally not agent-ready until
-Wiii validates the exact live Composio action schema for the configured
-Facebook auth config.
+The first catalog candidate is `GMAIL_FETCH_EMAILS`, a disabled read-only Gmail
+action listed in current Composio docs. It is intentionally not agent-ready
+until Wiii validates the exact live Composio action schema for the configured
+Gmail auth config. Facebook remains a connection/catalog provider, but current
+Composio Facebook docs do not expose a ready Facebook action for Wiii to enable.
 
 ## Lifecycle States
 
