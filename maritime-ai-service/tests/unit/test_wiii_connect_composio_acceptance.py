@@ -91,6 +91,7 @@ def test_catalog_helpers_find_adapter_provider_action_and_active_connection() ->
     connection = acceptance.first_connected_connection(
         {
             "connections": [
+                {"connection_id": "ca_raw", "state": "connected", "active": True},
                 {"connection_id": "ca_old", "state": "disabled", "active": False},
                 {"connection_ref": "wcn_live", "state": "connected", "active": True},
             ]
@@ -101,6 +102,23 @@ def test_catalog_helpers_find_adapter_provider_action_and_active_connection() ->
     assert provider["provider_kind"] == "composio"
     assert action["mutation"] == "read"
     assert connection["connection_ref"] == "wcn_live"
+
+
+def test_first_connected_connection_requires_opaque_connection_ref() -> None:
+    assert (
+        acceptance.first_connected_connection(
+            {
+                "connections": [
+                    {
+                        "connection_id": "ca_raw_only",
+                        "state": "connected",
+                        "active": True,
+                    }
+                ]
+            }
+        )
+        is None
+    )
 
 
 def test_catalog_helpers_fail_closed_when_required_items_are_missing() -> None:
@@ -499,6 +517,44 @@ def test_execution_gateway_allowed_rejects_blocked_scope_policy(monkeypatch) -> 
 
     with pytest.raises(acceptance.AcceptanceFailure, match="scope policy not allowed"):
         harness.check_execution_gateway_allowed()
+
+
+def test_connection_listing_rejects_raw_connection_id_fallback(monkeypatch) -> None:
+    class FakeResponse:
+        def json(self):
+            return {
+                "status": "ready",
+                "connections": [
+                    {
+                        "connection_id": "ca_raw_only",
+                        "state": "connected",
+                        "active": True,
+                    }
+                ],
+            }
+
+    def fake_request_bytes(method, url, *, headers=None, payload=None, timeout=15.0):
+        return FakeResponse()
+
+    monkeypatch.setattr(acceptance, "request_bytes", fake_request_bytes)
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+            expect_connected=True,
+            require_execution_ready=False,
+            execute_readonly=False,
+            disconnect=False,
+        )
+    )
+    harness.token = "token"
+
+    with pytest.raises(acceptance.AcceptanceFailure, match="No active connected"):
+        harness.check_connections()
+    assert harness.selected_connection_ref == ""
 
 
 def test_validate_evidence_path_rejects_secret_and_generated_locations() -> None:

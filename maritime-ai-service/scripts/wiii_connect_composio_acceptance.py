@@ -215,16 +215,8 @@ def first_connected_connection(payload: dict[str, Any]) -> dict[str, Any] | None
             isinstance(connection, dict)
             and connection.get("active") is True
             and connection.get("state") == "connected"
-            and (
-                (
-                    isinstance(connection.get("connection_ref"), str)
-                    and connection.get("connection_ref")
-                )
-                or (
-                    isinstance(connection.get("connection_id"), str)
-                    and connection.get("connection_id")
-                )
-            )
+            and isinstance(connection.get("connection_ref"), str)
+            and connection.get("connection_ref")
         ):
             return connection
     return None
@@ -890,7 +882,7 @@ class WiiiConnectComposioAcceptance:
                 raise AcceptanceFailure("No active connected account was returned")
             return "ready; no active account required for this run"
         self.selected_connection_ref = str(
-            connection.get("connection_ref") or connection.get("connection_id") or ""
+            connection.get("connection_ref") or ""
         )
         return f"active_connection={opaque_ref(self.selected_connection_ref)}"
 
