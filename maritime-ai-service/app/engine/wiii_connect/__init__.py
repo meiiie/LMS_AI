@@ -32,8 +32,13 @@ from .callback_boundary import (
 from .composio_adapter import (
     WIII_CONNECT_COMPOSIO_ADAPTER_VERSION,
     WiiiConnectComposioAdapterConfig,
+    WiiiConnectComposioConnectLinkResult,
     build_composio_adapter_config,
+    build_composio_connect_enabled_entry,
+    build_composio_external_user_id,
+    build_composio_provider_managed_vault_capability,
     build_composio_provider_adapter_capability,
+    create_composio_connect_link,
     parse_composio_auth_config_map,
 )
 from .connection_sessions import (
@@ -107,6 +112,7 @@ __all__ = [
     "WiiiConnectCallbackDecision",
     "WiiiConnectCallbackRequest",
     "WiiiConnectComposioAdapterConfig",
+    "WiiiConnectComposioConnectLinkResult",
     "WiiiConnectConnectionSessionAuditEvent",
     "WiiiConnectConnectionRecordV1",
     "WiiiConnectExecutionDecision",
@@ -141,6 +147,9 @@ __all__ = [
     "decide_external_execution",
     "decide_authorization_url",
     "decide_vault_secret_write",
+    "build_composio_connect_enabled_entry",
+    "build_composio_external_user_id",
+    "build_composio_provider_managed_vault_capability",
     "default_provider_adapter_capability",
     "default_persistent_storage_status_metadata",
     "default_wiii_connect_vault_capability",
@@ -156,6 +165,7 @@ __all__ = [
     "provider_connection_status",
     "provider_connection_status_for_entry",
     "provider_registry_public_metadata",
+    "create_composio_connect_link",
     "scope_grant_from_mapping",
     "vault_status_public_metadata",
 ]

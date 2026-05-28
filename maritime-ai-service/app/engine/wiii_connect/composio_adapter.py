@@ -1,17 +1,22 @@
-"""Composio adapter configuration status for Wiii Connect.
+"""Composio adapter configuration and Connect Link boundary for Wiii Connect.
 
-This module does not call Composio. It turns backend settings into a
-privacy-safe provider adapter capability so operators can see whether Wiii is
-configured enough to attempt a future Connect Link flow.
+The status helpers expose only privacy-safe readiness metadata. The Connect
+Link client is the only function in this module that may call Composio, and it
+returns only the hosted redirect URL needed by the UI.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
+import httpx
+
+from .adapter_v1 import WiiiConnectProviderRegistryEntry
 from .provider_adapters import WiiiConnectProviderAdapterCapability
+from .vault import WiiiConnectVaultCapability, default_wiii_connect_vault_capability
 
 
 WIII_CONNECT_COMPOSIO_ADAPTER_VERSION = "wiii_connect_composio_adapter.v1"
@@ -22,6 +27,7 @@ class WiiiConnectComposioAdapterConfig:
     """Sanitized Composio adapter configuration state."""
 
     enabled: bool = False
+    api_key: str = field(default="", repr=False)
     api_key_present: bool = False
     base_url: str = "https://backend.composio.dev"
     api_version: str = "v3.1"
@@ -30,6 +36,12 @@ class WiiiConnectComposioAdapterConfig:
     @property
     def auth_config_count(self) -> int:
         return len(self.auth_config_by_provider or {})
+
+    def auth_config_id_for_provider(self, provider_slug: str) -> str:
+        return (self.auth_config_by_provider or {}).get(
+            _normalize_provider_slug(provider_slug),
+            "",
+        )
 
     def to_public_metadata(self) -> dict[str, Any]:
         return {
@@ -40,6 +52,26 @@ class WiiiConnectComposioAdapterConfig:
             "api_version": self.api_version,
             "auth_config_count": self.auth_config_count,
             "provider_slugs": sorted((self.auth_config_by_provider or {}).keys()),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class WiiiConnectComposioConnectLinkResult:
+    """Sanitized result of a Composio Connect Link creation attempt."""
+
+    ready: bool = False
+    redirect_url: str = ""
+    expires_at: str = ""
+    connected_account_ref_present: bool = False
+    reason: str = "not_requested"
+
+    def to_audit_metadata(self) -> dict[str, Any]:
+        return {
+            "ready": self.ready,
+            "redirect_url_present": bool(self.redirect_url),
+            "expires_at_present": bool(self.expires_at),
+            "connected_account_ref_present": self.connected_account_ref_present,
+            "reason": _safe_connect_link_reason(self.reason),
         }
 
 
@@ -89,9 +121,11 @@ def build_composio_adapter_config(
     auth_config_map = parse_composio_auth_config_map(
         getattr(settings_obj, "composio_auth_config_map", ""),
     )
+    api_key = str(getattr(settings_obj, "composio_api_key", "") or "").strip()
     return WiiiConnectComposioAdapterConfig(
         enabled=bool(getattr(settings_obj, "enable_wiii_connect_composio", False)),
-        api_key_present=bool(str(getattr(settings_obj, "composio_api_key", "") or "").strip()),
+        api_key=api_key,
+        api_key_present=bool(api_key),
         base_url=str(
             getattr(settings_obj, "composio_base_url", "https://backend.composio.dev")
             or "https://backend.composio.dev"
@@ -159,6 +193,148 @@ def build_composio_provider_adapter_capability(
     )
 
 
+def build_composio_provider_managed_vault_capability(
+    config: WiiiConnectComposioAdapterConfig | None = None,
+    *,
+    settings_obj: Any | None = None,
+) -> WiiiConnectVaultCapability:
+    """Return the vault policy for Composio-managed credentials."""
+
+    resolved = config or build_composio_adapter_config(settings_obj)
+    capability = build_composio_provider_adapter_capability(resolved)
+    if not capability.authorization_ready:
+        return default_wiii_connect_vault_capability()
+    return WiiiConnectVaultCapability(
+        enabled=True,
+        backend="provider_managed",
+        accepts_secret_material=True,
+        provider_managed=True,
+        key_namespace="composio",
+        reason="ready",
+        warnings=("secrets_remain_provider_managed",),
+    )
+
+
+def build_composio_connect_enabled_entry(
+    entry: WiiiConnectProviderRegistryEntry,
+    config: WiiiConnectComposioAdapterConfig | None = None,
+    *,
+    settings_obj: Any | None = None,
+) -> WiiiConnectProviderRegistryEntry:
+    """Enable only the connect phase when Composio is configured for a slug."""
+
+    if entry.provider_kind != "composio":
+        return entry
+    resolved = config or build_composio_adapter_config(settings_obj)
+    capability = build_composio_provider_adapter_capability(resolved)
+    if (
+        not capability.authorization_ready
+        or not resolved.auth_config_id_for_provider(entry.slug)
+    ):
+        return entry
+
+    warnings = tuple(
+        warning for warning in entry.warnings if warning != "adapter_disabled"
+    )
+    warnings = _append_unique(
+        warnings,
+        "agent_actions_disabled_until_gateway_ready",
+    )
+    return replace(
+        entry,
+        enabled=True,
+        agent_ready=False,
+        requirements=entry.agent_ready_requirements,
+        connect_requirements=(),
+        warnings=warnings,
+    )
+
+
+def build_composio_external_user_id(
+    *,
+    organization_id: str | None,
+    user_id: str,
+) -> str:
+    """Create a stable non-PII Composio user id for Wiii identities."""
+
+    owner = f"{organization_id or 'personal'}:{user_id}".encode("utf-8")
+    digest = hashlib.sha256(owner).hexdigest()[:32]
+    return f"wiii_{digest}"
+
+
+async def create_composio_connect_link(
+    *,
+    config: WiiiConnectComposioAdapterConfig,
+    provider_slug: str,
+    user_id: str,
+    callback_url: str,
+    http_client: httpx.AsyncClient | None = None,
+) -> WiiiConnectComposioConnectLinkResult:
+    """Create a Composio hosted auth link without leaking provider payloads."""
+
+    auth_config_id = config.auth_config_id_for_provider(provider_slug)
+    if not config.enabled or not config.api_key_present or not auth_config_id:
+        return WiiiConnectComposioConnectLinkResult(
+            reason="provider_adapter_not_configured",
+        )
+    if not user_id or not callback_url:
+        return WiiiConnectComposioConnectLinkResult(
+            reason="missing_user_or_callback",
+        )
+
+    payload = {
+        "auth_config_id": auth_config_id,
+        "user_id": user_id,
+        "callback_url": callback_url,
+    }
+    url = (
+        f"{config.base_url.rstrip('/')}/api/"
+        f"{config.api_version.strip('/')}/connected_accounts/link"
+    )
+    client_created = http_client is None
+    client = http_client or httpx.AsyncClient(timeout=20)
+    try:
+        response = await client.post(
+            url,
+            json=payload,
+            headers={"x-api-key": config.api_key},
+        )
+    except httpx.HTTPError:
+        return WiiiConnectComposioConnectLinkResult(
+            reason="provider_transport_error",
+        )
+    finally:
+        if client_created:
+            await client.aclose()
+
+    if response.status_code < 200 or response.status_code >= 300:
+        return WiiiConnectComposioConnectLinkResult(
+            reason="provider_response_rejected",
+        )
+
+    try:
+        data = response.json()
+    except ValueError:
+        return WiiiConnectComposioConnectLinkResult(
+            reason="provider_response_invalid",
+        )
+
+    redirect_url = str(data.get("redirect_url") or data.get("redirectUrl") or "").strip()
+    if not redirect_url:
+        return WiiiConnectComposioConnectLinkResult(
+            reason="provider_response_missing_redirect",
+        )
+    return WiiiConnectComposioConnectLinkResult(
+        ready=True,
+        redirect_url=redirect_url,
+        expires_at=str(data.get("expires_at") or data.get("expiresAt") or "").strip(),
+        connected_account_ref_present=bool(
+            data.get("connected_account_id") or data.get("connectedAccountId")
+        ),
+        reason="ready",
+    )
+
+
 def _normalize_mapping(value: Mapping[Any, Any]) -> dict[str, str]:
     result: dict[str, str] = {}
     for raw_provider, raw_auth_config in value.items():
@@ -173,10 +349,36 @@ def _normalize_provider_slug(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_")
 
 
+def _append_unique(values: tuple[str, ...], value: str) -> tuple[str, ...]:
+    if value in values:
+        return values
+    return values + (value,)
+
+
+def _safe_connect_link_reason(value: str) -> str:
+    allowed = {
+        "ready",
+        "not_requested",
+        "provider_adapter_not_configured",
+        "missing_user_or_callback",
+        "provider_transport_error",
+        "provider_response_rejected",
+        "provider_response_invalid",
+        "provider_response_missing_redirect",
+    }
+    reason = str(value or "").strip()
+    return reason if reason in allowed else "provider_response_unavailable"
+
+
 __all__ = [
     "WIII_CONNECT_COMPOSIO_ADAPTER_VERSION",
     "WiiiConnectComposioAdapterConfig",
+    "WiiiConnectComposioConnectLinkResult",
     "build_composio_adapter_config",
+    "build_composio_connect_enabled_entry",
+    "build_composio_external_user_id",
+    "build_composio_provider_managed_vault_capability",
     "build_composio_provider_adapter_capability",
+    "create_composio_connect_link",
     "parse_composio_auth_config_map",
 ]

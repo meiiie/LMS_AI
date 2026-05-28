@@ -208,10 +208,17 @@ must keep that provider disabled and non-agent-ready.
 
 `WiiiConnectComposioAdapterConfig`
 
-- reads backend-only Composio settings without exposing `composio_api_key`;
+- reads backend-only Composio settings without exposing `composio_api_key` in
+  public metadata;
 - supports provider-to-`auth_config_id` maps via JSON or comma-separated text;
 - reports disabled, missing API key, missing auth config map, or configured
   status as provider adapter capability metadata;
+- issues Composio hosted Connect Link URLs only through the authenticated Wiii
+  backend route after registry, adapter, provider-managed vault, and durable
+  audit checks pass;
+- hashes the Wiii org/user boundary into a stable non-PII Composio user ID;
+- redacts `link_token`, provider account IDs, API keys, auth config IDs, and raw
+  provider errors from audit/public metadata;
 - still keeps action execution disabled until gateway/curated-action enablement.
 
 `WiiiConnectAuthorizationUrlRequest`
@@ -329,12 +336,17 @@ Before real Composio OAuth is enabled:
 
 - backend settings must explicitly set `enable_wiii_connect_composio`, provide a
   Composio project API key, and map provider slugs to Composio auth config IDs;
+- `POST /api/v1/wiii-connect/providers/{slug}/authorization-url` must require
+  Wiii authentication before any provider call;
+- Wiii must use Composio hosted Connect Link
+  `/api/v3.1/connected_accounts/link` for Composio-managed OAuth instead of the
+  older direct initiate flow;
 - provider connection readiness must stay separate from `agent_ready`; account
   connection can be enabled before any curated action schema is exposed to an
   agent;
 - Wiii backend must create authorization sessions with state and nonce;
-- session start must return a backend decision first, not let the frontend call
-  Composio directly;
+- session start must return a backend decision first, and the frontend must
+  never call Composio directly;
 - authorization URLs must come from a bound provider adapter decision, not from
   raw frontend input or ad hoc session arguments;
 - authorization URL decisions may consume durable audit readiness only from an
@@ -355,7 +367,9 @@ Before real Composio OAuth is enabled:
   organization and user boundary;
 - frontend may receive connect URLs and state labels, not tokens;
 - stale pending/error OAuth rows must be cleaned up or expired safely;
-- provider errors must be sanitized before reaching UI or chat.
+- provider errors must be sanitized before reaching UI or chat;
+- Composio action execution must remain disabled until curated action catalog,
+  scope policy, and execution gateway are implemented.
 
 ## Write And Apply Requirements
 
@@ -373,11 +387,10 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 
 ## Next Slices
 
-1. Add encrypted vault integration or provider-managed secret reference storage.
-2. Add provider adapter implementation/configuration for one provider broker
-   without enabling broad action execution.
-3. Add frontend connection modal that uses Wiii backend routes only.
-4. Persist provider registry and connection records behind backend-owned storage.
-5. Add browser acceptance for connect, poll, disconnect, gated scope, and denied
+1. Add callback reconciliation that maps Composio `connected_account_id` to a
+   Wiii connection record without storing provider secrets.
+2. Add frontend connection modal that uses Wiii backend routes only.
+3. Add connection polling/listing equivalent to OpenHuman `list_connections`.
+4. Add browser acceptance for connect, poll, disconnect, gated scope, and denied
    execute cases.
-6. Enable one low-risk read-only Composio action before any write action.
+5. Enable one low-risk read-only Composio action before any write action.
