@@ -424,6 +424,122 @@ describe("WiiiConnectPage", () => {
     expect(screen.queryByText("access_token")).toBeNull();
   });
 
+  it("reflects backend read-only execution readiness on provider cards", async () => {
+    mockFetchWiiiConnectProviders.mockResolvedValue({
+      version: "wiii_connect_provider_registry.v1",
+      adapter_version: "wiii_connect_adapter.v1",
+      providers: [
+        {
+          slug: "gmail",
+          label: "Gmail",
+          provider_kind: "composio",
+          auth_mode: "oauth2",
+          enabled: true,
+          agent_ready: false,
+          category: "productivity",
+          description: "Gmail provider from backend registry.",
+          requirements: ["scope_policy", "execution_gateway"],
+          connect_requirements: ["provider_managed_vault_ref"],
+          agent_ready_requirements: ["curated_readonly_action", "execution_gateway"],
+          action_count: 0,
+        },
+      ],
+    });
+    mockFetchWiiiConnectProviderConnections.mockResolvedValue({
+      version: "wiii_connect_connection_list.v1",
+      status: "ready",
+      reason: "listed",
+      provider_slug: "gmail",
+      provider_kind: "composio",
+      connection_count: 1,
+      connections: [
+        {
+          version: "wiii_connect_adapter.v1",
+          connection_ref: "wcn_live_gmail_1",
+          provider_slug: "gmail",
+          state: "connected",
+          active: true,
+          scopes: { read: true, write: false },
+          vault_ref_present: true,
+          account_label: "Wiii Gmail Account",
+          external_account_ref_present: true,
+          last_checked_at: "2026-05-28T00:00:00Z",
+          reason: "provider_listed",
+          warnings: [],
+        },
+      ],
+      provider: { status: "ready", refresh_token: "secret-refresh-token" },
+      storage: { persistent: true },
+    });
+    mockFetchWiiiConnectProviderActivationReadiness.mockResolvedValue({
+      version: "wiii_connect_activation_readiness.v1",
+      status: "ready",
+      provider_slug: "gmail",
+      provider_kind: "composio",
+      ready_to_connect: true,
+      ready_to_execute_readonly: true,
+      gates: [
+        {
+          key: "local_connection",
+          ready: true,
+          reason: "ready",
+          required_next: [],
+        },
+        {
+          key: "curated_readonly_action",
+          ready: true,
+          reason: "ready",
+          required_next: [],
+        },
+        {
+          key: "execution_gateway",
+          ready: true,
+          reason: "allowed",
+          required_next: [],
+        },
+      ],
+      action: {
+        action_slug: "GMAIL_FETCH_EMAILS",
+        api_key: "secret-action-key",
+      },
+      connection: {
+        present: true,
+        provider_slug: "gmail",
+        state: "connected",
+        active: true,
+        scopes: { read: true },
+        vault_ref_present: true,
+        reason: "ready",
+      },
+      execution_gateway: {
+        status: "allowed",
+        reason: "readonly_action_allowed",
+      },
+      provider: { refresh_token: "secret-refresh-token" },
+      storage: { persistent: true },
+    });
+
+    const { container } = render(<WiiiConnectPage />);
+
+    expect(await screen.findByText("Registry backend")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Composio/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Gmail/i }));
+
+    expect(await screen.findByText("Read-only sẵn sàng")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Read-only action đã qua scope policy và execution gateway; mutation/write vẫn bị chặn ngoài allowlist.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getAllByText("allowed").length).toBeGreaterThan(0);
+    expect(container.textContent?.replace(/\s+/g, "")).toContain("Agent-readyCó");
+    expect(container.textContent).not.toContain("wcn_live_gmail_1");
+    expect(container.textContent).not.toContain("secret-refresh-token");
+    expect(container.textContent).not.toContain("secret-action-key");
+    expect(screen.queryByText("refresh_token")).toBeNull();
+    expect(screen.queryByText("api_key")).toBeNull();
+  });
+
   it("requests backend session decision for backend registry providers", async () => {
     mockFetchWiiiConnectProviders.mockResolvedValue({
       version: "wiii_connect_provider_registry.v1",
