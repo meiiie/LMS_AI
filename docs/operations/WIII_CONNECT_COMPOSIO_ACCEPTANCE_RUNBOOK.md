@@ -121,6 +121,11 @@ then rerun without printing the link:
 python scripts/wiii_connect_composio_acceptance.py --backend-url http://localhost:8080 --auth-mode dev-login --provider gmail --expect-connected --require-execution-ready
 ```
 
+Post-OAuth acceptance does not issue a new Connect Link when
+`--expect-connected`, `--require-execution-ready`, `--execute-readonly`, or
+`--disconnect` is set. Those phases verify the existing stored connection
+instead of starting another OAuth handoff.
+
 To execute the read-only action after the live Composio schema is known, pass
 arguments matching that schema:
 
