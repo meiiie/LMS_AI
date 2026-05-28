@@ -35,6 +35,8 @@ from app.engine.tools.tool_capability_registry import (
     DOCUMENT_PREVIEW_CAPABILITY_NAMES,
     HOST_ACTION_PREFIX,
     POINTY_TOOL_PREFIX,
+    WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION,
+    WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,6 +93,67 @@ def _needs_legal_search(query: str) -> bool:
 
 def _needs_maritime_search(query: str) -> bool:
     return _load_attr("app.engine.multi_agent.direct_intent", "_needs_maritime_search")(query)
+
+
+def _looks_wiii_connect_facebook_post_request(query: str) -> bool:
+    """Detect explicit requests to create/publish a Facebook post via Wiii Connect."""
+
+    normalized = _normalize_for_intent(query)
+    if not any(token in normalized for token in ("facebook", "fb", "meta")):
+        return False
+    post_markers = (
+        "dang bai",
+        "dang len",
+        "dang thang",
+        "post",
+        "publish",
+        "tao bai viet",
+        "viet bai",
+        "viet post",
+        "chia se",
+        "len facebook",
+        "facebook post",
+        "bai viet tren facebook",
+    )
+    return any(marker in normalized for marker in post_markers)
+
+
+def _wiii_connect_facebook_post_preview_capability() -> dict[str, Any]:
+    """Synthetic preview-only action exposed to chat through the host-action pipe."""
+
+    return {
+        "name": WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION,
+        "description": (
+            "Create a Wiii Connect preview for a Facebook Page post. Use this "
+            "only when the user explicitly asks Wiii to create, draft, publish, "
+            "or post content to Facebook. Draft the `message` as the exact post "
+            "copy. If the user attached an image, set `image_policy` to "
+            "`use_latest_user_image`; do not place raw image bytes in the tool call. "
+            "This is preview-first: the frontend will require an explicit user "
+            "confirmation before the apply action posts to Facebook."
+        ),
+        "surface": "wiii_connect",
+        "requires_confirmation": False,
+        "mutates_state": False,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "provider_slug": {"type": "string", "default": "facebook"},
+                "connection_ref": {"type": "string"},
+                "page_id": {"type": "string"},
+                "message": {
+                    "type": "string",
+                    "description": "The final Facebook post copy to preview.",
+                },
+                "image_policy": {
+                    "type": "string",
+                    "enum": ["none", "use_latest_user_image"],
+                    "default": "none",
+                },
+            },
+            "required": ["message"],
+        },
+    }
 
 
 def _needs_pointy(query: str) -> bool:
@@ -602,6 +665,7 @@ def _resolve_direct_turn_path_decision(
         looks_document_preview=_looks_like_document_preview_request(query, state),
         looks_reasoning_safety_meta=_looks_reasoning_safety_meta_turn(query),
         looks_wiii_pipeline_meta=_looks_wiii_pipeline_meta_turn(query),
+        needs_external_app_action=_looks_wiii_connect_facebook_post_request(query),
         needs_weather_lookup=_safe_intent_flag(_needs_weather_lookup, query),
         needs_web_search=_safe_intent_flag(_needs_web_search, query),
         needs_datetime=_safe_intent_flag(_needs_datetime, query),
@@ -986,6 +1050,26 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
     except Exception as _e:
         logger.debug("[DIRECT] Host action tools unavailable: %s", _e)
 
+    try:
+        if (
+            _looks_wiii_connect_facebook_post_request(query)
+            and getattr(settings, "enable_wiii_connect_composio", False)
+        ):
+            generate_host_action_tools = _load_attr(
+                "app.engine.context.action_tools",
+                "generate_host_action_tools",
+            )
+            _direct_tools.extend(
+                generate_host_action_tools(
+                    [_wiii_connect_facebook_post_preview_capability()],
+                    user_role,
+                    event_bus_id=state.get("_event_bus_id") if isinstance(state, dict) else "",
+                    approval_context={"query": query},
+                )
+            )
+    except Exception as _e:
+        logger.debug("[DIRECT] Wiii Connect Facebook post tool unavailable: %s", _e)
+
     if _is_host_ui_navigation_route(state):
         scoped_host_tools = _host_action_tools(_direct_tools)
         scoped_host_tools = _apply_tool_policy_session(
@@ -1324,6 +1408,8 @@ def _direct_required_tool_names(query: str, user_role: str = "student") -> list[
         required.append("tool_knowledge_search")
     if _needs_maritime_search(query):
         required.append("tool_search_maritime")
+    if _looks_wiii_connect_facebook_post_request(query):
+        required.append(WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL)
     # WAVE-001: browser_snapshot and execute_python removed from direct.
     # These capabilities now live exclusively in code_studio_agent.
 

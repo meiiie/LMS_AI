@@ -6,6 +6,13 @@
  * host-agnostic store supporting LMS, e-commerce, trading, CRM, etc.
  */
 import { create } from "zustand";
+import {
+  applyWiiiConnectFacebookPost,
+  fetchWiiiConnectFacebookPages,
+  fetchWiiiConnectProviderConnections,
+  previewWiiiConnectFacebookPost,
+} from "@/api/wiii-connect";
+import type { ImageInput } from "@/api/types";
 
 const MAX_SNIPPET_LENGTH = 2000;
 
@@ -131,9 +138,11 @@ export interface HostActionFeedbackItem {
 interface HostContextState {
   capabilities: HostCapabilities | null;
   currentContext: HostContext | null;
+  localActionImages: ImageInput[];
   lastActionResult: HostActionFeedbackItem | null;
   recentActionResults: HostActionFeedbackItem[];
   setCapabilities: (caps: HostCapabilities) => void;
+  setLocalActionImages: (images?: ImageInput[] | null) => void;
   updateContext: (ctx: HostContext) => void;
   setLegacyPageContext: (
     ctx: LegacyPageContext,
@@ -257,13 +266,203 @@ function legacyToHostContext(
   };
 }
 
+function stringParam(params: Record<string, unknown>, key: string): string {
+  const value = params[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function latestUserImagePayload(
+  params: Record<string, unknown>,
+  imageSource: () => ImageInput[],
+): {
+  image_base64?: string | null;
+  image_media_type?: string | null;
+  image_filename?: string | null;
+} {
+  const explicitImage = stringParam(params, "image_base64");
+  if (explicitImage) {
+    return {
+      image_base64: explicitImage,
+      image_media_type: stringParam(params, "image_media_type") || "image/jpeg",
+      image_filename: stringParam(params, "image_filename") || "wiii-facebook-image",
+    };
+  }
+
+  const policy = stringParam(params, "image_policy");
+  if (policy !== "use_latest_user_image") {
+    return {};
+  }
+  const image = imageSource().find((item) => item?.type === "base64" && item.data);
+  if (!image) {
+    return {};
+  }
+  return {
+    image_base64: image.data,
+    image_media_type: image.media_type || "image/jpeg",
+    image_filename: "wiii-chat-image",
+  };
+}
+
+async function resolveFacebookPostBase(
+  params: Record<string, unknown>,
+  imageSource: () => ImageInput[],
+) {
+  const providerSlug = stringParam(params, "provider_slug") || "facebook";
+  const connectionList = await fetchWiiiConnectProviderConnections(providerSlug, {
+    probeDatabase: true,
+  });
+  const connection =
+    (connectionList.connections || []).find(
+      (item) => item.active || item.state === "connected",
+    ) || connectionList.connections?.[0];
+  const connectionRef =
+    stringParam(params, "connection_ref") ||
+    connection?.connection_ref ||
+    connection?.connection_id ||
+    "";
+  if (!connectionRef) {
+    return {
+      error: "facebook_connection_missing",
+      providerSlug,
+      connectionRef: "",
+    };
+  }
+
+  const pages = await fetchWiiiConnectFacebookPages(providerSlug, connectionRef);
+  const selectedPageId = stringParam(params, "page_id") || pages.pages?.[0]?.page_id || "";
+  const page = pages.pages?.find((item) => item.page_id === selectedPageId) || pages.pages?.[0];
+  if (!selectedPageId) {
+    return {
+      error: pages.reason || "facebook_page_missing",
+      providerSlug,
+      connectionRef,
+    };
+  }
+
+  const message =
+    stringParam(params, "message") ||
+    stringParam(params, "caption") ||
+    stringParam(params, "text") ||
+    "Wiii Connect test: bài đăng này được tạo từ chat và cần xác nhận trước khi đăng.";
+  return {
+    providerSlug,
+    connectionRef,
+    pageId: selectedPageId,
+    pageLabel: page?.name || selectedPageId,
+    message,
+    imagePayload: latestUserImagePayload(params, imageSource),
+  };
+}
+
+function executeLocalWiiiConnectAction(
+  action: string,
+  params: Record<string, unknown>,
+  imageSource: () => ImageInput[],
+): Promise<ActionResult> | null {
+  if (action === "wiii_connect.facebook_post.preview") {
+    return (async () => {
+      const base = await resolveFacebookPostBase(params, imageSource);
+      if ("error" in base) {
+        return {
+          success: false,
+          error: base.error,
+          data: {
+            code: base.error,
+            provider_slug: base.providerSlug,
+            connection_ref: base.connectionRef,
+          },
+        };
+      }
+
+      const response = await previewWiiiConnectFacebookPost(base.providerSlug, {
+        connection_ref: base.connectionRef,
+        page_id: base.pageId,
+        message: base.message,
+        ...base.imagePayload,
+      });
+      if (response.status !== "ready") {
+        return {
+          success: false,
+          error: response.reason || "facebook_preview_blocked",
+          data: response as unknown as Record<string, unknown>,
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          ...response,
+          preview_kind: "facebook_post",
+          preview_token: response.preview_evidence_id,
+          apply_action: "wiii_connect.facebook_post.apply",
+          page_id: base.pageId,
+          page_label: base.pageLabel,
+          message: base.message,
+          image_present: Boolean(base.imagePayload.image_base64),
+          facebook_post_body: {
+            connection_ref: base.connectionRef,
+            page_id: base.pageId,
+            message: base.message,
+            ...base.imagePayload,
+          },
+          summary: `Preview Facebook đã sẵn sàng cho ${base.pageLabel}.`,
+        },
+      };
+    })();
+  }
+
+  if (action === "wiii_connect.facebook_post.apply") {
+    return (async () => {
+      const providerSlug = stringParam(params, "provider_slug") || "facebook";
+      const approvalToken = stringParam(params, "approval_token");
+      const previewEvidenceId =
+        stringParam(params, "preview_evidence_id") || stringParam(params, "preview_token");
+      const connectionRef = stringParam(params, "connection_ref");
+      const pageId = stringParam(params, "page_id");
+      const message = stringParam(params, "message");
+      if (!approvalToken || !previewEvidenceId || !connectionRef || !pageId) {
+        return {
+          success: false,
+          error: "facebook_apply_missing_preview_approval",
+          data: { code: "facebook_apply_missing_preview_approval" },
+        };
+      }
+      const response = await applyWiiiConnectFacebookPost(providerSlug, {
+        connection_ref: connectionRef,
+        page_id: pageId,
+        message,
+        image_base64: stringParam(params, "image_base64") || null,
+        image_media_type: stringParam(params, "image_media_type") || null,
+        image_filename: stringParam(params, "image_filename") || null,
+        approval_token: approvalToken,
+        preview_evidence_id: previewEvidenceId,
+      });
+      return {
+        success: response.status === "succeeded",
+        error: response.status === "succeeded" ? undefined : response.reason,
+        data: {
+          ...response,
+          summary:
+            response.status === "succeeded"
+              ? "Đã đăng bài lên Facebook."
+              : `Facebook chưa đăng: ${response.reason}`,
+        },
+      };
+    })();
+  }
+
+  return null;
+}
+
 export const useHostContextStore = create<HostContextState>((set, get) => ({
   capabilities: null,
   currentContext: null,
+  localActionImages: [],
   lastActionResult: null,
   recentActionResults: [],
 
   setCapabilities: (caps) => set({ capabilities: caps }),
+  setLocalActionImages: (images) => set({ localActionImages: images ? [...images] : [] }),
 
   updateContext: (ctx) => set({ currentContext: truncateSnippet(ctx) }),
 
@@ -283,6 +482,7 @@ export const useHostContextStore = create<HostContextState>((set, get) => ({
       currentContext: null,
       lastActionResult: null,
       recentActionResults: [],
+      localActionImages: [],
       pendingActions: new Map(),
     });
   },
@@ -316,6 +516,27 @@ export const useHostContextStore = create<HostContextState>((set, get) => ({
       const pending = get().pendingActions;
       pending.set(finalRequestId, { action, params, resolve, reject, timeout });
       set({ pendingActions: new Map(pending) });
+
+      const localAction = executeLocalWiiiConnectAction(
+        action,
+        params,
+        () => get().localActionImages,
+      );
+      if (localAction) {
+        localAction
+          .then((result) => get().resolveAction(finalRequestId, result))
+          .catch((error) => {
+            const currentPending = get().pendingActions;
+            const entry = currentPending.get(finalRequestId);
+            if (entry) {
+              clearTimeout(entry.timeout);
+              currentPending.delete(finalRequestId);
+              set({ pendingActions: new Map(currentPending) });
+              entry.reject(error instanceof Error ? error : new Error(String(error)));
+            }
+          });
+        return;
+      }
 
       // Send PostMessage to host
       if (window.parent !== window) {

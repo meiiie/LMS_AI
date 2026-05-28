@@ -312,3 +312,42 @@ def test_build_operator_session_prefers_confirm_apply_when_preview_exists():
 
     assert session.pending_approval is True
     assert "authoring.apply_lesson_patch" in session.next_best_step
+
+
+def test_host_session_prompt_includes_wiii_connect_snapshot():
+    from app.engine.context.host_context import (
+        build_host_session_v1,
+        format_host_session_for_prompt,
+    )
+
+    session = build_host_session_v1(
+        host_context={
+            "host_type": "wiii_desktop",
+            "host_name": "Wiii Desktop",
+            "page": {
+                "type": "chat",
+                "title": "Wiii",
+                "metadata": {
+                    "wiii_connect": {
+                        "provider_slug": "facebook",
+                        "provider_label": "Facebook",
+                        "status": "connected",
+                        "active_connection_count": 1,
+                        "page_count": 1,
+                        "page_names": ["Wiii"],
+                        "available_actions": [
+                            "wiii_connect.facebook_post.preview",
+                            "wiii_connect.facebook_post.apply",
+                        ],
+                    }
+                },
+            },
+        }
+    )
+
+    prompt = format_host_session_for_prompt(session)
+
+    assert "External connections" in prompt
+    assert "Facebook: connected" in prompt
+    assert "Wiii" in prompt
+    assert "wiii_connect.facebook_post.preview" in prompt

@@ -6,6 +6,10 @@ import { useCallback, useEffect, useRef } from "react";
 import { sendMessageStream } from "@/api/chat";
 import { ApiHttpError, initClient } from "@/api/client";
 import {
+  fetchWiiiConnectFacebookPages,
+  fetchWiiiConnectProviderConnections,
+} from "@/api/wiii-connect";
+import {
   submitHostActionAudit,
   type HostActionAuditEventType,
   type HostActionAuditRequest,
@@ -57,11 +61,117 @@ const STREAM_RESTART_ABORT_REASON = "stream_restart";
 const USER_CANCEL_ABORT_REASON = "user_cancel";
 const TRACE_SSE = import.meta.env.DEV;
 
+type HostContextForRequest = NonNullable<
+  ReturnType<typeof useHostContextStore.getState>["currentContext"]
+>;
+
 // Sprint 147: Track think tool IDs to skip their results
 const _thinkToolIds = new Set<string>();
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeIntentText(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function looksWiiiConnectFacebookContextTurn(text: string): boolean {
+  const normalized = normalizeIntentText(text);
+  if (!/\b(facebook|fb|meta)\b/.test(normalized)) {
+    return false;
+  }
+  return [
+    "ket noi",
+    "connect",
+    "connected",
+    "dang bai",
+    "dang len",
+    "post",
+    "publish",
+    "bai viet",
+    "facebook",
+  ].some((marker) => normalized.includes(marker));
+}
+
+async function buildWiiiConnectFacebookContextSnapshot(
+  text: string,
+): Promise<Record<string, unknown> | null> {
+  if (!looksWiiiConnectFacebookContextTurn(text)) {
+    return null;
+  }
+
+  try {
+    const connections = await fetchWiiiConnectProviderConnections("facebook", {
+      probeDatabase: true,
+    });
+    const connectionItems = connections.connections || [];
+    const activeConnections = connectionItems.filter(
+      (item) => item.active || item.state === "connected",
+    );
+    const firstConnection = activeConnections[0] || connectionItems[0];
+    const connectionRef =
+      firstConnection?.connection_ref || firstConnection?.connection_id || "";
+    const snapshot: Record<string, unknown> = {
+      provider_slug: "facebook",
+      provider_label: "Facebook",
+      status: activeConnections.length > 0 ? "connected" : "not_connected",
+      connection_count: connectionItems.length,
+      active_connection_count: activeConnections.length,
+    };
+
+    if (connectionRef) {
+      const pages = await fetchWiiiConnectFacebookPages("facebook", connectionRef);
+      snapshot.page_count = pages.page_count;
+      snapshot.page_names = (pages.pages || [])
+        .map((page) => page.name)
+        .filter((name) => Boolean(name))
+        .slice(0, 5);
+      if (pages.status === "ready" && pages.page_count > 0) {
+        snapshot.available_actions = [
+          "wiii_connect.facebook_post.preview",
+          "wiii_connect.facebook_post.apply",
+        ];
+      }
+    }
+
+    return snapshot;
+  } catch (error) {
+    console.warn(
+      "[SSE] Wiii Connect Facebook context snapshot failed:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return {
+      provider_slug: "facebook",
+      provider_label: "Facebook",
+      status: "unavailable",
+    };
+  }
+}
+
+function withWiiiConnectSnapshot(
+  context: HostContextForRequest | null,
+  snapshot: Record<string, unknown> | null,
+): HostContextForRequest | null {
+  if (!context || !snapshot) {
+    return context;
+  }
+  return {
+    ...context,
+    page: {
+      ...context.page,
+      metadata: {
+        ...(context.page.metadata || {}),
+        wiii_connect: snapshot,
+      },
+    },
+  };
 }
 
 async function waitForPointyLayoutCommit(): Promise<void> {
@@ -254,12 +364,17 @@ export function buildHostActionPreviewItem(
   data: Record<string, unknown>,
   hostContext: ReturnType<typeof useHostContextStore.getState>["currentContext"],
 ): PreviewItemData | null {
-  const previewToken = typeof data.preview_token === "string" ? data.preview_token.trim() : "";
+  const previewKind = typeof data.preview_kind === "string" ? data.preview_kind : "";
+  const previewToken =
+    typeof data.preview_token === "string" && data.preview_token.trim()
+      ? data.preview_token.trim()
+      : previewKind === "facebook_post" && typeof data.preview_evidence_id === "string"
+        ? data.preview_evidence_id.trim()
+        : "";
   if (!previewToken) return null;
   const approvalToken =
     typeof data.approval_token === "string" ? data.approval_token.trim() : "";
 
-  const previewKind = typeof data.preview_kind === "string" ? data.preview_kind : "";
   const summary = typeof data.summary === "string" ? data.summary.trim() : "Preview is ready.";
   const sourceReferences = normalizeSourceReferences(
     data.source_references ?? data.sourceReferences,
@@ -279,9 +394,11 @@ export function buildHostActionPreviewItem(
   const targetLabel =
     (typeof data.lesson_title === "string" && data.lesson_title.trim())
     || (typeof data.quiz_title === "string" && data.quiz_title.trim())
+    || (typeof data.page_label === "string" && data.page_label.trim())
     || (typeof params.title === "string" && params.title.trim())
     || (typeof data.lesson_id === "string" && data.lesson_id.trim())
     || (typeof data.quiz_id === "string" && data.quiz_id.trim())
+    || (typeof data.page_id === "string" && data.page_id.trim())
     || "Host preview";
 
   const title =
@@ -292,11 +409,15 @@ export function buildHostActionPreviewItem(
         : previewKind === "quiz_publish"
           ? `Xem trước phát hành bài kiểm tra: ${targetLabel}`
           : `Xem trước thao tác LMS: ${targetLabel}`;
+  const displayTitle =
+    previewKind === "facebook_post"
+      ? `Xem trước bài đăng Facebook: ${targetLabel}`
+      : title;
 
   return {
     preview_id: `host-action-${requestId}`,
     preview_type: "host_action",
-    title,
+    title: displayTitle,
     snippet: summary,
     metadata: {
       action,
@@ -304,9 +425,20 @@ export function buildHostActionPreviewItem(
       summary,
       preview_kind: previewKind || undefined,
       preview_token: previewToken,
+      preview_evidence_id:
+        typeof data.preview_evidence_id === "string" ? data.preview_evidence_id : undefined,
       approval_token: approvalToken || undefined,
       apply_action: typeof data.apply_action === "string" ? data.apply_action : undefined,
       target_label: targetLabel,
+      page_id: typeof data.page_id === "string" ? data.page_id : undefined,
+      page_label: typeof data.page_label === "string" ? data.page_label : undefined,
+      message: typeof data.message === "string" ? data.message : undefined,
+      image_present:
+        typeof data.image_present === "boolean" ? data.image_present : undefined,
+      facebook_post_body:
+        data.facebook_post_body && typeof data.facebook_post_body === "object"
+          ? data.facebook_post_body
+          : undefined,
       lesson_id: typeof data.lesson_id === "string" ? data.lesson_id : undefined,
       lesson_title: typeof data.lesson_title === "string" ? data.lesson_title : undefined,
       quiz_id: typeof data.quiz_id === "string" ? data.quiz_id : undefined,
@@ -790,9 +922,12 @@ export function useSSEStream() {
 
     // Add user message (Sprint 179 images + per-turn document chips)
     chatStore.addUserMessage(content, images, documents);
+    useHostContextStore.getState().setLocalActionImages(images);
 
     // Initialize the HTTP client with current settings
     initClient(settings.server_url, authHeaders);
+    const wiiiConnectContextSnapshot =
+      await buildWiiiConnectFacebookContextSnapshot(content);
 
       // Start streaming
       chatStore.startStreaming();
@@ -1537,7 +1672,10 @@ export function useSSEStream() {
     const buildUserContext = () => {
       const authState = useAuthStore.getState();
       const authMode = authState.authMode;
-      const currentHostCtx = useHostContextStore.getState().getContextForRequest();
+      const currentHostCtx = withWiiiConnectSnapshot(
+        useHostContextStore.getState().getContextForRequest(),
+        wiiiConnectContextSnapshot,
+      );
       const visualContext = useChatStore.getState().getActiveVisualContext();
       const widgetFeedback = useChatStore.getState().getActiveWidgetFeedbackContext();
       const codeStudioContext = useCodeStudioStore.getState().getActiveSessionContext();

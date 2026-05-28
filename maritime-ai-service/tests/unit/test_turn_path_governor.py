@@ -184,6 +184,33 @@ def test_turn_path_governor_routes_weather_to_weather_tool_only():
     assert decision.should_keep_tool_name("tool_pointy_show") is False
 
 
+def test_turn_path_governor_forces_wiii_connect_facebook_post_preview():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+    from app.engine.tools.tool_capability_registry import (
+        WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(
+            normalized_query="wiii dang bai len facebook giup minh",
+            needs_external_app_action=True,
+            pointy_requested=True,
+            suppress_pointy_for_output=True,
+        )
+    )
+
+    assert decision.path == "external_app_action"
+    assert decision.force_tools is True
+    assert decision.bind_tools is True
+    assert decision.allow_all_tools is False
+    assert decision.should_keep_tool_name(WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL) is True
+    assert decision.should_keep_tool_name("host_action__ui_click") is False
+    assert decision.should_keep_tool_name("tool_pointy_show") is False
+
+
 def test_turn_path_filter_keeps_only_lms_document_preview_tools():
     from app.engine.multi_agent.turn_path_governor import (
         TurnPathSignals,
@@ -420,3 +447,17 @@ def test_direct_required_tool_names_temperature_question_prefers_weather_over_we
     )
 
     assert required == ["tool_current_weather"]
+
+
+def test_direct_required_tool_names_includes_wiii_connect_facebook_preview():
+    from app.engine.multi_agent.tool_collection import _direct_required_tool_names
+    from app.engine.tools.tool_capability_registry import (
+        WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+    )
+
+    required = _direct_required_tool_names(
+        "Wiii tao bai viet Facebook ve lop hoc hom nay",
+        user_role="student",
+    )
+
+    assert WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL in required

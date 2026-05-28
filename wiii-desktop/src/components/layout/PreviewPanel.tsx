@@ -186,6 +186,10 @@ function ExpandedPreview({ item }: { item: PreviewItemData }) {
     message?: string;
   }>({ status: "idle" });
   const applyConfig = isHostAction ? resolveHostActionApplyConfig(item) : null;
+  const previewKind =
+    typeof item.metadata?.preview_kind === "string"
+      ? item.metadata.preview_kind
+      : "";
   const previewToken =
     typeof item.metadata?.preview_token === "string"
       ? item.metadata.preview_token
@@ -224,14 +228,35 @@ function ExpandedPreview({ item }: { item: PreviewItemData }) {
     const requestId = `req-preview-apply-${Math.random().toString(36).slice(2, 12)}`;
     setOperatorState({
       status: "running",
-      message: "Wiii đang gửi xác nhận sang LMS...",
+      message:
+        previewKind === "facebook_post"
+          ? "Wiii đang gửi bài đăng sang Facebook..."
+          : "Wiii đang gửi xác nhận sang LMS...",
     });
     try {
-      const applyParams: Record<string, string> = {
-        preview_token: previewToken,
-      };
+      const facebookPostBody =
+        previewKind === "facebook_post"
+          ? asRecord(item.metadata?.facebook_post_body)
+          : null;
+      const applyParams: Record<string, string> = facebookPostBody
+        ? Object.fromEntries(
+            Object.entries(facebookPostBody)
+              .filter(([, value]) => typeof value === "string")
+              .map(([key, value]) => [key, String(value)]),
+          )
+        : {
+            preview_token: previewToken,
+          };
       if (approvalToken) {
         applyParams.approval_token = approvalToken;
+      }
+      if (previewKind === "facebook_post") {
+        applyParams.provider_slug = "facebook";
+        applyParams.preview_evidence_id =
+          typeof item.metadata?.preview_evidence_id === "string"
+            ? item.metadata.preview_evidence_id
+            : previewToken;
+        applyParams.preview_token = previewToken;
       }
 
       const result = await useHostContextStore
@@ -672,6 +697,31 @@ function renderHostActionPreviewDetails(item: PreviewItemData) {
     );
   }
 
+  if (item.metadata?.preview_kind === "facebook_post") {
+    return (
+      <div className="space-y-3 rounded-lg bg-surface px-3 py-3">
+        <div className="text-[11px] uppercase tracking-wider text-text-tertiary">
+          Facebook post
+        </div>
+        <div className="grid gap-2 text-sm sm:grid-cols-2">
+          <MetaInline
+            label="Page"
+            value={String(item.metadata?.page_label || item.metadata?.page_id || "-")}
+          />
+          <MetaInline
+            label="Ảnh"
+            value={item.metadata?.image_present ? "Có ảnh" : "Không có ảnh"}
+          />
+        </div>
+        {typeof item.metadata?.message === "string" && (
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-text">
+            {item.metadata.message}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -947,7 +997,9 @@ function resolveHostActionApplyConfig(item: PreviewItemData): {
         ? "assessment.apply_quiz_commit"
         : previewKind === "quiz_publish"
           ? "publish.apply_quiz"
-          : "");
+          : previewKind === "facebook_post"
+            ? "wiii_connect.facebook_post.apply"
+            : "");
   if (!action) {
     return null;
   }
@@ -971,6 +1023,13 @@ function resolveHostActionApplyConfig(item: PreviewItemData): {
       action,
       label: "Xác nhận publish quiz",
       successLabel: "Đã publish quiz trên LMS.",
+    };
+  }
+  if (action === "wiii_connect.facebook_post.apply") {
+    return {
+      action,
+      label: "Đăng lên Facebook",
+      successLabel: "Đã đăng bài lên Facebook.",
     };
   }
   return {

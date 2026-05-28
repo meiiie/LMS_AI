@@ -19,6 +19,7 @@ ToolCapabilityGroup = Literal[
     "knowledge_search",
     "lms_query",
     "lms_authoring",
+    "external_app_action",
     "host_action",
     "pointy",
     "product_search",
@@ -49,6 +50,12 @@ DOC_PREVIEW_HOST_ACTION_TOOL = "host_action__authoring__preview_lesson_patch"
 DOC_COURSE_HOST_ACTION_TOOL = "host_action__authoring__generate_course_from_document"
 DOC_APPLY_LESSON_PATCH_TOOL = "host_action__authoring__apply_lesson_patch"
 DOC_APPLY_COURSE_PLAN_TOOL = "host_action__authoring__apply_course_plan"
+WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION = "wiii_connect.facebook_post.preview"
+WIII_CONNECT_FACEBOOK_POST_APPLY_ACTION = "wiii_connect.facebook_post.apply"
+WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL = (
+    "host_action__wiii_connect__facebook_post__preview"
+)
+WIII_CONNECT_FACEBOOK_POST_APPLY_TOOL = "host_action__wiii_connect__facebook_post__apply"
 
 DOCUMENT_PREVIEW_CAPABILITY_NAMES = frozenset(
     {
@@ -418,5 +425,23 @@ TOOL_CAPABILITIES: dict[str, ToolCapability] = {
         requires_approval=True,
         surface_scopes=("direct_chat", "host", "lms"),
         host_action_name="authoring.apply_course_plan",
+    ),
+    WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL: _capability(
+        WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+        "external_app_action",
+        permission="host_control",
+        mutates_state=False,
+        requires_approval=False,
+        surface_scopes=("direct_chat", "host"),
+        host_action_name=WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION,
+    ),
+    WIII_CONNECT_FACEBOOK_POST_APPLY_TOOL: _capability(
+        WIII_CONNECT_FACEBOOK_POST_APPLY_TOOL,
+        "external_app_action",
+        permission="write",
+        mutates_state=True,
+        requires_approval=True,
+        surface_scopes=("direct_chat", "host"),
+        host_action_name=WIII_CONNECT_FACEBOOK_POST_APPLY_ACTION,
     ),
 }

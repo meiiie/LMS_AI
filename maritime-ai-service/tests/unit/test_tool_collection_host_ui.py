@@ -338,6 +338,91 @@ def test_uploaded_document_preview_binds_safe_preview_when_global_host_actions_d
     assert force_tools is True
 
 
+def test_wiii_connect_facebook_post_request_binds_preview_host_action(monkeypatch):
+    from app.engine.multi_agent import tool_collection as module
+    from app.engine.tools.tool_capability_registry import (
+        WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION,
+        WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+    )
+
+    monkeypatch.setattr(module.settings, "enable_character_tools", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_lms_integration", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_host_actions", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_structured_visuals", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_wiii_connect_composio", True, raising=False)
+    monkeypatch.setattr(module, "_needs_web_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_datetime", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_news_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_legal_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_lms_query", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_direct_knowledge_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_analysis_tool", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_pointy", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_weather_lookup", lambda _query: False)
+    monkeypatch.setattr(module, "_infer_direct_thinking_mode", lambda *_args, **_kwargs: "general")
+    monkeypatch.setattr(module, "_should_strip_visual_tools_from_direct", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "_should_strip_visual_tools_for_analytical_text_turn", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "filter_tools_for_role", lambda tools, _role: tools)
+    monkeypatch.setattr(module, "filter_tools_for_visual_intent", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        module,
+        "resolve_visual_intent",
+        lambda _query: SimpleNamespace(
+            force_tool=False,
+            mode="text",
+            visual_type=None,
+            preferred_tool=None,
+            presentation_intent="text",
+        ),
+    )
+
+    generated_from: list[dict] = []
+
+    def fake_generate_host_action_tools(capabilities_tools, *_args, **_kwargs):
+        generated_from.extend(capabilities_tools)
+        return [
+            SimpleNamespace(
+                name="host_action__" + str(tool["name"]).replace(".", "__")
+            )
+            for tool in capabilities_tools
+        ]
+
+    def fake_load_attr(module_name: str, attr_name: str):
+        if module_name.endswith("utility_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_search_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_fetch_tool"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("agent_tools") and attr_name == "RAG_KNOWLEDGE_TOOL":
+            return SimpleNamespace(name="tool_rag_knowledge")
+        if module_name.endswith("action_tools") and attr_name == "generate_host_action_tools":
+            return fake_generate_host_action_tools
+        if module_name.endswith("direct_intent") and attr_name == "_needs_maritime_search":
+            return lambda _query: False
+        if module_name.endswith("direct_intent") and attr_name == "_normalize_for_intent":
+            return lambda query: str(query).lower()
+        if attr_name == "get_visual_tools":
+            return lambda: [SimpleNamespace(name="tool_generate_visual")]
+        raise AssertionError(f"Unexpected load: {module_name}.{attr_name}")
+
+    monkeypatch.setattr(module, "_load_attr", fake_load_attr)
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        "Wiii tao bai viet Facebook ve lop hoc hom nay",
+        user_role="student",
+        state=state,
+    )
+
+    assert [tool.name for tool in tools] == [WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL]
+    assert [tool["name"] for tool in generated_from] == [
+        WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION
+    ]
+    assert state["_turn_path_decision"]["path"] == "external_app_action"
+    assert force_tools is True
+
+
 def test_uploaded_document_preview_does_not_bind_lms_authoring_without_connection(monkeypatch):
     from app.engine.multi_agent import tool_collection as module
     from app.engine.multi_agent.visual_intent_resolver import build_visual_tool_requirement

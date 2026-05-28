@@ -19,6 +19,7 @@ from app.engine.tools.tool_capability_registry import (
     HOST_ACTION_PREFIX,
     LMS_DOCUMENT_PREVIEW_TOOL_NAMES,
     POINTY_TOOL_PREFIX,
+    WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
     WEATHER_TOOL_NAMES,
 )
 
@@ -28,6 +29,7 @@ TurnPathName = Literal[
     "host_ui_navigation",
     "pointy_guidance",
     "lms_document_preview",
+    "external_app_action",
     "weather_lookup",
     "web_search",
     "datetime_lookup",
@@ -66,6 +68,7 @@ class TurnPathSignals:
     looks_document_preview: bool = False
     looks_reasoning_safety_meta: bool = False
     looks_wiii_pipeline_meta: bool = False
+    needs_external_app_action: bool = False
     needs_weather_lookup: bool = False
     needs_web_search: bool = False
     needs_datetime: bool = False
@@ -176,6 +179,17 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             force_tools=True,
             allow_all_tools=False,
             allowed_tool_names=LMS_DOCUMENT_PREVIEW_TOOL_NAMES,
+            allow_agent_handoff=False,
+        )
+
+    if signals.needs_external_app_action:
+        return TurnPathDecision(
+            path="external_app_action",
+            reason="wiii_connect_external_app_action_request",
+            force_tools=True,
+            allow_all_tools=False,
+            allowed_tool_names=frozenset({WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL}),
+            forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
             allow_agent_handoff=False,
         )
 
@@ -461,6 +475,7 @@ def _has_tool_or_output_signal(signals: TurnPathSignals) -> bool:
             signals.host_ui_navigation,
             signals.looks_document_preview,
             signals.looks_reasoning_safety_meta,
+            signals.needs_external_app_action,
             signals.needs_weather_lookup,
             signals.needs_web_search,
             signals.needs_datetime,
