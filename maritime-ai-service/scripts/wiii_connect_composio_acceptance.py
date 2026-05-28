@@ -232,6 +232,52 @@ def activation_blocker_summary(payload: dict[str, Any]) -> str:
     return ", ".join(blockers[:8]) or "none"
 
 
+def activation_readiness_report_lines(payload: dict[str, Any]) -> list[str]:
+    """Return a human-readable, redacted activation-readiness report."""
+
+    provider = _safe_report_text(payload.get("provider_slug") or "unknown")
+    status = _safe_report_text(payload.get("status") or "unknown")
+    lines = [
+        (
+            f"provider={provider} status={status} "
+            f"ready_to_connect={payload.get('ready_to_connect') is True} "
+            f"ready_to_execute_readonly={payload.get('ready_to_execute_readonly') is True}"
+        )
+    ]
+    gates = payload.get("gates")
+    if not isinstance(gates, list):
+        lines.append("blocked_gates=gates_missing")
+        return lines
+
+    blockers: list[str] = []
+    for gate in gates:
+        if not isinstance(gate, dict) or gate.get("ready") is True:
+            continue
+        key = _safe_report_text(gate.get("key") or "unknown")
+        reason = _safe_report_text(gate.get("reason") or "blocked")
+        required_next = gate.get("required_next")
+        if isinstance(required_next, list):
+            next_steps = ",".join(
+                _safe_report_text(item) for item in required_next[:5]
+            )
+        else:
+            next_steps = ""
+        suffix = f" next={next_steps}" if next_steps else ""
+        blockers.append(f"- {key}: {reason}{suffix}")
+    if blockers:
+        lines.append("blocked_gates:")
+        lines.extend(blockers[:12])
+    else:
+        lines.append("blocked_gates=none")
+    return lines
+
+
+def print_activation_readiness_report(payload: dict[str, Any]) -> None:
+    print("[REPORT] activation readiness")
+    for line in activation_readiness_report_lines(payload):
+        print(f"[REPORT] {line}")
+
+
 def assert_activation_ready(
     payload: dict[str, Any],
     *,
@@ -269,6 +315,18 @@ def _looks_sensitive_string(value: str) -> bool:
     if "wiii_state=" in lowered or "connected_account_id=" in lowered:
         return True
     return False
+
+
+def _safe_report_text(value: Any) -> str:
+    text = str(value or "").strip().replace(" ", "_")
+    if not text:
+        return "unknown"
+    if _looks_sensitive_string(text):
+        return "[redacted]"
+    lowered = text.lower()
+    if any(marker in lowered for marker in SENSITIVE_KEY_MARKERS):
+        return "[redacted]"
+    return text[:160]
 
 
 class WiiiConnectComposioAcceptance:
@@ -319,35 +377,44 @@ class WiiiConnectComposioAcceptance:
         self.run_check("backend health", self.check_backend_health)
         self.run_check("authentication", self.authenticate)
         if self.token:
-            self.run_check("provider registry", self.check_provider_registry)
-            self.run_check("adapter readiness", self.check_adapter_readiness)
-            self.run_check("storage readiness", self.check_storage_readiness)
-            self.run_check("audit readiness", self.check_audit_readiness)
-            self.run_check("curated actions", self.check_curated_actions)
-            self.run_check(
-                "activation readiness connect",
-                self.check_activation_ready_to_connect,
-            )
-            self.run_check(
-                "gateway fail-closed control",
-                self.check_gateway_blocks_missing_connection,
-            )
-            if not self.args.skip_connect_link:
-                self.run_check("connect link preflight", self.check_connect_link)
-            self.run_check("connection listing", self.check_connections)
-            if self.args.require_execution_ready or self.args.execute_readonly:
+            if self.args.readiness_report_only:
                 self.run_check(
-                    "activation readiness execution",
-                    self.check_activation_ready_to_execute,
+                    "activation readiness report",
+                    self.check_activation_readiness_report,
+                )
+            else:
+                self.run_check("provider registry", self.check_provider_registry)
+                self.run_check("adapter readiness", self.check_adapter_readiness)
+                self.run_check("storage readiness", self.check_storage_readiness)
+                self.run_check("audit readiness", self.check_audit_readiness)
+                self.run_check("curated actions", self.check_curated_actions)
+                self.run_check(
+                    "activation readiness connect",
+                    self.check_activation_ready_to_connect,
                 )
                 self.run_check(
-                    "execution gateway allowed",
-                    self.check_execution_gateway_allowed,
+                    "gateway fail-closed control",
+                    self.check_gateway_blocks_missing_connection,
                 )
-            if self.args.execute_readonly:
-                self.run_check("read-only provider execution", self.check_readonly_execution)
-            if self.args.disconnect:
-                self.run_check("backend-owned disconnect", self.check_disconnect)
+                if not self.args.skip_connect_link:
+                    self.run_check("connect link preflight", self.check_connect_link)
+                self.run_check("connection listing", self.check_connections)
+                if self.args.require_execution_ready or self.args.execute_readonly:
+                    self.run_check(
+                        "activation readiness execution",
+                        self.check_activation_ready_to_execute,
+                    )
+                    self.run_check(
+                        "execution gateway allowed",
+                        self.check_execution_gateway_allowed,
+                    )
+                if self.args.execute_readonly:
+                    self.run_check(
+                        "read-only provider execution",
+                        self.check_readonly_execution,
+                    )
+                if self.args.disconnect:
+                    self.run_check("backend-owned disconnect", self.check_disconnect)
 
         total = self.passed + self.failed
         print(f"\nResult: {self.passed}/{total} checks passed")
@@ -562,6 +629,12 @@ class WiiiConnectComposioAcceptance:
         )
         return f"ready_to_execute_readonly=true connection={opaque_ref(connection_id)}"
 
+    def check_activation_readiness_report(self) -> str:
+        connection_id = (self.args.connection_id or "").strip()
+        payload = self.activation_readiness_payload(connection_id=connection_id)
+        print_activation_readiness_report(payload)
+        return f"blockers={activation_blocker_summary(payload)}"
+
     def check_connect_link(self) -> str:
         payload = request_bytes(
             "POST",
@@ -748,6 +821,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_EXPECTED_PLATFORM_ROLE,
     )
     parser.add_argument("--skip-connect-link", action="store_true")
+    parser.add_argument(
+        "--readiness-report-only",
+        action="store_true",
+        help=(
+            "Fetch and print the redacted activation-readiness report, then stop. "
+            "Does not issue Connect Links, list provider accounts, execute, or disconnect."
+        ),
+    )
     parser.add_argument("--print-connect-url", action="store_true")
     parser.add_argument("--expect-connected", action="store_true")
     parser.add_argument("--require-execution-ready", action="store_true")
