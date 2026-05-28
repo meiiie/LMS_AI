@@ -297,6 +297,11 @@ describe("WiiiConnectPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /Gmail/i }));
 
     expect(await screen.findByTestId("wiii-connect-readiness-panel")).toBeTruthy();
+    expect(screen.getByTestId("wiii-connect-lifecycle-panel")).toBeTruthy();
+    expect(screen.getByTestId("wiii-connect-next-action").textContent).toContain(
+      "Mở OAuth/Connect Link với provider",
+    );
+    expect(screen.getByText("Hoàn tất OAuth/Connect Link")).toBeTruthy();
     expect(screen.getByText("Activation readiness")).toBeTruthy();
     expect(screen.getByText("Connect-ready")).toBeTruthy();
     expect(screen.getByText("Agent read-only")).toBeTruthy();
@@ -407,6 +412,10 @@ describe("WiiiConnectPage", () => {
     expect(await screen.findByText("Connection thật")).toBeTruthy();
     expect(screen.getAllByText("Wiii Facebook Page").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Đã kết nối").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("wiii-connect-next-action").textContent).toContain(
+      "Hoàn tất policy/gateway trước khi agent dùng",
+    );
+    expect(screen.getByText("Bật policy agent cho provider")).toBeTruthy();
     await waitFor(() => {
       expect(mockFetchWiiiConnectProviderConnections).toHaveBeenCalledWith("facebook", {
         probeDatabase: true,
@@ -526,6 +535,10 @@ describe("WiiiConnectPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /Gmail/i }));
 
     expect(await screen.findByText("Read-only sẵn sàng")).toBeTruthy();
+    expect(screen.getByTestId("wiii-connect-next-action").textContent).toContain(
+      "Sẵn sàng cho agent read-only",
+    );
+    expect(screen.getByText("Không tự mở write/admin scope")).toBeTruthy();
     expect(
       screen.getByText(
         "Read-only action đã qua scope policy và execution gateway; mutation/write vẫn bị chặn ngoài allowlist.",
