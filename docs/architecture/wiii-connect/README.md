@@ -186,5 +186,7 @@ this repository.
    this projection.
 7. Add one low-risk read-only Composio action through the gateway before any
    write/apply action. The backend boundary now supports one curated Gmail
-   read-only action behind config, schema verification, gateway, and audit; the
-   remaining work is live credential acceptance and disconnect/reconnect UX.
+   read-only action behind config, schema verification, gateway, and audit; it
+   also supports backend-owned disconnect that disables local Wiii state before
+   provider cleanup. The remaining work is live credential acceptance and
+   frontend disconnect/reconnect UX.

@@ -104,6 +104,7 @@ GET  /api/v1/wiii-connect/providers/{slug}/status
 POST /api/v1/wiii-connect/providers/{slug}/sessions
 POST /api/v1/wiii-connect/providers/{slug}/authorization-url
 GET  /api/v1/wiii-connect/providers/{slug}/connections
+DELETE /api/v1/wiii-connect/providers/{slug}/connections/{connection_id}
 GET  /api/v1/wiii-connect/providers/{slug}/actions
 POST /api/v1/wiii-connect/providers/{slug}/execution-decision
 POST /api/v1/wiii-connect/providers/{slug}/execute
@@ -304,6 +305,18 @@ never receives provider tokens or raw payloads.
 - never returns credential state, provider raw payloads, auth config IDs, API
   keys, or provider error bodies.
 
+`WiiiConnectComposioDisconnectResult`
+
+- wraps Composio connected-account soft delete through
+  `DELETE /api/v3.1/connected_accounts/{nanoid}`;
+- is reached only after Wiii has authenticated the user, fetched the stored
+  org/user/provider connection, and marked the local Wiii connection disabled;
+- returns only provider status, reason, status code, connection-reference
+  presence, and success boolean;
+- never returns the connected-account ID, provider response body, provider
+  errors, OAuth tokens, auth config IDs, or Composio API keys in public or audit
+  metadata.
+
 `WiiiConnectAuthorizationUrlRequest`
 
 - records only safe authorization request shape: state presence, redirect URI
@@ -468,6 +481,13 @@ Before real Composio OAuth is enabled:
 - Wiii must append signed `wiii_state` to the provider callback URL before
   calling Composio, and callbacks must verify that state before any connection
   upsert;
+- user-requested disconnect must call Wiii backend only. Wiii must fetch the
+  stored connection by org/user/provider, disable the local connection before
+  provider cleanup, then call Composio connected-account delete from the backend
+  and audit both started and completion states;
+- provider polling must not reanimate a locally disabled
+  `user_disconnect_requested` row if Composio still reports the account active
+  during cleanup or eventual consistency windows;
 - authorization URL decisions may consume durable audit readiness only from an
   explicit storage probe or backend-controlled storage status, never from
   frontend claims;
@@ -522,5 +542,7 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
    action and keep writes disabled. Done for the backend boundary; still needs
    real Composio credentials and acceptance against a live Gmail connection.
 3. Add disconnect/delete/reconnect lifecycle controls behind the same policy.
+   Backend disconnect is implemented; frontend controls and live-provider
+   acceptance are still pending.
 4. Add browser acceptance for connect, denied execute, gated scope, and
    reconnect cases.

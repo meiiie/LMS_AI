@@ -36,6 +36,7 @@ WIII_CONNECT_COMPOSIO_ADAPTER_VERSION = "wiii_connect_composio_adapter.v1"
 WIII_CONNECT_COMPOSIO_CONNECTION_LIST_VERSION = "wiii_connect_composio_connections.v1"
 WIII_CONNECT_COMPOSIO_TOOL_SCHEMA_VERSION = "wiii_connect_composio_tool_schema.v1"
 WIII_CONNECT_COMPOSIO_EXECUTION_VERSION = "wiii_connect_composio_execution.v1"
+WIII_CONNECT_COMPOSIO_DISCONNECT_VERSION = "wiii_connect_composio_disconnect.v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +203,37 @@ class WiiiConnectComposioExecuteResult:
             "error_present": self.error_present,
             "session_info_present": self.session_info_present,
             "log_id_present": self.log_id_present,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class WiiiConnectComposioDisconnectResult:
+    """Sanitized Composio connected-account delete result."""
+
+    ready: bool = False
+    provider_slug: str = ""
+    reason: str = "not_requested"
+    status_code: int = 0
+    connection_ref_present: bool = False
+    provider_success: bool = False
+
+    @property
+    def status(self) -> str:
+        if self.ready and self.provider_success:
+            return "succeeded"
+        if self.ready:
+            return "failed"
+        return "blocked"
+
+    def to_public_metadata(self) -> dict[str, Any]:
+        return {
+            "version": WIII_CONNECT_COMPOSIO_DISCONNECT_VERSION,
+            "status": self.status,
+            "reason": _safe_disconnect_reason(self.reason),
+            "provider_slug": _normalize_provider_slug(self.provider_slug),
+            "status_code": self.status_code,
+            "connection_ref_present": self.connection_ref_present,
+            "provider_success": self.provider_success,
         }
 
 
@@ -872,6 +904,81 @@ async def execute_composio_tool(
     )
 
 
+async def disconnect_composio_connected_account(
+    *,
+    config: WiiiConnectComposioAdapterConfig,
+    provider_slug: str,
+    connected_account_id: str,
+    http_client: httpx.AsyncClient | None = None,
+) -> WiiiConnectComposioDisconnectResult:
+    """Soft-delete a Composio connected account without leaking payloads."""
+
+    provider = _normalize_provider_slug(provider_slug)
+    connection_id = str(connected_account_id or "").strip()
+    auth_config_id = config.auth_config_id_for_provider(provider)
+    if not config.enabled or not config.api_key_present or not auth_config_id:
+        return WiiiConnectComposioDisconnectResult(
+            provider_slug=provider,
+            connection_ref_present=bool(connection_id),
+            reason="provider_adapter_not_configured",
+        )
+    if not connection_id:
+        return WiiiConnectComposioDisconnectResult(
+            provider_slug=provider,
+            reason="missing_connection",
+        )
+
+    url = (
+        f"{config.base_url.rstrip('/')}/api/"
+        f"{config.api_version.strip('/')}/connected_accounts/{connection_id}"
+    )
+    client_created = http_client is None
+    client = http_client or httpx.AsyncClient(timeout=20)
+    try:
+        response = await client.delete(
+            url,
+            headers={"x-api-key": config.api_key},
+        )
+    except httpx.HTTPError:
+        return WiiiConnectComposioDisconnectResult(
+            provider_slug=provider,
+            connection_ref_present=True,
+            reason="provider_transport_error",
+        )
+    finally:
+        if client_created:
+            await client.aclose()
+
+    if response.status_code < 200 or response.status_code >= 300:
+        return WiiiConnectComposioDisconnectResult(
+            provider_slug=provider,
+            status_code=response.status_code,
+            connection_ref_present=True,
+            reason="provider_response_rejected",
+        )
+    provider_success = True
+    if response.content:
+        try:
+            data = response.json()
+        except ValueError:
+            return WiiiConnectComposioDisconnectResult(
+                provider_slug=provider,
+                status_code=response.status_code,
+                connection_ref_present=True,
+                reason="provider_response_invalid",
+            )
+        if isinstance(data, Mapping) and "success" in data:
+            provider_success = bool(data.get("success"))
+    return WiiiConnectComposioDisconnectResult(
+        ready=True,
+        provider_slug=provider,
+        status_code=response.status_code,
+        connection_ref_present=True,
+        reason="ready" if provider_success else "provider_disconnect_failed",
+        provider_success=provider_success,
+    )
+
+
 def _normalize_action_allowlist_mapping(
     value: Mapping[Any, Any],
 ) -> dict[str, tuple[str, ...]]:
@@ -1136,14 +1243,31 @@ def _safe_execute_reason(value: str) -> str:
     return reason if reason in allowed else "provider_response_unavailable"
 
 
+def _safe_disconnect_reason(value: str) -> str:
+    allowed = {
+        "ready",
+        "not_requested",
+        "provider_adapter_not_configured",
+        "missing_connection",
+        "provider_transport_error",
+        "provider_response_rejected",
+        "provider_response_invalid",
+        "provider_disconnect_failed",
+    }
+    reason = str(value or "").strip()
+    return reason if reason in allowed else "provider_response_unavailable"
+
+
 __all__ = [
     "WIII_CONNECT_COMPOSIO_ADAPTER_VERSION",
     "WIII_CONNECT_COMPOSIO_CONNECTION_LIST_VERSION",
+    "WIII_CONNECT_COMPOSIO_DISCONNECT_VERSION",
     "WIII_CONNECT_COMPOSIO_EXECUTION_VERSION",
     "WIII_CONNECT_COMPOSIO_TOOL_SCHEMA_VERSION",
     "WiiiConnectComposioAdapterConfig",
     "WiiiConnectComposioConnectionListResult",
     "WiiiConnectComposioConnectLinkResult",
+    "WiiiConnectComposioDisconnectResult",
     "WiiiConnectComposioExecuteResult",
     "WiiiConnectComposioToolSchemaResult",
     "build_composio_adapter_config",
@@ -1153,6 +1277,7 @@ __all__ = [
     "build_composio_provider_managed_vault_capability",
     "build_composio_provider_adapter_capability",
     "create_composio_connect_link",
+    "disconnect_composio_connected_account",
     "execute_composio_tool",
     "list_composio_connected_accounts",
     "parse_composio_auth_config_map",
