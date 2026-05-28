@@ -416,6 +416,86 @@ async def test_wiii_connect_activation_readiness_api_reports_ready_without_leaks
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_activation_readiness_requires_selected_connection(
+    authenticated_app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+
+    class FakeStorage:
+        fetches = 0
+
+        def status(self, *, probe_database: bool = True):
+            assert probe_database is True
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                reason="ready",
+            )
+
+        def get_connection_record(self, **kwargs):
+            self.fetches += 1
+            raise AssertionError("readiness must not select latest connection")
+
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            auth_config_by_provider={"gmail": "authcfg_gmail"},
+            readonly_execute_enabled=True,
+            readonly_action_allowlist_by_provider={
+                "gmail": ("GMAIL_FETCH_EMAILS",),
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/wiii-connect/providers/gmail/activation-readiness",
+            params={"action_slug": "GMAIL_FETCH_EMAILS"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    gates = {gate["key"]: gate for gate in payload["gates"]}
+    serialized = json.dumps(payload, sort_keys=True)
+
+    assert payload["status"] == "blocked"
+    assert payload["ready_to_connect"] is True
+    assert payload["ready_to_execute_readonly"] is False
+    assert payload["connection"]["present"] is False
+    assert payload["execution_gateway"]["reason"] == "connection_selection_required"
+    assert (
+        "select_provider_connection" in payload["execution_gateway"]["required_next"]
+    )
+    assert gates["local_connection"]["reason"] == "connection_missing"
+    assert gates["execution_gateway"]["reason"] == "connection_selection_required"
+    assert fake_storage.fetches == 0
+    assert "secret-api-key" not in serialized
+    assert "authcfg_gmail" not in serialized
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_session_start_api_blocks_without_leaking_secrets(app):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -1249,6 +1329,101 @@ async def test_wiii_connect_execution_decision_api_audits_fail_closed(
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_execution_decision_requires_selected_connection(
+    authenticated_app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+
+    class FakeStorage:
+        audit_appends = 0
+        fetches = 0
+
+        def status(self, *, probe_database: bool = True):
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                reason="ready",
+            )
+
+        def get_connection_record(self, **kwargs):
+            self.fetches += 1
+            raise AssertionError(
+                "execution preflight must not select latest connection",
+            )
+
+        def append_audit_record(self, record, *, organization_id: str, user_id: str):
+            self.audit_appends += 1
+            metadata = record.to_public_metadata()["metadata"]
+            serialized = json.dumps(record.to_public_metadata(), sort_keys=True)
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert metadata["connection_id_present"] is False
+            assert metadata["connection_found"] is False
+            assert metadata["request"]["action_slug"] == "GMAIL_FETCH_EMAILS"
+            assert "secret-api-key" not in serialized
+            assert "access_token" not in serialized
+            return True
+
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            auth_config_by_provider={"gmail": "authcfg_gmail"},
+            readonly_execute_enabled=True,
+            readonly_action_allowlist_by_provider={
+                "gmail": ("GMAIL_FETCH_EMAILS",),
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/wiii-connect/providers/gmail/execution-decision",
+            json={
+                "surface": "desktop",
+                "action_slug": "GMAIL_FETCH_EMAILS",
+                "path": "external_app_action",
+                "mutation": "read",
+                "argument_keys": ["query", "access_token"],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["status"] == "blocked"
+    assert payload["reason"] == "connection_selection_required"
+    assert payload["connection_present"] is False
+    assert "select_provider_connection" in payload["required_next"]
+    assert fake_storage.fetches == 0
+    assert fake_storage.audit_appends == 1
+    assert "secret-api-key" not in serialized
+    assert "authcfg_gmail" not in serialized
+    assert "access_token" not in serialized
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
     authenticated_app,
     monkeypatch,
@@ -1404,6 +1579,116 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
     assert "private subject" not in serialized
     assert "secret-api-key" not in serialized
     assert "authcfg_gmail" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_execute_requires_selected_connection_before_provider_call(
+    authenticated_app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+
+    class FakeStorage:
+        audit_appends = 0
+        fetches = 0
+
+        def status(self, *, probe_database: bool = True):
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                reason="ready",
+            )
+
+        def get_connection_record(self, **kwargs):
+            self.fetches += 1
+            raise AssertionError("execute must not select latest connection")
+
+        def append_audit_record(self, record, *, organization_id: str, user_id: str):
+            self.audit_appends += 1
+            metadata = record.to_public_metadata()["metadata"]
+            serialized = json.dumps(record.to_public_metadata(), sort_keys=True)
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert metadata["stage"] == "gateway"
+            assert metadata["connection_id_present"] is False
+            assert metadata["connection_found"] is False
+            assert metadata["request"]["action_slug"] == "GMAIL_FETCH_EMAILS"
+            assert "client-secret" not in serialized
+            assert "access_token" not in serialized
+            return True
+
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            auth_config_by_provider={"gmail": "authcfg_gmail"},
+            readonly_execute_enabled=True,
+            readonly_action_allowlist_by_provider={
+                "gmail": ("GMAIL_FETCH_EMAILS",),
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async def fake_schema(**kwargs):
+        raise AssertionError("schema probe must not run without selected connection")
+
+    async def fake_execute(**kwargs):
+        raise AssertionError(
+            "provider execution must not run without selected connection",
+        )
+
+    monkeypatch.setattr(wiii_connect_api, "verify_composio_tool_schema", fake_schema)
+    monkeypatch.setattr(wiii_connect_api, "execute_composio_tool", fake_execute)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/wiii-connect/providers/gmail/execute",
+            json={
+                "surface": "desktop",
+                "action_slug": "GMAIL_FETCH_EMAILS",
+                "path": "external_app_action",
+                "mutation": "read",
+                "arguments": {
+                    "query": "from:me",
+                    "access_token": "client-secret",
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["status"] == "blocked"
+    assert payload["reason"] == "connection_selection_required"
+    assert payload["connection_present"] is False
+    assert payload["schema"] is None
+    assert payload["execution"] is None
+    assert "select_provider_connection" in payload["required_next"]
+    assert fake_storage.fetches == 0
+    assert fake_storage.audit_appends == 1
+    assert "client-secret" not in serialized
+    assert "access_token" not in serialized
+    assert "secret-api-key" not in serialized
 
 
 @pytest.mark.asyncio

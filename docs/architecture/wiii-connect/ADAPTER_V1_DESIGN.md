@@ -416,7 +416,8 @@ and requires all of:
 2. provider registry entry is marked agent-ready;
 3. live connection belongs to the same provider slug;
 4. live connection state is `connected`;
-5. runtime path and action are allowed by the gateway.
+5. the caller selected an explicit stored connection id for execution;
+6. runtime path and action are allowed by the gateway.
 
 This follows the useful OpenHuman pattern while keeping Wiii's stronger LMS,
 tenant, and host-action safety boundary.
@@ -427,6 +428,7 @@ The gateway denies by default. Current reason codes:
 
 - `provider_disabled`
 - `provider_not_agent_ready`
+- `connection_selection_required`
 - `connection_missing`
 - `connection_provider_mismatch`
 - `connection_not_connected`
@@ -464,6 +466,12 @@ Composio execute
 Wiii must not expose Composio's broad meta-tools directly to normal chat. The
 path governor selects the product path first. Only then may a scoped integration
 agent receive curated action schemas for the selected provider.
+
+Execution preflight and execution calls must pass an explicit Wiii connection
+id. They must not fall back to the latest stored account for a provider. This
+keeps multi-account integrations deterministic and matches the source-audited
+OpenHuman/Composio pattern where connection state is visible first, then a
+specific connected account is chosen before tools run.
 
 ## OAuth And Vault Requirements
 

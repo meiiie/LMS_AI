@@ -297,6 +297,12 @@ projection, prints failed gates plus `required_next` hints, and deliberately
 does not issue Connect Links, list provider accounts, execute provider actions,
 or disconnect accounts.
 
+Wiii now keeps the execution side stricter than the storage helper: execution
+readiness, execution-decision, and execute calls require an explicit selected
+connection id. They do not silently reuse the latest stored provider account.
+This preserves the OpenHuman-style connection discipline while avoiding unsafe
+multi-account ambiguity once Composio is enabled with real users.
+
 Remaining work before enabling Composio for real users: configure production
 Composio project credentials and auth config IDs, connect a live Gmail account,
 run the acceptance harness plus browser acceptance through Wiii's
