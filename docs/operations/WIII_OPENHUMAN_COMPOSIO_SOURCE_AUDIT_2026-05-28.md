@@ -246,6 +246,9 @@ raw provider payloads or connection IDs. Wiii now also has an authenticated exec
 gateway preflight endpoint that fetches the stored org/user connection record,
 checks path/action/scope/evidence/adapter/audit policy, and appends a
 privacy-safe execution ledger record without calling Composio action execution.
+Provider connection selection now uses an opaque Wiii `connection_ref` in
+frontend and harness requests; raw provider connected-account IDs remain
+backend-internal for Composio execute/disconnect calls.
 Wiii also has a curated action catalog contract with a
 `GMAIL_FETCH_EMAILS` read-only candidate, so future action exposure has a
 reviewable allowlist rather than a broad Composio tool dump. This candidate was
@@ -299,7 +302,8 @@ or disconnect accounts.
 
 Wiii now keeps the execution side stricter than the storage helper: execution
 readiness, execution-decision, and execute calls require an explicit selected
-connection id. They do not silently reuse the latest stored provider account.
+opaque connection reference. They do not silently reuse the latest stored
+provider account.
 This preserves the OpenHuman-style connection discipline while avoiding unsafe
 multi-account ambiguity once Composio is enabled with real users.
 

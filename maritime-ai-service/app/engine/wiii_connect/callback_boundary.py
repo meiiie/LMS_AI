@@ -91,7 +91,7 @@ class WiiiConnectCallbackDecision:
     provider_kind: str
     auth_mode: str
     vault_ref_issued: bool = False
-    connection_id: str = ""
+    connection_ref: str = ""
     audit_event: WiiiConnectCallbackAuditEvent | None = None
 
     @property
@@ -108,7 +108,8 @@ class WiiiConnectCallbackDecision:
             "provider_kind": self.provider_kind,
             "auth_mode": self.auth_mode,
             "vault_ref_issued": self.vault_ref_issued,
-            "connection_id": self.connection_id,
+            "connection_ref": self.connection_ref,
+            "connection_ref_present": bool(self.connection_ref),
             "audit_event": (
                 self.audit_event.to_metadata() if self.audit_event is not None else None
             ),
@@ -163,7 +164,7 @@ def provider_callback_decision_for_entry(
         provider_kind=entry.provider_kind,
         auth_mode=entry.auth_mode,
         vault_ref_issued=status == "accepted",
-        connection_id="pending_connection_ref" if status == "accepted" else "",
+        connection_ref="pending_connection_ref" if status == "accepted" else "",
         audit_event=audit_event,
     )
 

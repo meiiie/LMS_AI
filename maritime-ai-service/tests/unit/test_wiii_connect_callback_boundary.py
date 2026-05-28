@@ -102,7 +102,8 @@ def test_callback_requires_state_code_vault_and_adapter_before_accepting():
     assert missing_adapter.reason == "provider_adapter_not_bound"
     assert accepted.accepted is True
     assert accepted.vault_ref_issued is True
-    assert accepted.connection_id == "pending_connection_ref"
+    assert accepted.connection_ref == "pending_connection_ref"
+    assert "connection_id" not in accepted.to_public_metadata()
 
 
 def test_callback_accepts_vault_capability_without_boolean_override():

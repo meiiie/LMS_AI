@@ -11,12 +11,14 @@ and carrying the required approval evidence before execution can proceed.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 
 WIII_CONNECT_ADAPTER_VERSION = "wiii_connect_adapter.v1"
+WIII_CONNECT_PUBLIC_CONNECTION_REF_PREFIX = "wcn_"
 
 ProviderKind = Literal[
     "wiii_native",
@@ -238,17 +240,22 @@ class WiiiConnectConnectionRecordV1:
     def active(self) -> bool:
         return self.state == "connected"
 
+    @property
+    def connection_ref(self) -> str:
+        return public_connection_ref(self.provider_slug, self.connection_id)
+
     def to_public_metadata(self) -> dict[str, Any]:
         return {
             "version": WIII_CONNECT_ADAPTER_VERSION,
-            "connection_id": self.connection_id,
+            "connection_ref": self.connection_ref,
+            "connection_ref_present": bool(self.connection_ref),
             "provider_slug": self.provider_slug,
             "state": self.state,
             "active": self.active,
             "scopes": self.scopes.to_metadata(),
             "vault_ref_present": self.vault_ref is not None,
             "account_label": self.account_label,
-            "external_account_ref": self.external_account_ref,
+            "external_account_ref_present": bool(self.external_account_ref),
             "last_checked_at": self.last_checked_at,
             "reason": self.reason,
             "warnings": list(self.warnings),
@@ -347,6 +354,31 @@ def normalize_connection_state(status: str | None) -> ConnectionLifecycleState:
     if normalized == "DISABLED":
         return "disabled"
     return "disconnected"
+
+
+def public_connection_ref(provider_slug: str, connection_id: str) -> str:
+    """Return an opaque stable reference for UI/backend connection selection."""
+
+    provider = str(provider_slug or "").strip().lower().replace("-", "_")
+    raw_id = str(connection_id or "").strip()
+    if not provider or not raw_id:
+        return ""
+    digest = hashlib.sha256(f"{provider}:{raw_id}".encode("utf-8")).hexdigest()
+    return f"{WIII_CONNECT_PUBLIC_CONNECTION_REF_PREFIX}{digest[:24]}"
+
+
+def connection_ref_matches(
+    *,
+    provider_slug: str,
+    connection_id: str,
+    candidate: str,
+) -> bool:
+    """Return true when a public ref belongs to one provider connection id."""
+
+    normalized_candidate = str(candidate or "").strip()
+    if not normalized_candidate:
+        return False
+    return normalized_candidate == public_connection_ref(provider_slug, connection_id)
 
 
 def is_connection_baseline_ready(

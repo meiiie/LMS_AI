@@ -310,11 +310,14 @@ def test_public_metadata_does_not_expose_vault_key_or_raw_secret_values():
     vault_serialized = json.dumps(metadata["vault"], sort_keys=True)
 
     assert metadata["connection"]["vault_ref_present"] is True
+    assert metadata["connection"]["connection_ref"].startswith("wcn_")
     assert metadata["vault"]["vault_ref_present"] is True
     assert metadata["vault"]["connection_ref_present"] is True
     assert metadata["entry"]["required_fields"][0]["key"] == "client_secret"
     assert "oauth-token-secret" not in serialized
     assert "vault://tenant/private" not in serialized
+    assert "conn_1" not in serialized
+    assert "connection_id" not in serialized
     assert "conn_1" not in vault_serialized
     assert "connection_id" not in vault_serialized
 

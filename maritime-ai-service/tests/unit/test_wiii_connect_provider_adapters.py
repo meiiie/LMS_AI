@@ -318,9 +318,12 @@ async def test_composio_connection_list_client_filters_and_sanitizes_accounts():
     assert captured["api_key"] == "secret-api-key"
     assert result.ready is True
     assert public["connection_count"] == 2
-    assert public["connections"][0]["connection_id"] == "ca_active"
+    assert public["connections"][0]["connection_ref"].startswith("wcn_")
     assert public["connections"][0]["state"] == "connected"
     assert public["connections"][1]["state"] == "waiting"
+    assert "ca_active" not in serialized
+    assert "ca_pending" not in serialized
+    assert "connection_id" not in serialized
     assert "secret-api-key" not in serialized
     assert "secret-token" not in serialized
     assert "secret-cursor-value" not in serialized

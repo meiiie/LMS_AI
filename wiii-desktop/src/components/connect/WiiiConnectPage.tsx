@@ -598,7 +598,9 @@ function providerConnectionSummary(
 ): string {
   if (!connection) return "Chưa có account";
   return compactText(
-    connection.account_label || connection.external_account_ref || connection.reason,
+    connection.account_label ||
+      (connection.external_account_ref_present ? "Provider account" : "") ||
+      connection.reason,
     "Đã có connection",
   );
 }
@@ -655,9 +657,15 @@ function responseWithLocallyDisabledConnection(
     reason,
     connection_count: Math.max(response.connection_count, 1),
     connections: response.connections.map((item) =>
-      item.connection_id === connection.connection_id ? disabled : item,
+      providerConnectionRef(item) === providerConnectionRef(connection) ? disabled : item,
     ),
   };
+}
+
+function providerConnectionRef(
+  connection: WiiiConnectProviderConnectionRecord | null | undefined,
+): string {
+  return connection?.connection_ref || connection?.connection_id || "";
 }
 
 function formatCount(value: unknown, label: string): string | null {
@@ -1128,7 +1136,7 @@ function ConnectionDetailPanel({
   const canDisconnectConnection =
     card.provider !== "wiii_native" &&
     card.registrySource === "backend" &&
-    Boolean(providerConnection?.connection_id) &&
+    Boolean(providerConnectionRef(providerConnection)) &&
     providerConnection?.state !== "disabled" &&
     Boolean(onDisconnectConnection);
 
@@ -1636,7 +1644,7 @@ function ConnectionCatalog({
     try {
       const response = await fetchWiiiConnectProviderActivationReadiness(slug, {
         actionSlug: "GMAIL_FETCH_EMAILS",
-        connectionId: selectedConnection?.connection_id,
+        connectionRef: providerConnectionRef(selectedConnection),
         probeDatabase: true,
       });
       setProviderReadinessStates((current) => ({
@@ -1768,7 +1776,7 @@ function ConnectionCatalog({
     try {
       const response = await disconnectWiiiConnectProviderConnection(
         slug,
-        connection.connection_id,
+        providerConnectionRef(connection),
       );
       setDisconnectStates((current) => ({
         ...current,

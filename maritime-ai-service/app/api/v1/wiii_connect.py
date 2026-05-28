@@ -31,6 +31,7 @@ from app.engine.wiii_connect import (
     build_composio_provider_adapter_capability,
     build_wiii_connect_callback_state,
     begin_connection_session,
+    connection_ref_matches,
     create_composio_connect_link,
     decide_authorization_url,
     decide_execution_gateway,
@@ -78,6 +79,7 @@ class WiiiConnectExecutionDecisionBody(BaseModel):
 
     surface: str = "desktop"
     connection_id: str | None = None
+    connection_ref: str | None = None
     action_slug: str
     path: str = "external_app_action"
     mutation: str = "read"
@@ -169,6 +171,7 @@ async def get_wiii_connect_provider_connection_status(slug: str) -> dict[str, ob
 async def get_wiii_connect_provider_activation_readiness(
     slug: str,
     connection_id: str | None = None,
+    connection_ref: str | None = None,
     action_slug: str = "GMAIL_FETCH_EMAILS",
     probe_database: bool = True,
     current_user: AuthenticatedUser = Depends(require_auth),
@@ -196,7 +199,15 @@ async def get_wiii_connect_provider_activation_readiness(
         probe_database=probe_database,
     )
     storage_ready = _connection_storage_ready(storage)
-    safe_connection_id = _safe_provider_connection_id(connection_id)
+    selected_connection_ref = _safe_provider_connection_id(
+        connection_ref or connection_id,
+    )
+    safe_connection_id = _resolve_provider_connection_id(
+        storage,
+        current_user=current_user,
+        provider_slug=execution_entry.slug,
+        connection_ref_or_id=selected_connection_ref,
+    )
     _expire_stale_pending_connections(
         storage,
         current_user=current_user,
@@ -245,7 +256,7 @@ async def get_wiii_connect_provider_activation_readiness(
                 storage.get("persistent") and storage.get("audit_ledger_ready")
             ),
         },
-        connection_selection_required=not bool(safe_connection_id),
+        connection_selection_required=not bool(selected_connection_ref),
     )
     return build_activation_readiness_metadata(
         provider_slug=connect_entry.slug,
@@ -482,7 +493,13 @@ async def disconnect_wiii_connect_provider_connection(
     effective_entry = build_composio_connect_enabled_entry(entry, composio_config)
     adapter_capability = build_composio_provider_adapter_capability(composio_config)
     storage = _wiii_connect_storage_status_metadata(probe_database=True)
-    safe_connection_id = _safe_provider_connection_id(connection_id)
+    selected_connection_ref = _safe_provider_connection_id(connection_id)
+    safe_connection_id = _resolve_provider_connection_id(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+        connection_ref_or_id=selected_connection_ref,
+    )
     if not _connection_storage_ready(storage):
         payload = _disconnect_payload(
             effective_entry,
@@ -681,7 +698,15 @@ async def decide_wiii_connect_provider_execution(
     effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
     storage = _wiii_connect_storage_status_metadata(probe_database=True)
     storage_ready = _connection_storage_ready(storage)
-    safe_connection_id = _safe_provider_connection_id(body.connection_id)
+    selected_connection_ref = _safe_provider_connection_id(
+        body.connection_ref or body.connection_id,
+    )
+    safe_connection_id = _resolve_provider_connection_id(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+        connection_ref_or_id=selected_connection_ref,
+    )
     _expire_stale_pending_connections(
         storage,
         current_user=current_user,
@@ -717,7 +742,7 @@ async def decide_wiii_connect_provider_execution(
         audit_ledger_metadata={
             "persistent": bool(storage.get("persistent") and storage.get("audit_ledger_ready")),
         },
-        connection_selection_required=not bool(safe_connection_id),
+        connection_selection_required=not bool(selected_connection_ref),
     )
     _append_execution_audit(
         gateway,
@@ -726,6 +751,7 @@ async def decide_wiii_connect_provider_execution(
         current_user=current_user,
         metadata={
             "surface": body.surface,
+            "connection_ref_present": bool(selected_connection_ref),
             "connection_id_present": bool(safe_connection_id),
             "connection_found": connection is not None,
             "storage": storage,
@@ -752,7 +778,15 @@ async def execute_wiii_connect_provider_action(
     effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
     storage = _wiii_connect_storage_status_metadata(probe_database=True)
     storage_ready = _connection_storage_ready(storage)
-    safe_connection_id = _safe_provider_connection_id(body.connection_id)
+    selected_connection_ref = _safe_provider_connection_id(
+        body.connection_ref or body.connection_id,
+    )
+    safe_connection_id = _resolve_provider_connection_id(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+        connection_ref_or_id=selected_connection_ref,
+    )
     _expire_stale_pending_connections(
         storage,
         current_user=current_user,
@@ -792,10 +826,11 @@ async def execute_wiii_connect_provider_action(
                 storage.get("persistent") and storage.get("audit_ledger_ready")
             ),
         },
-        connection_selection_required=not bool(safe_connection_id),
+        connection_selection_required=not bool(selected_connection_ref),
     )
     audit_base = {
         "surface": body.surface,
+        "connection_ref_present": bool(selected_connection_ref),
         "connection_id_present": bool(safe_connection_id),
         "connection_found": connection is not None,
         "storage": storage,
@@ -1347,6 +1382,38 @@ def _safe_provider_connection_id(value: str | None) -> str:
     if any(marker in text.lower() for marker in ("token", "secret", "password")):
         return ""
     return text[:160]
+
+
+def _resolve_provider_connection_id(
+    storage_metadata: dict[str, Any],
+    *,
+    current_user: AuthenticatedUser,
+    provider_slug: str,
+    connection_ref_or_id: str | None,
+) -> str:
+    """Resolve an opaque public connection ref inside one org/user boundary."""
+
+    candidate = _safe_provider_connection_id(connection_ref_or_id)
+    if not candidate:
+        return ""
+    if not candidate.startswith("wcn_"):
+        return candidate
+    if not _connection_storage_ready(storage_metadata):
+        return candidate
+
+    storage = get_wiii_connect_persistent_storage()
+    for connection in storage.list_connection_records(
+        organization_id=_wiii_connect_owner_organization_id(current_user),
+        user_id=current_user.user_id,
+        provider_slug=provider_slug,
+    ):
+        if connection_ref_matches(
+            provider_slug=connection.provider_slug,
+            connection_id=connection.connection_id,
+            candidate=candidate,
+        ):
+            return connection.connection_id
+    return candidate
 
 
 def _safe_action_slug(value: str) -> str:

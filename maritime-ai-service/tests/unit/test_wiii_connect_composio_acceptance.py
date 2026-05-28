@@ -78,7 +78,7 @@ def test_catalog_helpers_find_adapter_provider_action_and_active_connection() ->
         {
             "connections": [
                 {"connection_id": "ca_old", "state": "disabled", "active": False},
-                {"connection_id": "ca_live", "state": "connected", "active": True},
+                {"connection_ref": "wcn_live", "state": "connected", "active": True},
             ]
         }
     )
@@ -86,7 +86,7 @@ def test_catalog_helpers_find_adapter_provider_action_and_active_connection() ->
     assert adapter["bound"] is True
     assert provider["provider_kind"] == "composio"
     assert action["mutation"] == "read"
-    assert connection["connection_id"] == "ca_live"
+    assert connection["connection_ref"] == "wcn_live"
 
 
 def test_catalog_helpers_fail_closed_when_required_items_are_missing() -> None:
@@ -212,7 +212,7 @@ def test_activation_readiness_payload_uses_backend_endpoint(monkeypatch) -> None
     )
     assert "probe_database=true" in url
     assert "action_slug=GMAIL_FETCH_EMAILS" in url
-    assert "connection_id=ca_live" in url
+    assert "connection_ref=ca_live" in url
 
 
 def test_gateway_fail_closed_check_requires_connection_selection_reason(

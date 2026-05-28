@@ -213,8 +213,16 @@ def first_connected_connection(payload: dict[str, Any]) -> dict[str, Any] | None
             isinstance(connection, dict)
             and connection.get("active") is True
             and connection.get("state") == "connected"
-            and isinstance(connection.get("connection_id"), str)
-            and connection.get("connection_id")
+            and (
+                (
+                    isinstance(connection.get("connection_ref"), str)
+                    and connection.get("connection_ref")
+                )
+                or (
+                    isinstance(connection.get("connection_id"), str)
+                    and connection.get("connection_id")
+                )
+            )
         ):
             return connection
     return None
@@ -723,7 +731,7 @@ class WiiiConnectComposioAcceptance:
             "action_slug": self.args.action,
         }
         if connection_id:
-            params["connection_id"] = connection_id
+            params["connection_ref"] = connection_id
         query = urllib.parse.urlencode(params)
         return request_bytes(
             "GET",
@@ -815,7 +823,9 @@ class WiiiConnectComposioAcceptance:
             ):
                 raise AcceptanceFailure("No active connected account was returned")
             return "ready; no active account required for this run"
-        self.selected_connection_id = str(connection["connection_id"])
+        self.selected_connection_id = str(
+            connection.get("connection_ref") or connection.get("connection_id") or ""
+        )
         return f"active_connection={opaque_ref(self.selected_connection_id)}"
 
     def check_execution_gateway_allowed(self) -> str:
@@ -828,7 +838,7 @@ class WiiiConnectComposioAcceptance:
             headers=self.auth_headers(),
             payload={
                 "surface": "acceptance_harness",
-                "connection_id": connection_id,
+                "connection_ref": connection_id,
                 "action_slug": self.args.action,
                 "path": "external_app_action",
                 "mutation": "read",
@@ -852,7 +862,7 @@ class WiiiConnectComposioAcceptance:
             headers=self.auth_headers(),
             payload={
                 "surface": "acceptance_harness",
-                "connection_id": connection_id,
+                "connection_ref": connection_id,
                 "action_slug": self.args.action,
                 "path": "external_app_action",
                 "mutation": "read",

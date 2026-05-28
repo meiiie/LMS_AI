@@ -10,9 +10,11 @@ from .adapter_v1 import (
     WiiiConnectRequiredField,
     WiiiConnectScopeGrant,
     WiiiConnectVaultSecretRef,
+    connection_ref_matches,
     decide_external_execution,
     is_connection_baseline_ready,
     normalize_connection_state,
+    public_connection_ref,
 )
 from .action_catalog import (
     WIII_CONNECT_ACTION_CATALOG_VERSION,
@@ -220,6 +222,7 @@ __all__ = [
     "build_composio_external_user_id",
     "build_composio_provider_managed_vault_capability",
     "build_wiii_connect_callback_state",
+    "connection_ref_matches",
     "default_provider_adapter_capability",
     "default_persistent_storage_status_metadata",
     "default_wiii_connect_vault_capability",
@@ -233,6 +236,7 @@ __all__ = [
     "normalize_connection_state",
     "parse_composio_auth_config_map",
     "parse_composio_readonly_action_allowlist",
+    "public_connection_ref",
     "provider_adapter_status_public_metadata",
     "provider_callback_decision",
     "provider_callback_decision_for_entry",
