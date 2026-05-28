@@ -13,12 +13,14 @@ Related issue: #730
 This audit records the OpenHuman and Composio patterns Wiii should adopt before
 enabling real third-party actions through Wiii Connect.
 
-It does not mean Wiii has fully enabled Composio for users. Wiii now has a
-read-only catalog, runtime status surface, backend-owned Connect Link flow,
-connection polling, execution gateway, schema verification boundary, and
-read-only execute adapter. Real usage still requires production Composio
-credentials, provider auth configs, a live connected account, and acceptance
-against that account.
+It does not mean Wiii has broadly enabled Composio for every user or provider.
+Wiii now has a read-only catalog, runtime status surface, backend-owned Connect
+Link flow, connection polling, execution gateway, schema verification boundary,
+and read-only execute adapter. Local #780 acceptance passed with real Composio
+credentials, a Gmail auth config, a live connected Gmail account, read-only
+Gmail execution, browser Wiii Connect evidence, and Facebook connection-only
+OAuth. Production or staging rollout still requires target-specific credentials
+and the same acceptance run against that deployed backend.
 
 ## Official Composio Runtime Model
 
@@ -387,12 +389,11 @@ policy grants the required scope for the selected action/path. This mirrors the
 source-audited OpenHuman rule that user/toolkit scope preferences gate actions
 instead of letting a connected OAuth account automatically enter the agent loop.
 
-Remaining work before enabling Composio for real users: configure production
-Composio project credentials and auth config IDs, connect a live Gmail account,
-run the acceptance harness plus browser acceptance through Wiii's
-connect/list/execute/disconnect endpoints, and decide whether Wiii should keep
-using Composio as an adapter or graduate specific providers to Wiii-owned OAuth
-apps.
+Remaining work before broad production enablement: configure production
+Composio project credentials and auth config IDs, rerun the acceptance harness
+plus browser acceptance through Wiii's connect/list/execute/disconnect
+endpoints in that target environment, and decide whether Wiii should keep using
+Composio as an adapter or graduate specific providers to Wiii-owned OAuth apps.
 
 The 2026-05-29 OpenHuman refresh does not invalidate Wiii's Adapter V1 shape.
 It tightens the next enablement bar: Wiii can keep the current connect/list/
