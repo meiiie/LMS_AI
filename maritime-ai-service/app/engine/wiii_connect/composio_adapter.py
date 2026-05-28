@@ -161,6 +161,19 @@ class WiiiConnectComposioConnectLinkResult:
 
 
 @dataclass(frozen=True, slots=True)
+class WiiiConnectComposioAuthConfigLookupResult:
+    """Internal auth-config lookup result.
+
+    Auth config ids are provider configuration handles. They must never be
+    exposed through public metadata or chat-visible payloads.
+    """
+
+    ready: bool = False
+    auth_config_id: str = field(default="", repr=False)
+    reason: str = "not_requested"
+
+
+@dataclass(frozen=True, slots=True)
 class WiiiConnectComposioConnectionListResult:
     """Sanitized Composio connected-account list result."""
 
@@ -542,19 +555,6 @@ def build_composio_provider_adapter_capability(
             reason="provider_adapter_not_configured",
             warnings=("missing_composio_api_key",),
         )
-    if resolved.auth_config_count <= 0:
-        return WiiiConnectProviderAdapterCapability(
-            provider_kind="composio",
-            adapter_name="composio_adapter",
-            bound=True,
-            configured=False,
-            can_create_authorization_url=False,
-            can_exchange_callback=False,
-            can_execute_actions=False,
-            reason="provider_adapter_not_configured",
-            warnings=("missing_composio_auth_config_map",),
-        )
-
     can_execute_readonly = bool(
         resolved.readonly_execute_enabled and resolved.readonly_action_count > 0
     )
@@ -567,6 +567,8 @@ def build_composio_provider_adapter_capability(
         warnings_list.append("composio_readonly_execution_limited_to_curated_allowlist")
     if can_execute_apply:
         warnings_list.append("composio_apply_execution_requires_preview_and_approval")
+    if resolved.auth_config_count <= 0:
+        warnings_list.append("composio_auth_config_will_be_resolved_from_provider")
     if not warnings_list:
         warnings_list.append("execution_disabled_or_no_curated_actions")
     return WiiiConnectProviderAdapterCapability(
@@ -616,10 +618,7 @@ def build_composio_connect_enabled_entry(
         return entry
     resolved = config or build_composio_adapter_config(settings_obj)
     capability = build_composio_provider_adapter_capability(resolved)
-    if (
-        not capability.authorization_ready
-        or not resolved.auth_config_id_for_provider(entry.slug)
-    ):
+    if not capability.authorization_ready:
         return entry
 
     warnings = tuple(
@@ -715,6 +714,90 @@ def build_composio_external_user_id(
     return f"wiii_{digest}"
 
 
+async def resolve_composio_auth_config_id(
+    *,
+    config: WiiiConnectComposioAdapterConfig,
+    provider_slug: str,
+    http_client: httpx.AsyncClient | None = None,
+) -> WiiiConnectComposioAuthConfigLookupResult:
+    """Resolve the Composio auth_config_id for a toolkit.
+
+    Deployment config may pin provider->auth_config ids. If it does not, use
+    the same direct-mode pattern OpenHuman uses: ask Composio for the enabled
+    auth config matching the toolkit slug. The resolved id stays server-side.
+    """
+
+    provider = _normalize_provider_slug(provider_slug)
+    configured = config.auth_config_id_for_provider(provider)
+    if configured:
+        return WiiiConnectComposioAuthConfigLookupResult(
+            ready=True,
+            auth_config_id=configured,
+            reason="configured",
+        )
+    if not config.enabled or not config.api_key_present:
+        return WiiiConnectComposioAuthConfigLookupResult(
+            reason="provider_adapter_not_configured",
+        )
+    if not provider:
+        return WiiiConnectComposioAuthConfigLookupResult(reason="missing_provider")
+
+    url = (
+        f"{config.base_url.rstrip('/')}/api/"
+        f"{config.api_version.strip('/')}/auth_configs"
+    )
+    client_created = http_client is None
+    client = http_client or httpx.AsyncClient(timeout=20)
+    try:
+        response = await client.get(
+            url,
+            params={
+                "toolkit_slug": provider,
+                "show_disabled": "true",
+                "limit": "25",
+            },
+            headers={"x-api-key": config.api_key},
+        )
+    except httpx.HTTPError:
+        return WiiiConnectComposioAuthConfigLookupResult(
+            reason="provider_transport_error",
+        )
+    finally:
+        if client_created:
+            await client.aclose()
+
+    if response.status_code < 200 or response.status_code >= 300:
+        return WiiiConnectComposioAuthConfigLookupResult(
+            reason="provider_response_rejected",
+        )
+    try:
+        data = response.json()
+    except ValueError:
+        return WiiiConnectComposioAuthConfigLookupResult(
+            reason="provider_response_invalid",
+        )
+
+    items = _extract_auth_config_items(data)
+    if not items:
+        return WiiiConnectComposioAuthConfigLookupResult(
+            reason="provider_auth_config_missing",
+        )
+    preferred = next(
+        (item for item in items if _is_composio_auth_config_enabled(item)),
+        items[0],
+    )
+    auth_config_id = _safe_auth_config_id(preferred)
+    if not auth_config_id:
+        return WiiiConnectComposioAuthConfigLookupResult(
+            reason="provider_response_invalid",
+        )
+    return WiiiConnectComposioAuthConfigLookupResult(
+        ready=True,
+        auth_config_id=auth_config_id,
+        reason="provider_lookup",
+    )
+
+
 async def create_composio_connect_link(
     *,
     config: WiiiConnectComposioAdapterConfig,
@@ -725,8 +808,7 @@ async def create_composio_connect_link(
 ) -> WiiiConnectComposioConnectLinkResult:
     """Create a Composio hosted auth link without leaking provider payloads."""
 
-    auth_config_id = config.auth_config_id_for_provider(provider_slug)
-    if not config.enabled or not config.api_key_present or not auth_config_id:
+    if not config.enabled or not config.api_key_present:
         return WiiiConnectComposioConnectLinkResult(
             reason="provider_adapter_not_configured",
         )
@@ -735,18 +817,26 @@ async def create_composio_connect_link(
             reason="missing_user_or_callback",
         )
 
-    payload = {
-        "auth_config_id": auth_config_id,
-        "user_id": user_id,
-        "callback_url": callback_url,
-    }
-    url = (
-        f"{config.base_url.rstrip('/')}/api/"
-        f"{config.api_version.strip('/')}/connected_accounts/link"
-    )
     client_created = http_client is None
     client = http_client or httpx.AsyncClient(timeout=20)
     try:
+        auth_config = await resolve_composio_auth_config_id(
+            config=config,
+            provider_slug=provider_slug,
+            http_client=client,
+        )
+        if not auth_config.ready:
+            return WiiiConnectComposioConnectLinkResult(reason=auth_config.reason)
+
+        payload = {
+            "auth_config_id": auth_config.auth_config_id,
+            "user_id": user_id,
+            "callback_url": callback_url,
+        }
+        url = (
+            f"{config.base_url.rstrip('/')}/api/"
+            f"{config.api_version.strip('/')}/connected_accounts/link"
+        )
         response = await client.post(
             url,
             json=payload,
@@ -800,27 +890,34 @@ async def list_composio_connected_accounts(
 ) -> WiiiConnectComposioConnectionListResult:
     """List Composio connected accounts for one Wiii external user id."""
 
-    auth_config_id = config.auth_config_id_for_provider(provider_slug)
-    if not config.enabled or not config.api_key_present or not auth_config_id:
+    if not config.enabled or not config.api_key_present:
         return WiiiConnectComposioConnectionListResult(
             reason="provider_adapter_not_configured",
         )
     if not user_id:
         return WiiiConnectComposioConnectionListResult(reason="missing_user")
 
-    url = (
-        f"{config.base_url.rstrip('/')}/api/"
-        f"{config.api_version.strip('/')}/connected_accounts"
-    )
-    params: list[tuple[str, str | int]] = [
-        ("user_ids", user_id),
-        ("auth_config_ids", auth_config_id),
-        ("account_type", "PRIVATE"),
-        ("limit", max(1, min(int(limit or 50), 100))),
-    ]
     client_created = http_client is None
     client = http_client or httpx.AsyncClient(timeout=20)
     try:
+        auth_config = await resolve_composio_auth_config_id(
+            config=config,
+            provider_slug=provider_slug,
+            http_client=client,
+        )
+        if not auth_config.ready:
+            return WiiiConnectComposioConnectionListResult(reason=auth_config.reason)
+
+        url = (
+            f"{config.base_url.rstrip('/')}/api/"
+            f"{config.api_version.strip('/')}/connected_accounts"
+        )
+        params: list[tuple[str, str | int]] = [
+            ("user_ids", user_id),
+            ("auth_config_ids", auth_config.auth_config_id),
+            ("account_type", "PRIVATE"),
+            ("limit", max(1, min(int(limit or 50), 100))),
+        ]
         response = await client.get(
             url,
             params=params,
@@ -1321,8 +1418,7 @@ async def disconnect_composio_connected_account(
 
     provider = _normalize_provider_slug(provider_slug)
     connection_id = str(connected_account_id or "").strip()
-    auth_config_id = config.auth_config_id_for_provider(provider)
-    if not config.enabled or not config.api_key_present or not auth_config_id:
+    if not config.enabled or not config.api_key_present:
         return WiiiConnectComposioDisconnectResult(
             provider_slug=provider,
             connection_ref_present=bool(connection_id),
@@ -1341,6 +1437,18 @@ async def disconnect_composio_connected_account(
     client_created = http_client is None
     client = http_client or httpx.AsyncClient(timeout=20)
     try:
+        auth_config = await resolve_composio_auth_config_id(
+            config=config,
+            provider_slug=provider,
+            http_client=client,
+        )
+        if not auth_config.ready:
+            return WiiiConnectComposioDisconnectResult(
+                provider_slug=provider,
+                connection_ref_present=True,
+                reason=auth_config.reason,
+            )
+
         response = await client.delete(
             url,
             headers={"x-api-key": config.api_key},
@@ -1592,6 +1700,39 @@ def _extract_connection_items(data: Any) -> list[Any]:
     return []
 
 
+def _extract_auth_config_items(data: Any) -> list[Mapping[str, Any]]:
+    """Extract Composio auth config rows from v3 response variants."""
+
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, Mapping)]
+    if not isinstance(data, Mapping):
+        return []
+    for key in ("items", "data", "auth_configs", "authConfigs", "configs"):
+        value = data.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, Mapping)]
+    return []
+
+
+def _is_composio_auth_config_enabled(item: Mapping[str, Any]) -> bool:
+    enabled = item.get("enabled")
+    if isinstance(enabled, bool):
+        return enabled
+    status = str(item.get("status") or item.get("state") or "").strip().lower()
+    return status in {"active", "enabled", "connected", "ready"}
+
+
+def _safe_auth_config_id(item: Mapping[str, Any]) -> str:
+    return str(
+        item.get("id")
+        or item.get("nanoid")
+        or item.get("nanoId")
+        or item.get("auth_config_id")
+        or item.get("authConfigId")
+        or ""
+    ).strip()
+
+
 def _extract_facebook_page_items(data: Any) -> list[Any]:
     if isinstance(data, list):
         return data
@@ -1679,6 +1820,8 @@ def _safe_connect_link_reason(value: str) -> str:
         "not_requested",
         "provider_adapter_not_configured",
         "missing_user_or_callback",
+        "missing_provider",
+        "provider_auth_config_missing",
         "provider_transport_error",
         "provider_response_rejected",
         "provider_response_invalid",
@@ -1694,6 +1837,8 @@ def _safe_connection_list_reason(value: str) -> str:
         "not_requested",
         "provider_adapter_not_configured",
         "missing_user",
+        "missing_provider",
+        "provider_auth_config_missing",
         "provider_transport_error",
         "provider_response_rejected",
         "provider_response_invalid",
@@ -1754,6 +1899,8 @@ def _safe_disconnect_reason(value: str) -> str:
         "not_requested",
         "provider_adapter_not_configured",
         "missing_connection",
+        "missing_provider",
+        "provider_auth_config_missing",
         "provider_transport_error",
         "provider_response_rejected",
         "provider_response_invalid",
@@ -1772,6 +1919,7 @@ __all__ = [
     "WIII_CONNECT_COMPOSIO_TOOL_SCHEMA_VERSION",
     "WIII_CONNECT_FACEBOOK_PAGE_LIST_VERSION",
     "WiiiConnectComposioAdapterConfig",
+    "WiiiConnectComposioAuthConfigLookupResult",
     "WiiiConnectComposioConnectionListResult",
     "WiiiConnectComposioConnectLinkResult",
     "WiiiConnectComposioDisconnectResult",
@@ -1794,6 +1942,7 @@ __all__ = [
     "parse_composio_auth_config_map",
     "parse_composio_apply_action_allowlist",
     "parse_composio_readonly_action_allowlist",
+    "resolve_composio_auth_config_id",
     "stage_composio_file_upload",
     "verify_composio_tool_schema",
 ]

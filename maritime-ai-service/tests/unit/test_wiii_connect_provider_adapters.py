@@ -57,7 +57,7 @@ def test_composio_adapter_config_parses_without_exposing_secret_values():
             composio_auth_config_map='{"facebook": "authcfg_fb"}',
         ),
     )
-    missing_auth_config = build_composio_provider_adapter_capability(
+    dynamic_auth_config = build_composio_provider_adapter_capability(
         settings_obj=SimpleNamespace(
             enable_wiii_connect_composio=True,
             composio_api_key="secret-value",
@@ -77,7 +77,7 @@ def test_composio_adapter_config_parses_without_exposing_secret_values():
         "config": config.to_public_metadata(),
         "disabled": disabled.to_public_metadata(),
         "missing_key": missing_key.to_public_metadata(),
-        "missing_auth_config": missing_auth_config.to_public_metadata(),
+        "dynamic_auth_config": dynamic_auth_config.to_public_metadata(),
         "configured": configured.to_public_metadata(),
     }
     serialized = json.dumps(metadata, sort_keys=True)
@@ -96,8 +96,12 @@ def test_composio_adapter_config_parses_without_exposing_secret_values():
     assert missing_key.bound is True
     assert missing_key.configured is False
     assert "missing_composio_api_key" in missing_key.warnings
-    assert missing_auth_config.configured is False
-    assert "missing_composio_auth_config_map" in missing_auth_config.warnings
+    assert dynamic_auth_config.configured is True
+    assert dynamic_auth_config.can_create_authorization_url is True
+    assert (
+        "composio_auth_config_will_be_resolved_from_provider"
+        in dynamic_auth_config.warnings
+    )
     assert configured.bound is True
     assert configured.configured is True
     assert configured.can_create_authorization_url is True
@@ -281,6 +285,66 @@ async def test_composio_connect_link_client_uses_v31_and_redacts_payload():
 
 
 @pytest.mark.asyncio
+async def test_composio_connect_link_resolves_auth_config_like_openhuman_direct_mode():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        create_composio_connect_link,
+    )
+
+    captured: list[tuple[str, str, dict[str, object] | None]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/auth_configs"):
+            captured.append(("GET", str(request.url), None))
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {"id": "authcfg_disabled", "status": "DISABLED"},
+                        {"id": "authcfg_fb_dynamic", "status": "ENABLED"},
+                    ]
+                },
+            )
+        captured.append(
+            (
+                request.method,
+                str(request.url),
+                json.loads(request.content.decode("utf-8")),
+            )
+        )
+        return httpx.Response(
+            201,
+            json={"redirect_url": "https://composio.example.test/connect/session"},
+        )
+
+    config = WiiiConnectComposioAdapterConfig(
+        enabled=True,
+        api_key="secret-api-key",
+        api_key_present=True,
+        base_url="https://backend.composio.dev",
+        api_version="v3.1",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await create_composio_connect_link(
+            config=config,
+            provider_slug="facebook",
+            user_id="wiii_user_hash",
+            callback_url="https://wiii.example.test/callback",
+            http_client=client,
+        )
+
+    assert result.ready is True
+    assert captured[0][0] == "GET"
+    assert "/auth_configs" in captured[0][1]
+    assert "toolkit_slug=facebook" in captured[0][1]
+    assert captured[1][2] == {
+        "auth_config_id": "authcfg_fb_dynamic",
+        "user_id": "wiii_user_hash",
+        "callback_url": "https://wiii.example.test/callback",
+    }
+
+
+@pytest.mark.asyncio
 async def test_composio_connect_link_client_sanitizes_provider_errors():
     from app.engine.wiii_connect.composio_adapter import (
         WiiiConnectComposioAdapterConfig,
@@ -422,6 +486,46 @@ async def test_composio_connection_list_client_sanitizes_provider_errors():
     assert result.ready is False
     assert result.reason == "provider_response_rejected"
     assert "secret-api-key" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_composio_connection_list_resolves_auth_config_without_static_map():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        list_composio_connected_accounts,
+    )
+
+    captured: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(str(request.url))
+        if request.url.path.endswith("/auth_configs"):
+            return httpx.Response(
+                200,
+                json={"items": [{"id": "authcfg_fb_dynamic", "enabled": True}]},
+            )
+        return httpx.Response(
+            200,
+            json={"items": [{"id": "ca_active", "status": "ACTIVE"}]},
+        )
+
+    config = WiiiConnectComposioAdapterConfig(
+        enabled=True,
+        api_key="secret-api-key",
+        api_key_present=True,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await list_composio_connected_accounts(
+            config=config,
+            provider_slug="facebook",
+            user_id="wiii_user_hash",
+            http_client=client,
+        )
+
+    assert result.ready is True
+    assert result.connections[0].state == "connected"
+    assert "/auth_configs" in captured[0]
+    assert "auth_config_ids=authcfg_fb_dynamic" in captured[1]
 
 
 @pytest.mark.asyncio
