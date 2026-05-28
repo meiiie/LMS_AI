@@ -1297,6 +1297,7 @@ async def test_wiii_connect_execution_decision_api_audits_fail_closed(
     from app.engine.wiii_connect.adapter_v1 import (
         WiiiConnectConnectionRecordV1,
         WiiiConnectScopeGrant,
+        public_connection_ref,
     )
     from app.engine.wiii_connect.composio_adapter import (
         WiiiConnectComposioAdapterConfig,
@@ -1308,6 +1309,7 @@ async def test_wiii_connect_execution_decision_api_audits_fail_closed(
     class FakeStorage:
         audit_appends = 0
         fetches = 0
+        lists = 0
 
         def status(self, *, probe_database: bool = True):
             return WiiiConnectPersistentStorageStatus(
@@ -1317,6 +1319,27 @@ async def test_wiii_connect_execution_decision_api_audits_fail_closed(
                 audit_ledger_ready=True,
                 reason="ready",
             )
+
+        def list_connection_records(
+            self,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_slug: str,
+        ):
+            self.lists += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_slug == "facebook"
+            return [
+                WiiiConnectConnectionRecordV1(
+                    connection_id="ca_active",
+                    provider_slug="facebook",
+                    state="connected",
+                    scopes=WiiiConnectScopeGrant(read=True, write=True),
+                    reason="provider_connection_list",
+                ),
+            ]
 
         def get_connection_record(
             self,
@@ -1377,7 +1400,7 @@ async def test_wiii_connect_execution_decision_api_audits_fail_closed(
             "/wiii-connect/providers/facebook/execution-decision",
             json={
                 "surface": "desktop",
-                "connection_id": "ca_active",
+                "connection_ref": public_connection_ref("facebook", "ca_active"),
                 "action_slug": "FACEBOOK_GET_PAGE",
                 "path": "external_app_action",
                 "mutation": "read",
@@ -1394,6 +1417,7 @@ async def test_wiii_connect_execution_decision_api_audits_fail_closed(
     assert payload["reason"] == "provider_not_agent_ready"
     assert payload["connection_present"] is True
     assert payload["adapter"]["can_execute_actions"] is False
+    assert fake_storage.lists == 1
     assert fake_storage.fetches == 1
     assert fake_storage.audit_appends == 1
     assert "secret-api-key" not in serialized
@@ -1418,6 +1442,7 @@ async def test_wiii_connect_execution_decision_requires_selected_connection(
     class FakeStorage:
         audit_appends = 0
         fetches = 0
+        lists = 0
 
         def status(self, *, probe_database: bool = True):
             return WiiiConnectPersistentStorageStatus(
@@ -1476,6 +1501,7 @@ async def test_wiii_connect_execution_decision_requires_selected_connection(
             "/wiii-connect/providers/gmail/execution-decision",
             json={
                 "surface": "desktop",
+                "connection_id": "ca_active",
                 "action_slug": "GMAIL_FETCH_EMAILS",
                 "path": "external_app_action",
                 "mutation": "read",
@@ -1492,6 +1518,7 @@ async def test_wiii_connect_execution_decision_requires_selected_connection(
     assert "select_provider_connection" in payload["required_next"]
     assert fake_storage.fetches == 0
     assert fake_storage.audit_appends == 1
+    assert "ca_active" not in serialized
     assert "secret-api-key" not in serialized
     assert "authcfg_gmail" not in serialized
     assert "access_token" not in serialized
@@ -1506,6 +1533,7 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
     from app.engine.wiii_connect.adapter_v1 import (
         WiiiConnectConnectionRecordV1,
         WiiiConnectScopeGrant,
+        public_connection_ref,
     )
     from app.engine.wiii_connect.composio_adapter import (
         WiiiConnectComposioAdapterConfig,
@@ -1519,6 +1547,7 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
     class FakeStorage:
         audit_appends = 0
         fetches = 0
+        lists = 0
 
         def status(self, *, probe_database: bool = True):
             return WiiiConnectPersistentStorageStatus(
@@ -1528,6 +1557,27 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
                 audit_ledger_ready=True,
                 reason="ready",
             )
+
+        def list_connection_records(
+            self,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_slug: str,
+        ):
+            self.lists += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_slug == "gmail"
+            return [
+                WiiiConnectConnectionRecordV1(
+                    connection_id="ca_active",
+                    provider_slug="gmail",
+                    state="connected",
+                    scopes=WiiiConnectScopeGrant(read=True),
+                    reason="provider_connection_list",
+                ),
+            ]
 
         def get_connection_record(
             self,
@@ -1626,7 +1676,7 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
             "/wiii-connect/providers/gmail/execute",
             json={
                 "surface": "desktop",
-                "connection_id": "ca_active",
+                "connection_ref": public_connection_ref("gmail", "ca_active"),
                 "action_slug": "GMAIL_FETCH_EMAILS",
                 "path": "external_app_action",
                 "mutation": "read",
@@ -1646,6 +1696,7 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
     assert payload["schema"]["status"] == "ready"
     assert payload["execution"]["status"] == "succeeded"
     assert payload["execution"]["log_id_present"] is True
+    assert fake_storage.lists == 1
     assert fake_storage.fetches == 1
     assert fake_storage.audit_appends == 2
     assert "client-secret" not in serialized
@@ -1664,6 +1715,7 @@ async def test_wiii_connect_execute_blocks_missing_required_schema_arguments(
     from app.engine.wiii_connect.adapter_v1 import (
         WiiiConnectConnectionRecordV1,
         WiiiConnectScopeGrant,
+        public_connection_ref,
     )
     from app.engine.wiii_connect.composio_adapter import (
         WiiiConnectComposioAdapterConfig,
@@ -1676,6 +1728,7 @@ async def test_wiii_connect_execute_blocks_missing_required_schema_arguments(
     class FakeStorage:
         audit_appends = 0
         fetches = 0
+        lists = 0
 
         def status(self, *, probe_database: bool = True):
             return WiiiConnectPersistentStorageStatus(
@@ -1685,6 +1738,27 @@ async def test_wiii_connect_execute_blocks_missing_required_schema_arguments(
                 audit_ledger_ready=True,
                 reason="ready",
             )
+
+        def list_connection_records(
+            self,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_slug: str,
+        ):
+            self.lists += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_slug == "gmail"
+            return [
+                WiiiConnectConnectionRecordV1(
+                    connection_id="ca_active",
+                    provider_slug="gmail",
+                    state="connected",
+                    scopes=WiiiConnectScopeGrant(read=True),
+                    reason="provider_connection_list",
+                ),
+            ]
 
         def get_connection_record(
             self,
@@ -1775,7 +1849,7 @@ async def test_wiii_connect_execute_blocks_missing_required_schema_arguments(
             "/wiii-connect/providers/gmail/execute",
             json={
                 "surface": "desktop",
-                "connection_id": "ca_active",
+                "connection_ref": public_connection_ref("gmail", "ca_active"),
                 "action_slug": "GMAIL_FETCH_EMAILS",
                 "path": "external_app_action",
                 "mutation": "read",
@@ -1795,6 +1869,7 @@ async def test_wiii_connect_execute_blocks_missing_required_schema_arguments(
     assert payload["schema"]["status"] == "ready"
     assert payload["execution"] is None
     assert payload["missing_argument_keys"] == ["query", "redacted_sensitive_field"]
+    assert fake_storage.lists == 1
     assert fake_storage.fetches == 1
     assert fake_storage.audit_appends == 1
     assert "client-secret" not in serialized
@@ -1889,6 +1964,7 @@ async def test_wiii_connect_execute_requires_selected_connection_before_provider
             "/wiii-connect/providers/gmail/execute",
             json={
                 "surface": "desktop",
+                "connection_id": "ca_active",
                 "action_slug": "GMAIL_FETCH_EMAILS",
                 "path": "external_app_action",
                 "mutation": "read",
@@ -1910,6 +1986,7 @@ async def test_wiii_connect_execute_requires_selected_connection_before_provider
     assert "select_provider_connection" in payload["required_next"]
     assert fake_storage.fetches == 0
     assert fake_storage.audit_appends == 1
+    assert "ca_active" not in serialized
     assert "client-secret" not in serialized
     assert "access_token" not in serialized
     assert "secret-api-key" not in serialized

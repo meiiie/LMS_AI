@@ -200,7 +200,7 @@ async def get_wiii_connect_provider_activation_readiness(
         probe_database=probe_database,
     )
     storage_ready = _connection_storage_ready(storage)
-    selected_connection_ref = _safe_provider_connection_id(
+    selected_connection_ref = _safe_public_connection_ref(
         connection_ref or connection_id,
     )
     safe_connection_id = _resolve_provider_connection_id(
@@ -495,7 +495,7 @@ async def disconnect_wiii_connect_provider_connection(
     effective_entry = build_composio_connect_enabled_entry(entry, composio_config)
     adapter_capability = build_composio_provider_adapter_capability(composio_config)
     storage = _wiii_connect_storage_status_metadata(probe_database=True)
-    selected_connection_ref = _safe_provider_connection_id(connection_ref)
+    selected_connection_ref = _safe_public_connection_ref(connection_ref)
     safe_connection_id = _resolve_provider_connection_id(
         storage,
         current_user=current_user,
@@ -700,7 +700,7 @@ async def decide_wiii_connect_provider_execution(
     effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
     storage = _wiii_connect_storage_status_metadata(probe_database=True)
     storage_ready = _connection_storage_ready(storage)
-    selected_connection_ref = _safe_provider_connection_id(
+    selected_connection_ref = _safe_public_connection_ref(
         body.connection_ref or body.connection_id,
     )
     safe_connection_id = _resolve_provider_connection_id(
@@ -781,7 +781,7 @@ async def execute_wiii_connect_provider_action(
     effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
     storage = _wiii_connect_storage_status_metadata(probe_database=True)
     storage_ready = _connection_storage_ready(storage)
-    selected_connection_ref = _safe_provider_connection_id(
+    selected_connection_ref = _safe_public_connection_ref(
         body.connection_ref or body.connection_id,
     )
     safe_connection_id = _resolve_provider_connection_id(
@@ -1417,6 +1417,13 @@ def _safe_provider_connection_id(value: str | None) -> str:
     return text[:160]
 
 
+def _safe_public_connection_ref(value: str | None) -> str:
+    candidate = _safe_provider_connection_id(value)
+    if candidate.startswith("wcn_"):
+        return candidate
+    return ""
+
+
 def _resolve_provider_connection_id(
     storage_metadata: dict[str, Any],
     *,
@@ -1430,7 +1437,7 @@ def _resolve_provider_connection_id(
     if not candidate:
         return ""
     if not candidate.startswith("wcn_"):
-        return candidate
+        return ""
     if not _connection_storage_ready(storage_metadata):
         return candidate
 
