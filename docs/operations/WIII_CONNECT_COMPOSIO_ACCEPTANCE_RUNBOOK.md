@@ -4,7 +4,7 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-05-28
+Last updated: 2026-05-29
 
 Scope: operator acceptance for enabling Composio through Wiii Connect
 
@@ -22,6 +22,26 @@ maritime-ai-service/scripts/wiii_connect_composio_acceptance.py
 It calls only Wiii backend endpoints. It does not call Composio directly. Normal
 output redacts bearer tokens, authorization URLs, callback state, connection
 IDs, vault references, and provider credentials.
+
+## Current Acceptance Status
+
+Local live acceptance passed on 2026-05-29 under #780 using transient runtime
+credentials and a real connected Gmail account:
+
+- Gmail readiness and gateway acceptance passed 12/12 checks.
+- Gmail read-only execution passed 13/13 checks through the Wiii backend
+  execute route with sanitized output only.
+- Browser Wiii Connect acceptance showed Gmail connected, Agent-ready/read-only
+  readiness, gateway allowed, and no raw `wcn_*`, auth config, token, API key,
+  or client secret markers.
+- Facebook connection-only acceptance passed 8/8 checks after a backend-issued
+  Connect Link and OAuth callback; Facebook execution remains blocked because
+  Wiii has no curated Facebook action enabled.
+
+This proves the local Wiii Connect Composio path. Production or staging rollout
+still requires operators to set the same flags/secrets in that target
+environment and rerun this runbook against the deployed backend before enabling
+general users.
 
 ## Required Backend Configuration
 

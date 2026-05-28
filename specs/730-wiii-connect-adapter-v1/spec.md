@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/730-audit-wiii-connect-adapter-v1`
 **Created**: 2026-05-27
-**Status**: Contract implemented; live Composio acceptance pending #780
+**Status**: Contract implemented; local live Composio acceptance passed #780
 **Input**: User request to audit OpenHuman Connections/Composio and design Wiii
 Connect Adapter V1 before enabling real Composio execution.
 
@@ -117,15 +117,18 @@ paths and secret-like values are absent.
 
 ## Current Implementation Status
 
-As of 2026-05-28, Wiii has implemented the Adapter V1 contract, backend-owned
+As of 2026-05-29, Wiii has implemented the Adapter V1 contract, backend-owned
 provider registry, Composio adapter configuration boundary, provider-managed
 vault references, signed callback state, durable connection and audit storage,
 activation readiness projection, curated read-only action catalog, execution
 gateway, desktop Wiii Connect surface, and operator acceptance harness.
 
-The feature is not considered fully enabled for users until #780 proves the
-same flow with real Composio credentials, a Gmail auth config, a live connected
-account, sanitized harness output, and browser acceptance evidence.
+Local #780 acceptance has proven the flow with real Composio credentials, a
+Gmail auth config, a live connected account, sanitized harness output,
+read-only Gmail execution, browser Wiii Connect evidence, and Facebook
+connection-only OAuth. Production or staging rollout still requires operators
+to configure the same flags/secrets in that target environment and rerun the
+acceptance harness against the deployed backend before enabling users there.
 
 ## Assumptions
 
