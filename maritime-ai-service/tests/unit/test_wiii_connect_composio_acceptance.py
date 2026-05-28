@@ -299,6 +299,10 @@ def test_validate_evidence_path_rejects_secret_and_generated_locations() -> None
         acceptance.validate_evidence_path(".env.composio.json")
     with pytest.raises(acceptance.AcceptanceFailure, match="forbidden"):
         acceptance.validate_evidence_path("coverage/wiii-connect.json")
+    with pytest.raises(acceptance.AcceptanceFailure, match="forbidden"):
+        acceptance.validate_evidence_path("logs/wiii-connect/evidence.json")
+    with pytest.raises(acceptance.AcceptanceFailure, match="forbidden"):
+        acceptance.validate_evidence_path("screenshots/wiii-connect/evidence.json")
     with pytest.raises(acceptance.AcceptanceFailure, match="must end with .json"):
         acceptance.validate_evidence_path("artifacts/wiii-connect.txt")
 

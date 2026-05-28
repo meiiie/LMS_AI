@@ -1001,6 +1001,8 @@ def validate_evidence_path(raw_path: str) -> Path:
         "dist",
         "dist-embed",
         "coverage",
+        "logs",
+        "screenshots",
         "__pycache__",
     }
     if filename.startswith(".env") or any(part in blocked_parts for part in parts):
