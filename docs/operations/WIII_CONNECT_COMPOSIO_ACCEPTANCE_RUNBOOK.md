@@ -35,6 +35,11 @@ enable_wiii_connect_composio_readonly_execute=true
 composio_readonly_action_allowlist={"gmail":["GMAIL_FETCH_EMAILS"]}
 ```
 
+The committed `.env.example` files use uppercase environment variable names for
+operator convention. The backend settings loader is case-insensitive, so those
+uppercase names map to the lowercase settings shown above. Never place real
+Composio API keys or auth config IDs in committed example files.
+
 The database must also have migration `049_create_wiii_connect_storage.py`
 applied so these tables exist:
 
