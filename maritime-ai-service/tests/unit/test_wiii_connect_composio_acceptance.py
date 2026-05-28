@@ -854,7 +854,9 @@ def test_connect_phase_run_issues_connect_link(monkeypatch) -> None:
     monkeypatch.setattr(
         harness,
         "check_curated_actions",
-        lambda: calls.append("actions") or "ok",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("connect-only acceptance should not require actions")
+        ),
     )
     monkeypatch.setattr(
         harness,
@@ -864,7 +866,9 @@ def test_connect_phase_run_issues_connect_link(monkeypatch) -> None:
     monkeypatch.setattr(
         harness,
         "check_gateway_blocks_missing_connection",
-        lambda: calls.append("gateway_block") or "ok",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("connect-only acceptance should not require execution policy")
+        ),
     )
     monkeypatch.setattr(
         harness,
@@ -880,6 +884,112 @@ def test_connect_phase_run_issues_connect_link(monkeypatch) -> None:
     assert harness.run() == 0
 
     assert "connect_link" in calls
+    assert calls == [
+        "health",
+        "auth",
+        "registry",
+        "adapter",
+        "storage",
+        "audit",
+        "connect_ready",
+        "connect_link",
+        "connections",
+    ]
+
+
+def test_facebook_connect_only_run_does_not_require_curated_actions(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="facebook",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+            readiness_report_only=False,
+            skip_connect_link=False,
+            expect_connected=False,
+            require_execution_ready=False,
+            execute_readonly=False,
+            disconnect=False,
+        )
+    )
+
+    monkeypatch.setattr(
+        harness,
+        "check_backend_health",
+        lambda: calls.append("health") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "authenticate",
+        lambda: calls.append("auth") or setattr(harness, "token", "token") or "auth",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_provider_registry",
+        lambda: calls.append("registry") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_adapter_readiness",
+        lambda: calls.append("adapter") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_storage_readiness",
+        lambda: calls.append("storage") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_audit_readiness",
+        lambda: calls.append("audit") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_curated_actions",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("facebook connect-only should not require an action")
+        ),
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_gateway_blocks_missing_connection",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("facebook connect-only should not check execution gateway")
+        ),
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_activation_ready_to_connect",
+        lambda: calls.append("connect_ready") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_connect_link",
+        lambda: calls.append("connect_link") or "ok",
+    )
+    monkeypatch.setattr(
+        harness,
+        "check_connections",
+        lambda: calls.append("connections") or "ok",
+    )
+
+    assert harness.run() == 0
+
+    assert calls == [
+        "health",
+        "auth",
+        "registry",
+        "adapter",
+        "storage",
+        "audit",
+        "connect_ready",
+        "connect_link",
+        "connections",
+    ]
 
 
 def test_post_oauth_run_does_not_issue_new_connect_link(monkeypatch) -> None:
@@ -975,8 +1085,8 @@ def test_post_oauth_run_does_not_issue_new_connect_link(monkeypatch) -> None:
         "adapter",
         "storage",
         "audit",
-        "actions",
         "connect_ready",
+        "actions",
         "gateway_block",
         "connections",
         "execute_ready",

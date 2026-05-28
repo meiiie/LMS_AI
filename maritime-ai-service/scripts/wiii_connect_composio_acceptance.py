@@ -475,19 +475,20 @@ class WiiiConnectComposioAcceptance:
                 self.run_check("adapter readiness", self.check_adapter_readiness)
                 self.run_check("storage readiness", self.check_storage_readiness)
                 self.run_check("audit readiness", self.check_audit_readiness)
-                self.run_check("curated actions", self.check_curated_actions)
                 self.run_check(
                     "activation readiness connect",
                     self.check_activation_ready_to_connect,
                 )
-                self.run_check(
-                    "gateway fail-closed control",
-                    self.check_gateway_blocks_missing_connection,
-                )
+                if self.should_check_execution_policy():
+                    self.run_check("curated actions", self.check_curated_actions)
+                    self.run_check(
+                        "gateway fail-closed control",
+                        self.check_gateway_blocks_missing_connection,
+                    )
                 if self.should_issue_connect_link():
                     self.run_check("connect link preflight", self.check_connect_link)
                 self.run_check("connection listing", self.check_connections)
-                if self.args.require_execution_ready or self.args.execute_readonly:
+                if self.should_check_execution_policy():
                     self.run_check(
                         "activation readiness execution",
                         self.check_activation_ready_to_execute,
@@ -536,6 +537,11 @@ class WiiiConnectComposioAcceptance:
             or self.args.execute_readonly
             or self.args.disconnect
         )
+
+    def should_check_execution_policy(self) -> bool:
+        """Run action/gateway checks only for read-only execution acceptance."""
+
+        return bool(self.args.require_execution_ready or self.args.execute_readonly)
 
     def evidence_payload(self) -> dict[str, Any]:
         parsed_backend = urllib.parse.urlsplit(self.args.backend_url)

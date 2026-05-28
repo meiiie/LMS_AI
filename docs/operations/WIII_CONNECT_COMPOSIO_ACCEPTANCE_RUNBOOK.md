@@ -50,6 +50,18 @@ wiii_connect_audit_ledger
 
 Do not enable write/apply/admin actions in this phase.
 
+For Facebook connection-only acceptance, include the Facebook auth config in the
+same map instead of enabling a Facebook action:
+
+```text
+composio_auth_config_map={"facebook":"<Composio Facebook auth_config_id>"}
+```
+
+Facebook currently has no curated Wiii action catalog entry. Use it to prove
+Connect Link, OAuth callback, connection listing, and disconnect only; do not
+use it to execute Facebook actions until a reviewed action, scope policy,
+preview/approval rule, and gateway test exist.
+
 ## Acceptance Sequence
 
 Run from `maritime-ai-service/`.
@@ -107,6 +119,12 @@ For local dev-login:
 python scripts/wiii_connect_composio_acceptance.py --backend-url http://localhost:8080 --auth-mode dev-login --provider gmail --print-connect-url
 ```
 
+For Facebook connection-only local dev-login:
+
+```powershell
+python scripts/wiii_connect_composio_acceptance.py --backend-url http://localhost:8080 --auth-mode dev-login --provider facebook --print-connect-url
+```
+
 For staging or production with a JWT:
 
 ```powershell
@@ -119,6 +137,12 @@ then rerun without printing the link:
 
 ```powershell
 python scripts/wiii_connect_composio_acceptance.py --backend-url http://localhost:8080 --auth-mode dev-login --provider gmail --expect-connected --require-execution-ready
+```
+
+For Facebook connection-only, rerun without execution readiness:
+
+```powershell
+python scripts/wiii_connect_composio_acceptance.py --backend-url http://localhost:8080 --auth-mode dev-login --provider facebook --expect-connected
 ```
 
 Post-OAuth acceptance does not issue a new Connect Link when
@@ -188,6 +212,12 @@ Composio is ready to enable only when all of these are true:
   missing required argument keys;
 - optional execution succeeds through `POST /api/v1/wiii-connect/providers/gmail/execute`;
 - optional disconnect disables local Wiii state and completes provider cleanup.
+
+For provider connection-only acceptance, such as Facebook before action curation,
+the execution-specific criteria above do not apply. The pass criteria are:
+adapter, storage, audit, `ready_to_connect=true`, backend-issued Connect Link,
+active connected-account listing, opaque `connection_ref`, private-account
+provider polling, and optional backend-owned disconnect.
 
 ## Failure Interpretation
 
