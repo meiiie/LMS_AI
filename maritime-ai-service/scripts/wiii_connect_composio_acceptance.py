@@ -30,6 +30,7 @@ DEFAULT_DEMO_EMAIL = "dev@localhost"
 DEFAULT_DEMO_NAME = "Dev User"
 DEFAULT_DEMO_ROLE = "admin"
 DEFAULT_EXPECTED_PLATFORM_ROLE = "platform_admin"
+SCOPE_POLICY_VERSION = "wiii_connect_scope_policy.v1"
 TOKEN_ENV = "WIII_ACCEPTANCE_BEARER_TOKEN"
 TARGET_ENV = "WIII_ACCEPTANCE_TARGET_ENV"
 COMMIT_SHA_ENV = "WIII_ACCEPTANCE_COMMIT_SHA"
@@ -306,6 +307,46 @@ def assert_activation_ready(
         f"{flag}={payload.get(flag)!r} status={payload.get('status')!r} "
         f"blockers={activation_blocker_summary(payload)}"
     )
+
+
+def assert_scope_policy_allowed(
+    payload: dict[str, Any],
+    *,
+    label: str,
+) -> str:
+    """Require Wiii-owned scope policy evidence before provider execution."""
+
+    gateway = payload.get("execution_gateway")
+    if gateway is None:
+        gateway = payload
+    if not isinstance(gateway, dict):
+        raise AcceptanceFailure(f"{label} omitted execution gateway evidence")
+    scope_policy = gateway.get("scope_policy")
+    if not isinstance(scope_policy, dict):
+        raise AcceptanceFailure(f"{label} omitted scope_policy evidence")
+    version = str(scope_policy.get("version") or "")
+    if version != SCOPE_POLICY_VERSION:
+        raise AcceptanceFailure(
+            f"{label} scope_policy version mismatch: version={version!r}"
+        )
+    if scope_policy.get("status") != "allowed" or scope_policy.get("reason") != "allowed":
+        raise AcceptanceFailure(
+            f"{label} scope policy not allowed: "
+            f"status={scope_policy.get('status')!r} reason={scope_policy.get('reason')!r}"
+        )
+    required_scopes = scope_policy.get("required_scopes")
+    allowed_scopes = scope_policy.get("allowed_scopes")
+    if not isinstance(required_scopes, list) or "read" not in required_scopes:
+        raise AcceptanceFailure(
+            f"{label} scope_policy missing required read scope: "
+            f"required_scopes={required_scopes!r}"
+        )
+    if not isinstance(allowed_scopes, list) or "read" not in allowed_scopes:
+        raise AcceptanceFailure(
+            f"{label} scope_policy does not allow read scope: "
+            f"allowed_scopes={allowed_scopes!r}"
+        )
+    return "scope_policy=allowed required_scopes=read"
 
 
 def normalize_provider(value: str) -> str:
@@ -769,7 +810,14 @@ class WiiiConnectComposioAcceptance:
             flag="ready_to_execute_readonly",
             label="read-only execution-ready",
         )
-        return f"ready_to_execute_readonly=true connection={opaque_ref(connection_ref)}"
+        scope_detail = assert_scope_policy_allowed(
+            payload,
+            label="activation readiness",
+        )
+        return (
+            "ready_to_execute_readonly=true "
+            f"{scope_detail} connection={opaque_ref(connection_ref)}"
+        )
 
     def check_activation_readiness_report(self) -> str:
         connection_ref = (self.args.connection_ref or "").strip()
@@ -856,7 +904,11 @@ class WiiiConnectComposioAcceptance:
             raise AcceptanceFailure(
                 f"Gateway did not allow read-only action: reason={payload.get('reason')!r}"
             )
-        return f"allowed connection={opaque_ref(connection_ref)}"
+        scope_detail = assert_scope_policy_allowed(
+            payload,
+            label="execution gateway",
+        )
+        return f"allowed {scope_detail} connection={opaque_ref(connection_ref)}"
 
     def check_readonly_execution(self) -> str:
         connection_ref = self.connection_ref_for_action()

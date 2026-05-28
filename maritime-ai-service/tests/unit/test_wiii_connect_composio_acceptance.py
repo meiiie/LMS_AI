@@ -23,6 +23,17 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(acceptance)
 
 
+def allowed_read_scope_policy() -> dict[str, object]:
+    return {
+        "version": acceptance.SCOPE_POLICY_VERSION,
+        "status": "allowed",
+        "reason": "allowed",
+        "provider_slug": "gmail",
+        "required_scopes": ["read"],
+        "allowed_scopes": ["read"],
+    }
+
+
 def test_join_url_handles_slashes() -> None:
     assert acceptance.join_url("http://localhost:8080/", "/api/v1/health") == (
         "http://localhost:8080/api/v1/health"
@@ -133,6 +144,49 @@ def test_activation_readiness_helpers_report_blockers() -> None:
     )
 
 
+def test_scope_policy_helper_requires_allowed_read_policy() -> None:
+    assert acceptance.assert_scope_policy_allowed(
+        {
+            "execution_gateway": {
+                "status": "allowed",
+                "scope_policy": allowed_read_scope_policy(),
+            }
+        },
+        label="activation readiness",
+    ) == "scope_policy=allowed required_scopes=read"
+
+    with pytest.raises(acceptance.AcceptanceFailure, match="scope_policy evidence"):
+        acceptance.assert_scope_policy_allowed(
+            {"execution_gateway": {"status": "allowed"}},
+            label="activation readiness",
+        )
+
+    with pytest.raises(acceptance.AcceptanceFailure, match="scope policy not allowed"):
+        acceptance.assert_scope_policy_allowed(
+            {
+                "status": "blocked",
+                "scope_policy": {
+                    **allowed_read_scope_policy(),
+                    "status": "blocked",
+                    "reason": "scope_policy_denied",
+                },
+            },
+            label="execution gateway",
+        )
+
+    with pytest.raises(acceptance.AcceptanceFailure, match="missing required read"):
+        acceptance.assert_scope_policy_allowed(
+            {
+                "status": "allowed",
+                "scope_policy": {
+                    **allowed_read_scope_policy(),
+                    "required_scopes": ["write"],
+                },
+            },
+            label="execution gateway",
+        )
+
+
 def test_activation_readiness_report_lines_are_redacted() -> None:
     payload = {
         "provider_slug": "gmail",
@@ -218,6 +272,73 @@ def test_activation_readiness_payload_uses_backend_endpoint(monkeypatch) -> None
     assert "connection_ref=wcn_live" in url
 
 
+def test_activation_ready_to_execute_requires_scope_policy_proof(
+    monkeypatch,
+) -> None:
+    class FakeResponse:
+        def json(self):
+            return {
+                "status": "ready",
+                "ready_to_execute_readonly": True,
+                "execution_gateway": {
+                    "status": "allowed",
+                    "scope_policy": allowed_read_scope_policy(),
+                },
+            }
+
+    def fake_request_bytes(method, url, *, headers=None, payload=None, timeout=15.0):
+        return FakeResponse()
+
+    monkeypatch.setattr(acceptance, "request_bytes", fake_request_bytes)
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+            connection_ref="wcn_live",
+        )
+    )
+    harness.token = "token"
+
+    detail = harness.check_activation_ready_to_execute()
+
+    assert "ready_to_execute_readonly=true" in detail
+    assert "scope_policy=allowed" in detail
+
+
+def test_activation_ready_to_execute_rejects_missing_scope_policy(
+    monkeypatch,
+) -> None:
+    class FakeResponse:
+        def json(self):
+            return {
+                "status": "ready",
+                "ready_to_execute_readonly": True,
+                "execution_gateway": {"status": "allowed"},
+            }
+
+    def fake_request_bytes(method, url, *, headers=None, payload=None, timeout=15.0):
+        return FakeResponse()
+
+    monkeypatch.setattr(acceptance, "request_bytes", fake_request_bytes)
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+            connection_ref="wcn_live",
+        )
+    )
+    harness.token = "token"
+
+    with pytest.raises(acceptance.AcceptanceFailure, match="scope_policy evidence"):
+        harness.check_activation_ready_to_execute()
+
+
 def test_gateway_fail_closed_check_requires_connection_selection_reason(
     monkeypatch,
 ) -> None:
@@ -295,6 +416,89 @@ def test_gateway_fail_closed_check_rejects_generic_block_reason(monkeypatch) -> 
         match="explicit connection selection",
     ):
         harness.check_gateway_blocks_missing_connection()
+
+
+def test_execution_gateway_allowed_requires_scope_policy_proof(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def json(self):
+            return {
+                "status": "allowed",
+                "reason": "allowed",
+                "scope_policy": allowed_read_scope_policy(),
+            }
+
+    def fake_request_bytes(method, url, *, headers=None, payload=None, timeout=15.0):
+        captured["method"] = method
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["payload"] = payload
+        return FakeResponse()
+
+    monkeypatch.setattr(acceptance, "request_bytes", fake_request_bytes)
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+            connection_ref="wcn_live",
+            argument_keys="",
+            arguments_json='{"query": "from:me"}',
+        )
+    )
+    harness.token = "token"
+
+    detail = harness.check_execution_gateway_allowed()
+
+    assert "allowed scope_policy=allowed" in detail
+    assert captured["method"] == "POST"
+    assert captured["headers"] == {"Authorization": "Bearer token"}
+    assert captured["payload"] == {
+        "surface": "acceptance_harness",
+        "connection_ref": "wcn_live",
+        "action_slug": "GMAIL_FETCH_EMAILS",
+        "path": "external_app_action",
+        "mutation": "read",
+        "argument_keys": ["query"],
+    }
+
+
+def test_execution_gateway_allowed_rejects_blocked_scope_policy(monkeypatch) -> None:
+    class FakeResponse:
+        def json(self):
+            return {
+                "status": "allowed",
+                "reason": "allowed",
+                "scope_policy": {
+                    **allowed_read_scope_policy(),
+                    "status": "blocked",
+                    "reason": "scope_policy_denied",
+                },
+            }
+
+    def fake_request_bytes(method, url, *, headers=None, payload=None, timeout=15.0):
+        return FakeResponse()
+
+    monkeypatch.setattr(acceptance, "request_bytes", fake_request_bytes)
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+            connection_ref="wcn_live",
+            argument_keys="",
+            arguments_json="{}",
+        )
+    )
+    harness.token = "token"
+
+    with pytest.raises(acceptance.AcceptanceFailure, match="scope policy not allowed"):
+        harness.check_execution_gateway_allowed()
 
 
 def test_validate_evidence_path_rejects_secret_and_generated_locations() -> None:
