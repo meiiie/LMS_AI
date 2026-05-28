@@ -20,6 +20,7 @@ from app.engine.wiii_connect import (
     action_catalog_public_metadata,
     append_wiii_connect_callback_state,
     audit_ledger_status_public_metadata,
+    build_activation_readiness_metadata,
     build_audit_ledger_record,
     build_composio_adapter_config,
     build_composio_connect_enabled_entry,
@@ -37,6 +38,7 @@ from app.engine.wiii_connect import (
     get_wiii_connect_provider_entry,
     get_wiii_connect_persistent_storage,
     execute_composio_tool,
+    get_wiii_connect_curated_action,
     list_composio_connected_accounts,
     normalize_connection_state,
     provider_adapter_status_public_metadata,
@@ -160,6 +162,95 @@ async def get_wiii_connect_provider_connection_status(slug: str) -> dict[str, ob
     if status is None:
         raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
     return status.to_public_metadata()
+
+
+@router.get("/providers/{slug}/activation-readiness")
+async def get_wiii_connect_provider_activation_readiness(
+    slug: str,
+    connection_id: str | None = None,
+    action_slug: str = "GMAIL_FETCH_EMAILS",
+    probe_database: bool = True,
+    current_user: AuthenticatedUser = Depends(require_auth),
+) -> dict[str, object]:
+    """Return one privacy-safe readiness projection for enabling a provider.
+
+    This endpoint performs no provider network calls and does not issue Connect
+    Links. It only aggregates local Wiii Connect policy, storage, action, and
+    connection readiness for the authenticated org/user boundary.
+    """
+
+    entry = get_wiii_connect_provider_entry(slug)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
+
+    action = _safe_action_slug(action_slug)
+    composio_config = build_composio_adapter_config()
+    connect_entry = build_composio_connect_enabled_entry(entry, composio_config)
+    execution_entry = build_composio_execution_enabled_entry(entry, composio_config)
+    adapter_capability = build_composio_provider_adapter_capability(composio_config)
+    vault_capability = build_composio_provider_managed_vault_capability(
+        composio_config,
+    )
+    storage = _wiii_connect_storage_status_metadata(
+        probe_database=probe_database,
+    )
+    storage_ready = _connection_storage_ready(storage)
+    connection = (
+        get_wiii_connect_persistent_storage().get_connection_record(
+            organization_id=_wiii_connect_owner_organization_id(current_user),
+            user_id=current_user.user_id,
+            provider_slug=execution_entry.slug,
+            connection_id=_safe_provider_connection_id(connection_id),
+        )
+        if storage_ready
+        else None
+    )
+    curated_action = get_wiii_connect_curated_action(execution_entry.slug, action)
+    runtime_enabled_actions = (
+        composio_config.readonly_action_slugs_for_provider(execution_entry.slug)
+        if composio_config.readonly_execute_enabled
+        else ()
+    )
+    action_runtime_enabled = bool(
+        curated_action is not None and curated_action.slug in runtime_enabled_actions
+    )
+    request = WiiiConnectExecutionRequest(
+        provider_slug=execution_entry.slug,
+        action_slug=action,
+        path=curated_action.path
+        if curated_action is not None
+        else "external_app_action",
+        mutation=curated_action.mutation if curated_action is not None else "read",
+        preview_evidence_required=bool(
+            curated_action.requires_preview if curated_action is not None else False
+        ),
+        argument_keys=tuple(
+            curated_action.argument_keys if curated_action is not None else ()
+        ),
+    )
+    gateway = decide_execution_gateway(
+        execution_entry,
+        connection,
+        request,
+        adapter_capability=adapter_capability,
+        audit_ledger_metadata={
+            "persistent": bool(
+                storage.get("persistent") and storage.get("audit_ledger_ready")
+            ),
+        },
+    )
+    return build_activation_readiness_metadata(
+        provider_slug=connect_entry.slug,
+        connect_entry=connect_entry,
+        execution_entry=execution_entry,
+        adapter_capability=adapter_capability,
+        vault_capability=vault_capability,
+        storage_metadata=storage,
+        action=curated_action,
+        action_runtime_enabled=action_runtime_enabled,
+        connection=connection,
+        execution_gateway=gateway,
+    )
 
 
 @router.post("/providers/{slug}/sessions")

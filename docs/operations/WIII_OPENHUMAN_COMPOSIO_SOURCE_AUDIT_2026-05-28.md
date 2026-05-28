@@ -199,6 +199,15 @@ missing-connection denial, backend-owned Connect Link creation, sanitized
 connection listing, optional read-only execution, and optional backend-owned
 disconnect without calling Composio directly from the harness.
 
+Wiii also exposes a single authenticated activation-readiness projection for a
+provider. It aggregates registry, Composio adapter, provider-managed vault,
+durable storage, audit ledger, curated read-only action, stored connection, and
+execution gateway state without contacting Composio or issuing a Connect Link.
+This is the Wiii-side equivalent of the OpenHuman connection discipline: the UI
+and operators can see whether a provider is ready to connect and separately
+whether it is ready for read-only agent execution, while raw connection IDs,
+vault references, auth configs, API keys, and provider payloads remain hidden.
+
 Remaining work before enabling Composio for real users: configure production
 Composio project credentials and auth config IDs, connect a live Gmail account,
 run the acceptance harness plus browser acceptance through Wiii's
