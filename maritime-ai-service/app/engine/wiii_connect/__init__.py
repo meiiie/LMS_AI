@@ -39,7 +39,9 @@ from .callback_state import (
 )
 from .composio_adapter import (
     WIII_CONNECT_COMPOSIO_ADAPTER_VERSION,
+    WIII_CONNECT_COMPOSIO_CONNECTION_LIST_VERSION,
     WiiiConnectComposioAdapterConfig,
+    WiiiConnectComposioConnectionListResult,
     WiiiConnectComposioConnectLinkResult,
     build_composio_adapter_config,
     build_composio_connect_enabled_entry,
@@ -47,6 +49,7 @@ from .composio_adapter import (
     build_composio_provider_managed_vault_capability,
     build_composio_provider_adapter_capability,
     create_composio_connect_link,
+    list_composio_connected_accounts,
     parse_composio_auth_config_map,
 )
 from .connection_sessions import (
@@ -109,6 +112,7 @@ __all__ = [
     "WIII_CONNECT_CALLBACK_STATE_PARAM",
     "WIII_CONNECT_CALLBACK_STATE_VERSION",
     "WIII_CONNECT_COMPOSIO_ADAPTER_VERSION",
+    "WIII_CONNECT_COMPOSIO_CONNECTION_LIST_VERSION",
     "WIII_CONNECT_PROVIDER_ADAPTER_VERSION",
     "WIII_CONNECT_PERSISTENT_STORAGE_VERSION",
     "WIII_CONNECT_SESSION_CONTRACT_VERSION",
@@ -123,6 +127,7 @@ __all__ = [
     "WiiiConnectCallbackRequest",
     "WiiiConnectCallbackStateClaims",
     "WiiiConnectComposioAdapterConfig",
+    "WiiiConnectComposioConnectionListResult",
     "WiiiConnectComposioConnectLinkResult",
     "WiiiConnectConnectionSessionAuditEvent",
     "WiiiConnectConnectionRecordV1",
@@ -170,6 +175,7 @@ __all__ = [
     "get_wiii_connect_persistent_storage",
     "is_connection_baseline_ready",
     "list_wiii_connect_provider_registry",
+    "list_composio_connected_accounts",
     "normalize_connection_state",
     "parse_composio_auth_config_map",
     "provider_adapter_status_public_metadata",

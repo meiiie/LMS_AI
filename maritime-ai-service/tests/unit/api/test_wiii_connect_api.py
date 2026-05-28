@@ -561,6 +561,121 @@ async def test_wiii_connect_authorization_url_api_sanitizes_composio_failure(
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_connections_api_requires_auth(app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/wiii-connect/providers/facebook/connections")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_connections_api_lists_and_persists_safely(
+    authenticated_app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect.adapter_v1 import WiiiConnectConnectionRecordV1
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        WiiiConnectComposioConnectionListResult,
+    )
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+
+    class FakeStorage:
+        upserts = 0
+
+        def status(self, *, probe_database: bool = True):
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                reason="ready",
+            )
+
+        def upsert_connection_record(
+            self,
+            connection,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_kind: str,
+        ):
+            self.upserts += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_kind == "composio"
+            assert connection.connection_id == "ca_active"
+            return True
+
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            auth_config_by_provider={"facebook": "authcfg_fb"},
+        ),
+    )
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async def fake_list_connections(**kwargs):
+        assert kwargs["provider_slug"] == "facebook"
+        assert kwargs["user_id"].startswith("wiii_")
+        return WiiiConnectComposioConnectionListResult(
+            ready=True,
+            reason="ready",
+            connections=(
+                WiiiConnectConnectionRecordV1(
+                    connection_id="ca_active",
+                    provider_slug="facebook",
+                    state="connected",
+                    reason="provider_connection_list",
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "list_composio_connected_accounts",
+        fake_list_connections,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/wiii-connect/providers/facebook/connections",
+            params={"probe_database": "true"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["status"] == "ready"
+    assert payload["reason"] == "ready"
+    assert payload["connection_count"] == 1
+    assert payload["connections"][0]["connection_id"] == "ca_active"
+    assert payload["connections"][0]["state"] == "connected"
+    assert fake_storage.upserts == 1
+    assert "secret-api-key" not in serialized
+    assert "authcfg_fb" not in serialized
+    assert "access_token" not in serialized
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_authorization_url_api_404_for_unknown_provider(app):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
