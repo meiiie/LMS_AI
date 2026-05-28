@@ -13,6 +13,8 @@ from typing import Any
 
 from .adapter_v1 import (
     WIII_CONNECT_ADAPTER_VERSION,
+    ExecutionDenyReason,
+    ScopeName,
     WiiiConnectConnectionRecordV1,
     WiiiConnectExecutionDecision,
     WiiiConnectExecutionRequest,
@@ -23,6 +25,12 @@ from .provider_adapters import (
     WIII_CONNECT_PROVIDER_ADAPTER_VERSION,
     WiiiConnectProviderAdapterCapability,
     default_provider_adapter_capability,
+)
+from .scope_policy import (
+    WIII_CONNECT_SCOPE_POLICY_VERSION,
+    WiiiConnectScopePolicy,
+    WiiiConnectScopePolicyDecision,
+    decide_scope_policy,
 )
 
 
@@ -37,6 +45,7 @@ class WiiiConnectExecutionGatewayDecision:
     adapter: WiiiConnectProviderAdapterCapability
     connection_present: bool = False
     audit_persistent: bool = False
+    scope_policy: WiiiConnectScopePolicyDecision | None = None
     required_next: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -61,6 +70,12 @@ class WiiiConnectExecutionGatewayDecision:
             "reason": self.reason,
             "connection_present": self.connection_present,
             "audit_persistent": self.audit_persistent,
+            "scope_policy_version": WIII_CONNECT_SCOPE_POLICY_VERSION,
+            "scope_policy": (
+                self.scope_policy.to_public_metadata()
+                if self.scope_policy is not None
+                else None
+            ),
             "decision": self.decision.to_metadata(),
             "adapter": self.adapter.to_public_metadata(),
             "required_next": list(self.required_next),
@@ -77,6 +92,7 @@ def decide_execution_gateway(
     audit_ledger_metadata: dict[str, Any] | None = None,
     require_persistent_audit: bool = True,
     connection_selection_required: bool = False,
+    scope_policy: WiiiConnectScopePolicy | None = None,
 ) -> WiiiConnectExecutionGatewayDecision:
     """Return the fail-closed decision before a provider action may run."""
 
@@ -84,6 +100,11 @@ def decide_execution_gateway(
         entry.provider_kind,
     )
     audit_persistent = bool((audit_ledger_metadata or {}).get("persistent"))
+    scope_policy_decision = (
+        decide_scope_policy(scope_policy, request)
+        if scope_policy is not None
+        else None
+    )
 
     base = (
         _gateway_deny(entry, request, "connection_selection_required")
@@ -96,11 +117,19 @@ def decide_execution_gateway(
             adapter=adapter,
             connection_present=connection is not None,
             audit_persistent=audit_persistent,
+            scope_policy=scope_policy_decision,
             required_next=_required_next_for_reason(base.reason),
-            metadata={"request": request.to_audit_metadata()},
+            metadata=_metadata_for_request(request, scope_policy_decision),
         )
 
-    if adapter.provider_kind != entry.provider_kind:
+    if scope_policy_decision is not None and not scope_policy_decision.allowed:
+        decision = _gateway_deny(
+            entry,
+            request,
+            "scope_policy_denied",
+            required_scopes=scope_policy_decision.required_scopes,
+        )
+    elif adapter.provider_kind != entry.provider_kind:
         decision = _gateway_deny(entry, request, "provider_adapter_mismatch")
     elif not adapter.bound:
         decision = _gateway_deny(entry, request, "provider_adapter_not_bound")
@@ -118,22 +147,26 @@ def decide_execution_gateway(
         adapter=adapter,
         connection_present=connection is not None,
         audit_persistent=audit_persistent,
+        scope_policy=scope_policy_decision,
         required_next=_required_next_for_reason(decision.reason),
-        metadata={"request": request.to_audit_metadata()},
+        metadata=_metadata_for_request(request, scope_policy_decision),
     )
 
 
 def _gateway_deny(
     entry: WiiiConnectProviderRegistryEntry,
     request: WiiiConnectExecutionRequest,
-    reason: str,
+    reason: ExecutionDenyReason,
+    *,
+    required_scopes: tuple[ScopeName, ...] = (),
 ) -> WiiiConnectExecutionDecision:
     return WiiiConnectExecutionDecision(
         outcome="denied",
-        reason=reason,  # type: ignore[arg-type]
+        reason=reason,
         provider_slug=entry.slug,
         action_slug=request.action_slug,
         path=request.path,
+        required_scopes=required_scopes,
         audit_tags=(
             f"provider:{entry.provider_kind}",
             f"auth:{entry.auth_mode}",
@@ -163,10 +196,21 @@ def _required_next_for_reason(reason: str) -> tuple[str, ...]:
         "path_not_allowed": ("select_allowed_product_path",),
         "action_not_allowed": ("curate_action_for_provider",),
         "missing_scope": ("grant_required_scope",),
+        "scope_policy_denied": ("grant_required_scope_policy",),
         "missing_preview_evidence": ("create_preview_evidence",),
         "missing_approval_token": ("collect_approval_token",),
     }
     return mapping.get(reason, ("inspect_execution_policy",))
+
+
+def _metadata_for_request(
+    request: WiiiConnectExecutionRequest,
+    scope_policy: WiiiConnectScopePolicyDecision | None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"request": request.to_audit_metadata()}
+    if scope_policy is not None:
+        metadata["scope_policy"] = scope_policy.to_public_metadata()
+    return metadata
 
 
 _SENSITIVE_KEY_MARKERS = ("token", "secret", "password", "credential", "key", "code")

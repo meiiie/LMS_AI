@@ -162,6 +162,9 @@ Composio is ready to enable only when all of these are true:
 - execution gateway blocks a missing-connection execution request;
 - execution gateway blocks execution when no explicit opaque `connection_ref` is
   selected;
+- execution gateway requires Wiii-owned scope policy in addition to provider
+  connection scopes, and reports `scope_policy_denied` when policy has not
+  granted the selected action's required scope;
 - the acceptance harness treats any missing-selection deny reason other than
   `connection_selection_required` as a failed policy proof;
 - Connect Link is issued by Wiii backend;
@@ -189,6 +192,7 @@ Common blocked reasons:
 | `missing_required_arguments` | Live schema verification succeeded, but the request is missing required argument keys. |
 | `action_not_allowed` | The action is not in Wiii's curated catalog for that provider. |
 | `missing_scope` | The stored connection lacks the required scope grant. |
+| `scope_policy_denied` | Wiii's provider/action scope policy has not granted the required scope even though the connection may be present. |
 | `tool_schema_not_found` | Composio's live schema does not match the curated action/provider. |
 
 Treat provider errors as acceptance failures until the sanitized reason is

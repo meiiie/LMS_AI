@@ -49,6 +49,7 @@ from app.engine.wiii_connect import (
     provider_connection_status,
     provider_registry_public_metadata,
     scope_grant_from_mapping,
+    scope_policy_for_provider_entry,
     verify_composio_tool_schema,
     verify_wiii_connect_callback_state,
     vault_status_public_metadata,
@@ -257,6 +258,7 @@ async def get_wiii_connect_provider_activation_readiness(
             ),
         },
         connection_selection_required=not bool(selected_connection_ref),
+        scope_policy=scope_policy_for_provider_entry(execution_entry),
     )
     return build_activation_readiness_metadata(
         provider_slug=connect_entry.slug,
@@ -743,6 +745,7 @@ async def decide_wiii_connect_provider_execution(
             "persistent": bool(storage.get("persistent") and storage.get("audit_ledger_ready")),
         },
         connection_selection_required=not bool(selected_connection_ref),
+        scope_policy=scope_policy_for_provider_entry(effective_entry),
     )
     _append_execution_audit(
         gateway,
@@ -827,6 +830,7 @@ async def execute_wiii_connect_provider_action(
             ),
         },
         connection_selection_required=not bool(selected_connection_ref),
+        scope_policy=scope_policy_for_provider_entry(effective_entry),
     )
     audit_base = {
         "surface": body.surface,

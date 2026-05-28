@@ -56,6 +56,7 @@ ExecutionDenyReason = Literal[
     "path_not_allowed",
     "action_not_allowed",
     "missing_scope",
+    "scope_policy_denied",
     "missing_preview_evidence",
     "missing_approval_token",
 ]
