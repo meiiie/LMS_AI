@@ -215,6 +215,85 @@ def test_activation_readiness_payload_uses_backend_endpoint(monkeypatch) -> None
     assert "connection_id=ca_live" in url
 
 
+def test_gateway_fail_closed_check_requires_connection_selection_reason(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def json(self):
+            return {
+                "status": "blocked",
+                "reason": "connection_selection_required",
+            }
+
+    def fake_request_bytes(method, url, *, headers=None, payload=None, timeout=15.0):
+        captured["method"] = method
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["payload"] = payload
+        return FakeResponse()
+
+    monkeypatch.setattr(acceptance, "request_bytes", fake_request_bytes)
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+            argument_keys="query,access_token",
+            arguments_json="{}",
+        )
+    )
+    harness.token = "token"
+
+    detail = harness.check_gateway_blocks_missing_connection()
+
+    assert detail == "blocked reason=connection_selection_required"
+    assert captured["method"] == "POST"
+    assert captured["headers"] == {"Authorization": "Bearer token"}
+    assert captured["payload"] == {
+        "surface": "acceptance_harness",
+        "action_slug": "GMAIL_FETCH_EMAILS",
+        "path": "external_app_action",
+        "mutation": "read",
+        "argument_keys": ["query", "access_token"],
+    }
+
+
+def test_gateway_fail_closed_check_rejects_generic_block_reason(monkeypatch) -> None:
+    class FakeResponse:
+        def json(self):
+            return {
+                "status": "blocked",
+                "reason": "connection_missing",
+            }
+
+    def fake_request_bytes(method, url, *, headers=None, payload=None, timeout=15.0):
+        return FakeResponse()
+
+    monkeypatch.setattr(acceptance, "request_bytes", fake_request_bytes)
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+            argument_keys="",
+            arguments_json='{"query": "from:me"}',
+        )
+    )
+    harness.token = "token"
+
+    with pytest.raises(
+        acceptance.AcceptanceFailure,
+        match="explicit connection selection",
+    ):
+        harness.check_gateway_blocks_missing_connection()
+
+
 def test_validate_evidence_path_rejects_secret_and_generated_locations() -> None:
     with pytest.raises(acceptance.AcceptanceFailure, match="forbidden"):
         acceptance.validate_evidence_path(".env.composio.json")
