@@ -153,7 +153,10 @@ agent-ready execution state. Wiii now also has an authenticated execution
 gateway preflight endpoint that fetches the stored org/user connection record,
 checks path/action/scope/evidence/adapter/audit policy, and appends a
 privacy-safe execution ledger record without calling Composio action execution.
-It still needs a curated action catalog, provider execution adapter enablement
-for one low-risk read-only action, disconnect/reconnect controls, and
-end-to-end acceptance against real Composio credentials before Composio actions
-can be enabled for real users.
+Wiii also has a curated action catalog contract with a disabled
+`FACEBOOK_GET_PAGE_PROFILE` read-only candidate, so future action exposure has a
+reviewable allowlist rather than a broad Composio tool dump. It still needs live
+Composio schema verification, provider execution adapter enablement for one
+low-risk read-only action, disconnect/reconnect controls, and end-to-end
+acceptance against real Composio credentials before Composio actions can be
+enabled for real users.

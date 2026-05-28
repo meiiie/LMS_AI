@@ -676,6 +676,28 @@ async def test_wiii_connect_connections_api_lists_and_persists_safely(
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_actions_api_lists_curated_catalog_without_secrets(app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/wiii-connect/providers/facebook/actions")
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["version"] == "wiii_connect_action_catalog.v1"
+    assert payload["provider_slug"] == "facebook"
+    assert payload["action_count"] == 1
+    assert payload["enabled_action_count"] == 0
+    assert payload["actions"][0]["slug"] == "FACEBOOK_GET_PAGE_PROFILE"
+    assert payload["actions"][0]["enabled"] is False
+    assert "access_token" not in serialized
+    assert "refresh_token" not in serialized
+    assert "client_secret" not in serialized
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_execution_decision_api_requires_auth(app):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),

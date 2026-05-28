@@ -17,6 +17,7 @@ from app.engine.wiii_connect import (
     WiiiConnectExecutionRequest,
     WiiiConnectSessionStartRequest,
     WiiiConnectVaultSecretRef,
+    action_catalog_public_metadata,
     append_wiii_connect_callback_state,
     audit_ledger_status_public_metadata,
     build_audit_ledger_record,
@@ -331,6 +332,16 @@ async def list_wiii_connect_provider_connections(
         "provider": provider_result.to_public_metadata(),
         "storage": storage,
     }
+
+
+@router.get("/providers/{slug}/actions")
+async def list_wiii_connect_provider_actions(slug: str) -> dict[str, object]:
+    """Return the privacy-safe curated action catalog for a provider."""
+
+    entry = get_wiii_connect_provider_entry(slug)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
+    return action_catalog_public_metadata(provider_slug=entry.slug)
 
 
 @router.post("/providers/{slug}/execution-decision")

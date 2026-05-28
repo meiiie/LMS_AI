@@ -39,6 +39,12 @@ The implemented backend contract lives in:
 maritime-ai-service/app/engine/wiii_connect/adapter_v1.py
 ```
 
+The curated action catalog contract lives in:
+
+```text
+maritime-ai-service/app/engine/wiii_connect/action_catalog.py
+```
+
 The backend-owned provider catalog lives in:
 
 ```text
@@ -98,6 +104,7 @@ GET  /api/v1/wiii-connect/providers/{slug}/status
 POST /api/v1/wiii-connect/providers/{slug}/sessions
 POST /api/v1/wiii-connect/providers/{slug}/authorization-url
 GET  /api/v1/wiii-connect/providers/{slug}/connections
+GET  /api/v1/wiii-connect/providers/{slug}/actions
 POST /api/v1/wiii-connect/providers/{slug}/execution-decision
 GET  /api/v1/wiii-connect/providers/{slug}/callback
 GET  /api/v1/wiii-connect/provider-adapters/status
@@ -132,6 +139,18 @@ never receives provider tokens or raw payloads.
 - curated action allowlist;
 - provider-specific required fields;
 - default scopes and safe public metadata.
+
+`WiiiConnectCuratedAction`
+
+- reviewed action candidate for one provider;
+- records action slug, mutation class, product path, required scopes,
+  preview/approval requirements, and sanitized argument key names;
+- starts disabled until the live provider schema is verified and adapter
+  execution is implemented;
+- never stores raw Composio schemas, provider payloads, provider responses, or
+  secrets;
+- exposes public catalog summary through both provider registry metadata and
+  `GET /api/v1/wiii-connect/providers/{slug}/actions`.
 
 `WiiiConnectVaultSecretRef`
 
@@ -308,6 +327,11 @@ never receives provider tokens or raw payloads.
 - currently performs preflight only. It does not call Composio action execution
   until a curated action catalog and provider execution adapter are enabled.
 
+The first catalog candidate is `FACEBOOK_GET_PAGE_PROFILE`, a disabled
+read-only Facebook action placeholder. It is intentionally not agent-ready until
+Wiii validates the exact live Composio action schema for the configured
+Facebook auth config.
+
 ## Lifecycle States
 
 Adapter V1 normalizes provider states into:
@@ -458,7 +482,8 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 ## Next Slices
 
 1. Add a curated Composio action catalog contract for one low-risk read-only
-   provider action.
+   provider action. Done for the disabled contract candidate; still needs live
+   schema verification before enablement.
 2. Bind Composio adapter `can_execute_actions` only for that curated read-only
    action and keep writes disabled.
 3. Add disconnect/delete/reconnect lifecycle controls behind the same policy.
