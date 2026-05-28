@@ -465,6 +465,8 @@ export interface WiiiConnectProviderRegistryEntry {
   allowed_paths?: string[];
   action_count?: number;
   requirements?: string[];
+  connect_requirements?: string[];
+  agent_ready_requirements?: string[];
   required_fields?: Array<Record<string, unknown>>;
   default_scopes?: Record<string, boolean>;
   source?: string;
@@ -494,6 +496,7 @@ export interface WiiiConnectProviderConnectionStatus {
 export interface WiiiConnectSessionStartBody {
   surface?: string;
   redirect_uri?: string | null;
+  probe_database?: boolean;
   requested_scopes?: Record<string, boolean>;
   request_metadata?: Record<string, unknown>;
 }
@@ -523,6 +526,61 @@ export interface WiiiConnectSessionStartDecision {
   authorization_url?: string;
   required_next?: string[];
   audit_event?: WiiiConnectSessionAuditEvent | null;
+}
+
+export interface WiiiConnectProviderAdapterCapability {
+  version: string;
+  provider_kind: string;
+  adapter_name: string;
+  bound: boolean;
+  configured: boolean;
+  can_create_authorization_url: boolean;
+  can_exchange_callback: boolean;
+  can_execute_actions: boolean;
+  authorization_ready: boolean;
+  reason: string;
+  warnings?: string[];
+}
+
+export interface WiiiConnectAuthorizationUrlDecision {
+  version: string;
+  status: "blocked" | "ready" | string;
+  reason: string;
+  provider_slug: string;
+  label: string;
+  provider_kind: string;
+  auth_mode: string;
+  authorization_url?: string;
+  adapter?: WiiiConnectProviderAdapterCapability | null;
+  required_next?: string[];
+  audit_event?: WiiiConnectSessionAuditEvent | null;
+}
+
+export interface WiiiConnectProviderConnectionRecord {
+  version: string;
+  connection_id: string;
+  provider_slug: string;
+  state: string;
+  active?: boolean;
+  scopes?: Record<string, boolean>;
+  vault_ref_present?: boolean;
+  account_label?: string;
+  external_account_ref?: string;
+  last_checked_at?: string | null;
+  reason?: string;
+  warnings?: string[];
+}
+
+export interface WiiiConnectProviderConnectionListResponse {
+  version: string;
+  status: "blocked" | "ready" | string;
+  reason: string;
+  provider_slug: string;
+  provider_kind: string;
+  connection_count: number;
+  connections: WiiiConnectProviderConnectionRecord[];
+  provider?: Record<string, unknown> | null;
+  storage?: Record<string, unknown> | null;
 }
 
 export interface SSEChatLifecycleEvent {
