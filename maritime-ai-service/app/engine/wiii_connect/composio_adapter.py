@@ -61,6 +61,7 @@ class WiiiConnectComposioConnectLinkResult:
 
     ready: bool = False
     redirect_url: str = ""
+    connected_account_id: str = field(default="", repr=False)
     expires_at: str = ""
     connected_account_ref_present: bool = False
     reason: str = "not_requested"
@@ -324,13 +325,15 @@ async def create_composio_connect_link(
         return WiiiConnectComposioConnectLinkResult(
             reason="provider_response_missing_redirect",
         )
+    connected_account_id = str(
+        data.get("connected_account_id") or data.get("connectedAccountId") or ""
+    ).strip()
     return WiiiConnectComposioConnectLinkResult(
         ready=True,
         redirect_url=redirect_url,
+        connected_account_id=connected_account_id,
         expires_at=str(data.get("expires_at") or data.get("expiresAt") or "").strip(),
-        connected_account_ref_present=bool(
-            data.get("connected_account_id") or data.get("connectedAccountId")
-        ),
+        connected_account_ref_present=bool(connected_account_id),
         reason="ready",
     )
 

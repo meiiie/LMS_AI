@@ -29,6 +29,14 @@ from .callback_boundary import (
     provider_callback_decision,
     provider_callback_decision_for_entry,
 )
+from .callback_state import (
+    WIII_CONNECT_CALLBACK_STATE_PARAM,
+    WIII_CONNECT_CALLBACK_STATE_VERSION,
+    WiiiConnectCallbackStateClaims,
+    append_wiii_connect_callback_state,
+    build_wiii_connect_callback_state,
+    verify_wiii_connect_callback_state,
+)
 from .composio_adapter import (
     WIII_CONNECT_COMPOSIO_ADAPTER_VERSION,
     WiiiConnectComposioAdapterConfig,
@@ -98,6 +106,8 @@ __all__ = [
     "WIII_CONNECT_ADAPTER_VERSION",
     "WIII_CONNECT_AUDIT_LEDGER_VERSION",
     "WIII_CONNECT_CALLBACK_CONTRACT_VERSION",
+    "WIII_CONNECT_CALLBACK_STATE_PARAM",
+    "WIII_CONNECT_CALLBACK_STATE_VERSION",
     "WIII_CONNECT_COMPOSIO_ADAPTER_VERSION",
     "WIII_CONNECT_PROVIDER_ADAPTER_VERSION",
     "WIII_CONNECT_PERSISTENT_STORAGE_VERSION",
@@ -111,6 +121,7 @@ __all__ = [
     "WiiiConnectCallbackAuditEvent",
     "WiiiConnectCallbackDecision",
     "WiiiConnectCallbackRequest",
+    "WiiiConnectCallbackStateClaims",
     "WiiiConnectComposioAdapterConfig",
     "WiiiConnectComposioConnectLinkResult",
     "WiiiConnectConnectionSessionAuditEvent",
@@ -139,6 +150,7 @@ __all__ = [
     "WiiiConnectionSnapshot",
     "WiiiPathCapabilityRecord",
     "audit_ledger_status_public_metadata",
+    "append_wiii_connect_callback_state",
     "begin_connection_session",
     "build_composio_adapter_config",
     "build_composio_provider_adapter_capability",
@@ -150,6 +162,7 @@ __all__ = [
     "build_composio_connect_enabled_entry",
     "build_composio_external_user_id",
     "build_composio_provider_managed_vault_capability",
+    "build_wiii_connect_callback_state",
     "default_provider_adapter_capability",
     "default_persistent_storage_status_metadata",
     "default_wiii_connect_vault_capability",
@@ -167,5 +180,6 @@ __all__ = [
     "provider_registry_public_metadata",
     "create_composio_connect_link",
     "scope_grant_from_mapping",
+    "verify_wiii_connect_callback_state",
     "vault_status_public_metadata",
 ]

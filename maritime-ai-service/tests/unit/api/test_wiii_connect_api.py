@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
@@ -372,6 +373,7 @@ async def test_wiii_connect_authorization_url_api_issues_sanitized_composio_link
 
     class FakeStorage:
         audit_appends = 0
+        connection_upserts = 0
 
         def status(self, *, probe_database: bool = True):
             return WiiiConnectPersistentStorageStatus(
@@ -393,6 +395,22 @@ async def test_wiii_connect_authorization_url_api_issues_sanitized_composio_link
             assert "ca_secret" not in serialized
             return True
 
+        def upsert_connection_record(
+            self,
+            connection,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_kind: str,
+        ):
+            self.connection_upserts += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_kind == "composio"
+            assert connection.connection_id == "ca_123"
+            assert connection.state == "authorizing"
+            return True
+
     fake_storage = FakeStorage()
     monkeypatch.setattr(
         wiii_connect_api,
@@ -412,11 +430,16 @@ async def test_wiii_connect_authorization_url_api_issues_sanitized_composio_link
 
     async def fake_connect_link(**kwargs):
         assert kwargs["provider_slug"] == "facebook"
-        assert kwargs["callback_url"] == "https://wiii.example.test/callback"
+        callback = urlsplit(kwargs["callback_url"])
+        assert callback.scheme == "https"
+        assert callback.netloc == "wiii.example.test"
+        assert callback.path == "/callback"
+        assert "wiii_state" in parse_qs(callback.query)
         assert kwargs["user_id"].startswith("wiii_")
         return WiiiConnectComposioConnectLinkResult(
             ready=True,
             redirect_url="https://composio.example.test/connect/session",
+            connected_account_id="ca_123",
             connected_account_ref_present=True,
             reason="ready",
         )
@@ -449,6 +472,7 @@ async def test_wiii_connect_authorization_url_api_issues_sanitized_composio_link
     assert payload["authorization_url"] == "https://composio.example.test/connect/session"
     assert payload["adapter"]["can_execute_actions"] is False
     assert fake_storage.audit_appends == 1
+    assert fake_storage.connection_upserts == 1
     assert "secret-api-key" not in serialized
     assert "authcfg_fb" not in serialized
     assert "link_token" not in serialized
@@ -594,6 +618,113 @@ async def test_wiii_connect_callback_api_blocks_and_redacts_oauth_values(app):
     assert "oauth-code-value" not in serialized
     assert "client_secret" not in serialized
     assert "secret-value" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_callback_api_reconciles_signed_composio_connection(
+    app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.core.config import settings
+    from app.engine.wiii_connect.callback_state import (
+        build_wiii_connect_callback_state,
+    )
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+
+    class FakeStorage:
+        audit_appends = 0
+        connection_upserts = 0
+
+        def status(self, *, probe_database: bool = True):
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                reason="ready",
+            )
+
+        def append_audit_record(self, record, *, organization_id: str, user_id: str):
+            self.audit_appends += 1
+            metadata = record.to_public_metadata()["metadata"]
+            serialized = json.dumps(metadata, sort_keys=True)
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert metadata["state"]["valid"] is True
+            assert "secret-state-value" not in serialized
+            return True
+
+        def upsert_connection_record(
+            self,
+            connection,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_kind: str,
+        ):
+            self.connection_upserts += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_kind == "composio"
+            assert connection.connection_id == "ca_123"
+            assert connection.state == "connected"
+            return True
+
+    state = build_wiii_connect_callback_state(
+        provider_slug="facebook",
+        organization_id="org_1",
+        user_id="user_1",
+        secret_key=settings.session_secret_key,
+    )
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            auth_config_by_provider={"facebook": "authcfg_fb"},
+        ),
+    )
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/wiii-connect/providers/facebook/callback",
+            params={
+                "wiii_state": state,
+                "connected_account_id": "ca_123",
+                "status": "ACTIVE",
+                "client_secret": "secret-value",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["status"] == "accepted"
+    assert payload["reason"] == "accepted"
+    assert payload["vault_ref_issued"] is True
+    assert fake_storage.audit_appends == 1
+    assert fake_storage.connection_upserts == 1
+    assert "secret-api-key" not in serialized
+    assert "authcfg_fb" not in serialized
+    assert "secret-value" not in serialized
+    assert state not in serialized
 
 
 @pytest.mark.asyncio

@@ -56,14 +56,20 @@ def test_callback_requires_state_code_vault_and_adapter_before_accepting():
     )
     missing_code = provider_callback_decision_for_entry(
         entry,
-        WiiiConnectCallbackRequest(provider_slug="internal_test", state_present=True),
+        WiiiConnectCallbackRequest(
+            provider_slug="internal_test",
+            state_present=True,
+            state_valid=True,
+        ),
     )
     missing_vault = provider_callback_decision_for_entry(
         entry,
         WiiiConnectCallbackRequest(
             provider_slug="internal_test",
             state_present=True,
+            state_valid=True,
             code_present=True,
+            connection_ref_present=True,
         ),
     )
     missing_adapter = provider_callback_decision_for_entry(
@@ -71,7 +77,9 @@ def test_callback_requires_state_code_vault_and_adapter_before_accepting():
         WiiiConnectCallbackRequest(
             provider_slug="internal_test",
             state_present=True,
+            state_valid=True,
             code_present=True,
+            connection_ref_present=True,
         ),
         vault_ready=True,
     )
@@ -80,7 +88,9 @@ def test_callback_requires_state_code_vault_and_adapter_before_accepting():
         WiiiConnectCallbackRequest(
             provider_slug="internal_test",
             state_present=True,
+            state_valid=True,
             code_present=True,
+            connection_ref_present=True,
         ),
         vault_ready=True,
         provider_adapter_bound=True,
@@ -117,7 +127,9 @@ def test_callback_accepts_vault_capability_without_boolean_override():
         WiiiConnectCallbackRequest(
             provider_slug="internal_test",
             state_present=True,
+            state_valid=True,
             code_present=True,
+            connection_ref_present=True,
         ),
         vault_capability=WiiiConnectVaultCapability(
             enabled=True,

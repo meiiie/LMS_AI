@@ -141,8 +141,10 @@ Before Wiii enables Composio:
 
 Wiii now has a V0 snapshot/dashboard, V1 policy contract, provider registry,
 callback/vault boundary, durable connection/audit storage, controlled storage
-probe, Composio adapter configuration status, and an authenticated Connect Link
-client path that calls Composio only after policy preflight passes. It still
-needs callback reconciliation, connection listing/polling, frontend modal UX,
-curated action catalog, execution gateway, and end-to-end browser acceptance
-before Composio actions can be enabled for real users.
+probe, Composio adapter configuration status, an authenticated Connect Link
+client path that calls Composio only after policy preflight passes, signed
+callback state, and callback reconciliation into durable Wiii connection
+records. It still needs connection listing/polling, frontend modal UX, curated
+action catalog, execution gateway hardening for real provider actions, and
+end-to-end browser acceptance before Composio actions can be enabled for real
+users.
