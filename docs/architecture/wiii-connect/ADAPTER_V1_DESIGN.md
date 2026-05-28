@@ -78,6 +78,12 @@ maritime-ai-service/app/engine/wiii_connect/provider_adapters.py
 maritime-ai-service/app/engine/wiii_connect/composio_adapter.py
 ```
 
+The execution gateway preflight and audit boundary lives in:
+
+```text
+maritime-ai-service/app/engine/wiii_connect/execution_gateway.py
+```
+
 The durable storage contract and schema live in:
 
 ```text
@@ -92,6 +98,7 @@ GET  /api/v1/wiii-connect/providers/{slug}/status
 POST /api/v1/wiii-connect/providers/{slug}/sessions
 POST /api/v1/wiii-connect/providers/{slug}/authorization-url
 GET  /api/v1/wiii-connect/providers/{slug}/connections
+POST /api/v1/wiii-connect/providers/{slug}/execution-decision
 GET  /api/v1/wiii-connect/providers/{slug}/callback
 GET  /api/v1/wiii-connect/provider-adapters/status
 GET  /api/v1/wiii-connect/storage/status
@@ -274,6 +281,8 @@ never receives provider tokens or raw payloads.
 `WiiiConnectPersistentStorage`
 
 - writes per-org, per-user connection records to `wiii_connect_connections`;
+- reads the latest sanitized per-org/per-user/provider connection record for
+  execution gateway decisions;
 - appends privacy-safe provider/session/callback/vault/execution events to
   `wiii_connect_audit_ledger`;
 - requires explicit `organization_id` and `user_id` before writing;
@@ -283,6 +292,21 @@ never receives provider tokens or raw payloads.
   blocked instead of allowing un-audited execution.
 - is exposed through controlled status/probe APIs with database probing disabled
   by default, so normal UI renders do not block on storage connectivity.
+
+`WiiiConnectExecutionGatewayDecision`
+
+- is the audited preflight boundary before any provider action can execute;
+- requires the authenticated Wiii org/user connection record from persistent
+  storage, not a frontend-supplied connection claim;
+- checks registry enabled state, `agent_ready`, path allowlist, curated action
+  allowlist, stored scopes, preview evidence, approval-token presence, adapter
+  execution capability, and persistent audit readiness;
+- records only action slug, path, mutation, approval-token presence, preview
+  evidence presence, and sanitized argument key names;
+- never accepts raw provider arguments, raw provider payloads, OAuth tokens,
+  approval token values, Composio API keys, or provider response bodies;
+- currently performs preflight only. It does not call Composio action execution
+  until a curated action catalog and provider execution adapter are enabled.
 
 ## Lifecycle States
 
@@ -337,6 +361,11 @@ The gateway denies by default. Current reason codes:
 - `missing_scope`
 - `missing_preview_evidence`
 - `missing_approval_token`
+- `provider_adapter_mismatch`
+- `provider_adapter_not_bound`
+- `provider_adapter_not_configured`
+- `provider_adapter_cannot_execute`
+- `audit_ledger_not_persistent`
 
 The action is allowed only after all checks pass.
 
@@ -402,6 +431,8 @@ Before real Composio OAuth is enabled:
 - every session/callback/vault/execution decision must produce a privacy-safe
   ledger record shape and be eligible for durable append before provider
   execution is allowed;
+- execution decisions must be requested through the authenticated Wiii backend
+  gateway and must fetch the connection record from Wiii storage by org/user;
 - durable persistence must bind every connection/audit write to a Wiii
   organization and user boundary;
 - frontend may receive connect URLs and state labels, not tokens;
@@ -426,7 +457,10 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 
 ## Next Slices
 
-1. Add disconnect/delete/reconnect lifecycle controls behind the same policy.
-2. Add browser acceptance for disconnect, gated scope, and denied
-   execute cases.
-3. Enable one low-risk read-only Composio action before any write action.
+1. Add a curated Composio action catalog contract for one low-risk read-only
+   provider action.
+2. Bind Composio adapter `can_execute_actions` only for that curated read-only
+   action and keep writes disabled.
+3. Add disconnect/delete/reconnect lifecycle controls behind the same policy.
+4. Add browser acceptance for connect, denied execute, gated scope, and
+   reconnect cases.

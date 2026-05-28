@@ -15,7 +15,12 @@ from typing import Any, Callable
 
 from sqlalchemy import text
 
-from .adapter_v1 import WiiiConnectConnectionRecordV1
+from .adapter_v1 import (
+    WiiiConnectConnectionRecordV1,
+    WiiiConnectScopeGrant,
+    WiiiConnectVaultSecretRef,
+    normalize_connection_state,
+)
 from .audit_ledger import WiiiConnectAuditLedgerRecord
 
 
@@ -248,6 +253,90 @@ class WiiiConnectPersistentStorage:
             logger.warning("Wiii Connect connection upsert failed: %s", exc)
             return False
 
+    def get_connection_record(
+        self,
+        *,
+        organization_id: str,
+        user_id: str,
+        provider_slug: str,
+        connection_id: str | None = None,
+    ) -> WiiiConnectConnectionRecordV1 | None:
+        """Fetch the latest sanitized connection row for an org/user/provider."""
+
+        owner = _normalize_owner(organization_id=organization_id, user_id=user_id)
+        slug = str(provider_slug or "").strip().lower().replace("-", "_")
+        safe_connection_id = str(connection_id or "").strip()
+        if owner is None or not slug:
+            return None
+        self._ensure_initialized()
+        if self._session_factory is None:
+            return None
+
+        try:
+            with self._session_factory() as session:
+                result = session.execute(
+                    text(
+                        f"SELECT id, provider_slug, state, scopes, vault_ref, "
+                        f"account_label, external_account_ref, reason, warnings, "
+                        f"last_checked_at "
+                        f"FROM {self.CONNECTIONS_TABLE} "
+                        f"WHERE organization_id = :organization_id "
+                        f"AND user_id = :user_id "
+                        f"AND provider_slug = :provider_slug "
+                        f"AND (:connection_id = '' OR id = :connection_id) "
+                        f"ORDER BY updated_at DESC "
+                        f"LIMIT 1"
+                    ),
+                    {
+                        "organization_id": owner["organization_id"],
+                        "user_id": owner["user_id"],
+                        "provider_slug": slug,
+                        "connection_id": safe_connection_id,
+                    },
+                )
+                row = _fetch_mapping_row(result)
+        except Exception as exc:
+            if _is_missing_storage_table_error(exc):
+                logger.info("Wiii Connect connection storage unavailable; skipping fetch.")
+                return None
+            logger.warning("Wiii Connect connection fetch failed: %s", exc)
+            return None
+
+        if row is None:
+            return None
+        scopes = _decode_json_object(_row_value(row, "scopes"), default={})
+        vault_ref = _decode_json_object(_row_value(row, "vault_ref"), default={})
+        warnings = _decode_json_list(_row_value(row, "warnings"))
+        connection_id_value = str(_row_value(row, "id") or "").strip()
+        has_vault_ref = bool(vault_ref.get("vault_ref_present"))
+        return WiiiConnectConnectionRecordV1(
+            connection_id=connection_id_value,
+            provider_slug=str(_row_value(row, "provider_slug") or slug).strip(),
+            state=normalize_connection_state(str(_row_value(row, "state") or "")),
+            scopes=WiiiConnectScopeGrant(
+                read=bool(scopes.get("read")),
+                preview=bool(scopes.get("preview")),
+                write=bool(scopes.get("write")),
+                apply=bool(scopes.get("apply")),
+                admin=bool(scopes.get("admin")),
+            ),
+            vault_ref=(
+                WiiiConnectVaultSecretRef(
+                    provider_slug=slug,
+                    connection_id=connection_id_value,
+                    vault_key_id="stored_opaque_ref",
+                    secret_version=str(vault_ref.get("secret_version") or ""),
+                )
+                if has_vault_ref
+                else None
+            ),
+            account_label=str(_row_value(row, "account_label") or ""),
+            external_account_ref=str(_row_value(row, "external_account_ref") or ""),
+            last_checked_at=_datetime_to_iso(_row_value(row, "last_checked_at")),
+            reason=str(_row_value(row, "reason") or ""),
+            warnings=tuple(warnings),
+        )
+
 
 def default_persistent_storage_status_metadata() -> dict[str, Any]:
     """Return default non-probed persistent storage status metadata."""
@@ -278,6 +367,61 @@ def _parse_datetime(value: Any) -> datetime | None:
     except ValueError:
         return None
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _datetime_to_iso(value: Any) -> str | None:
+    parsed = _parse_datetime(value)
+    return parsed.isoformat() if parsed is not None else None
+
+
+def _fetch_mapping_row(result: Any) -> Any | None:
+    mappings = getattr(result, "mappings", None)
+    if callable(mappings):
+        try:
+            return mappings().fetchone()
+        except Exception:
+            return None
+    fetchone = getattr(result, "fetchone", None)
+    if callable(fetchone):
+        return fetchone()
+    return None
+
+
+def _row_value(row: Any, key: str) -> Any:
+    if isinstance(row, dict):
+        return row.get(key)
+    mapping = getattr(row, "_mapping", None)
+    if mapping is not None:
+        return mapping.get(key)
+    try:
+        return row[key]
+    except Exception:
+        return None
+
+
+def _decode_json_object(value: Any, *, default: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return dict(default)
+        return parsed if isinstance(parsed, dict) else dict(default)
+    return dict(default)
+
+
+def _decode_json_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed if str(item).strip()]
+    return []
 
 
 def _is_missing_storage_table_error(exc: Exception) -> bool:

@@ -176,11 +176,12 @@ this repository.
 4. Add tests proving that LMS apply, Pointy, web/weather, document-grounded
    chat, and visual/Code Studio paths bind only the right tools.
 5. Use `ADAPTER_V1_DESIGN.md` as the contract for external providers. Composio
-   remains disabled until registry, vault, OAuth/session callback, scope
-   policy, execution gateway, and audit ledger are implemented against that
-   contract.
+   connection can be enabled only after registry, vault/provider-managed
+   secrets, OAuth/session callback, storage, and audit checks are ready. Agent
+   action execution remains disabled until a curated action catalog and
+   provider execution adapter pass the execution gateway.
 6. Keep the backend `provider_registry.py` as the source of truth for disabled
    external provider catalog entries; frontend catalog state should converge on
    this projection.
-7. Add a Composio adapter only after the native Wiii snapshot and Adapter V1
-   gateway are stable.
+7. Add one low-risk read-only Composio action through the gateway before any
+   write/apply action.

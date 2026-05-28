@@ -7,6 +7,9 @@ class _FakeResult:
     def __init__(self, row=None):
         self._row = row
 
+    def mappings(self):
+        return self
+
     def fetchone(self):
         return self._row
 
@@ -141,6 +144,46 @@ def test_connection_upsert_stores_only_public_vault_ref_metadata():
     assert "oauth-token-secret" not in serialized
     assert "vault://tenant/private" not in serialized
     assert session.commits == 1
+
+
+def test_connection_fetch_rehydrates_sanitized_policy_record():
+    from app.engine.wiii_connect.persistent_storage import WiiiConnectPersistentStorage
+
+    session = _FakeSession(
+        row={
+            "id": "conn_1",
+            "provider_slug": "facebook",
+            "state": "ACTIVE",
+            "scopes": json.dumps({"read": True, "write": True, "apply": False}),
+            "vault_ref": json.dumps(
+                {"vault_ref_present": True, "secret_version": "provider_managed"}
+            ),
+            "account_label": "Wiii Page",
+            "external_account_ref": "page_1",
+            "reason": "provider_connection_list",
+            "warnings": json.dumps(["safe_warning"]),
+            "last_checked_at": "2026-05-28T00:00:00+00:00",
+        },
+    )
+    storage = WiiiConnectPersistentStorage(session_factory=lambda: session)
+
+    record = storage.get_connection_record(
+        organization_id="org_1",
+        user_id="user_1",
+        provider_slug="facebook",
+        connection_id="conn_1",
+    )
+    assert record is not None
+    serialized = json.dumps(record.to_public_metadata(), sort_keys=True)
+
+    assert record.connection_id == "conn_1"
+    assert record.state == "connected"
+    assert record.scopes.read is True
+    assert record.scopes.write is True
+    assert record.vault_ref is not None
+    assert record.to_public_metadata()["vault_ref_present"] is True
+    assert "provider-managed://" not in serialized
+    assert "oauth-token" not in serialized
 
 
 def test_persistent_storage_rejects_missing_owner_boundary():

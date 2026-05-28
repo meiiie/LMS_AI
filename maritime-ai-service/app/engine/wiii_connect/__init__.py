@@ -63,6 +63,11 @@ from .connection_sessions import (
     provider_connection_status_for_entry,
     scope_grant_from_mapping,
 )
+from .execution_gateway import (
+    WIII_CONNECT_EXECUTION_GATEWAY_VERSION,
+    WiiiConnectExecutionGatewayDecision,
+    decide_execution_gateway,
+)
 from .provider_adapters import (
     WIII_CONNECT_PROVIDER_ADAPTER_VERSION,
     WiiiConnectAuthorizationUrlAuditEvent,
@@ -113,6 +118,7 @@ __all__ = [
     "WIII_CONNECT_CALLBACK_STATE_VERSION",
     "WIII_CONNECT_COMPOSIO_ADAPTER_VERSION",
     "WIII_CONNECT_COMPOSIO_CONNECTION_LIST_VERSION",
+    "WIII_CONNECT_EXECUTION_GATEWAY_VERSION",
     "WIII_CONNECT_PROVIDER_ADAPTER_VERSION",
     "WIII_CONNECT_PERSISTENT_STORAGE_VERSION",
     "WIII_CONNECT_SESSION_CONTRACT_VERSION",
@@ -132,6 +138,7 @@ __all__ = [
     "WiiiConnectConnectionSessionAuditEvent",
     "WiiiConnectConnectionRecordV1",
     "WiiiConnectExecutionDecision",
+    "WiiiConnectExecutionGatewayDecision",
     "WiiiConnectExecutionRequest",
     "WiiiConnectInMemoryAuditLedger",
     "WiiiConnectProviderAdapterCapability",
@@ -162,6 +169,7 @@ __all__ = [
     "build_wiii_connect_snapshot",
     "build_audit_ledger_record",
     "decide_external_execution",
+    "decide_execution_gateway",
     "decide_authorization_url",
     "decide_vault_secret_write",
     "build_composio_connect_enabled_entry",
