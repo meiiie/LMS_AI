@@ -49,7 +49,7 @@ Do not enable write/apply/admin actions in this phase.
 
 Run from `maritime-ai-service/`.
 
-Before issuing a Connect Link, check activation readiness through Wiii:
+Before issuing a Connect Link manually, check activation readiness through Wiii:
 
 ```powershell
 curl -H "Authorization: Bearer <jwt>" "http://localhost:8080/api/v1/wiii-connect/providers/gmail/activation-readiness?probe_database=true"
@@ -61,6 +61,14 @@ IDs or secrets. `ready_to_connect=true` means Wiii has enough local policy,
 adapter, vault, storage, and audit readiness to issue a backend-owned Connect
 Link. `ready_to_execute_readonly=true` additionally requires a live stored
 connection and a runtime-enabled curated read-only action.
+
+The acceptance harness enforces the same projection automatically:
+
+- every run requires activation readiness to report `ready_to_connect=true`
+  before Connect Link issuance;
+- runs with `--require-execution-ready` or `--execute-readonly` also require
+  activation readiness to report `ready_to_execute_readonly=true` for the
+  selected connection before provider execution.
 
 For local dev-login:
 
