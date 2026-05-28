@@ -60,17 +60,23 @@ Sources:
 
 ## OpenHuman Source Findings
 
-Audited local reference clone:
+Audited external reference clone:
 
 ```text
-.Codex/external/reference-systems/openhuman
+../_reference_research/openhuman
 ```
 
-Reference clone commit inspected for the Composio source pass:
+Reference clone commit inspected for the current Composio source pass:
 
 ```text
-77c15cb
+6736467
 ```
+
+This clone is intentionally outside the Wiii repository and is not a committed
+artifact. Earlier exploratory clones under local agent folders such as
+`.Codex/` are not canonical Wiii source inputs. The canonical Wiii evidence is
+this audit document plus the Wiii Connect contracts and tests in the main
+repository.
 
 Important source files:
 

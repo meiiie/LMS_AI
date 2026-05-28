@@ -25,19 +25,25 @@ without reading raw prompts or uploaded documents.
 
 ## Source Snapshot
 
-External code was inspected from the ignored local research workspace:
+External code was originally inspected from an ignored local research
+workspace. The current refreshed OpenHuman reference clone used for later
+Composio/Connections audit work is kept outside the Wiii repository:
 
 ```text
-.Codex/external/reference-systems/openhuman
+../_reference_research/openhuman
 ```
+
+Do not treat legacy `.Codex/` exploratory folders as canonical Wiii source
+inputs or committed artifacts.
 
 | Field | Value |
 |---|---|
 | Remote | `https://github.com/tinyhumansai/openhuman.git` |
-| Inspected commit | `0e4729e7f2214f2fed3e23fb8d352018c0393fb3` |
-| Commit date | `2026-05-25T23:33:40+05:30` |
-| Commit title | `test(memory): serialize tests that drive the process-global memory client (#2649)` |
-| Local checkout note | Local worktree remained at `5e31d3e00dd7972d81b52b4d537d6925ec318ee3`; latest files were read through `origin/main:<path>` without resetting the clone. |
+| Original inspected commit | `0e4729e7f2214f2fed3e23fb8d352018c0393fb3` |
+| Original commit date | `2026-05-25T23:33:40+05:30` |
+| Original commit title | `test(memory): serialize tests that drive the process-global memory client (#2649)` |
+| Refreshed local commit for 2026-05-28 Composio pass | `6736467` |
+| Local checkout note | Later Composio/Connections checks use the external `_reference_research/openhuman` clone without vendoring it into Wiii. |
 | Clone mode | shallow, sparse, no submodules |
 
 Primary OpenHuman areas reviewed:
