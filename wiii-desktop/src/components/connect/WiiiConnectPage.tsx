@@ -1622,6 +1622,10 @@ function FacebookPostComposer({
       state.preview.preview_evidence_id,
   );
   const canApply = canPreview && previewReady && !state.applyLoading;
+  const imagePreviewUrl =
+    image?.previewUrl && image.previewUrl.startsWith("blob:")
+      ? image.previewUrl
+      : "";
 
   const clearDecision = () => {
     setState((current) => ({
@@ -1881,10 +1885,10 @@ function FacebookPostComposer({
             onChange={(event) => void chooseImage(event.target.files?.[0])}
           />
         </label>
-        {image && (
+        {image && imagePreviewUrl && (
           <div className="overflow-hidden rounded-md border border-[var(--border)] bg-surface">
             <img
-              src={image.previewUrl}
+              src={imagePreviewUrl}
               alt=""
               className="h-36 w-full object-cover"
             />
