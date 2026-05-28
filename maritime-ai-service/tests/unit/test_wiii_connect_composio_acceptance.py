@@ -350,11 +350,42 @@ def test_evidence_payload_redacts_sensitive_details() -> None:
     assert payload["target_env"] == "staging"
     assert payload["commit_sha"] == "abc1234"
     assert payload["flags"]["explicit_connection_selected"] is True
+    assert payload["flags"]["connection_selected_for_action"] is True
     assert payload["flags"]["arguments_present"] is True
     assert "token=secret" not in serialized
     assert "wiii_state=secret" not in serialized
     assert "ca_secret" not in serialized
     assert "authorization_url=" not in serialized
+
+
+def test_evidence_payload_marks_connection_selected_from_listing() -> None:
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="https://wiii.example.com",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            auth_mode="bearer",
+            target_env="staging",
+            commit_sha="abc1234",
+            readiness_report_only=False,
+            skip_connect_link=False,
+            print_connect_url=False,
+            expect_connected=True,
+            require_execution_ready=True,
+            execute_readonly=True,
+            disconnect=False,
+            connection_id="",
+            arguments_json='{"max_results": 1}',
+        )
+    )
+    harness.selected_connection_id = "ca_selected_from_listing"
+
+    payload = harness.evidence_payload()
+    serialized = json.dumps(payload, sort_keys=True)
+
+    assert payload["flags"]["explicit_connection_selected"] is False
+    assert payload["flags"]["connection_selected_for_action"] is True
+    assert "ca_selected_from_listing" not in serialized
 
 
 def test_run_writes_redacted_evidence_json(monkeypatch, tmp_path) -> None:

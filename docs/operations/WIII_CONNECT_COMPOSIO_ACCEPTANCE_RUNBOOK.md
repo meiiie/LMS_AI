@@ -89,11 +89,11 @@ temporary path:
 python scripts/wiii_connect_composio_acceptance.py --backend-url http://localhost:8080 --auth-mode dev-login --provider gmail --readiness-report-only --target-env local --commit-sha <deployed-commit> --evidence-json "$env:TEMP\wiii-connect-composio-acceptance.json"
 ```
 
-The JSON includes check names, pass/fail status, elapsed time, target label, and
-deployed commit. It intentionally strips bearer tokens, Connect URLs, callback
-state, raw connection IDs, vault references, and provider payloads. Do not commit
-generated evidence files; attach or summarize the sanitized output in the
-issue/PR when needed.
+The JSON includes check names, pass/fail status, elapsed time, target label,
+deployed commit, and whether a connection was selected for action execution. It
+intentionally strips bearer tokens, Connect URLs, callback state, raw connection
+IDs, vault references, and provider payloads. Do not commit generated evidence
+files; attach or summarize the sanitized output in the issue/PR when needed.
 
 For local dev-login:
 
