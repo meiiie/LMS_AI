@@ -19,20 +19,22 @@ audit. It is not an endorsement to copy architecture wholesale.
 
 ## Local Research Workspace
 
-External reference repositories are cloned outside tracked Wiii source:
+External reference repositories are cloned outside tracked Wiii source. The
+current durable refresh location for OpenHuman is:
 
 ```text
-.Codex/external/reference-systems/
+../_reference_research/openhuman
 ```
 
-This path is intentionally ignored by `.gitignore` through the existing
-`.Codex/` rule. Do not vendor external repositories into Wiii history.
+Older exploratory clones under `.Codex/external/reference-systems/` were local
+scratch space and are not canonical Wiii source inputs. Do not vendor external
+repositories into Wiii history.
 
-Current local clones:
+Reference entries recorded during the original audit and refreshed where noted:
 
 | Project | Local path | Remote | Local HEAD | Clone mode | Why it is first-class |
 |---|---|---|---|---|---|
-| OpenHuman | `.Codex/external/reference-systems/openhuman` | `https://github.com/tinyhumansai/openhuman.git` | `5e31d3e` | shallow, sparse, no submodules | living memory, local-first knowledge vault, typed integrations, background context ingestion, personal-agent UX |
+| OpenHuman | `../_reference_research/openhuman` | `https://github.com/tinyhumansai/openhuman.git` | `6736467` | shallow, sparse, no submodules | living memory, local-first knowledge vault, typed integrations, background context ingestion, personal-agent UX |
 | OpenClaw | `.Codex/external/reference-systems/openclaw` | `https://github.com/openclaw/openclaw.git` | `d967760` | shallow, sparse | gateway control plane, multi-channel routing, operator commands, session isolation, tool permission defaults, trace/doctor UX |
 | Understand-Anything | `.Codex/external/reference-systems/understand-anything` | `https://github.com/Lum1104/Understand-Anything.git` | `470cc01` | shallow | system-comprehension harness, deterministic source inventory, import-map extraction, semantic batching, local architecture graph/dashboard |
 
