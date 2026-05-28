@@ -141,6 +141,21 @@ interface ProviderDisconnectState {
   lastUpdatedAt?: string;
 }
 
+interface ProviderLifecycleStage {
+  id: string;
+  label: string;
+  value: string;
+  detail: string;
+  tone: CapabilityStatusTone;
+}
+
+interface ProviderNextAction {
+  title: string;
+  detail: string;
+  tone: CapabilityStatusTone;
+  items: string[];
+}
+
 const tabs: FullPageTab[] = [
   { id: "catalog", label: "Danh bạ", icon: <PlugZap size={15} /> },
   { id: "connections", label: "Snapshot", icon: <Database size={15} /> },
@@ -1114,6 +1129,366 @@ function readinessGateTone(gate: WiiiConnectActivationGate): CapabilityStatusTon
   return gate.ready ? "ok" : "warn";
 }
 
+function requirementDisplayLabel(value: string): string {
+  const labels: Record<string, string> = {
+    audit_ledger: "Bật audit ledger",
+    complete_provider_oauth: "Hoàn tất OAuth/Connect Link",
+    connect_policy: "Bật connect policy",
+    connect_provider_account: "Kết nối account provider",
+    curate_readonly_action: "Khai báo action read-only đã kiểm duyệt",
+    curated_action_catalog: "Khai báo catalog action đã kiểm duyệt",
+    curated_readonly_action: "Khai báo action read-only đã kiểm duyệt",
+    durable_audit_ledger: "Bật audit ledger bền vững",
+    enable_curated_action_catalog: "Bật catalog action đã kiểm duyệt",
+    enable_provider_agent_policy: "Bật policy agent cho provider",
+    encrypted_vault_ref: "Cấu hình vault/token ref",
+    execution_gateway: "Mở execution gateway read-only",
+    provider_adapter: "Bind adapter provider",
+    provider_managed_vault_ref: "Dùng vault ref do provider quản lý",
+    provider_registered: "Khai báo provider trong registry",
+    scope_policy: "Bật scope policy",
+    vault: "Cấu hình vault",
+  };
+  return labels[value] ?? compactText(value.replaceAll("_", " "));
+}
+
+function blockedReadinessGates(
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+): WiiiConnectActivationGate[] {
+  return (readiness?.gates ?? []).filter((gate) => !gate.ready);
+}
+
+function readableRequiredNext(
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+): string[] {
+  const values = blockedReadinessGates(readiness).flatMap((gate) =>
+    gate.required_next && gate.required_next.length > 0
+      ? gate.required_next
+      : [gate.key],
+  );
+  return Array.from(new Set(values.map(requirementDisplayLabel)));
+}
+
+function readinessConnectionPresent(
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+): boolean {
+  const state = readiness?.connection?.state;
+  return Boolean(
+    readiness?.connection?.present &&
+      state !== "disabled" &&
+      state !== "not_connected" &&
+      state !== "missing",
+  );
+}
+
+function providerHasUsableConnection(
+  connection: WiiiConnectProviderConnectionRecord | undefined,
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+): boolean {
+  if (connection) {
+    return Boolean(
+      (connection.active || connection.state === "connected") &&
+        connection.state !== "disabled",
+    );
+  }
+  return readinessConnectionPresent(readiness);
+}
+
+function gatewayLifecycleTone(
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+): CapabilityStatusTone {
+  if (readiness?.ready_to_execute_readonly) return "ok";
+  const status = String(readiness?.execution_gateway?.status ?? "").toLowerCase();
+  if (!status) return "off";
+  if (["allowed", "ready", "ok", "enabled"].includes(status)) return "ok";
+  if (["blocked", "denied", "disabled", "error", "missing"].includes(status)) return "warn";
+  return "pending";
+}
+
+function providerLifecycleStages({
+  card,
+  readiness,
+  providerConnection,
+  connectionList,
+}: {
+  card: CatalogCard;
+  readiness: WiiiConnectActivationReadinessResponse | undefined;
+  providerConnection: WiiiConnectProviderConnectionRecord | undefined;
+  connectionList?: ProviderConnectionListState;
+}): ProviderLifecycleStage[] {
+  const accountPresent = providerHasUsableConnection(providerConnection, readiness);
+  const accountState =
+    providerConnection?.state ??
+    readiness?.connection?.state ??
+    (connectionList?.loading ? "waiting" : undefined);
+  const registryFromBackend = card.registrySource === "backend";
+  const registryTone: CapabilityStatusTone =
+    card.provider === "wiii_native" ? card.tone : registryFromBackend ? "ok" : "off";
+  const accountTone: CapabilityStatusTone = providerConnection
+    ? providerConnectionTone(providerConnection, connectionList?.response)
+    : accountPresent
+      ? "ok"
+      : connectionList?.loading || readinessStateIsConnectable(readiness)
+        ? "pending"
+        : "off";
+  const agentTone: CapabilityStatusTone = readiness
+    ? readiness.ready_to_execute_readonly
+      ? "ok"
+      : accountPresent
+        ? "warn"
+        : readiness.ready_to_connect
+          ? "pending"
+          : "off"
+    : card.agentReady
+      ? "ok"
+      : "off";
+
+  return [
+    {
+      id: "registry",
+      label: "Registry",
+      value:
+        card.provider === "wiii_native"
+          ? "Runtime native"
+          : registryFromBackend
+            ? "Đã đăng ký"
+            : "Local fallback",
+      detail:
+        card.provider === "wiii_native"
+          ? "Đọc từ snapshot runtime hoặc fallback client."
+          : registryFromBackend
+            ? "Provider do backend khai báo; UI không tự giữ secret."
+            : "Chỉ là catalog tham khảo, chưa được phép kết nối.",
+      tone: registryTone,
+    },
+    {
+      id: "account",
+      label: "Account",
+      value: accountPresent
+        ? statusLabel(accountState)
+        : connectionList?.loading
+          ? "Đang đọc"
+          : "Chưa có account",
+      detail: accountPresent
+        ? providerConnection
+          ? providerConnectionSummary(providerConnection)
+          : compactText(readiness?.connection?.reason, "Provider account đã được backend ghi nhận.")
+        : "Cần OAuth/Connect Link trước khi agent nhìn thấy account này.",
+      tone: accountTone,
+    },
+    {
+      id: "agent-policy",
+      label: "Agent policy",
+      value: readiness?.ready_to_execute_readonly
+        ? "Đã cho phép read-only"
+        : card.agentReady
+          ? "Agent-ready"
+          : accountPresent
+            ? "Chờ policy"
+            : "Chưa agent-ready",
+      detail: readiness?.ready_to_execute_readonly
+        ? "Action read-only đã qua scope policy và catalog đã kiểm duyệt."
+        : accountPresent
+          ? "Account đã kết nối nhưng policy/gateway vẫn đang chặn agent."
+          : "Agent chưa được phép dùng provider này.",
+      tone: agentTone,
+    },
+    {
+      id: "gateway",
+      label: "Gateway",
+      value: readinessGatewayStatus(readiness),
+      detail: compactText(
+        readiness?.execution_gateway?.reason,
+        "Chưa có quyết định execution gateway.",
+      ),
+      tone: gatewayLifecycleTone(readiness),
+    },
+  ];
+}
+
+function readinessStateIsConnectable(
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+): boolean {
+  return Boolean(readiness?.ready_to_connect);
+}
+
+function providerNextAction({
+  card,
+  readiness,
+  providerConnection,
+  connectionList,
+}: {
+  card: CatalogCard;
+  readiness: WiiiConnectActivationReadinessResponse | undefined;
+  providerConnection: WiiiConnectProviderConnectionRecord | undefined;
+  connectionList?: ProviderConnectionListState;
+}): ProviderNextAction {
+  if (card.provider === "wiii_native") {
+    return {
+      title: card.agentReady ? "Đang dùng được trong runtime" : "Chờ runtime snapshot",
+      detail: card.agentReady
+        ? "Kết nối native này đã có trong path/capability hiện tại."
+        : "Mở một lượt chat hoặc host tương ứng để backend phát snapshot mới.",
+      tone: card.agentReady ? "ok" : "pending",
+      items: card.requirements?.map(requirementDisplayLabel).slice(0, 3) ?? [],
+    };
+  }
+
+  if (card.registrySource !== "backend") {
+    return {
+      title: "Chưa thể kết nối an toàn",
+      detail:
+        "Provider này mới là catalog cục bộ. Cần backend adapter, vault, policy và audit trước khi mở OAuth thật.",
+      tone: "warn",
+      items: [],
+    };
+  }
+
+  if (!readiness && !connectionList?.response) {
+    return {
+      title: "Đọc trạng thái backend trước",
+      detail:
+        "Bấm kiểm tra readiness hoặc làm mới trạng thái để Wiii đọc account, policy và gateway thật.",
+      tone: "pending",
+      items: ["Không dùng dữ liệu đoán từ UI", "Không hiển thị token/provider payload"],
+    };
+  }
+
+  if (readiness?.ready_to_execute_readonly) {
+    return {
+      title: "Sẵn sàng cho agent read-only",
+      detail:
+        "Agent có thể dùng action read-only đã kiểm duyệt. Write/mutation vẫn phải qua allowlist và approval riêng.",
+      tone: "ok",
+      items: ["Không tự mở write/admin scope", "Theo dõi audit khi agent gọi tool"],
+    };
+  }
+
+  const hasAccount = providerHasUsableConnection(providerConnection, readiness);
+  if (!hasAccount && readiness?.ready_to_connect) {
+    return {
+      title: "Mở OAuth/Connect Link với provider",
+      detail:
+        "Bấm Kết nối qua Wiii để backend cấp link. Sau khi OAuth xong, Wiii sẽ poll lại connection thật.",
+      tone: "pending",
+      items: readableRequiredNext(readiness),
+    };
+  }
+
+  if (!hasAccount) {
+    return {
+      title: "Chưa có account provider",
+      detail:
+        "Backend chưa thấy account dùng được. Cần hoàn tất connect policy/vault trước khi mở cho agent.",
+      tone: "warn",
+      items: readableRequiredNext(readiness),
+    };
+  }
+
+  const nextItems = readableRequiredNext(readiness);
+  return {
+    title: "Hoàn tất policy/gateway trước khi agent dùng",
+    detail:
+      "Account đã kết nối, nhưng agent chưa được phép chạy action. Đây là fail-closed đúng: UI không tự cấp quyền thay backend.",
+    tone: "warn",
+    items: nextItems.length > 0 ? nextItems : ["Kiểm tra scope policy", "Kiểm tra execution gateway"],
+  };
+}
+
+function ProviderLifecyclePanel({
+  card,
+  readiness,
+  providerConnection,
+  connectionList,
+}: {
+  card: CatalogCard;
+  readiness: WiiiConnectActivationReadinessResponse | undefined;
+  providerConnection: WiiiConnectProviderConnectionRecord | undefined;
+  connectionList?: ProviderConnectionListState;
+}) {
+  const stages = providerLifecycleStages({
+    card,
+    readiness,
+    providerConnection,
+    connectionList,
+  });
+  const nextAction = providerNextAction({
+    card,
+    readiness,
+    providerConnection,
+    connectionList,
+  });
+
+  return (
+    <section
+      className="mt-4 rounded-md border border-[var(--border)] bg-surface-secondary px-3 py-3"
+      data-testid="wiii-connect-lifecycle-panel"
+    >
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold uppercase text-text-tertiary">
+          Vòng đời kết nối
+        </div>
+        <StatusPill tone={nextAction.tone}>
+          {nextAction.tone === "ok"
+            ? "ready"
+            : nextAction.tone === "pending"
+              ? "đang chờ"
+              : nextAction.tone === "warn"
+                ? "blocked"
+                : "chưa bật"}
+        </StatusPill>
+      </div>
+
+      <ol className="grid gap-2 sm:grid-cols-2">
+        {stages.map((stage, index) => (
+          <li
+            key={`${card.id}-lifecycle-${stage.id}`}
+            className="min-w-0 rounded-md border border-[var(--border)] bg-surface px-2 py-2"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-xs font-medium text-text-tertiary">
+                {index + 1}. {stage.label}
+              </span>
+              <span className={`h-2 w-2 shrink-0 rounded-full ${statusDotClasses[stage.tone]}`} />
+            </div>
+            <div className="mt-1 truncate text-sm font-semibold text-text">
+              {stage.value}
+            </div>
+            <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-text-secondary">
+              {stage.detail}
+            </p>
+          </li>
+        ))}
+      </ol>
+
+      <div
+        className={`mt-3 rounded-md border px-3 py-2 ${statusToneClasses[nextAction.tone]}`}
+        data-testid="wiii-connect-next-action"
+      >
+        <div className="text-xs font-semibold uppercase">Bước tiếp theo</div>
+        <div className="mt-1 text-sm font-semibold">{nextAction.title}</div>
+        <p className="mt-1 text-xs leading-relaxed">{nextAction.detail}</p>
+        {nextAction.items.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {nextAction.items.slice(0, 4).map((item) => (
+              <span
+                key={`${card.id}-next-${item}`}
+                className="rounded-md border border-current/20 bg-white/45 px-2 py-1 text-xs"
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <p className="mt-2 text-xs text-text-tertiary">
+        Agent không tự cấp quyền. Scope/write/admin phải đến từ policy hoặc approval riêng.
+      </p>
+    </section>
+  );
+}
+
 function ConnectionDetailPanel({
   card,
   readinessState,
@@ -1211,6 +1586,13 @@ function ConnectionDetailPanel({
           </div>
         ))}
       </dl>
+
+      <ProviderLifecyclePanel
+        card={card}
+        readiness={readiness}
+        providerConnection={providerConnection}
+        connectionList={connectionList}
+      />
 
       {card.requirements && card.requirements.length > 0 && (
         <div className="mt-4 rounded-md border border-[var(--border)] bg-surface-secondary px-3 py-3">
