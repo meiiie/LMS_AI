@@ -512,6 +512,10 @@ class WiiiConnectComposioAcceptance:
                     "explicit_connection_selected": bool(
                         getattr(self.args, "connection_id", "")
                     ),
+                    "connection_selected_for_action": bool(
+                        getattr(self.args, "connection_id", "")
+                        or self.selected_connection_id
+                    ),
                     "arguments_present": bool(
                         parse_json_argument_object(
                             getattr(self.args, "arguments_json", "{}")
