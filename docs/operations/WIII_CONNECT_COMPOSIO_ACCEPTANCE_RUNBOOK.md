@@ -49,6 +49,19 @@ Do not enable write/apply/admin actions in this phase.
 
 Run from `maritime-ai-service/`.
 
+Before issuing a Connect Link, check activation readiness through Wiii:
+
+```powershell
+curl -H "Authorization: Bearer <jwt>" "http://localhost:8080/api/v1/wiii-connect/providers/gmail/activation-readiness?probe_database=true"
+```
+
+The response must be treated as the operator preflight. It does not contact
+Composio, does not create an OAuth session, and does not expose raw connection
+IDs or secrets. `ready_to_connect=true` means Wiii has enough local policy,
+adapter, vault, storage, and audit readiness to issue a backend-owned Connect
+Link. `ready_to_execute_readonly=true` additionally requires a live stored
+connection and a runtime-enabled curated read-only action.
+
 For local dev-login:
 
 ```powershell
@@ -96,6 +109,8 @@ Composio is ready to enable only when all of these are true:
 - adapter readiness reports `authorization_ready=true`;
 - storage readiness reports persistent connection and audit tables;
 - audit readiness reports `persistent=true`;
+- activation readiness reports `ready_to_connect=true` before OAuth and
+  `ready_to_execute_readonly=true` after OAuth plus action allowlist;
 - provider registry returns Gmail as a Composio provider;
 - curated actions include only the intended read-only action;
 - execution gateway blocks a missing-connection execution request;

@@ -24,6 +24,11 @@ from .action_catalog import (
     get_wiii_connect_curated_action,
     list_wiii_connect_curated_actions,
 )
+from .activation_readiness import (
+    WIII_CONNECT_ACTIVATION_READINESS_VERSION,
+    WiiiConnectActivationGate,
+    build_activation_readiness_metadata,
+)
 from .audit_ledger import (
     WIII_CONNECT_AUDIT_LEDGER_VERSION,
     WiiiConnectAuditLedgerRecord,
@@ -133,6 +138,7 @@ from .snapshot import (
 
 __all__ = [
     "WIII_CONNECT_ADAPTER_VERSION",
+    "WIII_CONNECT_ACTIVATION_READINESS_VERSION",
     "WIII_CONNECT_ACTION_CATALOG_VERSION",
     "WIII_CONNECT_AUDIT_LEDGER_VERSION",
     "WIII_CONNECT_CALLBACK_CONTRACT_VERSION",
@@ -149,6 +155,7 @@ __all__ = [
     "WIII_CONNECT_SESSION_CONTRACT_VERSION",
     "WIII_CONNECT_VAULT_CONTRACT_VERSION",
     "WiiiConnectAuthorizationUrlAuditEvent",
+    "WiiiConnectActivationGate",
     "WiiiConnectAuthorizationUrlDecision",
     "WiiiConnectAuthorizationUrlRequest",
     "WiiiConnectCuratedAction",
@@ -196,6 +203,7 @@ __all__ = [
     "append_wiii_connect_callback_state",
     "begin_connection_session",
     "build_composio_adapter_config",
+    "build_activation_readiness_metadata",
     "build_composio_execution_enabled_entry",
     "build_composio_provider_adapter_capability",
     "build_wiii_connect_snapshot",

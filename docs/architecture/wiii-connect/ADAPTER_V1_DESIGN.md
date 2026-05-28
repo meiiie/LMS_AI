@@ -106,6 +106,7 @@ POST /api/v1/wiii-connect/providers/{slug}/authorization-url
 GET  /api/v1/wiii-connect/providers/{slug}/connections
 DELETE /api/v1/wiii-connect/providers/{slug}/connections/{connection_id}
 GET  /api/v1/wiii-connect/providers/{slug}/actions
+GET  /api/v1/wiii-connect/providers/{slug}/activation-readiness
 POST /api/v1/wiii-connect/providers/{slug}/execution-decision
 POST /api/v1/wiii-connect/providers/{slug}/execute
 GET  /api/v1/wiii-connect/providers/{slug}/callback
@@ -126,6 +127,14 @@ opens only backend-issued Connect Links, polls sanitized connection records
 through Wiii, and still keeps provider connection state separate from
 `agent_ready` execution state. The frontend never calls Composio directly and
 never receives provider tokens or raw payloads.
+
+The activation readiness endpoint is the single operator/UI preflight for a
+provider. It performs no provider network calls, creates no Connect Link, and
+does not mutate local connection rows. It aggregates registry, provider adapter,
+provider-managed vault, durable storage, audit ledger, curated read-only action,
+local connection, and execution gateway state into one privacy-safe response so
+operators can see whether Wiii is ready to connect or execute a read-only action
+without guessing from logs.
 
 ## Core Entities
 
