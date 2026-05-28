@@ -307,9 +307,47 @@ def test_public_metadata_does_not_expose_vault_key_or_raw_secret_values():
         "vault": connection.vault_ref.to_public_metadata(),
     }
     serialized = json.dumps(metadata, sort_keys=True)
+    vault_serialized = json.dumps(metadata["vault"], sort_keys=True)
 
     assert metadata["connection"]["vault_ref_present"] is True
     assert metadata["vault"]["vault_ref_present"] is True
+    assert metadata["vault"]["connection_ref_present"] is True
     assert metadata["entry"]["required_fields"][0]["key"] == "client_secret"
     assert "oauth-token-secret" not in serialized
     assert "vault://tenant/private" not in serialized
+    assert "conn_1" not in vault_serialized
+    assert "connection_id" not in vault_serialized
+
+
+def test_execution_audit_event_reports_connection_presence_only():
+    from app.engine.wiii_connect.adapter_v1 import (
+        WiiiConnectAuditEvent,
+        WiiiConnectExecutionDecision,
+        WiiiConnectExecutionRequest,
+    )
+
+    request = WiiiConnectExecutionRequest(
+        provider_slug="gmail",
+        action_slug="GMAIL_FETCH_EMAILS",
+        path="external_app_action",
+    )
+    decision = WiiiConnectExecutionDecision(
+        outcome="allowed",
+        reason="allowed",
+        provider_slug="gmail",
+        action_slug="GMAIL_FETCH_EMAILS",
+        path="external_app_action",
+    )
+    event = WiiiConnectAuditEvent(
+        stage="started",
+        request=request,
+        decision=decision,
+        connection_id="ca_secret_provider_ref",
+    )
+
+    metadata = event.to_metadata()
+    serialized = json.dumps(metadata, sort_keys=True)
+
+    assert metadata["connection_ref_present"] is True
+    assert "ca_secret_provider_ref" not in serialized
+    assert "connection_id" not in serialized

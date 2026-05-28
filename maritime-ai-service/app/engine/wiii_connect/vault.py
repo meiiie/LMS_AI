@@ -82,7 +82,7 @@ class WiiiConnectVaultSecretWriteRequest:
     def to_audit_metadata(self) -> dict[str, Any]:
         return {
             "provider_slug": self.provider_slug,
-            "connection_id": self.connection_id,
+            "connection_ref_present": bool(self.connection_id),
             "secret_kind": self.secret_kind,
             "secret_material_present": self.secret_material_present,
             "metadata_keys": [_safe_metadata_key(key) for key in self.metadata_keys],
@@ -129,7 +129,7 @@ class WiiiConnectVaultSecretWriteDecision:
             "status": self.status,
             "reason": self.reason,
             "provider_slug": self.provider_slug,
-            "connection_id": self.connection_id,
+            "connection_ref_present": bool(self.connection_id),
             "secret_kind": self.secret_kind,
             "vault_ref": (
                 self.vault_ref.to_public_metadata() if self.vault_ref is not None else None

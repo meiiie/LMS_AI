@@ -142,7 +142,10 @@ def test_connection_upsert_stores_only_public_vault_ref_metadata():
     assert scopes["read"] is True
     assert scopes["write"] is True
     assert vault_ref["vault_ref_present"] is True
+    assert vault_ref["connection_ref_present"] is True
     assert vault_ref["secret_version"] == "v1"
+    assert "conn_1" not in json.dumps(vault_ref, sort_keys=True)
+    assert "connection_id" not in vault_ref
     assert "oauth-token-secret" not in serialized
     assert "vault://tenant/private" not in serialized
     assert session.commits == 1
