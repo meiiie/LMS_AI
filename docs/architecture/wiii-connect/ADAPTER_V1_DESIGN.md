@@ -487,9 +487,10 @@ Wiii must not expose Composio's broad meta-tools directly to normal chat. The
 path governor selects the product path first. Only then may a scoped integration
 agent receive curated action schemas for the selected provider.
 
-Execution preflight and execution calls must pass an explicit Wiii connection
-id. They must not fall back to the latest stored account for a provider. This
-keeps multi-account integrations deterministic and matches the source-audited
+Execution preflight and execution calls must pass an explicit Wiii opaque
+`connection_ref` (`wcn_*`). They must not accept raw provider connected-account
+IDs or fall back to the latest stored account for a provider. This keeps
+multi-account integrations deterministic and matches the source-audited
 OpenHuman/Composio pattern where connection state is visible first, then a
 specific connected account is chosen before tools run.
 
