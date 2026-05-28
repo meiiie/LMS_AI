@@ -160,6 +160,8 @@ Composio is ready to enable only when all of these are true:
   `connection_selection_required` as a failed policy proof;
 - Connect Link is issued by Wiii backend;
 - after OAuth, connection listing returns an active connected account;
+- connection listing returns an opaque `connection_ref`, not the raw provider
+  connected-account ID;
 - execution gateway allows the selected read-only action only for the stored
   org/user connection;
 - optional execution succeeds through `POST /api/v1/wiii-connect/providers/gmail/execute`;

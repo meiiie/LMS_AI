@@ -58,7 +58,7 @@ export async function fetchWiiiConnectProviderActivationReadiness(
   slug: string,
   options: {
     actionSlug?: string;
-    connectionId?: string;
+    connectionRef?: string;
     probeDatabase?: boolean;
   } = {},
 ): Promise<WiiiConnectActivationReadinessResponse> {
@@ -66,7 +66,7 @@ export async function fetchWiiiConnectProviderActivationReadiness(
     `/api/v1/wiii-connect/providers/${encodeURIComponent(slug)}/activation-readiness`,
     {
       action_slug: options.actionSlug ?? "GMAIL_FETCH_EMAILS",
-      connection_id: options.connectionId ?? "",
+      connection_ref: options.connectionRef ?? "",
       probe_database: options.probeDatabase === false ? "false" : "true",
     },
   );

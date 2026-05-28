@@ -181,7 +181,6 @@ class WiiiConnectPersistentStorage:
         owner = _normalize_owner(organization_id=organization_id, user_id=user_id)
         if owner is None or not connection.connection_id or not connection.provider_slug:
             return False
-        metadata = connection.to_public_metadata()
         self._ensure_initialized()
         if self._session_factory is None:
             return False
@@ -224,22 +223,19 @@ class WiiiConnectPersistentStorage:
                         "provider_kind": str(provider_kind or "unknown").strip()
                         or "unknown",
                         "state": connection.state,
-                        "scopes": _json_dumps(metadata.get("scopes", {})),
+                        "scopes": _json_dumps(connection.scopes.to_metadata()),
                         "vault_ref": _json_dumps(
                             connection.vault_ref.to_public_metadata()
                             if connection.vault_ref is not None
                             else {}
                         ),
-                        "account_label": metadata.get("account_label") or None,
-                        "external_account_ref": (
-                            metadata.get("external_account_ref") or None
-                        ),
-                        "reason": metadata.get("reason") or None,
-                        "warnings": _json_dumps(metadata.get("warnings", [])),
+                        "account_label": connection.account_label or None,
+                        "external_account_ref": connection.external_account_ref
+                        or None,
+                        "reason": connection.reason or None,
+                        "warnings": _json_dumps(list(connection.warnings)),
                         "updated_at": datetime.now(UTC),
-                        "last_checked_at": _parse_datetime(
-                            metadata.get("last_checked_at")
-                        ),
+                        "last_checked_at": _parse_datetime(connection.last_checked_at),
                         "last_used_at": datetime.now(UTC)
                         if connection.active
                         else None,
@@ -303,40 +299,63 @@ class WiiiConnectPersistentStorage:
             logger.warning("Wiii Connect connection fetch failed: %s", exc)
             return None
 
-        if row is None:
-            return None
-        scopes = _decode_json_object(_row_value(row, "scopes"), default={})
-        vault_ref = _decode_json_object(_row_value(row, "vault_ref"), default={})
-        warnings = _decode_json_list(_row_value(row, "warnings"))
-        connection_id_value = str(_row_value(row, "id") or "").strip()
-        has_vault_ref = bool(vault_ref.get("vault_ref_present"))
-        return WiiiConnectConnectionRecordV1(
-            connection_id=connection_id_value,
-            provider_slug=str(_row_value(row, "provider_slug") or slug).strip(),
-            state=normalize_connection_state(str(_row_value(row, "state") or "")),
-            scopes=WiiiConnectScopeGrant(
-                read=bool(scopes.get("read")),
-                preview=bool(scopes.get("preview")),
-                write=bool(scopes.get("write")),
-                apply=bool(scopes.get("apply")),
-                admin=bool(scopes.get("admin")),
-            ),
-            vault_ref=(
-                WiiiConnectVaultSecretRef(
-                    provider_slug=slug,
-                    connection_id=connection_id_value,
-                    vault_key_id="stored_opaque_ref",
-                    secret_version=str(vault_ref.get("secret_version") or ""),
+        return _connection_record_from_row(row, fallback_provider_slug=slug)
+
+    def list_connection_records(
+        self,
+        *,
+        organization_id: str,
+        user_id: str,
+        provider_slug: str,
+        limit: int = 100,
+    ) -> tuple[WiiiConnectConnectionRecordV1, ...]:
+        """Fetch sanitized connection rows for resolving opaque public refs."""
+
+        owner = _normalize_owner(organization_id=organization_id, user_id=user_id)
+        slug = str(provider_slug or "").strip().lower().replace("-", "_")
+        if owner is None or not slug:
+            return ()
+        self._ensure_initialized()
+        if self._session_factory is None:
+            return ()
+
+        safe_limit = max(1, min(int(limit or 100), 500))
+        try:
+            with self._session_factory() as session:
+                result = session.execute(
+                    text(
+                        f"SELECT id, provider_slug, state, scopes, vault_ref, "
+                        f"account_label, external_account_ref, reason, warnings, "
+                        f"last_checked_at "
+                        f"FROM {self.CONNECTIONS_TABLE} "
+                        f"WHERE organization_id = :organization_id "
+                        f"AND user_id = :user_id "
+                        f"AND provider_slug = :provider_slug "
+                        f"ORDER BY updated_at DESC "
+                        f"LIMIT :limit"
+                    ),
+                    {
+                        "organization_id": owner["organization_id"],
+                        "user_id": owner["user_id"],
+                        "provider_slug": slug,
+                        "limit": safe_limit,
+                    },
                 )
-                if has_vault_ref
-                else None
-            ),
-            account_label=str(_row_value(row, "account_label") or ""),
-            external_account_ref=str(_row_value(row, "external_account_ref") or ""),
-            last_checked_at=_datetime_to_iso(_row_value(row, "last_checked_at")),
-            reason=str(_row_value(row, "reason") or ""),
-            warnings=tuple(warnings),
-        )
+                mappings = getattr(result, "mappings", None)
+                rows = mappings().all() if callable(mappings) else result.fetchall()
+        except Exception as exc:
+            if _is_missing_storage_table_error(exc):
+                logger.info("Wiii Connect connection storage unavailable; skipping list.")
+                return ()
+            logger.warning("Wiii Connect connection list failed: %s", exc)
+            return ()
+
+        records: list[WiiiConnectConnectionRecordV1] = []
+        for row in rows:
+            record = _connection_record_from_row(row, fallback_provider_slug=slug)
+            if record is not None:
+                records.append(record)
+        return tuple(records)
 
     def expire_stale_pending_connections(
         self,
@@ -447,6 +466,52 @@ def _fetch_mapping_row(result: Any) -> Any | None:
     if callable(fetchone):
         return fetchone()
     return None
+
+
+def _connection_record_from_row(
+    row: Any | None,
+    *,
+    fallback_provider_slug: str,
+) -> WiiiConnectConnectionRecordV1 | None:
+    if row is None:
+        return None
+    slug = str(fallback_provider_slug or "").strip().lower().replace("-", "_")
+    scopes = _decode_json_object(_row_value(row, "scopes"), default={})
+    vault_ref = _decode_json_object(_row_value(row, "vault_ref"), default={})
+    warnings = _decode_json_list(_row_value(row, "warnings"))
+    connection_id_value = str(_row_value(row, "id") or "").strip()
+    if not connection_id_value:
+        return None
+    provider_slug = str(_row_value(row, "provider_slug") or slug).strip()
+    normalized_provider = provider_slug.lower().replace("-", "_") or slug
+    has_vault_ref = bool(vault_ref.get("vault_ref_present"))
+    return WiiiConnectConnectionRecordV1(
+        connection_id=connection_id_value,
+        provider_slug=normalized_provider,
+        state=normalize_connection_state(str(_row_value(row, "state") or "")),
+        scopes=WiiiConnectScopeGrant(
+            read=bool(scopes.get("read")),
+            preview=bool(scopes.get("preview")),
+            write=bool(scopes.get("write")),
+            apply=bool(scopes.get("apply")),
+            admin=bool(scopes.get("admin")),
+        ),
+        vault_ref=(
+            WiiiConnectVaultSecretRef(
+                provider_slug=normalized_provider,
+                connection_id=connection_id_value,
+                vault_key_id="stored_opaque_ref",
+                secret_version=str(vault_ref.get("secret_version") or ""),
+            )
+            if has_vault_ref
+            else None
+        ),
+        account_label=str(_row_value(row, "account_label") or ""),
+        external_account_ref=str(_row_value(row, "external_account_ref") or ""),
+        last_checked_at=_datetime_to_iso(_row_value(row, "last_checked_at")),
+        reason=str(_row_value(row, "reason") or ""),
+        warnings=tuple(warnings),
+    )
 
 
 def _row_value(row: Any, key: str) -> Any:

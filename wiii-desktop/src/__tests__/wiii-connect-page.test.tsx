@@ -305,7 +305,7 @@ describe("WiiiConnectPage", () => {
     expect(screen.getByText("complete_provider_oauth")).toBeTruthy();
     expect(mockFetchWiiiConnectProviderActivationReadiness).toHaveBeenCalledWith("gmail", {
       actionSlug: "GMAIL_FETCH_EMAILS",
-      connectionId: undefined,
+      connectionRef: "",
       probeDatabase: true,
     });
     expect(screen.queryByText("secret-api-key")).toBeNull();
@@ -436,14 +436,14 @@ describe("WiiiConnectPage", () => {
       connections: [
         {
           version: "wiii_connect_adapter.v1",
-          connection_id: "conn_public_1",
+          connection_ref: "wcn_public_1",
           provider_slug: "facebook",
           state: "connected",
           active: true,
           scopes: { read: true, write: false },
           vault_ref_present: true,
           account_label: "Wiii Facebook Page",
-          external_account_ref: "fb_page_public",
+          external_account_ref_present: true,
           last_checked_at: "2026-05-28T00:00:00Z",
           reason: "provider_listed",
           warnings: [],
@@ -480,7 +480,7 @@ describe("WiiiConnectPage", () => {
     expect(await screen.findByText("Connection thật")).toBeTruthy();
     expect(screen.getAllByText("Wiii Facebook Page").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Đã kết nối").length).toBeGreaterThan(0);
-    expect(container.textContent).not.toContain("conn_public_1");
+    expect(container.textContent).not.toContain("wcn_public_1");
     expect(container.textContent).not.toContain("fb_page_public");
     expect(container.textContent).not.toContain("https://composio.example/connect/safe");
     expect(screen.queryByText("access_token")).toBeNull();
@@ -545,14 +545,14 @@ describe("WiiiConnectPage", () => {
       connections: [
         {
           version: "wiii_connect_adapter.v1",
-          connection_id: "conn_public_1",
+          connection_ref: "wcn_public_1",
           provider_slug: "facebook",
           state: "connected",
           active: true,
           scopes: { read: true, write: false },
           vault_ref_present: true,
           account_label: "Wiii Facebook Page",
-          external_account_ref: "fb_page_public",
+          external_account_ref_present: true,
           last_checked_at: "2026-05-28T00:00:00Z",
           reason: "provider_listed",
           warnings: [],
@@ -586,12 +586,12 @@ describe("WiiiConnectPage", () => {
 
     expect(mockDisconnectWiiiConnectProviderConnection).toHaveBeenCalledWith(
       "facebook",
-      "conn_public_1",
+      "wcn_public_1",
     );
     expect((await screen.findByTestId("wiii-connect-disconnect-status")).textContent).toContain("local");
     expect(screen.getByTestId("wiii-connect-disconnect-button").textContent?.toLowerCase()).toContain("ng");
     expect(screen.getAllByText("user_disconnect_requested").length).toBeGreaterThan(0);
-    expect(screen.queryByText("conn_public_1")).toBeNull();
+    expect(screen.queryByText("wcn_public_1")).toBeNull();
     expect(screen.queryByText("secret-token")).toBeNull();
     expect(screen.queryByText("access_token")).toBeNull();
 

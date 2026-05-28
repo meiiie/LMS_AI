@@ -4,8 +4,9 @@ import json
 
 
 class _FakeResult:
-    def __init__(self, row=None, *, rowcount: int = 0):
+    def __init__(self, row=None, *, rows=None, rowcount: int = 0):
         self._row = row
+        self._rows = rows
         self.rowcount = rowcount
 
     def mappings(self):
@@ -14,10 +15,17 @@ class _FakeResult:
     def fetchone(self):
         return self._row
 
+    def all(self):
+        return list(self._rows if self._rows is not None else [self._row])
+
+    def fetchall(self):
+        return self.all()
+
 
 class _FakeSession:
-    def __init__(self, row=None, *, rowcount: int = 0):
+    def __init__(self, row=None, *, rows=None, rowcount: int = 0):
         self.row = row
+        self.rows = rows
         self.rowcount = rowcount
         self.executions = []
         self.commits = 0
@@ -35,7 +43,7 @@ class _FakeSession:
                 "params": dict(params or {}),
             }
         )
-        return _FakeResult(self.row, rowcount=self.rowcount)
+        return _FakeResult(self.row, rows=self.rows, rowcount=self.rowcount)
 
     def commit(self):
         self.commits += 1
@@ -189,6 +197,46 @@ def test_connection_fetch_rehydrates_sanitized_policy_record():
     assert record.to_public_metadata()["vault_ref_present"] is True
     assert "provider-managed://" not in serialized
     assert "oauth-token" not in serialized
+
+
+def test_connection_list_rehydrates_rows_for_opaque_ref_resolution():
+    from app.engine.wiii_connect.adapter_v1 import public_connection_ref
+    from app.engine.wiii_connect.persistent_storage import WiiiConnectPersistentStorage
+
+    session = _FakeSession(
+        rows=[
+            {
+                "id": "conn_1",
+                "provider_slug": "facebook",
+                "state": "ACTIVE",
+                "scopes": json.dumps({"read": True}),
+                "vault_ref": json.dumps(
+                    {"vault_ref_present": True, "secret_version": "provider_managed"}
+                ),
+                "account_label": "Wiii Page",
+                "external_account_ref": "page_1",
+                "reason": "provider_connection_list",
+                "warnings": json.dumps([]),
+                "last_checked_at": "2026-05-28T00:00:00+00:00",
+            }
+        ],
+    )
+    storage = WiiiConnectPersistentStorage(session_factory=lambda: session)
+
+    records = storage.list_connection_records(
+        organization_id="org_1",
+        user_id="user_1",
+        provider_slug="facebook",
+    )
+    public = records[0].to_public_metadata()
+    serialized = json.dumps(public, sort_keys=True)
+
+    assert len(records) == 1
+    assert records[0].connection_id == "conn_1"
+    assert public["connection_ref"] == public_connection_ref("facebook", "conn_1")
+    assert "conn_1" not in serialized
+    assert "page_1" not in serialized
+    assert "connection_id" not in serialized
 
 
 def test_persistent_storage_rejects_missing_owner_boundary():

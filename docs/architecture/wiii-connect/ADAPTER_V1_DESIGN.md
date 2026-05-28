@@ -126,7 +126,7 @@ authorization and connection-list endpoints for backend registry providers. It
 opens only backend-issued Connect Links, polls sanitized connection records
 through Wiii, and still keeps provider connection state separate from
 `agent_ready` execution state. The frontend never calls Composio directly and
-never receives provider tokens or raw payloads.
+never receives provider tokens, raw payloads, or raw provider connection IDs.
 
 The activation readiness endpoint is the single operator/UI preflight for a
 provider. It performs no provider network calls, creates no Connect Link, and
@@ -173,10 +173,12 @@ without guessing from logs.
 
 `WiiiConnectConnectionRecordV1`
 
-- provider slug, connection ID, normalized lifecycle state;
+- provider slug, opaque public `connection_ref`, normalized lifecycle state;
+- raw provider connection ID stays backend-internal for provider execute,
+  disconnect, and storage lookup;
 - granted scopes;
 - optional vault reference;
-- sanitized account label/reference only.
+- sanitized account label/reference presence only.
 
 `WiiiConnectExecutionRequest`
 

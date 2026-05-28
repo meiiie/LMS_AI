@@ -558,14 +558,16 @@ export interface WiiiConnectAuthorizationUrlDecision {
 
 export interface WiiiConnectProviderConnectionRecord {
   version: string;
-  connection_id: string;
+  connection_ref: string;
+  connection_ref_present?: boolean;
+  connection_id?: string;
   provider_slug: string;
   state: string;
   active?: boolean;
   scopes?: Record<string, boolean>;
   vault_ref_present?: boolean;
   account_label?: string;
-  external_account_ref?: string;
+  external_account_ref_present?: boolean;
   last_checked_at?: string | null;
   reason?: string;
   warnings?: string[];

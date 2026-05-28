@@ -300,6 +300,7 @@ async def test_wiii_connect_activation_readiness_api_reports_ready_without_leaks
         WiiiConnectConnectionRecordV1,
         WiiiConnectScopeGrant,
         WiiiConnectVaultSecretRef,
+        public_connection_ref,
     )
     from app.engine.wiii_connect.composio_adapter import (
         WiiiConnectComposioAdapterConfig,
@@ -311,6 +312,7 @@ async def test_wiii_connect_activation_readiness_api_reports_ready_without_leaks
     class FakeStorage:
         fetches = 0
         expires = 0
+        lists = 0
 
         def status(self, *, probe_database: bool = True):
             assert probe_database is True
@@ -336,6 +338,26 @@ async def test_wiii_connect_activation_readiness_api_reports_ready_without_leaks
             assert provider_slug == "gmail"
             assert ttl_seconds >= 60
             return 1
+
+        def list_connection_records(
+            self,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_slug: str,
+        ):
+            self.lists += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_slug == "gmail"
+            return (
+                WiiiConnectConnectionRecordV1(
+                    connection_id="ca_active",
+                    provider_slug="gmail",
+                    state="connected",
+                    scopes=WiiiConnectScopeGrant(read=True),
+                ),
+            )
 
         def get_connection_record(
             self,
@@ -395,7 +417,7 @@ async def test_wiii_connect_activation_readiness_api_reports_ready_without_leaks
             "/wiii-connect/providers/gmail/activation-readiness",
             params={
                 "action_slug": "GMAIL_FETCH_EMAILS",
-                "connection_id": "ca_active",
+                "connection_ref": public_connection_ref("gmail", "ca_active"),
             },
         )
 
@@ -420,6 +442,7 @@ async def test_wiii_connect_activation_readiness_api_reports_ready_without_leaks
     assert gates["audit_ledger"]["ready"] is True
     assert gates["curated_readonly_action"]["ready"] is True
     assert gates["execution_gateway"]["ready"] is True
+    assert fake_storage.lists == 1
     assert fake_storage.fetches == 1
     assert fake_storage.expires == 1
     assert "ca_active" not in serialized
@@ -929,9 +952,11 @@ async def test_wiii_connect_connections_api_lists_and_persists_safely(
     assert payload["status"] == "ready"
     assert payload["reason"] == "ready"
     assert payload["connection_count"] == 1
-    assert payload["connections"][0]["connection_id"] == "ca_active"
+    assert payload["connections"][0]["connection_ref"].startswith("wcn_")
     assert payload["connections"][0]["state"] == "connected"
     assert fake_storage.upserts == 1
+    assert "ca_active" not in serialized
+    assert "connection_id" not in serialized
     assert "secret-api-key" not in serialized
     assert "authcfg_fb" not in serialized
     assert "access_token" not in serialized
@@ -2060,6 +2085,9 @@ async def test_wiii_connect_callback_api_reconciles_signed_composio_connection(
     assert payload["vault_ref_issued"] is True
     assert fake_storage.audit_appends == 1
     assert fake_storage.connection_upserts == 1
+    assert payload["connection_ref"] == "pending_connection_ref"
+    assert "connection_id" not in serialized
+    assert "ca_123" not in serialized
     assert "secret-api-key" not in serialized
     assert "authcfg_fb" not in serialized
     assert "secret-value" not in serialized
