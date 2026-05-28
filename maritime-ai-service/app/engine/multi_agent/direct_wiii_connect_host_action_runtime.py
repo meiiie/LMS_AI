@@ -12,6 +12,7 @@ from app.engine.multi_agent.direct_document_host_action_runtime import (
 from app.engine.multi_agent.direct_prompt_tool_binding import _tool_name
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.wiii_connect_intent import (
+    build_wiii_connect_facebook_post_unavailable_answer,
     facebook_post_message_from_query,
     facebook_post_uses_latest_user_image,
     looks_wiii_connect_facebook_post_request,
@@ -82,6 +83,13 @@ async def execute_requested_wiii_connect_facebook_post_shortcut(
 
     if not looks_wiii_connect_facebook_post_request(query):
         return None
+
+    unavailable_answer = build_wiii_connect_facebook_post_unavailable_answer(state)
+    if unavailable_answer:
+        return build_assistant_message(
+            unavailable_answer,
+            native_tool_messages=native_tool_messages,
+        )
 
     tool = find_wiii_connect_facebook_post_preview_tool(tools)
     if tool is None:

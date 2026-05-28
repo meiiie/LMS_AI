@@ -125,9 +125,17 @@ async function buildWiiiConnectFacebookContextSnapshot(
       connection_count: connectionItems.length,
       active_connection_count: activeConnections.length,
     };
+    if (firstConnection) {
+      snapshot.connection_ref_present = Boolean(connectionRef);
+      snapshot.connection_state = firstConnection.state || "";
+      snapshot.connection_active = Boolean(firstConnection.active);
+      snapshot.blocked_reason = firstConnection.reason || firstConnection.state || "";
+    }
 
-    if (connectionRef) {
+    if (connectionRef && activeConnections.length > 0) {
       const pages = await fetchWiiiConnectFacebookPages("facebook", connectionRef);
+      snapshot.page_status = pages.status;
+      snapshot.blocked_reason = pages.status === "ready" ? "" : pages.reason || "";
       snapshot.page_count = pages.page_count;
       snapshot.page_names = (pages.pages || [])
         .map((page) => page.name)

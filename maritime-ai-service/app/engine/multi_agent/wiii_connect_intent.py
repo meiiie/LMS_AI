@@ -6,6 +6,7 @@ binding, deterministic shortcuts, and image preflight agree on the same turns.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.engine.multi_agent.direct_intent import _normalize_for_intent
@@ -22,17 +23,34 @@ def looks_wiii_connect_facebook_post_request(query: str) -> bool:
         "dang len",
         "dang thang",
         "dang luon",
+        "dang mot bai",
+        "dang 1 bai",
+        "dang giup",
+        "dang ho",
         "post",
         "publish",
         "tao bai viet",
+        "tao mot bai",
+        "tao 1 bai",
+        "tao toi bai viet",
+        "tao cho toi bai viet",
         "viet bai",
+        "viet mot bai",
+        "viet 1 bai",
         "viet post",
         "chia se",
         "len facebook",
         "facebook post",
         "bai viet tren facebook",
     )
-    return any(marker in normalized for marker in post_markers)
+    if any(marker in normalized for marker in post_markers):
+        return True
+    post_patterns = (
+        r"\b(dang|post|publish|chia se)\b.+\b(bai|post|facebook|fb|meta)\b",
+        r"\b(tao|viet)\b.+\b(bai|bai viet|post)\b",
+        r"\b(bai|bai viet|post)\b.+\b(facebook|fb|meta)\b",
+    )
+    return any(re.search(pattern, normalized) for pattern in post_patterns)
 
 
 def looks_wiii_connect_facebook_status_request(query: str) -> bool:
@@ -89,6 +107,8 @@ def build_wiii_connect_facebook_status_answer(
 
     snapshot = wiii_connect_facebook_snapshot_from_state(state)
     status = str(snapshot.get("status") or "").strip().lower()
+    connection_state = str(snapshot.get("connection_state") or "").strip().lower()
+    blocked_reason = str(snapshot.get("blocked_reason") or "").strip().lower()
     page_names = snapshot.get("page_names")
     page_label = ""
     if isinstance(page_names, list):
@@ -96,6 +116,7 @@ def build_wiii_connect_facebook_status_answer(
         if names:
             page_label = ", ".join(names[:3])
     active_count = snapshot.get("active_connection_count")
+    connection_count = snapshot.get("connection_count")
     page_count = snapshot.get("page_count")
 
     if status == "connected":
@@ -111,6 +132,14 @@ def build_wiii_connect_facebook_status_answer(
             f"Có. Facebook đang được kết nối qua Wiii Connect{suffix}. "
             "Nếu cậu muốn đăng bài, hãy gửi nội dung/ảnh rồi nói rõ “đăng lên Facebook”; "
             "Wiii sẽ tạo bản xem trước để cậu xác nhận trước khi publish."
+        )
+
+    if isinstance(connection_count, int) and connection_count > 0:
+        state_label = connection_state or blocked_reason or "chưa active"
+        return (
+            "Wiii đã thấy bản ghi Facebook trong Wiii Connect, nhưng provider chưa ở trạng thái active "
+            f"(trạng thái hiện tại: {state_label}). Vì vậy Wiii chưa được phép đăng bài hay đọc page. "
+            "Hãy quay lại Wiii Connect, hoàn tất OAuth nếu còn tab xác nhận, rồi bấm làm mới hoặc kết nối lại Facebook."
         )
 
     if status in {"not_connected", "unavailable"}:
@@ -171,6 +200,38 @@ def facebook_post_message_from_query(query: str) -> str:
     if len(cleaned) < 12:
         return "Một khoảnh khắc mới được chia sẻ từ Wiii."
     return cleaned[:800]
+
+
+def build_wiii_connect_facebook_post_unavailable_answer(
+    state: dict[str, Any] | None,
+) -> str | None:
+    """Return a deterministic block message when Facebook cannot post yet."""
+
+    snapshot = wiii_connect_facebook_snapshot_from_state(state)
+    if not snapshot:
+        return None
+    status = str(snapshot.get("status") or "").strip().lower()
+    if status == "connected":
+        return None
+    connection_count = snapshot.get("connection_count")
+    active_count = snapshot.get("active_connection_count")
+    connection_state = str(snapshot.get("connection_state") or "").strip().lower()
+    blocked_reason = str(snapshot.get("blocked_reason") or "").strip().lower()
+    if isinstance(connection_count, int) and connection_count > 0:
+        state_label = connection_state or blocked_reason or "chưa active"
+        active_label = active_count if isinstance(active_count, int) else 0
+        return (
+            "Mình chưa thể tạo preview đăng Facebook vì Wiii Connect chưa có account Facebook active "
+            f"({active_label}/{connection_count} account active, trạng thái hiện tại: {state_label}). "
+            "Hoàn tất OAuth trong Wiii Connect rồi bấm làm mới; khi account active, câu “đăng một bài Facebook” "
+            "sẽ đi thẳng vào preview để cậu xác nhận đăng."
+        )
+    if status in {"not_connected", "unavailable"}:
+        return (
+            "Mình chưa thể đăng Facebook từ chat vì Wiii Connect chưa có kết nối Facebook sẵn sàng. "
+            "Hãy mở Wiii Connect, kết nối Facebook trước; sau đó gửi lại yêu cầu đăng bài."
+        )
+    return None
 
 
 def facebook_post_uses_latest_user_image(state: dict[str, Any] | None) -> bool:

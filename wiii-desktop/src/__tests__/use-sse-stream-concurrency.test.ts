@@ -453,4 +453,47 @@ describe("useSSEStream concurrency", () => {
       ],
     });
   });
+
+  it("sends pending Facebook connection state without probing pages", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    vi.mocked(fetchWiiiConnectProviderConnections).mockResolvedValueOnce({
+      version: "wiii_connect_connection_list.v1",
+      provider_slug: "facebook",
+      status: "ready",
+      connections: [
+        {
+          provider_slug: "facebook",
+          connection_ref: "conn-waiting",
+          connection_id: "conn-waiting",
+          state: "waiting",
+          active: false,
+          reason: "provider_connection_list",
+        },
+      ],
+      connection_count: 1,
+    } as any);
+    sendMessageStreamMock.mockResolvedValueOnce({
+      lastEventId: null,
+      sawDone: true,
+      eventOrder: ["done"],
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Wiii connected Facebook?");
+    });
+
+    expect(fetchWiiiConnectFacebookPages).not.toHaveBeenCalled();
+    const request = sendMessageStreamMock.mock.calls[0]?.[0] as any;
+    expect(request.user_context?.host_context?.page?.metadata?.wiii_connect).toMatchObject({
+      provider_slug: "facebook",
+      status: "not_connected",
+      connection_count: 1,
+      active_connection_count: 0,
+      connection_state: "waiting",
+      connection_active: false,
+      blocked_reason: "provider_connection_list",
+    });
+  });
 });

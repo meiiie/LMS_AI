@@ -3008,6 +3008,65 @@ async def test_wiii_connect_facebook_post_shortcut_emits_preview_event() -> None
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_facebook_post_shortcut_blocks_pending_connection() -> None:
+    from app.engine.multi_agent.direct_wiii_connect_host_action_runtime import (
+        execute_requested_wiii_connect_facebook_post_shortcut,
+    )
+    from app.engine.tools.tool_capability_registry import (
+        WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+    )
+
+    tool = SimpleNamespace(name=WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL)
+    state: dict = {
+        "context": {
+            "host_context": {
+                "page": {
+                    "metadata": {
+                        "wiii_connect": {
+                            "provider_slug": "facebook",
+                            "status": "not_connected",
+                            "connection_count": 1,
+                            "active_connection_count": 0,
+                            "connection_state": "waiting",
+                        }
+                    }
+                }
+            }
+        }
+    }
+    invoked = False
+    pushed_events: list[dict] = []
+
+    async def invoke_tool(*_args, **_kwargs):
+        nonlocal invoked
+        invoked = True
+        return {}
+
+    def build_assistant_message(content: str, **kwargs) -> dict:
+        return {"content": content, "native_tool_messages": kwargs["native_tool_messages"]}
+
+    response = await execute_requested_wiii_connect_facebook_post_shortcut(
+        query="Wiii dang mot bai Facebook, bai nao cung duoc",
+        state=state,
+        tools=[tool],
+        tool_call_events=[],
+        push_event=lambda event: pushed_events.append(event),
+        native_tool_messages=True,
+        runtime_context_base={"request_id": "req-1"},
+        invoke_tool_with_runtime=invoke_tool,
+        maybe_emit_host_action_event=lambda **_kwargs: None,
+        summarize_tool_result_for_stream=lambda _name, _result: "summary",
+        build_assistant_message=build_assistant_message,
+        logger_obj=__import__("logging").getLogger(__name__),
+    )
+
+    assert response is not None
+    assert "chưa có account Facebook active" in response["content"]
+    assert invoked is False
+    assert pushed_events == []
+
+
+@pytest.mark.asyncio
 async def test_requested_document_host_action_shortcut_prefers_course_preview() -> None:
     course_tool = object()
     lesson_tool = object()

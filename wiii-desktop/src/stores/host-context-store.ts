@@ -327,6 +327,14 @@ async function resolveFacebookPostBase(
       connectionRef: "",
     };
   }
+  if (connection && !(connection.active || connection.state === "connected")) {
+    return {
+      error: "facebook_connection_not_active",
+      providerSlug,
+      connectionRef,
+      connectionState: connection.state || "unknown",
+    };
+  }
 
   const pages = await fetchWiiiConnectFacebookPages(providerSlug, connectionRef);
   const selectedPageId = stringParam(params, "page_id") || pages.pages?.[0]?.page_id || "";
