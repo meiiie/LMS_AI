@@ -242,11 +242,12 @@ probe, Composio adapter configuration status, an authenticated Connect Link
 client path that calls Composio only after policy preflight passes, signed
 callback state, and callback reconciliation into durable Wiii connection
 records. It also has an authenticated connection-listing/polling boundary that
-calls Composio `connected_accounts` only through Wiii backend and upserts
-sanitized connection records. The desktop Wiii Connect page can now start a
-backend-owned Connect Link, open only backend-issued URLs, refresh/poll
-sanitized provider connection records, and show connection state separately from
-agent-ready execution state. It can also request backend-owned disconnect for a
+calls Composio `connected_accounts` only through Wiii backend, filters listing
+to private connected accounts for the selected Wiii user/auth config, and
+upserts sanitized connection records. The desktop Wiii Connect page can now
+start a backend-owned Connect Link, open only backend-issued URLs, refresh/poll
+sanitized provider connection records, and show connection state separately
+from agent-ready execution state. It can also request backend-owned disconnect for a
 provider connection and update the local UI state to disabled without exposing
 raw provider payloads or connection IDs. Wiii now also has an authenticated execution
 gateway preflight endpoint that fetches the stored org/user connection record,
