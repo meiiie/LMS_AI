@@ -21,6 +21,7 @@ Operational docs are different from exploratory reports:
 - `WIII_AGENTIC_CODEBASE_HARNESS.md`: layered context, scoped exploration, WIP recovery, and deterministic checks for large-codebase agent work.
 - `WIII_SYSTEM_CONTROL_PLANE.md`: whole-system operating map, active runtime flows, flow-monitoring ladder, and debugging protocol.
 - `WIII_SELF_HARNESS.md`: repository-owned static harness for active product-path contracts.
+- `WIII_CONNECT_COMPOSIO_ACCEPTANCE_RUNBOOK.md`: operator acceptance sequence for enabling Composio through Wiii Connect without bypassing vault, scope, gateway, or audit policy.
 - `WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md`: external systems audit baseline and ignored local clone workspace for OpenHuman, OpenClaw, and related references.
 - `WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md`: OpenHuman memory/context audit, Wiii Context Provenance Ledger v1 requirements, and non-copy boundaries.
 - `WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md`: OpenClaw control-plane audit, Wiii Runtime Flow Ledger v1 requirements, and Chat Baseline Acceptance Harness requirements.

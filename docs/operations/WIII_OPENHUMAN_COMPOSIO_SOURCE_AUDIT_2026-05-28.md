@@ -192,8 +192,16 @@ also prevents provider polling from re-enabling a locally disabled
 `user_disconnect_requested` connection if Composio still reports it active
 during cleanup or eventual consistency windows.
 
+Wiii now also has an operator acceptance harness:
+`maritime-ai-service/scripts/wiii_connect_composio_acceptance.py`. It verifies
+adapter readiness, durable storage, audit readiness, curated action exposure,
+missing-connection denial, backend-owned Connect Link creation, sanitized
+connection listing, optional read-only execution, and optional backend-owned
+disconnect without calling Composio directly from the harness.
+
 Remaining work before enabling Composio for real users: configure production
 Composio project credentials and auth config IDs, connect a live Gmail account,
-run browser/backend acceptance through Wiii's connect/list/execute/disconnect
-endpoints, and decide whether Wiii should keep using Composio as an adapter or
-graduate specific providers to Wiii-owned OAuth apps.
+run the acceptance harness plus browser acceptance through Wiii's
+connect/list/execute/disconnect endpoints, and decide whether Wiii should keep
+using Composio as an adapter or graduate specific providers to Wiii-owned OAuth
+apps.

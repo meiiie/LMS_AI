@@ -190,4 +190,7 @@ this repository.
    also supports backend-owned disconnect that disables local Wiii state before
    provider cleanup. The desktop Wiii Connect page can now call the backend
    disconnect boundary and keep reconnect on the backend Connect Link path. The
-   remaining work is live credential acceptance.
+   operator acceptance harness now exists in
+   `maritime-ai-service/scripts/wiii_connect_composio_acceptance.py`; the
+   remaining work is running it with real Composio credentials and a live Gmail
+   connection before rollout.
