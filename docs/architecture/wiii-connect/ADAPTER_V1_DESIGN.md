@@ -544,5 +544,9 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 3. Add disconnect/delete/reconnect lifecycle controls behind the same policy.
    Backend disconnect and desktop lifecycle controls are implemented; live
    provider acceptance is still pending.
-4. Add browser acceptance for connect, denied execute, gated scope, and
-   reconnect cases.
+4. Add acceptance for connect, denied execute, gated scope, and reconnect cases.
+   A backend/operator harness now exists at
+   `maritime-ai-service/scripts/wiii_connect_composio_acceptance.py` for
+   adapter/storage/audit/connect/list/read-only-execute/disconnect checks. Live
+   browser acceptance with real Composio credentials and a connected Gmail
+   account is still pending before rollout.
