@@ -31,6 +31,7 @@ def test_composio_adapter_config_parses_without_exposing_secret_values():
         build_composio_adapter_config,
         build_composio_provider_adapter_capability,
         parse_composio_auth_config_map,
+        parse_composio_readonly_action_allowlist,
     )
 
     parsed_json = parse_composio_auth_config_map(
@@ -38,6 +39,9 @@ def test_composio_adapter_config_parses_without_exposing_secret_values():
     )
     parsed_text = parse_composio_auth_config_map(
         "facebook=authcfg_fb,gmail:authcfg_gmail",
+    )
+    parsed_actions = parse_composio_readonly_action_allowlist(
+        "gmail=GMAIL_FETCH_EMAILS",
     )
     disabled = build_composio_provider_adapter_capability(
         settings_obj=SimpleNamespace(
@@ -86,6 +90,7 @@ def test_composio_adapter_config_parses_without_exposing_secret_values():
         "facebook": "authcfg_fb",
         "gmail": "authcfg_gmail",
     }
+    assert parsed_actions == {"gmail": ("GMAIL_FETCH_EMAILS",)}
     assert disabled.bound is False
     assert disabled.reason == "provider_adapter_not_bound"
     assert missing_key.bound is True
@@ -100,7 +105,54 @@ def test_composio_adapter_config_parses_without_exposing_secret_values():
     assert configured.can_execute_actions is False
     assert metadata["config"]["auth_config_count"] == 1
     assert metadata["config"]["provider_slugs"] == ["facebook"]
+    assert metadata["config"]["readonly_execute_enabled"] is False
+    assert metadata["config"]["readonly_action_count"] == 0
     assert "secret-value" not in serialized
+
+
+def test_composio_readonly_execute_requires_explicit_curated_allowlist():
+    from app.engine.wiii_connect.composio_adapter import (
+        build_composio_adapter_config,
+        build_composio_execution_enabled_entry,
+        build_composio_provider_adapter_capability,
+    )
+    from app.engine.wiii_connect.provider_registry import (
+        get_wiii_connect_provider_entry,
+    )
+
+    settings_obj = SimpleNamespace(
+        enable_wiii_connect_composio=True,
+        enable_wiii_connect_composio_readonly_execute=True,
+        composio_api_key="secret-value",
+        composio_base_url="https://backend.composio.dev",
+        composio_api_version="v3.1",
+        composio_auth_config_map='{"gmail": "authcfg_gmail"}',
+        composio_readonly_action_allowlist='{"gmail": ["GMAIL_FETCH_EMAILS"]}',
+    )
+    config = build_composio_adapter_config(settings_obj)
+    capability = build_composio_provider_adapter_capability(config)
+    entry = get_wiii_connect_provider_entry("gmail")
+    assert entry is not None
+    effective = build_composio_execution_enabled_entry(entry, config)
+    serialized = json.dumps(
+        {
+            "config": config.to_public_metadata(),
+            "capability": capability.to_public_metadata(),
+            "entry": effective.to_public_metadata(),
+        },
+        sort_keys=True,
+    )
+
+    assert config.readonly_action_slugs_for_provider("gmail") == (
+        "GMAIL_FETCH_EMAILS",
+    )
+    assert capability.can_execute_actions is True
+    assert effective.enabled is True
+    assert effective.agent_ready is True
+    assert effective.action_allowlist == ("GMAIL_FETCH_EMAILS",)
+    assert effective.default_scopes.read is True
+    assert "secret-value" not in serialized
+    assert "authcfg_gmail" not in serialized
 
 
 @pytest.mark.asyncio
@@ -305,6 +357,136 @@ async def test_composio_connection_list_client_sanitizes_provider_errors():
 
     assert result.ready is False
     assert result.reason == "provider_response_rejected"
+    assert "secret-api-key" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_composio_tool_schema_client_uses_v31_and_redacts_shape():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        verify_composio_tool_schema,
+    )
+
+    captured = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["api_key"] = request.headers.get("x-api-key")
+        return httpx.Response(
+            200,
+            json={
+                "slug": "GMAIL_FETCH_EMAILS",
+                "toolkit": {"slug": "gmail"},
+                "input_parameters": {
+                    "query": {"type": "string", "required": True},
+                    "max_results": {"type": "number"},
+                    "access_token": {"type": "string"},
+                },
+            },
+        )
+
+    config = WiiiConnectComposioAdapterConfig(
+        enabled=True,
+        api_key="secret-api-key",
+        api_key_present=True,
+        auth_config_by_provider={"gmail": "authcfg_gmail"},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await verify_composio_tool_schema(
+            config=config,
+            provider_slug="gmail",
+            action_slug="GMAIL_FETCH_EMAILS",
+            http_client=client,
+        )
+
+    public = result.to_public_metadata()
+    serialized = json.dumps(public, sort_keys=True)
+
+    assert captured["url"] == (
+        "https://backend.composio.dev/api/v3.1/tools/GMAIL_FETCH_EMAILS"
+        "?toolkit_versions=latest"
+    )
+    assert captured["api_key"] == "secret-api-key"
+    assert public["status"] == "ready"
+    assert public["reason"] == "ready"
+    assert public["schema_present"] is True
+    assert "query" in public["argument_keys"]
+    assert "max_results" in public["argument_keys"]
+    assert "redacted_sensitive_field" in public["argument_keys"]
+    assert "access_token" not in serialized
+    assert "secret-api-key" not in serialized
+    assert "authcfg_gmail" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_composio_execute_client_uses_allowlist_and_redacts_provider_data():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        execute_composio_tool,
+    )
+
+    captured = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["api_key"] = request.headers.get("x-api-key")
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "messages": [{"subject": "private subject"}],
+                    "access_token": "secret-provider-token",
+                },
+                "error": None,
+                "successful": True,
+                "session_info": {"session_id": "session-secret"},
+                "log_id": "log-secret",
+            },
+        )
+
+    config = WiiiConnectComposioAdapterConfig(
+        enabled=True,
+        api_key="secret-api-key",
+        api_key_present=True,
+        auth_config_by_provider={"gmail": "authcfg_gmail"},
+        readonly_execute_enabled=True,
+        readonly_action_allowlist_by_provider={"gmail": ("GMAIL_FETCH_EMAILS",)},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await execute_composio_tool(
+            config=config,
+            provider_slug="gmail",
+            action_slug="GMAIL_FETCH_EMAILS",
+            user_id="wiii_user_hash",
+            connected_account_id="ca_active",
+            arguments={"query": "from:me", "access_token": "client-secret"},
+            http_client=client,
+        )
+
+    public = result.to_public_metadata()
+    serialized = json.dumps(public, sort_keys=True)
+
+    assert captured["url"] == (
+        "https://backend.composio.dev/api/v3.1/tools/execute/GMAIL_FETCH_EMAILS"
+    )
+    assert captured["api_key"] == "secret-api-key"
+    assert captured["body"] == {
+        "user_id": "wiii_user_hash",
+        "connected_account_id": "ca_active",
+        "arguments": {"query": "from:me", "access_token": "client-secret"},
+    }
+    assert public["status"] == "succeeded"
+    assert public["reason"] == "ready"
+    assert "messages" in public["data_keys"]
+    assert "redacted_sensitive_field" in public["data_keys"]
+    assert public["session_info_present"] is True
+    assert public["log_id_present"] is True
+    assert "private subject" not in serialized
+    assert "secret-provider-token" not in serialized
+    assert "session-secret" not in serialized
+    assert "log-secret" not in serialized
+    assert "client-secret" not in serialized
     assert "secret-api-key" not in serialized
 
 

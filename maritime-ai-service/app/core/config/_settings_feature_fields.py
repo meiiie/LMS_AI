@@ -415,6 +415,20 @@ class FeatureSettingsMixin:
             "JSON object or comma list mapping provider slug to Composio auth_config_id"
         ),
     )
+    enable_wiii_connect_composio_readonly_execute: bool = Field(
+        default=False,
+        description=(
+            "Enable read-only Composio action execution after Wiii Connect "
+            "gateway, curated catalog, schema verification, and audit checks pass"
+        ),
+    )
+    composio_readonly_action_allowlist: str = Field(
+        default="",
+        description=(
+            "Comma-separated curated Composio read-only action slugs allowed "
+            "through Wiii Connect execution gateway"
+        ),
+    )
 
     # SoulBridge (Sprint 213)
     enable_soul_bridge: bool = Field(default=False, description="Enable cross-service soul-to-soul communication bridge (WebSocket + HTTP)")

@@ -23,6 +23,7 @@ from app.engine.wiii_connect import (
     build_audit_ledger_record,
     build_composio_adapter_config,
     build_composio_connect_enabled_entry,
+    build_composio_execution_enabled_entry,
     build_composio_external_user_id,
     build_composio_provider_managed_vault_capability,
     build_composio_provider_adapter_capability,
@@ -34,6 +35,7 @@ from app.engine.wiii_connect import (
     default_persistent_storage_status_metadata,
     get_wiii_connect_provider_entry,
     get_wiii_connect_persistent_storage,
+    execute_composio_tool,
     list_composio_connected_accounts,
     normalize_connection_state,
     provider_adapter_status_public_metadata,
@@ -42,6 +44,7 @@ from app.engine.wiii_connect import (
     provider_connection_status,
     provider_registry_public_metadata,
     scope_grant_from_mapping,
+    verify_composio_tool_schema,
     verify_wiii_connect_callback_state,
     vault_status_public_metadata,
 )
@@ -78,6 +81,12 @@ class WiiiConnectExecutionDecisionBody(BaseModel):
     preview_evidence_id: str | None = None
     approval_token_present: bool = False
     argument_keys: list[str] = Field(default_factory=list)
+
+
+class WiiiConnectExecutionRunBody(WiiiConnectExecutionDecisionBody):
+    """Safe request body for a backend-brokered external action call."""
+
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.get("/providers")
@@ -341,7 +350,16 @@ async def list_wiii_connect_provider_actions(slug: str) -> dict[str, object]:
     entry = get_wiii_connect_provider_entry(slug)
     if entry is None:
         raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
-    return action_catalog_public_metadata(provider_slug=entry.slug)
+    composio_config = build_composio_adapter_config()
+    enabled_slugs = (
+        composio_config.readonly_action_slugs_for_provider(entry.slug)
+        if composio_config.readonly_execute_enabled
+        else ()
+    )
+    return action_catalog_public_metadata(
+        provider_slug=entry.slug,
+        enabled_slugs=enabled_slugs,
+    )
 
 
 @router.post("/providers/{slug}/execution-decision")
@@ -361,7 +379,7 @@ async def decide_wiii_connect_provider_execution(
     if entry is None:
         raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
     composio_config = build_composio_adapter_config()
-    effective_entry = build_composio_connect_enabled_entry(entry, composio_config)
+    effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
     storage = _wiii_connect_storage_status_metadata(probe_database=True)
     storage_ready = _connection_storage_ready(storage)
     connection = (
@@ -410,6 +428,151 @@ async def decide_wiii_connect_provider_execution(
     payload = gateway.to_public_metadata()
     payload["provider_slug"] = effective_entry.slug
     payload["storage"] = storage
+    return payload
+
+
+@router.post("/providers/{slug}/execute")
+async def execute_wiii_connect_provider_action(
+    slug: str,
+    body: WiiiConnectExecutionRunBody,
+    current_user: AuthenticatedUser = Depends(require_auth),
+) -> dict[str, object]:
+    """Run one read-only provider action through Wiii policy and audit."""
+
+    entry = get_wiii_connect_provider_entry(slug)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
+    composio_config = build_composio_adapter_config()
+    effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
+    storage = _wiii_connect_storage_status_metadata(probe_database=True)
+    storage_ready = _connection_storage_ready(storage)
+    connection = (
+        get_wiii_connect_persistent_storage().get_connection_record(
+            organization_id=_wiii_connect_owner_organization_id(current_user),
+            user_id=current_user.user_id,
+            provider_slug=effective_entry.slug,
+            connection_id=body.connection_id,
+        )
+        if storage_ready
+        else None
+    )
+    request = WiiiConnectExecutionRequest(
+        provider_slug=effective_entry.slug,
+        action_slug=_safe_action_slug(body.action_slug),
+        path=_safe_path(body.path),
+        mutation=_safe_mutation(body.mutation),
+        approval_token_present=bool(body.approval_token_present),
+        preview_evidence_id=_safe_public_id(body.preview_evidence_id),
+        preview_evidence_required=bool(body.preview_evidence_required),
+        argument_keys=tuple(
+            _safe_argument_keys(body.argument_keys or list(body.arguments.keys())),
+        ),
+    )
+    gateway = decide_execution_gateway(
+        effective_entry,
+        connection,
+        request,
+        adapter_capability=build_composio_provider_adapter_capability(
+            composio_config,
+        ),
+        audit_ledger_metadata={
+            "persistent": bool(
+                storage.get("persistent") and storage.get("audit_ledger_ready")
+            ),
+        },
+    )
+    audit_base = {
+        "surface": body.surface,
+        "connection_id_present": bool(body.connection_id),
+        "connection_found": connection is not None,
+        "storage": storage,
+    }
+    if not gateway.allowed or connection is None:
+        _append_execution_audit(
+            gateway,
+            request,
+            storage,
+            current_user=current_user,
+            metadata={**audit_base, "stage": "gateway"},
+        )
+        payload = gateway.to_public_metadata()
+        payload["provider_slug"] = effective_entry.slug
+        payload["storage"] = storage
+        payload["schema"] = None
+        payload["execution"] = None
+        return payload
+
+    schema = await verify_composio_tool_schema(
+        config=composio_config,
+        provider_slug=effective_entry.slug,
+        action_slug=request.action_slug,
+    )
+    if not schema.ready:
+        _append_execution_stage_audit(
+            gateway,
+            request,
+            storage,
+            current_user=current_user,
+            status="blocked",
+            reason=schema.reason,
+            metadata={
+                **audit_base,
+                "stage": "schema",
+                "schema": schema.to_public_metadata(),
+            },
+        )
+        payload = gateway.to_public_metadata()
+        payload["status"] = "blocked"
+        payload["reason"] = schema.reason
+        payload["provider_slug"] = effective_entry.slug
+        payload["storage"] = storage
+        payload["schema"] = schema.to_public_metadata()
+        payload["execution"] = None
+        return payload
+
+    _append_execution_stage_audit(
+        gateway,
+        request,
+        storage,
+        current_user=current_user,
+        status="started",
+        reason="provider_execution_started",
+        metadata={
+            **audit_base,
+            "schema": schema.to_public_metadata(),
+        },
+    )
+    execution = await execute_composio_tool(
+        config=composio_config,
+        provider_slug=effective_entry.slug,
+        action_slug=request.action_slug,
+        user_id=build_composio_external_user_id(
+            organization_id=current_user.organization_id,
+            user_id=current_user.user_id,
+        ),
+        connected_account_id=connection.connection_id,
+        arguments=body.arguments,
+    )
+    _append_execution_stage_audit(
+        gateway,
+        request,
+        storage,
+        current_user=current_user,
+        status=execution.status,
+        reason=execution.reason,
+        metadata={
+            **audit_base,
+            "schema": schema.to_public_metadata(),
+            "execution": execution.to_public_metadata(),
+        },
+    )
+    payload = gateway.to_public_metadata()
+    payload["status"] = execution.status
+    payload["reason"] = execution.reason
+    payload["provider_slug"] = effective_entry.slug
+    payload["storage"] = storage
+    payload["schema"] = schema.to_public_metadata()
+    payload["execution"] = execution.to_public_metadata()
     return payload
 
 
@@ -582,6 +745,37 @@ def _append_execution_audit(
         provider_slug=gateway.decision.provider_slug,
         status=gateway.status,
         reason=gateway.reason,
+        surface=_safe_surface(metadata.get("surface") or "backend"),
+        metadata={
+            "request": request.to_audit_metadata(),
+            "decision": gateway.decision.to_metadata(),
+            **metadata,
+        },
+    )
+    get_wiii_connect_persistent_storage().append_audit_record(
+        record,
+        organization_id=_wiii_connect_owner_organization_id(current_user),
+        user_id=current_user.user_id,
+    )
+
+
+def _append_execution_stage_audit(
+    gateway: Any,
+    request: WiiiConnectExecutionRequest,
+    storage_metadata: dict[str, Any],
+    *,
+    current_user: AuthenticatedUser,
+    status: str,
+    reason: str,
+    metadata: dict[str, Any],
+) -> None:
+    if not bool(storage_metadata.get("persistent") and storage_metadata.get("audit_ledger_ready")):
+        return
+    record = build_audit_ledger_record(
+        event_kind="execution",
+        provider_slug=gateway.decision.provider_slug,
+        status=_safe_surface(status),
+        reason=_safe_surface(reason),
         surface=_safe_surface(metadata.get("surface") or "backend"),
         metadata={
             "request": request.to_audit_metadata(),

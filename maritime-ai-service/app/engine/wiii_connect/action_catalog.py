@@ -8,7 +8,7 @@ metadata and sanitized argument key names, not provider payload schemas.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 from .adapter_v1 import ActionMutation, ProviderKind, ScopeName
 
@@ -92,15 +92,62 @@ def list_wiii_connect_curated_actions(
     return tuple(sorted(actions, key=lambda item: (item.provider_slug, item.slug)))
 
 
-def enabled_action_slugs_for_provider(provider_slug: str) -> tuple[str, ...]:
+def get_wiii_connect_curated_action(
+    provider_slug: str,
+    action_slug: str,
+) -> WiiiConnectCuratedAction | None:
+    """Return one curated action candidate for a provider."""
+
+    provider = _normalize_provider_slug(provider_slug)
+    action_key = _normalize_action_slug(action_slug)
+    if not provider or not action_key:
+        return None
+    for action in _CURATED_ACTIONS:
+        if action.provider_slug == provider and action.slug == action_key:
+            return action
+    return None
+
+
+def enabled_action_slugs_for_provider(
+    provider_slug: str,
+    *,
+    enabled_slugs: Iterable[str] | None = None,
+) -> tuple[str, ...]:
     """Return action slugs that may enter gateway allowlists."""
 
+    allowed = {
+        _normalize_action_slug(slug)
+        for slug in (enabled_slugs or ())
+        if _normalize_action_slug(slug)
+    }
     return tuple(
         action.slug
         for action in list_wiii_connect_curated_actions(
             provider_slug=provider_slug,
             include_disabled=False,
         )
+        if not allowed or action.slug in allowed
+    )
+
+
+def configured_action_slugs_for_provider(
+    provider_slug: str,
+    *,
+    enabled_slugs: Iterable[str],
+) -> tuple[str, ...]:
+    """Return disabled catalog candidates explicitly enabled by deployment config."""
+
+    allowed = {
+        _normalize_action_slug(slug)
+        for slug in enabled_slugs
+        if _normalize_action_slug(slug)
+    }
+    if not allowed:
+        return ()
+    return tuple(
+        action.slug
+        for action in list_wiii_connect_curated_actions(provider_slug=provider_slug)
+        if action.slug in allowed and action.mutation == "read"
     )
 
 
@@ -128,6 +175,7 @@ def action_catalog_public_metadata(
     *,
     provider_slug: str | None = None,
     include_disabled: bool = True,
+    enabled_slugs: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """Return the public action catalog projection."""
 
@@ -135,12 +183,22 @@ def action_catalog_public_metadata(
         provider_slug=provider_slug,
         include_disabled=include_disabled,
     )
+    enabled = {
+        _normalize_action_slug(slug)
+        for slug in (enabled_slugs or ())
+        if _normalize_action_slug(slug)
+    }
     return {
         "version": WIII_CONNECT_ACTION_CATALOG_VERSION,
         "provider_slug": _normalize_provider_slug(provider_slug) or None,
         "action_count": len(actions),
-        "enabled_action_count": len([action for action in actions if action.enabled]),
-        "actions": [action.to_public_metadata() for action in actions],
+        "enabled_action_count": len(
+            [action for action in actions if action.enabled or action.slug in enabled]
+        ),
+        "actions": [
+            _public_metadata_with_runtime_enabled(action, action.slug in enabled)
+            for action in actions
+        ],
     }
 
 
@@ -149,6 +207,24 @@ _SENSITIVE_KEY_MARKERS = ("token", "secret", "password", "credential", "key", "c
 
 def _normalize_provider_slug(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_")
+
+
+def _normalize_action_slug(value: Any) -> str:
+    return str(value or "").strip().upper().replace("-", "_")
+
+
+def _public_metadata_with_runtime_enabled(
+    action: WiiiConnectCuratedAction,
+    runtime_enabled: bool,
+) -> dict[str, Any]:
+    metadata = action.to_public_metadata()
+    if runtime_enabled and not action.enabled:
+        metadata["enabled"] = True
+        metadata["warnings"] = sorted(
+            set(metadata.get("warnings", []))
+            | {"runtime_enabled_requires_live_schema_verification"}
+        )
+    return metadata
 
 
 def _safe_public_key(value: str) -> str:
@@ -165,6 +241,8 @@ __all__ = [
     "WiiiConnectCuratedAction",
     "action_catalog_public_metadata",
     "action_catalog_summary_for_provider",
+    "configured_action_slugs_for_provider",
     "enabled_action_slugs_for_provider",
+    "get_wiii_connect_curated_action",
     "list_wiii_connect_curated_actions",
 ]

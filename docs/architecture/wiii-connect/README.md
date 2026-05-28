@@ -178,11 +178,13 @@ this repository.
 5. Use `ADAPTER_V1_DESIGN.md` as the contract for external providers. Composio
    connection can be enabled only after registry, vault/provider-managed
    secrets, OAuth/session callback, storage, and audit checks are ready. Agent
-   action execution remains disabled until a curated action catalog and
-   provider execution adapter pass the execution gateway.
+   action execution remains disabled by default and can only be enabled for a
+   curated read-only allowlist after schema verification and execution gateway
+   approval.
 6. Keep the backend `provider_registry.py` as the source of truth for disabled
    external provider catalog entries; frontend catalog state should converge on
    this projection.
 7. Add one low-risk read-only Composio action through the gateway before any
-   write/apply action. A disabled read-only catalog candidate now exists; the
-   remaining work is live schema verification and adapter execution enablement.
+   write/apply action. The backend boundary now supports one curated Gmail
+   read-only action behind config, schema verification, gateway, and audit; the
+   remaining work is live credential acceptance and disconnect/reconnect UX.

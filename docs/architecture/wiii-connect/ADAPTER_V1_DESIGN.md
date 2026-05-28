@@ -106,6 +106,7 @@ POST /api/v1/wiii-connect/providers/{slug}/authorization-url
 GET  /api/v1/wiii-connect/providers/{slug}/connections
 GET  /api/v1/wiii-connect/providers/{slug}/actions
 POST /api/v1/wiii-connect/providers/{slug}/execution-decision
+POST /api/v1/wiii-connect/providers/{slug}/execute
 GET  /api/v1/wiii-connect/providers/{slug}/callback
 GET  /api/v1/wiii-connect/provider-adapters/status
 GET  /api/v1/wiii-connect/storage/status
@@ -268,7 +269,31 @@ never receives provider tokens or raw payloads.
 - hashes the Wiii org/user boundary into a stable non-PII Composio user ID;
 - redacts `link_token`, provider account IDs, API keys, auth config IDs, and raw
   provider errors from audit/public metadata;
-- still keeps action execution disabled until gateway/curated-action enablement.
+- keeps action execution disabled by default;
+- enables action execution only when
+  `enable_wiii_connect_composio_readonly_execute` and
+  `composio_readonly_action_allowlist` explicitly name a curated read-only
+  action for that provider.
+
+`WiiiConnectComposioToolSchemaResult`
+
+- verifies a curated Composio tool with `GET /api/v3.1/tools/{tool_slug}`
+  before execution;
+- exposes only status, reason, schema presence, sanitized argument keys, and
+  sanitized required keys;
+- never returns raw Composio schema descriptions, provider payloads, examples,
+  OAuth scopes, API keys, auth config IDs, or provider error bodies.
+
+`WiiiConnectComposioExecuteResult`
+
+- wraps `POST /api/v3.1/tools/execute/{tool_slug}` for one curated read-only
+  action after the gateway and schema verifier pass;
+- sends provider arguments only from the backend adapter call and never records
+  those values in public metadata or audit records;
+- returns only execution status, reason, HTTP status code, safe top-level data
+  keys, and presence flags for provider error/session/log fields;
+- never returns email bodies, provider response data, `log_id`, session IDs,
+  OAuth tokens, Composio API keys, or raw error bodies.
 
 `WiiiConnectComposioConnectionListResult`
 
@@ -324,8 +349,10 @@ never receives provider tokens or raw payloads.
   evidence presence, and sanitized argument key names;
 - never accepts raw provider arguments, raw provider payloads, OAuth tokens,
   approval token values, Composio API keys, or provider response bodies;
-- currently performs preflight only. It does not call Composio action execution
-  until a curated action catalog and provider execution adapter are enabled.
+- remains the required preflight boundary for both execution-decision and real
+  execution routes. The execute route may call Composio only after this gateway
+  returns `allowed`, the live schema check passes, and started/succeeded/failed
+  audit records can be appended.
 
 The first catalog candidate is `GMAIL_FETCH_EMAILS`, a disabled read-only Gmail
 action listed in current Composio docs. It is intentionally not agent-ready
@@ -458,13 +485,19 @@ Before real Composio OAuth is enabled:
   execution is allowed;
 - execution decisions must be requested through the authenticated Wiii backend
   gateway and must fetch the connection record from Wiii storage by org/user;
+- real action execution must be requested through
+  `POST /api/v1/wiii-connect/providers/{slug}/execute`, not direct Composio
+  calls from frontend or chat;
+- read-only Composio execution must verify the live tool schema before the
+  provider call and append privacy-safe started plus completion audit events;
 - durable persistence must bind every connection/audit write to a Wiii
   organization and user boundary;
 - frontend may receive connect URLs and state labels, not tokens;
 - stale pending/error OAuth rows must be cleaned up or expired safely;
 - provider errors must be sanitized before reaching UI or chat;
-- Composio action execution must remain disabled until curated action catalog,
-  scope policy, and execution gateway are implemented.
+- Composio action execution must remain disabled unless the provider has a
+  curated read-only action allowlist, live schema verification, scope policy,
+  execution gateway approval, persistent audit, and a stored connected account.
 
 ## Write And Apply Requirements
 
@@ -486,7 +519,8 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
    provider action. Done for the disabled contract candidate; still needs live
    schema verification before enablement.
 2. Bind Composio adapter `can_execute_actions` only for that curated read-only
-   action and keep writes disabled.
+   action and keep writes disabled. Done for the backend boundary; still needs
+   real Composio credentials and acceptance against a live Gmail connection.
 3. Add disconnect/delete/reconnect lifecycle controls behind the same policy.
 4. Add browser acceptance for connect, denied execute, gated scope, and
    reconnect cases.
