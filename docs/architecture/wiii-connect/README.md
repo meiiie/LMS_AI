@@ -186,11 +186,12 @@ this repository.
    this projection.
 7. Add one low-risk read-only Composio action through the gateway before any
    write/apply action. The backend boundary now supports one curated Gmail
-   read-only action behind config, schema verification, gateway, and audit; it
-   also supports backend-owned disconnect that disables local Wiii state before
-   provider cleanup. The desktop Wiii Connect page can now call the backend
-   disconnect boundary and keep reconnect on the backend Connect Link path. The
-   operator acceptance harness now exists in
+   read-only action behind config, schema verification, required-argument
+   gating, gateway, and audit; it also supports backend-owned disconnect that
+   disables local Wiii state before provider cleanup. The desktop Wiii Connect
+   page can now call the backend disconnect boundary through opaque
+   `connection_ref` values and keep reconnect on the backend Connect Link path.
+   The operator acceptance harness now exists in
    `maritime-ai-service/scripts/wiii_connect_composio_acceptance.py`; the
    remaining work is running it with real Composio credentials and a live Gmail
    connection before rollout.

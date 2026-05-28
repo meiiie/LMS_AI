@@ -104,7 +104,7 @@ GET  /api/v1/wiii-connect/providers/{slug}/status
 POST /api/v1/wiii-connect/providers/{slug}/sessions
 POST /api/v1/wiii-connect/providers/{slug}/authorization-url
 GET  /api/v1/wiii-connect/providers/{slug}/connections
-DELETE /api/v1/wiii-connect/providers/{slug}/connections/{connection_id}
+DELETE /api/v1/wiii-connect/providers/{slug}/connections/{connection_ref}
 GET  /api/v1/wiii-connect/providers/{slug}/actions
 GET  /api/v1/wiii-connect/providers/{slug}/activation-readiness
 POST /api/v1/wiii-connect/providers/{slug}/execution-decision
@@ -377,8 +377,8 @@ without guessing from logs.
   approval token values, Composio API keys, or provider response bodies;
 - remains the required preflight boundary for both execution-decision and real
   execution routes. The execute route may call Composio only after this gateway
-  returns `allowed`, the live schema check passes, and started/succeeded/failed
-  audit records can be appended.
+  returns `allowed`, the live schema check passes, required schema argument
+  keys are present, and started/succeeded/failed audit records can be appended.
 
 The first catalog candidate is `GMAIL_FETCH_EMAILS`, a disabled read-only Gmail
 action listed in current Composio docs. It is intentionally not agent-ready
@@ -420,7 +420,7 @@ and requires all of:
 2. provider registry entry is marked agent-ready;
 3. live connection belongs to the same provider slug;
 4. live connection state is `connected`;
-5. the caller selected an explicit stored connection id for execution;
+5. the caller selected an explicit opaque `connection_ref` for execution;
 6. runtime path and action are allowed by the gateway.
 
 This follows the useful OpenHuman pattern while keeping Wiii's stronger LMS,
@@ -534,7 +534,8 @@ Before real Composio OAuth is enabled:
   `POST /api/v1/wiii-connect/providers/{slug}/execute`, not direct Composio
   calls from frontend or chat;
 - read-only Composio execution must verify the live tool schema before the
-  provider call and append privacy-safe started plus completion audit events;
+  provider call, block if required schema argument keys are missing, and append
+  privacy-safe started plus completion audit events when execution proceeds;
 - durable persistence must bind every connection/audit write to a Wiii
   organization and user boundary;
 - frontend may receive connect URLs and state labels, not tokens;
@@ -564,7 +565,7 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 
 1. Add a curated Composio action catalog contract for one low-risk read-only
    provider action. Done for the disabled contract candidate; still needs live
-   schema verification before enablement.
+   acceptance with real credentials before rollout.
 2. Bind Composio adapter `can_execute_actions` only for that curated read-only
    action and keep writes disabled. Done for the backend boundary; still needs
    real Composio credentials and acceptance against a live Gmail connection.
