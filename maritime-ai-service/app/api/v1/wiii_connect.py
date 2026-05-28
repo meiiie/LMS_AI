@@ -14,6 +14,7 @@ from app.engine.wiii_connect import (
     WiiiConnectAuthorizationUrlRequest,
     WiiiConnectCallbackRequest,
     WiiiConnectConnectionRecordV1,
+    WiiiConnectExecutionRequest,
     WiiiConnectSessionStartRequest,
     WiiiConnectVaultSecretRef,
     append_wiii_connect_callback_state,
@@ -28,6 +29,7 @@ from app.engine.wiii_connect import (
     begin_connection_session,
     create_composio_connect_link,
     decide_authorization_url,
+    decide_execution_gateway,
     default_persistent_storage_status_metadata,
     get_wiii_connect_provider_entry,
     get_wiii_connect_persistent_storage,
@@ -42,6 +44,7 @@ from app.engine.wiii_connect import (
     verify_wiii_connect_callback_state,
     vault_status_public_metadata,
 )
+from app.engine.wiii_connect.adapter_v1 import ActionMutation
 
 
 router = APIRouter(prefix="/wiii-connect", tags=["wiii-connect"])
@@ -58,6 +61,22 @@ class WiiiConnectStartSessionBody(BaseModel):
     probe_database: bool = False
     requested_scopes: dict[str, bool] = Field(default_factory=dict)
     request_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WiiiConnectExecutionDecisionBody(BaseModel):
+    """Safe request body for an external provider action preflight."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    surface: str = "desktop"
+    connection_id: str | None = None
+    action_slug: str
+    path: str = "external_app_action"
+    mutation: str = "read"
+    preview_evidence_required: bool = False
+    preview_evidence_id: str | None = None
+    approval_token_present: bool = False
+    argument_keys: list[str] = Field(default_factory=list)
 
 
 @router.get("/providers")
@@ -314,6 +333,75 @@ async def list_wiii_connect_provider_connections(
     }
 
 
+@router.post("/providers/{slug}/execution-decision")
+async def decide_wiii_connect_provider_execution(
+    slug: str,
+    body: WiiiConnectExecutionDecisionBody,
+    current_user: AuthenticatedUser = Depends(require_auth),
+) -> dict[str, object]:
+    """Return the audited fail-closed decision for one provider action.
+
+    This endpoint is a gateway preflight only. It does not execute provider
+    actions and it never accepts raw provider arguments, provider payloads, or
+    approval token values.
+    """
+
+    entry = get_wiii_connect_provider_entry(slug)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
+    composio_config = build_composio_adapter_config()
+    effective_entry = build_composio_connect_enabled_entry(entry, composio_config)
+    storage = _wiii_connect_storage_status_metadata(probe_database=True)
+    storage_ready = _connection_storage_ready(storage)
+    connection = (
+        get_wiii_connect_persistent_storage().get_connection_record(
+            organization_id=_wiii_connect_owner_organization_id(current_user),
+            user_id=current_user.user_id,
+            provider_slug=effective_entry.slug,
+            connection_id=body.connection_id,
+        )
+        if storage_ready
+        else None
+    )
+    request = WiiiConnectExecutionRequest(
+        provider_slug=effective_entry.slug,
+        action_slug=_safe_action_slug(body.action_slug),
+        path=_safe_path(body.path),
+        mutation=_safe_mutation(body.mutation),
+        approval_token_present=bool(body.approval_token_present),
+        preview_evidence_id=_safe_public_id(body.preview_evidence_id),
+        preview_evidence_required=bool(body.preview_evidence_required),
+        argument_keys=tuple(_safe_argument_keys(body.argument_keys)),
+    )
+    gateway = decide_execution_gateway(
+        effective_entry,
+        connection,
+        request,
+        adapter_capability=build_composio_provider_adapter_capability(
+            composio_config,
+        ),
+        audit_ledger_metadata={
+            "persistent": bool(storage.get("persistent") and storage.get("audit_ledger_ready")),
+        },
+    )
+    _append_execution_audit(
+        gateway,
+        request,
+        storage,
+        current_user=current_user,
+        metadata={
+            "surface": body.surface,
+            "connection_id_present": bool(body.connection_id),
+            "connection_found": connection is not None,
+            "storage": storage,
+        },
+    )
+    payload = gateway.to_public_metadata()
+    payload["provider_slug"] = effective_entry.slug
+    payload["storage"] = storage
+    return payload
+
+
 @router.get("/providers/{slug}/callback")
 async def receive_wiii_connect_provider_callback(
     slug: str,
@@ -468,6 +556,35 @@ def _append_callback_audit(
     )
 
 
+def _append_execution_audit(
+    gateway: Any,
+    request: WiiiConnectExecutionRequest,
+    storage_metadata: dict[str, Any],
+    *,
+    current_user: AuthenticatedUser,
+    metadata: dict[str, Any],
+) -> None:
+    if not bool(storage_metadata.get("persistent") and storage_metadata.get("audit_ledger_ready")):
+        return
+    record = build_audit_ledger_record(
+        event_kind="execution",
+        provider_slug=gateway.decision.provider_slug,
+        status=gateway.status,
+        reason=gateway.reason,
+        surface=_safe_surface(metadata.get("surface") or "backend"),
+        metadata={
+            "request": request.to_audit_metadata(),
+            "decision": gateway.decision.to_metadata(),
+            **metadata,
+        },
+    )
+    get_wiii_connect_persistent_storage().append_audit_record(
+        record,
+        organization_id=_wiii_connect_owner_organization_id(current_user),
+        user_id=current_user.user_id,
+    )
+
+
 def _upsert_authorizing_connection(
     link: Any,
     entry: Any,
@@ -589,3 +706,41 @@ def _safe_provider_connection_id(value: str | None) -> str:
     if any(marker in text.lower() for marker in ("token", "secret", "password")):
         return ""
     return text[:160]
+
+
+def _safe_action_slug(value: str) -> str:
+    return str(value or "").strip().upper().replace("-", "_")[:120]
+
+
+def _safe_path(value: str) -> str:
+    return str(value or "").strip().lower().replace("-", "_")[:120]
+
+
+def _safe_mutation(value: str) -> ActionMutation:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"read", "preview", "write", "apply", "admin"}:
+        return normalized  # type: ignore[return-value]
+    return "read"
+
+
+def _safe_argument_keys(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values[:50]:
+        key = str(value or "").strip()
+        if key:
+            result.append(key[:120])
+    return result
+
+
+def _safe_public_id(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if any(marker in text.lower() for marker in ("token", "secret", "password")):
+        return None
+    return text[:160]
+
+
+def _safe_surface(value: Any) -> str:
+    text = str(value or "").strip().lower().replace("-", "_")
+    return text[:80] or "backend"

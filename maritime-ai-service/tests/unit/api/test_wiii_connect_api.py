@@ -676,6 +676,134 @@ async def test_wiii_connect_connections_api_lists_and_persists_safely(
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_execution_decision_api_requires_auth(app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/wiii-connect/providers/facebook/execution-decision",
+            json={"action_slug": "FACEBOOK_GET_PAGE"},
+        )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_execution_decision_api_audits_fail_closed(
+    authenticated_app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect.adapter_v1 import (
+        WiiiConnectConnectionRecordV1,
+        WiiiConnectScopeGrant,
+    )
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+
+    class FakeStorage:
+        audit_appends = 0
+        fetches = 0
+
+        def status(self, *, probe_database: bool = True):
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                reason="ready",
+            )
+
+        def get_connection_record(
+            self,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_slug: str,
+            connection_id: str | None = None,
+        ):
+            self.fetches += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_slug == "facebook"
+            assert connection_id == "ca_active"
+            return WiiiConnectConnectionRecordV1(
+                connection_id="ca_active",
+                provider_slug="facebook",
+                state="connected",
+                scopes=WiiiConnectScopeGrant(read=True, write=True),
+                reason="provider_connection_list",
+            )
+
+        def append_audit_record(self, record, *, organization_id: str, user_id: str):
+            self.audit_appends += 1
+            metadata = record.to_public_metadata()["metadata"]
+            serialized = json.dumps(record.to_public_metadata(), sort_keys=True)
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert metadata["request"]["action_slug"] == "FACEBOOK_GET_PAGE"
+            assert metadata["connection_found"] is True
+            assert "approval_token" not in serialized
+            assert "secret-value" not in serialized
+            assert "access_token" not in serialized
+            return True
+
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            auth_config_by_provider={"facebook": "authcfg_fb"},
+        ),
+    )
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/wiii-connect/providers/facebook/execution-decision",
+            json={
+                "surface": "desktop",
+                "connection_id": "ca_active",
+                "action_slug": "FACEBOOK_GET_PAGE",
+                "path": "external_app_action",
+                "mutation": "read",
+                "argument_keys": ["page_id", "access_token"],
+                "approval_token": "secret-value",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["version"] == "wiii_connect_execution_gateway.v1"
+    assert payload["status"] == "blocked"
+    assert payload["reason"] == "provider_not_agent_ready"
+    assert payload["connection_present"] is True
+    assert payload["adapter"]["can_execute_actions"] is False
+    assert fake_storage.fetches == 1
+    assert fake_storage.audit_appends == 1
+    assert "secret-api-key" not in serialized
+    assert "authcfg_fb" not in serialized
+    assert "secret-value" not in serialized
+    assert "access_token" not in serialized
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_authorization_url_api_404_for_unknown_provider(app):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),

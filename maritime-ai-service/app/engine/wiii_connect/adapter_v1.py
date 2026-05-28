@@ -42,6 +42,11 @@ ExecutionDenyReason = Literal[
     "allowed",
     "provider_disabled",
     "provider_not_agent_ready",
+    "provider_adapter_mismatch",
+    "provider_adapter_not_bound",
+    "provider_adapter_not_configured",
+    "provider_adapter_cannot_execute",
+    "audit_ledger_not_persistent",
     "connection_missing",
     "connection_provider_mismatch",
     "connection_not_connected",
@@ -270,7 +275,7 @@ class WiiiConnectExecutionRequest:
             "mutation": self.mutation,
             "approval_token_present": self.approval_token_present,
             "preview_evidence_present": bool(self.preview_evidence_id),
-            "argument_keys": list(self.argument_keys),
+            "argument_keys": [_safe_audit_key(key) for key in self.argument_keys],
         }
 
 
@@ -450,3 +455,15 @@ def _deny(
             f"deny:{reason}",
         ),
     )
+
+
+_SENSITIVE_KEY_MARKERS = ("token", "secret", "password", "credential", "key", "code")
+
+
+def _safe_audit_key(key: str) -> str:
+    normalized = str(key or "").strip().lower()
+    if not normalized:
+        return "empty"
+    if any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS):
+        return "redacted_sensitive_field"
+    return normalized[:80]

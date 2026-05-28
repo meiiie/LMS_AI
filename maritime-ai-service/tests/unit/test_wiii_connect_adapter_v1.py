@@ -177,6 +177,95 @@ def test_wildcard_only_action_allowlist_stays_fail_closed():
     assert entry.allows_action("SLACK_SEND_MESSAGE") is False
 
 
+def test_execution_gateway_requires_adapter_execution_and_persistent_audit():
+    from app.engine.wiii_connect.adapter_v1 import (
+        WiiiConnectConnectionRecordV1,
+        WiiiConnectExecutionRequest,
+        WiiiConnectProviderRegistryEntry,
+        WiiiConnectScopeGrant,
+    )
+    from app.engine.wiii_connect.execution_gateway import decide_execution_gateway
+    from app.engine.wiii_connect.provider_adapters import (
+        WiiiConnectProviderAdapterCapability,
+    )
+
+    entry = WiiiConnectProviderRegistryEntry(
+        slug="facebook",
+        label="Facebook",
+        provider_kind="composio",
+        auth_mode="oauth2",
+        enabled=True,
+        agent_ready=True,
+        allowed_paths=("external_app_action",),
+        action_allowlist=("FACEBOOK_GET_PAGE",),
+    )
+    connection = WiiiConnectConnectionRecordV1(
+        connection_id="conn_1",
+        provider_slug="facebook",
+        state="connected",
+        scopes=WiiiConnectScopeGrant(read=True),
+    )
+    request = WiiiConnectExecutionRequest(
+        provider_slug="facebook",
+        action_slug="FACEBOOK_GET_PAGE",
+        path="external_app_action",
+        mutation="read",
+        argument_keys=("page_id", "access_token"),
+    )
+    adapter_without_execute = WiiiConnectProviderAdapterCapability(
+        provider_kind="composio",
+        adapter_name="composio_adapter",
+        bound=True,
+        configured=True,
+        can_create_authorization_url=True,
+        can_exchange_callback=True,
+        can_execute_actions=False,
+        reason="ready",
+    )
+    adapter_with_execute = WiiiConnectProviderAdapterCapability(
+        provider_kind="composio",
+        adapter_name="composio_adapter",
+        bound=True,
+        configured=True,
+        can_create_authorization_url=True,
+        can_exchange_callback=True,
+        can_execute_actions=True,
+        reason="ready",
+    )
+
+    blocked_adapter = decide_execution_gateway(
+        entry,
+        connection,
+        request,
+        adapter_capability=adapter_without_execute,
+        audit_ledger_metadata={"persistent": True},
+    )
+    blocked_audit = decide_execution_gateway(
+        entry,
+        connection,
+        request,
+        adapter_capability=adapter_with_execute,
+        audit_ledger_metadata={"persistent": False},
+    )
+    allowed = decide_execution_gateway(
+        entry,
+        connection,
+        request,
+        adapter_capability=adapter_with_execute,
+        audit_ledger_metadata={"persistent": True},
+    )
+    serialized = json.dumps(allowed.to_public_metadata(), sort_keys=True)
+
+    assert blocked_adapter.allowed is False
+    assert blocked_adapter.reason == "provider_adapter_cannot_execute"
+    assert blocked_audit.allowed is False
+    assert blocked_audit.reason == "audit_ledger_not_persistent"
+    assert allowed.allowed is True
+    assert allowed.reason == "allowed"
+    assert "redacted_sensitive_field" in serialized
+    assert "access_token" not in serialized
+
+
 def test_public_metadata_does_not_expose_vault_key_or_raw_secret_values():
     from app.engine.wiii_connect.adapter_v1 import (
         WiiiConnectConnectionRecordV1,

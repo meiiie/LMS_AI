@@ -149,7 +149,11 @@ calls Composio `connected_accounts` only through Wiii backend and upserts
 sanitized connection records. The desktop Wiii Connect page can now start a
 backend-owned Connect Link, open only backend-issued URLs, refresh/poll
 sanitized provider connection records, and show connection state separately from
-agent-ready execution state. It still needs disconnect and reconnect controls,
-curated action catalog, execution gateway hardening for real provider actions,
-and end-to-end acceptance against real Composio credentials before Composio
-actions can be enabled for real users.
+agent-ready execution state. Wiii now also has an authenticated execution
+gateway preflight endpoint that fetches the stored org/user connection record,
+checks path/action/scope/evidence/adapter/audit policy, and appends a
+privacy-safe execution ledger record without calling Composio action execution.
+It still needs a curated action catalog, provider execution adapter enablement
+for one low-risk read-only action, disconnect/reconnect controls, and
+end-to-end acceptance against real Composio credentials before Composio actions
+can be enabled for real users.
