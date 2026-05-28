@@ -133,6 +133,10 @@ opens only backend-issued Connect Links, polls sanitized connection records
 through Wiii, and still keeps provider connection state separate from
 `agent_ready` execution state. The frontend never calls Composio directly and
 never receives provider tokens, raw payloads, or raw provider connection IDs.
+Activation, execution-decision, execute, and disconnect surfaces must select an
+account with Wiii's opaque `connection_ref` (`wcn_*`). Raw provider connected
+account IDs are backend-internal only and are treated as "no selected
+connection" if they appear in public request bodies or paths.
 
 The activation readiness endpoint is the single operator/UI preflight for a
 provider. It performs no provider network calls, creates no Connect Link, and
