@@ -454,7 +454,7 @@ describe("WiiiConnectPage", () => {
     });
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
 
-    render(<WiiiConnectPage />);
+    const { container } = render(<WiiiConnectPage />);
 
     expect(await screen.findByText("Registry backend")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Composio/i }));
@@ -480,6 +480,9 @@ describe("WiiiConnectPage", () => {
     expect(await screen.findByText("Connection thật")).toBeTruthy();
     expect(screen.getAllByText("Wiii Facebook Page").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Đã kết nối").length).toBeGreaterThan(0);
+    expect(container.textContent).not.toContain("conn_public_1");
+    expect(container.textContent).not.toContain("fb_page_public");
+    expect(container.textContent).not.toContain("https://composio.example/connect/safe");
     expect(screen.queryByText("access_token")).toBeNull();
     expect(screen.queryByText("secret-value")).toBeNull();
 
