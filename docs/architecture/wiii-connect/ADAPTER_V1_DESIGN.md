@@ -104,6 +104,13 @@ inventing a separate external-provider source of truth. Until a provider has
 OAuth, vault, scoped action catalog, gateway, and audit support, the registry
 must keep that provider disabled and non-agent-ready.
 
+The desktop Wiii Connect page now consumes the authenticated backend
+authorization and connection-list endpoints for backend registry providers. It
+opens only backend-issued Connect Links, polls sanitized connection records
+through Wiii, and still keeps provider connection state separate from
+`agent_ready` execution state. The frontend never calls Composio directly and
+never receives provider tokens or raw payloads.
+
 ## Core Entities
 
 `WiiiConnectProviderRegistryEntry`
@@ -419,8 +426,7 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 
 ## Next Slices
 
-1. Add frontend connection modal that uses Wiii backend routes only.
-2. Add disconnect/delete/reconnect lifecycle controls behind the same policy.
-3. Add browser acceptance for connect, poll, disconnect, gated scope, and denied
+1. Add disconnect/delete/reconnect lifecycle controls behind the same policy.
+2. Add browser acceptance for disconnect, gated scope, and denied
    execute cases.
-4. Enable one low-risk read-only Composio action before any write action.
+3. Enable one low-risk read-only Composio action before any write action.
