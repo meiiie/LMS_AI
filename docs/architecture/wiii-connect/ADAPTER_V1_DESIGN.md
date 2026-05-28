@@ -61,6 +61,7 @@ The OAuth callback/vault boundary contract lives in:
 
 ```text
 maritime-ai-service/app/engine/wiii_connect/callback_boundary.py
+maritime-ai-service/app/engine/wiii_connect/callback_state.py
 ```
 
 The vault policy and audit ledger contracts live in:
@@ -169,15 +170,27 @@ must keep that provider disabled and non-agent-ready.
 `WiiiConnectCallbackRequest`
 
 - records only callback shape: state/code/error presence and sanitized key names;
+- supports Composio Connect Link callbacks where a provider-managed connected
+  account reference is present instead of a raw OAuth code;
+- requires Wiii-owned signed callback state to be valid before accepting;
 - never returns OAuth code, state value, token, client secret, or raw provider
   payload.
 
 `WiiiConnectCallbackDecision`
 
 - returns `blocked` or `accepted`;
-- blocks disabled providers, provider errors, missing state, missing code, missing
-  vault, or missing provider adapter;
+- blocks disabled providers, provider errors, missing state, invalid state,
+  missing provider connection reference, missing vault, or missing provider
+  adapter;
 - issues a vault reference only after vault and provider adapter are both ready.
+
+`WiiiConnectCallbackStateClaims`
+
+- verifies the Wiii-owned `wiii_state` query value appended to provider callback
+  URLs;
+- binds callbacks back to the Wiii organization/user boundary without exposing
+  the raw state value in audit or public metadata;
+- rejects tampered, expired, wrong-provider, and malformed state values.
 
 `WiiiConnectVaultCapability`
 
@@ -349,14 +362,18 @@ Before real Composio OAuth is enabled:
   never call Composio directly;
 - authorization URLs must come from a bound provider adapter decision, not from
   raw frontend input or ad hoc session arguments;
+- Wiii must append signed `wiii_state` to the provider callback URL before
+  calling Composio, and callbacks must verify that state before any connection
+  upsert;
 - authorization URL decisions may consume durable audit readiness only from an
   explicit storage probe or backend-controlled storage status, never from
   frontend claims;
 - disabled providers must return a blocked decision with missing requirements;
 - missing connection requirements block OAuth/session start, while missing
   agent-ready requirements only block tool/action exposure;
-- callback handling must stay blocked until state/code validation, vault storage,
-  and provider adapter exchange are ready;
+- callback handling must stay blocked until signed state validation,
+  provider-managed connection reference or code presence, vault storage, and
+  provider adapter exchange are ready;
 - callback/webhook handling must bind provider account to Wiii org/user;
 - credential material must be stored in an encrypted vault or provider-managed
   backend secret store;

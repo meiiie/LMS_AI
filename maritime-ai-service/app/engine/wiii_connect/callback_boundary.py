@@ -23,7 +23,9 @@ CallbackDecisionReason = Literal[
     "provider_disabled",
     "provider_error",
     "missing_state",
+    "invalid_state",
     "missing_code",
+    "missing_connection_ref",
     "vault_not_configured",
     "provider_adapter_not_bound",
     "accepted",
@@ -40,7 +42,9 @@ class WiiiConnectCallbackRequest:
     surface: str = "desktop"
     state_present: bool = False
     code_present: bool = False
+    connection_ref_present: bool = False
     error_present: bool = False
+    state_valid: bool = False
     request_metadata_keys: tuple[str, ...] = ()
 
     def to_audit_metadata(self) -> dict[str, Any]:
@@ -49,7 +53,9 @@ class WiiiConnectCallbackRequest:
             "surface": self.surface,
             "state_present": self.state_present,
             "code_present": self.code_present,
+            "connection_ref_present": self.connection_ref_present,
             "error_present": self.error_present,
+            "state_valid": self.state_valid,
             "request_metadata_keys": [
                 _safe_metadata_key(key) for key in self.request_metadata_keys
             ],
@@ -175,8 +181,12 @@ def _callback_reason(
         return "provider_error"
     if not request.state_present:
         return "missing_state"
-    if not request.code_present:
+    if not request.state_valid:
+        return "invalid_state"
+    if not request.code_present and not request.connection_ref_present:
         return "missing_code"
+    if not request.connection_ref_present:
+        return "missing_connection_ref"
     if not vault_ready:
         return "vault_not_configured"
     if not provider_adapter_bound:
