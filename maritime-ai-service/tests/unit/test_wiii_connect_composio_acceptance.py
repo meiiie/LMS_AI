@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -212,6 +213,148 @@ def test_activation_readiness_payload_uses_backend_endpoint(monkeypatch) -> None
     assert "probe_database=true" in url
     assert "action_slug=GMAIL_FETCH_EMAILS" in url
     assert "connection_id=ca_live" in url
+
+
+def test_validate_evidence_path_rejects_secret_and_generated_locations() -> None:
+    with pytest.raises(acceptance.AcceptanceFailure, match="forbidden"):
+        acceptance.validate_evidence_path(".env.composio.json")
+    with pytest.raises(acceptance.AcceptanceFailure, match="forbidden"):
+        acceptance.validate_evidence_path("coverage/wiii-connect.json")
+    with pytest.raises(acceptance.AcceptanceFailure, match="must end with .json"):
+        acceptance.validate_evidence_path("artifacts/wiii-connect.txt")
+
+    assert (
+        acceptance.validate_evidence_path("artifacts/wiii-connect/evidence.json").name
+        == "evidence.json"
+    )
+
+
+def test_evidence_payload_redacts_sensitive_details() -> None:
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="https://wiii.example.com/api?token=secret",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            auth_mode="bearer",
+            target_env="staging",
+            commit_sha="abc1234",
+            readiness_report_only=False,
+            skip_connect_link=False,
+            print_connect_url=True,
+            expect_connected=True,
+            require_execution_ready=True,
+            execute_readonly=False,
+            disconnect=False,
+            connection_id="ca_secret",
+            arguments_json='{"max_results": 1}',
+        )
+    )
+    harness.passed = 1
+    harness.failed = 0
+    harness.check_records.append(
+        harness.check_record(
+            "connect link",
+            status="passed",
+            elapsed=0.2,
+            detail=(
+                "authorization_url=https://connect.example/callback"
+                "?wiii_state=secret connection_id=ca_secret"
+            ),
+        )
+    )
+
+    payload = harness.evidence_payload()
+    serialized = json.dumps(payload, sort_keys=True)
+
+    assert payload["schema"] == "wiii_connect_composio_acceptance_evidence.v1"
+    assert payload["backend_origin"] == "https://wiii.example.com"
+    assert payload["target_env"] == "staging"
+    assert payload["commit_sha"] == "abc1234"
+    assert payload["flags"]["explicit_connection_selected"] is True
+    assert payload["flags"]["arguments_present"] is True
+    assert "token=secret" not in serialized
+    assert "wiii_state=secret" not in serialized
+    assert "ca_secret" not in serialized
+    assert "authorization_url=" not in serialized
+
+
+def test_run_writes_redacted_evidence_json(monkeypatch, tmp_path) -> None:
+    calls: list[str] = []
+    printed: list[str] = []
+    evidence_path = tmp_path / "wiii-connect-evidence.json"
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(
+            backend_url="http://localhost:8080",
+            provider="gmail",
+            action="GMAIL_FETCH_EMAILS",
+            timeout=7.0,
+            org_id="",
+            readiness_report_only=True,
+            connection_id="",
+            auth_mode="bearer",
+            target_env="local",
+            commit_sha="abc1234",
+            evidence_json=str(evidence_path),
+        )
+    )
+
+    def backend_health() -> str:
+        calls.append("health")
+        return "ok"
+
+    def authenticate() -> str:
+        calls.append("auth")
+        harness.token = "secret-token"
+        return "bearer token"
+
+    def report_payload(*, connection_id: str = ""):
+        calls.append(f"report:{connection_id or 'none'}")
+        return {
+            "provider_slug": "gmail",
+            "status": "blocked",
+            "ready_to_connect": False,
+            "ready_to_execute_readonly": False,
+            "gates": [
+                {
+                    "key": "provider_adapter",
+                    "ready": False,
+                    "reason": "missing_composio_api_key",
+                    "required_next": [
+                        "configure_composio_adapter",
+                        "https://callback.example/?wiii_state=secret",
+                    ],
+                }
+            ],
+        }
+
+    monkeypatch.setattr(harness, "check_backend_health", backend_health)
+    monkeypatch.setattr(harness, "authenticate", authenticate)
+    monkeypatch.setattr(harness, "activation_readiness_payload", report_payload)
+    monkeypatch.setattr(
+        builtins,
+        "print",
+        lambda *values, **kwargs: printed.append(
+            " ".join(str(value) for value in values)
+        ),
+    )
+
+    assert harness.run() == 0
+
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    serialized = json.dumps(payload, sort_keys=True)
+    output = "\n".join(printed)
+
+    assert calls == ["health", "auth", "report:none"]
+    assert payload["summary"] == {"failed": 0, "passed": 3, "success": True, "total": 3}
+    assert [item["name"] for item in payload["checks"]] == [
+        "backend health",
+        "authentication",
+        "activation readiness report",
+    ]
+    assert "secret-token" not in serialized
+    assert "missing_composio_api_key" not in serialized
+    assert "wiii_state=secret" not in serialized
+    assert "Wrote redacted evidence JSON" in output
 
 
 def test_readiness_report_only_does_not_run_live_connect_or_execute(monkeypatch) -> None:
