@@ -28,6 +28,8 @@ import {
   XCircle,
 } from "lucide-react";
 import type {
+  WiiiConnectActivationGate,
+  WiiiConnectActivationReadinessResponse,
   WiiiConnectAuthorizationUrlDecision,
   WiiiConnectProviderConnectionListResponse,
   WiiiConnectProviderConnectionRecord,
@@ -42,6 +44,7 @@ import {
   buildWiiiConnectProviderCallbackUrl,
   createWiiiConnectProviderAuthorizationUrl,
   disconnectWiiiConnectProviderConnection,
+  fetchWiiiConnectProviderActivationReadiness,
   fetchWiiiConnectProviderConnections,
   fetchWiiiConnectProviders,
   startWiiiConnectProviderSession,
@@ -119,6 +122,13 @@ interface CatalogCard {
 
 interface ProviderConnectionListState {
   response?: WiiiConnectProviderConnectionListResponse;
+  loading: boolean;
+  error?: string;
+  lastFetchedAt?: string;
+}
+
+interface ProviderActivationReadinessState {
+  response?: WiiiConnectActivationReadinessResponse;
   loading: boolean;
   error?: string;
   lastFetchedAt?: string;
@@ -1016,30 +1026,70 @@ function sessionDecisionTone(
   return decision.status === "ready" ? "ok" : "warn";
 }
 
+function activationReadinessTone(
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+): CapabilityStatusTone {
+  if (!readiness) return "off";
+  if (readiness.ready_to_execute_readonly) return "ok";
+  if (readiness.ready_to_connect) return "pending";
+  return "warn";
+}
+
+function readinessBooleanLabel(value: boolean | undefined): string {
+  return value ? "Sẵn sàng" : "Chưa sẵn sàng";
+}
+
+function readinessGateLabel(key: string): string {
+  const labels: Record<string, string> = {
+    provider_registered: "Provider registry",
+    provider_adapter: "Adapter",
+    vault: "Vault",
+    persistent_storage: "Storage",
+    audit_ledger: "Audit ledger",
+    connect_policy: "Connect policy",
+    curated_readonly_action: "Read-only action",
+    local_connection: "Connection",
+    execution_gateway: "Execution gateway",
+  };
+  return labels[key] ?? compactText(key.replaceAll("_", " "));
+}
+
+function readinessGateTone(gate: WiiiConnectActivationGate): CapabilityStatusTone {
+  return gate.ready ? "ok" : "warn";
+}
+
 function ConnectionDetailPanel({
   card,
+  readinessState,
   sessionDecision,
   authorizationDecision,
   sessionLoading,
+  readinessLoading,
   authorizationLoading,
   disconnectState,
+  readinessError,
   sessionError,
   authorizationError,
   connectionList,
+  onRefreshReadiness,
   onRequestSession,
   onRequestAuthorization,
   onRefreshConnections,
   onDisconnectConnection,
 }: {
   card: CatalogCard | null;
+  readinessState?: ProviderActivationReadinessState;
   sessionDecision?: WiiiConnectSessionStartDecision;
   authorizationDecision?: WiiiConnectAuthorizationUrlDecision;
   sessionLoading?: boolean;
+  readinessLoading?: boolean;
   authorizationLoading?: boolean;
   disconnectState?: ProviderDisconnectState;
+  readinessError?: string;
   sessionError?: string;
   authorizationError?: string;
   connectionList?: ProviderConnectionListState;
+  onRefreshReadiness?: (card: CatalogCard) => Promise<unknown>;
   onRequestSession?: (card: CatalogCard) => Promise<void>;
   onRequestAuthorization?: (card: CatalogCard) => Promise<void>;
   onRefreshConnections?: (card: CatalogCard) => Promise<unknown>;
@@ -1069,7 +1119,12 @@ function ConnectionDetailPanel({
     card.provider !== "wiii_native" &&
     card.registrySource === "backend" &&
     Boolean(onRefreshConnections);
+  const canRefreshReadiness =
+    card.provider !== "wiii_native" &&
+    card.registrySource === "backend" &&
+    Boolean(onRefreshReadiness);
   const providerConnection = primaryProviderConnection(connectionList?.response);
+  const readiness = readinessState?.response;
   const canDisconnectConnection =
     card.provider !== "wiii_native" &&
     card.registrySource === "backend" &&
@@ -1115,6 +1170,92 @@ function ConnectionDetailPanel({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {(readinessState || canRefreshReadiness) && (
+        <div
+          className="mt-4 rounded-md border border-[var(--border)] bg-surface-secondary px-3 py-3"
+          data-testid="wiii-connect-readiness-panel"
+        >
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase text-text-tertiary">
+              Activation readiness
+            </div>
+            <StatusPill tone={activationReadinessTone(readiness)}>
+              {readiness?.status ?? (readinessState?.loading ? "đang đọc" : "chưa đọc")}
+            </StatusPill>
+          </div>
+
+          <dl className="grid gap-2 text-xs sm:grid-cols-2">
+            <div className="rounded-md bg-surface px-2 py-2">
+              <dt className="text-text-tertiary">Connect-ready</dt>
+              <dd className="mt-0.5 font-medium text-text">
+                {readinessBooleanLabel(readiness?.ready_to_connect)}
+              </dd>
+            </div>
+            <div className="rounded-md bg-surface px-2 py-2">
+              <dt className="text-text-tertiary">Agent read-only</dt>
+              <dd className="mt-0.5 font-medium text-text">
+                {readinessBooleanLabel(readiness?.ready_to_execute_readonly)}
+              </dd>
+            </div>
+            <div className="rounded-md bg-surface px-2 py-2">
+              <dt className="text-text-tertiary">Connection</dt>
+              <dd className="mt-0.5 font-medium text-text">
+                {readiness?.connection?.present
+                  ? statusLabel(readiness.connection.state)
+                  : "Chưa có account"}
+              </dd>
+            </div>
+            <div className="rounded-md bg-surface px-2 py-2">
+              <dt className="text-text-tertiary">Gateway</dt>
+              <dd className="mt-0.5 font-medium text-text">
+                {compactText(readiness?.execution_gateway?.status, "Chưa đánh giá")}
+              </dd>
+            </div>
+          </dl>
+
+          {readiness?.gates && readiness.gates.length > 0 && (
+            <ul className="mt-3 grid gap-2">
+              {readiness.gates.map((gate) => (
+                <li
+                  key={`${card.id}-readiness-${gate.key}`}
+                  className="rounded-md border border-[var(--border)] bg-surface px-2 py-2"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate text-sm font-medium text-text">
+                      {readinessGateLabel(gate.key)}
+                    </span>
+                    <StatusPill tone={readinessGateTone(gate)}>
+                      {gate.ready ? "ok" : "blocked"}
+                    </StatusPill>
+                  </div>
+                  <div className="mt-1 break-words text-xs text-text-tertiary">
+                    {compactText(gate.reason)}
+                  </div>
+                  {gate.required_next && gate.required_next.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {gate.required_next.slice(0, 3).map((item) => (
+                        <span
+                          key={`${card.id}-readiness-${gate.key}-${item}`}
+                          className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-text-secondary"
+                        >
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {readinessState?.lastFetchedAt && (
+            <p className="mt-2 text-xs text-text-tertiary">
+              Cập nhật {formatDateTime(readinessState.lastFetchedAt)}
+            </p>
+          )}
         </div>
       )}
 
@@ -1250,6 +1391,12 @@ function ConnectionDetailPanel({
         </div>
       )}
 
+      {readinessError && (
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {readinessError}
+        </div>
+      )}
+
       {disconnectState?.response && (
         <div className="mt-4 rounded-md border border-[var(--border)] bg-surface-secondary px-3 py-3">
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -1294,6 +1441,26 @@ function ConnectionDetailPanel({
       )}
 
       <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={!canRefreshReadiness || readinessLoading}
+          onClick={() => {
+            if (canRefreshReadiness) void onRefreshReadiness?.(card);
+          }}
+          className={`inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium ${
+            canRefreshReadiness
+              ? "border-[var(--border)] bg-surface-secondary text-text-secondary hover:text-text"
+              : "border-[var(--border)] bg-surface-secondary text-text-tertiary"
+          }`}
+        >
+          <RefreshCw
+            size={14}
+            className={readinessLoading ? "animate-spin" : ""}
+            aria-hidden="true"
+          />
+          Kiểm tra readiness
+        </button>
+
         <button
           type="button"
           disabled={!canRequestAuthorization || authorizationLoading}
@@ -1414,6 +1581,9 @@ function ConnectionCatalog({
   const [authorizationErrors, setAuthorizationErrors] = useState<Record<string, string>>({});
   const [sessionLoadingSlug, setSessionLoadingSlug] = useState<string | null>(null);
   const [authorizationLoadingSlug, setAuthorizationLoadingSlug] = useState<string | null>(null);
+  const [providerReadinessStates, setProviderReadinessStates] = useState<
+    Record<string, ProviderActivationReadinessState>
+  >({});
   const [providerConnectionLists, setProviderConnectionLists] = useState<
     Record<string, ProviderConnectionListState>
   >({});
@@ -1446,6 +1616,69 @@ function ConnectionCatalog({
 
   const selectedCard =
     filteredCards.find((card) => card.id === selectedCardId) ?? filteredCards[0] ?? null;
+
+  const refreshActivationReadiness = async (
+    card: CatalogCard,
+    connection?: WiiiConnectProviderConnectionRecord | null,
+  ): Promise<WiiiConnectActivationReadinessResponse | null> => {
+    if (card.provider === "wiii_native" || card.registrySource !== "backend") return null;
+    const slug = card.providerSlug;
+    const selectedConnection =
+      connection ?? primaryProviderConnection(providerConnectionLists[slug]?.response);
+    setProviderReadinessStates((current) => ({
+      ...current,
+      [slug]: {
+        ...current[slug],
+        loading: true,
+        error: undefined,
+      },
+    }));
+    try {
+      const response = await fetchWiiiConnectProviderActivationReadiness(slug, {
+        actionSlug: "GMAIL_FETCH_EMAILS",
+        connectionId: selectedConnection?.connection_id,
+        probeDatabase: true,
+      });
+      setProviderReadinessStates((current) => ({
+        ...current,
+        [slug]: {
+          response,
+          loading: false,
+          lastFetchedAt: new Date().toISOString(),
+        },
+      }));
+      return response;
+    } catch {
+      setProviderReadinessStates((current) => ({
+        ...current,
+        [slug]: {
+          ...current[slug],
+          loading: false,
+          error: "Không thể đọc activation readiness từ backend.",
+          lastFetchedAt: new Date().toISOString(),
+        },
+      }));
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    if (
+      !selectedCard ||
+      selectedCard.provider === "wiii_native" ||
+      selectedCard.registrySource !== "backend"
+    ) {
+      return;
+    }
+    const state = providerReadinessStates[selectedCard.providerSlug];
+    if (state?.loading || state?.response || state?.error) return;
+    void refreshActivationReadiness(selectedCard);
+  }, [
+    selectedCard?.id,
+    selectedCard?.provider,
+    selectedCard?.providerSlug,
+    selectedCard?.registrySource,
+  ]);
 
   const requestSessionDecision = async (card: CatalogCard) => {
     if (card.provider === "wiii_native" || card.registrySource !== "backend") return;
@@ -1501,6 +1734,7 @@ function ConnectionCatalog({
           lastFetchedAt: new Date().toISOString(),
         },
       }));
+      void refreshActivationReadiness(card, primaryProviderConnection(response));
       return response;
     } catch {
       setProviderConnectionLists((current) => ({
@@ -1545,6 +1779,10 @@ function ConnectionCatalog({
         },
       }));
       if (response.local_disabled) {
+        const disabledConnection = locallyDisabledConnection(
+          connection,
+          "user_disconnect_requested",
+        );
         setProviderConnectionLists((current) => ({
           ...current,
           [slug]: {
@@ -1558,6 +1796,7 @@ function ConnectionCatalog({
             lastFetchedAt: new Date().toISOString(),
           },
         }));
+        void refreshActivationReadiness(card, disabledConnection);
       }
     } catch {
       setDisconnectStates((current) => ({
@@ -1770,14 +2009,26 @@ function ConnectionCatalog({
 
         <ConnectionDetailPanel
           card={selectedCard}
+          readinessState={
+            selectedCard ? providerReadinessStates[selectedCard.providerSlug] : undefined
+          }
           sessionDecision={selectedCard ? sessionDecisions[selectedCard.providerSlug] : undefined}
           authorizationDecision={selectedCard ? authorizationDecisions[selectedCard.providerSlug] : undefined}
           sessionLoading={selectedCard ? sessionLoadingSlug === selectedCard.providerSlug : false}
+          readinessLoading={
+            selectedCard
+              ? Boolean(providerReadinessStates[selectedCard.providerSlug]?.loading)
+              : false
+          }
           authorizationLoading={selectedCard ? authorizationLoadingSlug === selectedCard.providerSlug : false}
           disconnectState={selectedCard ? disconnectStates[selectedCard.providerSlug] : undefined}
+          readinessError={
+            selectedCard ? providerReadinessStates[selectedCard.providerSlug]?.error : undefined
+          }
           sessionError={selectedCard ? sessionErrors[selectedCard.providerSlug] : undefined}
           authorizationError={selectedCard ? authorizationErrors[selectedCard.providerSlug] : undefined}
           connectionList={selectedCard ? providerConnectionLists[selectedCard.providerSlug] : undefined}
+          onRefreshReadiness={refreshActivationReadiness}
           onRequestSession={requestSessionDecision}
           onRequestAuthorization={requestAuthorizationUrl}
           onRefreshConnections={refreshProviderConnections}

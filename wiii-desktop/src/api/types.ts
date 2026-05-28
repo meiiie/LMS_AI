@@ -583,6 +583,46 @@ export interface WiiiConnectProviderConnectionListResponse {
   storage?: Record<string, unknown> | null;
 }
 
+export interface WiiiConnectActivationGate {
+  key: string;
+  ready: boolean;
+  reason: string;
+  required_next?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface WiiiConnectActivationReadinessConnection {
+  present?: boolean;
+  provider_slug?: string;
+  state?: string;
+  active?: boolean;
+  scopes?: Record<string, boolean>;
+  vault_ref_present?: boolean;
+  account_label_present?: boolean;
+  external_account_ref_present?: boolean;
+  last_checked_at_present?: boolean;
+  reason?: string;
+  warnings?: string[];
+}
+
+export interface WiiiConnectActivationReadinessResponse {
+  version: string;
+  status: "blocked" | "ready" | string;
+  provider_slug: string;
+  provider_kind: string;
+  ready_to_connect: boolean;
+  ready_to_execute_readonly: boolean;
+  gates: WiiiConnectActivationGate[];
+  provider?: Record<string, unknown> | null;
+  execution_provider?: Record<string, unknown> | null;
+  adapter?: WiiiConnectProviderAdapterCapability | null;
+  vault?: Record<string, unknown> | null;
+  storage?: Record<string, unknown> | null;
+  action?: Record<string, unknown> | null;
+  connection?: WiiiConnectActivationReadinessConnection | null;
+  execution_gateway?: Record<string, unknown> | null;
+}
+
 export interface WiiiConnectProviderDisconnectResponse {
   version: string;
   status: "blocked" | "succeeded" | "failed" | string;

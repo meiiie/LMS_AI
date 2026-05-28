@@ -1,5 +1,6 @@
 import { getClient } from "./client";
 import type {
+  WiiiConnectActivationReadinessResponse,
   WiiiConnectAuthorizationUrlDecision,
   WiiiConnectProviderConnectionListResponse,
   WiiiConnectProviderConnectionStatus,
@@ -48,6 +49,24 @@ export async function fetchWiiiConnectProviderConnections(
   return getClient().get<WiiiConnectProviderConnectionListResponse>(
     `/api/v1/wiii-connect/providers/${encodeURIComponent(slug)}/connections`,
     {
+      probe_database: options.probeDatabase === false ? "false" : "true",
+    },
+  );
+}
+
+export async function fetchWiiiConnectProviderActivationReadiness(
+  slug: string,
+  options: {
+    actionSlug?: string;
+    connectionId?: string;
+    probeDatabase?: boolean;
+  } = {},
+): Promise<WiiiConnectActivationReadinessResponse> {
+  return getClient().get<WiiiConnectActivationReadinessResponse>(
+    `/api/v1/wiii-connect/providers/${encodeURIComponent(slug)}/activation-readiness`,
+    {
+      action_slug: options.actionSlug ?? "GMAIL_FETCH_EMAILS",
+      connection_id: options.connectionId ?? "",
       probe_database: options.probeDatabase === false ? "false" : "true",
     },
   );

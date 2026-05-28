@@ -4,6 +4,7 @@ import {
   buildWiiiConnectProviderCallbackUrl,
   createWiiiConnectProviderAuthorizationUrl,
   disconnectWiiiConnectProviderConnection,
+  fetchWiiiConnectProviderActivationReadiness,
   fetchWiiiConnectProviderConnections,
   fetchWiiiConnectProviders,
   startWiiiConnectProviderSession,
@@ -18,6 +19,7 @@ vi.mock("@/api/wiii-connect", () => ({
   buildWiiiConnectProviderCallbackUrl: vi.fn(),
   createWiiiConnectProviderAuthorizationUrl: vi.fn(),
   disconnectWiiiConnectProviderConnection: vi.fn(),
+  fetchWiiiConnectProviderActivationReadiness: vi.fn(),
   fetchWiiiConnectProviderConnections: vi.fn(),
   fetchWiiiConnectProviders: vi.fn(),
   startWiiiConnectProviderSession: vi.fn(),
@@ -30,6 +32,9 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
 const mockBuildWiiiConnectProviderCallbackUrl = vi.mocked(buildWiiiConnectProviderCallbackUrl);
 const mockCreateWiiiConnectProviderAuthorizationUrl = vi.mocked(createWiiiConnectProviderAuthorizationUrl);
 const mockDisconnectWiiiConnectProviderConnection = vi.mocked(disconnectWiiiConnectProviderConnection);
+const mockFetchWiiiConnectProviderActivationReadiness = vi.mocked(
+  fetchWiiiConnectProviderActivationReadiness,
+);
 const mockFetchWiiiConnectProviderConnections = vi.mocked(fetchWiiiConnectProviderConnections);
 const mockFetchWiiiConnectProviders = vi.mocked(fetchWiiiConnectProviders);
 const mockStartWiiiConnectProviderSession = vi.mocked(startWiiiConnectProviderSession);
@@ -44,6 +49,8 @@ describe("WiiiConnectPage", () => {
     mockCreateWiiiConnectProviderAuthorizationUrl.mockRejectedValue(new Error("offline"));
     mockDisconnectWiiiConnectProviderConnection.mockReset();
     mockDisconnectWiiiConnectProviderConnection.mockRejectedValue(new Error("offline"));
+    mockFetchWiiiConnectProviderActivationReadiness.mockReset();
+    mockFetchWiiiConnectProviderActivationReadiness.mockRejectedValue(new Error("offline"));
     mockFetchWiiiConnectProviderConnections.mockReset();
     mockFetchWiiiConnectProviderConnections.mockRejectedValue(new Error("offline"));
     mockStartWiiiConnectProviderSession.mockReset();
@@ -219,6 +226,91 @@ describe("WiiiConnectPage", () => {
     expect(screen.getByText("execution_gateway")).toBeTruthy();
     expect(screen.getByText("audit_ledger")).toBeTruthy();
     expect(screen.getByText("Backend registry")).toBeTruthy();
+  });
+
+  it("renders activation readiness gates without exposing provider secrets", async () => {
+    mockFetchWiiiConnectProviders.mockResolvedValue({
+      version: "wiii_connect_provider_registry.v1",
+      adapter_version: "wiii_connect_adapter.v1",
+      providers: [
+        {
+          slug: "gmail",
+          label: "Gmail",
+          provider_kind: "composio",
+          auth_mode: "oauth2",
+          enabled: true,
+          agent_ready: false,
+          category: "productivity",
+          description: "Gmail provider from backend registry.",
+          requirements: ["scope_policy", "execution_gateway"],
+          action_count: 1,
+        },
+      ],
+    });
+    mockFetchWiiiConnectProviderActivationReadiness.mockResolvedValue({
+      version: "wiii_connect_activation_readiness.v1",
+      status: "blocked",
+      provider_slug: "gmail",
+      provider_kind: "composio",
+      ready_to_connect: true,
+      ready_to_execute_readonly: false,
+      gates: [
+        {
+          key: "provider_adapter",
+          ready: true,
+          reason: "ready",
+          required_next: [],
+          metadata: { configured: true },
+        },
+        {
+          key: "local_connection",
+          ready: false,
+          reason: "connection_missing",
+          required_next: ["complete_provider_oauth"],
+        },
+        {
+          key: "execution_gateway",
+          ready: false,
+          reason: "connection_missing",
+          required_next: ["connect_provider_account"],
+        },
+      ],
+      connection: {
+        present: false,
+        state: "missing",
+        active: false,
+        vault_ref_present: false,
+        reason: "connection_missing",
+      },
+      execution_gateway: {
+        status: "blocked",
+        reason: "connection_missing",
+      },
+      provider: { api_key: "secret-api-key" },
+      storage: { persistent: true },
+    });
+
+    render(<WiiiConnectPage />);
+
+    expect(await screen.findByText("Registry backend")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Composio/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Gmail/i }));
+
+    expect(await screen.findByTestId("wiii-connect-readiness-panel")).toBeTruthy();
+    expect(screen.getByText("Activation readiness")).toBeTruthy();
+    expect(screen.getByText("Connect-ready")).toBeTruthy();
+    expect(screen.getByText("Agent read-only")).toBeTruthy();
+    expect(screen.getByText("Adapter")).toBeTruthy();
+    expect(screen.getAllByText("Connection").length).toBeGreaterThan(0);
+    expect(screen.getByText("complete_provider_oauth")).toBeTruthy();
+    expect(mockFetchWiiiConnectProviderActivationReadiness).toHaveBeenCalledWith("gmail", {
+      actionSlug: "GMAIL_FETCH_EMAILS",
+      connectionId: undefined,
+      probeDatabase: true,
+    });
+    expect(screen.queryByText("secret-api-key")).toBeNull();
+    expect(screen.queryByText("api_key")).toBeNull();
+    expect(screen.queryByText("access_token")).toBeNull();
   });
 
   it("requests backend session decision for backend registry providers", async () => {
