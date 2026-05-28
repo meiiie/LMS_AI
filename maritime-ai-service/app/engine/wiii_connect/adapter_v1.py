@@ -213,7 +213,7 @@ class WiiiConnectVaultSecretRef:
     def to_public_metadata(self) -> dict[str, Any]:
         return {
             "provider_slug": self.provider_slug,
-            "connection_id": self.connection_id,
+            "connection_ref_present": bool(self.connection_id),
             "vault_ref_present": bool(self.vault_key_id),
             "secret_version": self.secret_version,
         }
@@ -324,7 +324,7 @@ class WiiiConnectAuditEvent:
             "version": WIII_CONNECT_ADAPTER_VERSION,
             "stage": self.stage,
             "created_at": self.created_at,
-            "connection_id": self.connection_id,
+            "connection_ref_present": bool(self.connection_id),
             "request": self.request.to_audit_metadata(),
             "decision": self.decision.to_metadata(),
         }

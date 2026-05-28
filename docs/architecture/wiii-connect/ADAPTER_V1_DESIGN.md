@@ -167,6 +167,8 @@ without guessing from logs.
 
 - opaque pointer to credentials;
 - never serializes secret values or vault paths to public metadata;
+- public metadata reports only provider slug, connection-reference presence, and
+  secret-version labels, never raw provider connection IDs;
 - lets UI and runtime know that a vault reference exists without exposing it.
 
 `WiiiConnectConnectionRecordV1`

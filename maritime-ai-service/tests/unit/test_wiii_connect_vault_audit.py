@@ -51,9 +51,12 @@ def test_vault_write_decision_blocks_disabled_provider_and_redacts_keys():
 
     assert decision.ready is False
     assert metadata["reason"] == "provider_disabled"
+    assert metadata["connection_ref_present"] is True
     assert metadata["vault_ref"] is None
     assert "redacted_sensitive_field" in serialized
     assert "account_id" in serialized
+    assert "conn_1" not in serialized
+    assert "connection_id" not in serialized
     assert "access_token" not in serialized
     assert "refresh_token" not in serialized
     assert "secret-value" not in serialized
@@ -97,8 +100,12 @@ def test_vault_write_decision_issues_only_opaque_ref_when_ready():
 
     assert decision.ready is True
     assert metadata["reason"] == "ready_to_store"
+    assert metadata["connection_ref_present"] is True
     assert metadata["vault_ref"]["vault_ref_present"] is True
+    assert metadata["vault_ref"]["connection_ref_present"] is True
     assert metadata["vault_ref"]["secret_version"] == "pending"
+    assert "conn_1" not in serialized
+    assert "connection_id" not in serialized
     assert "tenant_1/composio/internal_test/conn_1/oauth_token" not in serialized
 
 
