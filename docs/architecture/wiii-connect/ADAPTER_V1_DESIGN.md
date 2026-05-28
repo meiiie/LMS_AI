@@ -514,9 +514,10 @@ Before real Composio OAuth is enabled:
 - disabled providers must return a blocked decision with missing requirements;
 - missing connection requirements block OAuth/session start, while missing
   agent-ready requirements only block tool/action exposure;
-- callback handling must stay blocked until signed state validation,
-  provider-managed connection reference or code presence, vault storage, and
-  provider adapter exchange are ready;
+- callback handling must validate Wiii-owned signed state before trusting
+  provider error/status fields, and must stay blocked until signed state
+  validation, provider-managed connection reference or code presence, vault
+  storage, and provider adapter exchange are ready;
 - callback/webhook handling must bind provider account to Wiii org/user;
 - credential material must be stored in an encrypted vault or provider-managed
   backend secret store;

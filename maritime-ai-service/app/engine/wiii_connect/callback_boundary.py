@@ -177,12 +177,12 @@ def _callback_reason(
 ) -> CallbackDecisionReason:
     if not entry.enabled:
         return "provider_disabled"
-    if request.error_present:
-        return "provider_error"
     if not request.state_present:
         return "missing_state"
     if not request.state_valid:
         return "invalid_state"
+    if request.error_present:
+        return "provider_error"
     if not request.code_present and not request.connection_ref_present:
         return "missing_code"
     if not request.connection_ref_present:
