@@ -1069,10 +1069,18 @@ async def test_wiii_connect_disconnect_api_requires_auth(app):
         base_url="http://test",
     ) as client:
         response = await client.delete(
-            "/wiii-connect/providers/gmail/connections/ca_active",
+            "/wiii-connect/providers/gmail/connections/wcn_public_ref",
         )
 
     assert response.status_code == 401
+
+
+def test_wiii_connect_openapi_names_disconnect_path_connection_ref(app):
+    schema = app.openapi()
+    paths = schema["paths"]
+
+    assert "/wiii-connect/providers/{slug}/connections/{connection_ref}" in paths
+    assert "/wiii-connect/providers/{slug}/connections/{connection_id}" not in paths
 
 
 @pytest.mark.asyncio
@@ -1084,6 +1092,7 @@ async def test_wiii_connect_disconnect_api_disables_local_before_provider_delete
     from app.engine.wiii_connect.adapter_v1 import (
         WiiiConnectConnectionRecordV1,
         WiiiConnectScopeGrant,
+        public_connection_ref,
     )
     from app.engine.wiii_connect.composio_adapter import (
         WiiiConnectComposioAdapterConfig,
@@ -1096,6 +1105,7 @@ async def test_wiii_connect_disconnect_api_disables_local_before_provider_delete
     class FakeStorage:
         audit_appends = 0
         fetches = 0
+        lists = 0
         upserts = 0
 
         def status(self, *, probe_database: bool = True):
@@ -1126,6 +1136,26 @@ async def test_wiii_connect_disconnect_api_disables_local_before_provider_delete
                 state="connected",
                 scopes=WiiiConnectScopeGrant(read=True),
                 reason="provider_connection_list",
+            )
+
+        def list_connection_records(
+            self,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_slug: str,
+        ):
+            self.lists += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_slug == "gmail"
+            return (
+                WiiiConnectConnectionRecordV1(
+                    connection_id="ca_active",
+                    provider_slug="gmail",
+                    state="connected",
+                    scopes=WiiiConnectScopeGrant(read=True),
+                ),
             )
 
         def upsert_connection_record(
@@ -1199,7 +1229,8 @@ async def test_wiii_connect_disconnect_api_disables_local_before_provider_delete
     ) as client:
         response = await client.request(
             "DELETE",
-            "/wiii-connect/providers/gmail/connections/ca_active",
+            "/wiii-connect/providers/gmail/connections/"
+            f"{public_connection_ref('gmail', 'ca_active')}",
             json={"surface": "desktop"},
         )
 
@@ -1212,6 +1243,7 @@ async def test_wiii_connect_disconnect_api_disables_local_before_provider_delete
     assert payload["connection_present"] is True
     assert payload["local_disabled"] is True
     assert payload["provider"]["provider_success"] is True
+    assert fake_storage.lists == 1
     assert fake_storage.fetches == 1
     assert fake_storage.upserts == 1
     assert fake_storage.audit_appends == 2

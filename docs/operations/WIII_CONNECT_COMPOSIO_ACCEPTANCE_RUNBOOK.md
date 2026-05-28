@@ -127,6 +127,10 @@ arguments matching that schema:
 python scripts/wiii_connect_composio_acceptance.py --backend-url http://localhost:8080 --auth-mode dev-login --provider gmail --expect-connected --require-execution-ready --execute-readonly --arguments-json '{"max_results":1}'
 ```
 
+If selecting a specific account manually, pass the opaque Wiii `connection_ref`
+returned by the connection list through `--connection-ref`; do not pass a raw
+provider connected-account ID.
+
 If the schema uses different argument names, do not change Wiii code blindly.
 Pass the live schema-compatible JSON through `--arguments-json` and record the
 accepted shape in the PR or release note.

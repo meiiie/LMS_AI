@@ -199,7 +199,7 @@ def test_activation_readiness_payload_uses_backend_endpoint(monkeypatch) -> None
     )
     harness.token = "token"
 
-    payload = harness.activation_readiness_payload(connection_id="ca_live")
+    payload = harness.activation_readiness_payload(connection_ref="wcn_live")
 
     assert payload["ready_to_connect"] is True
     assert captured["method"] == "GET"
@@ -212,7 +212,7 @@ def test_activation_readiness_payload_uses_backend_endpoint(monkeypatch) -> None
     )
     assert "probe_database=true" in url
     assert "action_slug=GMAIL_FETCH_EMAILS" in url
-    assert "connection_ref=ca_live" in url
+    assert "connection_ref=wcn_live" in url
 
 
 def test_gateway_fail_closed_check_requires_connection_selection_reason(
@@ -328,7 +328,7 @@ def test_evidence_payload_redacts_sensitive_details() -> None:
             require_execution_ready=True,
             execute_readonly=False,
             disconnect=False,
-            connection_id="ca_secret",
+            connection_ref="wcn_secret",
             arguments_json='{"max_results": 1}',
         )
     )
@@ -341,7 +341,7 @@ def test_evidence_payload_redacts_sensitive_details() -> None:
             elapsed=0.2,
             detail=(
                 "authorization_url=https://connect.example/callback"
-                "?wiii_state=secret connection_id=ca_secret"
+                "?wiii_state=secret connection_ref=wcn_secret"
             ),
         )
     )
@@ -353,12 +353,12 @@ def test_evidence_payload_redacts_sensitive_details() -> None:
     assert payload["backend_origin"] == "https://wiii.example.com"
     assert payload["target_env"] == "staging"
     assert payload["commit_sha"] == "abc1234"
-    assert payload["flags"]["explicit_connection_selected"] is True
+    assert payload["flags"]["explicit_connection_ref_selected"] is True
     assert payload["flags"]["connection_selected_for_action"] is True
     assert payload["flags"]["arguments_present"] is True
     assert "token=secret" not in serialized
     assert "wiii_state=secret" not in serialized
-    assert "ca_secret" not in serialized
+    assert "wcn_secret" not in serialized
     assert "authorization_url=" not in serialized
 
 
@@ -378,18 +378,18 @@ def test_evidence_payload_marks_connection_selected_from_listing() -> None:
             require_execution_ready=True,
             execute_readonly=True,
             disconnect=False,
-            connection_id="",
+            connection_ref="",
             arguments_json='{"max_results": 1}',
         )
     )
-    harness.selected_connection_id = "ca_selected_from_listing"
+    harness.selected_connection_ref = "wcn_selected_from_listing"
 
     payload = harness.evidence_payload()
     serialized = json.dumps(payload, sort_keys=True)
 
-    assert payload["flags"]["explicit_connection_selected"] is False
+    assert payload["flags"]["explicit_connection_ref_selected"] is False
     assert payload["flags"]["connection_selected_for_action"] is True
-    assert "ca_selected_from_listing" not in serialized
+    assert "wcn_selected_from_listing" not in serialized
 
 
 def test_run_writes_redacted_evidence_json(monkeypatch, tmp_path) -> None:
@@ -404,7 +404,7 @@ def test_run_writes_redacted_evidence_json(monkeypatch, tmp_path) -> None:
             timeout=7.0,
             org_id="",
             readiness_report_only=True,
-            connection_id="",
+            connection_ref="",
             auth_mode="bearer",
             target_env="local",
             commit_sha="abc1234",
@@ -421,8 +421,8 @@ def test_run_writes_redacted_evidence_json(monkeypatch, tmp_path) -> None:
         harness.token = "secret-token"
         return "bearer token"
 
-    def report_payload(*, connection_id: str = ""):
-        calls.append(f"report:{connection_id or 'none'}")
+    def report_payload(*, connection_ref: str = ""):
+        calls.append(f"report:{connection_ref or 'none'}")
         return {
             "provider_slug": "gmail",
             "status": "blocked",
@@ -482,7 +482,7 @@ def test_readiness_report_only_does_not_run_live_connect_or_execute(monkeypatch)
             timeout=7.0,
             org_id="",
             readiness_report_only=True,
-            connection_id="",
+            connection_ref="",
         )
     )
 
@@ -495,8 +495,8 @@ def test_readiness_report_only_does_not_run_live_connect_or_execute(monkeypatch)
         harness.token = "token"
         return "bearer"
 
-    def report_payload(*, connection_id: str = ""):
-        calls.append(f"report:{connection_id or 'none'}")
+    def report_payload(*, connection_ref: str = ""):
+        calls.append(f"report:{connection_ref or 'none'}")
         return {
             "provider_slug": "gmail",
             "status": "blocked",
@@ -539,13 +539,26 @@ def test_readiness_report_only_does_not_run_live_connect_or_execute(monkeypatch)
     assert "complete_provider_oauth" in output
 
 
-def test_connection_id_for_action_requires_selected_or_explicit_connection() -> None:
+def test_connection_ref_for_action_requires_selected_or_explicit_connection() -> None:
     harness = acceptance.WiiiConnectComposioAcceptance(
-        SimpleNamespace(connection_id="", selected_connection_id="")
+        SimpleNamespace(connection_ref="", selected_connection_ref="")
     )
 
     with pytest.raises(acceptance.AcceptanceFailure, match="No connected account"):
-        harness.connection_id_for_action()
+        harness.connection_ref_for_action()
 
-    harness.selected_connection_id = "ca_live"
-    assert harness.connection_id_for_action() == "ca_live"
+    harness.selected_connection_ref = "wcn_live"
+    assert harness.connection_ref_for_action() == "wcn_live"
+
+
+def test_parser_prefers_connection_ref_and_keeps_legacy_alias() -> None:
+    parser = acceptance.build_parser()
+
+    preferred = parser.parse_args(["--connection-ref", "wcn_live"])
+    legacy = parser.parse_args(["--connection-id", "wcn_legacy"])
+    help_text = parser.format_help()
+
+    assert preferred.connection_ref == "wcn_live"
+    assert legacy.connection_ref == "wcn_legacy"
+    assert "--connection-ref" in help_text
+    assert "--connection-id" not in help_text

@@ -476,10 +476,10 @@ async def list_wiii_connect_provider_connections(
     }
 
 
-@router.delete("/providers/{slug}/connections/{connection_id}")
+@router.delete("/providers/{slug}/connections/{connection_ref}")
 async def disconnect_wiii_connect_provider_connection(
     slug: str,
-    connection_id: str,
+    connection_ref: str,
     body: WiiiConnectDisconnectBody | None = None,
     current_user: AuthenticatedUser = Depends(require_auth),
 ) -> dict[str, object]:
@@ -493,7 +493,7 @@ async def disconnect_wiii_connect_provider_connection(
     effective_entry = build_composio_connect_enabled_entry(entry, composio_config)
     adapter_capability = build_composio_provider_adapter_capability(composio_config)
     storage = _wiii_connect_storage_status_metadata(probe_database=True)
-    selected_connection_ref = _safe_provider_connection_id(connection_id)
+    selected_connection_ref = _safe_provider_connection_id(connection_ref)
     safe_connection_id = _resolve_provider_connection_id(
         storage,
         current_user=current_user,
