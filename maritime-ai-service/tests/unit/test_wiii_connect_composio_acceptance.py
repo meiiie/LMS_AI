@@ -41,6 +41,7 @@ def test_redact_for_log_removes_tokens_urls_and_connection_ids() -> None:
     payload = {
         "authorization_url": "https://connect.example/callback?wiii_state=abc",
         "connection_id": "ca_secret_123",
+        "connection_ref": "wcn_public_ref",
         "nested": {
             "access_token": "secret-token",
             "safe": "visible",
@@ -53,11 +54,13 @@ def test_redact_for_log_removes_tokens_urls_and_connection_ids() -> None:
 
     assert redacted["authorization_url"] == "[redacted]"
     assert redacted["connection_id"] == "[redacted]"
+    assert redacted["connection_ref"] == "[redacted]"
     assert redacted["nested"]["access_token"] == "[redacted]"
     assert redacted["nested"]["items"][0]["vault_key_id"] == "[redacted]"
     assert redacted["nested"]["safe"] == "visible"
     assert "secret-token" not in serialized
     assert "ca_secret_123" not in serialized
+    assert "wcn_public_ref" not in serialized
     assert "provider-managed://composio" not in serialized
 
 
@@ -537,6 +540,27 @@ def test_readiness_report_only_does_not_run_live_connect_or_execute(monkeypatch)
     assert calls == ["health", "auth", "report:none"]
     assert "[REPORT] activation readiness" in output
     assert "complete_provider_oauth" in output
+
+
+def test_check_record_redacts_connection_ref_query_strings() -> None:
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(connection_ref="", selected_connection_ref="")
+    )
+
+    record = harness.check_record(
+        "activation readiness",
+        status="failed",
+        elapsed=0.1,
+        detail=(
+            "GET http://localhost:8080/api/v1/wiii-connect/providers/gmail/"
+            "activation-readiness?connection_ref=wcn_public_ref failed"
+        ),
+    )
+    serialized = json.dumps(record, sort_keys=True)
+
+    assert record["detail"] == "[redacted]"
+    assert "wcn_public_ref" not in serialized
+    assert "connection_ref=" not in serialized
 
 
 def test_connection_ref_for_action_requires_selected_or_explicit_connection() -> None:
