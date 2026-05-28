@@ -57,19 +57,19 @@ class WiiiConnectCuratedAction:
 
 _CURATED_ACTIONS: tuple[WiiiConnectCuratedAction, ...] = (
     WiiiConnectCuratedAction(
-        slug="FACEBOOK_GET_PAGE_PROFILE",
-        provider_slug="facebook",
+        slug="GMAIL_FETCH_EMAILS",
+        provider_slug="gmail",
         provider_kind="composio",
-        label="Read Facebook Page profile",
+        label="Fetch Gmail emails",
         mutation="read",
         enabled=False,
         required_scopes=("read",),
-        argument_keys=("page_id",),
+        argument_keys=("query", "max_results"),
         description=(
-            "Read-only candidate for verifying Composio execution after a real "
-            "Facebook auth-config and action schema are confirmed."
+            "Read-only candidate listed in current Composio Gmail docs. Enable "
+            "only after a real Gmail auth-config and live tool schema are verified."
         ),
-        warnings=("disabled_until_live_schema_verified",),
+        warnings=("disabled_until_live_gmail_schema_verified",),
     ),
 )
 

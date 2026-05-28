@@ -681,16 +681,16 @@ async def test_wiii_connect_actions_api_lists_curated_catalog_without_secrets(ap
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
     ) as client:
-        response = await client.get("/wiii-connect/providers/facebook/actions")
+        response = await client.get("/wiii-connect/providers/gmail/actions")
 
     assert response.status_code == 200
     payload = response.json()
     serialized = json.dumps(payload, sort_keys=True)
     assert payload["version"] == "wiii_connect_action_catalog.v1"
-    assert payload["provider_slug"] == "facebook"
+    assert payload["provider_slug"] == "gmail"
     assert payload["action_count"] == 1
     assert payload["enabled_action_count"] == 0
-    assert payload["actions"][0]["slug"] == "FACEBOOK_GET_PAGE_PROFILE"
+    assert payload["actions"][0]["slug"] == "GMAIL_FETCH_EMAILS"
     assert payload["actions"][0]["enabled"] is False
     assert "access_token" not in serialized
     assert "refresh_token" not in serialized

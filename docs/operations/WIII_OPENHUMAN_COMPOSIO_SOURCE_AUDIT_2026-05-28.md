@@ -154,9 +154,11 @@ gateway preflight endpoint that fetches the stored org/user connection record,
 checks path/action/scope/evidence/adapter/audit policy, and appends a
 privacy-safe execution ledger record without calling Composio action execution.
 Wiii also has a curated action catalog contract with a disabled
-`FACEBOOK_GET_PAGE_PROFILE` read-only candidate, so future action exposure has a
-reviewable allowlist rather than a broad Composio tool dump. It still needs live
-Composio schema verification, provider execution adapter enablement for one
-low-risk read-only action, disconnect/reconnect controls, and end-to-end
-acceptance against real Composio credentials before Composio actions can be
-enabled for real users.
+`GMAIL_FETCH_EMAILS` read-only candidate, so future action exposure has a
+reviewable allowlist rather than a broad Composio tool dump. This candidate was
+chosen because current Composio Gmail docs list it as an available tool, while
+current Facebook docs still describe Facebook actions as coming soon. Wiii still
+needs live Composio schema verification, provider execution adapter enablement
+for one low-risk read-only action, disconnect/reconnect controls, and
+end-to-end acceptance against real Composio credentials before Composio actions
+can be enabled for real users.

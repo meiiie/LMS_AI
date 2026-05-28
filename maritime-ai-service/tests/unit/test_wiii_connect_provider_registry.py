@@ -14,8 +14,9 @@ def test_provider_registry_exposes_disabled_composio_catalog_without_secrets():
 
     assert metadata["version"] == "wiii_connect_provider_registry.v1"
     assert by_slug["facebook"]["provider_kind"] == "composio"
-    assert by_slug["facebook"]["action_catalog"]["catalog_action_count"] == 1
-    assert by_slug["facebook"]["action_catalog"]["enabled_action_count"] == 0
+    assert by_slug["facebook"]["action_catalog"]["catalog_action_count"] == 0
+    assert by_slug["gmail"]["action_catalog"]["catalog_action_count"] == 1
+    assert by_slug["gmail"]["action_catalog"]["enabled_action_count"] == 0
     assert by_slug["gmail"]["enabled"] is False
     assert by_slug["gmail"]["agent_ready"] is False
     assert by_slug["github"]["requirements"] == [
