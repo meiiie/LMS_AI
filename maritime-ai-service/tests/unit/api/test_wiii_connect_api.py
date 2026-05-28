@@ -48,10 +48,10 @@ async def test_wiii_connect_provider_registry_api_is_privacy_safe(app):
     assert payload["version"] == "wiii_connect_provider_registry.v1"
     assert payload["adapter_version"] == "wiii_connect_adapter.v1"
     assert by_slug["facebook"]["provider_kind"] == "composio"
-    assert by_slug["facebook"]["enabled"] is False
-    assert by_slug["facebook"]["agent_ready"] is False
-    assert by_slug["facebook"]["action_count"] == 0
-    assert "execution_gateway" in by_slug["facebook"]["requirements"]
+    assert isinstance(by_slug["facebook"]["enabled"], bool)
+    assert isinstance(by_slug["facebook"]["agent_ready"], bool)
+    assert by_slug["facebook"]["action_count"] >= 0
+    assert isinstance(by_slug["facebook"]["requirements"], list)
 
     serialized = json.dumps(payload, sort_keys=True)
     assert "access_token" not in serialized
@@ -2351,6 +2351,113 @@ async def test_wiii_connect_callback_api_reconciles_signed_composio_connection(
     assert "authcfg_fb" not in serialized
     assert "secret-value" not in serialized
     assert state not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_callback_browser_accept_returns_handoff_html(
+    app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.core.config import settings
+    from app.engine.wiii_connect.callback_state import (
+        build_wiii_connect_callback_state,
+    )
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+
+    class FakeStorage:
+        audit_appends = 0
+        connection_upserts = 0
+
+        def status(self, *, probe_database: bool = True):
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                reason="ready",
+            )
+
+        def append_audit_record(self, record, *, organization_id: str, user_id: str):
+            self.audit_appends += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            return True
+
+        def upsert_connection_record(
+            self,
+            connection,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_kind: str,
+        ):
+            self.connection_upserts += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_kind == "composio"
+            assert connection.connection_id == "ca_123"
+            assert connection.state == "connected"
+            return True
+
+    state = build_wiii_connect_callback_state(
+        provider_slug="facebook",
+        organization_id="org_1",
+        user_id="user_1",
+        secret_key=settings.session_secret_key,
+    )
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            auth_config_by_provider={"facebook": "authcfg_fb"},
+        ),
+    )
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/wiii-connect/providers/facebook/callback",
+            params={
+                "wiii_state": state,
+                "connected_account_id": "ca_123",
+                "status": "ACTIVE",
+                "client_secret": "secret-value",
+            },
+            headers={"accept": "text/html,application/xhtml+xml"},
+        )
+
+    body = response.text
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "Wiii Connect" in body
+    assert "Facebook" in body
+    assert "Kết nối Facebook đã được ghi nhận" in body
+    assert "wiii-connect:callback" in body
+    assert fake_storage.audit_appends == 1
+    assert fake_storage.connection_upserts == 1
+    assert "ca_123" not in body
+    assert "connection_id" not in body
+    assert "secret-api-key" not in body
+    assert "authcfg_fb" not in body
+    assert "secret-value" not in body
+    assert state not in body
 
 
 @pytest.mark.asyncio

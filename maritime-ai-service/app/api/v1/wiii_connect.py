@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+from html import escape
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import settings
@@ -957,7 +960,7 @@ async def execute_wiii_connect_provider_action(
     return payload
 
 
-@router.get("/providers/{slug}/callback")
+@router.get("/providers/{slug}/callback", response_model=None)
 async def receive_wiii_connect_provider_callback(
     slug: str,
     request: Request,
@@ -967,7 +970,7 @@ async def receive_wiii_connect_provider_callback(
     connected_account_id: str | None = None,
     status: str | None = None,
     surface: str = "desktop",
-) -> dict[str, object]:
+) -> dict[str, object] | HTMLResponse:
     """Return a fail-closed callback decision without exchanging credentials."""
 
     entry = get_wiii_connect_provider_entry(slug)
@@ -1027,7 +1030,144 @@ async def receive_wiii_connect_provider_callback(
             state_claims=state_claims,
             storage_metadata=storage,
         )
-    return decision.to_public_metadata()
+    payload = decision.to_public_metadata()
+    if _wiii_connect_callback_wants_html(request):
+        return _wiii_connect_callback_html(payload)
+    return payload
+
+
+def _wiii_connect_callback_wants_html(request: Request) -> bool:
+    accept = str(request.headers.get("accept") or "").lower()
+    return "text/html" in accept and "application/json" not in accept
+
+
+def _wiii_connect_callback_html(payload: dict[str, object]) -> HTMLResponse:
+    provider_slug = _safe_callback_html_text(payload.get("provider_slug"))
+    label = _safe_callback_html_text(payload.get("label") or provider_slug)
+    status = _safe_callback_html_text(payload.get("status"))
+    reason = _safe_callback_html_text(payload.get("reason"))
+    accepted = status == "accepted"
+    title = (
+        f"Kết nối {label} đã được ghi nhận"
+        if accepted
+        else f"Kết nối {label} chưa hoàn tất"
+    )
+    detail = (
+        "Wiii đã nhận callback từ provider. Quay lại Wiii Connect và bấm "
+        "Làm mới trạng thái nếu danh sách account chưa tự cập nhật."
+        if accepted
+        else "Wiii đã chặn callback này theo policy. Quay lại Wiii Connect để "
+        "xem lý do và thử kết nối lại nếu cần."
+    )
+    message = {
+        "type": "wiii-connect:callback",
+        "providerSlug": provider_slug,
+        "status": status,
+        "reason": reason,
+    }
+    message_json = json.dumps(message, ensure_ascii=False)
+    html = f"""<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wiii Connect</title>
+    <style>
+      :root {{ color-scheme: light; }}
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f7f6ef;
+        color: #1f2933;
+      }}
+      main {{
+        width: min(520px, calc(100vw - 32px));
+        border: 1px solid #dfddd2;
+        border-radius: 12px;
+        background: #fffefa;
+        box-shadow: 0 20px 50px rgba(31, 41, 51, 0.12);
+        padding: 28px;
+      }}
+      .badge {{
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid { "#a7f3d0" if accepted else "#fed7aa" };
+        background: { "#ecfdf5" if accepted else "#fff7ed" };
+        color: { "#047857" if accepted else "#9a3412" };
+        padding: 6px 10px;
+        font-size: 13px;
+        font-weight: 600;
+      }}
+      h1 {{
+        margin: 18px 0 10px;
+        font-size: 26px;
+        line-height: 1.2;
+      }}
+      p {{
+        margin: 0;
+        color: #52616b;
+        line-height: 1.6;
+      }}
+      dl {{
+        margin: 18px 0 0;
+        display: grid;
+        gap: 8px;
+        font-size: 14px;
+      }}
+      div.row {{
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        border-radius: 8px;
+        background: #f4f1e8;
+        padding: 10px 12px;
+      }}
+      dt {{ color: #6b7280; }}
+      dd {{ margin: 0; font-weight: 600; }}
+      button {{
+        margin-top: 20px;
+        border: 0;
+        border-radius: 8px;
+        background: #111827;
+        color: white;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+        padding: 11px 14px;
+      }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="badge">{escape(status)}</span>
+      <h1>{escape(title)}</h1>
+      <p>{escape(detail)}</p>
+      <dl>
+        <div class="row"><dt>Provider</dt><dd>{escape(label)}</dd></div>
+        <div class="row"><dt>Lý do</dt><dd>{escape(reason)}</dd></div>
+      </dl>
+      <button type="button" onclick="window.close()">Đóng tab này</button>
+    </main>
+    <script>
+      window.opener?.postMessage({message_json}, "*");
+      window.history?.replaceState(null, document.title, window.location.pathname + "?status={escape(status)}&provider={escape(provider_slug)}");
+    </script>
+  </body>
+</html>"""
+    return HTMLResponse(content=html, status_code=200)
+
+
+def _safe_callback_html_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if any(marker in text.lower() for marker in ("token", "secret", "password")):
+        return "redacted"
+    return text[:120]
 
 
 def _wiii_connect_storage_status_metadata(

@@ -151,11 +151,24 @@ def configured_action_slugs_for_provider(
     )
 
 
-def action_catalog_summary_for_provider(provider_slug: str) -> dict[str, Any]:
+def action_catalog_summary_for_provider(
+    provider_slug: str,
+    *,
+    enabled_slugs: Iterable[str] | None = None,
+) -> dict[str, Any]:
     """Return a privacy-safe catalog summary for one provider."""
 
     actions = list_wiii_connect_curated_actions(provider_slug=provider_slug)
-    enabled = [action for action in actions if action.enabled]
+    runtime_enabled = {
+        _normalize_action_slug(slug)
+        for slug in (enabled_slugs or ())
+        if _normalize_action_slug(slug)
+    }
+    enabled = [
+        action
+        for action in actions
+        if action.enabled or action.slug in runtime_enabled
+    ]
     read_only = [action for action in actions if action.mutation == "read"]
     return {
         "version": WIII_CONNECT_ACTION_CATALOG_VERSION,
