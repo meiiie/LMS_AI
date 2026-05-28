@@ -14,6 +14,14 @@ from .adapter_v1 import (
     is_connection_baseline_ready,
     normalize_connection_state,
 )
+from .action_catalog import (
+    WIII_CONNECT_ACTION_CATALOG_VERSION,
+    WiiiConnectCuratedAction,
+    action_catalog_public_metadata,
+    action_catalog_summary_for_provider,
+    enabled_action_slugs_for_provider,
+    list_wiii_connect_curated_actions,
+)
 from .audit_ledger import (
     WIII_CONNECT_AUDIT_LEDGER_VERSION,
     WiiiConnectAuditLedgerRecord,
@@ -112,6 +120,7 @@ from .snapshot import (
 
 __all__ = [
     "WIII_CONNECT_ADAPTER_VERSION",
+    "WIII_CONNECT_ACTION_CATALOG_VERSION",
     "WIII_CONNECT_AUDIT_LEDGER_VERSION",
     "WIII_CONNECT_CALLBACK_CONTRACT_VERSION",
     "WIII_CONNECT_CALLBACK_STATE_PARAM",
@@ -126,6 +135,7 @@ __all__ = [
     "WiiiConnectAuthorizationUrlAuditEvent",
     "WiiiConnectAuthorizationUrlDecision",
     "WiiiConnectAuthorizationUrlRequest",
+    "WiiiConnectCuratedAction",
     "WiiiConnectAuditEvent",
     "WiiiConnectAuditLedgerRecord",
     "WiiiConnectCallbackAuditEvent",
@@ -161,6 +171,8 @@ __all__ = [
     "WiiiConnectionScopes",
     "WiiiConnectionSnapshot",
     "WiiiPathCapabilityRecord",
+    "action_catalog_public_metadata",
+    "action_catalog_summary_for_provider",
     "audit_ledger_status_public_metadata",
     "append_wiii_connect_callback_state",
     "begin_connection_session",
@@ -172,6 +184,7 @@ __all__ = [
     "decide_execution_gateway",
     "decide_authorization_url",
     "decide_vault_secret_write",
+    "enabled_action_slugs_for_provider",
     "build_composio_connect_enabled_entry",
     "build_composio_external_user_id",
     "build_composio_provider_managed_vault_capability",
@@ -182,6 +195,7 @@ __all__ = [
     "get_wiii_connect_provider_entry",
     "get_wiii_connect_persistent_storage",
     "is_connection_baseline_ready",
+    "list_wiii_connect_curated_actions",
     "list_wiii_connect_provider_registry",
     "list_composio_connected_accounts",
     "normalize_connection_state",

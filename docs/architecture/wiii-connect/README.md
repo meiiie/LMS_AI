@@ -184,4 +184,5 @@ this repository.
    external provider catalog entries; frontend catalog state should converge on
    this projection.
 7. Add one low-risk read-only Composio action through the gateway before any
-   write/apply action.
+   write/apply action. A disabled read-only catalog candidate now exists; the
+   remaining work is live schema verification and adapter execution enablement.

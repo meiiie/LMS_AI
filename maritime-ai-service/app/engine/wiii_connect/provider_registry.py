@@ -14,6 +14,7 @@ from .adapter_v1 import (
     ProviderKind,
     WiiiConnectProviderRegistryEntry,
 )
+from .action_catalog import action_catalog_summary_for_provider
 
 
 WIII_CONNECT_PROVIDER_REGISTRY_VERSION = "wiii_connect_provider_registry.v1"
@@ -178,11 +179,13 @@ def get_wiii_connect_provider_entry(
 def provider_registry_public_metadata() -> dict[str, object]:
     """Return the privacy-safe provider catalog projection for UI/API use."""
 
+    providers = []
+    for entry in list_wiii_connect_provider_registry():
+        metadata = entry.to_public_metadata()
+        metadata["action_catalog"] = action_catalog_summary_for_provider(entry.slug)
+        providers.append(metadata)
     return {
         "version": WIII_CONNECT_PROVIDER_REGISTRY_VERSION,
         "adapter_version": WIII_CONNECT_ADAPTER_VERSION,
-        "providers": [
-            entry.to_public_metadata()
-            for entry in list_wiii_connect_provider_registry()
-        ],
+        "providers": providers,
     }
