@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
 
 from sqlalchemy import text
@@ -27,6 +27,7 @@ from .audit_ledger import WiiiConnectAuditLedgerRecord
 logger = logging.getLogger(__name__)
 
 WIII_CONNECT_PERSISTENT_STORAGE_VERSION = "wiii_connect_persistent_storage.v1"
+DEFAULT_STALE_PENDING_CONNECTION_TTL_SECONDS = 30 * 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,6 +338,67 @@ class WiiiConnectPersistentStorage:
             warnings=tuple(warnings),
         )
 
+    def expire_stale_pending_connections(
+        self,
+        *,
+        organization_id: str,
+        user_id: str,
+        provider_slug: str,
+        ttl_seconds: int = DEFAULT_STALE_PENDING_CONNECTION_TTL_SECONDS,
+    ) -> int:
+        """Mark stale non-active OAuth connection rows as expired.
+
+        This lifecycle cleanup is deliberately scoped to one org/user/provider
+        boundary and only affects rows that cannot authorize execution:
+        authorizing, waiting, or error.
+        """
+
+        owner = _normalize_owner(organization_id=organization_id, user_id=user_id)
+        slug = str(provider_slug or "").strip().lower().replace("-", "_")
+        if owner is None or not slug:
+            return 0
+        safe_ttl = max(60, int(ttl_seconds or 0))
+        expires_before = datetime.now(UTC) - timedelta(seconds=safe_ttl)
+        self._ensure_initialized()
+        if self._session_factory is None:
+            return 0
+
+        try:
+            with self._session_factory() as session:
+                result = session.execute(
+                    text(
+                        f"UPDATE {self.CONNECTIONS_TABLE} "
+                        f"SET state = 'expired', "
+                        f"reason = 'stale_oauth_connection_expired', "
+                        f"warnings = COALESCE(warnings, '[]'::jsonb) || "
+                        f"CAST(:expiry_warning AS jsonb), "
+                        f"updated_at = :updated_at "
+                        f"WHERE organization_id = :organization_id "
+                        f"AND user_id = :user_id "
+                        f"AND provider_slug = :provider_slug "
+                        f"AND state IN ('authorizing', 'waiting', 'error') "
+                        f"AND updated_at < :expires_before"
+                    ),
+                    {
+                        "organization_id": owner["organization_id"],
+                        "user_id": owner["user_id"],
+                        "provider_slug": slug,
+                        "expiry_warning": _json_dumps(
+                            ["expired_by_wiii_connect_cleanup"],
+                        ),
+                        "updated_at": datetime.now(UTC),
+                        "expires_before": expires_before,
+                    },
+                )
+                session.commit()
+                return max(0, int(getattr(result, "rowcount", 0) or 0))
+        except Exception as exc:
+            if _is_missing_storage_table_error(exc):
+                logger.info("Wiii Connect connection storage unavailable; skipping expiry.")
+                return 0
+            logger.warning("Wiii Connect stale connection expiry failed: %s", exc)
+            return 0
+
 
 def default_persistent_storage_status_metadata() -> dict[str, Any]:
     """Return default non-probed persistent storage status metadata."""
@@ -442,6 +504,7 @@ def get_wiii_connect_persistent_storage() -> WiiiConnectPersistentStorage:
 
 
 __all__ = [
+    "DEFAULT_STALE_PENDING_CONNECTION_TTL_SECONDS",
     "WIII_CONNECT_PERSISTENT_STORAGE_VERSION",
     "WiiiConnectPersistentStorage",
     "WiiiConnectPersistentStorageStatus",

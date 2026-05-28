@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.security import require_auth
 from app.core.security_models import AuthenticatedUser
 from app.engine.wiii_connect import (
+    DEFAULT_STALE_PENDING_CONNECTION_TTL_SECONDS,
     WiiiConnectAuthorizationUrlRequest,
     WiiiConnectCallbackRequest,
     WiiiConnectConnectionRecordV1,
@@ -196,6 +197,11 @@ async def get_wiii_connect_provider_activation_readiness(
     )
     storage_ready = _connection_storage_ready(storage)
     safe_connection_id = _safe_provider_connection_id(connection_id)
+    _expire_stale_pending_connections(
+        storage,
+        current_user=current_user,
+        provider_slug=execution_entry.slug,
+    )
     connection = (
         get_wiii_connect_persistent_storage().get_connection_record(
             organization_id=_wiii_connect_owner_organization_id(current_user),
@@ -317,6 +323,11 @@ async def create_wiii_connect_provider_authorization_url(
     storage = _wiii_connect_storage_status_metadata(
         probe_database=body.probe_database,
     )
+    stale_pending_expired = _expire_stale_pending_connections(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+    )
     audit_ledger_metadata = {
         "persistent": bool(
             storage.get("persistent") and storage.get("audit_ledger_ready")
@@ -339,7 +350,10 @@ async def create_wiii_connect_provider_authorization_url(
             preflight,
             storage,
             current_user=current_user,
-            metadata={"stage": "preflight"},
+            metadata={
+                "stage": "preflight",
+                "stale_pending_expired": stale_pending_expired,
+            },
         )
         return preflight.to_public_metadata()
 
@@ -367,6 +381,7 @@ async def create_wiii_connect_provider_authorization_url(
         metadata={
             "stage": "connect_link",
             "connect_link": link.to_audit_metadata(),
+            "stale_pending_expired": stale_pending_expired,
         },
     )
     if decision.ready:
@@ -411,6 +426,14 @@ async def list_wiii_connect_provider_connections(
             "storage": default_persistent_storage_status_metadata(),
         }
 
+    storage = _wiii_connect_storage_status_metadata(
+        probe_database=probe_database,
+    )
+    _expire_stale_pending_connections(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+    )
     provider_result = await list_composio_connected_accounts(
         config=composio_config,
         provider_slug=effective_entry.slug,
@@ -418,9 +441,6 @@ async def list_wiii_connect_provider_connections(
             organization_id=current_user.organization_id,
             user_id=current_user.user_id,
         ),
-    )
-    storage = _wiii_connect_storage_status_metadata(
-        probe_database=probe_database,
     )
     if provider_result.ready:
         _upsert_listed_connections(
@@ -662,6 +682,11 @@ async def decide_wiii_connect_provider_execution(
     storage = _wiii_connect_storage_status_metadata(probe_database=True)
     storage_ready = _connection_storage_ready(storage)
     safe_connection_id = _safe_provider_connection_id(body.connection_id)
+    _expire_stale_pending_connections(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+    )
     connection = (
         get_wiii_connect_persistent_storage().get_connection_record(
             organization_id=_wiii_connect_owner_organization_id(current_user),
@@ -728,6 +753,11 @@ async def execute_wiii_connect_provider_action(
     storage = _wiii_connect_storage_status_metadata(probe_database=True)
     storage_ready = _connection_storage_ready(storage)
     safe_connection_id = _safe_provider_connection_id(body.connection_id)
+    _expire_stale_pending_connections(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+    )
     connection = (
         get_wiii_connect_persistent_storage().get_connection_record(
             organization_id=_wiii_connect_owner_organization_id(current_user),
@@ -1266,6 +1296,32 @@ def _connection_storage_ready(storage_metadata: dict[str, Any]) -> bool:
         and storage_metadata.get("connection_table_ready")
         and storage_metadata.get("audit_ledger_ready")
     )
+
+
+def _expire_stale_pending_connections(
+    storage_metadata: dict[str, Any],
+    *,
+    current_user: AuthenticatedUser,
+    provider_slug: str,
+) -> int:
+    if not _connection_storage_ready(storage_metadata):
+        return 0
+    storage = get_wiii_connect_persistent_storage()
+    expire = getattr(storage, "expire_stale_pending_connections", None)
+    if not callable(expire):
+        return 0
+    try:
+        return int(
+            expire(
+                organization_id=_wiii_connect_owner_organization_id(current_user),
+                user_id=current_user.user_id,
+                provider_slug=provider_slug,
+                ttl_seconds=DEFAULT_STALE_PENDING_CONNECTION_TTL_SECONDS,
+            )
+            or 0
+        )
+    except Exception:
+        return 0
 
 
 def _wiii_connect_owner_organization_id(user: AuthenticatedUser) -> str:

@@ -144,6 +144,9 @@ Composio is ready to enable only when all of these are true:
 - audit readiness reports `persistent=true`;
 - activation readiness reports `ready_to_connect=true` before OAuth and
   `ready_to_execute_readonly=true` after OAuth plus action allowlist;
+- stale local `authorizing`, `waiting`, and `error` OAuth rows are expired by
+  the Wiii backend before readiness/listing/execution checks use local
+  connection state;
 - provider registry returns Gmail as a Composio provider;
 - curated actions include only the intended read-only action;
 - execution gateway blocks a missing-connection execution request;
