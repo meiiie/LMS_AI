@@ -702,6 +702,11 @@ class WiiiConnectComposioAcceptance:
         ).json()
         if payload.get("status") == "allowed":
             raise AcceptanceFailure("Gateway allowed execution without a connection")
+        if payload.get("reason") != "connection_selection_required":
+            raise AcceptanceFailure(
+                "Gateway did not enforce explicit connection selection: "
+                f"reason={payload.get('reason')!r}"
+            )
         return f"blocked reason={payload.get('reason')}"
 
     def activation_readiness_payload(

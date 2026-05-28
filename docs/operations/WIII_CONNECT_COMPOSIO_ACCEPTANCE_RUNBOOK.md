@@ -148,6 +148,8 @@ Composio is ready to enable only when all of these are true:
 - curated actions include only the intended read-only action;
 - execution gateway blocks a missing-connection execution request;
 - execution gateway blocks execution when no explicit connection id is selected;
+- the acceptance harness treats any missing-selection deny reason other than
+  `connection_selection_required` as a failed policy proof;
 - Connect Link is issued by Wiii backend;
 - after OAuth, connection listing returns an active connected account;
 - execution gateway allows the selected read-only action only for the stored
