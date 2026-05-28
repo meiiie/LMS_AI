@@ -4,11 +4,16 @@ import json
 
 
 def test_provider_registry_exposes_disabled_composio_catalog_without_secrets():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
     from app.engine.wiii_connect.provider_registry import (
         provider_registry_public_metadata,
     )
 
-    metadata = provider_registry_public_metadata()
+    metadata = provider_registry_public_metadata(
+        composio_config=WiiiConnectComposioAdapterConfig(),
+    )
     providers = metadata["providers"]
     by_slug = {item["slug"]: item for item in providers}
 
@@ -44,6 +49,61 @@ def test_provider_registry_exposes_disabled_composio_catalog_without_secrets():
     assert "api_key" not in serialized
     assert "approval_token" not in serialized
     assert "vault://" not in serialized
+
+
+def test_provider_registry_projects_runtime_composio_readiness_without_secrets():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+    from app.engine.wiii_connect.provider_registry import (
+        provider_registry_public_metadata,
+    )
+
+    metadata = provider_registry_public_metadata(
+        composio_config=WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            auth_config_by_provider={
+                "facebook": "authcfg_fb",
+                "gmail": "authcfg_gmail",
+            },
+            readonly_execute_enabled=True,
+            readonly_action_allowlist_by_provider={
+                "gmail": ("GMAIL_FETCH_EMAILS",),
+            },
+        ),
+    )
+    by_slug = {item["slug"]: item for item in metadata["providers"]}
+
+    assert by_slug["facebook"]["enabled"] is True
+    assert by_slug["facebook"]["agent_ready"] is False
+    assert by_slug["facebook"]["connect_requirements"] == []
+    assert by_slug["facebook"]["requirements"] == [
+        "scope_policy",
+        "curated_action_catalog",
+        "execution_gateway",
+    ]
+    assert "adapter_disabled" not in by_slug["facebook"]["warnings"]
+    assert "agent_actions_disabled_until_gateway_ready" in by_slug["facebook"]["warnings"]
+
+    assert by_slug["gmail"]["enabled"] is True
+    assert by_slug["gmail"]["agent_ready"] is True
+    assert by_slug["gmail"]["requirements"] == []
+    assert by_slug["gmail"]["agent_ready_requirements"] == []
+    assert by_slug["gmail"]["action_count"] == 1
+    assert by_slug["gmail"]["action_catalog"]["enabled_action_count"] == 1
+    assert by_slug["gmail"]["action_catalog"]["enabled_action_slugs"] == [
+        "GMAIL_FETCH_EMAILS",
+    ]
+
+    serialized = json.dumps(metadata, sort_keys=True)
+    assert "secret-api-key" not in serialized
+    assert "authcfg_fb" not in serialized
+    assert "authcfg_gmail" not in serialized
+    assert "access_token" not in serialized
+    assert "refresh_token" not in serialized
+    assert "api_key" not in serialized
 
 
 def test_disabled_composio_registry_entries_remain_execution_denied():

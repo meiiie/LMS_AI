@@ -15,6 +15,11 @@ from .adapter_v1 import (
     WiiiConnectProviderRegistryEntry,
 )
 from .action_catalog import action_catalog_summary_for_provider
+from .composio_adapter import (
+    WiiiConnectComposioAdapterConfig,
+    build_composio_adapter_config,
+    build_composio_execution_enabled_entry,
+)
 
 
 WIII_CONNECT_PROVIDER_REGISTRY_VERSION = "wiii_connect_provider_registry.v1"
@@ -176,16 +181,37 @@ def get_wiii_connect_provider_entry(
     return None
 
 
-def provider_registry_public_metadata() -> dict[str, object]:
+def provider_registry_public_metadata(
+    *,
+    composio_config: WiiiConnectComposioAdapterConfig | None = None,
+) -> dict[str, object]:
     """Return the privacy-safe provider catalog projection for UI/API use."""
 
+    resolved_composio_config = composio_config or build_composio_adapter_config()
     providers = []
     for entry in list_wiii_connect_provider_registry():
-        metadata = entry.to_public_metadata()
-        metadata["action_catalog"] = action_catalog_summary_for_provider(entry.slug)
+        effective_entry = _provider_registry_runtime_entry(
+            entry,
+            composio_config=resolved_composio_config,
+        )
+        metadata = effective_entry.to_public_metadata()
+        metadata["action_catalog"] = action_catalog_summary_for_provider(
+            effective_entry.slug,
+            enabled_slugs=effective_entry.action_allowlist,
+        )
         providers.append(metadata)
     return {
         "version": WIII_CONNECT_PROVIDER_REGISTRY_VERSION,
         "adapter_version": WIII_CONNECT_ADAPTER_VERSION,
         "providers": providers,
     }
+
+
+def _provider_registry_runtime_entry(
+    entry: WiiiConnectProviderRegistryEntry,
+    *,
+    composio_config: WiiiConnectComposioAdapterConfig,
+) -> WiiiConnectProviderRegistryEntry:
+    if entry.provider_kind != "composio":
+        return entry
+    return build_composio_execution_enabled_entry(entry, composio_config)
