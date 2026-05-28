@@ -44,6 +44,10 @@ Current Composio docs describe a session/connected-account model:
 - Current REST tool endpoints include `GET /api/v3.1/tools/{tool_slug}` for
   detailed input/output metadata and `POST /api/v3.1/tools/execute/{tool_slug}`
   for execution with `connected_account_id`, `user_id`, and `arguments`.
+- Connected-account lifecycle endpoints include
+  `DELETE /api/v3.1/connected_accounts/{nanoid}`, which soft-deletes a
+  connected account and prevents further provider execution while preserving
+  provider-side audit history.
 
 Sources:
 
@@ -51,6 +55,7 @@ Sources:
 - https://docs.composio.dev/docs/configuring-sessions
 - https://docs.composio.dev/docs/auth-configuration/connected-accounts
 - https://docs.composio.dev/docs/composio-connect
+- https://docs.composio.dev/reference/api-reference/connected-accounts/deleteConnectedAccountsByNanoid
 - https://docs.composio.dev/reference/changelog
 
 ## OpenHuman Source Findings
@@ -175,8 +180,19 @@ write/apply actions, Composio meta-tools, direct frontend Composio calls, raw
 schemas, raw provider outputs, provider tokens, and Composio API keys remain
 outside public/chat metadata.
 
+The backend now also has a user-requested disconnect boundary. Wiii fetches the
+stored connection by authenticated org/user/provider, marks the local connection
+`disabled` before provider cleanup so future agent execution fails closed, then
+calls Composio connected-account delete from the backend and writes sanitized
+started/completion audit records. This follows OpenHuman's useful connection
+state discipline while keeping Wiii's stronger tenant and audit boundary. Wiii
+also prevents provider polling from re-enabling a locally disabled
+`user_disconnect_requested` connection if Composio still reports it active
+during cleanup or eventual consistency windows.
+
 Remaining work before enabling Composio for real users: configure production
 Composio project credentials and auth config IDs, connect a live Gmail account,
-run browser/backend acceptance through Wiii's `/execute` endpoint, add
-disconnect/reconnect controls, and decide whether Wiii should keep using
-Composio as an adapter or graduate specific providers to Wiii-owned OAuth apps.
+run browser/backend acceptance through Wiii's connect/list/execute/disconnect
+endpoints, add frontend disconnect/reconnect controls, and decide whether Wiii
+should keep using Composio as an adapter or graduate specific providers to
+Wiii-owned OAuth apps.

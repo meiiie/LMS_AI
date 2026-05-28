@@ -33,6 +33,7 @@ from app.engine.wiii_connect import (
     decide_authorization_url,
     decide_execution_gateway,
     default_persistent_storage_status_metadata,
+    disconnect_composio_connected_account,
     get_wiii_connect_provider_entry,
     get_wiii_connect_persistent_storage,
     execute_composio_tool,
@@ -87,6 +88,14 @@ class WiiiConnectExecutionRunBody(WiiiConnectExecutionDecisionBody):
     """Safe request body for a backend-brokered external action call."""
 
     arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class WiiiConnectDisconnectBody(BaseModel):
+    """Safe request body for a user-requested connection disconnect."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    surface: str = "desktop"
 
 
 @router.get("/providers")
@@ -341,6 +350,183 @@ async def list_wiii_connect_provider_connections(
         "provider": provider_result.to_public_metadata(),
         "storage": storage,
     }
+
+
+@router.delete("/providers/{slug}/connections/{connection_id}")
+async def disconnect_wiii_connect_provider_connection(
+    slug: str,
+    connection_id: str,
+    body: WiiiConnectDisconnectBody | None = None,
+    current_user: AuthenticatedUser = Depends(require_auth),
+) -> dict[str, object]:
+    """Disconnect one stored provider account through Wiii backend policy."""
+
+    entry = get_wiii_connect_provider_entry(slug)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
+    body = body or WiiiConnectDisconnectBody()
+    composio_config = build_composio_adapter_config()
+    effective_entry = build_composio_connect_enabled_entry(entry, composio_config)
+    adapter_capability = build_composio_provider_adapter_capability(composio_config)
+    storage = _wiii_connect_storage_status_metadata(probe_database=True)
+    safe_connection_id = _safe_provider_connection_id(connection_id)
+    if not _connection_storage_ready(storage):
+        payload = _disconnect_payload(
+            effective_entry,
+            status="blocked",
+            reason="storage_not_ready",
+            storage=storage,
+            connection_present=False,
+            local_disabled=False,
+        )
+        _append_provider_lifecycle_audit(
+            effective_entry.slug,
+            storage,
+            current_user=current_user,
+            status="blocked",
+            reason="storage_not_ready",
+            surface=body.surface,
+            metadata=payload,
+        )
+        return payload
+
+    storage_adapter = get_wiii_connect_persistent_storage()
+    connection = storage_adapter.get_connection_record(
+        organization_id=_wiii_connect_owner_organization_id(current_user),
+        user_id=current_user.user_id,
+        provider_slug=effective_entry.slug,
+        connection_id=safe_connection_id,
+    )
+    if not safe_connection_id or connection is None:
+        payload = _disconnect_payload(
+            effective_entry,
+            status="blocked",
+            reason="connection_missing",
+            storage=storage,
+            connection_present=False,
+            local_disabled=False,
+        )
+        _append_provider_lifecycle_audit(
+            effective_entry.slug,
+            storage,
+            current_user=current_user,
+            status="blocked",
+            reason="connection_missing",
+            surface=body.surface,
+            metadata=payload,
+        )
+        return payload
+    if connection.provider_slug != effective_entry.slug:
+        payload = _disconnect_payload(
+            effective_entry,
+            status="blocked",
+            reason="connection_provider_mismatch",
+            storage=storage,
+            connection_present=True,
+            local_disabled=False,
+        )
+        _append_provider_lifecycle_audit(
+            effective_entry.slug,
+            storage,
+            current_user=current_user,
+            status="blocked",
+            reason="connection_provider_mismatch",
+            surface=body.surface,
+            metadata=payload,
+        )
+        return payload
+    if not effective_entry.enabled or not adapter_capability.authorization_ready:
+        reason = (
+            "provider_disabled"
+            if not effective_entry.enabled
+            else adapter_capability.reason
+        )
+        payload = _disconnect_payload(
+            effective_entry,
+            status="blocked",
+            reason=reason,
+            storage=storage,
+            connection_present=True,
+            local_disabled=False,
+        )
+        _append_provider_lifecycle_audit(
+            effective_entry.slug,
+            storage,
+            current_user=current_user,
+            status="blocked",
+            reason=reason,
+            surface=body.surface,
+            metadata=payload,
+        )
+        return payload
+
+    disabled_connection = _disabled_connection_record(
+        connection,
+        reason="user_disconnect_requested",
+    )
+    local_disabled = storage_adapter.upsert_connection_record(
+        disabled_connection,
+        organization_id=_wiii_connect_owner_organization_id(current_user),
+        user_id=current_user.user_id,
+        provider_kind=effective_entry.provider_kind,
+    )
+    if not local_disabled:
+        payload = _disconnect_payload(
+            effective_entry,
+            status="blocked",
+            reason="local_state_update_failed",
+            storage=storage,
+            connection_present=True,
+            local_disabled=False,
+        )
+        _append_provider_lifecycle_audit(
+            effective_entry.slug,
+            storage,
+            current_user=current_user,
+            status="blocked",
+            reason="local_state_update_failed",
+            surface=body.surface,
+            metadata=payload,
+        )
+        return payload
+
+    _append_provider_lifecycle_audit(
+        effective_entry.slug,
+        storage,
+        current_user=current_user,
+        status="started",
+        reason="provider_disconnect_started",
+        surface=body.surface,
+        metadata={
+            "connection_present": True,
+            "local_disabled": True,
+            "provider_slug": effective_entry.slug,
+        },
+    )
+    provider_result = await disconnect_composio_connected_account(
+        config=composio_config,
+        provider_slug=effective_entry.slug,
+        connected_account_id=connection.connection_id,
+    )
+    payload = _disconnect_payload(
+        effective_entry,
+        status=provider_result.status,
+        reason=provider_result.reason,
+        storage=storage,
+        connection_present=True,
+        local_disabled=True,
+        provider=provider_result.to_public_metadata(),
+    )
+    _append_provider_lifecycle_audit(
+        effective_entry.slug,
+        storage,
+        current_user=current_user,
+        status=provider_result.status,
+        reason=provider_result.reason,
+        surface=body.surface,
+        metadata=payload,
+    )
+    return payload
 
 
 @router.get("/providers/{slug}/actions")
@@ -790,6 +976,33 @@ def _append_execution_stage_audit(
     )
 
 
+def _append_provider_lifecycle_audit(
+    provider_slug: str,
+    storage_metadata: dict[str, Any],
+    *,
+    current_user: AuthenticatedUser,
+    status: str,
+    reason: str,
+    surface: str,
+    metadata: dict[str, Any],
+) -> None:
+    if not bool(storage_metadata.get("persistent") and storage_metadata.get("audit_ledger_ready")):
+        return
+    record = build_audit_ledger_record(
+        event_kind="provider",
+        provider_slug=provider_slug,
+        status=_safe_surface(status),
+        reason=_safe_surface(reason),
+        surface=_safe_surface(surface),
+        metadata=metadata,
+    )
+    get_wiii_connect_persistent_storage().append_audit_record(
+        record,
+        organization_id=_wiii_connect_owner_organization_id(current_user),
+        user_id=current_user.user_id,
+    )
+
+
 def _upsert_authorizing_connection(
     link: Any,
     entry: Any,
@@ -872,12 +1085,82 @@ def _upsert_listed_connections(
         return
     storage = get_wiii_connect_persistent_storage()
     for connection in connections:
+        if _provider_poll_would_reanimate_user_disconnect(
+            storage,
+            connection,
+            current_user=current_user,
+        ):
+            continue
         storage.upsert_connection_record(
             connection,
             organization_id=_wiii_connect_owner_organization_id(current_user),
             user_id=current_user.user_id,
             provider_kind=entry.provider_kind,
         )
+
+
+def _provider_poll_would_reanimate_user_disconnect(
+    storage: Any,
+    connection: WiiiConnectConnectionRecordV1,
+    *,
+    current_user: AuthenticatedUser,
+) -> bool:
+    existing = storage.get_connection_record(
+        organization_id=_wiii_connect_owner_organization_id(current_user),
+        user_id=current_user.user_id,
+        provider_slug=connection.provider_slug,
+        connection_id=connection.connection_id,
+    )
+    return bool(
+        existing is not None
+        and existing.state == "disabled"
+        and existing.reason == "user_disconnect_requested"
+        and connection.active
+    )
+
+
+def _disabled_connection_record(
+    connection: WiiiConnectConnectionRecordV1,
+    *,
+    reason: str,
+) -> WiiiConnectConnectionRecordV1:
+    return WiiiConnectConnectionRecordV1(
+        connection_id=connection.connection_id,
+        provider_slug=connection.provider_slug,
+        state="disabled",
+        scopes=scope_grant_from_mapping({}),
+        vault_ref=connection.vault_ref,
+        account_label=connection.account_label,
+        external_account_ref=connection.external_account_ref,
+        last_checked_at=connection.last_checked_at,
+        reason=reason,
+        warnings=tuple(
+            sorted(set(connection.warnings + ("disconnected_by_user",)))
+        ),
+    )
+
+
+def _disconnect_payload(
+    entry: Any,
+    *,
+    status: str,
+    reason: str,
+    storage: dict[str, Any],
+    connection_present: bool,
+    local_disabled: bool,
+    provider: dict[str, Any] | None = None,
+) -> dict[str, object]:
+    return {
+        "version": "wiii_connect_disconnect.v1",
+        "status": _safe_surface(status),
+        "reason": _safe_surface(reason),
+        "provider_slug": entry.slug,
+        "provider_kind": entry.provider_kind,
+        "connection_present": connection_present,
+        "local_disabled": local_disabled,
+        "provider": provider,
+        "storage": storage,
+    }
 
 
 def _connection_storage_ready(storage_metadata: dict[str, Any]) -> bool:

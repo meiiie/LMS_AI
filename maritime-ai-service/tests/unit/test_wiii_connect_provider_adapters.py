@@ -490,6 +490,98 @@ async def test_composio_execute_client_uses_allowlist_and_redacts_provider_data(
     assert "secret-api-key" not in serialized
 
 
+@pytest.mark.asyncio
+async def test_composio_disconnect_client_soft_deletes_and_redacts_payload():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        disconnect_composio_connected_account,
+    )
+
+    captured = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["api_key"] = request.headers.get("x-api-key")
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "access_token": "secret-provider-token",
+                "log_id": "secret-log",
+            },
+        )
+
+    config = WiiiConnectComposioAdapterConfig(
+        enabled=True,
+        api_key="secret-api-key",
+        api_key_present=True,
+        auth_config_by_provider={"gmail": "authcfg_gmail"},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await disconnect_composio_connected_account(
+            config=config,
+            provider_slug="gmail",
+            connected_account_id="ca_active",
+            http_client=client,
+        )
+
+    public = result.to_public_metadata()
+    serialized = json.dumps(public, sort_keys=True)
+
+    assert captured["url"] == (
+        "https://backend.composio.dev/api/v3.1/connected_accounts/ca_active"
+    )
+    assert captured["api_key"] == "secret-api-key"
+    assert public["status"] == "succeeded"
+    assert public["reason"] == "ready"
+    assert public["connection_ref_present"] is True
+    assert public["provider_success"] is True
+    assert "secret-api-key" not in serialized
+    assert "secret-provider-token" not in serialized
+    assert "secret-log" not in serialized
+    assert "authcfg_gmail" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_composio_disconnect_client_sanitizes_provider_errors():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        disconnect_composio_connected_account,
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={
+                "error": {
+                    "message": "Invalid API key secret-api-key",
+                    "access_token": "secret-token",
+                }
+            },
+        )
+
+    config = WiiiConnectComposioAdapterConfig(
+        enabled=True,
+        api_key="secret-api-key",
+        api_key_present=True,
+        auth_config_by_provider={"gmail": "authcfg_gmail"},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await disconnect_composio_connected_account(
+            config=config,
+            provider_slug="gmail",
+            connected_account_id="ca_active",
+            http_client=client,
+        )
+
+    serialized = json.dumps(result.to_public_metadata(), sort_keys=True)
+
+    assert result.ready is False
+    assert result.reason == "provider_response_rejected"
+    assert "secret-api-key" not in serialized
+    assert "secret-token" not in serialized
+
+
 def test_provider_adapter_status_accepts_backend_capability_override():
     from app.engine.wiii_connect.provider_adapters import (
         WiiiConnectProviderAdapterCapability,
