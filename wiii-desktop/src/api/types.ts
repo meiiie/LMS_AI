@@ -585,6 +585,69 @@ export interface WiiiConnectProviderConnectionListResponse {
   storage?: Record<string, unknown> | null;
 }
 
+export interface WiiiConnectProviderScopeGrantResponse {
+  version: string;
+  status: "blocked" | "ready" | string;
+  reason: string;
+  provider_slug: string;
+  provider_kind: string;
+  connection?: WiiiConnectProviderConnectionRecord | null;
+  storage?: Record<string, unknown> | null;
+}
+
+export interface WiiiConnectFacebookPageOption {
+  page_id: string;
+  name: string;
+  category?: string;
+  link?: string;
+}
+
+export interface WiiiConnectFacebookPagesResponse {
+  version: string;
+  status: "blocked" | "ready" | string;
+  reason: string;
+  provider_slug: string;
+  action_slug?: string;
+  page_count: number;
+  pages: WiiiConnectFacebookPageOption[];
+  gateway?: Record<string, unknown> | null;
+}
+
+export interface WiiiConnectFacebookPostPreviewResponse {
+  version: string;
+  status: "blocked" | "ready" | string;
+  reason: string;
+  provider_slug: string;
+  action_slug?: string;
+  preview_evidence_id?: string;
+  approval_token?: string;
+  preview?: {
+    page_id: string;
+    message: string;
+    image_present: boolean;
+    image_media_type?: string;
+    image_filename?: string;
+    image_url_present?: boolean;
+  };
+  gateway?: Record<string, unknown> | null;
+  storage?: Record<string, unknown> | null;
+}
+
+export interface WiiiConnectFacebookPostApplyResponse {
+  version: string;
+  status: "blocked" | "ready" | "succeeded" | "failed" | string;
+  reason: string;
+  provider_slug: string;
+  action_slug?: string;
+  token?: Record<string, unknown> | null;
+  gateway?: Record<string, unknown> | null;
+  schema?: Record<string, unknown> | null;
+  upload?: Record<string, unknown> | null;
+  execution?: Record<string, unknown> | null;
+  storage?: Record<string, unknown> | null;
+  missing_argument_keys?: string[];
+}
+
 export interface WiiiConnectActivationGate {
   key: string;
   ready: boolean;
@@ -613,6 +676,7 @@ export interface WiiiConnectActivationReadinessResponse {
   provider_slug: string;
   provider_kind: string;
   ready_to_connect: boolean;
+  ready_to_execute_action?: boolean;
   ready_to_execute_readonly: boolean;
   gates: WiiiConnectActivationGate[];
   provider?: Record<string, unknown> | null;

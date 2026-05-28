@@ -111,6 +111,10 @@ POST /api/v1/wiii-connect/providers/{slug}/sessions
 POST /api/v1/wiii-connect/providers/{slug}/authorization-url
 GET  /api/v1/wiii-connect/providers/{slug}/connections
 DELETE /api/v1/wiii-connect/providers/{slug}/connections/{connection_ref}
+POST /api/v1/wiii-connect/providers/{slug}/connections/{connection_ref}/scope-grant
+GET  /api/v1/wiii-connect/providers/{slug}/facebook/pages
+POST /api/v1/wiii-connect/providers/{slug}/facebook-post/preview
+POST /api/v1/wiii-connect/providers/{slug}/facebook-post/apply
 GET  /api/v1/wiii-connect/providers/{slug}/actions
 GET  /api/v1/wiii-connect/providers/{slug}/activation-readiness
 POST /api/v1/wiii-connect/providers/{slug}/execution-decision
@@ -400,9 +404,18 @@ listed in current Composio docs. It stays disabled unless backend runtime flags
 explicitly enable Wiii Connect Composio read-only execution and the provider
 allowlist names the action. Local #780 acceptance validated the live Composio
 schema, Wiii-owned scope policy, explicit `connection_ref` selection, execution
-gateway, and read-only execute path for a connected Gmail account. Facebook
-remains a connection/catalog provider, but current Composio Facebook docs do
-not expose a ready Facebook action for Wiii to enable.
+gateway, and read-only execute path for a connected Gmail account.
+
+The first controlled apply path is Facebook Page posting through
+`FACEBOOK_CREATE_POST` and `FACEBOOK_CREATE_PHOTO_POST`. It is disabled by
+default and requires `enable_wiii_connect_composio_apply_execute` plus a
+provider allowlist naming the actions. The desktop Wiii Connect UI exposes it as
+a preview/apply composer, not as casual chat execution: the user must select a
+specific `connection_ref`, grant read/preview/apply scope for that connection,
+select a Page, review the generated preview, and submit the backend-issued
+approval token before Wiii can call Composio. User-selected images are staged
+through Composio's file upload request flow; Wiii never accepts arbitrary local
+file paths from a model/tool call for this mutation.
 
 ## Lifecycle States
 

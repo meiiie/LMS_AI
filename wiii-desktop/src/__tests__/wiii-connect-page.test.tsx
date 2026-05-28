@@ -423,7 +423,7 @@ describe("WiiiConnectPage", () => {
     });
     await waitFor(() => {
       expect(mockFetchWiiiConnectProviderActivationReadiness).toHaveBeenCalledWith("facebook", {
-        actionSlug: "GMAIL_FETCH_EMAILS",
+        actionSlug: "FACEBOOK_CREATE_PHOTO_POST",
         connectionRef: "wcn_public_1",
         probeDatabase: true,
       });

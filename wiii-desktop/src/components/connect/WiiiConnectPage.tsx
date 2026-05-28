@@ -12,6 +12,7 @@ import {
   FileText,
   Globe2,
   GraduationCap,
+  Image as ImageIcon,
   Info,
   Loader2,
   Lock,
@@ -21,7 +22,9 @@ import {
   RefreshCw,
   Route,
   Search,
+  Send,
   Server,
+  ShieldCheck,
   Unplug,
   Workflow,
   type LucideIcon,
@@ -31,6 +34,9 @@ import type {
   WiiiConnectActivationGate,
   WiiiConnectActivationReadinessResponse,
   WiiiConnectAuthorizationUrlDecision,
+  WiiiConnectFacebookPagesResponse,
+  WiiiConnectFacebookPostApplyResponse,
+  WiiiConnectFacebookPostPreviewResponse,
   WiiiConnectProviderConnectionListResponse,
   WiiiConnectProviderConnectionRecord,
   WiiiConnectProviderDisconnectResponse,
@@ -41,12 +47,16 @@ import type {
   WiiiConnectRuntimeSnapshot,
 } from "@/api/types";
 import {
+  applyWiiiConnectFacebookPost,
   buildWiiiConnectProviderCallbackUrl,
   createWiiiConnectProviderAuthorizationUrl,
   disconnectWiiiConnectProviderConnection,
+  fetchWiiiConnectFacebookPages,
   fetchWiiiConnectProviderActivationReadiness,
   fetchWiiiConnectProviderConnections,
   fetchWiiiConnectProviders,
+  grantWiiiConnectProviderConnectionScopes,
+  previewWiiiConnectFacebookPost,
   startWiiiConnectProviderSession,
 } from "@/api/wiii-connect";
 import { FullPageView, type FullPageTab } from "@/components/layout/FullPageView";
@@ -139,6 +149,27 @@ interface ProviderDisconnectState {
   loading: boolean;
   error?: string;
   lastUpdatedAt?: string;
+}
+
+interface FacebookPostDraftImage {
+  base64: string;
+  mediaType: string;
+  filename: string;
+  previewUrl: string;
+}
+
+interface FacebookPostComposerState {
+  pages?: WiiiConnectFacebookPagesResponse;
+  pagesLoading: boolean;
+  pagesError?: string;
+  scopeGrantLoading: boolean;
+  scopeGrantError?: string;
+  preview?: WiiiConnectFacebookPostPreviewResponse;
+  previewLoading: boolean;
+  previewError?: string;
+  apply?: WiiiConnectFacebookPostApplyResponse;
+  applyLoading: boolean;
+  applyError?: string;
 }
 
 interface ProviderLifecycleStage {
@@ -683,6 +714,12 @@ function providerConnectionRef(
   return connection?.connection_ref || connection?.connection_id || "";
 }
 
+function defaultActivationActionSlug(card: CatalogCard): string {
+  if (card.providerSlug === "facebook") return "FACEBOOK_CREATE_PHOTO_POST";
+  if (card.providerSlug === "gmail") return "GMAIL_FETCH_EMAILS";
+  return "GMAIL_FETCH_EMAILS";
+}
+
 function formatCount(value: unknown, label: string): string | null {
   if (typeof value !== "number") return null;
   return `${value} ${label}`;
@@ -957,7 +994,7 @@ function buildExternalCatalogCards(
         ? "Bị chặn"
         : "Chưa nối";
     const readiness = providerReadinessStates[definition.id]?.response;
-    const agentReady = Boolean(readiness?.ready_to_execute_readonly);
+    const agentReady = readinessReadyForAction(readiness);
     const reason = connectionResponse?.reason;
     const statusDetail = externalAgentStatusDetail(fromBackend, readiness);
     return {
@@ -1055,9 +1092,32 @@ function activationReadinessTone(
   readiness: WiiiConnectActivationReadinessResponse | undefined,
 ): CapabilityStatusTone {
   if (!readiness) return "off";
-  if (readiness.ready_to_execute_readonly) return "ok";
+  if (readinessReadyForAction(readiness)) return "ok";
   if (readiness.ready_to_connect) return "pending";
   return "warn";
+}
+
+function readinessReadyForAction(
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+): boolean {
+  return Boolean(readiness?.ready_to_execute_action ?? readiness?.ready_to_execute_readonly);
+}
+
+function readinessReadyForReadonly(
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+): boolean {
+  return Boolean(readiness?.ready_to_execute_readonly);
+}
+
+function readinessActionMutation(
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+): string {
+  const value = readiness?.action?.mutation;
+  return typeof value === "string" ? value : "";
+}
+
+function cardDefaultActionIsReadonly(card: CatalogCard): boolean {
+  return defaultActivationActionSlug(card) === "GMAIL_FETCH_EMAILS";
 }
 
 function readinessBooleanLabel(value: boolean | undefined): string {
@@ -1081,8 +1141,14 @@ function externalActionSummary(
   readiness: WiiiConnectActivationReadinessResponse | undefined,
   actionCount: number | undefined,
 ): string {
-  if (readiness?.ready_to_execute_readonly || readinessGateReady(readiness, "curated_readonly_action")) {
+  if (
+    readinessReadyForReadonly(readiness) ||
+    readinessGateReady(readiness, "curated_readonly_action")
+  ) {
     return "Read-only sẵn sàng";
+  }
+  if (readinessReadyForAction(readiness) || readinessGateReady(readiness, "curated_action")) {
+    return "Action sẵn sàng";
   }
   if (actionCount != null) return `${actionCount}`;
   return "Chưa khai báo";
@@ -1095,8 +1161,11 @@ function externalAgentStatusDetail(
   if (!fromBackend) {
     return "Wiii chưa có adapter, vault và permission gate cho kết nối này.";
   }
-  if (readiness?.ready_to_execute_readonly) {
+  if (readinessReadyForReadonly(readiness)) {
     return "Read-only action đã qua scope policy và execution gateway; mutation/write vẫn bị chặn ngoài allowlist.";
+  }
+  if (readinessReadyForAction(readiness)) {
+    return "Action đã qua scope policy và execution gateway; mutation vẫn phải đúng preview/approval.";
   }
   if (readiness?.ready_to_connect) {
     return "Backend đã sẵn sàng cấp Connect Link; agent action vẫn chờ account, scope policy và execution gateway.";
@@ -1105,7 +1174,7 @@ function externalAgentStatusDetail(
 }
 
 function externalControlLabel(card: CatalogCard): string {
-  if (card.agentReady) return "Read-only";
+  if (card.agentReady) return "Agent-ready";
   if (card.connected) return "Chờ policy";
   return "Fail-closed";
 }
@@ -1118,6 +1187,7 @@ function readinessGateLabel(key: string): string {
     persistent_storage: "Storage",
     audit_ledger: "Audit ledger",
     connect_policy: "Connect policy",
+    curated_action: "Curated action",
     curated_readonly_action: "Read-only action",
     local_connection: "Connection",
     execution_gateway: "Execution gateway",
@@ -1135,11 +1205,13 @@ function requirementDisplayLabel(value: string): string {
     complete_provider_oauth: "Hoàn tất OAuth/Connect Link",
     connect_policy: "Bật connect policy",
     connect_provider_account: "Kết nối account provider",
+    curate_action: "Khai báo action đã kiểm duyệt",
     curate_readonly_action: "Khai báo action read-only đã kiểm duyệt",
     curated_action_catalog: "Khai báo catalog action đã kiểm duyệt",
     curated_readonly_action: "Khai báo action read-only đã kiểm duyệt",
     durable_audit_ledger: "Bật audit ledger bền vững",
     enable_curated_action_catalog: "Bật catalog action đã kiểm duyệt",
+    enable_action_allowlist: "Bật action allowlist đã kiểm duyệt",
     enable_provider_agent_policy: "Bật policy agent cho provider",
     encrypted_vault_ref: "Cấu hình vault/token ref",
     execution_gateway: "Mở execution gateway read-only",
@@ -1197,7 +1269,7 @@ function providerHasUsableConnection(
 function gatewayLifecycleTone(
   readiness: WiiiConnectActivationReadinessResponse | undefined,
 ): CapabilityStatusTone {
-  if (readiness?.ready_to_execute_readonly) return "ok";
+  if (readinessReadyForAction(readiness)) return "ok";
   const status = String(readiness?.execution_gateway?.status ?? "").toLowerCase();
   if (!status) return "off";
   if (["allowed", "ready", "ok", "enabled"].includes(status)) return "ok";
@@ -1232,7 +1304,7 @@ function providerLifecycleStages({
         ? "pending"
         : "off";
   const agentTone: CapabilityStatusTone = readiness
-    ? readiness.ready_to_execute_readonly
+    ? readinessReadyForAction(readiness)
       ? "ok"
       : accountPresent
         ? "warn"
@@ -1279,15 +1351,15 @@ function providerLifecycleStages({
     {
       id: "agent-policy",
       label: "Agent policy",
-      value: readiness?.ready_to_execute_readonly
-        ? "Đã cho phép read-only"
+      value: readinessReadyForAction(readiness)
+        ? "Đã cho phép action"
         : card.agentReady
           ? "Agent-ready"
           : accountPresent
             ? "Chờ policy"
             : "Chưa agent-ready",
-      detail: readiness?.ready_to_execute_readonly
-        ? "Action read-only đã qua scope policy và catalog đã kiểm duyệt."
+      detail: readinessReadyForAction(readiness)
+        ? "Action đã qua scope policy và catalog đã kiểm duyệt."
         : accountPresent
           ? "Account đã kết nối nhưng policy/gateway vẫn đang chặn agent."
           : "Agent chưa được phép dùng provider này.",
@@ -1354,11 +1426,21 @@ function providerNextAction({
     };
   }
 
-  if (readiness?.ready_to_execute_readonly) {
+  if (readinessReadyForReadonly(readiness)) {
     return {
       title: "Sẵn sàng cho agent read-only",
       detail:
-        "Agent có thể dùng action read-only đã kiểm duyệt. Write/mutation vẫn phải qua allowlist và approval riêng.",
+        "Agent có thể dùng action đọc đã kiểm duyệt; mutation/write vẫn bị chặn ngoài allowlist.",
+      tone: "ok",
+      items: ["Không tự mở write/admin scope", "Theo dõi audit khi agent gọi tool"],
+    };
+  }
+
+  if (readinessReadyForAction(readiness)) {
+    return {
+      title: "Sẵn sàng cho agent action",
+      detail:
+        "Agent có thể dùng action đã kiểm duyệt. Mutation vẫn phải qua allowlist và approval riêng.",
       tone: "ok",
       items: ["Không tự mở write/admin scope", "Theo dõi audit khi agent gọi tool"],
     };
@@ -1487,6 +1569,393 @@ function ProviderLifecyclePanel({
       </p>
     </section>
   );
+}
+
+function FacebookPostComposer({
+  card,
+  providerConnection,
+  readiness,
+  onRefreshConnections,
+}: {
+  card: CatalogCard;
+  providerConnection: WiiiConnectProviderConnectionRecord | undefined;
+  readiness: WiiiConnectActivationReadinessResponse | undefined;
+  onRefreshConnections?: (card: CatalogCard) => Promise<unknown>;
+}) {
+  const [pageId, setPageId] = useState("");
+  const [message, setMessage] = useState(
+    "Wiii Connect test: bài đăng này đã đi qua preview và xác nhận trước khi đăng.",
+  );
+  const [image, setImage] = useState<FacebookPostDraftImage | null>(null);
+  const [state, setState] = useState<FacebookPostComposerState>({
+    pagesLoading: false,
+    scopeGrantLoading: false,
+    previewLoading: false,
+    applyLoading: false,
+  });
+
+  useEffect(() => {
+    return () => {
+      if (image?.previewUrl) URL.revokeObjectURL(image.previewUrl);
+    };
+  }, [image?.previewUrl]);
+
+  if (card.providerSlug !== "facebook" || card.registrySource !== "backend") {
+    return null;
+  }
+
+  const connectionRef = providerConnectionRef(providerConnection);
+  const connected = Boolean(
+    connectionRef &&
+      providerConnection &&
+      (providerConnection.active || providerConnection.state === "connected") &&
+      providerConnection.state !== "disabled",
+  );
+  const scopes: Record<string, boolean> = providerConnection?.scopes ?? {};
+  const hasPostScopes = Boolean(scopes.read && scopes.preview && scopes.apply);
+  const selectedPageId = pageId.trim();
+  const canLoadPages = connected && Boolean(scopes.read);
+  const canPreview = connected && hasPostScopes && Boolean(selectedPageId);
+  const previewReady = Boolean(
+    state.preview?.status === "ready" &&
+      state.preview.approval_token &&
+      state.preview.preview_evidence_id,
+  );
+  const canApply = canPreview && previewReady && !state.applyLoading;
+
+  const clearDecision = () => {
+    setState((current) => ({
+      ...current,
+      preview: undefined,
+      previewError: undefined,
+      apply: undefined,
+      applyError: undefined,
+    }));
+  };
+
+  const grantScopes = async () => {
+    if (!connectionRef || state.scopeGrantLoading) return;
+    setState((current) => ({
+      ...current,
+      scopeGrantLoading: true,
+      scopeGrantError: undefined,
+    }));
+    try {
+      const response = await grantWiiiConnectProviderConnectionScopes(
+        card.providerSlug,
+        connectionRef,
+        { read: true, preview: true, apply: true },
+      );
+      setState((current) => ({
+        ...current,
+        scopeGrantLoading: false,
+        scopeGrantError: response.status === "ready" ? undefined : response.reason,
+      }));
+      await onRefreshConnections?.(card);
+    } catch {
+      setState((current) => ({
+        ...current,
+        scopeGrantLoading: false,
+        scopeGrantError: "Không thể cấp scope qua backend.",
+      }));
+    }
+  };
+
+  const loadPages = async () => {
+    if (!connectionRef || !canLoadPages || state.pagesLoading) return;
+    setState((current) => ({
+      ...current,
+      pagesLoading: true,
+      pagesError: undefined,
+    }));
+    try {
+      const response = await fetchWiiiConnectFacebookPages(card.providerSlug, connectionRef);
+      setState((current) => ({
+        ...current,
+        pages: response,
+        pagesLoading: false,
+        pagesError: response.status === "ready" ? undefined : response.reason,
+      }));
+      if (!pageId && response.pages?.[0]?.page_id) {
+        setPageId(response.pages[0].page_id);
+      }
+    } catch {
+      setState((current) => ({
+        ...current,
+        pagesLoading: false,
+        pagesError: "Không thể đọc Page từ backend.",
+      }));
+    }
+  };
+
+  const chooseImage = async (file: File | undefined) => {
+    if (!file) return;
+    clearDecision();
+    if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type)) {
+      setState((current) => ({
+        ...current,
+        previewError: "Ảnh phải là PNG, JPEG, WebP hoặc GIF.",
+      }));
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setState((current) => ({
+        ...current,
+        previewError: "Ảnh tối đa 10MB.",
+      }));
+      return;
+    }
+    const base64 = await readFileAsDataUrl(file);
+    setImage((current) => {
+      if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl);
+      return {
+        base64,
+        mediaType: file.type,
+        filename: file.name,
+        previewUrl: URL.createObjectURL(file),
+      };
+    });
+  };
+
+  const previewPost = async () => {
+    if (!canPreview || state.previewLoading) return;
+    setState((current) => ({
+      ...current,
+      previewLoading: true,
+      previewError: undefined,
+      apply: undefined,
+      applyError: undefined,
+    }));
+    try {
+      const response = await previewWiiiConnectFacebookPost(card.providerSlug, {
+        connection_ref: connectionRef,
+        page_id: selectedPageId,
+        message,
+        image_base64: image?.base64 ?? null,
+        image_media_type: image?.mediaType ?? null,
+        image_filename: image?.filename ?? null,
+      });
+      setState((current) => ({
+        ...current,
+        preview: response,
+        previewLoading: false,
+        previewError: response.status === "ready" ? undefined : response.reason,
+      }));
+    } catch {
+      setState((current) => ({
+        ...current,
+        previewLoading: false,
+        previewError: "Không thể tạo preview qua backend.",
+      }));
+    }
+  };
+
+  const applyPost = async () => {
+    if (!canApply || !state.preview?.approval_token || !state.preview.preview_evidence_id) {
+      return;
+    }
+    setState((current) => ({
+      ...current,
+      applyLoading: true,
+      applyError: undefined,
+    }));
+    try {
+      const response = await applyWiiiConnectFacebookPost(card.providerSlug, {
+        connection_ref: connectionRef,
+        page_id: selectedPageId,
+        message,
+        image_base64: image?.base64 ?? null,
+        image_media_type: image?.mediaType ?? null,
+        image_filename: image?.filename ?? null,
+        approval_token: state.preview.approval_token,
+        preview_evidence_id: state.preview.preview_evidence_id,
+      });
+      setState((current) => ({
+        ...current,
+        apply: response,
+        applyLoading: false,
+        applyError: response.status === "succeeded" ? undefined : response.reason,
+      }));
+    } catch {
+      setState((current) => ({
+        ...current,
+        applyLoading: false,
+        applyError: "Không thể đăng qua backend.",
+      }));
+    }
+  };
+
+  return (
+    <section className="mt-4 rounded-md border border-[var(--border)] bg-surface-secondary px-3 py-3">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold uppercase text-text-tertiary">
+          Facebook post
+        </div>
+        <StatusPill tone={connected ? (hasPostScopes ? "ok" : "warn") : "off"}>
+          {connected ? (hasPostScopes ? "Có quyền" : "Cần scope") : "Chưa nối"}
+        </StatusPill>
+      </div>
+
+      <div className="grid gap-2 text-xs sm:grid-cols-2">
+        <div className="rounded-md bg-surface px-2 py-2">
+          <dt className="text-text-tertiary">Preview/apply</dt>
+          <dd className="mt-0.5 font-medium text-text">
+            {readinessBooleanLabel(readinessReadyForAction(readiness))}
+          </dd>
+        </div>
+        <div className="rounded-md bg-surface px-2 py-2">
+          <dt className="text-text-tertiary">Scope</dt>
+          <dd className="mt-0.5 font-medium text-text">{scopeSummary(scopes)}</dd>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={!connected || hasPostScopes || state.scopeGrantLoading}
+          onClick={() => void grantScopes()}
+          className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 text-sm font-medium text-primary disabled:border-[var(--border)] disabled:bg-surface disabled:text-text-tertiary"
+        >
+          {state.scopeGrantLoading ? (
+            <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <ShieldCheck size={14} aria-hidden="true" />
+          )}
+          Cho phép đăng
+        </button>
+        <button
+          type="button"
+          disabled={!canLoadPages || state.pagesLoading}
+          onClick={() => void loadPages()}
+          className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-[var(--border)] bg-surface px-3 text-sm font-medium text-text-secondary disabled:text-text-tertiary"
+        >
+          <RefreshCw
+            size={14}
+            className={state.pagesLoading ? "animate-spin" : ""}
+            aria-hidden="true"
+          />
+          Đọc Page
+        </button>
+      </div>
+
+      <label className="mt-3 block text-xs font-medium text-text-tertiary">
+        Page
+        <select
+          value={pageId}
+          onChange={(event) => {
+            setPageId(event.target.value);
+            clearDecision();
+          }}
+          className="mt-1 h-10 w-full rounded-md border border-[var(--border)] bg-surface px-3 text-sm text-text outline-none focus:border-primary"
+        >
+          <option value="">Chọn Page</option>
+          {state.pages?.pages?.map((page) => (
+            <option key={page.page_id} value={page.page_id}>
+              {page.name || page.page_id}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="mt-3 block text-xs font-medium text-text-tertiary">
+        Nội dung
+        <textarea
+          value={message}
+          onChange={(event) => {
+            setMessage(event.target.value);
+            clearDecision();
+          }}
+          rows={4}
+          className="mt-1 w-full resize-none rounded-md border border-[var(--border)] bg-surface px-3 py-2 text-sm text-text outline-none focus:border-primary"
+        />
+      </label>
+
+      <div className="mt-3 grid gap-3">
+        <label className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-md border border-[var(--border)] bg-surface px-3 text-sm font-medium text-text-secondary hover:text-text">
+          <ImageIcon size={15} aria-hidden="true" />
+          Chọn ảnh
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="sr-only"
+            onChange={(event) => void chooseImage(event.target.files?.[0])}
+          />
+        </label>
+        {image && (
+          <div className="overflow-hidden rounded-md border border-[var(--border)] bg-surface">
+            <img
+              src={image.previewUrl}
+              alt=""
+              className="h-36 w-full object-cover"
+            />
+            <div className="px-3 py-2 text-xs text-text-secondary">
+              {image.filename}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={!canPreview || state.previewLoading}
+          onClick={() => void previewPost()}
+          className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-[var(--border)] bg-surface px-3 text-sm font-medium text-text-secondary disabled:text-text-tertiary"
+        >
+          {state.previewLoading ? (
+            <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <CheckCircle2 size={14} aria-hidden="true" />
+          )}
+          Tạo preview
+        </button>
+        <button
+          type="button"
+          aria-label="Dang bai da duyet"
+          disabled={!canApply}
+          onClick={() => void applyPost()}
+          className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-sm font-medium text-emerald-700 disabled:border-[var(--border)] disabled:bg-surface disabled:text-text-tertiary"
+        >
+          {state.applyLoading ? (
+            <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Send size={14} aria-hidden="true" />
+          )}
+          Đăng lên Facebook
+        </button>
+      </div>
+
+      {state.preview?.preview && (
+        <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          Preview sẵn sàng cho Page {state.preview.preview.page_id}.
+        </div>
+      )}
+      {state.apply?.status === "succeeded" && (
+        <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          Đã gửi yêu cầu đăng qua gateway.
+        </div>
+      )}
+      {[state.scopeGrantError, state.pagesError, state.previewError, state.applyError]
+        .filter(Boolean)
+        .map((error) => (
+          <div
+            key={String(error)}
+            className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+          >
+            {error}
+          </div>
+        ))}
+    </section>
+  );
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error ?? new Error("file_read_failed"));
+    reader.readAsDataURL(file);
+  });
 }
 
 function ConnectionDetailPanel({
@@ -1633,9 +2102,15 @@ function ConnectionDetailPanel({
               </dd>
             </div>
             <div className="rounded-md bg-surface px-2 py-2">
-              <dt className="text-text-tertiary">Agent read-only</dt>
+              <dt className="text-text-tertiary">
+                {readinessReadyForReadonly(readiness) ||
+                readinessActionMutation(readiness) === "read" ||
+                cardDefaultActionIsReadonly(card)
+                  ? "Agent read-only"
+                  : "Agent action"}
+              </dt>
               <dd className="mt-0.5 font-medium text-text">
-                {readinessBooleanLabel(readiness?.ready_to_execute_readonly)}
+                {readinessBooleanLabel(readinessReadyForAction(readiness))}
               </dd>
             </div>
             <div className="rounded-md bg-surface px-2 py-2">
@@ -1810,6 +2285,13 @@ function ConnectionDetailPanel({
           )}
         </div>
       )}
+
+      <FacebookPostComposer
+        card={card}
+        providerConnection={providerConnection}
+        readiness={readiness}
+        onRefreshConnections={onRefreshConnections}
+      />
 
       {sessionError && (
         <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -2080,7 +2562,7 @@ function ConnectionCatalog({
     }));
     try {
       const response = await fetchWiiiConnectProviderActivationReadiness(slug, {
-        actionSlug: "GMAIL_FETCH_EMAILS",
+        actionSlug: defaultActivationActionSlug(card),
         connectionRef: providerConnectionRef(selectedConnection),
         probeDatabase: true,
       });

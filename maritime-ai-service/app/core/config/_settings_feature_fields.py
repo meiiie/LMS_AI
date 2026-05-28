@@ -429,6 +429,20 @@ class FeatureSettingsMixin:
             "through Wiii Connect execution gateway"
         ),
     )
+    enable_wiii_connect_composio_apply_execute: bool = Field(
+        default=False,
+        description=(
+            "Enable Composio apply-style mutations after Wiii Connect preview, "
+            "approval token, scoped connection, schema verification, and audit checks pass"
+        ),
+    )
+    composio_apply_action_allowlist: str = Field(
+        default="",
+        description=(
+            "Comma-separated curated Composio apply action slugs allowed through "
+            "Wiii Connect execution gateway"
+        ),
+    )
 
     # SoulBridge (Sprint 213)
     enable_soul_bridge: bool = Field(default=False, description="Enable cross-service soul-to-soul communication bridge (WebSocket + HTTP)")

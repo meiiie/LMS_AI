@@ -155,6 +155,66 @@ def test_composio_readonly_execute_requires_explicit_curated_allowlist():
     assert "authcfg_gmail" not in serialized
 
 
+def test_composio_apply_execute_requires_explicit_curated_allowlist():
+    from app.engine.wiii_connect.composio_adapter import (
+        build_composio_adapter_config,
+        build_composio_execution_enabled_entry,
+        build_composio_provider_adapter_capability,
+        parse_composio_apply_action_allowlist,
+    )
+    from app.engine.wiii_connect.provider_registry import (
+        get_wiii_connect_provider_entry,
+    )
+
+    parsed_actions = parse_composio_apply_action_allowlist(
+        "facebook=FACEBOOK_CREATE_PHOTO_POST|FACEBOOK_CREATE_POST",
+    )
+    settings_obj = SimpleNamespace(
+        enable_wiii_connect_composio=True,
+        enable_wiii_connect_composio_apply_execute=True,
+        composio_api_key="secret-value",
+        composio_base_url="https://backend.composio.dev",
+        composio_api_version="v3.1",
+        composio_auth_config_map='{"facebook": "authcfg_fb"}',
+        composio_apply_action_allowlist=(
+            '{"facebook": ["FACEBOOK_CREATE_PHOTO_POST", "FACEBOOK_CREATE_POST"]}'
+        ),
+    )
+    config = build_composio_adapter_config(settings_obj)
+    capability = build_composio_provider_adapter_capability(config)
+    entry = get_wiii_connect_provider_entry("facebook")
+    assert entry is not None
+    effective = build_composio_execution_enabled_entry(entry, config)
+    serialized = json.dumps(
+        {
+            "config": config.to_public_metadata(),
+            "capability": capability.to_public_metadata(),
+            "entry": effective.to_public_metadata(),
+        },
+        sort_keys=True,
+    )
+
+    assert parsed_actions == {
+        "facebook": ("FACEBOOK_CREATE_PHOTO_POST", "FACEBOOK_CREATE_POST"),
+    }
+    assert config.apply_action_slugs_for_provider("facebook") == (
+        "FACEBOOK_CREATE_PHOTO_POST",
+        "FACEBOOK_CREATE_POST",
+    )
+    assert capability.can_execute_actions is True
+    assert effective.enabled is True
+    assert effective.agent_ready is True
+    assert set(effective.action_allowlist) == {
+        "FACEBOOK_CREATE_PHOTO_POST",
+        "FACEBOOK_CREATE_POST",
+    }
+    assert effective.default_scopes.read is True
+    assert effective.default_scopes.preview is True
+    assert effective.default_scopes.apply is True
+    assert "secret-value" not in serialized
+    assert "authcfg_fb" not in serialized
+
+
 @pytest.mark.asyncio
 async def test_composio_connect_link_client_uses_v31_and_redacts_payload():
     from app.engine.wiii_connect.composio_adapter import (
@@ -394,6 +454,8 @@ async def test_composio_tool_schema_client_uses_v31_and_redacts_shape():
         api_key="secret-api-key",
         api_key_present=True,
         auth_config_by_provider={"gmail": "authcfg_gmail"},
+        readonly_execute_enabled=True,
+        readonly_action_allowlist_by_provider={"gmail": ("GMAIL_FETCH_EMAILS",)},
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         result = await verify_composio_tool_schema(
@@ -492,6 +554,141 @@ async def test_composio_execute_client_uses_allowlist_and_redacts_provider_data(
     assert "log-secret" not in serialized
     assert "client-secret" not in serialized
     assert "secret-api-key" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_composio_file_upload_stages_descriptor_without_leaking_s3_key():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        stage_composio_file_upload,
+    )
+
+    calls = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, str(request.url), request.headers.get("x-api-key")))
+        if request.method == "POST":
+            body = json.loads(request.content.decode("utf-8"))
+            assert body["toolkit_slug"] == "facebook"
+            assert body["tool_slug"] == "FACEBOOK_CREATE_PHOTO_POST"
+            assert body["filename"] == "post.png"
+            assert body["mimetype"] == "image/png"
+            assert len(body["md5"]) == 32
+            return httpx.Response(
+                200,
+                json={
+                    "key": "secret-s3-key",
+                    "new_presigned_url": "https://upload.example.test/file",
+                },
+            )
+        assert request.method == "PUT"
+        assert request.content == b"fake-image"
+        assert request.headers.get("Content-Type") == "image/png"
+        return httpx.Response(200)
+
+    config = WiiiConnectComposioAdapterConfig(
+        enabled=True,
+        api_key="secret-api-key",
+        api_key_present=True,
+        auth_config_by_provider={"facebook": "authcfg_fb"},
+        apply_execute_enabled=True,
+        apply_action_allowlist_by_provider={
+            "facebook": ("FACEBOOK_CREATE_PHOTO_POST",),
+        },
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await stage_composio_file_upload(
+            config=config,
+            provider_slug="facebook",
+            action_slug="FACEBOOK_CREATE_PHOTO_POST",
+            filename="post.png",
+            mimetype="image/png",
+            content=b"fake-image",
+            http_client=client,
+        )
+
+    public = result.to_public_metadata()
+    serialized = json.dumps(public, sort_keys=True)
+
+    assert len(calls) == 2
+    assert calls[0][1] == "https://backend.composio.dev/api/v3/files/upload/request"
+    assert calls[0][2] == "secret-api-key"
+    assert calls[1][1] == "https://upload.example.test/file"
+    assert result.ready is True
+    assert result.file_descriptor == {
+        "name": "post.png",
+        "mimetype": "image/png",
+        "s3key": "secret-s3-key",
+    }
+    assert public["file_ref_present"] is True
+    assert "secret-s3-key" not in serialized
+    assert "secret-api-key" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_composio_facebook_pages_client_strips_tokens():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        list_composio_facebook_pages,
+    )
+
+    captured = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "successful": True,
+                "data": {
+                    "data": [
+                        {
+                            "id": "123456",
+                            "name": "Wiii Page",
+                            "category": "Education",
+                            "link": "https://facebook.com/wiii",
+                            "access_token": "secret-page-token",
+                        }
+                    ]
+                },
+                "log_id": "secret-log",
+            },
+        )
+
+    config = WiiiConnectComposioAdapterConfig(
+        enabled=True,
+        api_key="secret-api-key",
+        api_key_present=True,
+        auth_config_by_provider={"facebook": "authcfg_fb"},
+        readonly_execute_enabled=True,
+        readonly_action_allowlist_by_provider={
+            "facebook": ("FACEBOOK_LIST_MANAGED_PAGES",),
+        },
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await list_composio_facebook_pages(
+            config=config,
+            user_id="wiii_user_hash",
+            connected_account_id="ca_active",
+            http_client=client,
+        )
+
+    public = result.to_public_metadata()
+    serialized = json.dumps(public, sort_keys=True)
+
+    assert captured["url"] == (
+        "https://backend.composio.dev/api/v3.1/tools/execute/FACEBOOK_LIST_MANAGED_PAGES"
+    )
+    assert captured["body"]["user_id"] == "wiii_user_hash"
+    assert captured["body"]["connected_account_id"] == "ca_active"
+    assert result.ready is True
+    assert public["page_count"] == 1
+    assert public["pages"][0]["page_id"] == "123456"
+    assert public["pages"][0]["name"] == "Wiii Page"
+    assert "secret-page-token" not in serialized
+    assert "secret-api-key" not in serialized
+    assert "secret-log" not in serialized
 
 
 @pytest.mark.asyncio

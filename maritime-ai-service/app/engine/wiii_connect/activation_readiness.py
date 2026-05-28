@@ -82,11 +82,14 @@ def build_activation_readiness_metadata(
         and storage_ready
         and audit_ready
     )
-    ready_to_execute_readonly = bool(
+    ready_to_execute_action = bool(
         ready_to_connect
         and action_ready
         and connection_ready
         and gateway_allowed
+    )
+    ready_to_execute_readonly = bool(
+        ready_to_execute_action and action is not None and action.mutation == "read"
     )
     gates = (
         _provider_gate(connect_entry),
@@ -101,10 +104,11 @@ def build_activation_readiness_metadata(
     )
     return {
         "version": WIII_CONNECT_ACTIVATION_READINESS_VERSION,
-        "status": "ready" if ready_to_execute_readonly else "blocked",
+        "status": "ready" if ready_to_execute_action else "blocked",
         "provider_slug": _safe_key(provider_slug),
         "provider_kind": provider_kind,
         "ready_to_connect": ready_to_connect,
+        "ready_to_execute_action": ready_to_execute_action,
         "ready_to_execute_readonly": ready_to_execute_readonly,
         "gates": [gate.to_public_metadata() for gate in gates],
         "provider": connect_entry.to_public_metadata() if connect_entry else None,
@@ -238,16 +242,16 @@ def _action_gate(
 ) -> WiiiConnectActivationGate:
     if action is None:
         return WiiiConnectActivationGate(
-            key="curated_readonly_action",
+            key="curated_action",
             ready=False,
             reason="action_not_curated",
-            required_next=("curate_readonly_action",),
+            required_next=("curate_action",),
         )
-    ready = bool(action.mutation == "read" and runtime_enabled)
+    ready = bool(runtime_enabled)
     reason = "ready" if ready else "action_not_runtime_enabled"
-    required_next = () if ready else ("enable_readonly_action_allowlist",)
+    required_next = () if ready else ("enable_action_allowlist",)
     return WiiiConnectActivationGate(
-        key="curated_readonly_action",
+        key="curated_readonly_action" if action.mutation == "read" else "curated_action",
         ready=ready,
         reason=reason,
         required_next=required_next,

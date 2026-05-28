@@ -71,6 +71,58 @@ _CURATED_ACTIONS: tuple[WiiiConnectCuratedAction, ...] = (
         ),
         warnings=("disabled_until_live_gmail_schema_verified",),
     ),
+    WiiiConnectCuratedAction(
+        slug="FACEBOOK_LIST_MANAGED_PAGES",
+        provider_slug="facebook",
+        provider_kind="composio",
+        label="List managed Facebook Pages",
+        mutation="read",
+        enabled=False,
+        required_scopes=("read",),
+        argument_keys=("fields", "limit", "after", "before", "user_id"),
+        description=(
+            "Read-only Facebook Page selector. It may expose Page ids and "
+            "names to the authenticated user, but must not expose Page access "
+            "tokens returned by Facebook/Composio."
+        ),
+        warnings=("runtime_enabled_requires_live_facebook_schema_verification",),
+    ),
+    WiiiConnectCuratedAction(
+        slug="FACEBOOK_CREATE_POST",
+        provider_slug="facebook",
+        provider_kind="composio",
+        label="Create Facebook Page post",
+        mutation="apply",
+        enabled=False,
+        requires_preview=True,
+        requires_approval=True,
+        required_scopes=("apply",),
+        argument_keys=("page_id", "message", "link", "published", "scheduled_publish_time"),
+        description=(
+            "Creates a text/link post on a Facebook Page. Wiii may call this "
+            "only after a preview, explicit user approval, selected account, "
+            "scope grant, schema verification, and audit append."
+        ),
+        warnings=("external_mutation_requires_preview_and_approval",),
+    ),
+    WiiiConnectCuratedAction(
+        slug="FACEBOOK_CREATE_PHOTO_POST",
+        provider_slug="facebook",
+        provider_kind="composio",
+        label="Create Facebook Page photo post",
+        mutation="apply",
+        enabled=False,
+        requires_preview=True,
+        requires_approval=True,
+        required_scopes=("apply",),
+        argument_keys=("page_id", "message", "photo", "media", "url", "published"),
+        description=(
+            "Creates a photo post on a Facebook Page. User-uploaded images "
+            "must stay behind Wiii preview/apply and use controlled Composio "
+            "file staging, never arbitrary local paths from the model."
+        ),
+        warnings=("external_mutation_requires_preview_and_approval",),
+    ),
 )
 
 
@@ -134,8 +186,9 @@ def configured_action_slugs_for_provider(
     provider_slug: str,
     *,
     enabled_slugs: Iterable[str],
+    mutations: Iterable[ActionMutation] | None = ("read",),
 ) -> tuple[str, ...]:
-    """Return disabled catalog candidates explicitly enabled by deployment config."""
+    """Return catalog candidates explicitly enabled by deployment config."""
 
     allowed = {
         _normalize_action_slug(slug)
@@ -144,10 +197,12 @@ def configured_action_slugs_for_provider(
     }
     if not allowed:
         return ()
+    allowed_mutations = set(mutations or ())
     return tuple(
         action.slug
         for action in list_wiii_connect_curated_actions(provider_slug=provider_slug)
-        if action.slug in allowed and action.mutation == "read"
+        if action.slug in allowed
+        and (not allowed_mutations or action.mutation in allowed_mutations)
     )
 
 

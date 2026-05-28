@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
+from dataclasses import replace
 from html import escape
 from typing import Any
 
@@ -20,6 +23,7 @@ from app.engine.wiii_connect import (
     WiiiConnectConnectionRecordV1,
     WiiiConnectExecutionRequest,
     WiiiConnectSessionStartRequest,
+    WiiiConnectScopeGrant,
     WiiiConnectVaultSecretRef,
     action_catalog_public_metadata,
     append_wiii_connect_callback_state,
@@ -32,6 +36,8 @@ from app.engine.wiii_connect import (
     build_composio_external_user_id,
     build_composio_provider_managed_vault_capability,
     build_composio_provider_adapter_capability,
+    build_facebook_post_approval_token,
+    build_facebook_post_preview_evidence_id,
     build_wiii_connect_callback_state,
     begin_connection_session,
     connection_ref_matches,
@@ -43,9 +49,16 @@ from app.engine.wiii_connect import (
     get_wiii_connect_provider_entry,
     get_wiii_connect_persistent_storage,
     execute_composio_tool,
+    facebook_image_sha256,
     get_wiii_connect_curated_action,
+    list_composio_facebook_pages,
     list_composio_connected_accounts,
+    normalize_facebook_image_filename,
+    normalize_facebook_image_media_type,
+    normalize_facebook_image_url,
+    normalize_facebook_page_id,
     normalize_connection_state,
+    normalize_facebook_post_message,
     provider_adapter_status_public_metadata,
     provider_callback_decision,
     provider_callback_decision_for_entry,
@@ -53,6 +66,8 @@ from app.engine.wiii_connect import (
     provider_registry_public_metadata,
     scope_grant_from_mapping,
     scope_policy_for_provider_entry,
+    stage_composio_file_upload,
+    verify_facebook_post_approval_token,
     verify_composio_tool_schema,
     verify_wiii_connect_callback_state,
     vault_status_public_metadata,
@@ -105,6 +120,37 @@ class WiiiConnectDisconnectBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     surface: str = "desktop"
+
+
+class WiiiConnectConnectionScopeGrantBody(BaseModel):
+    """User-approved scope grant for one selected provider account."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    surface: str = "desktop"
+    scopes: dict[str, bool] = Field(default_factory=dict)
+
+
+class WiiiConnectFacebookPostPreviewBody(BaseModel):
+    """Safe Facebook post preview body."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    surface: str = "desktop"
+    connection_ref: str
+    page_id: str
+    message: str = ""
+    image_base64: str | None = None
+    image_media_type: str | None = None
+    image_filename: str | None = None
+    image_url: str | None = None
+
+
+class WiiiConnectFacebookPostApplyBody(WiiiConnectFacebookPostPreviewBody):
+    """Safe Facebook post apply body."""
+
+    approval_token: str
+    preview_evidence_id: str
 
 
 @router.get("/providers")
@@ -228,10 +274,8 @@ async def get_wiii_connect_provider_activation_readiness(
         else None
     )
     curated_action = get_wiii_connect_curated_action(execution_entry.slug, action)
-    runtime_enabled_actions = (
-        composio_config.readonly_action_slugs_for_provider(execution_entry.slug)
-        if composio_config.readonly_execute_enabled
-        else ()
+    runtime_enabled_actions = composio_config.executable_action_slugs_for_provider(
+        execution_entry.slug,
     )
     action_runtime_enabled = bool(
         curated_action is not None and curated_action.slug in runtime_enabled_actions
@@ -664,6 +708,597 @@ async def disconnect_wiii_connect_provider_connection(
     return payload
 
 
+@router.post("/providers/{slug}/connections/{connection_ref}/scope-grant")
+async def grant_wiii_connect_provider_connection_scopes(
+    slug: str,
+    connection_ref: str,
+    body: WiiiConnectConnectionScopeGrantBody | None = None,
+    current_user: AuthenticatedUser = Depends(require_auth),
+) -> dict[str, object]:
+    """Persist user-approved scopes for one selected provider account."""
+
+    entry = get_wiii_connect_provider_entry(slug)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
+    body = body or WiiiConnectConnectionScopeGrantBody()
+    composio_config = build_composio_adapter_config()
+    effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
+    storage = _wiii_connect_storage_status_metadata(probe_database=True)
+    selected_connection_ref = _safe_public_connection_ref(connection_ref)
+    safe_connection_id = _resolve_provider_connection_id(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+        connection_ref_or_id=selected_connection_ref,
+    )
+    storage_adapter = get_wiii_connect_persistent_storage()
+    connection = (
+        storage_adapter.get_connection_record(
+            organization_id=_wiii_connect_owner_organization_id(current_user),
+            user_id=current_user.user_id,
+            provider_slug=effective_entry.slug,
+            connection_id=safe_connection_id,
+        )
+        if _connection_storage_ready(storage) and safe_connection_id
+        else None
+    )
+    if connection is None or not connection.active:
+        payload = _scope_grant_payload(
+            effective_entry,
+            status="blocked",
+            reason="connection_missing",
+            storage=storage,
+            connection=None,
+        )
+        _append_provider_lifecycle_audit(
+            effective_entry.slug,
+            storage,
+            current_user=current_user,
+            status="blocked",
+            reason="scope_grant_connection_missing",
+            surface=body.surface,
+            metadata=payload,
+        )
+        return payload
+
+    requested = scope_grant_from_mapping(body.scopes)
+    granted_scopes = _merge_scope_grants(
+        connection.scopes,
+        _scope_grant_limited_to_policy(requested, effective_entry.default_scopes),
+    )
+    updated_connection = replace(
+        connection,
+        scopes=granted_scopes,
+        reason="user_scope_grant_updated",
+        warnings=tuple(
+            sorted(
+                set(
+                    connection.warnings
+                    + (
+                        (
+                            "user_enabled_external_apply_scope"
+                            if granted_scopes.apply
+                            else "user_scope_grant_updated"
+                        ),
+                    )
+                )
+            )
+        ),
+    )
+    saved = storage_adapter.upsert_connection_record(
+        updated_connection,
+        organization_id=_wiii_connect_owner_organization_id(current_user),
+        user_id=current_user.user_id,
+        provider_kind=effective_entry.provider_kind,
+    )
+    payload = _scope_grant_payload(
+        effective_entry,
+        status="ready" if saved else "blocked",
+        reason="scope_grant_updated" if saved else "scope_grant_update_failed",
+        storage=storage,
+        connection=updated_connection if saved else connection,
+    )
+    _append_provider_lifecycle_audit(
+        effective_entry.slug,
+        storage,
+        current_user=current_user,
+        status=payload["status"],
+        reason=payload["reason"],
+        surface=body.surface,
+        metadata={
+            "connection_ref_present": bool(selected_connection_ref),
+            "requested_scopes": requested.to_metadata(),
+            "granted_scopes": granted_scopes.to_metadata(),
+        },
+    )
+    return payload
+
+
+@router.get("/providers/{slug}/facebook/pages")
+async def list_wiii_connect_facebook_pages(
+    slug: str,
+    connection_ref: str,
+    current_user: AuthenticatedUser = Depends(require_auth),
+) -> dict[str, object]:
+    """List sanitized Facebook Page choices for a connected account."""
+
+    entry = get_wiii_connect_provider_entry(slug)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
+    if entry.slug != "facebook":
+        raise HTTPException(status_code=404, detail="unsupported_provider_pages")
+    composio_config = build_composio_adapter_config()
+    effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
+    storage, connection, selected_connection_ref, safe_connection_id = (
+        _load_selected_wiii_connect_connection(
+            effective_entry,
+            current_user=current_user,
+            connection_ref=connection_ref,
+        )
+    )
+    request = WiiiConnectExecutionRequest(
+        provider_slug=effective_entry.slug,
+        action_slug="FACEBOOK_LIST_MANAGED_PAGES",
+        path="external_app_action",
+        mutation="read",
+        argument_keys=("fields", "limit"),
+    )
+    gateway = decide_execution_gateway(
+        effective_entry,
+        connection,
+        request,
+        adapter_capability=build_composio_provider_adapter_capability(
+            composio_config,
+        ),
+        audit_ledger_metadata={
+            "persistent": bool(
+                storage.get("persistent") and storage.get("audit_ledger_ready")
+            ),
+        },
+        connection_selection_required=not bool(selected_connection_ref),
+        scope_policy=scope_policy_for_provider_entry(effective_entry),
+    )
+    audit_base = {
+        "surface": "desktop",
+        "connection_ref_present": bool(selected_connection_ref),
+        "connection_id_present": bool(safe_connection_id),
+        "connection_found": connection is not None,
+        "stage": "page_list",
+    }
+    if not gateway.allowed or connection is None:
+        _append_execution_audit(
+            gateway,
+            request,
+            storage,
+            current_user=current_user,
+            metadata=audit_base,
+        )
+        return {
+            "version": "wiii_connect_facebook_pages.v1",
+            "status": "blocked",
+            "reason": gateway.reason,
+            "provider_slug": effective_entry.slug,
+            "gateway": gateway.to_public_metadata(),
+            "pages": [],
+            "page_count": 0,
+        }
+    result = await list_composio_facebook_pages(
+        config=composio_config,
+        user_id=build_composio_external_user_id(
+            organization_id=current_user.organization_id,
+            user_id=current_user.user_id,
+        ),
+        connected_account_id=connection.connection_id,
+    )
+    _append_execution_stage_audit(
+        gateway,
+        request,
+        storage,
+        current_user=current_user,
+        status="succeeded" if result.ready else "blocked",
+        reason=result.reason,
+        metadata={**audit_base, "page_list": result.to_public_metadata()},
+    )
+    payload = result.to_public_metadata()
+    payload["gateway"] = gateway.to_public_metadata()
+    return payload
+
+
+@router.post("/providers/{slug}/facebook-post/preview")
+async def preview_wiii_connect_facebook_post(
+    slug: str,
+    body: WiiiConnectFacebookPostPreviewBody,
+    current_user: AuthenticatedUser = Depends(require_auth),
+) -> dict[str, object]:
+    """Create a preview approval token for a Facebook Page post."""
+
+    entry = get_wiii_connect_provider_entry(slug)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
+    if entry.slug != "facebook":
+        raise HTTPException(status_code=404, detail="unsupported_provider_post")
+    composio_config = build_composio_adapter_config()
+    effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
+    image_bytes, image_media_type, image_filename, image_error = (
+        _decode_facebook_image_payload(body)
+    )
+    image_url = normalize_facebook_image_url(body.image_url)
+    message = normalize_facebook_post_message(body.message)
+    page_id = normalize_facebook_page_id(body.page_id)
+    action_slug = _facebook_post_action_slug(
+        image_bytes=image_bytes,
+        image_url=image_url,
+    )
+    if image_error or not page_id:
+        return _facebook_post_validation_payload(
+            reason=image_error or "missing_page_id",
+        )
+    storage, connection, selected_connection_ref, safe_connection_id = (
+        _load_selected_wiii_connect_connection(
+            effective_entry,
+            current_user=current_user,
+            connection_ref=body.connection_ref,
+        )
+    )
+    request = WiiiConnectExecutionRequest(
+        provider_slug=effective_entry.slug,
+        action_slug=action_slug,
+        path="external_app_action",
+        mutation="preview",
+        argument_keys=_facebook_post_argument_keys(
+            action_slug=action_slug,
+            image_bytes=image_bytes,
+            image_url=image_url,
+        ),
+    )
+    gateway = decide_execution_gateway(
+        effective_entry,
+        connection,
+        request,
+        adapter_capability=build_composio_provider_adapter_capability(
+            composio_config,
+        ),
+        audit_ledger_metadata={
+            "persistent": bool(
+                storage.get("persistent") and storage.get("audit_ledger_ready")
+            ),
+        },
+        connection_selection_required=not bool(selected_connection_ref),
+        scope_policy=scope_policy_for_provider_entry(effective_entry),
+    )
+    image_hash = facebook_image_sha256(image_bytes)
+    preview_evidence_id = build_facebook_post_preview_evidence_id(
+        provider_slug=effective_entry.slug,
+        action_slug=action_slug,
+        connection_ref=selected_connection_ref,
+        page_id=page_id,
+        message=message,
+        image_sha256=image_hash,
+        image_url=image_url,
+    )
+    _append_execution_audit(
+        gateway,
+        request,
+        storage,
+        current_user=current_user,
+        metadata={
+            "surface": body.surface,
+            "stage": "preview",
+            "connection_ref_present": bool(selected_connection_ref),
+            "connection_id_present": bool(safe_connection_id),
+            "connection_found": connection is not None,
+            "message_length": len(message),
+            "image_present": bool(image_bytes or image_url),
+            "image_size_bytes": len(image_bytes),
+            "preview_evidence_id_present": bool(preview_evidence_id),
+        },
+    )
+    if not gateway.allowed:
+        return _facebook_post_gateway_payload(
+            effective_entry,
+            status="blocked",
+            reason=gateway.reason,
+            gateway=gateway,
+            storage=storage,
+        )
+    approval_token = build_facebook_post_approval_token(
+        provider_slug=effective_entry.slug,
+        action_slug=action_slug,
+        connection_ref=selected_connection_ref,
+        page_id=page_id,
+        message=message,
+        image_sha256=image_hash,
+        image_url=image_url,
+        secret_key=settings.session_secret_key,
+    )
+    return {
+        "version": "wiii_connect_facebook_post_preview.v1",
+        "status": "ready",
+        "reason": "preview_ready",
+        "provider_slug": effective_entry.slug,
+        "action_slug": action_slug,
+        "preview_evidence_id": preview_evidence_id,
+        "approval_token": approval_token,
+        "preview": {
+            "page_id": page_id,
+            "message": message,
+            "image_present": bool(image_bytes or image_url),
+            "image_media_type": image_media_type,
+            "image_filename": image_filename,
+            "image_url_present": bool(image_url),
+        },
+        "gateway": gateway.to_public_metadata(),
+        "storage": storage,
+    }
+
+
+@router.post("/providers/{slug}/facebook-post/apply")
+async def apply_wiii_connect_facebook_post(
+    slug: str,
+    body: WiiiConnectFacebookPostApplyBody,
+    current_user: AuthenticatedUser = Depends(require_auth),
+) -> dict[str, object]:
+    """Post to Facebook only after preview evidence and approval token match."""
+
+    entry = get_wiii_connect_provider_entry(slug)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
+    if entry.slug != "facebook":
+        raise HTTPException(status_code=404, detail="unsupported_provider_post")
+    composio_config = build_composio_adapter_config()
+    effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
+    image_bytes, image_media_type, image_filename, image_error = (
+        _decode_facebook_image_payload(body)
+    )
+    image_url = normalize_facebook_image_url(body.image_url)
+    message = normalize_facebook_post_message(body.message)
+    page_id = normalize_facebook_page_id(body.page_id)
+    action_slug = _facebook_post_action_slug(
+        image_bytes=image_bytes,
+        image_url=image_url,
+    )
+    if image_error or not page_id:
+        return _facebook_post_validation_payload(
+            reason=image_error or "missing_page_id",
+        )
+    selected_connection_ref = _safe_public_connection_ref(body.connection_ref)
+    image_hash = facebook_image_sha256(image_bytes)
+    token_check = verify_facebook_post_approval_token(
+        body.approval_token,
+        provider_slug=effective_entry.slug,
+        action_slug=action_slug,
+        connection_ref=selected_connection_ref,
+        page_id=page_id,
+        message=message,
+        image_sha256=image_hash,
+        image_url=image_url,
+        secret_key=settings.session_secret_key,
+        preview_evidence_id=_safe_public_id(body.preview_evidence_id) or "",
+    )
+    if not token_check.valid:
+        return {
+            "version": "wiii_connect_facebook_post_apply.v1",
+            "status": "blocked",
+            "reason": token_check.reason,
+            "provider_slug": effective_entry.slug,
+            "token": token_check.to_public_metadata(),
+            "execution": None,
+        }
+
+    storage, connection, selected_connection_ref, safe_connection_id = (
+        _load_selected_wiii_connect_connection(
+            effective_entry,
+            current_user=current_user,
+            connection_ref=body.connection_ref,
+        )
+    )
+    argument_keys = _facebook_post_argument_keys(
+        action_slug=action_slug,
+        image_bytes=image_bytes,
+        image_url=image_url,
+    )
+    request = WiiiConnectExecutionRequest(
+        provider_slug=effective_entry.slug,
+        action_slug=action_slug,
+        path="external_app_action",
+        mutation="apply",
+        approval_token_present=True,
+        preview_evidence_id=token_check.preview_evidence_id,
+        preview_evidence_required=True,
+        argument_keys=argument_keys,
+    )
+    gateway = decide_execution_gateway(
+        effective_entry,
+        connection,
+        request,
+        adapter_capability=build_composio_provider_adapter_capability(
+            composio_config,
+        ),
+        audit_ledger_metadata={
+            "persistent": bool(
+                storage.get("persistent") and storage.get("audit_ledger_ready")
+            ),
+        },
+        connection_selection_required=not bool(selected_connection_ref),
+        scope_policy=scope_policy_for_provider_entry(effective_entry),
+    )
+    audit_base = {
+        "surface": body.surface,
+        "connection_ref_present": bool(selected_connection_ref),
+        "connection_id_present": bool(safe_connection_id),
+        "connection_found": connection is not None,
+        "preview_evidence_id_present": bool(token_check.preview_evidence_id),
+        "approval_token_present": True,
+        "message_length": len(message),
+        "image_present": bool(image_bytes or image_url),
+        "image_size_bytes": len(image_bytes),
+    }
+    if not gateway.allowed or connection is None:
+        _append_execution_audit(
+            gateway,
+            request,
+            storage,
+            current_user=current_user,
+            metadata={**audit_base, "stage": "gateway"},
+        )
+        return _facebook_post_gateway_payload(
+            effective_entry,
+            status="blocked",
+            reason=gateway.reason,
+            gateway=gateway,
+            storage=storage,
+        )
+    schema = await verify_composio_tool_schema(
+        config=composio_config,
+        provider_slug=effective_entry.slug,
+        action_slug=action_slug,
+    )
+    if not schema.ready:
+        _append_execution_stage_audit(
+            gateway,
+            request,
+            storage,
+            current_user=current_user,
+            status="blocked",
+            reason=schema.reason,
+            metadata={
+                **audit_base,
+                "stage": "schema",
+                "schema": schema.to_public_metadata(),
+            },
+        )
+        return _facebook_post_gateway_payload(
+            effective_entry,
+            status="blocked",
+            reason=schema.reason,
+            gateway=gateway,
+            storage=storage,
+            schema=schema.to_public_metadata(),
+        )
+
+    arguments: dict[str, Any] = {
+        "page_id": page_id,
+        "message": message,
+        "published": True,
+    }
+    upload_metadata: dict[str, Any] | None = None
+    if image_bytes:
+        upload = await stage_composio_file_upload(
+            config=composio_config,
+            provider_slug=effective_entry.slug,
+            action_slug=action_slug,
+            filename=image_filename,
+            mimetype=image_media_type,
+            content=image_bytes,
+        )
+        upload_metadata = upload.to_public_metadata()
+        if not upload.ready:
+            _append_execution_stage_audit(
+                gateway,
+                request,
+                storage,
+                current_user=current_user,
+                status="blocked",
+                reason=upload.reason,
+                metadata={**audit_base, "stage": "file_upload", "upload": upload_metadata},
+            )
+            return _facebook_post_gateway_payload(
+                effective_entry,
+                status="blocked",
+                reason=upload.reason,
+                gateway=gateway,
+                storage=storage,
+                schema=schema.to_public_metadata(),
+                upload=upload_metadata,
+            )
+        arguments["photo"] = upload.file_descriptor
+    elif image_url:
+        arguments["url"] = image_url
+
+    missing_argument_keys = _missing_required_argument_keys(
+        required_keys=schema.required_argument_keys,
+        arguments=arguments,
+    )
+    if missing_argument_keys:
+        _append_execution_stage_audit(
+            gateway,
+            request,
+            storage,
+            current_user=current_user,
+            status="blocked",
+            reason="missing_required_arguments",
+            metadata={
+                **audit_base,
+                "stage": "schema",
+                "schema": schema.to_public_metadata(),
+                "missing_required_arguments": list(missing_argument_keys),
+            },
+        )
+        return _facebook_post_gateway_payload(
+            effective_entry,
+            status="blocked",
+            reason="missing_required_arguments",
+            gateway=gateway,
+            storage=storage,
+            schema=schema.to_public_metadata(),
+            upload=upload_metadata,
+            missing_argument_keys=list(missing_argument_keys),
+        )
+
+    _append_execution_stage_audit(
+        gateway,
+        request,
+        storage,
+        current_user=current_user,
+        status="started",
+        reason="provider_execution_started",
+        metadata={
+            **audit_base,
+            "stage": "execute",
+            "schema": schema.to_public_metadata(),
+            "upload": upload_metadata,
+        },
+    )
+    execution = await execute_composio_tool(
+        config=composio_config,
+        provider_slug=effective_entry.slug,
+        action_slug=action_slug,
+        user_id=build_composio_external_user_id(
+            organization_id=current_user.organization_id,
+            user_id=current_user.user_id,
+        ),
+        connected_account_id=connection.connection_id,
+        arguments=arguments,
+    )
+    _append_execution_stage_audit(
+        gateway,
+        request,
+        storage,
+        current_user=current_user,
+        status=execution.status,
+        reason=execution.reason,
+        metadata={
+            **audit_base,
+            "stage": "execute_result",
+            "schema": schema.to_public_metadata(),
+            "upload": upload_metadata,
+            "execution": execution.to_public_metadata(),
+        },
+    )
+    return {
+        "version": "wiii_connect_facebook_post_apply.v1",
+        "status": execution.status,
+        "reason": execution.reason,
+        "provider_slug": effective_entry.slug,
+        "action_slug": action_slug,
+        "gateway": gateway.to_public_metadata(),
+        "schema": schema.to_public_metadata(),
+        "upload": upload_metadata,
+        "execution": execution.to_public_metadata(),
+        "storage": storage,
+    }
+
+
 @router.get("/providers/{slug}/actions")
 async def list_wiii_connect_provider_actions(slug: str) -> dict[str, object]:
     """Return the privacy-safe curated action catalog for a provider."""
@@ -672,11 +1307,7 @@ async def list_wiii_connect_provider_actions(slug: str) -> dict[str, object]:
     if entry is None:
         raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
     composio_config = build_composio_adapter_config()
-    enabled_slugs = (
-        composio_config.readonly_action_slugs_for_provider(entry.slug)
-        if composio_config.readonly_execute_enabled
-        else ()
-    )
+    enabled_slugs = composio_config.executable_action_slugs_for_provider(entry.slug)
     return action_catalog_public_metadata(
         provider_slug=entry.slug,
         enabled_slugs=enabled_slugs,
@@ -1161,6 +1792,173 @@ def _wiii_connect_callback_html(payload: dict[str, object]) -> HTMLResponse:
     return HTMLResponse(content=html, status_code=200)
 
 
+def _load_selected_wiii_connect_connection(
+    entry: Any,
+    *,
+    current_user: AuthenticatedUser,
+    connection_ref: str | None,
+) -> tuple[dict[str, Any], WiiiConnectConnectionRecordV1 | None, str, str]:
+    storage = _wiii_connect_storage_status_metadata(probe_database=True)
+    storage_ready = _connection_storage_ready(storage)
+    selected_connection_ref = _safe_public_connection_ref(connection_ref)
+    safe_connection_id = _resolve_provider_connection_id(
+        storage,
+        current_user=current_user,
+        provider_slug=entry.slug,
+        connection_ref_or_id=selected_connection_ref,
+    )
+    _expire_stale_pending_connections(
+        storage,
+        current_user=current_user,
+        provider_slug=entry.slug,
+    )
+    connection = (
+        get_wiii_connect_persistent_storage().get_connection_record(
+            organization_id=_wiii_connect_owner_organization_id(current_user),
+            user_id=current_user.user_id,
+            provider_slug=entry.slug,
+            connection_id=safe_connection_id,
+        )
+        if storage_ready and safe_connection_id
+        else None
+    )
+    return storage, connection, selected_connection_ref, safe_connection_id
+
+
+def _scope_grant_limited_to_policy(
+    requested: WiiiConnectScopeGrant,
+    allowed: WiiiConnectScopeGrant,
+) -> WiiiConnectScopeGrant:
+    return WiiiConnectScopeGrant(
+        read=bool(requested.read and allowed.read),
+        preview=bool(requested.preview and allowed.preview),
+        write=bool(requested.write and allowed.write),
+        apply=bool(requested.apply and allowed.apply),
+        admin=False,
+    )
+
+
+def _merge_scope_grants(
+    base: WiiiConnectScopeGrant,
+    granted: WiiiConnectScopeGrant,
+) -> WiiiConnectScopeGrant:
+    return WiiiConnectScopeGrant(
+        read=bool(base.read or granted.read),
+        preview=bool(base.preview or granted.preview),
+        write=bool(base.write or granted.write),
+        apply=bool(base.apply or granted.apply),
+        admin=False,
+    )
+
+
+def _scope_grant_payload(
+    entry: Any,
+    *,
+    status: str,
+    reason: str,
+    storage: dict[str, Any],
+    connection: WiiiConnectConnectionRecordV1 | None,
+) -> dict[str, object]:
+    return {
+        "version": "wiii_connect_scope_grant.v1",
+        "status": _safe_surface(status),
+        "reason": _safe_surface(reason),
+        "provider_slug": entry.slug,
+        "provider_kind": entry.provider_kind,
+        "connection": connection.to_public_metadata() if connection else None,
+        "storage": storage,
+    }
+
+
+def _decode_facebook_image_payload(
+    body: WiiiConnectFacebookPostPreviewBody,
+) -> tuple[bytes, str, str, str]:
+    raw = str(body.image_base64 or "").strip()
+    if not raw:
+        return b"", "", "", ""
+    if "," in raw and raw.lower().startswith("data:"):
+        raw = raw.split(",", 1)[1]
+    media_type = normalize_facebook_image_media_type(body.image_media_type)
+    if not media_type:
+        return b"", "", "", "unsupported_image_type"
+    try:
+        image_bytes = base64.b64decode(raw, validate=True)
+    except (binascii.Error, ValueError):
+        return b"", "", "", "invalid_image_base64"
+    if not image_bytes:
+        return b"", "", "", "missing_image"
+    if len(image_bytes) > 10 * 1024 * 1024:
+        return b"", "", "", "image_too_large"
+    filename = normalize_facebook_image_filename(
+        body.image_filename,
+        media_type=media_type,
+    )
+    return image_bytes, media_type, filename, ""
+
+
+def _facebook_post_action_slug(
+    *,
+    image_bytes: bytes,
+    image_url: str,
+) -> str:
+    if image_bytes or image_url:
+        return "FACEBOOK_CREATE_PHOTO_POST"
+    return "FACEBOOK_CREATE_POST"
+
+
+def _facebook_post_argument_keys(
+    *,
+    action_slug: str,
+    image_bytes: bytes,
+    image_url: str,
+) -> tuple[str, ...]:
+    if action_slug == "FACEBOOK_CREATE_PHOTO_POST":
+        if image_bytes:
+            return ("page_id", "message", "photo", "published")
+        if image_url:
+            return ("page_id", "message", "url", "published")
+        return ("page_id", "message", "published")
+    return ("page_id", "message", "published")
+
+
+def _facebook_post_validation_payload(*, reason: str) -> dict[str, object]:
+    return {
+        "version": "wiii_connect_facebook_post_validation.v1",
+        "status": "blocked",
+        "reason": _safe_surface(reason),
+        "provider_slug": "facebook",
+        "gateway": None,
+        "execution": None,
+    }
+
+
+def _facebook_post_gateway_payload(
+    entry: Any,
+    *,
+    status: str,
+    reason: str,
+    gateway: Any,
+    storage: dict[str, Any],
+    schema: dict[str, Any] | None = None,
+    upload: dict[str, Any] | None = None,
+    missing_argument_keys: list[str] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "version": "wiii_connect_facebook_post_apply.v1",
+        "status": _safe_surface(status),
+        "reason": _safe_surface(reason),
+        "provider_slug": entry.slug,
+        "gateway": gateway.to_public_metadata(),
+        "schema": schema,
+        "upload": upload,
+        "execution": None,
+        "storage": storage,
+    }
+    if missing_argument_keys:
+        payload["missing_argument_keys"] = missing_argument_keys
+    return payload
+
+
 def _safe_callback_html_text(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -1426,8 +2224,13 @@ def _upsert_listed_connections(
             current_user=current_user,
         ):
             continue
-        storage.upsert_connection_record(
+        connection_to_save = _provider_connection_with_preserved_user_scopes(
+            storage,
             connection,
+            current_user=current_user,
+        )
+        storage.upsert_connection_record(
+            connection_to_save,
             organization_id=_wiii_connect_owner_organization_id(current_user),
             user_id=current_user.user_id,
             provider_kind=entry.provider_kind,
@@ -1451,6 +2254,27 @@ def _provider_poll_would_reanimate_user_disconnect(
         and existing.state == "disabled"
         and existing.reason == "user_disconnect_requested"
         and connection.active
+    )
+
+
+def _provider_connection_with_preserved_user_scopes(
+    storage: Any,
+    connection: WiiiConnectConnectionRecordV1,
+    *,
+    current_user: AuthenticatedUser,
+) -> WiiiConnectConnectionRecordV1:
+    existing = storage.get_connection_record(
+        organization_id=_wiii_connect_owner_organization_id(current_user),
+        user_id=current_user.user_id,
+        provider_slug=connection.provider_slug,
+        connection_id=connection.connection_id,
+    )
+    if existing is None:
+        return connection
+    return replace(
+        connection,
+        scopes=_merge_scope_grants(connection.scopes, existing.scopes),
+        warnings=tuple(sorted(set(connection.warnings + existing.warnings))),
     )
 
 
