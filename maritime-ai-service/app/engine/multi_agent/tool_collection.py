@@ -29,6 +29,9 @@ from app.engine.multi_agent.tool_policy_session import (
     finalize_tool_policy_visible_tools,
     record_tool_policy_session,
 )
+from app.engine.multi_agent.wiii_connect_intent import (
+    looks_wiii_connect_facebook_post_request,
+)
 from app.engine.tools.tool_capability_registry import (
     DOC_COURSE_HOST_ACTION_TOOL,
     DOC_PREVIEW_HOST_ACTION_TOOL,
@@ -98,24 +101,7 @@ def _needs_maritime_search(query: str) -> bool:
 def _looks_wiii_connect_facebook_post_request(query: str) -> bool:
     """Detect explicit requests to create/publish a Facebook post via Wiii Connect."""
 
-    normalized = _normalize_for_intent(query)
-    if not any(token in normalized for token in ("facebook", "fb", "meta")):
-        return False
-    post_markers = (
-        "dang bai",
-        "dang len",
-        "dang thang",
-        "post",
-        "publish",
-        "tao bai viet",
-        "viet bai",
-        "viet post",
-        "chia se",
-        "len facebook",
-        "facebook post",
-        "bai viet tren facebook",
-    )
-    return any(marker in normalized for marker in post_markers)
+    return looks_wiii_connect_facebook_post_request(query)
 
 
 def _wiii_connect_facebook_post_preview_capability() -> dict[str, Any]:

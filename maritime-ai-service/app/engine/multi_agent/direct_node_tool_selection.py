@@ -21,6 +21,9 @@ from app.engine.multi_agent.tool_policy_session import (
     tool_policy_session_from_state,
 )
 from app.engine.multi_agent.tool_collection import _force_skills_from_state
+from app.engine.multi_agent.wiii_connect_intent import (
+    looks_wiii_connect_facebook_post_request,
+)
 
 
 @dataclass(slots=True)
@@ -103,7 +106,11 @@ def select_direct_node_tools(
     direct_required_tool_names: Callable[[str, str], list[str]],
     logger_obj: logging.Logger,
 ) -> DirectNodeToolSelection:
-    if is_short_house_chatter or is_identity_turn or is_emotional_support_turn:
+    is_external_app_action = looks_wiii_connect_facebook_post_request(query)
+    if (
+        (is_short_house_chatter or is_identity_turn or is_emotional_support_turn)
+        and not is_external_app_action
+    ):
         return DirectNodeToolSelection(tools=[], force_tools=False)
     if is_codebase_source_turn and not explicit_web_search_turn and not needs_web_search(query):
         return DirectNodeToolSelection(tools=[], force_tools=False)

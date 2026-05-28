@@ -2934,6 +2934,80 @@ async def test_document_host_action_shortcut_emits_preview_event_contract() -> N
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_facebook_post_shortcut_emits_preview_event() -> None:
+    from app.engine.multi_agent.direct_wiii_connect_host_action_runtime import (
+        execute_requested_wiii_connect_facebook_post_shortcut,
+    )
+    from app.engine.tools.tool_capability_registry import (
+        WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+    )
+
+    tool = SimpleNamespace(name=WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL)
+    pushed_events: list[dict] = []
+    tool_call_events: list[dict] = []
+    invoked: dict = {}
+    state: dict = {"context": {"images": [{"type": "base64", "data": "abc"}]}}
+
+    async def push_event(event: dict) -> None:
+        pushed_events.append(event)
+
+    async def invoke_tool(tool_arg, args, **kwargs):
+        invoked.update({"tool": tool_arg, "args": args, "kwargs": kwargs})
+        return json.dumps(
+            {
+                "status": "action_requested",
+                "request_id": "fb-preview-1",
+                "action": "wiii_connect.facebook_post.preview",
+                "params": args,
+            }
+        )
+
+    async def emit_host_action(**kwargs) -> None:
+        pushed_events.append(
+            {
+                "type": "host_action",
+                "tool_name": kwargs["tool_name"],
+                "result": kwargs["result"],
+            }
+        )
+
+    def build_assistant_message(content: str, **kwargs) -> dict:
+        return {"content": content, "native_tool_messages": kwargs["native_tool_messages"]}
+
+    response = await execute_requested_wiii_connect_facebook_post_shortcut(
+        query="Wiii đăng bài Facebook, bài nào cũng được kèm ảnh này",
+        state=state,
+        tools=[tool],
+        tool_call_events=tool_call_events,
+        push_event=push_event,
+        native_tool_messages=True,
+        runtime_context_base={"request_id": "req-1"},
+        invoke_tool_with_runtime=invoke_tool,
+        maybe_emit_host_action_event=emit_host_action,
+        summarize_tool_result_for_stream=lambda _name, _result: "summary",
+        build_assistant_message=build_assistant_message,
+        logger_obj=__import__("logging").getLogger(__name__),
+    )
+
+    assert response is not None
+    assert response["native_tool_messages"] is True
+    assert "bản xem trước bài đăng Facebook" in response["content"]
+    assert invoked["tool"] is tool
+    assert invoked["args"]["provider_slug"] == "facebook"
+    assert invoked["args"]["image_policy"] == "use_latest_user_image"
+    assert invoked["args"]["message"]
+    assert [event["type"] for event in pushed_events] == [
+        "tool_call",
+        "tool_result",
+        "host_action",
+        "thinking_start",
+        "thinking_delta",
+        "thinking_end",
+    ]
+    assert tool_call_events[0]["name"] == WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL
+
+
+@pytest.mark.asyncio
 async def test_requested_document_host_action_shortcut_prefers_course_preview() -> None:
     course_tool = object()
     lesson_tool = object()

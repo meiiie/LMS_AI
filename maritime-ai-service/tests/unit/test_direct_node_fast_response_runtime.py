@@ -125,6 +125,44 @@ def test_fast_response_uploaded_document_fact_uses_document_context():
     assert calls[0]["kwargs"]["provenance"] == "deterministic_uploaded_file_context_fact"
 
 
+def test_fast_response_answers_facebook_connection_from_host_snapshot():
+    calls, record_snapshot = _record_snapshot_calls()
+    state: dict = {
+        "context": {
+            "host_context": {
+                "host_type": "wiii-desktop",
+                "page": {
+                    "type": "chat",
+                    "metadata": {
+                        "wiii_connect": {
+                            "provider_slug": "facebook",
+                            "provider_label": "Facebook",
+                            "status": "connected",
+                            "active_connection_count": 1,
+                            "page_count": 1,
+                            "page_names": ["Wiii"],
+                        }
+                    },
+                },
+            }
+        }
+    }
+
+    result = _resolve_fast_response(
+        query="Wiii có kết nối được Facebook không?",
+        state=state,
+        ctx=state["context"],
+        has_uploaded_document_context=False,
+        record_snapshot=record_snapshot,
+    )
+
+    assert result is not None
+    assert result.response_type == "wiii_connect_facebook_status"
+    assert "Facebook đang được kết nối" in result.response
+    assert "Wiii" in result.response
+    assert calls[0]["kwargs"]["provenance"] == "deterministic_wiii_connect_facebook_status"
+
+
 def test_fast_response_leaves_casual_chatter_for_provider_direct_path():
     calls, record_snapshot = _record_snapshot_calls()
     state: dict = {

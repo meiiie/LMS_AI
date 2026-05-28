@@ -12,9 +12,18 @@ import { useHostContextStore } from "@/stores/host-context-store";
 import { useModelStore } from "@/stores/model-store";
 import type { VisualPayload } from "@/api/types";
 import { sendMessageStream } from "@/api/chat";
+import {
+  fetchWiiiConnectFacebookPages,
+  fetchWiiiConnectProviderConnections,
+} from "@/api/wiii-connect";
 
 vi.mock("@/api/chat", () => ({
   sendMessageStream: vi.fn(),
+}));
+
+vi.mock("@/api/wiii-connect", () => ({
+  fetchWiiiConnectProviderConnections: vi.fn(),
+  fetchWiiiConnectFacebookPages: vi.fn(),
 }));
 
 vi.mock("@/api/client", () => ({
@@ -110,6 +119,8 @@ beforeEach(() => {
   useCharacterStore.getState().reset();
   usePageContextStore.getState().clear();
   useHostContextStore.getState().clear();
+  vi.mocked(fetchWiiiConnectProviderConnections).mockReset();
+  vi.mocked(fetchWiiiConnectFacebookPages).mockReset();
   useModelStore.setState({
     activeProvider: "auto",
     nextTurnProvider: null,
@@ -387,5 +398,59 @@ describe("useSSEStream concurrency", () => {
     expect(useChatStore.getState().streamingLifecycleEvents).toHaveLength(0);
     expect(useChatStore.getState().lastCompletedLifecycleEvents).toHaveLength(0);
     useChatStore.getState().clearStreaming();
+  });
+
+  it("sends Wiii Connect Facebook snapshot even when host context is missing", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    vi.mocked(fetchWiiiConnectProviderConnections).mockResolvedValueOnce({
+      version: "wiii_connect_connection_list.v1",
+      provider_slug: "facebook",
+      status: "ready",
+      connections: [
+        {
+          provider_slug: "facebook",
+          connection_ref: "conn-1",
+          connection_id: "conn-1",
+          state: "connected",
+          active: true,
+        },
+      ],
+      connection_count: 1,
+    } as any);
+    vi.mocked(fetchWiiiConnectFacebookPages).mockResolvedValueOnce({
+      version: "wiii_connect_facebook_pages.v1",
+      provider_slug: "facebook",
+      status: "ready",
+      connection_ref: "conn-1",
+      pages: [{ page_id: "page-1", name: "Wiii" }],
+      page_count: 1,
+    } as any);
+    sendMessageStreamMock.mockResolvedValueOnce({
+      lastEventId: null,
+      sawDone: true,
+      eventOrder: ["done"],
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Wiii có kết nối được Facebook không?");
+    });
+
+    const request = sendMessageStreamMock.mock.calls[0]?.[0] as any;
+    const hostContext = request.user_context?.host_context;
+    expect(hostContext?.host_type).toBe("wiii-desktop");
+    expect(hostContext?.page?.metadata?.wiii_connect).toMatchObject({
+      provider_slug: "facebook",
+      provider_label: "Facebook",
+      status: "connected",
+      active_connection_count: 1,
+      page_count: 1,
+      page_names: ["Wiii"],
+      available_actions: [
+        "wiii_connect.facebook_post.preview",
+        "wiii_connect.facebook_post.apply",
+      ],
+    });
   });
 });

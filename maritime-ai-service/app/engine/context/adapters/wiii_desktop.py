@@ -58,6 +58,7 @@ def _format_standalone(ctx: HostContext, surface_label: str) -> str:
     is_embedded = bool(metadata.get("is_embedded", False))
     hostname = metadata.get("hostname", "")
     available_targets = metadata.get("available_targets") or []
+    wiii_connect = metadata.get("wiii_connect") if isinstance(metadata, dict) else None
 
     # Exact-id list cho LLM. Inline `→ call:` directive ở
     # `_format_pointy_inventory` (direct_tool_rounds_runtime); ở đây ta
@@ -182,6 +183,33 @@ def _format_standalone(ctx: HostContext, surface_label: str) -> str:
         "không có LMS context. Trả lời tự nhiên như chatbot thông thường."
         "</anti_hallucination>"
     )
+
+    if isinstance(wiii_connect, dict):
+        provider = str(
+            wiii_connect.get("provider_label")
+            or wiii_connect.get("provider_slug")
+            or "external app"
+        ).strip()
+        status = str(wiii_connect.get("status") or "unknown").strip()
+        page_names = wiii_connect.get("page_names")
+        names = []
+        if isinstance(page_names, list):
+            names = [str(name).strip() for name in page_names[:3] if str(name).strip()]
+        actions = wiii_connect.get("available_actions")
+        action_names = []
+        if isinstance(actions, list):
+            action_names = [
+                str(action).strip() for action in actions[:4] if str(action).strip()
+            ]
+        parts.append(
+            "  <wiii_connect>"
+            f"{_escape(provider)} status={_escape(status)}"
+            + (f" pages={_escape(', '.join(names))}" if names else "")
+            + (f" actions={_escape(', '.join(action_names))}" if action_names else "")
+            + ". If status=connected, do not claim Wiii cannot connect to that provider. "
+            "For publish/write requests, use the Wiii Connect host action preview path first."
+            "</wiii_connect>"
+        )
 
     parts.append("</host_context>")
     return "\n".join(parts)

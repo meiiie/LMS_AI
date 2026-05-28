@@ -69,6 +69,9 @@ from app.engine.multi_agent.direct_document_preview_payloads import (
     _build_uploaded_doc_course_params,
     _build_uploaded_doc_preview_params,
 )
+from app.engine.multi_agent.direct_wiii_connect_host_action_runtime import (
+    execute_requested_wiii_connect_facebook_post_shortcut,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.tool_call_text_parser import (
     extract_raw_tool_calls_from_text,
@@ -216,6 +219,25 @@ async def execute_direct_tool_rounds_impl(
         )
         if document_shortcut_response is not None:
             return document_shortcut_response, messages, tool_call_events
+
+        facebook_post_shortcut_response = (
+            await execute_requested_wiii_connect_facebook_post_shortcut(
+                query=query,
+                state=state,
+                tools=tools,
+                tool_call_events=tool_call_events,
+                push_event=push_event,
+                native_tool_messages=native_tool_messages,
+                runtime_context_base=runtime_context_base,
+                invoke_tool_with_runtime=tool_runtime_bindings.invoke_tool_with_runtime,
+                maybe_emit_host_action_event=tool_runtime_bindings.maybe_emit_host_action_event,
+                summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
+                build_assistant_message=_build_assistant_message,
+                logger_obj=logger,
+            )
+        )
+        if facebook_post_shortcut_response is not None:
+            return facebook_post_shortcut_response, messages, tool_call_events
 
         if tools and forced_tool_choice:
             # Forced tool choice — use ainvoke to ensure tool calls happen

@@ -52,6 +52,10 @@ from app.engine.multi_agent.supervisor_runtime_support import (
     _looks_wiii_capability_inventory_turn,
     _looks_wiii_pipeline_meta_turn,
 )
+from app.engine.multi_agent.wiii_connect_intent import (
+    build_wiii_connect_facebook_status_answer,
+    looks_wiii_connect_facebook_status_request,
+)
 
 
 RecordThinkingSnapshot = Callable[..., Any]
@@ -89,6 +93,20 @@ def resolve_direct_node_fast_response(
         fast_method = str(routing_meta_for_fast.get("method") or "").strip().lower()
         fast_intent = str(routing_meta_for_fast.get("intent") or "").strip().lower()
         normalized_for_fast = dependencies.normalize_for_intent(query)
+        if looks_wiii_connect_facebook_status_request(query):
+            response = build_wiii_connect_facebook_status_answer(state)
+            _record_fast_thinking(
+                state=state,
+                thinking=(
+                    "Mình nhận đây là câu hỏi trạng thái Wiii Connect/Facebook. "
+                    "Trả lời từ snapshot host_context thay vì để model đoán hoặc phủ nhận capability."
+                ),
+                provenance="deterministic_wiii_connect_facebook_status",
+                record_thinking_snapshot_fn=(
+                    dependencies.record_thinking_snapshot_fn
+                ),
+            )
+            return DirectNodeFastResponse(response, "wiii_connect_facebook_status")
         if state.get("_pointy_fast_path_action"):
             response = _extract_pointy_fast_path_answer(state)
             if response:

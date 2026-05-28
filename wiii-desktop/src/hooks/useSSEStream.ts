@@ -159,8 +159,30 @@ function withWiiiConnectSnapshot(
   context: HostContextForRequest | null,
   snapshot: Record<string, unknown> | null,
 ): HostContextForRequest | null {
-  if (!context || !snapshot) {
+  if (!snapshot) {
     return context;
+  }
+  if (!context) {
+    const hostname =
+      typeof window !== "undefined" ? window.location.hostname : "localhost";
+    const isEmbedded =
+      typeof window !== "undefined" ? window.parent !== window : false;
+    return {
+      host_type: "wiii-desktop",
+      host_name: "Wiii Desktop",
+      resource_uri: "wiii://chat/current",
+      page: {
+        type: "chat",
+        title: "Wiii Chat",
+        url: typeof window !== "undefined" ? window.location.href : undefined,
+        metadata: {
+          hostname,
+          is_embedded: isEmbedded,
+          wiii_connect: snapshot,
+        },
+      },
+      workflow_stage: "conversation",
+    };
   }
   return {
     ...context,
