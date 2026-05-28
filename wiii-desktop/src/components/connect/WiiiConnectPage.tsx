@@ -926,6 +926,7 @@ function buildNativeCatalogCards(
 function buildExternalCatalogCards(
   providerRegistry: WiiiConnectProviderRegistryEntry[] | null,
   providerConnectionLists: Record<string, ProviderConnectionListState> = {},
+  providerReadinessStates: Record<string, ProviderActivationReadinessState> = {},
 ): CatalogCard[] {
   const definitions =
     registryEntriesToExternalDefinitions(providerRegistry) ?? externalCatalogDefinitions;
@@ -940,7 +941,10 @@ function buildExternalCatalogCards(
       : connectionResponse?.status === "blocked"
         ? "Bị chặn"
         : "Chưa nối";
+    const readiness = providerReadinessStates[definition.id]?.response;
+    const agentReady = Boolean(readiness?.ready_to_execute_readonly);
     const reason = connectionResponse?.reason;
+    const statusDetail = externalAgentStatusDetail(fromBackend, readiness);
     return {
       id: `${definition.provider}-${definition.id}`,
       providerSlug: definition.id,
@@ -953,29 +957,26 @@ function buildExternalCatalogCards(
       icon: definition.icon,
       tone,
       status: connectionStatus,
-      statusDetail: fromBackend
-        ? "Backend registry đã khai báo provider này; agent action vẫn bị khóa cho đến khi có scope, policy và audit."
-        : "Wiii chưa có adapter, vault và permission gate cho kết nối này.",
-      agentReady: false,
+      statusDetail,
+      agentReady,
       connected: tone === "ok",
       registrySource: definition.source ?? "local",
       detailRows: [
         ["Provider", providerKindLabels[definition.provider] ?? definition.provider],
         ["Nguồn", fromBackend ? "Backend registry" : "Local fallback"],
         ["Auth", compactText(definition.authMode, "Chưa khai báo")],
-        ["Action", definition.actionCount != null ? `${definition.actionCount}` : "Chưa khai báo"],
+        ["Action", externalActionSummary(readiness, definition.actionCount)],
         ["Trạng thái", connectionStatus],
         ["Account", providerConnectionSummary(providerConnection)],
         ["Vault ref", providerConnection?.vault_ref_present ? "Có" : "Chưa"],
         ["Scope", providerConnection ? scopeSummary(providerConnection.scopes) : "Chưa"],
-        ["Agent-ready", "Chưa"],
-        ["Mutation", "Bị chặn cho đến khi có curated action và execution gateway"],
+        ["Agent-ready", agentReady ? "Có" : "Chưa"],
+        ["Gateway", readinessGatewayStatus(readiness)],
+        ["Mutation", "Write vẫn bị chặn ngoài allowlist"],
         ...(reason ? ([["Lý do", compactText(reason)]] as Array<[string, string]>) : []),
       ],
       requirements: definition.requirements,
-      disabledReason: fromBackend
-        ? "Provider có trong registry backend. Kết nối account được phép khi backend cấp URL; action vẫn fail-closed."
-        : "Cần thiết kế adapter/vault/policy trước khi bật Connect.",
+      disabledReason: fromBackend ? statusDetail : "Cần thiết kế adapter/vault/policy trước khi bật Connect.",
     };
   });
 }
@@ -985,10 +986,11 @@ function buildConnectionCatalogCards(
   fallbackModel: CapabilityStatusViewModel,
   providerRegistry: WiiiConnectProviderRegistryEntry[] | null,
   providerConnectionLists: Record<string, ProviderConnectionListState> = {},
+  providerReadinessStates: Record<string, ProviderActivationReadinessState> = {},
 ): CatalogCard[] {
   return [
     ...buildNativeCatalogCards(snapshot, fallbackModel),
-    ...buildExternalCatalogCards(providerRegistry, providerConnectionLists),
+    ...buildExternalCatalogCards(providerRegistry, providerConnectionLists, providerReadinessStates),
   ];
 }
 
@@ -1045,6 +1047,52 @@ function activationReadinessTone(
 
 function readinessBooleanLabel(value: boolean | undefined): string {
   return value ? "Sẵn sàng" : "Chưa sẵn sàng";
+}
+
+function readinessGateReady(
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+  key: string,
+): boolean {
+  return Boolean(readiness?.gates?.some((gate) => gate.key === key && gate.ready));
+}
+
+function readinessGatewayStatus(
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+): string {
+  return compactText(readiness?.execution_gateway?.status, "Chưa đánh giá");
+}
+
+function externalActionSummary(
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+  actionCount: number | undefined,
+): string {
+  if (readiness?.ready_to_execute_readonly || readinessGateReady(readiness, "curated_readonly_action")) {
+    return "Read-only sẵn sàng";
+  }
+  if (actionCount != null) return `${actionCount}`;
+  return "Chưa khai báo";
+}
+
+function externalAgentStatusDetail(
+  fromBackend: boolean,
+  readiness: WiiiConnectActivationReadinessResponse | undefined,
+): string {
+  if (!fromBackend) {
+    return "Wiii chưa có adapter, vault và permission gate cho kết nối này.";
+  }
+  if (readiness?.ready_to_execute_readonly) {
+    return "Read-only action đã qua scope policy và execution gateway; mutation/write vẫn bị chặn ngoài allowlist.";
+  }
+  if (readiness?.ready_to_connect) {
+    return "Backend đã sẵn sàng cấp Connect Link; agent action vẫn chờ account, scope policy và execution gateway.";
+  }
+  return "Backend registry đã khai báo provider này; agent action vẫn bị khóa cho đến khi có scope, policy và audit.";
+}
+
+function externalControlLabel(card: CatalogCard): string {
+  if (card.agentReady) return "Read-only";
+  if (card.connected) return "Chờ policy";
+  return "Fail-closed";
 }
 
 function readinessGateLabel(key: string): string {
@@ -1607,8 +1655,15 @@ function ConnectionCatalog({
   }, []);
 
   const cards = useMemo(
-    () => buildConnectionCatalogCards(snapshot, fallbackModel, providerRegistry, providerConnectionLists),
-    [snapshot, fallbackModel, providerRegistry, providerConnectionLists],
+    () =>
+      buildConnectionCatalogCards(
+        snapshot,
+        fallbackModel,
+        providerRegistry,
+        providerConnectionLists,
+        providerReadinessStates,
+      ),
+    [snapshot, fallbackModel, providerRegistry, providerConnectionLists, providerReadinessStates],
   );
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -2015,7 +2070,7 @@ function ConnectionCatalog({
                   <div className="min-w-0 rounded-md bg-surface-secondary px-2 py-2">
                     <div className="text-text-tertiary">Điều khiển</div>
                     <div className="mt-0.5 truncate font-medium text-text">
-                      {card.connected ? "Theo policy" : "Fail-closed"}
+                      {externalControlLabel(card)}
                     </div>
                   </div>
                 </div>
