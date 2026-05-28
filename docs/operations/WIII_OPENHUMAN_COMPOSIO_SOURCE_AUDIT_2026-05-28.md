@@ -144,7 +144,9 @@ callback/vault boundary, durable connection/audit storage, controlled storage
 probe, Composio adapter configuration status, an authenticated Connect Link
 client path that calls Composio only after policy preflight passes, signed
 callback state, and callback reconciliation into durable Wiii connection
-records. It still needs connection listing/polling, frontend modal UX, curated
-action catalog, execution gateway hardening for real provider actions, and
-end-to-end browser acceptance before Composio actions can be enabled for real
-users.
+records. It also has an authenticated connection-listing/polling boundary that
+calls Composio `connected_accounts` only through Wiii backend and upserts
+sanitized connection records. It still needs frontend modal UX, disconnect and
+reconnect controls, curated action catalog, execution gateway hardening for
+real provider actions, and end-to-end browser acceptance before Composio actions
+can be enabled for real users.

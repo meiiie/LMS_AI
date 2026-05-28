@@ -210,6 +210,104 @@ async def test_composio_connect_link_client_sanitizes_provider_errors():
     assert "secret-token" not in serialized
 
 
+@pytest.mark.asyncio
+async def test_composio_connection_list_client_filters_and_sanitizes_accounts():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        list_composio_connected_accounts,
+    )
+
+    captured = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["api_key"] = request.headers.get("x-api-key")
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "ca_active",
+                        "status": "ACTIVE",
+                        "state": {"val": {"access_token": "secret-token"}},
+                    },
+                    {
+                        "id": "ca_pending",
+                        "status": "INITIATED",
+                        "state": {"val": {"refresh_token": "secret-token"}},
+                    },
+                ],
+                "cursor": "secret-cursor-value",
+            },
+        )
+
+    config = WiiiConnectComposioAdapterConfig(
+        enabled=True,
+        api_key="secret-api-key",
+        api_key_present=True,
+        auth_config_by_provider={"facebook": "authcfg_fb"},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await list_composio_connected_accounts(
+            config=config,
+            provider_slug="facebook",
+            user_id="wiii_user_hash",
+            http_client=client,
+        )
+
+    public = result.to_public_metadata()
+    serialized = json.dumps(public, sort_keys=True)
+
+    assert captured["url"].startswith(
+        "https://backend.composio.dev/api/v3.1/connected_accounts?"
+    )
+    assert "user_ids=wiii_user_hash" in captured["url"]
+    assert "auth_config_ids=authcfg_fb" in captured["url"]
+    assert captured["api_key"] == "secret-api-key"
+    assert result.ready is True
+    assert public["connection_count"] == 2
+    assert public["connections"][0]["connection_id"] == "ca_active"
+    assert public["connections"][0]["state"] == "connected"
+    assert public["connections"][1]["state"] == "waiting"
+    assert "secret-api-key" not in serialized
+    assert "secret-token" not in serialized
+    assert "secret-cursor-value" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_composio_connection_list_client_sanitizes_provider_errors():
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        list_composio_connected_accounts,
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={"error": {"message": "Invalid key secret-api-key"}},
+        )
+
+    config = WiiiConnectComposioAdapterConfig(
+        enabled=True,
+        api_key="secret-api-key",
+        api_key_present=True,
+        auth_config_by_provider={"facebook": "authcfg_fb"},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await list_composio_connected_accounts(
+            config=config,
+            provider_slug="facebook",
+            user_id="wiii_user_hash",
+            http_client=client,
+        )
+
+    serialized = json.dumps(result.to_public_metadata(), sort_keys=True)
+
+    assert result.ready is False
+    assert result.reason == "provider_response_rejected"
+    assert "secret-api-key" not in serialized
+
+
 def test_provider_adapter_status_accepts_backend_capability_override():
     from app.engine.wiii_connect.provider_adapters import (
         WiiiConnectProviderAdapterCapability,

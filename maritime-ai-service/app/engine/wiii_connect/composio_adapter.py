@@ -14,12 +14,18 @@ from typing import Any, Mapping
 
 import httpx
 
-from .adapter_v1 import WiiiConnectProviderRegistryEntry
+from .adapter_v1 import (
+    WiiiConnectConnectionRecordV1,
+    WiiiConnectProviderRegistryEntry,
+    WiiiConnectVaultSecretRef,
+    normalize_connection_state,
+)
 from .provider_adapters import WiiiConnectProviderAdapterCapability
 from .vault import WiiiConnectVaultCapability, default_wiii_connect_vault_capability
 
 
 WIII_CONNECT_COMPOSIO_ADAPTER_VERSION = "wiii_connect_composio_adapter.v1"
+WIII_CONNECT_COMPOSIO_CONNECTION_LIST_VERSION = "wiii_connect_composio_connections.v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +79,28 @@ class WiiiConnectComposioConnectLinkResult:
             "expires_at_present": bool(self.expires_at),
             "connected_account_ref_present": self.connected_account_ref_present,
             "reason": _safe_connect_link_reason(self.reason),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class WiiiConnectComposioConnectionListResult:
+    """Sanitized Composio connected-account list result."""
+
+    ready: bool = False
+    reason: str = "not_requested"
+    connections: tuple[WiiiConnectConnectionRecordV1, ...] = ()
+    cursor: str = ""
+
+    def to_public_metadata(self) -> dict[str, Any]:
+        return {
+            "version": WIII_CONNECT_COMPOSIO_CONNECTION_LIST_VERSION,
+            "status": "ready" if self.ready else "blocked",
+            "reason": _safe_connection_list_reason(self.reason),
+            "connection_count": len(self.connections),
+            "cursor_present": bool(self.cursor),
+            "connections": [
+                connection.to_public_metadata() for connection in self.connections
+            ],
         }
 
 
@@ -338,6 +366,78 @@ async def create_composio_connect_link(
     )
 
 
+async def list_composio_connected_accounts(
+    *,
+    config: WiiiConnectComposioAdapterConfig,
+    provider_slug: str,
+    user_id: str,
+    limit: int = 50,
+    http_client: httpx.AsyncClient | None = None,
+) -> WiiiConnectComposioConnectionListResult:
+    """List Composio connected accounts for one Wiii external user id."""
+
+    auth_config_id = config.auth_config_id_for_provider(provider_slug)
+    if not config.enabled or not config.api_key_present or not auth_config_id:
+        return WiiiConnectComposioConnectionListResult(
+            reason="provider_adapter_not_configured",
+        )
+    if not user_id:
+        return WiiiConnectComposioConnectionListResult(reason="missing_user")
+
+    url = (
+        f"{config.base_url.rstrip('/')}/api/"
+        f"{config.api_version.strip('/')}/connected_accounts"
+    )
+    params: list[tuple[str, str | int]] = [
+        ("user_ids", user_id),
+        ("auth_config_ids", auth_config_id),
+        ("limit", max(1, min(int(limit or 50), 100))),
+    ]
+    client_created = http_client is None
+    client = http_client or httpx.AsyncClient(timeout=20)
+    try:
+        response = await client.get(
+            url,
+            params=params,
+            headers={"x-api-key": config.api_key},
+        )
+    except httpx.HTTPError:
+        return WiiiConnectComposioConnectionListResult(
+            reason="provider_transport_error",
+        )
+    finally:
+        if client_created:
+            await client.aclose()
+
+    if response.status_code < 200 or response.status_code >= 300:
+        return WiiiConnectComposioConnectionListResult(
+            reason="provider_response_rejected",
+        )
+    try:
+        data = response.json()
+    except ValueError:
+        return WiiiConnectComposioConnectionListResult(
+            reason="provider_response_invalid",
+        )
+
+    connections = tuple(
+        connection
+        for connection in (
+            _connection_record_from_composio_account(provider_slug, account)
+            for account in _extract_connection_items(data)
+        )
+        if connection is not None
+    )
+    return WiiiConnectComposioConnectionListResult(
+        ready=True,
+        reason="ready",
+        connections=connections,
+        cursor=str(data.get("cursor") or data.get("next_cursor") or "").strip()
+        if isinstance(data, dict)
+        else "",
+    )
+
+
 def _normalize_mapping(value: Mapping[Any, Any]) -> dict[str, str]:
     result: dict[str, str] = {}
     for raw_provider, raw_auth_config in value.items():
@@ -358,6 +458,52 @@ def _append_unique(values: tuple[str, ...], value: str) -> tuple[str, ...]:
     return values + (value,)
 
 
+def _connection_record_from_composio_account(
+    provider_slug: str,
+    account: Any,
+) -> WiiiConnectConnectionRecordV1 | None:
+    if not isinstance(account, Mapping):
+        return None
+    connection_id = str(
+        account.get("id")
+        or account.get("nanoid")
+        or account.get("nanoId")
+        or account.get("connected_account_id")
+        or account.get("connectedAccountId")
+        or ""
+    ).strip()
+    if not connection_id:
+        return None
+    status = str(account.get("status") or "").strip()
+    return WiiiConnectConnectionRecordV1(
+        connection_id=connection_id,
+        provider_slug=_normalize_provider_slug(provider_slug),
+        state=normalize_connection_state(status),
+        vault_ref=WiiiConnectVaultSecretRef(
+            provider_slug=_normalize_provider_slug(provider_slug),
+            connection_id=connection_id,
+            vault_key_id=f"provider-managed://composio/{connection_id}",
+            secret_version="provider_managed",
+        ),
+        reason="provider_connection_list",
+        warnings=()
+        if normalize_connection_state(status) == "connected"
+        else ("provider_status_not_active",),
+    )
+
+
+def _extract_connection_items(data: Any) -> list[Any]:
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, Mapping):
+        return []
+    for key in ("items", "data", "connected_accounts", "connectedAccounts", "connections"):
+        value = data.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
 def _safe_connect_link_reason(value: str) -> str:
     allowed = {
         "ready",
@@ -373,9 +519,25 @@ def _safe_connect_link_reason(value: str) -> str:
     return reason if reason in allowed else "provider_response_unavailable"
 
 
+def _safe_connection_list_reason(value: str) -> str:
+    allowed = {
+        "ready",
+        "not_requested",
+        "provider_adapter_not_configured",
+        "missing_user",
+        "provider_transport_error",
+        "provider_response_rejected",
+        "provider_response_invalid",
+    }
+    reason = str(value or "").strip()
+    return reason if reason in allowed else "provider_response_unavailable"
+
+
 __all__ = [
     "WIII_CONNECT_COMPOSIO_ADAPTER_VERSION",
+    "WIII_CONNECT_COMPOSIO_CONNECTION_LIST_VERSION",
     "WiiiConnectComposioAdapterConfig",
+    "WiiiConnectComposioConnectionListResult",
     "WiiiConnectComposioConnectLinkResult",
     "build_composio_adapter_config",
     "build_composio_connect_enabled_entry",
@@ -383,5 +545,6 @@ __all__ = [
     "build_composio_provider_managed_vault_capability",
     "build_composio_provider_adapter_capability",
     "create_composio_connect_link",
+    "list_composio_connected_accounts",
     "parse_composio_auth_config_map",
 ]

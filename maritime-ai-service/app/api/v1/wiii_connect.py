@@ -31,6 +31,7 @@ from app.engine.wiii_connect import (
     default_persistent_storage_status_metadata,
     get_wiii_connect_provider_entry,
     get_wiii_connect_persistent_storage,
+    list_composio_connected_accounts,
     normalize_connection_state,
     provider_adapter_status_public_metadata,
     provider_callback_decision,
@@ -246,6 +247,71 @@ async def create_wiii_connect_provider_authorization_url(
             storage_metadata=storage,
         )
     return decision.to_public_metadata()
+
+
+@router.get("/providers/{slug}/connections")
+async def list_wiii_connect_provider_connections(
+    slug: str,
+    probe_database: bool = True,
+    current_user: AuthenticatedUser = Depends(require_auth),
+) -> dict[str, object]:
+    """List sanitized connected accounts for the authenticated Wiii user."""
+
+    entry = get_wiii_connect_provider_entry(slug)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
+    composio_config = build_composio_adapter_config()
+    effective_entry = build_composio_connect_enabled_entry(entry, composio_config)
+    adapter_capability = build_composio_provider_adapter_capability(composio_config)
+    if not effective_entry.enabled or not adapter_capability.authorization_ready:
+        return {
+            "version": "wiii_connect_connection_list.v1",
+            "status": "blocked",
+            "reason": (
+                "provider_disabled"
+                if not effective_entry.enabled
+                else adapter_capability.reason
+            ),
+            "provider_slug": effective_entry.slug,
+            "provider_kind": effective_entry.provider_kind,
+            "connection_count": 0,
+            "connections": [],
+            "provider": None,
+            "storage": default_persistent_storage_status_metadata(),
+        }
+
+    provider_result = await list_composio_connected_accounts(
+        config=composio_config,
+        provider_slug=effective_entry.slug,
+        user_id=build_composio_external_user_id(
+            organization_id=current_user.organization_id,
+            user_id=current_user.user_id,
+        ),
+    )
+    storage = _wiii_connect_storage_status_metadata(
+        probe_database=probe_database,
+    )
+    if provider_result.ready:
+        _upsert_listed_connections(
+            provider_result.connections,
+            effective_entry,
+            current_user=current_user,
+            storage_metadata=storage,
+        )
+    return {
+        "version": "wiii_connect_connection_list.v1",
+        "status": "ready" if provider_result.ready else "blocked",
+        "reason": provider_result.reason,
+        "provider_slug": effective_entry.slug,
+        "provider_kind": effective_entry.provider_kind,
+        "connection_count": len(provider_result.connections),
+        "connections": [
+            connection.to_public_metadata()
+            for connection in provider_result.connections
+        ],
+        "provider": provider_result.to_public_metadata(),
+        "storage": storage,
+    }
 
 
 @router.get("/providers/{slug}/callback")
@@ -471,6 +537,25 @@ def _upsert_callback_connection(
         user_id=state_claims.user_id,
         provider_kind=entry.provider_kind,
     )
+
+
+def _upsert_listed_connections(
+    connections: tuple[WiiiConnectConnectionRecordV1, ...],
+    entry: Any,
+    *,
+    current_user: AuthenticatedUser,
+    storage_metadata: dict[str, Any],
+) -> None:
+    if not _connection_storage_ready(storage_metadata):
+        return
+    storage = get_wiii_connect_persistent_storage()
+    for connection in connections:
+        storage.upsert_connection_record(
+            connection,
+            organization_id=_wiii_connect_owner_organization_id(current_user),
+            user_id=current_user.user_id,
+            provider_kind=entry.provider_kind,
+        )
 
 
 def _connection_storage_ready(storage_metadata: dict[str, Any]) -> bool:

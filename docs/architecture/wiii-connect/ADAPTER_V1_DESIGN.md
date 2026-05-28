@@ -91,6 +91,7 @@ Current session/status API projections:
 GET  /api/v1/wiii-connect/providers/{slug}/status
 POST /api/v1/wiii-connect/providers/{slug}/sessions
 POST /api/v1/wiii-connect/providers/{slug}/authorization-url
+GET  /api/v1/wiii-connect/providers/{slug}/connections
 GET  /api/v1/wiii-connect/providers/{slug}/callback
 GET  /api/v1/wiii-connect/provider-adapters/status
 GET  /api/v1/wiii-connect/storage/status
@@ -229,10 +230,21 @@ must keep that provider disabled and non-agent-ready.
 - issues Composio hosted Connect Link URLs only through the authenticated Wiii
   backend route after registry, adapter, provider-managed vault, and durable
   audit checks pass;
+- lists Composio connected accounts only through an authenticated Wiii backend
+  route filtered by the Wiii external user ID and provider auth config;
 - hashes the Wiii org/user boundary into a stable non-PII Composio user ID;
 - redacts `link_token`, provider account IDs, API keys, auth config IDs, and raw
   provider errors from audit/public metadata;
 - still keeps action execution disabled until gateway/curated-action enablement.
+
+`WiiiConnectComposioConnectionListResult`
+
+- normalizes Composio `connected_accounts` responses into
+  `WiiiConnectConnectionRecordV1`;
+- filters calls by Wiii-owned external user ID and provider `auth_config_id`;
+- returns only connection lifecycle metadata and public vault-reference presence;
+- never returns credential state, provider raw payloads, auth config IDs, API
+  keys, or provider error bodies.
 
 `WiiiConnectAuthorizationUrlRequest`
 
@@ -360,6 +372,9 @@ Before real Composio OAuth is enabled:
 - Wiii backend must create authorization sessions with state and nonce;
 - session start must return a backend decision first, and the frontend must
   never call Composio directly;
+- connection polling must call Wiii backend only; Wiii backend may call
+  Composio `GET /api/v3.1/connected_accounts` with user/auth-config filters and
+  then upsert sanitized records into Wiii storage;
 - authorization URLs must come from a bound provider adapter decision, not from
   raw frontend input or ad hoc session arguments;
 - Wiii must append signed `wiii_state` to the provider callback URL before
@@ -404,10 +419,8 @@ approval tokens and provider payloads must remain outside chat lifecycle data.
 
 ## Next Slices
 
-1. Add callback reconciliation that maps Composio `connected_account_id` to a
-   Wiii connection record without storing provider secrets.
-2. Add frontend connection modal that uses Wiii backend routes only.
-3. Add connection polling/listing equivalent to OpenHuman `list_connections`.
-4. Add browser acceptance for connect, poll, disconnect, gated scope, and denied
+1. Add frontend connection modal that uses Wiii backend routes only.
+2. Add disconnect/delete/reconnect lifecycle controls behind the same policy.
+3. Add browser acceptance for connect, poll, disconnect, gated scope, and denied
    execute cases.
-5. Enable one low-risk read-only Composio action before any write action.
+4. Enable one low-risk read-only Composio action before any write action.
