@@ -66,6 +66,12 @@ Audited local reference clone:
 .Codex/external/reference-systems/openhuman
 ```
 
+Reference clone commit inspected for the Composio source pass:
+
+```text
+77c15cb
+```
+
 Important source files:
 
 ```text
@@ -77,6 +83,8 @@ src/openhuman/composio/client.rs
 src/openhuman/composio/ops.rs
 src/openhuman/composio/oauth_handoff.rs
 src/openhuman/composio/action_tool.rs
+src/openhuman/composio/tools.rs
+src/openhuman/composio/tools_tests.rs
 ```
 
 Key behaviors:
@@ -105,6 +113,78 @@ Key behaviors:
     failures.
 12. Error messages and sync logs are sanitized to avoid leaking provider URLs,
     JSON payloads, message bodies, or PII.
+
+### Source Evidence Notes
+
+Frontend RPC boundary:
+
+- `app/src/lib/composio/composioApi.ts` wraps connection, authorize, scope, and
+  execute operations in `callCoreRpc(...)` methods such as
+  `openhuman.composio_list_connections`, `openhuman.composio_authorize`, and
+  `openhuman.composio_execute`. This is the source-level evidence for "frontend
+  does not call Composio directly".
+- `app/src/lib/composio/hooks.ts` fetches toolkits and connections together and
+  then polls `listConnections()` on an interval. It also refreshes on a
+  window-level Composio config-change event. This is the evidence for
+  post-OAuth polling and config-change reconciliation.
+
+Connection modal and required fields:
+
+- `app/src/components/composio/ComposioConnectModal.tsx` documents the modal
+  state flow: disconnected, required-field collection, authorize, browser
+  handoff, polling, connected, expired, disconnecting, and error.
+- The same component calls `getRequiredFieldsForToolkit(...)` and
+  `validateRequiredFieldValues(...)` instead of hard-coding per-provider form
+  branches.
+- `app/src/components/composio/toolkitRequiredFields.ts` is the declarative
+  registry for provider-specific required fields. The important lesson for Wiii
+  is not the field list itself; it is that provider-specific connection
+  requirements live in a registry and the modal reads the registry.
+
+Core client routing:
+
+- `src/openhuman/composio/client.rs` has a mode-aware
+  `create_composio_client(...)` factory. Backend mode uses OpenHuman backend
+  integration routes; direct mode uses a BYO Composio API key path.
+- Wiii should adopt the backend-owned adapter boundary, but not the initial
+  BYO-key product path. Wiii has LMS/org/audit requirements, so Wiii's first
+  path must keep Composio API keys backend-only.
+- `src/openhuman/composio/ops.rs` keeps some operations backend-only when they
+  depend on backend bookkeeping, while mode-aware operations use the factory.
+  This supports Wiii's decision to keep provider execution behind a Wiii-owned
+  gateway rather than exposing raw provider calls.
+
+OAuth cleanup and retry:
+
+- `src/openhuman/composio/oauth_handoff.rs` clears stale non-active Meta OAuth
+  connection rows before new handoff attempts and wraps rate-limit-shaped
+  authorize errors with retry/guidance behavior. Wiii should keep this class of
+  cleanup in the provider adapter/control plane rather than in chat prompts.
+
+Agent tool and scope discipline:
+
+- `src/openhuman/composio/tools.rs` exposes a small agent tool surface:
+  list toolkits, list connections, authorize, list tools, execute.
+- The same file explicitly excludes scope elevation from the agent tool set.
+  Users must toggle scopes in the Connections UI.
+- `evaluate_tool_visibility(...)` checks curated action catalogs and user scope
+  preferences before execution.
+- `composio_list_tools` filters actions to connected toolkits and can report
+  that a toolkit has no agent-ready actions.
+- `composio_execute` enforces read-only sandbox constraints, user scope
+  preferences, and curated whitelist membership before delegating execution.
+- `src/openhuman/composio/tools_tests.rs` pins this behavior with tests for
+  stable tool metadata, no scope-elevation tool, read-only sandbox blocks for
+  write/admin actions, pass-through for read actions, connected-toolkit
+  filtering, uncurated toolkit messaging, and backend/direct routing.
+
+Wiii consequence:
+
+- Wiii should keep a smaller, stricter first surface than OpenHuman:
+  backend-issued Connect Links, provider-managed vault references, Wiii-owned
+  activation readiness, curated read-only action allowlist, execution gateway,
+  and audit ledger. Do not expose broad Composio meta-tools or direct BYO API
+  key mode in normal Wiii chat.
 
 ## What Wiii Should Adopt
 
