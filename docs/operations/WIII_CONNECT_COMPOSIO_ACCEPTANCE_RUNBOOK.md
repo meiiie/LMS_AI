@@ -136,6 +136,8 @@ python scripts/wiii_connect_composio_acceptance.py --backend-url http://localhos
 If selecting a specific account manually, pass the opaque Wiii `connection_ref`
 returned by the connection list through `--connection-ref`; do not pass a raw
 provider connected-account ID.
+The acceptance harness intentionally does not accept a `--connection-id` alias;
+operator-selected accounts must use the `wcn_*` reference returned by Wiii.
 
 If the schema uses different argument names, do not change Wiii code blindly.
 Pass the live schema-compatible JSON through `--arguments-json` and record the

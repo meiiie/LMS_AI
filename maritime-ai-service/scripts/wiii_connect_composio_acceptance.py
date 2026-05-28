@@ -34,6 +34,7 @@ SCOPE_POLICY_VERSION = "wiii_connect_scope_policy.v1"
 TOKEN_ENV = "WIII_ACCEPTANCE_BEARER_TOKEN"
 TARGET_ENV = "WIII_ACCEPTANCE_TARGET_ENV"
 COMMIT_SHA_ENV = "WIII_ACCEPTANCE_COMMIT_SHA"
+PUBLIC_CONNECTION_REF_PREFIX = "wcn_"
 
 SENSITIVE_EXACT_KEYS = {
     "access_token",
@@ -180,6 +181,12 @@ def redact_for_log(value: Any) -> Any:
     return value
 
 
+def is_public_connection_ref(value: Any) -> bool:
+    return isinstance(value, str) and value.strip().startswith(
+        PUBLIC_CONNECTION_REF_PREFIX,
+    )
+
+
 def opaque_ref(value: str) -> str:
     if not value:
         return "missing"
@@ -211,12 +218,14 @@ def find_action(payload: dict[str, Any], action_slug: str) -> dict[str, Any]:
 
 def first_connected_connection(payload: dict[str, Any]) -> dict[str, Any] | None:
     for connection in payload.get("connections", []):
+        connection_ref = (
+            connection.get("connection_ref") if isinstance(connection, dict) else None
+        )
         if (
             isinstance(connection, dict)
             and connection.get("active") is True
             and connection.get("state") == "connected"
-            and isinstance(connection.get("connection_ref"), str)
-            and connection.get("connection_ref")
+            and is_public_connection_ref(connection_ref)
         ):
             return connection
     return None
@@ -989,6 +998,12 @@ class WiiiConnectComposioAcceptance:
                 "No connected account selected. Run with --expect-connected after OAuth "
                 "or pass --connection-ref explicitly."
             )
+        if not is_public_connection_ref(candidate):
+            raise AcceptanceFailure(
+                "Selected connection_ref is not a Wiii opaque ref. Pass the wcn_* "
+                "value returned by the backend connection list; do not pass raw "
+                "provider connection IDs."
+            )
         return candidate
 
 
@@ -1038,11 +1053,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--connection-ref",
         default="",
         help="Opaque Wiii connection_ref selected from the backend connection list.",
-    )
-    parser.add_argument(
-        "--connection-id",
-        dest="connection_ref",
-        help=argparse.SUPPRESS,
     )
     parser.add_argument("--argument-keys", default="")
     parser.add_argument("--arguments-json", default="{}")

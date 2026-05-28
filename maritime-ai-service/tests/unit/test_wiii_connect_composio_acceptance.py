@@ -111,6 +111,7 @@ def test_first_connected_connection_requires_opaque_connection_ref() -> None:
                 "connections": [
                     {
                         "connection_id": "ca_raw_only",
+                        "connection_ref": "ca_raw_only",
                         "state": "connected",
                         "active": True,
                     }
@@ -1016,14 +1017,23 @@ def test_connection_ref_for_action_requires_selected_or_explicit_connection() ->
     assert harness.connection_ref_for_action() == "wcn_live"
 
 
-def test_parser_prefers_connection_ref_and_keeps_legacy_alias() -> None:
+def test_connection_ref_for_action_rejects_raw_provider_connection_ids() -> None:
+    harness = acceptance.WiiiConnectComposioAcceptance(
+        SimpleNamespace(connection_ref="ca_raw_provider_id", selected_connection_ref="")
+    )
+
+    with pytest.raises(acceptance.AcceptanceFailure, match="not a Wiii opaque ref"):
+        harness.connection_ref_for_action()
+
+
+def test_parser_accepts_connection_ref_and_rejects_legacy_connection_id() -> None:
     parser = acceptance.build_parser()
 
     preferred = parser.parse_args(["--connection-ref", "wcn_live"])
-    legacy = parser.parse_args(["--connection-id", "wcn_legacy"])
     help_text = parser.format_help()
 
     assert preferred.connection_ref == "wcn_live"
-    assert legacy.connection_ref == "wcn_legacy"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--connection-id", "wcn_legacy"])
     assert "--connection-ref" in help_text
     assert "--connection-id" not in help_text
