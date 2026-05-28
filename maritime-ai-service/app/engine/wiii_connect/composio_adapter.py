@@ -638,6 +638,7 @@ async def list_composio_connected_accounts(
     params: list[tuple[str, str | int]] = [
         ("user_ids", user_id),
         ("auth_config_ids", auth_config_id),
+        ("account_type", "PRIVATE"),
         ("limit", max(1, min(int(limit or 50), 100))),
     ]
     client_created = http_client is None

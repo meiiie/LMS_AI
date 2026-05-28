@@ -315,6 +315,7 @@ async def test_composio_connection_list_client_filters_and_sanitizes_accounts():
     )
     assert "user_ids=wiii_user_hash" in captured["url"]
     assert "auth_config_ids=authcfg_fb" in captured["url"]
+    assert "account_type=PRIVATE" in captured["url"]
     assert captured["api_key"] == "secret-api-key"
     assert result.ready is True
     assert public["connection_count"] == 2
