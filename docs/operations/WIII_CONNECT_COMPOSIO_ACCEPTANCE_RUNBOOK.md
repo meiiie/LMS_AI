@@ -147,6 +147,7 @@ Composio is ready to enable only when all of these are true:
 - provider registry returns Gmail as a Composio provider;
 - curated actions include only the intended read-only action;
 - execution gateway blocks a missing-connection execution request;
+- execution gateway blocks execution when no explicit connection id is selected;
 - Connect Link is issued by Wiii backend;
 - after OAuth, connection listing returns an active connected account;
 - execution gateway allows the selected read-only action only for the stored
@@ -162,6 +163,7 @@ Common blocked reasons:
 |---|---|
 | `provider_adapter_not_configured` | Missing Composio API key or auth config map. |
 | `audit_ledger_not_persistent` | Migration or database connection is missing. |
+| `connection_selection_required` | The caller has not selected a stored provider connection id for execution. |
 | `connection_missing` | OAuth has not completed or the selected connection does not belong to this org/user. |
 | `provider_not_agent_ready` | Read-only action execution is not enabled for the curated allowlist. |
 | `action_not_allowed` | The action is not in Wiii's curated catalog for that provider. |

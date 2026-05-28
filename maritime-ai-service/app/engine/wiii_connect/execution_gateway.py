@@ -76,6 +76,7 @@ def decide_execution_gateway(
     adapter_capability: WiiiConnectProviderAdapterCapability | None = None,
     audit_ledger_metadata: dict[str, Any] | None = None,
     require_persistent_audit: bool = True,
+    connection_selection_required: bool = False,
 ) -> WiiiConnectExecutionGatewayDecision:
     """Return the fail-closed decision before a provider action may run."""
 
@@ -84,7 +85,11 @@ def decide_execution_gateway(
     )
     audit_persistent = bool((audit_ledger_metadata or {}).get("persistent"))
 
-    base = decide_external_execution(entry, connection, request)
+    base = (
+        _gateway_deny(entry, request, "connection_selection_required")
+        if connection_selection_required
+        else decide_external_execution(entry, connection, request)
+    )
     if not base.allowed:
         return WiiiConnectExecutionGatewayDecision(
             decision=base,
@@ -151,6 +156,7 @@ def _required_next_for_reason(reason: str) -> tuple[str, ...]:
         "provider_adapter_not_configured": ("configure_provider_adapter",),
         "provider_adapter_cannot_execute": ("implement_provider_action_adapter",),
         "audit_ledger_not_persistent": ("configure_persistent_audit_ledger",),
+        "connection_selection_required": ("select_provider_connection",),
         "connection_missing": ("connect_provider_account",),
         "connection_provider_mismatch": ("select_matching_connection",),
         "connection_not_connected": ("refresh_or_reconnect_provider_account",),

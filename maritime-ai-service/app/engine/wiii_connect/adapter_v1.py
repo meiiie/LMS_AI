@@ -47,6 +47,7 @@ ExecutionDenyReason = Literal[
     "provider_adapter_not_configured",
     "provider_adapter_cannot_execute",
     "audit_ledger_not_persistent",
+    "connection_selection_required",
     "connection_missing",
     "connection_provider_mismatch",
     "connection_not_connected",

@@ -195,14 +195,15 @@ async def get_wiii_connect_provider_activation_readiness(
         probe_database=probe_database,
     )
     storage_ready = _connection_storage_ready(storage)
+    safe_connection_id = _safe_provider_connection_id(connection_id)
     connection = (
         get_wiii_connect_persistent_storage().get_connection_record(
             organization_id=_wiii_connect_owner_organization_id(current_user),
             user_id=current_user.user_id,
             provider_slug=execution_entry.slug,
-            connection_id=_safe_provider_connection_id(connection_id),
+            connection_id=safe_connection_id,
         )
-        if storage_ready
+        if storage_ready and safe_connection_id
         else None
     )
     curated_action = get_wiii_connect_curated_action(execution_entry.slug, action)
@@ -238,6 +239,7 @@ async def get_wiii_connect_provider_activation_readiness(
                 storage.get("persistent") and storage.get("audit_ledger_ready")
             ),
         },
+        connection_selection_required=not bool(safe_connection_id),
     )
     return build_activation_readiness_metadata(
         provider_slug=connect_entry.slug,
@@ -659,14 +661,15 @@ async def decide_wiii_connect_provider_execution(
     effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
     storage = _wiii_connect_storage_status_metadata(probe_database=True)
     storage_ready = _connection_storage_ready(storage)
+    safe_connection_id = _safe_provider_connection_id(body.connection_id)
     connection = (
         get_wiii_connect_persistent_storage().get_connection_record(
             organization_id=_wiii_connect_owner_organization_id(current_user),
             user_id=current_user.user_id,
             provider_slug=effective_entry.slug,
-            connection_id=body.connection_id,
+            connection_id=safe_connection_id,
         )
-        if storage_ready
+        if storage_ready and safe_connection_id
         else None
     )
     request = WiiiConnectExecutionRequest(
@@ -689,6 +692,7 @@ async def decide_wiii_connect_provider_execution(
         audit_ledger_metadata={
             "persistent": bool(storage.get("persistent") and storage.get("audit_ledger_ready")),
         },
+        connection_selection_required=not bool(safe_connection_id),
     )
     _append_execution_audit(
         gateway,
@@ -697,7 +701,7 @@ async def decide_wiii_connect_provider_execution(
         current_user=current_user,
         metadata={
             "surface": body.surface,
-            "connection_id_present": bool(body.connection_id),
+            "connection_id_present": bool(safe_connection_id),
             "connection_found": connection is not None,
             "storage": storage,
         },
@@ -723,14 +727,15 @@ async def execute_wiii_connect_provider_action(
     effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
     storage = _wiii_connect_storage_status_metadata(probe_database=True)
     storage_ready = _connection_storage_ready(storage)
+    safe_connection_id = _safe_provider_connection_id(body.connection_id)
     connection = (
         get_wiii_connect_persistent_storage().get_connection_record(
             organization_id=_wiii_connect_owner_organization_id(current_user),
             user_id=current_user.user_id,
             provider_slug=effective_entry.slug,
-            connection_id=body.connection_id,
+            connection_id=safe_connection_id,
         )
-        if storage_ready
+        if storage_ready and safe_connection_id
         else None
     )
     request = WiiiConnectExecutionRequest(
@@ -757,10 +762,11 @@ async def execute_wiii_connect_provider_action(
                 storage.get("persistent") and storage.get("audit_ledger_ready")
             ),
         },
+        connection_selection_required=not bool(safe_connection_id),
     )
     audit_base = {
         "surface": body.surface,
-        "connection_id_present": bool(body.connection_id),
+        "connection_id_present": bool(safe_connection_id),
         "connection_found": connection is not None,
         "storage": storage,
     }
