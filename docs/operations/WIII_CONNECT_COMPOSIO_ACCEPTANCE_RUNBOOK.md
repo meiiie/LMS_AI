@@ -164,6 +164,8 @@ Composio is ready to enable only when all of these are true:
   connected-account ID;
 - execution gateway allows the selected read-only action only for the stored
   org/user connection;
+- execute blocks before calling Composio when live schema verification reports
+  missing required argument keys;
 - optional execution succeeds through `POST /api/v1/wiii-connect/providers/gmail/execute`;
 - optional disconnect disables local Wiii state and completes provider cleanup.
 
@@ -178,6 +180,7 @@ Common blocked reasons:
 | `connection_selection_required` | The caller has not selected a stored provider connection id for execution. |
 | `connection_missing` | OAuth has not completed or the selected connection does not belong to this org/user. |
 | `provider_not_agent_ready` | Read-only action execution is not enabled for the curated allowlist. |
+| `missing_required_arguments` | Live schema verification succeeded, but the request is missing required argument keys. |
 | `action_not_allowed` | The action is not in Wiii's curated catalog for that provider. |
 | `missing_scope` | The stored connection lacks the required scope grant. |
 | `tool_schema_not_found` | Composio's live schema does not match the curated action/provider. |
