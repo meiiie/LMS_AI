@@ -176,6 +176,8 @@ Composio is ready to enable only when all of these are true:
 - after OAuth, connection listing returns an active connected account;
 - connection listing returns an opaque `connection_ref`, not the raw provider
   connected-account ID;
+- the acceptance harness rejects active connected-account records that only
+  expose raw provider IDs without an opaque `connection_ref`;
 - backend Composio polling/listing filters the provider call to private
   connected accounts for the selected Wiii user and auth config;
 - execution gateway allows the selected read-only action only for the stored
