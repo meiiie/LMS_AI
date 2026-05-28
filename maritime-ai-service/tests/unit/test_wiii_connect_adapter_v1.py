@@ -266,6 +266,126 @@ def test_execution_gateway_requires_adapter_execution_and_persistent_audit():
     assert "access_token" not in serialized
 
 
+def test_execution_gateway_enforces_wiii_scope_policy_after_connection_scope():
+    from app.engine.wiii_connect.adapter_v1 import (
+        WiiiConnectConnectionRecordV1,
+        WiiiConnectExecutionRequest,
+        WiiiConnectProviderRegistryEntry,
+        WiiiConnectScopeGrant,
+    )
+    from app.engine.wiii_connect.execution_gateway import decide_execution_gateway
+    from app.engine.wiii_connect.provider_adapters import (
+        WiiiConnectProviderAdapterCapability,
+    )
+    from app.engine.wiii_connect.scope_policy import scope_policy_for_provider_entry
+
+    adapter = WiiiConnectProviderAdapterCapability(
+        provider_kind="composio",
+        adapter_name="composio_adapter",
+        bound=True,
+        configured=True,
+        can_create_authorization_url=True,
+        can_exchange_callback=True,
+        can_execute_actions=True,
+        reason="ready",
+    )
+    connection = WiiiConnectConnectionRecordV1(
+        connection_id="conn_1",
+        provider_slug="gmail",
+        state="connected",
+        scopes=WiiiConnectScopeGrant(
+            read=True,
+            write=True,
+            apply=True,
+            admin=True,
+        ),
+    )
+    request = WiiiConnectExecutionRequest(
+        provider_slug="gmail",
+        action_slug="GMAIL_FETCH_EMAILS",
+        path="external_app_action",
+        mutation="read",
+    )
+    connected_but_policy_closed = WiiiConnectProviderRegistryEntry(
+        slug="gmail",
+        label="Gmail",
+        provider_kind="composio",
+        auth_mode="oauth2",
+        enabled=True,
+        agent_ready=True,
+        action_allowlist=("GMAIL_FETCH_EMAILS",),
+        default_scopes=WiiiConnectScopeGrant(),
+    )
+    read_policy_entry = WiiiConnectProviderRegistryEntry(
+        slug="gmail",
+        label="Gmail",
+        provider_kind="composio",
+        auth_mode="oauth2",
+        enabled=True,
+        agent_ready=True,
+        action_allowlist=("GMAIL_FETCH_EMAILS",),
+        default_scopes=WiiiConnectScopeGrant(read=True),
+    )
+
+    blocked = decide_execution_gateway(
+        connected_but_policy_closed,
+        connection,
+        request,
+        adapter_capability=adapter,
+        audit_ledger_metadata={"persistent": True},
+        scope_policy=scope_policy_for_provider_entry(connected_but_policy_closed),
+    )
+    allowed = decide_execution_gateway(
+        read_policy_entry,
+        connection,
+        request,
+        adapter_capability=adapter,
+        audit_ledger_metadata={"persistent": True},
+        scope_policy=scope_policy_for_provider_entry(read_policy_entry),
+    )
+    mutating_blocks = []
+    for mutation in ("write", "apply", "admin"):
+        mutating_blocks.append(
+            decide_execution_gateway(
+                read_policy_entry,
+                connection,
+                WiiiConnectExecutionRequest(
+                    provider_slug="gmail",
+                    action_slug="GMAIL_FETCH_EMAILS",
+                    path="external_app_action",
+                    mutation=mutation,  # type: ignore[arg-type]
+                    approval_token_present=mutation == "apply",
+                ),
+                adapter_capability=adapter,
+                audit_ledger_metadata={"persistent": True},
+                scope_policy=scope_policy_for_provider_entry(read_policy_entry),
+            )
+        )
+    serialized = json.dumps(blocked.to_public_metadata(), sort_keys=True)
+
+    assert blocked.allowed is False
+    assert blocked.reason == "scope_policy_denied"
+    assert blocked.decision.required_scopes == ("read",)
+    assert blocked.scope_policy is not None
+    assert blocked.scope_policy.allowed_scopes == ()
+    assert "grant_required_scope_policy" in blocked.required_next
+    assert allowed.allowed is True
+    assert allowed.scope_policy is not None
+    assert allowed.scope_policy.allowed_scopes == ("read",)
+    assert [decision.reason for decision in mutating_blocks] == [
+        "scope_policy_denied",
+        "scope_policy_denied",
+        "scope_policy_denied",
+    ]
+    assert [decision.decision.required_scopes for decision in mutating_blocks] == [
+        ("write",),
+        ("apply",),
+        ("admin",),
+    ]
+    assert "access_token" not in serialized
+    assert "conn_1" not in serialized
+
+
 def test_public_metadata_does_not_expose_vault_key_or_raw_secret_values():
     from app.engine.wiii_connect.adapter_v1 import (
         WiiiConnectConnectionRecordV1,

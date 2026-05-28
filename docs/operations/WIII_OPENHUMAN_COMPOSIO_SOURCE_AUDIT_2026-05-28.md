@@ -307,6 +307,15 @@ provider account.
 This preserves the OpenHuman-style connection discipline while avoiding unsafe
 multi-account ambiguity once Composio is enabled with real users.
 
+Wiii now also separates provider connection scopes from Wiii-owned scope
+policy. The stored connection record can report provider/session scopes, but
+the execution gateway also evaluates `scope_policy.py` from the effective
+provider entry before adapter execution. A connected account with `read` on the
+connection is still blocked with `scope_policy_denied` unless Wiii's runtime
+policy grants the required scope for the selected action/path. This mirrors the
+source-audited OpenHuman rule that user/toolkit scope preferences gate actions
+instead of letting a connected OAuth account automatically enter the agent loop.
+
 Remaining work before enabling Composio for real users: configure production
 Composio project credentials and auth config IDs, connect a live Gmail account,
 run the acceptance harness plus browser acceptance through Wiii's

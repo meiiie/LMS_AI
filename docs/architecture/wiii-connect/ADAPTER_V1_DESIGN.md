@@ -90,6 +90,12 @@ The execution gateway preflight and audit boundary lives in:
 maritime-ai-service/app/engine/wiii_connect/execution_gateway.py
 ```
 
+The provider/action scope policy contract lives in:
+
+```text
+maritime-ai-service/app/engine/wiii_connect/scope_policy.py
+```
+
 The durable storage contract and schema live in:
 
 ```text
@@ -369,8 +375,13 @@ without guessing from logs.
 - requires the authenticated Wiii org/user connection record from persistent
   storage, not a frontend-supplied connection claim;
 - checks registry enabled state, `agent_ready`, path allowlist, curated action
-  allowlist, stored scopes, preview evidence, approval-token presence, adapter
-  execution capability, and persistent audit readiness;
+  allowlist, stored connection scopes, Wiii-owned scope policy, preview
+  evidence, approval-token presence, adapter execution capability, and
+  persistent audit readiness;
+- treats provider connection scope and Wiii policy scope as separate gates:
+  a provider account may be connected and still blocked with
+  `scope_policy_denied` if the effective provider policy does not grant the
+  required read/write/apply/admin scope for that path/action;
 - records only action slug, path, mutation, approval-token presence, preview
   evidence presence, and sanitized argument key names;
 - never accepts raw provider arguments, raw provider payloads, OAuth tokens,
@@ -439,6 +450,7 @@ The gateway denies by default. Current reason codes:
 - `path_not_allowed`
 - `action_not_allowed`
 - `missing_scope`
+- `scope_policy_denied`
 - `missing_preview_evidence`
 - `missing_approval_token`
 - `provider_adapter_mismatch`
