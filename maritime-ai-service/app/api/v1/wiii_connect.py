@@ -878,6 +878,35 @@ async def execute_wiii_connect_provider_action(
         payload["execution"] = None
         return payload
 
+    missing_argument_keys = _missing_required_argument_keys(
+        required_keys=schema.required_argument_keys,
+        arguments=body.arguments,
+    )
+    if missing_argument_keys:
+        _append_execution_stage_audit(
+            gateway,
+            request,
+            storage,
+            current_user=current_user,
+            status="blocked",
+            reason="missing_required_arguments",
+            metadata={
+                **audit_base,
+                "stage": "schema",
+                "schema": schema.to_public_metadata(),
+                "missing_required_arguments": list(missing_argument_keys),
+            },
+        )
+        payload = gateway.to_public_metadata()
+        payload["status"] = "blocked"
+        payload["reason"] = "missing_required_arguments"
+        payload["provider_slug"] = effective_entry.slug
+        payload["storage"] = storage
+        payload["schema"] = schema.to_public_metadata()
+        payload["execution"] = None
+        payload["missing_argument_keys"] = list(missing_argument_keys)
+        return payload
+
     _append_execution_stage_audit(
         gateway,
         request,
@@ -1438,6 +1467,33 @@ def _safe_argument_keys(values: list[str]) -> list[str]:
         if key:
             result.append(key[:120])
     return result
+
+
+def _missing_required_argument_keys(
+    *,
+    required_keys: tuple[str, ...],
+    arguments: dict[str, Any],
+) -> tuple[str, ...]:
+    provided = {str(key or "").strip() for key in (arguments or {}).keys()}
+    missing: list[str] = []
+    for raw_key in required_keys:
+        key = str(raw_key or "").strip()
+        if not key or key in provided:
+            continue
+        safe_key = _safe_public_argument_key(key)
+        if safe_key not in missing:
+            missing.append(safe_key)
+    return tuple(missing[:50])
+
+
+def _safe_public_argument_key(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return "empty"
+    sensitive_markers = ("token", "secret", "password", "credential", "key", "code")
+    if any(marker in normalized for marker in sensitive_markers):
+        return "redacted_sensitive_field"
+    return normalized[:80]
 
 
 def _safe_public_id(value: str | None) -> str | None:
