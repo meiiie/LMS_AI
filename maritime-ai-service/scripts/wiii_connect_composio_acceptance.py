@@ -18,6 +18,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Callable
 
 
@@ -29,6 +31,8 @@ DEFAULT_DEMO_NAME = "Dev User"
 DEFAULT_DEMO_ROLE = "admin"
 DEFAULT_EXPECTED_PLATFORM_ROLE = "platform_admin"
 TOKEN_ENV = "WIII_ACCEPTANCE_BEARER_TOKEN"
+TARGET_ENV = "WIII_ACCEPTANCE_TARGET_ENV"
+COMMIT_SHA_ENV = "WIII_ACCEPTANCE_COMMIT_SHA"
 
 SENSITIVE_EXACT_KEYS = {
     "access_token",
@@ -226,8 +230,8 @@ def activation_blocker_summary(payload: dict[str, Any]) -> str:
     for gate in gates:
         if not isinstance(gate, dict) or gate.get("ready") is True:
             continue
-        key = str(gate.get("key") or "unknown")
-        reason = str(gate.get("reason") or "blocked")
+        key = _safe_report_text(gate.get("key") or "unknown")
+        reason = _safe_report_text(gate.get("reason") or "blocked")
         blockers.append(f"{key}:{reason}")
     return ", ".join(blockers[:8]) or "none"
 
@@ -336,6 +340,8 @@ class WiiiConnectComposioAcceptance:
         self.selected_connection_id = ""
         self.passed = 0
         self.failed = 0
+        self.started_at = datetime.now(UTC)
+        self.check_records: list[dict[str, Any]] = []
 
     def api_url(self, path: str) -> str:
         return join_url(self.args.backend_url, path)
@@ -361,14 +367,40 @@ class WiiiConnectComposioAcceptance:
             detail = func()
         except AcceptanceFailure as exc:
             self.failed += 1
+            elapsed = time.monotonic() - start
+            self.check_records.append(
+                self.check_record(
+                    name,
+                    status="failed",
+                    elapsed=elapsed,
+                    detail=str(exc),
+                )
+            )
             print(f"[FAIL] {name} - {exc}")
             return False
         except Exception as exc:  # pragma: no cover - defensive CLI boundary
             self.failed += 1
+            elapsed = time.monotonic() - start
+            self.check_records.append(
+                self.check_record(
+                    name,
+                    status="failed",
+                    elapsed=elapsed,
+                    detail=f"unexpected error: {exc}",
+                )
+            )
             print(f"[FAIL] {name} - unexpected error: {exc}")
             return False
         elapsed = time.monotonic() - start
         suffix = f" - {detail}" if detail else ""
+        self.check_records.append(
+            self.check_record(
+                name,
+                status="passed",
+                elapsed=elapsed,
+                detail=detail,
+            )
+        )
         print(f"[PASS] {name} ({elapsed:.1f}s){suffix}")
         self.passed += 1
         return True
@@ -418,7 +450,94 @@ class WiiiConnectComposioAcceptance:
 
         total = self.passed + self.failed
         print(f"\nResult: {self.passed}/{total} checks passed")
+        if getattr(self.args, "evidence_json", ""):
+            self.write_evidence_json()
         return 1 if self.failed else 0
+
+    def check_record(
+        self,
+        name: str,
+        *,
+        status: str,
+        elapsed: float,
+        detail: str,
+    ) -> dict[str, Any]:
+        return {
+            "name": str(name),
+            "status": status,
+            "elapsed_seconds": round(float(elapsed), 3),
+            "detail": redact_for_log(str(detail or "")),
+        }
+
+    def evidence_payload(self) -> dict[str, Any]:
+        parsed_backend = urllib.parse.urlsplit(self.args.backend_url)
+        backend_origin = ""
+        if parsed_backend.scheme and parsed_backend.netloc:
+            backend_origin = f"{parsed_backend.scheme}://{parsed_backend.netloc}"
+        return redact_for_log(
+            {
+                "schema": "wiii_connect_composio_acceptance_evidence.v1",
+                "generated_at": datetime.now(UTC).isoformat(),
+                "started_at": self.started_at.isoformat(),
+                "backend_origin": backend_origin or "[invalid_backend_url]",
+                "target_env": getattr(self.args, "target_env", "")
+                or os.environ.get(TARGET_ENV, "")
+                or "unspecified",
+                "commit_sha": getattr(self.args, "commit_sha", "")
+                or os.environ.get(COMMIT_SHA_ENV, "")
+                or "unspecified",
+                "provider": normalize_provider(self.args.provider),
+                "action": normalize_action(self.args.action),
+                "auth_mode": self.args.auth_mode,
+                "flags": {
+                    "readiness_report_only": bool(
+                        getattr(self.args, "readiness_report_only", False)
+                    ),
+                    "skip_connect_link": bool(
+                        getattr(self.args, "skip_connect_link", False)
+                    ),
+                    "print_connect_url": bool(
+                        getattr(self.args, "print_connect_url", False)
+                    ),
+                    "expect_connected": bool(
+                        getattr(self.args, "expect_connected", False)
+                    ),
+                    "require_execution_ready": bool(
+                        getattr(self.args, "require_execution_ready", False)
+                    ),
+                    "execute_readonly": bool(
+                        getattr(self.args, "execute_readonly", False)
+                    ),
+                    "disconnect": bool(getattr(self.args, "disconnect", False)),
+                    "explicit_connection_selected": bool(
+                        getattr(self.args, "connection_id", "")
+                    ),
+                    "arguments_present": bool(
+                        parse_json_argument_object(
+                            getattr(self.args, "arguments_json", "{}")
+                        )
+                    ),
+                },
+                "summary": {
+                    "passed": self.passed,
+                    "failed": self.failed,
+                    "total": self.passed + self.failed,
+                    "success": self.failed == 0,
+                },
+                "checks": self.check_records,
+            }
+        )
+
+    def write_evidence_json(self) -> None:
+        path = validate_evidence_path(getattr(self.args, "evidence_json", ""))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.evidence_payload()
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+        print(f"[INFO] Wrote redacted evidence JSON: {path}")
 
     def check_backend_health(self) -> str:
         payload = request_bytes(
@@ -837,7 +956,51 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--connection-id", default="")
     parser.add_argument("--argument-keys", default="")
     parser.add_argument("--arguments-json", default="{}")
+    parser.add_argument(
+        "--target-env",
+        default="",
+        help=f"Optional target environment label for evidence JSON; env fallback {TARGET_ENV}.",
+    )
+    parser.add_argument(
+        "--commit-sha",
+        default="",
+        help=f"Optional deployed commit SHA for evidence JSON; env fallback {COMMIT_SHA_ENV}.",
+    )
+    parser.add_argument(
+        "--evidence-json",
+        default="",
+        help=(
+            "Write a sanitized JSON evidence artifact. Do not point this at "
+            ".env files, logs, screenshots, coverage, dist, or dependency folders."
+        ),
+    )
     return parser
+
+
+def validate_evidence_path(raw_path: str) -> Path:
+    text = str(raw_path or "").strip()
+    if not text:
+        raise AcceptanceFailure("--evidence-json path must not be empty")
+    path = Path(text).expanduser()
+    parts = [part.lower() for part in path.parts]
+    filename = path.name.lower()
+    blocked_parts = {
+        ".git",
+        ".env",
+        ".venv",
+        "node_modules",
+        "dist",
+        "dist-embed",
+        "coverage",
+        "__pycache__",
+    }
+    if filename.startswith(".env") or any(part in blocked_parts for part in parts):
+        raise AcceptanceFailure(
+            "--evidence-json path points at a forbidden local/secret/generated location"
+        )
+    if path.suffix.lower() != ".json":
+        raise AcceptanceFailure("--evidence-json path must end with .json")
+    return path
 
 
 def main(argv: list[str] | None = None) -> int:

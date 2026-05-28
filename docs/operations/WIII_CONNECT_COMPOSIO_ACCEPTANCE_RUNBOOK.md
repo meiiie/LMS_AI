@@ -82,6 +82,19 @@ The report prints `ready_to_connect`, `ready_to_execute_readonly`, and failed
 activation gates with `required_next` hints. It is designed for preflight and
 environment setup; it is not a substitute for the live acceptance sequence.
 
+For PR or issue evidence, write the optional sanitized JSON artifact to a local
+temporary path:
+
+```powershell
+python scripts/wiii_connect_composio_acceptance.py --backend-url http://localhost:8080 --auth-mode dev-login --provider gmail --readiness-report-only --target-env local --commit-sha <deployed-commit> --evidence-json "$env:TEMP\wiii-connect-composio-acceptance.json"
+```
+
+The JSON includes check names, pass/fail status, elapsed time, target label, and
+deployed commit. It intentionally strips bearer tokens, Connect URLs, callback
+state, raw connection IDs, vault references, and provider payloads. Do not commit
+generated evidence files; attach or summarize the sanitized output in the
+issue/PR when needed.
+
 For local dev-login:
 
 ```powershell
