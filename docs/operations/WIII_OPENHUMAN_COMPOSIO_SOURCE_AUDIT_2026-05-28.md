@@ -66,10 +66,11 @@ Audited external reference clone:
 ../_reference_research/openhuman
 ```
 
-Reference clone commit inspected for the current Composio source pass:
+Reference clone commits inspected for the current Composio source pass:
 
 ```text
-6736467
+6736467 initial pass
+9a95f2f refresh pass, fetched 2026-05-29
 ```
 
 This clone is intentionally outside the Wiii repository and is not a committed
@@ -91,6 +92,10 @@ src/openhuman/composio/oauth_handoff.rs
 src/openhuman/composio/action_tool.rs
 src/openhuman/composio/tools.rs
 src/openhuman/composio/tools_tests.rs
+src/openhuman/composio/execute_prepare.rs
+src/openhuman/composio/execute_dispatch.rs
+src/openhuman/memory_sync/composio/periodic.rs
+src/openhuman/memory_sync/composio/providers/sync_state.rs
 ```
 
 Key behaviors:
@@ -119,6 +124,18 @@ Key behaviors:
     failures.
 12. Error messages and sync logs are sanitized to avoid leaking provider URLs,
     JSON payloads, message bodies, or PII.
+13. Later OpenHuman source narrows tool listing with optional action tags,
+    currently guarded so tag filters are forwarded only for toolkits that
+    explicitly support them, such as GitHub.
+14. OpenHuman adds backend-owned helper routes for provider-specific views,
+    such as listing GitHub repositories, instead of forcing every provider
+    UX through the generic execute path.
+15. OpenHuman gates periodic Composio memory-sync work when the user disables
+    Memory Tree or is signed out, preventing background connector traffic when
+    the runtime is not allowed to sync.
+16. OpenHuman records request-budget reset observability for Composio sync so
+    operators can distinguish policy pauses, budget resets, and provider
+    failures.
 
 ### Source Evidence Notes
 
@@ -183,6 +200,35 @@ Agent tool and scope discipline:
   stable tool metadata, no scope-elevation tool, read-only sandbox blocks for
   write/admin actions, pass-through for read actions, connected-toolkit
   filtering, uncurated toolkit messaging, and backend/direct routing.
+- The 2026-05-29 refresh shows `composio_list_tools` now accepts optional
+  action tags and forwards them only when the selected toolkit supports that
+  filter. This is a more precise version of the same policy: narrow the action
+  catalog before the agent sees schemas, and do not rely on broad toolkit
+  visibility.
+
+Provider-specific helper endpoints:
+
+- `app/src/lib/composio/composioApi.ts` now wraps
+  `openhuman.composio_list_github_repos` as a backend-owned RPC. The UI can
+  render a provider-specific repository picker without receiving Composio API
+  keys or calling the generic `composio_execute` action path.
+- For Wiii this argues for explicit provider helper endpoints when a product
+  surface needs structured provider state, rather than asking chat/tool loops
+  to execute a broad provider action just to populate UI.
+
+Background sync discipline:
+
+- `src/openhuman/memory_sync/composio/periodic.rs` now checks the scheduler
+  gate before each periodic Composio sync tick. When memory is user-disabled or
+  the session is signed out, the tick becomes a cheap no-op before config load,
+  API client creation, connection listing, or provider walks.
+- `src/openhuman/memory_sync/composio/providers/sync_state.rs` logs daily
+  request-budget resets. This separates expected budget lifecycle from
+  provider failures in ops logs.
+- Wiii does not yet expose Composio periodic sync as a user feature. If Wiii
+  adds background connector sync later, it must be gated by explicit product
+  state, org/user session state, and budget/audit signals before provider
+  calls happen.
 
 Wiii consequence:
 
@@ -204,6 +250,15 @@ Wiii should adopt these rules:
 - main chat sees only path/capability summaries, not a broad action catalog;
 - integration-specific agents get narrowed action schemas after path and
   provider selection;
+- provider-specific helper views are backend-owned when UI needs structured
+  provider state, rather than being implemented as generic chat executions;
+- action catalogs should support further narrowing dimensions, such as tags or
+  task scopes, only after the backend registry declares the provider supports
+  them;
+- background connector sync must be gated by user/org/runtime state before it
+  resolves credentials or calls provider APIs;
+- sync budgets, pauses, and resets should be visible as safe operational
+  signals, not hidden inside provider errors;
 - write/apply operations require scope and evidence;
 - action attempts are audited before and after provider execution.
 
@@ -218,6 +273,15 @@ Wiii should not treat Composio meta tools as general chat tools. Composio's
 meta-tool model is powerful, but Wiii must keep path governance first: choose
 the product path, verify the connection, narrow the action catalog, then
 execute through Wiii's gateway.
+
+Wiii should not turn provider-specific UI needs into broad agent tool
+execution. If a future Wiii Connect page needs "list repositories", "list
+pages", or "list calendars", add a narrow backend-owned helper endpoint with a
+reviewed response shape and audit behavior.
+
+Wiii should not add background Composio sync until there is a user-visible
+enablement flag, org/session gate, budget control, and safe pause/resume audit
+story. A connected account is not consent for indefinite background polling.
 
 ## Adapter V1 Requirements
 
@@ -329,3 +393,9 @@ run the acceptance harness plus browser acceptance through Wiii's
 connect/list/execute/disconnect endpoints, and decide whether Wiii should keep
 using Composio as an adapter or graduate specific providers to Wiii-owned OAuth
 apps.
+
+The 2026-05-29 OpenHuman refresh does not invalidate Wiii's Adapter V1 shape.
+It tightens the next enablement bar: Wiii can keep the current connect/list/
+execution gateway path, but any provider-specific browser UX should enter as a
+backend helper endpoint, and any future background sync must have an explicit
+runtime gate and budget signal before it can be considered production-ready.
