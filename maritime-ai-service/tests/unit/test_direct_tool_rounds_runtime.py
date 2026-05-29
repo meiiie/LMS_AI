@@ -3008,6 +3008,105 @@ async def test_wiii_connect_facebook_post_shortcut_emits_preview_event() -> None
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_facebook_post_shortcut_preempts_forced_web_search() -> None:
+    from app.engine.multi_agent.direct_tool_rounds_runtime import (
+        execute_direct_tool_rounds_impl,
+    )
+    from app.engine.tools.tool_capability_registry import (
+        WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+    )
+
+    class FakeWebSearchTool:
+        name = "tool_web_search"
+
+        def invoke(self, _args):
+            raise AssertionError("facebook external action should preempt web search")
+
+        async def ainvoke(self, _args):
+            raise AssertionError("facebook external action should preempt web search")
+
+    class FakeFacebookPreviewTool:
+        name = WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL
+
+        def invoke(self, args):
+            return json.dumps(
+                {
+                    "status": "action_requested",
+                    "request_id": "fb-preview-1",
+                    "action": "wiii_connect.facebook_post.preview",
+                    "params": args,
+                }
+            )
+
+        async def ainvoke(self, args):
+            return self.invoke(args)
+
+    pushed_events: list[dict] = []
+
+    async def push_event(event: dict) -> None:
+        pushed_events.append(event)
+
+    async def fake_ainvoke_with_fallback(*_args, **_kwargs):
+        raise AssertionError("facebook external action should not use planner LLM")
+
+    async def fake_stream_direct_answer_with_fallback(*_args, **_kwargs):
+        raise AssertionError("facebook external action should not stream direct answer")
+
+    async def fake_stream_direct_wait_heartbeats(*_args, **kwargs):
+        stop_signal = kwargs.get("stop_signal")
+        if stop_signal is not None:
+            await stop_signal.wait()
+            return
+        await asyncio.Future()
+
+    async def push_status_only_progress(*_args, **_kwargs):
+        return None
+
+    state = {
+        "context": {
+            "force_skills": ["web-search"],
+            "host_context": {
+                "page": {
+                    "metadata": {
+                        "wiii_connect": {
+                            "provider_slug": "facebook",
+                            "status": "connected",
+                            "connection_count": 1,
+                            "active_connection_count": 1,
+                            "connection_state": "connected",
+                        }
+                    }
+                }
+            },
+        }
+    }
+
+    llm_response, _messages, tool_call_events = await execute_direct_tool_rounds_impl(
+        llm_with_tools=object(),
+        llm_auto=object(),
+        messages=[],
+        tools=[FakeWebSearchTool(), FakeFacebookPreviewTool()],
+        push_event=push_event,
+        query=(
+            'Wiii đăng một bài Facebook: "Một ngày bình thường của Wiii: '
+            'đang học COLREGs" rồi đăng lên trang cá nhân đi'
+        ),
+        state=state,
+        forced_tool_choice="tool_web_search",
+        ainvoke_with_fallback=fake_ainvoke_with_fallback,
+        stream_direct_answer_with_fallback=fake_stream_direct_answer_with_fallback,
+        stream_direct_wait_heartbeats=fake_stream_direct_wait_heartbeats,
+        push_status_only_progress=push_status_only_progress,
+        native_tool_messages=True,
+    )
+
+    assert "bản xem trước bài đăng Facebook" in llm_response.content
+    assert tool_call_events[0]["name"] == WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL
+    assert tool_call_events[0]["args"]["provider_slug"] == "facebook"
+    assert any(event["type"] == "host_action" for event in pushed_events)
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_facebook_post_shortcut_blocks_pending_connection() -> None:
     from app.engine.multi_agent.direct_wiii_connect_host_action_runtime import (
         execute_requested_wiii_connect_facebook_post_shortcut,

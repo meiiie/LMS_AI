@@ -9,6 +9,10 @@ def test_facebook_post_intent_detects_natural_chat_phrasing():
     assert looks_wiii_connect_facebook_post_request(
         "Wiii tao cho toi bai viet tren facebook, bai nao cung duoc"
     )
+    assert looks_wiii_connect_facebook_post_request(
+        "ảnh thì là ảnh này đi còn nội dung thì là nội dung test bạn tự đăng đi, đăng lên trang cá nhân thử xem"
+    )
+    assert not looks_wiii_connect_facebook_post_request("đăng bài chưa ?")
 
 
 def test_facebook_status_answer_reports_pending_connection():

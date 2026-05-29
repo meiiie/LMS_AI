@@ -16,8 +16,50 @@ def looks_wiii_connect_facebook_post_request(query: str) -> bool:
     """Detect explicit requests to create or publish a Facebook post."""
 
     normalized = _normalize_for_intent(query)
-    if not any(token in normalized for token in ("facebook", "fb", "meta")):
+    if not normalized:
         return False
+
+    status_followups = (
+        "dang bai chua",
+        "da dang chua",
+        "dang duoc chua",
+        "da post chua",
+        "post chua",
+        "publish chua",
+    )
+    if any(marker in normalized for marker in status_followups):
+        return False
+
+    has_provider_marker = any(
+        token in normalized for token in ("facebook", "fb", "meta")
+    )
+    social_surface_markers = (
+        "trang ca nhan",
+        "tuong ca nhan",
+        "tuong nha",
+        "timeline",
+        "profile",
+        "page",
+        "fanpage",
+    )
+    publish_followup_markers = (
+        "dang len",
+        "tu dang",
+        "dang thu",
+        "dang giup",
+        "dang ho",
+        "post len",
+        "publish len",
+        "chia se len",
+    )
+    if any(marker in normalized for marker in social_surface_markers) and any(
+        marker in normalized for marker in publish_followup_markers
+    ):
+        return True
+
+    if not has_provider_marker:
+        return False
+
     post_markers = (
         "dang bai",
         "dang len",

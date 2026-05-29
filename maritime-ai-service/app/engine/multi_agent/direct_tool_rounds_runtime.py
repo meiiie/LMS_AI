@@ -177,6 +177,25 @@ async def execute_direct_tool_rounds_impl(
     )
     streamed_direct_answer = False
     try:
+        facebook_post_shortcut_response = (
+            await execute_requested_wiii_connect_facebook_post_shortcut(
+                query=query,
+                state=state,
+                tools=tools,
+                tool_call_events=tool_call_events,
+                push_event=push_event,
+                native_tool_messages=native_tool_messages,
+                runtime_context_base=runtime_context_base,
+                invoke_tool_with_runtime=tool_runtime_bindings.invoke_tool_with_runtime,
+                maybe_emit_host_action_event=tool_runtime_bindings.maybe_emit_host_action_event,
+                summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
+                build_assistant_message=_build_assistant_message,
+                logger_obj=logger,
+            )
+        )
+        if facebook_post_shortcut_response is not None:
+            return facebook_post_shortcut_response, messages, tool_call_events
+
         forced_web_response = await execute_forced_web_search_shortcut(
             query=query,
             state=state,
@@ -219,25 +238,6 @@ async def execute_direct_tool_rounds_impl(
         )
         if document_shortcut_response is not None:
             return document_shortcut_response, messages, tool_call_events
-
-        facebook_post_shortcut_response = (
-            await execute_requested_wiii_connect_facebook_post_shortcut(
-                query=query,
-                state=state,
-                tools=tools,
-                tool_call_events=tool_call_events,
-                push_event=push_event,
-                native_tool_messages=native_tool_messages,
-                runtime_context_base=runtime_context_base,
-                invoke_tool_with_runtime=tool_runtime_bindings.invoke_tool_with_runtime,
-                maybe_emit_host_action_event=tool_runtime_bindings.maybe_emit_host_action_event,
-                summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
-                build_assistant_message=_build_assistant_message,
-                logger_obj=logger,
-            )
-        )
-        if facebook_post_shortcut_response is not None:
-            return facebook_post_shortcut_response, messages, tool_call_events
 
         if tools and forced_tool_choice:
             # Forced tool choice — use ainvoke to ensure tool calls happen
