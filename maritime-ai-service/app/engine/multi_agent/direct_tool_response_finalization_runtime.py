@@ -54,9 +54,10 @@ def facebook_direct_apply_final_answer(
 ) -> str:
     """Build a stable answer for host-action publish requests.
 
-    The backend emits the host action request, while the desktop host executes
-    preview/apply and audits the provider result. Do not ask the model to
-    reinterpret this intermediate JSON; it can contradict the host action state.
+    The backend now prefers a core-owned Wiii Connect execution path and keeps
+    the older host-action result envelope as a compatible fallback. Do not ask
+    the model to reinterpret this intermediate JSON; it can contradict the
+    audited connector state.
     """
 
     saw_direct_apply = any(

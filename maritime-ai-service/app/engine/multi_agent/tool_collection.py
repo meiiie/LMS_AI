@@ -1082,18 +1082,33 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
             _looks_wiii_connect_facebook_post_request(query)
             and getattr(settings, "enable_wiii_connect_composio", False)
         ):
-            generate_host_action_tools = _load_attr(
-                "app.engine.context.action_tools",
-                "generate_host_action_tools",
-            )
-            _direct_tools.extend(
-                generate_host_action_tools(
-                    [_wiii_connect_facebook_post_direct_apply_capability()],
-                    user_role,
-                    event_bus_id=state.get("_event_bus_id") if isinstance(state, dict) else "",
-                    approval_context={"query": query},
+            try:
+                make_backend_facebook_tool = _load_attr(
+                    "app.engine.tools.wiii_connect_tools",
+                    "make_wiii_connect_facebook_post_direct_apply_tool",
                 )
-            )
+                _direct_tools.append(
+                    make_backend_facebook_tool(
+                        state=state if isinstance(state, dict) else {},
+                    )
+                )
+            except Exception as backend_tool_error:  # noqa: BLE001
+                logger.debug(
+                    "[DIRECT] Backend Wiii Connect Facebook tool unavailable: %s",
+                    backend_tool_error,
+                )
+                generate_host_action_tools = _load_attr(
+                    "app.engine.context.action_tools",
+                    "generate_host_action_tools",
+                )
+                _direct_tools.extend(
+                    generate_host_action_tools(
+                        [_wiii_connect_facebook_post_direct_apply_capability()],
+                        user_role,
+                        event_bus_id=state.get("_event_bus_id") if isinstance(state, dict) else "",
+                        approval_context={"query": query},
+                    )
+                )
     except Exception as _e:
         logger.debug("[DIRECT] Wiii Connect Facebook post tool unavailable: %s", _e)
 

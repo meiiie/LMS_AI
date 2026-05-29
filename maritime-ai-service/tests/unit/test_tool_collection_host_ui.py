@@ -341,7 +341,6 @@ def test_uploaded_document_preview_binds_safe_preview_when_global_host_actions_d
 def test_wiii_connect_facebook_post_request_binds_direct_apply_host_action(monkeypatch):
     from app.engine.multi_agent import tool_collection as module
     from app.engine.tools.tool_capability_registry import (
-        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION,
         WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
     )
 
@@ -388,6 +387,11 @@ def test_wiii_connect_facebook_post_request_binds_direct_apply_host_action(monke
         ]
 
     def fake_load_attr(module_name: str, attr_name: str):
+        if module_name.endswith("wiii_connect_tools"):
+            assert attr_name == "make_wiii_connect_facebook_post_direct_apply_tool"
+            return lambda **_kwargs: SimpleNamespace(
+                name=WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
+            )
         if module_name.endswith("utility_tools"):
             return SimpleNamespace(name=attr_name)
         if module_name.endswith("web_search_tools"):
@@ -416,9 +420,7 @@ def test_wiii_connect_facebook_post_request_binds_direct_apply_host_action(monke
     )
 
     assert [tool.name for tool in tools] == [WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL]
-    assert [tool["name"] for tool in generated_from] == [
-        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION
-    ]
+    assert generated_from == []
     assert state["_turn_path_decision"]["path"] == "external_app_action"
     assert force_tools is True
 
