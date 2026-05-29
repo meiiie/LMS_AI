@@ -70,7 +70,16 @@ from app.engine.multi_agent.direct_document_preview_payloads import (
     _build_uploaded_doc_preview_params,
 )
 from app.engine.multi_agent.direct_wiii_connect_host_action_runtime import (
-    execute_requested_wiii_connect_facebook_post_shortcut,
+    find_wiii_connect_facebook_post_direct_apply_tool,
+    find_wiii_connect_facebook_post_preview_tool,
+    preflight_requested_wiii_connect_facebook_post,
+)
+from app.engine.multi_agent.wiii_connect_intent import (
+    looks_wiii_connect_facebook_post_request,
+)
+from app.engine.tools.tool_capability_registry import (
+    WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+    WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
 )
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.tool_call_text_parser import (
@@ -177,24 +186,26 @@ async def execute_direct_tool_rounds_impl(
     )
     streamed_direct_answer = False
     try:
-        facebook_post_shortcut_response = (
-            await execute_requested_wiii_connect_facebook_post_shortcut(
+        facebook_post_preflight_response = (
+            await preflight_requested_wiii_connect_facebook_post(
                 query=query,
                 state=state,
-                tools=tools,
-                tool_call_events=tool_call_events,
-                push_event=push_event,
                 native_tool_messages=native_tool_messages,
-                runtime_context_base=runtime_context_base,
-                invoke_tool_with_runtime=tool_runtime_bindings.invoke_tool_with_runtime,
-                maybe_emit_host_action_event=tool_runtime_bindings.maybe_emit_host_action_event,
-                summarize_tool_result_for_stream=_summarize_tool_result_for_stream,
                 build_assistant_message=_build_assistant_message,
-                logger_obj=logger,
             )
         )
-        if facebook_post_shortcut_response is not None:
-            return facebook_post_shortcut_response, messages, tool_call_events
+        if facebook_post_preflight_response is not None:
+            return facebook_post_preflight_response, messages, tool_call_events
+
+        if looks_wiii_connect_facebook_post_request(query):
+            direct_apply_tool = find_wiii_connect_facebook_post_direct_apply_tool(tools)
+            preview_tool = find_wiii_connect_facebook_post_preview_tool(tools)
+            if direct_apply_tool is not None:
+                tools = [direct_apply_tool]
+                forced_tool_choice = WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
+            elif preview_tool is not None:
+                tools = [preview_tool]
+                forced_tool_choice = WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL
 
         forced_web_response = await execute_forced_web_search_shortcut(
             query=query,

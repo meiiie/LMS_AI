@@ -1,7 +1,7 @@
 """Shared Wiii Connect intent helpers.
 
 Keep external-app routing predicates in one place so path governance, tool
-binding, deterministic shortcuts, and image preflight agree on the same turns.
+binding, and image preflight agree on the same turns.
 """
 
 from __future__ import annotations
@@ -196,73 +196,6 @@ def build_wiii_connect_facebook_status_answer(
     )
 
 
-def facebook_post_message_from_query(query: str) -> str:
-    """Create a compact fallback post body for deterministic Facebook requests."""
-
-    raw = " ".join(str(query or "").strip().split())
-    if not raw:
-        return "Một khoảnh khắc mới được chia sẻ từ Wiii."
-
-    normalized = _normalize_for_intent(raw)
-    poem_markers = ("bai tho", "tho cua ban", "tho tu wiii", "poem")
-    self_creative_markers = (
-        "cua ban",
-        "tu viet",
-        "tu nghi",
-        "ban tu viet",
-        "wiii tu viet",
-    )
-    if any(marker in normalized for marker in poem_markers) and any(
-        marker in normalized for marker in self_creative_markers
-    ):
-        return (
-            "Một chút thơ từ Wiii\n\n"
-            "Giữa dòng ngày rộng mở,\n"
-            "mình gửi một vệt sáng hiền.\n"
-            "Nếu lòng còn nhiều gió,\n"
-            "hãy chậm lại, rồi bước tiếp bình yên."
-        )
-
-    generic_anything = any(
-        marker in normalized
-        for marker in (
-            "bai nao cung duoc",
-            "gi cung duoc",
-            "noi dung nao cung duoc",
-            "tuy y",
-        )
-    )
-    if generic_anything:
-        return (
-            "Một bài đăng thử nghiệm từ Wiii Connect. "
-            "Mọi thứ đang được chuẩn bị trực tiếp từ cuộc trò chuyện với Wiii."
-        )
-
-    prefixes = (
-        "wiii",
-        "tao",
-        "tạo",
-        "viet",
-        "viết",
-        "dang",
-        "đăng",
-        "hay",
-        "hãy",
-        "giup",
-        "giúp",
-        "minh",
-        "mình",
-        "toi",
-        "tôi",
-    )
-    cleaned = raw
-    for prefix in prefixes:
-        cleaned = cleaned.removeprefix(prefix).strip(" ,:;-")
-    if len(cleaned) < 12:
-        return "Một khoảnh khắc mới được chia sẻ từ Wiii."
-    return cleaned[:800]
-
-
 def build_wiii_connect_facebook_post_unavailable_answer(
     state: dict[str, Any] | None,
 ) -> str | None:
@@ -293,15 +226,3 @@ def build_wiii_connect_facebook_post_unavailable_answer(
             "Hãy mở Wiii Connect, kết nối Facebook trước; sau đó gửi lại yêu cầu đăng bài."
         )
     return None
-
-
-def facebook_post_uses_latest_user_image(state: dict[str, Any] | None) -> bool:
-    """Return true when the current chat turn carries image input."""
-
-    if not isinstance(state, dict):
-        return False
-    context = state.get("context")
-    if not isinstance(context, dict):
-        context = {}
-    images = context.get("images") or state.get("images")
-    return isinstance(images, list) and any(images)

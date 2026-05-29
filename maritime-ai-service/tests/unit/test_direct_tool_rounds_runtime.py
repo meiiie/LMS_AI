@@ -2934,81 +2934,45 @@ async def test_document_host_action_shortcut_emits_preview_event_contract() -> N
 
 
 @pytest.mark.asyncio
-async def test_wiii_connect_facebook_post_shortcut_emits_direct_apply_event() -> None:
+async def test_wiii_connect_facebook_post_preflight_defers_ready_request_to_tool_schema() -> None:
     from app.engine.multi_agent.direct_wiii_connect_host_action_runtime import (
-        execute_requested_wiii_connect_facebook_post_shortcut,
-    )
-    from app.engine.tools.tool_capability_registry import (
-        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+        preflight_requested_wiii_connect_facebook_post,
     )
 
-    tool = SimpleNamespace(name=WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL)
-    pushed_events: list[dict] = []
-    tool_call_events: list[dict] = []
-    invoked: dict = {}
-    state: dict = {"context": {"images": [{"type": "base64", "data": "abc"}]}}
-
-    async def push_event(event: dict) -> None:
-        pushed_events.append(event)
-
-    async def invoke_tool(tool_arg, args, **kwargs):
-        invoked.update({"tool": tool_arg, "args": args, "kwargs": kwargs})
-        return json.dumps(
-            {
-                "status": "action_requested",
-                "request_id": "fb-direct-apply-1",
-                "action": "wiii_connect.facebook_post.direct_apply",
-                "params": args,
-            }
-        )
-
-    async def emit_host_action(**kwargs) -> None:
-        pushed_events.append(
-            {
-                "type": "host_action",
-                "tool_name": kwargs["tool_name"],
-                "result": kwargs["result"],
-            }
-        )
+    state: dict = {
+        "context": {
+            "images": [{"type": "base64", "data": "abc"}],
+            "host_context": {
+                "page": {
+                    "metadata": {
+                        "wiii_connect": {
+                            "provider_slug": "facebook",
+                            "status": "connected",
+                            "connection_count": 1,
+                            "active_connection_count": 1,
+                            "connection_state": "connected",
+                        }
+                    }
+                }
+            },
+        }
+    }
 
     def build_assistant_message(content: str, **kwargs) -> dict:
         return {"content": content, "native_tool_messages": kwargs["native_tool_messages"]}
 
-    response = await execute_requested_wiii_connect_facebook_post_shortcut(
+    response = await preflight_requested_wiii_connect_facebook_post(
         query="Wiii đăng bài Facebook, bài nào cũng được kèm ảnh này",
         state=state,
-        tools=[tool],
-        tool_call_events=tool_call_events,
-        push_event=push_event,
         native_tool_messages=True,
-        runtime_context_base={"request_id": "req-1"},
-        invoke_tool_with_runtime=invoke_tool,
-        maybe_emit_host_action_event=emit_host_action,
-        summarize_tool_result_for_stream=lambda _name, _result: "summary",
         build_assistant_message=build_assistant_message,
-        logger_obj=__import__("logging").getLogger(__name__),
     )
 
-    assert response is not None
-    assert response["native_tool_messages"] is True
-    assert "gửi yêu cầu đăng bài Facebook" in response["content"]
-    assert invoked["tool"] is tool
-    assert invoked["args"]["provider_slug"] == "facebook"
-    assert invoked["args"]["image_policy"] == "use_latest_user_image"
-    assert invoked["args"]["message"]
-    assert [event["type"] for event in pushed_events] == [
-        "tool_call",
-        "tool_result",
-        "host_action",
-        "thinking_start",
-        "thinking_delta",
-        "thinking_end",
-    ]
-    assert tool_call_events[0]["name"] == WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
+    assert response is None
 
 
 @pytest.mark.asyncio
-async def test_wiii_connect_facebook_post_shortcut_preempts_forced_web_search() -> None:
+async def test_wiii_connect_facebook_post_preflight_preempts_forced_web_search() -> None:
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         execute_direct_tool_rounds_impl,
     )
@@ -3046,8 +3010,30 @@ async def test_wiii_connect_facebook_post_shortcut_preempts_forced_web_search() 
     async def push_event(event: dict) -> None:
         pushed_events.append(event)
 
-    async def fake_ainvoke_with_fallback(*_args, **_kwargs):
-        raise AssertionError("facebook external action should not use planner LLM")
+    ainvoke_calls: list[dict] = []
+
+    async def fake_ainvoke_with_fallback(*_args, **kwargs):
+        ainvoke_calls.append(kwargs)
+        if len(ainvoke_calls) == 1:
+            return SimpleNamespace(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "fb-direct-apply-1",
+                        "name": WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+                        "args": {
+                            "provider_slug": "facebook",
+                            "message": (
+                                "Một ngày bình thường của Wiii: đang học COLREGs"
+                            ),
+                        },
+                    }
+                ],
+            )
+        return SimpleNamespace(
+            content="Mình đã gửi yêu cầu đăng bài Facebook qua Wiii Connect.",
+            tool_calls=[],
+        )
 
     async def fake_stream_direct_answer_with_fallback(*_args, **_kwargs):
         raise AssertionError("facebook external action should not stream direct answer")
@@ -3081,41 +3067,55 @@ async def test_wiii_connect_facebook_post_shortcut_preempts_forced_web_search() 
         }
     }
 
-    llm_response, _messages, tool_call_events = await execute_direct_tool_rounds_impl(
-        llm_with_tools=object(),
-        llm_auto=object(),
-        messages=[],
-        tools=[FakeWebSearchTool(), FakeFacebookPreviewTool()],
-        push_event=push_event,
-        query=(
-            'Wiii đăng một bài Facebook: "Một ngày bình thường của Wiii: '
-            'đang học COLREGs" rồi đăng lên trang cá nhân đi'
-        ),
-        state=state,
-        forced_tool_choice="tool_web_search",
-        ainvoke_with_fallback=fake_ainvoke_with_fallback,
-        stream_direct_answer_with_fallback=fake_stream_direct_answer_with_fallback,
-        stream_direct_wait_heartbeats=fake_stream_direct_wait_heartbeats,
-        push_status_only_progress=push_status_only_progress,
-        native_tool_messages=True,
-    )
+    with patch(
+        "app.engine.multi_agent.graph._ainvoke_with_fallback",
+        new=fake_ainvoke_with_fallback,
+    ), patch(
+        "app.engine.multi_agent.graph._stream_direct_answer_with_fallback",
+        new=fake_stream_direct_answer_with_fallback,
+    ), patch(
+        "app.engine.multi_agent.graph._stream_direct_wait_heartbeats",
+        new=fake_stream_direct_wait_heartbeats,
+    ):
+        llm_response, _messages, tool_call_events = await execute_direct_tool_rounds_impl(
+            llm_with_tools=object(),
+            llm_auto=object(),
+            messages=[],
+            tools=[FakeWebSearchTool(), FakeFacebookPreviewTool()],
+            push_event=push_event,
+            query=(
+                'Wiii đăng một bài Facebook: "Một ngày bình thường của Wiii: '
+                'đang học COLREGs" rồi đăng lên trang cá nhân đi'
+            ),
+            state=state,
+            forced_tool_choice="tool_web_search",
+            ainvoke_with_fallback=fake_ainvoke_with_fallback,
+            stream_direct_answer_with_fallback=fake_stream_direct_answer_with_fallback,
+            stream_direct_wait_heartbeats=fake_stream_direct_wait_heartbeats,
+            push_status_only_progress=push_status_only_progress,
+            native_tool_messages=True,
+        )
 
     assert "gửi yêu cầu đăng bài Facebook" in llm_response.content
+    assert ainvoke_calls[0]["tool_choice"] == WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
+    assert [tool.name for tool in ainvoke_calls[0]["tools"]] == [
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
+    ]
     assert tool_call_events[0]["name"] == WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
     assert tool_call_events[0]["args"]["provider_slug"] == "facebook"
+    assert (
+        tool_call_events[0]["args"]["message"]
+        == "Một ngày bình thường của Wiii: đang học COLREGs"
+    )
     assert any(event["type"] == "host_action" for event in pushed_events)
 
 
 @pytest.mark.asyncio
-async def test_wiii_connect_facebook_post_shortcut_blocks_pending_connection() -> None:
+async def test_wiii_connect_facebook_post_preflight_blocks_pending_connection() -> None:
     from app.engine.multi_agent.direct_wiii_connect_host_action_runtime import (
-        execute_requested_wiii_connect_facebook_post_shortcut,
-    )
-    from app.engine.tools.tool_capability_registry import (
-        WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+        preflight_requested_wiii_connect_facebook_post,
     )
 
-    tool = SimpleNamespace(name=WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL)
     state: dict = {
         "context": {
             "host_context": {
@@ -3133,36 +3133,19 @@ async def test_wiii_connect_facebook_post_shortcut_blocks_pending_connection() -
             }
         }
     }
-    invoked = False
-    pushed_events: list[dict] = []
-
-    async def invoke_tool(*_args, **_kwargs):
-        nonlocal invoked
-        invoked = True
-        return {}
 
     def build_assistant_message(content: str, **kwargs) -> dict:
         return {"content": content, "native_tool_messages": kwargs["native_tool_messages"]}
 
-    response = await execute_requested_wiii_connect_facebook_post_shortcut(
+    response = await preflight_requested_wiii_connect_facebook_post(
         query="Wiii dang mot bai Facebook, bai nao cung duoc",
         state=state,
-        tools=[tool],
-        tool_call_events=[],
-        push_event=lambda event: pushed_events.append(event),
         native_tool_messages=True,
-        runtime_context_base={"request_id": "req-1"},
-        invoke_tool_with_runtime=invoke_tool,
-        maybe_emit_host_action_event=lambda **_kwargs: None,
-        summarize_tool_result_for_stream=lambda _name, _result: "summary",
         build_assistant_message=build_assistant_message,
-        logger_obj=__import__("logging").getLogger(__name__),
     )
 
     assert response is not None
     assert "chưa có account Facebook active" in response["content"]
-    assert invoked is False
-    assert pushed_events == []
 
 
 @pytest.mark.asyncio
