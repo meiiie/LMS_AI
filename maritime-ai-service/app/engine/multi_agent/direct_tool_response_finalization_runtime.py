@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -19,6 +20,9 @@ from app.engine.multi_agent.direct_web_search_policy import (
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
 )
+from app.engine.tools.tool_capability_registry import (
+    WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+)
 
 
 @dataclass(slots=True)
@@ -28,6 +32,76 @@ class DirectToolResponseFinalization:
     llm_response: Any
     messages: list[Any]
     resolved_provider: str | None
+
+
+def _parse_tool_result_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return {}
+    text = value.strip()
+    if not text:
+        return {}
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def facebook_direct_apply_final_answer(
+    tool_call_events: list[dict[str, Any]],
+) -> str:
+    """Build a stable answer for host-action publish requests.
+
+    The backend emits the host action request, while the desktop host executes
+    preview/apply and audits the provider result. Do not ask the model to
+    reinterpret this intermediate JSON; it can contradict the host action state.
+    """
+
+    saw_direct_apply = any(
+        event.get("name") == WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
+        for event in tool_call_events
+    )
+    if not saw_direct_apply:
+        return ""
+
+    for event in reversed(tool_call_events):
+        if (
+            event.get("type") != "result"
+            or event.get("name") != WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
+        ):
+            continue
+        payload = _parse_tool_result_payload(event.get("result"))
+        status = str(payload.get("status") or "").strip()
+        if status == "action_requested":
+            return (
+                "Mình đã gửi yêu cầu đăng bài Facebook qua Wiii Connect. "
+                "Host action sẽ dùng kết nối Facebook hiện tại để preview/apply "
+                "qua gateway đã bật và hiển thị kết quả sau khi chạy xong."
+            )
+        if status == "validation_failed":
+            missing = payload.get("missing_fields")
+            missing_fields = ", ".join(
+                str(item)
+                for item in missing
+                if str(item or "").strip()
+            ) if isinstance(missing, list) else ""
+            suffix = f" Trường thiếu: {missing_fields}." if missing_fields else ""
+            return (
+                "Mình chưa thể đăng Facebook vì yêu cầu host action "
+                "thiếu dữ liệu bắt buộc."
+                f"{suffix}"
+            )
+        if status == "approval_required":
+            return (
+                "Mình cần bạn xác nhận rõ trước khi Wiii Connect "
+                "thực hiện thao tác đăng."
+            )
+        if status == "preview_required":
+            return "Mình cần tạo preview Facebook hợp lệ trước khi đăng."
+
+    return ""
 
 
 async def finalize_direct_tool_response(
@@ -67,6 +141,17 @@ async def finalize_direct_tool_response(
     visible_response_text = extract_direct_visible_text(
         getattr(next_response, "content", "")
     )
+
+    facebook_host_action_answer = facebook_direct_apply_final_answer(
+        tool_call_events,
+    )
+    if facebook_host_action_answer:
+        next_response = build_assistant_message(
+            facebook_host_action_answer,
+            native_tool_messages=native_tool_messages,
+        )
+        visible_response_text = facebook_host_action_answer
+        remaining_tool_calls = False
 
     if (
         tool_call_events

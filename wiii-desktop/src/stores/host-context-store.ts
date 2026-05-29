@@ -336,6 +336,18 @@ async function resolveFacebookPostBase(
     };
   }
 
+  const message =
+    stringParam(params, "message") ||
+    stringParam(params, "caption") ||
+    stringParam(params, "text");
+  if (!message) {
+    return {
+      error: "facebook_post_message_missing",
+      providerSlug,
+      connectionRef,
+    };
+  }
+
   const pages = await fetchWiiiConnectFacebookPages(providerSlug, connectionRef);
   const selectedPageId = stringParam(params, "page_id") || pages.pages?.[0]?.page_id || "";
   const page = pages.pages?.find((item) => item.page_id === selectedPageId) || pages.pages?.[0];
@@ -347,11 +359,6 @@ async function resolveFacebookPostBase(
     };
   }
 
-  const message =
-    stringParam(params, "message") ||
-    stringParam(params, "caption") ||
-    stringParam(params, "text") ||
-    "Wiii Connect test: bài đăng này được tạo từ chat và cần xác nhận trước khi đăng.";
   return {
     providerSlug,
     connectionRef,

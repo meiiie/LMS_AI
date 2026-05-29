@@ -39,6 +39,7 @@ from app.engine.multi_agent.direct_tool_followup_runtime import (
     invoke_direct_tool_followup,
 )
 from app.engine.multi_agent.direct_tool_response_finalization_runtime import (
+    facebook_direct_apply_final_answer,
     finalize_direct_tool_response,
 )
 from app.engine.multi_agent.direct_reasoning import (
@@ -364,6 +365,19 @@ async def execute_direct_tool_rounds_impl(
         )
         if search_template_response is not None:
             return search_template_response, messages, tool_call_events
+
+        facebook_host_action_answer = facebook_direct_apply_final_answer(
+            tool_call_events,
+        )
+        if facebook_host_action_answer:
+            return (
+                _build_assistant_message(
+                    facebook_host_action_answer,
+                    native_tool_messages=native_tool_messages,
+                ),
+                messages,
+                tool_call_events,
+            )
 
         # Phase 35 — convergence self-eval rubric injected after round 0.
         # SOTA Anthropic Claude tool-use pattern: explicit "is info sufficient?"

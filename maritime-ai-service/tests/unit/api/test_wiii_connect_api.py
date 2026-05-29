@@ -2238,6 +2238,29 @@ async def test_wiii_connect_facebook_post_preview_apply_requires_scope_and_token
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_facebook_post_preview_rejects_missing_message(
+    authenticated_app,
+):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/wiii-connect/providers/facebook/facebook-post/preview",
+            json={
+                "connection_ref": "wcn_placeholder",
+                "page_id": "123456",
+                "message": "   ",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "validation_failed"
+    assert payload["reason"] == "missing_message"
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_authorization_url_api_404_for_unknown_provider(app):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),

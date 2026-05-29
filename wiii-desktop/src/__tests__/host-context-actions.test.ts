@@ -187,4 +187,38 @@ describe("Host Context Store — Action Support (Sprint 222b)", () => {
       "wiii_connect.facebook_post.direct_apply",
     );
   });
+
+  it("direct Facebook action fails closed when post message is missing", async () => {
+    vi.useRealTimers();
+    vi.mocked(fetchWiiiConnectProviderConnections).mockResolvedValueOnce({
+      version: "wiii_connect_connection_list.v1",
+      provider_slug: "facebook",
+      status: "ready",
+      connection_count: 1,
+      connections: [
+        {
+          provider_slug: "facebook",
+          connection_ref: "conn-facebook-1",
+          connection_id: "conn-facebook-1",
+          state: "connected",
+          active: true,
+        },
+      ],
+    } as any);
+
+    const result = await useHostContextStore.getState().requestAction(
+      "wiii_connect.facebook_post.direct_apply",
+      { provider_slug: "facebook" },
+      "req-facebook-direct-missing-message",
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("facebook_post_message_missing");
+    expect(fetchWiiiConnectFacebookPages).not.toHaveBeenCalled();
+    expect(previewWiiiConnectFacebookPost).not.toHaveBeenCalled();
+    expect(applyWiiiConnectFacebookPost).not.toHaveBeenCalled();
+    expect(useHostContextStore.getState().lastActionResult?.summary).toContain(
+      "facebook_post_message_missing",
+    );
+  });
 });

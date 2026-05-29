@@ -41,8 +41,6 @@ def normalize_facebook_post_message(value: Any) -> str:
     """Normalize user-visible post text without inventing content."""
 
     text = " ".join(str(value or "").strip().split())
-    if not text:
-        return "Wiii Connect test: bài đăng này đã đi qua preview và xác nhận trước khi đăng."
     return text[:5000]
 
 

@@ -938,9 +938,12 @@ async def preview_wiii_connect_facebook_post(
         image_bytes=image_bytes,
         image_url=image_url,
     )
-    if image_error or not page_id:
+    if image_error or not page_id or not message:
+        reason = image_error or (
+            "missing_page_id" if not page_id else "missing_message"
+        )
         return _facebook_post_validation_payload(
-            reason=image_error or "missing_page_id",
+            reason=reason,
         )
     storage, connection, selected_connection_ref, safe_connection_id = (
         _load_selected_wiii_connect_connection(
@@ -1066,9 +1069,12 @@ async def apply_wiii_connect_facebook_post(
         image_bytes=image_bytes,
         image_url=image_url,
     )
-    if image_error or not page_id:
+    if image_error or not page_id or not message:
+        reason = image_error or (
+            "missing_page_id" if not page_id else "missing_message"
+        )
         return _facebook_post_validation_payload(
-            reason=image_error or "missing_page_id",
+            reason=reason,
         )
     selected_connection_ref = _safe_public_connection_ref(body.connection_ref)
     image_hash = facebook_image_sha256(image_bytes)
@@ -1933,7 +1939,7 @@ def _facebook_post_argument_keys(
 def _facebook_post_validation_payload(*, reason: str) -> dict[str, object]:
     return {
         "version": "wiii_connect_facebook_post_validation.v1",
-        "status": "blocked",
+        "status": "validation_failed",
         "reason": _safe_surface(reason),
         "provider_slug": "facebook",
         "gateway": None,

@@ -3097,6 +3097,8 @@ async def test_wiii_connect_facebook_post_preflight_preempts_forced_web_search()
         )
 
     assert "gửi yêu cầu đăng bài Facebook" in llm_response.content
+    assert "chưa có nội dung" not in llm_response.content
+    assert len(ainvoke_calls) == 1
     assert ainvoke_calls[0]["tool_choice"] == WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
     assert [tool.name for tool in ainvoke_calls[0]["tools"]] == [
         WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL

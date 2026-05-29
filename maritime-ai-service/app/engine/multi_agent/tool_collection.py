@@ -41,7 +41,6 @@ from app.engine.tools.tool_capability_registry import (
     WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION,
     WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
     WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION,
-    WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
 )
 
 logger = logging.getLogger(__name__)
@@ -152,7 +151,9 @@ def _wiii_connect_facebook_post_direct_apply_capability() -> dict[str, Any]:
         "description": (
             "Publish a Facebook Page post through Wiii Connect for an explicit "
             "user request to post or publish to Facebook. Draft the `message` as "
-            "the exact post copy. If the user attached an image, set "
+            "the exact post copy. If the user says any content is acceptable "
+            "or asks for a random post, write a short original safe post "
+            "yourself instead of leaving `message` empty. If the user attached an image, set "
             "`image_policy` to `use_latest_user_image`; do not place raw image "
             "bytes in the tool call. The desktop host will resolve the connected "
             "account/page and call the audited Wiii Connect preview/apply gateway "
