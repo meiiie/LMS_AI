@@ -254,6 +254,61 @@ async def test_wiii_connect_provider_status_api_is_fail_closed(app):
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_session_status_uses_runtime_composio_config(
+    app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            apply_execute_enabled=True,
+            apply_action_allowlist_by_provider={
+                "facebook": ("FACEBOOK_CREATE_POST",),
+            },
+        ),
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        status_response = await client.get("/wiii-connect/providers/facebook/status")
+        session_response = await client.post(
+            "/wiii-connect/providers/facebook/sessions",
+            json={
+                "surface": "desktop",
+                "redirect_uri": "https://wiii.example.test/callback",
+            },
+        )
+
+    assert status_response.status_code == 200
+    assert session_response.status_code == 200
+    status_payload = status_response.json()
+    session_payload = session_response.json()
+    serialized = json.dumps(
+        {"status": status_payload, "session": session_payload},
+        sort_keys=True,
+    )
+
+    assert status_payload["enabled"] is True
+    assert status_payload["agent_ready"] is True
+    assert status_payload["reason"] == "provider_adapter_not_bound"
+    assert status_payload["missing_requirements"] == []
+    assert session_payload["status"] == "blocked"
+    assert session_payload["reason"] == "provider_adapter_not_bound"
+    assert "secret-api-key" not in serialized
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_activation_readiness_api_fails_closed_without_config(
     authenticated_app,
 ):
