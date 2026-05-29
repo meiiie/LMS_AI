@@ -178,6 +178,43 @@ The first frontend-facing projection is additive on the existing SSE V3
 chat_lifecycle.capabilities.wiii_connect = WiiiConnectionSnapshot
 ```
 
+## Host Action Result Bridge
+
+Wiii host actions are two-phase:
+
+1. Backend tool loop emits `host_action` with an opaque `request_id`, action
+   name, and sanitized params.
+2. Frontend/host executes the action through the declared bridge or local Wiii
+   Connect adapter.
+3. Frontend submits a sanitized `HostActionResultRequest` to
+   `/api/v1/host-actions/result`.
+4. Backend resumes the in-flight turn when the `request_id`, action, user, and
+   organization match a pending waiter.
+
+This mirrors OpenHuman's parked approval/tool-result pattern without allowing
+the frontend to self-grant scope. Connection, scope, gateway, preview, and
+approval policy still belong to backend Wiii Connect.
+
+The result bridge may carry:
+
+- `request_id`
+- action name
+- success boolean
+- short summary
+- error code/message
+- sanitized result data
+
+The result bridge must not carry:
+
+- OAuth access or refresh tokens
+- API keys
+- raw approval tokens
+- raw image base64
+- provider secrets
+
+If no pending waiter exists, the API acknowledges the submission as ignored.
+That keeps older clients and non-continuation host actions backward-compatible.
+
 This projection is for observability and browser acceptance only. It must use
 the same privacy rules as the backend snapshot:
 

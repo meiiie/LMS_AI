@@ -11,8 +11,10 @@ import {
 } from "@/api/wiii-connect";
 import {
   submitHostActionAudit,
+  submitHostActionResult,
   type HostActionAuditEventType,
   type HostActionAuditRequest,
+  type HostActionResultRequest,
 } from "@/api/host-actions";
 import { useChatStore } from "@/stores/chat-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -21,7 +23,7 @@ import { useOrgStore } from "@/stores/org-store";
 import { useContextStore } from "@/stores/context-store";
 import { useCharacterStore } from "@/stores/character-store";
 import { usePageContextStore } from "@/stores/page-context-store";
-import { useHostContextStore } from "@/stores/host-context-store";
+import { useHostContextStore, type ActionResult } from "@/stores/host-context-store";
 import { useCodeStudioStore } from "@/stores/code-studio-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useToastStore } from "@/stores/toast-store";
@@ -585,6 +587,50 @@ function buildHostActionAuditRequest(
       source_references:
         sourceReferences.length > 0 ? sourceReferences : undefined,
     },
+  };
+}
+
+const HOST_ACTION_RESULT_REDACT_KEYS = new Set([
+  "access_token",
+  "refresh_token",
+  "client_secret",
+  "api_key",
+  "authorization",
+  "approval_token",
+  "image_base64",
+]);
+
+function sanitizeHostActionResultValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeHostActionResultValue(item));
+  }
+  if (value && typeof value === "object") {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      sanitized[key] = HOST_ACTION_RESULT_REDACT_KEYS.has(key.toLowerCase())
+        ? "[redacted]"
+        : sanitizeHostActionResultValue(item);
+    }
+    return sanitized;
+  }
+  return value;
+}
+
+export function buildHostActionResultRequest(
+  action: string,
+  requestId: string,
+  result: ActionResult,
+): HostActionResultRequest {
+  const rawData = result.data || {};
+  const data = sanitizeHostActionResultValue(rawData) as Record<string, unknown>;
+  const dataSummary = typeof data.summary === "string" ? data.summary.trim() : "";
+  return {
+    action,
+    request_id: requestId,
+    success: result.success,
+    summary: dataSummary || (result.success ? "Host action completed." : result.error),
+    error: result.error,
+    data,
   };
 }
 
@@ -1607,6 +1653,11 @@ export function useSSEStream() {
           useHostContextStore.getState().requestAction(action, params || {}, id)
             .then((result) => {
               console.log(`[SSE] Host action ${id} resolved:`, result);
+              void submitHostActionResult(
+                buildHostActionResultRequest(action, id, result),
+              ).catch((err) => {
+                console.warn(`[SSE] Host action result ${id} failed:`, err instanceof Error ? err.message : String(err));
+              });
               const hostStore = useHostContextStore.getState();
               const previewItem = buildHostActionPreviewItem(
                 action,
@@ -1646,7 +1697,20 @@ export function useSSEStream() {
               }
             })
             .catch((err) => {
-              console.warn(`[SSE] Host action ${id} failed:`, err.message);
+              const message = err instanceof Error ? err.message : String(err);
+              console.warn(`[SSE] Host action ${id} failed:`, message);
+              void submitHostActionResult(
+                buildHostActionResultRequest(action, id, {
+                  success: false,
+                  error: message,
+                  data: { summary: message },
+                }),
+              ).catch((submitError) => {
+                console.warn(
+                  `[SSE] Host action failed-result ${id} failed:`,
+                  submitError instanceof Error ? submitError.message : String(submitError),
+                );
+              });
             });
         }
       },

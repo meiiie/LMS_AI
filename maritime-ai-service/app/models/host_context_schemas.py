@@ -164,6 +164,27 @@ class HostActionAuditResponse(BaseModel):
     request_id: str
 
 
+class HostActionResultRequest(BaseModel):
+    """Execution result returned by the host for a pending host action."""
+
+    action: str = Field(..., min_length=1, max_length=160)
+    request_id: str = Field(..., min_length=1, max_length=160)
+    success: bool
+    summary: Optional[str] = Field(default=None, max_length=2000)
+    error: Optional[str] = Field(default=None, max_length=1000)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class HostActionResultResponse(BaseModel):
+    """Acknowledgement for a host action result submission."""
+
+    status: Literal["accepted", "ignored"]
+    action: str
+    request_id: str
+    matched: bool
+    reason: Optional[str] = None
+
+
 class UserContext(BaseModel):
     """
     User context from LMS for personalization.

@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildHostActionPreviewItem } from "@/hooks/useSSEStream";
+import {
+  buildHostActionPreviewItem,
+  buildHostActionResultRequest,
+} from "@/hooks/useSSEStream";
 import { useHostContextStore } from "@/stores/host-context-store";
 import type { HostContext } from "@/stores/host-context-store";
 
@@ -173,5 +176,33 @@ describe("Host Action SSE + PostMessage Integration (Sprint 222b)", () => {
       page_id: "page-1",
       message: "Bài đăng thử từ Wiii.",
     });
+  });
+
+  it("builds sanitized host action result submissions", () => {
+    const request = buildHostActionResultRequest(
+      "wiii_connect.facebook_post.direct_apply",
+      "req-facebook-result-1",
+      {
+        success: true,
+        data: {
+          summary: "Published.",
+          provider_post_id: "post-1",
+          approval_token: "secret-approval",
+          nested: {
+            image_base64: "secret-image",
+          },
+        },
+      },
+    );
+
+    expect(request).toMatchObject({
+      action: "wiii_connect.facebook_post.direct_apply",
+      request_id: "req-facebook-result-1",
+      success: true,
+      summary: "Published.",
+    });
+    expect(request.data?.provider_post_id).toBe("post-1");
+    expect(request.data?.approval_token).toBe("[redacted]");
+    expect((request.data?.nested as Record<string, unknown>).image_base64).toBe("[redacted]");
   });
 });

@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+import json
 from typing import Any, Awaitable, Callable
 
 from app.engine.multi_agent.direct_handoff_runtime import record_direct_handoff_request
 from app.engine.multi_agent.direct_pointy_runtime import handle_direct_pointy_post_dispatch
 from app.engine.multi_agent.state import AgentState
+from app.engine.context.host_action_result_bridge import (
+    DEFAULT_HOST_ACTION_RESULT_TIMEOUT_SECONDS,
+    parse_host_action_request_result,
+    register_host_action_result_request,
+    should_wait_for_host_action_result,
+    wait_for_host_action_result,
+)
 
 
 PushEvent = Callable[[dict[str, Any]], Awaitable[None]]
@@ -62,6 +70,16 @@ async def process_direct_tool_post_dispatch(
     )
     updated_result = pointy_post_dispatch.result
 
+    host_action_request = parse_host_action_request_result(tool_name, updated_result)
+    host_action_ticket = None
+    if host_action_request and should_wait_for_host_action_result(host_action_request.action):
+        host_action_ticket = register_host_action_result_request(
+            request_id=host_action_request.request_id,
+            action=host_action_request.action,
+            user_id=state.get("user_id"),
+            organization_id=state.get("organization_id"),
+        )
+
     await maybe_emit_host_action_event(
         push_event=push_event,
         tool_name=tool_name,
@@ -69,6 +87,22 @@ async def process_direct_tool_post_dispatch(
         node="direct",
         tool_call_events=tool_call_events,
     )
+    if host_action_ticket is not None:
+        host_action_result = await wait_for_host_action_result(
+            host_action_ticket,
+            timeout_seconds=DEFAULT_HOST_ACTION_RESULT_TIMEOUT_SECONDS,
+        )
+        if host_action_result:
+            updated_result = json.dumps(host_action_result, ensure_ascii=False)
+            tool_call_events.append(
+                {
+                    "type": "host_action_result",
+                    "id": host_action_ticket.request_id,
+                    "action": host_action_ticket.action,
+                    "success": bool(host_action_result.get("success")),
+                    "status": host_action_result.get("status"),
+                }
+            )
     emitted_visual_session_ids, disposed_visual_session_ids = await maybe_emit_visual_event(
         push_event=push_event,
         tool_name=tool_name,

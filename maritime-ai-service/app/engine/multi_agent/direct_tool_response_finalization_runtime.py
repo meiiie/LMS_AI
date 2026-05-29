@@ -74,6 +74,15 @@ def facebook_direct_apply_final_answer(
             continue
         payload = _parse_tool_result_payload(event.get("result"))
         status = str(payload.get("status") or "").strip()
+        if status == "action_completed":
+            summary = str(payload.get("summary") or "").strip()
+            if summary:
+                return summary
+            return "Đã đăng bài lên Facebook qua Wiii Connect."
+        if status == "action_failed":
+            reason = str(payload.get("error") or payload.get("summary") or "").strip()
+            suffix = f": {reason}" if reason else "."
+            return f"Facebook chưa đăng được{suffix}"
         if status == "action_requested":
             return (
                 "Mình đã gửi yêu cầu đăng bài Facebook qua Wiii Connect. "

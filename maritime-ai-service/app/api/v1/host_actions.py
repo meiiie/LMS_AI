@@ -1,10 +1,16 @@
 """Host action audit endpoints."""
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from app.api.deps import RequireAuth
 from app.core.rate_limit import limiter
 from app.engine.context.host_action_audit import log_host_action_event
-from app.models.host_context_schemas import HostActionAuditRequest, HostActionAuditResponse
+from app.engine.context.host_action_result_bridge import publish_host_action_result
+from app.models.host_context_schemas import (
+    HostActionAuditRequest,
+    HostActionAuditResponse,
+    HostActionResultRequest,
+    HostActionResultResponse,
+)
 
 router = APIRouter(prefix="/host-actions", tags=["host-actions"])
 
@@ -42,4 +48,43 @@ async def submit_host_action_audit(
         event_type=body.event_type,
         action=body.action,
         request_id=body.request_id,
+    )
+
+
+@router.post("/result", response_model=HostActionResultResponse)
+@limiter.limit("120/minute")
+async def submit_host_action_result(
+    request: Request,
+    body: HostActionResultRequest,
+    auth: RequireAuth,
+) -> HostActionResultResponse:
+    """Submit the real host-side result for a pending action request.
+
+    This endpoint is intentionally separate from audit. Audit records what the
+    host says happened; result submission resumes an in-flight chat turn when a
+    matching waiter exists.
+    """
+
+    publication = publish_host_action_result(
+        request_id=body.request_id,
+        action=body.action,
+        success=body.success,
+        summary=body.summary,
+        error=body.error,
+        data=body.data,
+        user_id=auth.user_id,
+        organization_id=auth.organization_id,
+    )
+    if publication.status == "identity_mismatch":
+        raise HTTPException(status_code=403, detail="Host action result identity mismatch.")
+    if publication.status == "action_mismatch":
+        raise HTTPException(status_code=409, detail="Host action result action mismatch.")
+
+    matched = publication.status == "accepted"
+    return HostActionResultResponse(
+        status="accepted" if matched else "ignored",
+        action=body.action,
+        request_id=body.request_id,
+        matched=matched,
+        reason=None if matched else publication.reason,
     )
