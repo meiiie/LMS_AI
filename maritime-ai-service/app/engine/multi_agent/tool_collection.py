@@ -38,6 +38,8 @@ from app.engine.tools.tool_capability_registry import (
     DOCUMENT_PREVIEW_CAPABILITY_NAMES,
     HOST_ACTION_PREFIX,
     POINTY_TOOL_PREFIX,
+    WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION,
+    WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
     WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION,
     WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
 )
@@ -130,6 +132,44 @@ def _wiii_connect_facebook_post_preview_capability() -> dict[str, Any]:
                 "message": {
                     "type": "string",
                     "description": "The final Facebook post copy to preview.",
+                },
+                "image_policy": {
+                    "type": "string",
+                    "enum": ["none", "use_latest_user_image"],
+                    "default": "none",
+                },
+            },
+            "required": ["message"],
+        },
+    }
+
+
+def _wiii_connect_facebook_post_direct_apply_capability() -> dict[str, Any]:
+    """Synthetic direct publish action exposed through Wiii Connect policy."""
+
+    return {
+        "name": WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION,
+        "description": (
+            "Publish a Facebook Page post through Wiii Connect for an explicit "
+            "user request to post or publish to Facebook. Draft the `message` as "
+            "the exact post copy. If the user attached an image, set "
+            "`image_policy` to `use_latest_user_image`; do not place raw image "
+            "bytes in the tool call. The desktop host will resolve the connected "
+            "account/page and call the audited Wiii Connect preview/apply gateway "
+            "before Composio execution."
+        ),
+        "surface": "wiii_connect",
+        "requires_confirmation": False,
+        "mutates_state": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "provider_slug": {"type": "string", "default": "facebook"},
+                "connection_ref": {"type": "string"},
+                "page_id": {"type": "string"},
+                "message": {
+                    "type": "string",
+                    "description": "The final Facebook post copy to publish.",
                 },
                 "image_policy": {
                     "type": "string",
@@ -1047,7 +1087,7 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
             )
             _direct_tools.extend(
                 generate_host_action_tools(
-                    [_wiii_connect_facebook_post_preview_capability()],
+                    [_wiii_connect_facebook_post_direct_apply_capability()],
                     user_role,
                     event_bus_id=state.get("_event_bus_id") if isinstance(state, dict) else "",
                     approval_context={"query": query},
@@ -1395,7 +1435,7 @@ def _direct_required_tool_names(query: str, user_role: str = "student") -> list[
     if _needs_maritime_search(query):
         required.append("tool_search_maritime")
     if _looks_wiii_connect_facebook_post_request(query):
-        required.append(WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL)
+        required.append(WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL)
     # WAVE-001: browser_snapshot and execute_python removed from direct.
     # These capabilities now live exclusively in code_studio_agent.
 

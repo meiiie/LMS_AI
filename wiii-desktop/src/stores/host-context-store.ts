@@ -362,11 +362,83 @@ async function resolveFacebookPostBase(
   };
 }
 
+function facebookPostBodyFromBase(base: {
+  connectionRef: string;
+  pageId: string;
+  message: string;
+  imagePayload: ReturnType<typeof latestUserImagePayload>;
+}) {
+  return {
+    connection_ref: base.connectionRef,
+    page_id: base.pageId,
+    message: base.message,
+    ...base.imagePayload,
+  };
+}
+
 function executeLocalWiiiConnectAction(
   action: string,
   params: Record<string, unknown>,
   imageSource: () => ImageInput[],
 ): Promise<ActionResult> | null {
+  if (action === "wiii_connect.facebook_post.direct_apply") {
+    return (async () => {
+      const base = await resolveFacebookPostBase(params, imageSource);
+      if ("error" in base) {
+        return {
+          success: false,
+          error: base.error,
+          data: {
+            code: base.error,
+            provider_slug: base.providerSlug,
+            connection_ref: base.connectionRef,
+            summary: `Facebook chưa đăng: ${base.error}`,
+          },
+        };
+      }
+
+      const postBody = facebookPostBodyFromBase(base);
+      const preview = await previewWiiiConnectFacebookPost(base.providerSlug, postBody);
+      if (
+        preview.status !== "ready" ||
+        !preview.preview_evidence_id ||
+        !preview.approval_token
+      ) {
+        const reason = preview.reason || "facebook_preview_blocked";
+        return {
+          success: false,
+          error: reason,
+          data: {
+            ...preview,
+            summary: `Facebook chưa đăng: ${reason}`,
+          } as unknown as Record<string, unknown>,
+        };
+      }
+
+      const response = await applyWiiiConnectFacebookPost(base.providerSlug, {
+        ...postBody,
+        approval_token: preview.approval_token,
+        preview_evidence_id: preview.preview_evidence_id,
+      });
+      const succeeded = response.status === "succeeded";
+      const reason = response.reason || (succeeded ? "succeeded" : "facebook_apply_failed");
+      return {
+        success: succeeded,
+        error: succeeded ? undefined : reason,
+        data: {
+          ...response,
+          preview_evidence_id_present: true,
+          page_id: base.pageId,
+          page_label: base.pageLabel,
+          image_present: Boolean(base.imagePayload.image_base64),
+          summary: succeeded
+            ? `Đã đăng bài lên Facebook: ${base.pageLabel}.`
+            : `Facebook chưa đăng: ${reason}`,
+        } as unknown as Record<string, unknown>,
+      };
+    })();
+  }
+
   if (action === "wiii_connect.facebook_post.preview") {
     return (async () => {
       const base = await resolveFacebookPostBase(params, imageSource);
@@ -382,12 +454,10 @@ function executeLocalWiiiConnectAction(
         };
       }
 
-      const response = await previewWiiiConnectFacebookPost(base.providerSlug, {
-        connection_ref: base.connectionRef,
-        page_id: base.pageId,
-        message: base.message,
-        ...base.imagePayload,
-      });
+      const response = await previewWiiiConnectFacebookPost(
+        base.providerSlug,
+        facebookPostBodyFromBase(base),
+      );
       if (response.status !== "ready") {
         return {
           success: false,
@@ -407,12 +477,7 @@ function executeLocalWiiiConnectAction(
           page_label: base.pageLabel,
           message: base.message,
           image_present: Boolean(base.imagePayload.image_base64),
-          facebook_post_body: {
-            connection_ref: base.connectionRef,
-            page_id: base.pageId,
-            message: base.message,
-            ...base.imagePayload,
-          },
+          facebook_post_body: facebookPostBodyFromBase(base),
           summary: `Preview Facebook đã sẵn sàng cho ${base.pageLabel}.`,
         },
       };

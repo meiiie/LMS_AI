@@ -143,6 +143,7 @@ async function buildWiiiConnectFacebookContextSnapshot(
         .slice(0, 5);
       if (pages.status === "ready" && pages.page_count > 0) {
         snapshot.available_actions = [
+          "wiii_connect.facebook_post.direct_apply",
           "wiii_connect.facebook_post.preview",
           "wiii_connect.facebook_post.apply",
         ];
@@ -1618,6 +1619,18 @@ export function useSSEStream() {
                 flushBothBuffers();
                 useChatStore.getState().addPreviewItem(previewItem, data.node || "host_action", toDisplayMeta(data));
                 useUIStore.getState().openPreview(previewItem.preview_id);
+              } else if (action === "wiii_connect.facebook_post.direct_apply") {
+                const summary =
+                  typeof result.data?.summary === "string" && result.data.summary.trim().length > 0
+                    ? result.data.summary.trim()
+                    : result.success
+                      ? "Đã đăng bài lên Facebook."
+                      : (result.error || "Facebook chưa đăng.");
+                useToastStore.getState().addToast(
+                  result.success ? "success" : "error",
+                  summary,
+                  5000,
+                );
               }
               const auditRequest = buildHostActionAuditRequest(
                 action,

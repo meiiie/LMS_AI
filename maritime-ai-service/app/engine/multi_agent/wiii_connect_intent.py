@@ -173,7 +173,7 @@ def build_wiii_connect_facebook_status_answer(
         return (
             f"Có. Facebook đang được kết nối qua Wiii Connect{suffix}. "
             "Nếu cậu muốn đăng bài, hãy gửi nội dung/ảnh rồi nói rõ “đăng lên Facebook”; "
-            "Wiii sẽ tạo bản xem trước để cậu xác nhận trước khi publish."
+            "Wiii sẽ gửi qua gateway preview/apply đã audit rồi publish bằng Composio."
         )
 
     if isinstance(connection_count, int) and connection_count > 0:
@@ -197,7 +197,7 @@ def build_wiii_connect_facebook_status_answer(
 
 
 def facebook_post_message_from_query(query: str) -> str:
-    """Create a compact fallback post body for deterministic preview requests."""
+    """Create a compact fallback post body for deterministic Facebook requests."""
 
     raw = " ".join(str(query or "").strip().split())
     if not raw:
@@ -263,10 +263,10 @@ def build_wiii_connect_facebook_post_unavailable_answer(
         state_label = connection_state or blocked_reason or "chưa active"
         active_label = active_count if isinstance(active_count, int) else 0
         return (
-            "Mình chưa thể tạo preview đăng Facebook vì Wiii Connect chưa có account Facebook active "
+            "Mình chưa thể đăng Facebook vì Wiii Connect chưa có account Facebook active "
             f"({active_label}/{connection_count} account active, trạng thái hiện tại: {state_label}). "
             "Hoàn tất OAuth trong Wiii Connect rồi bấm làm mới; khi account active, câu “đăng một bài Facebook” "
-            "sẽ đi thẳng vào preview để cậu xác nhận đăng."
+            "sẽ đi thẳng vào publish gateway đã audit."
         )
     if status in {"not_connected", "unavailable"}:
         return (

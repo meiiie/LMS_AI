@@ -448,6 +448,7 @@ describe("useSSEStream concurrency", () => {
       page_count: 1,
       page_names: ["Wiii"],
       available_actions: [
+        "wiii_connect.facebook_post.direct_apply",
         "wiii_connect.facebook_post.preview",
         "wiii_connect.facebook_post.apply",
       ],

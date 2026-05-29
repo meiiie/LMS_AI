@@ -2934,15 +2934,15 @@ async def test_document_host_action_shortcut_emits_preview_event_contract() -> N
 
 
 @pytest.mark.asyncio
-async def test_wiii_connect_facebook_post_shortcut_emits_preview_event() -> None:
+async def test_wiii_connect_facebook_post_shortcut_emits_direct_apply_event() -> None:
     from app.engine.multi_agent.direct_wiii_connect_host_action_runtime import (
         execute_requested_wiii_connect_facebook_post_shortcut,
     )
     from app.engine.tools.tool_capability_registry import (
-        WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
     )
 
-    tool = SimpleNamespace(name=WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL)
+    tool = SimpleNamespace(name=WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL)
     pushed_events: list[dict] = []
     tool_call_events: list[dict] = []
     invoked: dict = {}
@@ -2956,8 +2956,8 @@ async def test_wiii_connect_facebook_post_shortcut_emits_preview_event() -> None
         return json.dumps(
             {
                 "status": "action_requested",
-                "request_id": "fb-preview-1",
-                "action": "wiii_connect.facebook_post.preview",
+                "request_id": "fb-direct-apply-1",
+                "action": "wiii_connect.facebook_post.direct_apply",
                 "params": args,
             }
         )
@@ -2991,7 +2991,7 @@ async def test_wiii_connect_facebook_post_shortcut_emits_preview_event() -> None
 
     assert response is not None
     assert response["native_tool_messages"] is True
-    assert "bản xem trước bài đăng Facebook" in response["content"]
+    assert "gửi yêu cầu đăng bài Facebook" in response["content"]
     assert invoked["tool"] is tool
     assert invoked["args"]["provider_slug"] == "facebook"
     assert invoked["args"]["image_policy"] == "use_latest_user_image"
@@ -3004,7 +3004,7 @@ async def test_wiii_connect_facebook_post_shortcut_emits_preview_event() -> None
         "thinking_delta",
         "thinking_end",
     ]
-    assert tool_call_events[0]["name"] == WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL
+    assert tool_call_events[0]["name"] == WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
 
 
 @pytest.mark.asyncio
@@ -3013,7 +3013,7 @@ async def test_wiii_connect_facebook_post_shortcut_preempts_forced_web_search() 
         execute_direct_tool_rounds_impl,
     )
     from app.engine.tools.tool_capability_registry import (
-        WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
     )
 
     class FakeWebSearchTool:
@@ -3026,14 +3026,14 @@ async def test_wiii_connect_facebook_post_shortcut_preempts_forced_web_search() 
             raise AssertionError("facebook external action should preempt web search")
 
     class FakeFacebookPreviewTool:
-        name = WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL
+        name = WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
 
         def invoke(self, args):
             return json.dumps(
                 {
                     "status": "action_requested",
-                    "request_id": "fb-preview-1",
-                    "action": "wiii_connect.facebook_post.preview",
+                    "request_id": "fb-direct-apply-1",
+                    "action": "wiii_connect.facebook_post.direct_apply",
                     "params": args,
                 }
             )
@@ -3100,8 +3100,8 @@ async def test_wiii_connect_facebook_post_shortcut_preempts_forced_web_search() 
         native_tool_messages=True,
     )
 
-    assert "bản xem trước bài đăng Facebook" in llm_response.content
-    assert tool_call_events[0]["name"] == WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL
+    assert "gửi yêu cầu đăng bài Facebook" in llm_response.content
+    assert tool_call_events[0]["name"] == WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
     assert tool_call_events[0]["args"]["provider_slug"] == "facebook"
     assert any(event["type"] == "host_action" for event in pushed_events)
 

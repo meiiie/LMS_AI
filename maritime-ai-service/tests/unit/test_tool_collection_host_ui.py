@@ -338,11 +338,11 @@ def test_uploaded_document_preview_binds_safe_preview_when_global_host_actions_d
     assert force_tools is True
 
 
-def test_wiii_connect_facebook_post_request_binds_preview_host_action(monkeypatch):
+def test_wiii_connect_facebook_post_request_binds_direct_apply_host_action(monkeypatch):
     from app.engine.multi_agent import tool_collection as module
     from app.engine.tools.tool_capability_registry import (
-        WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION,
-        WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION,
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
     )
 
     monkeypatch.setattr(module.settings, "enable_character_tools", False, raising=False)
@@ -415,9 +415,9 @@ def test_wiii_connect_facebook_post_request_binds_preview_host_action(monkeypatc
         state=state,
     )
 
-    assert [tool.name for tool in tools] == [WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL]
+    assert [tool.name for tool in tools] == [WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL]
     assert [tool["name"] for tool in generated_from] == [
-        WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION
     ]
     assert state["_turn_path_decision"]["path"] == "external_app_action"
     assert force_tools is True

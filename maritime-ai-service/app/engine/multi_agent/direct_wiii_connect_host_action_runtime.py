@@ -18,6 +18,7 @@ from app.engine.multi_agent.wiii_connect_intent import (
     looks_wiii_connect_facebook_post_request,
 )
 from app.engine.tools.tool_capability_registry import (
+    WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
     WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
 )
 
@@ -40,11 +41,38 @@ FACEBOOK_POST_PREVIEW_SHORTCUT = DocumentHostActionShortcut(
 )
 
 
+FACEBOOK_POST_DIRECT_APPLY_SHORTCUT = DocumentHostActionShortcut(
+    tool_name=WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+    tool_call_id="wiii-connect-facebook-post-direct-apply",
+    thinking=(
+        "Mình nhận đây là yêu cầu publish Facebook rõ ràng qua Wiii Connect. "
+        "Mình dùng host_action direct_apply để frontend chọn connection/page đang active, "
+        "đi qua preview/apply gateway đã audit, rồi mới gọi Composio execute."
+    ),
+    thinking_summary="Đang gửi yêu cầu đăng Facebook qua Wiii Connect.",
+    thinking_provenance="deterministic_wiii_connect_facebook_post_direct_apply",
+    response=(
+        "Mình đã gửi yêu cầu đăng bài Facebook qua Wiii Connect. "
+        "Wiii Desktop sẽ báo trạng thái thành công hoặc lỗi từ Facebook trong kết quả hành động."
+    ),
+    failure_log_message="[DIRECT] Deterministic Wiii Connect Facebook direct publish failed: %s",
+)
+
+
 def find_wiii_connect_facebook_post_preview_tool(tools: list[Any]) -> Any | None:
     """Find the generated host action tool for Facebook post preview."""
 
     for tool in tools:
         if _tool_name(tool) == WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL:
+            return tool
+    return None
+
+
+def find_wiii_connect_facebook_post_direct_apply_tool(tools: list[Any]) -> Any | None:
+    """Find the generated host action tool for direct Facebook publish."""
+
+    for tool in tools:
+        if _tool_name(tool) == WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL:
             return tool
     return None
 
@@ -91,13 +119,17 @@ async def execute_requested_wiii_connect_facebook_post_shortcut(
             native_tool_messages=native_tool_messages,
         )
 
-    tool = find_wiii_connect_facebook_post_preview_tool(tools)
+    shortcut = FACEBOOK_POST_DIRECT_APPLY_SHORTCUT
+    tool = find_wiii_connect_facebook_post_direct_apply_tool(tools)
+    if tool is None:
+        shortcut = FACEBOOK_POST_PREVIEW_SHORTCUT
+        tool = find_wiii_connect_facebook_post_preview_tool(tools)
     if tool is None:
         return None
 
     args = build_wiii_connect_facebook_post_preview_params(query, state)
     response = await execute_document_host_action_shortcut(
-        shortcut=FACEBOOK_POST_PREVIEW_SHORTCUT,
+        shortcut=shortcut,
         tool=tool,
         args=args,
         state=state,
@@ -111,7 +143,8 @@ async def execute_requested_wiii_connect_facebook_post_shortcut(
         logger_obj=logger_obj,
     )
     logger_obj.info(
-        "[DIRECT] Deterministic Wiii Connect Facebook preview host action requested"
+        "[DIRECT] Deterministic Wiii Connect Facebook host action requested (%s)",
+        shortcut.tool_name,
     )
     return build_assistant_message(
         response,

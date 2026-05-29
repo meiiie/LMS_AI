@@ -19,6 +19,7 @@ from app.engine.tools.tool_capability_registry import (
     HOST_ACTION_PREFIX,
     LMS_DOCUMENT_PREVIEW_TOOL_NAMES,
     POINTY_TOOL_PREFIX,
+    WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
     WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
     WEATHER_TOOL_NAMES,
 )
@@ -188,7 +189,12 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             reason="wiii_connect_external_app_action_request",
             force_tools=True,
             allow_all_tools=False,
-            allowed_tool_names=frozenset({WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL}),
+            allowed_tool_names=frozenset(
+                {
+                    WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+                    WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+                }
+            ),
             forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
             allow_agent_handoff=False,
         )

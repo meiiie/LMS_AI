@@ -336,6 +336,7 @@ def test_host_session_prompt_includes_wiii_connect_snapshot():
                         "page_count": 1,
                         "page_names": ["Wiii"],
                         "available_actions": [
+                            "wiii_connect.facebook_post.direct_apply",
                             "wiii_connect.facebook_post.preview",
                             "wiii_connect.facebook_post.apply",
                         ],
@@ -350,4 +351,5 @@ def test_host_session_prompt_includes_wiii_connect_snapshot():
     assert "External connections" in prompt
     assert "Facebook: connected" in prompt
     assert "Wiii" in prompt
+    assert "wiii_connect.facebook_post.direct_apply" in prompt
     assert "wiii_connect.facebook_post.preview" in prompt
