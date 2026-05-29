@@ -146,14 +146,26 @@ def _event_tool_name(event_type: str, content: Any) -> str | None:
     if event_type == "preview":
         return "preview"
     if not isinstance(content, Mapping):
-        if event_type in {"tool_call", "tool_result", "host_action", "pointy_action"}:
+        if event_type in {
+            "tool_call",
+            "tool_result",
+            "host_action",
+            "host_action_result",
+            "pointy_action",
+        }:
             return event_type
         return None
     for key in ("tool_name", "name", "tool", "action", "type"):
         token = _safe_token(content.get(key))
         if token:
             return token
-    if event_type in {"tool_call", "tool_result", "host_action", "pointy_action"}:
+    if event_type in {
+        "tool_call",
+        "tool_result",
+        "host_action",
+        "host_action_result",
+        "pointy_action",
+    }:
         return event_type
     return None
 
@@ -250,6 +262,9 @@ class RuntimeFlowLedger:
     approval_token_present: bool = False
     approval_token_hash: str | None = None
     apply_attempted: bool = False
+    host_action_result_received: bool = False
+    host_action_result_success: bool | None = None
+    host_action_result_statuses: list[str] = field(default_factory=list)
     mutation_blocked_reason: str | None = None
     finalization_status: str = "pending"
     finalization_error_type: str | None = None
@@ -366,6 +381,7 @@ class RuntimeFlowLedger:
             "tool_call",
             "tool_result",
             "host_action",
+            "host_action_result",
             "pointy_action",
             "preview",
             "visual",
@@ -448,6 +464,18 @@ class RuntimeFlowLedger:
         if event_type == "preview":
             self.preview_emitted = True
         if isinstance(content, Mapping):
+            if event_type == "host_action_result":
+                self.host_action_result_received = True
+                success = content.get("success")
+                if isinstance(success, bool):
+                    self.host_action_result_success = success
+                status = _safe_token(content.get("status"))
+                if status and status not in self.host_action_result_statuses:
+                    self.host_action_result_statuses.append(status)
+                    if len(self.host_action_result_statuses) > _MAX_SEQUENCE_ITEMS:
+                        self.host_action_result_statuses = (
+                            self.host_action_result_statuses[-_MAX_SEQUENCE_ITEMS:]
+                        )
             action = _safe_token(
                 content.get("action") or content.get("type") or content.get("name")
             )
@@ -517,6 +545,9 @@ class RuntimeFlowLedger:
                 "approval_token_present": self.approval_token_present,
                 "approval_token_hash": self.approval_token_hash,
                 "apply_attempted": self.apply_attempted,
+                "result_received": self.host_action_result_received,
+                "result_success": self.host_action_result_success,
+                "result_statuses": list(self.host_action_result_statuses),
                 "mutation_blocked_reason": self.mutation_blocked_reason,
             },
             "finalization": {
@@ -528,8 +559,10 @@ class RuntimeFlowLedger:
 
     def _refresh_suppressed_tools(self) -> None:
         suppressed: list[str] = []
-        if "host_action" not in self.host_capabilities and not self.event_counts.get(
-            "host_action"
+        if (
+            "host_action" not in self.host_capabilities
+            and not self.event_counts.get("host_action")
+            and not self.event_counts.get("host_action_result")
         ):
             suppressed.append("host_action")
         if "pointy" not in self.host_capabilities and not self.event_counts.get(
