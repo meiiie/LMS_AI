@@ -204,6 +204,25 @@ def facebook_post_message_from_query(query: str) -> str:
         return "Một khoảnh khắc mới được chia sẻ từ Wiii."
 
     normalized = _normalize_for_intent(raw)
+    poem_markers = ("bai tho", "tho cua ban", "tho tu wiii", "poem")
+    self_creative_markers = (
+        "cua ban",
+        "tu viet",
+        "tu nghi",
+        "ban tu viet",
+        "wiii tu viet",
+    )
+    if any(marker in normalized for marker in poem_markers) and any(
+        marker in normalized for marker in self_creative_markers
+    ):
+        return (
+            "Một chút thơ từ Wiii\n\n"
+            "Giữa dòng ngày rộng mở,\n"
+            "mình gửi một vệt sáng hiền.\n"
+            "Nếu lòng còn nhiều gió,\n"
+            "hãy chậm lại, rồi bước tiếp bình yên."
+        )
+
     generic_anything = any(
         marker in normalized
         for marker in (

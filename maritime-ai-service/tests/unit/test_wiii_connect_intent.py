@@ -15,6 +15,20 @@ def test_facebook_post_intent_detects_natural_chat_phrasing():
     assert not looks_wiii_connect_facebook_post_request("đăng bài chưa ?")
 
 
+def test_facebook_post_message_generates_self_poem_body():
+    from app.engine.multi_agent.wiii_connect_intent import (
+        facebook_post_message_from_query,
+    )
+
+    message = facebook_post_message_from_query(
+        "Wiii đăng một bài thơ của bạn lên Facebook đi"
+    )
+
+    assert "Một chút thơ từ Wiii" in message
+    assert "Facebook" not in message
+    assert "đăng một bài thơ" not in message
+
+
 def test_facebook_status_answer_reports_pending_connection():
     from app.engine.multi_agent.wiii_connect_intent import (
         build_wiii_connect_facebook_status_answer,
