@@ -47,7 +47,7 @@ opensandbox-code-interpreter>=0.1.1,<0.2.0
 # Google GenAI SDK (UNIFIED - CHỈ THỊ 26 + Semantic Memory)
 # SDK mới thống nhất cho Gemini API - hỗ trợ cả embeddings và vision
 # NOTE: Không dùng google-generativeai vì conflict với langchain-google-genai
-google-genai>=1.66.0,<2.0.0
+google-genai>=1.66.0,<3.0.0
 
 # Semantic Memory
 numpy>=1.26.4
