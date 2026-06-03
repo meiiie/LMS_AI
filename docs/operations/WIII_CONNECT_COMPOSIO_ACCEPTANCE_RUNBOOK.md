@@ -133,6 +133,47 @@ IDs, opaque connection refs, vault references, and provider payloads. Do not
 commit generated evidence files; attach or summarize the sanitized output in
 the issue/PR when needed.
 
+For Runtime Evidence Registry collection, use `--out` instead of
+`--evidence-json`. This mode is intentionally guarded because it can prove a
+credentialed read-only provider execution:
+
+```powershell
+$env:WIII_LIVE_WIII_CONNECT_COMPOSIO_ACCEPTANCE="1"
+$env:WIII_ACCEPTANCE_BEARER_TOKEN="<jwt>"
+python scripts/wiii_connect_composio_acceptance.py --preflight-only --allow-live --backend-url https://wiii.example.com --auth-mode bearer --provider gmail --expect-connected --require-execution-ready --execute-readonly --arguments-json '{"query":"from:me","max_results":1}' --out wiii-connect-composio-acceptance-preflight.json
+python ../tools/wiii_self_harness/validate_runtime_evidence_preflight.py wiii-connect-composio-acceptance-preflight.json --requirement-id wiii-connect-composio-acceptance
+python scripts/wiii_connect_composio_acceptance.py --allow-live --backend-url https://wiii.example.com --auth-mode bearer --provider gmail --expect-connected --require-execution-ready --execute-readonly --arguments-json '{"query":"from:me","max_results":1}' --out wiii-connect-composio-acceptance-evidence.json
+python ../tools/wiii_self_harness/validate_runtime_evidence_artifact.py wiii-connect-composio-acceptance-evidence.json --requirement-id wiii-connect-composio-acceptance
+```
+
+The preflight output uses `wiii.connect_composio_acceptance_preflight.v1`, does
+not call the backend or provider, and records only setup booleans and
+`required_next` hints. It must not be uploaded as the registry evidence
+artifact; `wiii-connect-composio-acceptance-evidence.json` still requires the
+credentialed connected-account read-only execution. In GitHub Actions, the
+workflow validates this preflight JSON, prints it to the step log and job
+summary, and then exits with the preflight status, so operators can diagnose
+setup from the log or from the 14-day
+`wiii-connect-composio-acceptance-preflight-${{ github.run_id }}` diagnostic
+artifact. The workflow validates before printing or uploading the payload and
+removes the preflight file if validation fails. This artifact is diagnostic-only
+and cannot satisfy the Runtime Evidence Registry.
+
+The registry artifact is intentionally structured. A passing credentialed run
+must show backend health, sanitized authentication source, provider registry,
+Composio adapter readiness, durable storage, audit ledger persistence,
+activation readiness, curated action enablement, fail-closed missing-connection
+gateway behavior, selected-account hash presence, allowed read-scope gateway,
+live schema readiness, required argument coverage, successful read-only
+execution metadata, and privacy flags proving bearer values/env names,
+connection refs, account IDs, raw schemas, provider arguments, provider
+responses, and provider payloads are absent from archived evidence.
+
+GitHub Actions collection lives in
+`.github/workflows/wiii-connect-composio-acceptance-evidence.yml` and is gated
+by explicit `run_composio_acceptance=true` dispatch or scheduled
+`WIII_CONNECT_COMPOSIO_ACCEPTANCE_EVIDENCE_ENABLED=1` runs.
+
 For local dev-login:
 
 ```powershell
@@ -230,7 +271,15 @@ Composio is ready to enable only when all of these are true:
   org/user connection;
 - execute blocks before calling Composio when live schema verification reports
   missing required argument keys;
-- optional execution succeeds through `POST /api/v1/wiii-connect/providers/gmail/execute`;
+- optional execution succeeds through `POST /api/v1/wiii-connect/providers/gmail/execute`
+  and the evidence records live schema readiness, required argument coverage,
+  provider execution metadata, and provider response absence as structured
+  fields;
+- registry evidence omits authorization URLs, access/refresh tokens,
+  connected-account IDs, connection refs, opaque `wcn_*` values,
+  provider-managed vault keys, API keys, raw schemas, provider arguments, raw
+  provider payloads, raw provider responses, bearer values, and bearer secret
+  environment variable names;
 - optional disconnect disables local Wiii state and completes provider cleanup.
 
 For provider connection-only acceptance, such as Facebook before action curation,

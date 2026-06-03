@@ -460,6 +460,87 @@ class TestStoreImageMemory:
         mock_repo.save_memory.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_store_image_memory_blocks_without_org_context_when_multi_tenant(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.runtime.session_event_log import InMemorySessionEventLog
+        from app.engine.semantic_memory.visual_memory import VisualMemoryManager
+
+        mgr = VisualMemoryManager()
+        b64 = base64.b64encode(b"private image bytes").decode()
+        log = InMemorySessionEventLog()
+
+        mock_settings = MagicMock()
+        mock_settings.enable_visual_memory = True
+        describe = AsyncMock(
+            return_value=SimpleNamespace(
+                success=True,
+                text="PRIVATE IMAGE DESCRIPTION",
+                error=None,
+            )
+        )
+        mock_embeddings = MagicMock()
+        mock_embeddings.aembed_documents = AsyncMock(return_value=[[0.1] * 768])
+        repo_factory = MagicMock()
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        monkeypatch.setattr(
+            "app.engine.runtime.session_event_log.get_session_event_log",
+            lambda: log,
+        )
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.config.get_settings", return_value=mock_settings), \
+                 patch(
+                     "app.engine.semantic_memory.visual_memory.describe_image_content",
+                     new=describe,
+                 ), \
+                 patch(
+                     "app.engine.semantic_memory.visual_memory.get_embedding_backend",
+                     return_value=mock_embeddings,
+                 ), \
+                 patch(
+                     "app.repositories.semantic_memory_repository.SemanticMemoryRepository",
+                     repo_factory,
+                 ):
+                entry = await mgr.store_image_memory(
+                    user_id="user-private-123",
+                    image_base64=b64,
+                    media_type="image/jpeg",
+                    session_id="session-private-123",
+                    context_hint="PRIVATE IMAGE CONTEXT",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert entry is None
+        describe.assert_not_awaited()
+        mock_embeddings.aembed_documents.assert_not_awaited()
+        repo_factory.assert_not_called()
+        events = await log.get_events(session_id="session-private-123")
+        assert len(events) == 1
+        payload = events[0].payload
+        assert payload["write"]["kind"] == "visual_memory"
+        assert payload["write"]["status"] == "blocked"
+        assert payload["scope"]["write_allowed"] is False
+        assert payload["privacy"]["raw_content_included"] is False
+        assert (
+            payload["scope"]["organization_context"]
+            == "blocked_missing_org_context"
+        )
+        serialized = str(payload)
+        assert "PRIVATE IMAGE CONTEXT" not in serialized
+        assert "PRIVATE IMAGE DESCRIPTION" not in serialized
+        assert "user-private-123" not in serialized
+        assert "session-private-123" not in serialized
+
+    @pytest.mark.asyncio
     async def test_store_image_memory_feature_disabled(self):
         from app.engine.semantic_memory.visual_memory import VisualMemoryManager
 
@@ -623,6 +704,44 @@ class TestRetrieveVisualMemories:
 
         assert len(ctx.entries) == 0
         assert ctx.context_text == ""
+
+    @pytest.mark.asyncio
+    async def test_retrieve_blocks_without_org_context_when_multi_tenant(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.semantic_memory.visual_memory import VisualMemoryManager
+
+        mgr = VisualMemoryManager()
+        mock_embeddings = MagicMock()
+        mock_embeddings.aembed_documents = AsyncMock(return_value=[[0.5] * 768])
+        repo_factory = MagicMock()
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        token = current_org_id.set(None)
+        try:
+            with patch(
+                "app.engine.semantic_memory.visual_memory.get_embedding_backend",
+                return_value=mock_embeddings,
+            ), patch(
+                "app.repositories.semantic_memory_repository.SemanticMemoryRepository",
+                repo_factory,
+            ):
+                ctx = await mgr.retrieve_visual_memories(
+                    user_id="user-private-123",
+                    query="PRIVATE QUERY",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert ctx.entries == []
+        assert ctx.context_text == ""
+        mock_embeddings.aembed_documents.assert_not_called()
+        repo_factory.assert_not_called()
 
 
 # ==============================================================================

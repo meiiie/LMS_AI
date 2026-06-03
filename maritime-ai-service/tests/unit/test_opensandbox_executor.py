@@ -125,10 +125,11 @@ class TestOpenSandboxExecutor:
 
         assert labels["wiii.provider"] == "opensandbox"
         assert labels["wiii.org"] == "org_123"
-        assert labels["wiii.user"] == "user_456"
+        assert labels["wiii.user"].startswith("sha256:")
         assert labels["wiii.session"] == "sess_789"
         assert labels["wiii.request"] == "req_abc"
         assert labels["wiii.workload"] == "python"
+        assert "user_456" not in str(labels)
 
     def test_build_network_policy_denies_all_when_disabled(self):
         captured = {}
@@ -273,7 +274,10 @@ class TestOpenSandboxExecutor:
             workload_kind=SandboxWorkloadKind.PYTHON,
             code="print('hello')",
             files={"data/input.txt": "payload"},
-            metadata={"purpose": "unit-test"},
+            metadata={
+                "purpose": "unit-test",
+                "access_token": "raw-access-token",
+            },
             working_directory="/workspace",
             organization_id="org_123",
             user_id="user_456",
@@ -299,7 +303,10 @@ class TestOpenSandboxExecutor:
         assert result.metadata["request_id"] == "req_abc"
         assert result.metadata["session_id"] == "sess_789"
         assert result.metadata["organization_id"] == "org_123"
-        assert result.metadata["user_id"] == "user_456"
+        assert result.metadata["user_id_hash"].startswith("sha256:")
+        assert "user_456" not in str(result.metadata)
+        assert "raw-access-token" not in str(result.metadata)
+        assert "access_token" not in str(result.metadata)
 
         assert captured["template"] == "python-dev"
         assert captured["command"] == "mkdir -p /workspace && cd /workspace && python /tmp/wiii_exec.py"
@@ -309,13 +316,16 @@ class TestOpenSandboxExecutor:
         assert sandbox_kwargs["env"] is None
         assert sandbox_kwargs["network_policy"] is None
         assert sandbox_kwargs["metadata"]["wiii.org"] == "org_123"
-        assert sandbox_kwargs["metadata"]["wiii.user"] == "user_456"
+        assert sandbox_kwargs["metadata"]["wiii.user"].startswith("sha256-")
         assert sandbox_kwargs["metadata"]["wiii.session"] == "sess_789"
         assert sandbox_kwargs["metadata"]["wiii.request"] == "req_abc"
         assert sandbox_kwargs["metadata"]["wiii.template"] == "python-dev"
         assert sandbox_kwargs["metadata"]["wiii.network_mode"] == "egress"
         assert sandbox_kwargs["metadata"]["wiii.meta.keepalive_seconds"] == "600"
         assert sandbox_kwargs["metadata"]["wiii.meta.purpose"] == "unit-test"
+        assert "user_456" not in str(sandbox_kwargs["metadata"])
+        assert "raw-access-token" not in str(sandbox_kwargs["metadata"])
+        assert "access_token" not in str(sandbox_kwargs["metadata"])
 
         config_kwargs = captured["connection_config"]
         assert config_kwargs["api_key"] is None

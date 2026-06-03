@@ -31,6 +31,7 @@ class RAGToolState:
     reasoning_trace: Optional[Any] = None
     confidence: float = 0.0
     is_complete: bool = False
+    identity_key: Optional[str] = None
 
 
 # ContextVar: each async request gets its own RAGToolState
@@ -42,12 +43,59 @@ _rag_tool_state: contextvars.ContextVar[RAGToolState] = contextvars.ContextVar(
 _rag_agent = None
 
 
+def _tool_identity() -> tuple[str, bool]:
+    """Resolve the current RAG tool identity for state isolation."""
+    runtime_user_id = ""
+    runtime_org_id = ""
+    runtime_session_id = ""
+    identity_available = False
+
+    try:
+        from app.engine.tools.runtime_context import get_current_tool_runtime_context
+
+        runtime = get_current_tool_runtime_context()
+        if runtime:
+            runtime_user_id = str(runtime.user_id or "").strip()
+            runtime_org_id = str(runtime.organization_id or "").strip()
+            runtime_session_id = str(runtime.session_id or "").strip()
+            identity_available = bool(
+                runtime_user_id or runtime_org_id or runtime_session_id
+            )
+    except Exception:
+        pass
+
+    if not runtime_org_id:
+        try:
+            from app.core.org_context import get_current_org_id
+
+            runtime_org_id = str(get_current_org_id() or "").strip()
+            identity_available = identity_available or bool(runtime_org_id)
+        except Exception:
+            pass
+
+    identity_key = (
+        f"user={runtime_user_id}|org={runtime_org_id}|session={runtime_session_id}"
+    )
+    return identity_key, identity_available
+
+
+def _new_state() -> RAGToolState:
+    identity_key, _ = _tool_identity()
+    return RAGToolState(identity_key=identity_key)
+
+
 def _get_state() -> RAGToolState:
-    """Get or create per-request RAG tool state."""
+    """Get or create identity-scoped RAG tool state."""
+    identity_key, identity_available = _tool_identity()
     state = _rag_tool_state.get(None)
     if state is None:
-        state = RAGToolState()
+        state = _new_state()
         _rag_tool_state.set(state)
+    elif identity_available and state.identity_key != identity_key:
+        state = _new_state()
+        _rag_tool_state.set(state)
+    elif state.identity_key is None:
+        state.identity_key = identity_key
     return state
 
 
@@ -90,7 +138,7 @@ def get_last_confidence() -> tuple[float, bool]:
 
 def clear_retrieved_sources():
     """Reset per-request state for a new request."""
-    _rag_tool_state.set(RAGToolState())
+    _rag_tool_state.set(_new_state())
 
 
 def is_no_internal_match_observation(text: str) -> bool:
@@ -216,7 +264,7 @@ async def tool_knowledge_search(query: str) -> str:
     except Exception as e:
         logger.error("Knowledge search error: %s", e)
         # Reset state on error
-        _rag_tool_state.set(RAGToolState())
+        _rag_tool_state.set(_new_state())
         return f"Lỗi khi tra cứu: {str(e)}"
 
 

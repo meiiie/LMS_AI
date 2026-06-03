@@ -88,13 +88,16 @@ class TestToolRuntimeContext:
                 user_role="admin",
                 node="direct",
                 source="agentic_loop",
-                metadata={"trace_id": "trace-1"},
+                metadata={
+                    "trace_id": "trace-1",
+                    "access_token": "raw-runtime-token",
+                },
             ).for_tool("tool_execute_python", tool_call_id="tc-1")
         ):
             context = build_sandbox_execution_context(
                 "tool_execute_python",
                 approval_scope="privileged_execution",
-                metadata={"origin": "unit-test"},
+                metadata={"origin": "unit-test", "api_key": "raw-api-key"},
             )
 
         assert context.tool_name == "tool_execute_python"
@@ -108,6 +111,11 @@ class TestToolRuntimeContext:
         assert context.metadata["node"] == "direct"
         assert context.metadata["tool_call_id"] == "tc-1"
         assert context.metadata["origin"] == "unit-test"
+        serialized = str(context.metadata)
+        assert "raw-runtime-token" not in serialized
+        assert "raw-api-key" not in serialized
+        assert "access_token" not in serialized
+        assert "api_key" not in serialized
 
     def test_build_tool_runtime_context_prefers_bound_request_id(self):
         structlog.contextvars.bind_contextvars(request_id="http-req-1")
@@ -130,7 +138,10 @@ class TestToolRuntimeContext:
                 user_role="admin",
                 node="direct",
                 source="mcp_http",
-                metadata={"mcp_call_id": "mcp-call-1"},
+                metadata={
+                    "mcp_call_id": "mcp-call-1",
+                    "access_token": "raw-access-token",
+                },
             ).for_tool("tool_browser_snapshot_url", tool_call_id="tc-1")
         ):
             metadata = build_runtime_correlation_metadata()
@@ -138,10 +149,13 @@ class TestToolRuntimeContext:
         assert metadata["request_id"] == "req-1"
         assert metadata["session_id"] == "sess-1"
         assert metadata["organization_id"] == "org-1"
-        assert metadata["user_id"] == "user-1"
+        assert metadata["user_id_hash"].startswith("sha256:")
         assert metadata["user_role"] == "admin"
         assert metadata["node"] == "direct"
         assert metadata["request_source"] == "mcp_http"
         assert metadata["tool_name"] == "tool_browser_snapshot_url"
         assert metadata["tool_call_id"] == "tc-1"
         assert metadata["mcp_call_id"] == "mcp-call-1"
+        assert "user_id" not in metadata
+        assert "access_token" not in metadata
+        assert "raw-access-token" not in str(metadata)

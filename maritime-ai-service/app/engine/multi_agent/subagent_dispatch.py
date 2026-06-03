@@ -6,9 +6,31 @@ import logging
 from typing import Any, Callable
 
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.subagents.event_stream import (
+    push_subagent_stream_event,
+    sanitize_subagent_stream_event,
+)
+from app.engine.multi_agent.subagents.handoff_context import (
+    project_state_for_subagent,
+)
+from app.engine.runtime.event_payload_sanitizer import (
+    redact_runtime_secret_text,
+)
 from app.engine.reasoning import sanitize_visible_reasoning_text
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_PARALLEL_TARGETS = ("rag", "tutor")
+
+
+def _project_state_for_subagent(state: dict) -> dict[str, Any]:
+    """Compatibility wrapper for older tests/imports."""
+
+    return project_state_for_subagent(state)
+
+
+def _sanitize_subagent_event(event: dict) -> dict[str, Any]:
+    return sanitize_subagent_stream_event(event)
 
 
 def _push_bus_event(state: dict, event: dict) -> None:
@@ -16,12 +38,15 @@ def _push_bus_event(state: dict, event: dict) -> None:
     bus_id = state.get("_event_bus_id")
     if not bus_id:
         return
+    safe_event = _sanitize_subagent_event(event)
+    if not safe_event:
+        return
     try:
         from app.engine.multi_agent.graph_event_bus import _get_event_queue
 
         queue = _get_event_queue(bus_id)
         if queue:
-            queue.put_nowait(event)
+            push_subagent_stream_event(queue, safe_event)
     except Exception as exc:  # pragma: no cover - defensive logging only
         logger.debug("[SUBAGENT_EVENT] Event emit failed: %s", exc)
 
@@ -33,8 +58,46 @@ def _emit_subagent_event_impl(
     capture_public_thinking_event: Callable[[dict, dict], None],
 ) -> None:
     """Emit an SSE event from a subagent adapter via the event bus."""
-    capture_public_thinking_event(state, event)
-    _push_bus_event(state, event)
+    safe_event = _sanitize_subagent_event(event)
+    if not safe_event:
+        return
+    capture_public_thinking_event(state, safe_event)
+    _push_bus_event(state, safe_event)
+
+
+def _normalize_parallel_targets(
+    raw_targets: Any,
+    *,
+    subagent_adapters: dict[str, Callable[..., Any]],
+) -> list[str]:
+    if raw_targets is None:
+        candidates: list[Any] = list(_DEFAULT_PARALLEL_TARGETS)
+    elif isinstance(raw_targets, str):
+        candidates = [raw_targets]
+    elif isinstance(raw_targets, (list, tuple, set)):
+        candidates = list(raw_targets)
+    else:
+        logger.warning(
+            "[PARALLEL_DISPATCH] Invalid target plan type: %s",
+            type(raw_targets).__name__,
+        )
+        return []
+
+    targets: list[str] = []
+    seen: set[str] = set()
+    for raw_name in candidates:
+        name = redact_runtime_secret_text(str(raw_name or "")[:128]).strip()
+        if not name:
+            continue
+        if name in seen:
+            logger.debug("[PARALLEL_DISPATCH] Duplicate target skipped: %s", name)
+            continue
+        seen.add(name)
+        if name not in subagent_adapters:
+            logger.warning("[PARALLEL_DISPATCH] Unknown target: %s, skipping", name)
+            continue
+        targets.append(name)
+    return targets
 
 
 def build_subagent_registry_impl(
@@ -350,9 +413,10 @@ async def parallel_dispatch_node_impl(
     from app.engine.multi_agent.subagents.executor import execute_parallel_subagents
     from app.engine.multi_agent.subagents.report import build_report
 
-    targets = state.get("_parallel_targets")
-    if targets is None:
-        targets = ["rag", "tutor"]
+    targets = _normalize_parallel_targets(
+        state.get("_parallel_targets"),
+        subagent_adapters=subagent_adapters,
+    )
 
     logger.info("[PARALLEL_DISPATCH] Dispatching to: %s", targets)
 
@@ -375,12 +439,9 @@ async def parallel_dispatch_node_impl(
 
     tasks = []
     for name in targets:
-        adapter = subagent_adapters.get(name)
-        if adapter is None:
-            logger.warning("[PARALLEL_DISPATCH] Unknown target: %s, skipping", name)
-            continue
+        adapter = subagent_adapters[name]
         config = SubagentConfig(name=name, timeout_seconds=timeout)
-        tasks.append((adapter, config, dict(state), {}))
+        tasks.append((adapter, config, _project_state_for_subagent(dict(state)), {}))
 
     if not tasks:
         logger.warning("[PARALLEL_DISPATCH] No valid targets, skipping")

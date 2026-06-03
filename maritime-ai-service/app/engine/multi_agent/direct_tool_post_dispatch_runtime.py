@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable
 from app.engine.multi_agent.direct_handoff_runtime import record_direct_handoff_request
 from app.engine.multi_agent.direct_pointy_runtime import handle_direct_pointy_post_dispatch
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.tool_event_sanitizer import sanitize_tool_result_for_event
 from app.engine.context.host_action_result_bridge import (
     DEFAULT_HOST_ACTION_RESULT_TIMEOUT_SECONDS,
     parse_host_action_request_result,
@@ -140,7 +141,7 @@ async def process_direct_tool_post_dispatch(
         {
             "type": "result",
             "name": tool_name,
-            "result": str(updated_result),
+            "result": sanitize_tool_result_for_event(updated_result),
             "id": tool_call_id,
         }
     )

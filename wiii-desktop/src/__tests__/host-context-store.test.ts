@@ -41,6 +41,64 @@ describe('host-context-store', () => {
     expect(forRequest?.page.type).toBe('quiz');
   });
 
+  it('should sanitize control identifiers and secrets from chat request context', () => {
+    const store = useHostContextStore.getState();
+    store.updateContext({
+      host_type: 'lms',
+      page: {
+        type: 'lesson',
+        title: 'COLREGs',
+        metadata: {
+          safe: 'visible',
+          connection_ref: 'conn-secret',
+          page_id: 'page-secret',
+          access_token: 'access-secret',
+          wiii_connect: {
+            provider_slug: 'facebook',
+            status: 'connected',
+            connection_id: 'conn-secret',
+            page_id: 'page-secret',
+          },
+        },
+      },
+      selection: {
+        text: 'visible selection',
+        approval_token: 'approval-secret',
+      },
+      available_actions: [
+        {
+          action: 'safe.action',
+          label: 'Safe action',
+          input_schema: {
+            properties: {
+              message: { type: 'string' },
+              connection_ref: { type: 'string' },
+              image_base64: { type: 'string' },
+            },
+          },
+        },
+      ],
+    });
+
+    const current = useHostContextStore.getState().currentContext;
+    expect(current?.page.metadata?.connection_ref).toBe('conn-secret');
+
+    const forRequest = useHostContextStore.getState().getContextForRequest();
+    const serialized = JSON.stringify(forRequest);
+    expect(forRequest?.page.metadata?.safe).toBe('visible');
+    expect(serialized).toContain('visible selection');
+    expect(serialized).not.toContain('conn-secret');
+    expect(serialized).not.toContain('page-secret');
+    expect(serialized).not.toContain('access-secret');
+    expect(serialized).not.toContain('approval-secret');
+    expect(serialized).not.toContain('connection_ref');
+    expect(serialized).not.toContain('connection_id');
+    expect(serialized).not.toContain('page_id');
+    expect(serialized).not.toContain('access_token');
+    expect(serialized).not.toContain('approval_token');
+    expect(serialized).not.toContain('image_base64');
+  });
+
   it('should handle legacy wiii:page-context format', () => {
     const store = useHostContextStore.getState();
     store.setLegacyPageContext({

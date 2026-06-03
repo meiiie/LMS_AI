@@ -40,6 +40,11 @@ from app.engine.living_agent.emotion_engine_support import (
     save_state_to_db_impl,
     serialize_state_to_dict_impl,
 )
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +59,14 @@ TIER_KNOWN = 1     # Frequent users (50+ messages) — aggregate mood only
 TIER_OTHER = 2     # Everyone else — no mood impact
 
 
-def get_relationship_tier(user_id: str, user_role: str = "") -> int:
+_KNOWN_USER_CACHE_MISSING_ORG_WARNING = "known_user_cache_blocked_missing_org_context"
+
+
+def get_relationship_tier(
+    user_id: str,
+    user_role: str = "",
+    organization_id: Optional[str] = None,
+) -> int:
     """Determine user's relationship tier with Wiii.
 
     Tier 0 (CREATOR): role=admin or user_id in creator whitelist.
@@ -76,19 +88,33 @@ def get_relationship_tier(user_id: str, user_role: str = "") -> int:
     except Exception:
         pass
 
-    # Tier 1: Known user (cached set, refreshed by heartbeat)
-    if user_id in _known_user_cache:
+    scope = _resolve_known_user_scope(organization_id)
+    if not _scope_allows_known_user_cache(scope):
+        _log_known_user_scope_blocked("get_relationship_tier", scope, user_id=user_id)
+        return TIER_OTHER
+
+    # Tier 1: Known user (org-scoped cached set, refreshed by heartbeat)
+    with _known_cache_lock:
+        if scope.state in {"single_tenant_default", "defaulted"}:
+            is_known = user_id in _known_user_cache
+        else:
+            is_known = user_id in _known_user_cache_by_org.get(scope.org_id or "", set())
+
+    if is_known:
         return TIER_KNOWN
 
     return TIER_OTHER
 
 
-# In-memory cache of known user IDs (refreshed every heartbeat cycle)
+# In-memory cache of known user IDs (refreshed every heartbeat cycle).
+# _known_user_cache is retained for single-tenant compatibility; multi-tenant
+# runtime paths must use the org-scoped cache.
 _known_user_cache: Set[str] = set()
+_known_user_cache_by_org: dict[str, Set[str]] = {}
 _known_cache_lock = threading.Lock()
 
 
-def refresh_known_user_cache() -> int:
+def refresh_known_user_cache(organization_id: Optional[str] = None) -> int:
     """Refresh the known user cache from wiii_user_routines table.
 
     Called by heartbeat every 30 min. Returns number of known users.
@@ -99,24 +125,75 @@ def refresh_known_user_cache() -> int:
         from app.core.database import get_shared_session_factory
         from app.core.config import get_settings
 
+        scope = _resolve_known_user_scope(organization_id)
+        if not _scope_allows_known_user_cache(scope):
+            _log_known_user_scope_blocked("refresh_known_user_cache", scope)
+            return 0
+
         threshold = get_settings().living_agent_known_user_threshold
 
         session_factory = get_shared_session_factory()
         with session_factory() as session:
             rows = session.execute(
-                text("SELECT user_id FROM wiii_user_routines WHERE total_messages >= :threshold"),
-                {"threshold": threshold},
+                text(
+                    """
+                        SELECT user_id FROM wiii_user_routines
+                        WHERE total_messages >= :threshold
+                        AND organization_id = :org_id
+                    """
+                ),
+                {"threshold": threshold, "org_id": scope.org_id},
             ).fetchall()
 
         new_cache = {row[0] for row in rows}
         with _known_cache_lock:
-            _known_user_cache = new_cache
+            _known_user_cache_by_org[scope.org_id or ""] = new_cache
+            if scope.state in {"single_tenant_default", "defaulted"}:
+                _known_user_cache = new_cache
 
-        logger.debug("[EMOTION] Refreshed known user cache: %d users", len(new_cache))
+        logger.debug(
+            "[EMOTION] Refreshed known user cache: %d users org_hash=%s",
+            len(new_cache),
+            hash_memory_identifier(scope.org_id),
+        )
         return len(new_cache)
     except Exception as e:
         logger.debug("[EMOTION] Failed to refresh known user cache: %s", e)
         return 0
+
+
+def _resolve_known_user_scope(organization_id: Optional[str]) -> MemoryWriteScope:
+    if isinstance(organization_id, str) and organization_id.strip():
+        return MemoryWriteScope(
+            org_id=organization_id.strip(),
+            state="explicit",
+            warnings=[],
+            write_allowed=True,
+        )
+    return resolve_memory_read_scope()
+
+
+def _scope_allows_known_user_cache(scope: MemoryWriteScope) -> bool:
+    return bool(scope.write_allowed and scope.org_id)
+
+
+def _log_known_user_scope_blocked(
+    operation: str,
+    scope: MemoryWriteScope,
+    *,
+    user_id: Optional[str] = None,
+) -> None:
+    warnings = list(scope.warnings)
+    if "missing_org_context" in warnings:
+        warnings.append(_KNOWN_USER_CACHE_MISSING_ORG_WARNING)
+    logger.warning(
+        "[EMOTION] %s blocked user_hash=%s org_hash=%s org_scope=%s warnings=%s",
+        operation,
+        hash_memory_identifier(user_id),
+        hash_memory_identifier(scope.org_id),
+        scope.state,
+        sorted(set(warnings)),
+    )
 
 
 # =============================================================================

@@ -227,7 +227,11 @@ async def test_execute_forced_web_search_shortcut_emits_events(monkeypatch):
         invoke_call["tool"] = tool_arg
         invoke_call["args"] = args
         invoke_call.update(kwargs)
-        return "URL: https://example.test\nTin mới."
+        return (
+            "URL: https://example.test\n"
+            "Tin mới.\n"
+            "access_token=raw-forced-token-123456 page_id=page-secret-123456"
+        )
 
     response = await runtime.execute_forced_web_search_shortcut(
         query="@web-search giá dầu hôm nay",
@@ -263,7 +267,9 @@ async def test_execute_forced_web_search_shortcut_emits_events(monkeypatch):
     assert tool_events[0]["type"] == "call"
     assert tool_events[0]["name"] == "tool_web_search"
     assert tool_events[1]["type"] == "result"
-    assert tool_events[1]["result"] == "URL: https://example.test\nTin mới."
+    assert "URL: https://example.test" in tool_events[1]["result"]
+    assert "raw-forced-token" not in tool_events[1]["result"]
+    assert "page-secret-123456" not in tool_events[1]["result"]
     assert invoke_call["tool"] is tool
     assert invoke_call["args"]["query"] == "giá dầu hôm nay"
     assert invoke_call["tool_name"] == "tool_web_search"
@@ -2934,7 +2940,63 @@ async def test_document_host_action_shortcut_emits_preview_event_contract() -> N
 
 
 @pytest.mark.asyncio
-async def test_wiii_connect_facebook_post_preflight_defers_ready_request_to_tool_schema() -> None:
+async def test_document_host_action_shortcut_redacts_public_tool_args() -> None:
+    pushed_events: list[dict] = []
+    tool_call_events: list[dict] = []
+    invoked_args: dict = {}
+    state: dict = {}
+
+    shortcut = DocumentHostActionShortcut(
+        tool_name="tool_preview_lesson_patch",
+        tool_call_id="forced_doc_preview_sensitive",
+        thinking="Preview only.",
+        thinking_summary="Preview document lesson",
+        thinking_provenance="test_document_preview",
+        response="Preview sent.",
+        failure_log_message="failed: %s",
+    )
+
+    async def push_event(event: dict) -> None:
+        pushed_events.append(event)
+
+    async def invoke_tool(tool, args, **kwargs):
+        invoked_args.update(args)
+        return {"host_action": "preview"}
+
+    async def emit_host_action(**kwargs) -> None:
+        return None
+
+    await execute_document_host_action_shortcut(
+        shortcut=shortcut,
+        tool=object(),
+        args={
+            "title": "Draft",
+            "content": "private uploaded document excerpt",
+            "source_references": [{"excerpt": "raw source text"}],
+            "course_plan": {"chapters": [{"title": "raw chapter"}]},
+        },
+        state=state,
+        tool_call_events=tool_call_events,
+        push_event=push_event,
+        invoke_tool_with_runtime=invoke_tool,
+        maybe_emit_host_action_event=emit_host_action,
+        summarize_tool_result_for_stream=lambda name, result: "summary",
+        runtime_context_base=None,
+        query_snippet="Draft",
+        logger_obj=__import__("logging").getLogger(__name__),
+    )
+
+    assert invoked_args["content"] == "private uploaded document excerpt"
+    public_args = pushed_events[0]["content"]["args"]
+    assert public_args["title"] == "Draft"
+    assert public_args["content"] == "[redacted]"
+    assert public_args["source_references"] == "[redacted]"
+    assert public_args["course_plan"] == "[redacted]"
+    assert tool_call_events[0]["args"] == public_args
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_facebook_post_preflight_defers_ready_request_to_tool_schema(monkeypatch) -> None:
     from app.engine.multi_agent.direct_wiii_connect_host_action_runtime import (
         preflight_requested_wiii_connect_facebook_post,
     )
@@ -2961,6 +3023,17 @@ async def test_wiii_connect_facebook_post_preflight_defers_ready_request_to_tool
     def build_assistant_message(content: str, **kwargs) -> dict:
         return {"content": content, "native_tool_messages": kwargs["native_tool_messages"]}
 
+    monkeypatch.setattr(
+        "app.engine.multi_agent.external_app_action_runtime."
+        "_effective_action_allowlists_for_providers",
+        lambda *_args, **_kwargs: {"facebook": ("FACEBOOK_CREATE_POST",)},
+    )
+    monkeypatch.setattr(
+        "app.engine.multi_agent.external_app_action_runtime."
+        "_ready_provider_slugs_from_state",
+        lambda *_args, **_kwargs: ("facebook",),
+    )
+
     response = await preflight_requested_wiii_connect_facebook_post(
         query="Wiii đăng bài Facebook, bài nào cũng được kèm ảnh này",
         state=state,
@@ -2972,7 +3045,7 @@ async def test_wiii_connect_facebook_post_preflight_defers_ready_request_to_tool
 
 
 @pytest.mark.asyncio
-async def test_wiii_connect_facebook_post_preflight_preempts_forced_web_search() -> None:
+async def test_wiii_connect_facebook_post_preflight_preempts_forced_web_search(monkeypatch) -> None:
     from app.engine.multi_agent.direct_tool_rounds_runtime import (
         execute_direct_tool_rounds_impl,
     )
@@ -3047,6 +3120,17 @@ async def test_wiii_connect_facebook_post_preflight_preempts_forced_web_search()
 
     async def push_status_only_progress(*_args, **_kwargs):
         return None
+
+    monkeypatch.setattr(
+        "app.engine.multi_agent.external_app_action_runtime."
+        "_effective_action_allowlists_for_providers",
+        lambda *_args, **_kwargs: {"facebook": ("FACEBOOK_CREATE_POST",)},
+    )
+    monkeypatch.setattr(
+        "app.engine.multi_agent.external_app_action_runtime."
+        "_ready_provider_slugs_from_state",
+        lambda *_args, **_kwargs: ("facebook",),
+    )
 
     state = {
         "context": {

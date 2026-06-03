@@ -19,6 +19,12 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 from app.engine.living_agent.models import (
     GoalPriority,
     GoalStatus,
@@ -26,6 +32,7 @@ from app.engine.living_agent.models import (
 )
 
 logger = logging.getLogger(__name__)
+_GOAL_MISSING_ORG_WARNING = "goal_manager_blocked_missing_org_context"
 
 
 class GoalManager:
@@ -38,7 +45,11 @@ class GoalManager:
         goals = await manager.get_active_goals()
     """
 
-    async def seed_initial_goals(self, soul) -> int:
+    async def seed_initial_goals(
+        self,
+        soul,
+        organization_id: Optional[str] = None,
+    ) -> int:
         """Create initial goals from soul definition if none exist.
 
         Sprint 210: Seeds goals from soul.interests.wants_to_learn so
@@ -50,7 +61,13 @@ class GoalManager:
         Returns:
             Number of goals seeded (0 if already has goals).
         """
-        existing = await self.get_active_goals()
+        scope = self._resolve_goal_scope(organization_id, write=True)
+        if not self._scope_allows_goals(scope):
+            self._log_scope_blocked("seed_initial_goals", scope)
+            return 0
+        org_id = scope.org_id
+
+        existing = await self.get_active_goals(org_id)
         if existing:
             return 0  # Already has goals
 
@@ -58,25 +75,33 @@ class GoalManager:
         wants_to_learn = getattr(getattr(soul, 'interests', None), 'wants_to_learn', None) or []
         for topic in wants_to_learn[:3]:
             try:
-                await self.create_goal(
+                goal = await self.create_goal(
                     title=f"Học về: {topic}",
                     description=f"Tìm hiểu và nắm vững kiến thức về {topic}",
                     priority="medium",
                     source="soul_seed",
+                    organization_id=org_id,
                 )
-                seeded += 1
+                if goal:
+                    seeded += 1
             except Exception as e:
-                logger.debug("[GOALS] Failed to seed goal '%s': %s", topic, e)
+                logger.debug(
+                    "[GOALS] Failed to seed goal topic_hash=%s: %s",
+                    hash_memory_identifier(topic),
+                    e,
+                )
 
         # One meta-goal from soul identity
         try:
-            await self.create_goal(
+            goal = await self.create_goal(
                 title="Giúp đỡ sinh viên hàng hải tốt hơn mỗi ngày",
                 description="Mục tiêu dài hạn: trở thành người bạn đồng hành đáng tin cậy cho sinh viên hàng hải Việt Nam",
                 priority="high",
                 source="soul_seed",
+                organization_id=org_id,
             )
-            seeded += 1
+            if goal:
+                seeded += 1
         except Exception as e:
             logger.debug("[GOALS] Failed to seed meta-goal: %s", e)
 
@@ -93,11 +118,16 @@ class GoalManager:
         milestones: Optional[List[str]] = None,
         target_date: Optional[datetime] = None,
         organization_id: Optional[str] = None,
-    ) -> WiiiGoal:
+    ) -> Optional[WiiiGoal]:
         """Create a new goal.
 
         New goals start as PROPOSED and need activation.
         """
+        scope = self._resolve_goal_scope(organization_id, write=True)
+        if not self._scope_allows_goals(scope):
+            self._log_scope_blocked("create_goal", scope)
+            return None
+
         goal = WiiiGoal(
             title=title,
             description=description,
@@ -106,36 +136,62 @@ class GoalManager:
             source=source,
             milestones=milestones or [],
             target_date=target_date,
-            organization_id=organization_id,
+            organization_id=scope.org_id,
         )
 
         await self._save_goal(goal)
-        logger.info("[GOALS] Created goal: %s (priority=%s)", title, priority)
+        logger.info(
+            "[GOALS] Created goal title_hash=%s (priority=%s)",
+            hash_memory_identifier(title),
+            priority,
+        )
         return goal
 
-    async def activate_goal(self, goal_id: str) -> bool:
+    async def activate_goal(
+        self,
+        goal_id: str,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """Move goal from PROPOSED to ACTIVE."""
-        return await self._update_status(goal_id, GoalStatus.ACTIVE)
+        return await self._update_status(goal_id, GoalStatus.ACTIVE, organization_id)
 
-    async def start_progress(self, goal_id: str) -> bool:
+    async def start_progress(
+        self,
+        goal_id: str,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """Move goal from ACTIVE to IN_PROGRESS."""
-        return await self._update_status(goal_id, GoalStatus.IN_PROGRESS)
+        return await self._update_status(goal_id, GoalStatus.IN_PROGRESS, organization_id)
 
-    async def complete_goal(self, goal_id: str) -> bool:
+    async def complete_goal(
+        self,
+        goal_id: str,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """Mark goal as COMPLETED."""
-        return await self._update_status(goal_id, GoalStatus.COMPLETED)
+        return await self._update_status(goal_id, GoalStatus.COMPLETED, organization_id)
 
-    async def abandon_goal(self, goal_id: str) -> bool:
+    async def abandon_goal(
+        self,
+        goal_id: str,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """Mark goal as ABANDONED."""
-        return await self._update_status(goal_id, GoalStatus.ABANDONED)
+        return await self._update_status(goal_id, GoalStatus.ABANDONED, organization_id)
 
     async def update_progress(
         self,
         goal_id: str,
         progress: float,
         milestone: Optional[str] = None,
+        organization_id: Optional[str] = None,
     ) -> bool:
         """Update goal progress and optionally record a milestone."""
+        scope = self._resolve_goal_scope(organization_id, write=True)
+        if not self._scope_allows_goals(scope):
+            self._log_scope_blocked("update_progress", scope, goal_id=goal_id)
+            return False
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -144,6 +200,7 @@ class GoalManager:
             with session_factory() as session:
                 params = {
                     "id": goal_id,
+                    "org_id": scope.org_id,
                     "progress": max(0.0, min(1.0, progress)),
                 }
 
@@ -158,6 +215,7 @@ class GoalManager:
                                 completed_at = CASE WHEN :progress >= 1.0 THEN NOW() ELSE completed_at END,
                                 updated_at = NOW()
                             WHERE id = :id
+                            AND organization_id = :org_id
                         """),
                         {**params, "milestone": json.dumps([milestone])},
                     )
@@ -170,13 +228,17 @@ class GoalManager:
                                 completed_at = CASE WHEN :progress >= 1.0 THEN NOW() ELSE completed_at END,
                                 updated_at = NOW()
                             WHERE id = :id
+                            AND organization_id = :org_id
                         """),
                         params,
                     )
                 session.commit()
 
             if progress >= 1.0:
-                logger.info("[GOALS] Goal completed: %s", goal_id)
+                logger.info(
+                    "[GOALS] Goal completed goal_hash=%s",
+                    hash_memory_identifier(goal_id),
+                )
             return True
         except Exception as e:
             logger.warning("[GOALS] Failed to update progress: %s", e)
@@ -220,17 +282,27 @@ class GoalManager:
                 source="weekly_reflection",
                 organization_id=organization_id,
             )
-            created.append(goal)
+            if goal:
+                created.append(goal)
 
         if created:
             logger.info("[GOALS] Proposed %d goals from reflection", len(created))
         return created
 
-    async def review_stale_goals(self, stale_days: int = 14) -> int:
+    async def review_stale_goals(
+        self,
+        stale_days: int = 14,
+        organization_id: Optional[str] = None,
+    ) -> int:
         """Auto-abandon goals with no progress for N days.
 
         Returns number of abandoned goals.
         """
+        scope = self._resolve_goal_scope(organization_id, write=True)
+        if not self._scope_allows_goals(scope):
+            self._log_scope_blocked("review_stale_goals", scope)
+            return 0
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -244,8 +316,9 @@ class GoalManager:
                         WHERE status IN ('proposed', 'active', 'in_progress')
                         AND updated_at < NOW() - INTERVAL '1 day' * :days
                         AND progress < 0.1
+                        AND organization_id = :org_id
                     """),
-                    {"days": stale_days},
+                    {"days": stale_days, "org_id": scope.org_id},
                 )
                 session.commit()
                 count = result.rowcount
@@ -260,15 +333,29 @@ class GoalManager:
     # Internal helpers
     # =========================================================================
 
-    async def _update_status(self, goal_id: str, new_status: GoalStatus) -> bool:
+    async def _update_status(
+        self,
+        goal_id: str,
+        new_status: GoalStatus,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """Update goal status."""
+        scope = self._resolve_goal_scope(organization_id, write=True)
+        if not self._scope_allows_goals(scope):
+            self._log_scope_blocked("update_status", scope, goal_id=goal_id)
+            return False
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
 
             session_factory = get_shared_session_factory()
             with session_factory() as session:
-                params = {"id": goal_id, "status": new_status.value}
+                params = {
+                    "id": goal_id,
+                    "org_id": scope.org_id,
+                    "status": new_status.value,
+                }
                 extra = ""
                 if new_status == GoalStatus.COMPLETED:
                     extra = ", completed_at = NOW(), progress = 1.0"
@@ -278,6 +365,7 @@ class GoalManager:
                         UPDATE wiii_goals
                         SET status = :status, updated_at = NOW(){extra}
                         WHERE id = :id
+                        AND organization_id = :org_id
                     """),
                     params,
                 )
@@ -293,6 +381,12 @@ class GoalManager:
         organization_id: Optional[str] = None,
     ) -> List[WiiiGoal]:
         """Query goals with optional filters."""
+        scope = self._resolve_goal_scope(organization_id, write=False)
+        if not self._scope_allows_goals(scope):
+            self._log_scope_blocked("query_goals", scope)
+            return []
+        org_id = scope.org_id
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -309,9 +403,8 @@ class GoalManager:
                 if statuses:
                     query += " AND status = ANY(:statuses)"
                     params["statuses"] = statuses
-                if organization_id:
-                    query += " AND organization_id = :org_id"
-                    params["org_id"] = organization_id
+                query += " AND organization_id = :org_id"
+                params["org_id"] = org_id
                 query += " ORDER BY created_at DESC"
 
                 rows = session.execute(text(query), params).fetchall()
@@ -339,6 +432,12 @@ class GoalManager:
 
     async def _save_goal(self, goal: WiiiGoal) -> None:
         """Insert a new goal into the database."""
+        scope = self._resolve_goal_scope(goal.organization_id, write=True)
+        if not self._scope_allows_goals(scope):
+            self._log_scope_blocked("save_goal", scope, goal_id=str(goal.id))
+            return
+        goal.organization_id = scope.org_id
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -371,6 +470,43 @@ class GoalManager:
                 session.commit()
         except Exception as e:
             logger.warning("[GOALS] Failed to save goal: %s", e)
+
+    def _resolve_goal_scope(
+        self,
+        organization_id: Optional[str],
+        *,
+        write: bool,
+    ) -> MemoryWriteScope:
+        if isinstance(organization_id, str) and organization_id.strip():
+            return MemoryWriteScope(
+                org_id=organization_id.strip(),
+                state="explicit",
+                warnings=[],
+                write_allowed=True,
+            )
+        return resolve_memory_write_scope() if write else resolve_memory_read_scope()
+
+    def _scope_allows_goals(self, scope: MemoryWriteScope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _log_scope_blocked(
+        self,
+        operation: str,
+        scope: MemoryWriteScope,
+        *,
+        goal_id: Optional[str] = None,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_GOAL_MISSING_ORG_WARNING)
+        logger.warning(
+            "[GOALS] %s blocked goal_hash=%s org_hash=%s org_scope=%s warnings=%s",
+            operation,
+            hash_memory_identifier(goal_id),
+            hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
 
 # =============================================================================

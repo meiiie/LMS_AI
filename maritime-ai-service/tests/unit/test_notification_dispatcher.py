@@ -13,6 +13,7 @@ Verifies:
 """
 
 import json
+import logging
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -47,6 +48,7 @@ def sample_task():
         "schedule_type": "once",
         "channel": "websocket",
         "extra_data": {},
+        "organization_id": "org-1",
     }
 
 
@@ -81,6 +83,55 @@ class TestWebSocketNotification:
         assert result.delivered is True
         assert result.channel == "websocket"
         assert "2 sessions" in result.detail
+        mock_manager.send_to_user.assert_awaited_once_with(
+            "user-1",
+            "hello",
+            organization_id="",
+        )
+
+    @pytest.mark.asyncio
+    async def test_notify_user_filters_websocket_by_metadata_org(self):
+        """WebSocket notifications carry org scope into session filtering."""
+        from app.services.notifications.adapters.websocket import WebSocketAdapter
+
+        adapter = WebSocketAdapter()
+        mock_manager = MagicMock()
+        mock_manager.is_user_online.return_value = True
+        mock_manager.send_to_user = AsyncMock(return_value=1)
+
+        with patch("app.api.v1.websocket.manager", mock_manager):
+            result = await adapter.send(
+                "user-1",
+                "hello",
+                metadata={"organization_id": "org-A"},
+            )
+
+        assert result.delivered is True
+        mock_manager.send_to_user.assert_awaited_once_with(
+            "user-1",
+            "hello",
+            organization_id="org-A",
+        )
+
+    @pytest.mark.asyncio
+    async def test_notify_user_metadata_org_without_matching_session_not_delivered(self):
+        """Online users are not delivered when no session matches the target org."""
+        from app.services.notifications.adapters.websocket import WebSocketAdapter
+
+        adapter = WebSocketAdapter()
+        mock_manager = MagicMock()
+        mock_manager.is_user_online.return_value = True
+        mock_manager.send_to_user = AsyncMock(return_value=0)
+
+        with patch("app.api.v1.websocket.manager", mock_manager):
+            result = await adapter.send(
+                "user-1",
+                "hello",
+                metadata={"organization_id": "org-A"},
+            )
+
+        assert result.delivered is False
+        assert result.detail == "No matching WebSocket sessions"
 
     @pytest.mark.asyncio
     async def test_notify_user_offline(self):
@@ -111,6 +162,30 @@ class TestWebSocketNotification:
 
         assert result.delivered is False
         assert result.channel == "websocket"
+
+    @pytest.mark.asyncio
+    async def test_notify_websocket_exception_redacts_detail(self):
+        """WebSocket exception diagnostics must not expose user or message."""
+        from app.services.notifications.adapters.websocket import WebSocketAdapter
+
+        adapter = WebSocketAdapter()
+        mock_manager = MagicMock()
+        mock_manager.is_user_online.return_value = True
+        mock_manager.send_to_user = AsyncMock(
+            side_effect=RuntimeError(
+                "failed for user-secret with access_token=raw-ws-token "
+                "message=private-message"
+            )
+        )
+
+        with patch("app.api.v1.websocket.manager", mock_manager):
+            result = await adapter.send("user-secret", "private-message")
+
+        assert result.delivered is False
+        assert result.channel == "websocket"
+        assert "user-secret" not in result.detail
+        assert "raw-ws-token" not in result.detail
+        assert "private-message" not in result.detail
 
     @pytest.mark.asyncio
     async def test_notify_user_via_channel_websocket(self, dispatcher):
@@ -200,6 +275,34 @@ class TestTelegramNotification:
         assert "403" in result.detail
 
     @pytest.mark.asyncio
+    async def test_notify_telegram_exception_redacts_secret_diagnostics(self):
+        """Network exception detail must not expose token, recipient, or text."""
+        from app.services.notifications.adapters.telegram import TelegramAdapter
+
+        adapter = TelegramAdapter()
+        mock_settings = MagicMock()
+        mock_settings.telegram_bot_token = "bot-token-123"
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(
+            side_effect=RuntimeError(
+                "failed https://api.telegram.org/botbot-token-123/sendMessage"
+                "?chat_id=user-secret&text=private-message"
+            )
+        )
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("app.core.config.settings", mock_settings), \
+             patch("httpx.AsyncClient", return_value=mock_client):
+            result = await adapter.send("user-secret", "private-message")
+
+        assert result.delivered is False
+        assert "bot-token-123" not in result.detail
+        assert "user-secret" not in result.detail
+        assert "private-message" not in result.detail
+
+    @pytest.mark.asyncio
     async def test_notify_telegram_json_payload(self):
         """Extracts content from JSON payload for Telegram text."""
         from app.services.notifications.adapters.telegram import TelegramAdapter
@@ -258,6 +361,24 @@ class TestUnknownChannel:
         assert result["delivered"] is False
         assert "Unknown channel" in result["detail"]
 
+    @pytest.mark.asyncio
+    async def test_unknown_channel_log_hashes_recipient(self, dispatcher, caplog):
+        """Unknown channel diagnostics must not log the raw recipient."""
+        caplog.set_level(logging.WARNING, logger="app.services.notification_dispatcher")
+
+        result = await dispatcher.notify_user(
+            "user-secret",
+            "private-message",
+            channel="discord",
+        )
+
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        assert result["delivered"] is False
+        assert "Unknown channel: discord" in result["detail"]
+        assert "recipient_ref=sha256:" in log_text
+        assert "user-secret" not in log_text
+        assert "private-message" not in log_text
+
 
 # =============================================================================
 # Task result formatting
@@ -286,6 +407,30 @@ class TestNotifyTaskResult:
         assert payload["content"] == sample_result["response"]
         assert payload["mode"] == "notification"
         assert "timestamp" in payload
+
+    @pytest.mark.asyncio
+    async def test_task_result_metadata_includes_org_scope(
+        self,
+        dispatcher,
+        sample_task,
+        sample_result,
+    ):
+        """Task result delivery passes org scope to channel adapters."""
+        sent_metadata = []
+
+        async def mock_notify(user_id, message, channel="websocket", metadata=None):
+            sent_metadata.append(metadata)
+            return {"delivered": True, "channel": channel, "detail": "ok"}
+
+        dispatcher.notify_user = mock_notify
+        await dispatcher.notify_task_result(sample_task, sample_result)
+
+        assert sent_metadata == [
+            {
+                "task_id": "task-abc-12345678",
+                "organization_id": "org-1",
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_task_result_uses_task_channel(self, dispatcher, sample_task, sample_result):

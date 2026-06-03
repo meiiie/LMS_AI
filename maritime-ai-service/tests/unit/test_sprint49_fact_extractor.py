@@ -402,6 +402,57 @@ class TestStoreUserFactUpsert:
         saved = call_args[0][0]
         assert saved.metadata["fact_type"] == "role"
 
+    @pytest.mark.asyncio
+    async def test_blocks_missing_org_context_before_embedding(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.runtime.session_event_log import InMemorySessionEventLog
+
+        log = InMemorySessionEventLog()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        monkeypatch.setattr(
+            "app.engine.runtime.session_event_log.get_session_event_log",
+            lambda: log,
+        )
+
+        fe = _make_extractor()
+        token = current_org_id.set(None)
+        try:
+            result = await fe.store_user_fact_upsert(
+                user_id="user-private-123",
+                fact_content="PRIVATE FACT access_token=raw-fact-token-12345",
+                fact_type="goal",
+                session_id="session-private-123",
+                source_message="PRIVATE MESSAGE",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result is False
+        fe._embeddings.aembed_documents.assert_not_awaited()
+        fe._repository.save_memory.assert_not_called()
+        fe._repository.update_fact.assert_not_called()
+        events = await log.get_events(session_id="session-private-123")
+        assert len(events) == 1
+        payload = events[0].payload
+        assert payload["write"]["kind"] == "fact_upsert"
+        assert payload["write"]["status"] == "blocked"
+        assert payload["scope"]["write_allowed"] is False
+        assert (
+            payload["scope"]["organization_context"]
+            == "blocked_missing_org_context"
+        )
+        serialized = str(payload)
+        assert "PRIVATE FACT" not in serialized
+        assert "raw-fact-token" not in serialized
+        assert "user-private-123" not in serialized
+        assert "session-private-123" not in serialized
+
 
 # ============================================================================
 # _enforce_memory_cap
@@ -577,3 +628,56 @@ class TestExtractAndStoreFacts:
 
         result = await fe.extract_and_store_facts("u1", "Hello")
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_blocks_missing_org_context_before_embedding(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.runtime.session_event_log import InMemorySessionEventLog
+
+        log = InMemorySessionEventLog()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        monkeypatch.setattr(
+            "app.engine.runtime.session_event_log.get_session_event_log",
+            lambda: log,
+        )
+        fe = _make_extractor()
+        fe.extract_user_facts = AsyncMock(return_value=UserFactExtraction(
+            facts=[],
+            raw_message="PRIVATE MESSAGE",
+        ))
+        token = current_org_id.set(None)
+        try:
+            result = await fe.extract_and_store_facts(
+                user_id="user-private-123",
+                message="PRIVATE MESSAGE access_token=raw-message-token-12345",
+                session_id="session-private-123",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        fe.extract_user_facts.assert_not_awaited()
+        fe._embeddings.aembed_documents.assert_not_awaited()
+        fe._repository.save_memory.assert_not_called()
+        events = await log.get_events(session_id="session-private-123")
+        assert len(events) == 1
+        payload = events[0].payload
+        assert payload["write"]["kind"] == "fact_extraction"
+        assert payload["write"]["status"] == "blocked"
+        assert payload["write"]["stored_fact_count"] == 0
+        assert payload["scope"]["write_allowed"] is False
+        assert (
+            payload["scope"]["organization_context"]
+            == "blocked_missing_org_context"
+        )
+        serialized = str(payload)
+        assert "PRIVATE MESSAGE" not in serialized
+        assert "raw-message-token" not in serialized
+        assert "user-private-123" not in serialized
+        assert "session-private-123" not in serialized

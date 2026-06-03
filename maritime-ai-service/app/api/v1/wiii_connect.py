@@ -14,14 +14,17 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import settings
-from app.core.security import require_auth
+from app.core.security import optional_auth, require_auth
 from app.core.security_models import AuthenticatedUser
 from app.engine.wiii_connect import (
     DEFAULT_STALE_PENDING_CONNECTION_TTL_SECONDS,
+    FACEBOOK_POST_APPROVAL_TOKEN_MAX_AGE_SECONDS,
     WiiiConnectAuthorizationUrlRequest,
     WiiiConnectCallbackRequest,
     WiiiConnectConnectionRecordV1,
     WiiiConnectExecutionRequest,
+    WiiiConnectBackendActionPlan,
+    WiiiConnectOperationApprovalDecision,
     WiiiConnectSessionStartRequest,
     WiiiConnectScopeGrant,
     WiiiConnectVaultSecretRef,
@@ -36,8 +39,14 @@ from app.engine.wiii_connect import (
     build_composio_external_user_id,
     build_composio_provider_managed_vault_capability,
     build_composio_provider_adapter_capability,
+    build_connection_lifecycle_decision,
+    execute_wiii_connect_composio_backend_action,
     build_facebook_post_approval_token,
     build_facebook_post_preview_evidence_id,
+    build_wiii_connect_operation_approval_record,
+    build_wiii_connect_effective_action_inventory,
+    build_wiii_connect_operation_fingerprint,
+    build_wiii_connect_snapshot,
     build_wiii_connect_callback_state,
     begin_connection_session,
     connection_ref_matches,
@@ -48,9 +57,14 @@ from app.engine.wiii_connect import (
     disconnect_composio_connected_account,
     get_wiii_connect_provider_entry,
     get_wiii_connect_persistent_storage,
+    preflight_wiii_connect_composio_backend_action,
+    select_wiii_connect_connection,
+    storage_status_metadata,
+    unavailable_operation_approval_decision,
     execute_composio_tool,
     facebook_image_sha256,
     get_wiii_connect_curated_action,
+    list_wiii_connect_curated_actions,
     list_composio_facebook_pages,
     list_composio_connected_accounts,
     normalize_facebook_image_filename,
@@ -63,6 +77,7 @@ from app.engine.wiii_connect import (
     provider_callback_decision_for_entry,
     provider_connection_status_for_entry,
     provider_registry_public_metadata,
+    resolve_wiii_connect_action_authorization,
     scope_grant_from_mapping,
     scope_policy_for_provider_entry,
     stage_composio_file_upload,
@@ -72,6 +87,11 @@ from app.engine.wiii_connect import (
     vault_status_public_metadata,
 )
 from app.engine.wiii_connect.adapter_v1 import ActionMutation
+from app.engine.wiii_connect.argument_key_policy import (
+    model_visible_arguments,
+    safe_public_argument_key,
+    safe_public_argument_keys,
+)
 
 
 router = APIRouter(prefix="/wiii-connect", tags=["wiii-connect"])
@@ -159,6 +179,37 @@ async def list_wiii_connect_providers() -> dict[str, object]:
     return provider_registry_public_metadata()
 
 
+@router.get("/snapshot")
+async def get_wiii_connect_runtime_snapshot(
+    query: str = "",
+    surface: str | None = None,
+    current_user: AuthenticatedUser | None = Depends(optional_auth),
+) -> dict[str, object]:
+    """Return the privacy-safe runtime connection/path snapshot contract."""
+
+    return build_wiii_connect_snapshot(
+        state=_wiii_connect_snapshot_state(current_user),
+        query=query,
+        surface=surface,
+    ).to_metadata()
+
+
+@router.get("/doctor")
+async def get_wiii_connect_runtime_doctor(
+    query: str = "",
+    surface: str | None = None,
+    current_user: AuthenticatedUser | None = Depends(optional_auth),
+) -> dict[str, object]:
+    """Return a privacy-safe runtime doctor summary derived from the snapshot."""
+
+    snapshot = build_wiii_connect_snapshot(
+        state=_wiii_connect_snapshot_state(current_user),
+        query=query,
+        surface=surface,
+    )
+    return snapshot.doctor_report().to_metadata()
+
+
 @router.get("/vault/status")
 async def get_wiii_connect_vault_status() -> dict[str, object]:
     """Return privacy-safe Wiii Connect vault readiness metadata."""
@@ -227,7 +278,7 @@ async def get_wiii_connect_provider_activation_readiness(
     slug: str,
     connection_id: str | None = None,
     connection_ref: str | None = None,
-    action_slug: str = "GMAIL_FETCH_EMAILS",
+    action_slug: str = "",
     probe_database: bool = True,
     current_user: AuthenticatedUser = Depends(require_auth),
 ) -> dict[str, object]:
@@ -242,10 +293,12 @@ async def get_wiii_connect_provider_activation_readiness(
     if entry is None:
         raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
 
-    action = _safe_action_slug(action_slug)
     composio_config = build_composio_adapter_config()
     connect_entry = build_composio_connect_enabled_entry(entry, composio_config)
     execution_entry = build_composio_execution_enabled_entry(entry, composio_config)
+    action = _safe_action_slug(action_slug) or _default_activation_action_slug_for_provider(
+        execution_entry.slug,
+    )
     adapter_capability = build_composio_provider_adapter_capability(composio_config)
     vault_capability = build_composio_provider_managed_vault_capability(
         composio_config,
@@ -478,26 +531,42 @@ async def list_wiii_connect_provider_connections(
     composio_config = build_composio_adapter_config()
     effective_entry = build_composio_connect_enabled_entry(entry, composio_config)
     adapter_capability = build_composio_provider_adapter_capability(composio_config)
-    if not effective_entry.enabled or not adapter_capability.authorization_ready:
-        return {
-            "version": "wiii_connect_connection_list.v1",
-            "status": "blocked",
-            "reason": (
-                "provider_disabled"
-                if not effective_entry.enabled
-                else adapter_capability.reason
-            ),
-            "provider_slug": effective_entry.slug,
-            "provider_kind": effective_entry.provider_kind,
-            "connection_count": 0,
-            "connections": [],
-            "provider": None,
-            "storage": default_persistent_storage_status_metadata(),
-        }
-
     storage = _wiii_connect_storage_status_metadata(
         probe_database=probe_database,
     )
+    stored_connections = _stored_wiii_connect_connections(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+    )
+    stored_lifecycle_connection = stored_connections[0] if stored_connections else None
+    if not effective_entry.enabled or not adapter_capability.authorization_ready:
+        blocked_reason = (
+            "provider_disabled"
+            if not effective_entry.enabled
+            else adapter_capability.reason
+        )
+        return {
+            "version": "wiii_connect_connection_list.v1",
+            "status": "blocked",
+            "reason": blocked_reason,
+            "provider_slug": effective_entry.slug,
+            "provider_kind": effective_entry.provider_kind,
+            "connection_count": len(stored_connections),
+            "connections": [
+                connection.to_public_metadata()
+                for connection in stored_connections
+            ],
+            "connection_lifecycle": build_connection_lifecycle_decision(
+                provider_slug=effective_entry.slug,
+                connection=stored_lifecycle_connection,
+                reason=blocked_reason,
+                ready_to_connect=False,
+            ).to_public_metadata(),
+            "provider": None,
+            "storage": storage,
+        }
+
     _expire_stale_pending_connections(
         storage,
         current_user=current_user,
@@ -518,6 +587,11 @@ async def list_wiii_connect_provider_connections(
             current_user=current_user,
             storage_metadata=storage,
         )
+    lifecycle_connection = (
+        provider_result.connections[0]
+        if provider_result.connections
+        else stored_lifecycle_connection
+    )
     return {
         "version": "wiii_connect_connection_list.v1",
         "status": "ready" if provider_result.ready else "blocked",
@@ -529,6 +603,14 @@ async def list_wiii_connect_provider_connections(
             connection.to_public_metadata()
             for connection in provider_result.connections
         ],
+        "connection_lifecycle": build_connection_lifecycle_decision(
+            provider_slug=effective_entry.slug,
+            connection=lifecycle_connection,
+            reason=provider_result.reason if provider_result.connections else "",
+            ready_to_connect=bool(
+                effective_entry.enabled and adapter_capability.authorization_ready
+            ),
+        ).to_public_metadata(),
         "provider": provider_result.to_public_metadata(),
         "storage": storage,
     }
@@ -827,10 +909,12 @@ async def grant_wiii_connect_provider_connection_scopes(
 async def list_wiii_connect_facebook_pages(
     slug: str,
     connection_ref: str,
+    http_request: Request,
     current_user: AuthenticatedUser = Depends(require_auth),
 ) -> dict[str, object]:
     """List sanitized Facebook Page choices for a connected account."""
 
+    request_id = _request_id_from_http_request(http_request)
     entry = get_wiii_connect_provider_entry(slug)
     if entry is None:
         raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
@@ -851,6 +935,7 @@ async def list_wiii_connect_facebook_pages(
         path="external_app_action",
         mutation="read",
         argument_keys=("fields", "limit"),
+        request_id=request_id or "",
     )
     gateway = decide_execution_gateway(
         effective_entry,
@@ -898,6 +983,7 @@ async def list_wiii_connect_facebook_pages(
             user_id=current_user.user_id,
         ),
         connected_account_id=connection.connection_id,
+        request_id=request.request_id,
     )
     _append_execution_stage_audit(
         gateway,
@@ -917,10 +1003,12 @@ async def list_wiii_connect_facebook_pages(
 async def preview_wiii_connect_facebook_post(
     slug: str,
     body: WiiiConnectFacebookPostPreviewBody,
+    http_request: Request,
     current_user: AuthenticatedUser = Depends(require_auth),
 ) -> dict[str, object]:
     """Create a preview approval token for a Facebook Page post."""
 
+    request_id = _request_id_from_http_request(http_request)
     entry = get_wiii_connect_provider_entry(slug)
     if entry is None:
         raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
@@ -962,6 +1050,7 @@ async def preview_wiii_connect_facebook_post(
             image_bytes=image_bytes,
             image_url=image_url,
         ),
+        request_id=request_id or "",
     )
     gateway = decide_execution_gateway(
         effective_entry,
@@ -980,6 +1069,15 @@ async def preview_wiii_connect_facebook_post(
     )
     image_hash = facebook_image_sha256(image_bytes)
     preview_evidence_id = build_facebook_post_preview_evidence_id(
+        provider_slug=effective_entry.slug,
+        action_slug=action_slug,
+        connection_ref=selected_connection_ref,
+        page_id=page_id,
+        message=message,
+        image_sha256=image_hash,
+        image_url=image_url,
+    )
+    operation_fingerprint = build_wiii_connect_operation_fingerprint(
         provider_slug=effective_entry.slug,
         action_slug=action_slug,
         connection_ref=selected_connection_ref,
@@ -1013,6 +1111,20 @@ async def preview_wiii_connect_facebook_post(
             gateway=gateway,
             storage=storage,
         )
+    operation_approval = _record_facebook_post_operation_approval(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+        action_slug=action_slug,
+        preview_evidence_id=preview_evidence_id,
+        request_fingerprint=operation_fingerprint,
+        selected_connection_ref=selected_connection_ref,
+        page_selected=bool(page_id),
+        message_length=len(message),
+        image_present=bool(image_bytes or image_url),
+        image_size_bytes=len(image_bytes),
+        image_url_present=bool(image_url),
+    )
     approval_token = build_facebook_post_approval_token(
         provider_slug=effective_entry.slug,
         action_slug=action_slug,
@@ -1040,6 +1152,7 @@ async def preview_wiii_connect_facebook_post(
             "image_url_present": bool(image_url),
         },
         "gateway": gateway.to_public_metadata(),
+        "approval_ledger": operation_approval.to_public_metadata(),
         "storage": storage,
     }
 
@@ -1048,10 +1161,12 @@ async def preview_wiii_connect_facebook_post(
 async def apply_wiii_connect_facebook_post(
     slug: str,
     body: WiiiConnectFacebookPostApplyBody,
+    http_request: Request,
     current_user: AuthenticatedUser = Depends(require_auth),
 ) -> dict[str, object]:
     """Post to Facebook only after preview evidence and approval token match."""
 
+    request_id = _request_id_from_http_request(http_request)
     entry = get_wiii_connect_provider_entry(slug)
     if entry is None:
         raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
@@ -1107,6 +1222,38 @@ async def apply_wiii_connect_facebook_post(
             connection_ref=body.connection_ref,
         )
     )
+    operation_fingerprint = build_wiii_connect_operation_fingerprint(
+        provider_slug=effective_entry.slug,
+        action_slug=action_slug,
+        connection_ref=selected_connection_ref,
+        page_id=page_id,
+        message=message,
+        image_sha256=image_hash,
+        image_url=image_url,
+    )
+    operation_approval = _consume_facebook_post_operation_approval(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+        action_slug=action_slug,
+        preview_evidence_id=token_check.preview_evidence_id,
+        request_fingerprint=operation_fingerprint,
+    )
+    if operation_approval.blocked:
+        return {
+            "version": "wiii_connect_facebook_post_apply.v1",
+            "status": "blocked",
+            "reason": operation_approval.reason,
+            "provider_slug": effective_entry.slug,
+            "action_slug": action_slug,
+            "token": token_check.to_public_metadata(),
+            "approval_ledger": operation_approval.to_public_metadata(),
+            "gateway": None,
+            "schema": None,
+            "upload": None,
+            "execution": None,
+            "storage": storage,
+        }
     argument_keys = _facebook_post_argument_keys(
         action_slug=action_slug,
         image_bytes=image_bytes,
@@ -1121,6 +1268,7 @@ async def apply_wiii_connect_facebook_post(
         preview_evidence_id=token_check.preview_evidence_id,
         preview_evidence_required=True,
         argument_keys=argument_keys,
+        request_id=request_id or "",
     )
     gateway = decide_execution_gateway(
         effective_entry,
@@ -1147,6 +1295,7 @@ async def apply_wiii_connect_facebook_post(
         "message_length": len(message),
         "image_present": bool(image_bytes or image_url),
         "image_size_bytes": len(image_bytes),
+        "approval_ledger": operation_approval.to_public_metadata(),
     }
     if not gateway.allowed or connection is None:
         _append_execution_audit(
@@ -1162,11 +1311,13 @@ async def apply_wiii_connect_facebook_post(
             reason=gateway.reason,
             gateway=gateway,
             storage=storage,
+            approval_ledger=operation_approval.to_public_metadata(),
         )
     schema = await verify_composio_tool_schema(
         config=composio_config,
         provider_slug=effective_entry.slug,
         action_slug=action_slug,
+        request_id=request.request_id,
     )
     if not schema.ready:
         _append_execution_stage_audit(
@@ -1189,6 +1340,7 @@ async def apply_wiii_connect_facebook_post(
             gateway=gateway,
             storage=storage,
             schema=schema.to_public_metadata(),
+            approval_ledger=operation_approval.to_public_metadata(),
         )
 
     arguments: dict[str, Any] = {
@@ -1205,6 +1357,7 @@ async def apply_wiii_connect_facebook_post(
             filename=image_filename,
             mimetype=image_media_type,
             content=image_bytes,
+            request_id=request.request_id,
         )
         upload_metadata = upload.to_public_metadata()
         if not upload.ready:
@@ -1225,6 +1378,7 @@ async def apply_wiii_connect_facebook_post(
                 storage=storage,
                 schema=schema.to_public_metadata(),
                 upload=upload_metadata,
+                approval_ledger=operation_approval.to_public_metadata(),
             )
         arguments["photo"] = upload.file_descriptor
     elif image_url:
@@ -1258,6 +1412,7 @@ async def apply_wiii_connect_facebook_post(
             schema=schema.to_public_metadata(),
             upload=upload_metadata,
             missing_argument_keys=list(missing_argument_keys),
+            approval_ledger=operation_approval.to_public_metadata(),
         )
 
     _append_execution_stage_audit(
@@ -1284,6 +1439,7 @@ async def apply_wiii_connect_facebook_post(
         ),
         connected_account_id=connection.connection_id,
         arguments=arguments,
+        request_id=request.request_id,
     )
     _append_execution_stage_audit(
         gateway,
@@ -1310,6 +1466,7 @@ async def apply_wiii_connect_facebook_post(
         "schema": schema.to_public_metadata(),
         "upload": upload_metadata,
         "execution": execution.to_public_metadata(),
+        "approval_ledger": operation_approval.to_public_metadata(),
         "storage": storage,
     }
 
@@ -1329,10 +1486,73 @@ async def list_wiii_connect_provider_actions(slug: str) -> dict[str, object]:
     )
 
 
+@router.get("/providers/{slug}/effective-actions")
+async def list_wiii_connect_provider_effective_actions(
+    slug: str,
+    connection_ref: str | None = None,
+    probe_database: bool = True,
+    current_user: AuthenticatedUser = Depends(require_auth),
+) -> dict[str, object]:
+    """Return the OpenHuman-style effective action inventory for a provider.
+
+    This endpoint performs no provider network call and exposes no tool schema.
+    It only projects which curated actions can be seen by the agent, which are
+    executable now, and which policy stage is blocking the rest.
+    """
+
+    entry = get_wiii_connect_provider_entry(slug)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
+    composio_config = build_composio_adapter_config()
+    effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
+    storage = _wiii_connect_storage_status_metadata(probe_database=probe_database)
+    selected_connection_ref = _safe_public_connection_ref(connection_ref)
+    safe_connection_id = _resolve_provider_connection_id(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+        connection_ref_or_id=selected_connection_ref,
+    )
+    _expire_stale_pending_connections(
+        storage,
+        current_user=current_user,
+        provider_slug=effective_entry.slug,
+    )
+    connection = (
+        get_wiii_connect_persistent_storage().get_connection_record(
+            organization_id=_wiii_connect_owner_organization_id(current_user),
+            user_id=current_user.user_id,
+            provider_slug=effective_entry.slug,
+            connection_id=safe_connection_id,
+        )
+        if _connection_storage_ready(storage) and safe_connection_id
+        else None
+    )
+    inventory = build_wiii_connect_effective_action_inventory(
+        entry=effective_entry,
+        connection=connection,
+        adapter_capability=build_composio_provider_adapter_capability(composio_config),
+        runtime_enabled_action_slugs=composio_config.executable_action_slugs_for_provider(
+            effective_entry.slug,
+        ),
+        audit_ledger_metadata={
+            "persistent": bool(
+                storage.get("persistent") and storage.get("audit_ledger_ready")
+            ),
+        },
+        connection_ref_present=bool(selected_connection_ref),
+        connection_selection_required=not bool(selected_connection_ref),
+        storage_metadata=storage,
+        scope_policy=scope_policy_for_provider_entry(effective_entry),
+    )
+    return inventory.to_public_metadata()
+
+
 @router.post("/providers/{slug}/execution-decision")
 async def decide_wiii_connect_provider_execution(
     slug: str,
     body: WiiiConnectExecutionDecisionBody,
+    http_request: Request,
     current_user: AuthenticatedUser = Depends(require_auth),
 ) -> dict[str, object]:
     """Return the audited fail-closed decision for one provider action.
@@ -1342,6 +1562,7 @@ async def decide_wiii_connect_provider_execution(
     approval token values.
     """
 
+    request_id = _request_id_from_http_request(http_request)
     entry = get_wiii_connect_provider_entry(slug)
     if entry is None:
         raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
@@ -1382,6 +1603,7 @@ async def decide_wiii_connect_provider_execution(
         preview_evidence_id=_safe_public_id(body.preview_evidence_id),
         preview_evidence_required=bool(body.preview_evidence_required),
         argument_keys=tuple(_safe_argument_keys(body.argument_keys)),
+        request_id=request_id or "",
     )
     gateway = decide_execution_gateway(
         effective_entry,
@@ -1419,25 +1641,20 @@ async def decide_wiii_connect_provider_execution(
 async def execute_wiii_connect_provider_action(
     slug: str,
     body: WiiiConnectExecutionRunBody,
+    http_request: Request,
     current_user: AuthenticatedUser = Depends(require_auth),
 ) -> dict[str, object]:
-    """Run one read-only provider action through Wiii policy and audit."""
+    """Run one provider action through the shared Wiii Connect executor."""
 
+    request_id = _request_id_from_http_request(http_request)
     entry = get_wiii_connect_provider_entry(slug)
     if entry is None:
         raise HTTPException(status_code=404, detail="unknown_wiii_connect_provider")
     composio_config = build_composio_adapter_config()
     effective_entry = build_composio_execution_enabled_entry(entry, composio_config)
-    storage = _wiii_connect_storage_status_metadata(probe_database=True)
-    storage_ready = _connection_storage_ready(storage)
+    storage = storage_status_metadata()
     selected_connection_ref = _safe_public_connection_ref(
         body.connection_ref or body.connection_id,
-    )
-    safe_connection_id = _resolve_provider_connection_id(
-        storage,
-        current_user=current_user,
-        provider_slug=effective_entry.slug,
-        connection_ref_or_id=selected_connection_ref,
     )
     _expire_stale_pending_connections(
         storage,
@@ -1445,164 +1662,93 @@ async def execute_wiii_connect_provider_action(
         provider_slug=effective_entry.slug,
     )
     connection = (
-        get_wiii_connect_persistent_storage().get_connection_record(
-            organization_id=_wiii_connect_owner_organization_id(current_user),
-            user_id=current_user.user_id,
-            provider_slug=effective_entry.slug,
-            connection_id=safe_connection_id,
+        select_wiii_connect_connection(
+            effective_entry.slug,
+            current_user=current_user,
+            storage=storage,
+            connection_ref=selected_connection_ref,
         )
-        if storage_ready and safe_connection_id
+        if selected_connection_ref
         else None
     )
-    request = WiiiConnectExecutionRequest(
+    action_slug = _safe_action_slug(body.action_slug)
+    mutation = _safe_mutation(body.mutation)
+    sanitized_arguments = model_visible_arguments(
         provider_slug=effective_entry.slug,
-        action_slug=_safe_action_slug(body.action_slug),
-        path=_safe_path(body.path),
-        mutation=_safe_mutation(body.mutation),
-        approval_token_present=bool(body.approval_token_present),
+        action_slug=action_slug,
+        arguments=body.arguments,
+    )
+    authorization = resolve_wiii_connect_action_authorization(
+        mutation=mutation,
         preview_evidence_id=_safe_public_id(body.preview_evidence_id),
+        approval_token_present=bool(body.approval_token_present),
+        authorization_verified=False,
+    )
+    argument_policy = _argument_policy_metadata(
+        provider_slug=effective_entry.slug,
+        action_slug=action_slug,
+        raw_arguments=body.arguments,
+        safe_arguments=sanitized_arguments,
+    )
+    argument_keys = tuple(_safe_argument_keys(list(sanitized_arguments.keys())))
+    plan = WiiiConnectBackendActionPlan(
+        entry=effective_entry,
+        config=composio_config,
+        current_user=current_user,
+        connection=connection,
+        storage=storage,
+        action_slug=action_slug,
+        mutation=mutation,
+        path=_safe_path(body.path),
+        arguments=sanitized_arguments,
+        argument_keys=argument_keys,
+        approval_token_present=authorization.trusted_approval_token_present,
+        preview_evidence_id=authorization.trusted_preview_evidence_id,
         preview_evidence_required=bool(body.preview_evidence_required),
-        argument_keys=tuple(
-            _safe_argument_keys(body.argument_keys or list(body.arguments.keys())),
-        ),
-    )
-    gateway = decide_execution_gateway(
-        effective_entry,
-        connection,
-        request,
-        adapter_capability=build_composio_provider_adapter_capability(
-            composio_config,
-        ),
-        audit_ledger_metadata={
-            "persistent": bool(
-                storage.get("persistent") and storage.get("audit_ledger_ready")
-            ),
-        },
         connection_selection_required=not bool(selected_connection_ref),
-        scope_policy=scope_policy_for_provider_entry(effective_entry),
-    )
-    audit_base = {
-        "surface": body.surface,
-        "connection_ref_present": bool(selected_connection_ref),
-        "connection_id_present": bool(safe_connection_id),
-        "connection_found": connection is not None,
-        "storage": storage,
-    }
-    if not gateway.allowed or connection is None:
-        _append_execution_audit(
-            gateway,
-            request,
-            storage,
-            current_user=current_user,
-            metadata={**audit_base, "stage": "gateway"},
-        )
-        payload = gateway.to_public_metadata()
-        payload["provider_slug"] = effective_entry.slug
-        payload["storage"] = storage
-        payload["schema"] = None
-        payload["execution"] = None
-        return payload
-
-    schema = await verify_composio_tool_schema(
-        config=composio_config,
-        provider_slug=effective_entry.slug,
-        action_slug=request.action_slug,
-    )
-    if not schema.ready:
-        _append_execution_stage_audit(
-            gateway,
-            request,
-            storage,
-            current_user=current_user,
-            status="blocked",
-            reason=schema.reason,
-            metadata={
-                **audit_base,
-                "stage": "schema",
-                "schema": schema.to_public_metadata(),
-            },
-        )
-        payload = gateway.to_public_metadata()
-        payload["status"] = "blocked"
-        payload["reason"] = schema.reason
-        payload["provider_slug"] = effective_entry.slug
-        payload["storage"] = storage
-        payload["schema"] = schema.to_public_metadata()
-        payload["execution"] = None
-        return payload
-
-    missing_argument_keys = _missing_required_argument_keys(
-        required_keys=schema.required_argument_keys,
-        arguments=body.arguments,
-    )
-    if missing_argument_keys:
-        _append_execution_stage_audit(
-            gateway,
-            request,
-            storage,
-            current_user=current_user,
-            status="blocked",
-            reason="missing_required_arguments",
-            metadata={
-                **audit_base,
-                "stage": "schema",
-                "schema": schema.to_public_metadata(),
-                "missing_required_arguments": list(missing_argument_keys),
-            },
-        )
-        payload = gateway.to_public_metadata()
-        payload["status"] = "blocked"
-        payload["reason"] = "missing_required_arguments"
-        payload["provider_slug"] = effective_entry.slug
-        payload["storage"] = storage
-        payload["schema"] = schema.to_public_metadata()
-        payload["execution"] = None
-        payload["missing_argument_keys"] = list(missing_argument_keys)
-        return payload
-
-    _append_execution_stage_audit(
-        gateway,
-        request,
-        storage,
-        current_user=current_user,
-        status="started",
-        reason="provider_execution_started",
-        metadata={
-            **audit_base,
-            "schema": schema.to_public_metadata(),
+        surface=body.surface,
+        stage="api_execute",
+        request_id=request_id,
+        audit_metadata={
+            "connection_ref_present": bool(selected_connection_ref),
+            "connection_found": connection is not None,
+            "operation_policy": authorization.to_public_metadata(),
+            "argument_policy": argument_policy,
+            "storage": storage,
         },
     )
-    execution = await execute_composio_tool(
-        config=composio_config,
-        provider_slug=effective_entry.slug,
-        action_slug=request.action_slug,
-        user_id=build_composio_external_user_id(
-            organization_id=current_user.organization_id,
-            user_id=current_user.user_id,
-        ),
-        connected_account_id=connection.connection_id,
-        arguments=body.arguments,
+    preflight = await preflight_wiii_connect_composio_backend_action(plan)
+    if preflight.status != "ready":
+        payload = preflight.gateway.to_public_metadata()
+        payload["status"] = "blocked"
+        payload["reason"] = preflight.reason
+        payload["provider_slug"] = effective_entry.slug
+        payload["storage"] = storage
+        payload["schema"] = (
+            preflight.schema.to_public_metadata() if preflight.schema else None
+        )
+        payload["execution"] = None
+        payload["operation_policy"] = authorization.to_public_metadata()
+        payload["argument_policy"] = argument_policy
+        return payload
+
+    result = await execute_wiii_connect_composio_backend_action(
+        plan,
+        preflight=preflight,
     )
-    _append_execution_stage_audit(
-        gateway,
-        request,
-        storage,
-        current_user=current_user,
-        status=execution.status,
-        reason=execution.reason,
-        metadata={
-            **audit_base,
-            "schema": schema.to_public_metadata(),
-            "execution": execution.to_public_metadata(),
-        },
-    )
-    payload = gateway.to_public_metadata()
-    payload["status"] = execution.status
-    payload["reason"] = execution.reason
+    payload = result.gateway.to_public_metadata()
+    payload["status"] = result.status
+    payload["reason"] = result.reason
     payload["provider_slug"] = effective_entry.slug
     payload["storage"] = storage
-    payload["schema"] = schema.to_public_metadata()
-    payload["execution"] = execution.to_public_metadata()
+    payload["schema"] = result.schema.to_public_metadata() if result.schema else None
+    payload["execution"] = (
+        result.execution.to_public_metadata() if result.execution else None
+    )
+    payload["operation_policy"] = authorization.to_public_metadata()
+    payload["argument_policy"] = argument_policy
+    if result.missing_argument_keys:
+        payload["missing_argument_keys"] = list(result.missing_argument_keys)
     return payload
 
 
@@ -1947,6 +2093,121 @@ def _facebook_post_validation_payload(*, reason: str) -> dict[str, object]:
     }
 
 
+def _record_facebook_post_operation_approval(
+    storage_metadata: dict[str, Any],
+    *,
+    current_user: AuthenticatedUser,
+    provider_slug: str,
+    action_slug: str,
+    preview_evidence_id: str,
+    request_fingerprint: str,
+    selected_connection_ref: str,
+    page_selected: bool,
+    message_length: int,
+    image_present: bool,
+    image_size_bytes: int,
+    image_url_present: bool,
+) -> WiiiConnectOperationApprovalDecision:
+    if not _operation_approval_storage_ready(storage_metadata):
+        return unavailable_operation_approval_decision(
+            provider_slug=provider_slug,
+            action_slug=action_slug,
+            preview_evidence_id=preview_evidence_id,
+            request_fingerprint=request_fingerprint,
+        )
+    storage = get_wiii_connect_persistent_storage()
+    append_record = getattr(storage, "append_operation_approval_record", None)
+    if not callable(append_record):
+        return unavailable_operation_approval_decision(
+            provider_slug=provider_slug,
+            action_slug=action_slug,
+            preview_evidence_id=preview_evidence_id,
+            request_fingerprint=request_fingerprint,
+        )
+
+    record = build_wiii_connect_operation_approval_record(
+        provider_slug=provider_slug,
+        action_slug=action_slug,
+        preview_evidence_id=preview_evidence_id,
+        request_fingerprint=request_fingerprint,
+        ttl_seconds=FACEBOOK_POST_APPROVAL_TOKEN_MAX_AGE_SECONDS,
+        metadata={
+            "selected_connection_present": bool(selected_connection_ref),
+            "page_selected": bool(page_selected),
+            "message_length": int(message_length),
+            "image_present": bool(image_present),
+            "image_size_bytes": int(image_size_bytes),
+            "image_url_present": bool(image_url_present),
+        },
+    )
+    saved = bool(
+        append_record(
+            record,
+            organization_id=_wiii_connect_owner_organization_id(current_user),
+            user_id=current_user.user_id,
+        )
+    )
+    if not saved:
+        return unavailable_operation_approval_decision(
+            provider_slug=provider_slug,
+            action_slug=action_slug,
+            preview_evidence_id=preview_evidence_id,
+            request_fingerprint=request_fingerprint,
+        )
+    return WiiiConnectOperationApprovalDecision(
+        status="pending",
+        reason="preview_recorded",
+        provider_slug=provider_slug,
+        action_slug=action_slug,
+        preview_evidence_id_present=bool(preview_evidence_id),
+        request_fingerprint_present=bool(request_fingerprint),
+        persistent=True,
+        metadata={
+            "selected_connection_present": bool(selected_connection_ref),
+            "page_selected": bool(page_selected),
+            "message_length": int(message_length),
+            "image_present": bool(image_present),
+            "image_size_bytes": int(image_size_bytes),
+            "image_url_present": bool(image_url_present),
+        },
+    )
+
+
+def _consume_facebook_post_operation_approval(
+    storage_metadata: dict[str, Any],
+    *,
+    current_user: AuthenticatedUser,
+    provider_slug: str,
+    action_slug: str,
+    preview_evidence_id: str,
+    request_fingerprint: str,
+) -> WiiiConnectOperationApprovalDecision:
+    if not _operation_approval_storage_ready(storage_metadata):
+        return unavailable_operation_approval_decision(
+            provider_slug=provider_slug,
+            action_slug=action_slug,
+            preview_evidence_id=preview_evidence_id,
+            request_fingerprint=request_fingerprint,
+        )
+    storage = get_wiii_connect_persistent_storage()
+    consume_record = getattr(storage, "consume_operation_approval_record", None)
+    if not callable(consume_record):
+        return unavailable_operation_approval_decision(
+            provider_slug=provider_slug,
+            action_slug=action_slug,
+            preview_evidence_id=preview_evidence_id,
+            request_fingerprint=request_fingerprint,
+        )
+    return consume_record(
+        preview_evidence_id=preview_evidence_id,
+        request_fingerprint=request_fingerprint,
+        organization_id=_wiii_connect_owner_organization_id(current_user),
+        user_id=current_user.user_id,
+        provider_slug=provider_slug,
+        action_slug=action_slug,
+    )
+
+
 def _facebook_post_gateway_payload(
     entry: Any,
     *,
@@ -1957,6 +2218,7 @@ def _facebook_post_gateway_payload(
     schema: dict[str, Any] | None = None,
     upload: dict[str, Any] | None = None,
     missing_argument_keys: list[str] | None = None,
+    approval_ledger: dict[str, Any] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "version": "wiii_connect_facebook_post_apply.v1",
@@ -1969,6 +2231,8 @@ def _facebook_post_gateway_payload(
         "execution": None,
         "storage": storage,
     }
+    if approval_ledger is not None:
+        payload["approval_ledger"] = approval_ledger
     if missing_argument_keys:
         payload["missing_argument_keys"] = missing_argument_keys
     return payload
@@ -2345,6 +2609,41 @@ def _connection_storage_ready(storage_metadata: dict[str, Any]) -> bool:
     )
 
 
+def _connection_listing_storage_ready(storage_metadata: dict[str, Any]) -> bool:
+    return bool(
+        storage_metadata.get("persistent")
+        and storage_metadata.get("connection_table_ready")
+    )
+
+
+def _operation_approval_storage_ready(storage_metadata: dict[str, Any]) -> bool:
+    return bool(
+        storage_metadata.get("persistent")
+        and storage_metadata.get("audit_ledger_ready")
+        and storage_metadata.get("operation_approval_table_ready")
+    )
+
+
+def _stored_wiii_connect_connections(
+    storage_metadata: dict[str, Any],
+    *,
+    current_user: AuthenticatedUser,
+    provider_slug: str,
+) -> tuple[WiiiConnectConnectionRecordV1, ...]:
+    """Return sanitized local connection rows without implying agent readiness."""
+
+    if not _connection_listing_storage_ready(storage_metadata):
+        return ()
+    try:
+        return get_wiii_connect_persistent_storage().list_connection_records(
+            organization_id=_wiii_connect_owner_organization_id(current_user),
+            user_id=current_user.user_id,
+            provider_slug=provider_slug,
+        )
+    except Exception:
+        return ()
+
+
 def _expire_stale_pending_connections(
     storage_metadata: dict[str, Any],
     *,
@@ -2378,6 +2677,36 @@ def _wiii_connect_owner_organization_id(user: AuthenticatedUser) -> str:
         organization_id=None,
         user_id=user.user_id,
     )
+
+
+def _wiii_connect_snapshot_state(
+    current_user: AuthenticatedUser | None,
+) -> dict[str, Any]:
+    """Build the sanitized state slice needed for user-scoped snapshots."""
+
+    context: dict[str, Any] = {}
+    state: dict[str, Any] = {"context": context}
+    if current_user is None:
+        return state
+
+    user_id = str(current_user.user_id or "").strip()
+    organization_id = str(current_user.organization_id or "").strip()
+    session_id = str(current_user.session_id or "").strip()
+    role = str(current_user.role or "").strip()
+
+    if user_id:
+        state["user_id"] = user_id
+        context["user_id"] = user_id
+    if organization_id:
+        state["organization_id"] = organization_id
+        context["organization_id"] = organization_id
+    if session_id:
+        state["session_id"] = session_id
+        context["session_id"] = session_id
+    if role:
+        state["user_role"] = role
+        context["user_role"] = role
+    return state
 
 
 def _safe_redirect_uri(value: str | None) -> str:
@@ -2439,6 +2768,18 @@ def _safe_action_slug(value: str) -> str:
     return str(value or "").strip().upper().replace("-", "_")[:120]
 
 
+def _default_activation_action_slug_for_provider(provider_slug: str) -> str:
+    """Return a provider-scoped default action for readiness diagnostics."""
+
+    actions = list_wiii_connect_curated_actions(
+        provider_slug=provider_slug,
+        include_disabled=True,
+    )
+    readonly = [action for action in actions if action.mutation == "read"]
+    candidates = readonly or list(actions)
+    return candidates[0].slug if candidates else ""
+
+
 def _safe_path(value: str) -> str:
     return str(value or "").strip().lower().replace("-", "_")[:120]
 
@@ -2451,12 +2792,27 @@ def _safe_mutation(value: str) -> ActionMutation:
 
 
 def _safe_argument_keys(values: list[str]) -> list[str]:
-    result: list[str] = []
-    for value in values[:50]:
-        key = str(value or "").strip()
-        if key:
-            result.append(key[:120])
-    return result
+    return list(safe_public_argument_keys(values[:50]))
+
+
+def _argument_policy_metadata(
+    *,
+    provider_slug: str,
+    action_slug: str,
+    raw_arguments: dict[str, Any],
+    safe_arguments: dict[str, Any],
+) -> dict[str, Any]:
+    raw_keys = tuple(raw_arguments.keys()) if isinstance(raw_arguments, dict) else ()
+    accepted_keys = tuple(safe_arguments.keys()) if isinstance(safe_arguments, dict) else ()
+    return {
+        "version": "wiii_connect_argument_filter.v1",
+        "provider_slug": _safe_surface(provider_slug),
+        "action_slug": _safe_action_slug(action_slug),
+        "provided_argument_count": len(raw_keys),
+        "accepted_argument_count": len(accepted_keys),
+        "accepted_argument_keys": sorted(safe_public_argument_keys(accepted_keys)),
+        "hidden_argument_count": max(0, len(raw_keys) - len(accepted_keys)),
+    }
 
 
 def _missing_required_argument_keys(
@@ -2477,13 +2833,7 @@ def _missing_required_argument_keys(
 
 
 def _safe_public_argument_key(value: str) -> str:
-    normalized = str(value or "").strip().lower()
-    if not normalized:
-        return "empty"
-    sensitive_markers = ("token", "secret", "password", "credential", "key", "code")
-    if any(marker in normalized for marker in sensitive_markers):
-        return "redacted_sensitive_field"
-    return normalized[:80]
+    return safe_public_argument_key(value)
 
 
 def _safe_public_id(value: str | None) -> str | None:
@@ -2493,6 +2843,14 @@ def _safe_public_id(value: str | None) -> str | None:
     if any(marker in text.lower() for marker in ("token", "secret", "password")):
         return None
     return text[:160]
+
+
+def _request_id_from_http_request(request: Request) -> str | None:
+    state_request_id = str(getattr(request.state, "request_id", "") or "").strip()
+    if state_request_id:
+        return state_request_id
+    header_request_id = str(request.headers.get("X-Request-ID") or "").strip()
+    return header_request_id or None
 
 
 def _safe_surface(value: Any) -> str:

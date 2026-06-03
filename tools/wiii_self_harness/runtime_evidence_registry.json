@@ -1,0 +1,4997 @@
+{
+  "registry": "Wiii Runtime Evidence Registry",
+  "version": 1,
+  "description": "Machine-checked registry of OpenHuman-level runtime evidence artifacts and registered diagnostic preflight sidecars. Each entry ties a critical Wiii runtime capability to an opt-in probe, contract tests, GitHub Actions workflow, artifact name, schema version, and live-run guard.",
+  "requirements": [
+    {
+      "id": "provider-runtime-tool-loop",
+      "title": "Provider runtime tool-loop evidence",
+      "layer": "Wiii Core",
+      "workflow": ".github/workflows/provider-runtime-evidence.yml",
+      "artifact": "provider-runtime-evidence.json",
+      "schema_version": "wiii.live_provider_runtime_probe.v1",
+      "freshness": {
+        "timestamp_path": "generated_at",
+        "max_age_hours": 72
+      },
+      "payload_schema_field": "schema_version",
+      "forbidden_payload_tokens": [
+        "api_key",
+        "access_token",
+        "authorization",
+        "record_probe_fact value",
+        "\"label\": \"provider_runtime_probe\"",
+        "\\\"label\\\": \\\"provider_runtime_probe\\\""
+      ],
+      "forbidden_payload_regexes": [],
+      "payload_checks": [
+        {
+          "path": "status",
+          "equals": "pass"
+        },
+        {
+          "path": "evidence_contract.schema_version",
+          "equals": "wiii.provider_runtime_evidence_contract.v1"
+        },
+        {
+          "path": "evidence_contract.credentialed_provider_call_required",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.tool_roundtrip_required",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.single_tool_call_required",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.tool_result_linkage_required",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.followup_without_extra_tool_calls_required",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.trace_span_pair_required",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.stream_ledger_optional",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.stream_ledger_requires_allow_stream_write",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.hash_count_only_output",
+          "equals": true
+        },
+        {
+          "path": "privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.tool_argument_values_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.provider_arguments_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.provider_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.provider_response_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.stream_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_request_identifiers_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.identifier_strategy",
+          "equals": "hashes_and_counts"
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.status",
+          "equals": "pass"
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.provider_present",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.model_present",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.duration_ms",
+          "min": 0
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.selectable_provider_count",
+          "min": 1
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.route.provider_matches_resolved",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.runtime_boundary.schema_version",
+          "equals": "wiii.provider_runtime_boundary.v1"
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.runtime_boundary.llm_pool_route_used",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.runtime_boundary.wiii_chat_model_interface_used",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.runtime_boundary.native_message_contract_used",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.runtime_boundary.raw_provider_http_used",
+          "equals": false
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.runtime_boundary.raw_provider_payload_included",
+          "equals": false
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.runtime_boundary.raw_provider_response_included",
+          "equals": false
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_contract.schema_version",
+          "equals": "wiii.provider_tool_contract.v1"
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_contract.tool_name_matches_probe",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_contract.forced_tool_choice_used",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_contract.required_argument_keys",
+          "sorted_equals": [
+            "label",
+            "value"
+          ]
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_contract.required_argument_key_count",
+          "equals": 2
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_contract.additional_properties_allowed",
+          "equals": false
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_contract.no_side_effect_tool",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_contract.raw_schema_values_included",
+          "equals": false
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.scope.session_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.scope.organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.scope.raw_request_identifiers_included",
+          "equals": false
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_call_count",
+          "equals": 1
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_call_count_exactly_one",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_result_count",
+          "equals": 1
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_call.name",
+          "equals": "record_probe_fact"
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_call.id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_call.argument_keys",
+          "sorted_equals": [
+            "label",
+            "value"
+          ]
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_call.argument_count",
+          "equals": 2
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_call.argument_values_included",
+          "equals": false
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_call.raw_id_included",
+          "equals": false
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_result.role",
+          "equals": "tool"
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_result.tool_call_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_result.content_json_keys",
+          "sorted_equals": [
+            "label",
+            "observed_at",
+            "ok"
+          ]
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_result.content_json_key_count",
+          "equals": 3
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_result.content_json_values_included",
+          "equals": false
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_result.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_result.raw_tool_call_id_included",
+          "equals": false
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_result_linked_to_tool_call",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_result_followup.final_response_received",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_result_followup.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.tool_result_followup.returned_tool_call_count",
+          "equals": 0
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.trace.span_count",
+          "min": 2
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.trace.tool_call_span_seen",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.trace.tool_result_span_seen",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.trace.duration_observed",
+          "equals": true
+        },
+        {
+          "path": "direct_provider_tool_roundtrip.trace.raw_attribute_values_included",
+          "equals": false
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.status_code",
+          "equals": 200
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.ledger_schema_version",
+          "equals": "wiii.runtime_flow_ledger.v1"
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.provider_present",
+          "equals": true
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.model_present",
+          "equals": true
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.runtime_authoritative",
+          "equals": true
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.metadata_seen",
+          "equals": true
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.done_seen",
+          "equals": true
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.terminal_event_name",
+          "equals": "done"
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.done_count_matches_ledger",
+          "equals": true
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.metadata_count_matches_ledger",
+          "equals": true
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.event_count",
+          "min": 1
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.event_counts.done",
+          "min": 1
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.ledger_event_counts.done",
+          "min": 1
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.request_id_hash_present",
+          "equals": true
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.session_id_hash_present",
+          "equals": true
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.finalization_status",
+          "equals": "saved"
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.post_turn_lifecycle_schema_version",
+          "equals": "wiii.post_turn_lifecycle.v1"
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.post_turn_lifecycle_raw_content_included",
+          "equals": false
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.post_turn_lifecycle_raw_scope_keys_present",
+          "equals": false
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.privacy.raw_sse_data_included",
+          "equals": false
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.privacy.request_payload_included",
+          "equals": false
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.privacy.stream_prompt_included",
+          "equals": false
+        },
+        {
+          "when": {
+            "path": "stream_runtime_ledger.status",
+            "equals": "pass"
+          },
+          "path": "stream_runtime_ledger.privacy.auth_secret_included",
+          "equals": false
+        }
+      ],
+      "probe": "maritime-ai-service/scripts/probe_live_provider_runtime.py",
+      "contract_tests": [
+        "maritime-ai-service/tests/unit/test_probe_live_provider_runtime.py"
+      ],
+      "live_env_flags": [
+        "WIII_LIVE_PROVIDER_RUNTIME_PROBE"
+      ],
+      "live_guard_tokens": [
+        "--allow-call"
+      ],
+      "dispatch_or_schedule_gate_tokens": [
+        "allow_live_call",
+        "WIII_PROVIDER_RUNTIME_EVIDENCE_ENABLED"
+      ],
+      "artifact_tokens": [
+        "provider-runtime-evidence-${{ github.run_id }}"
+      ]
+    },
+    {
+      "id": "subagent-boundary-replay",
+      "title": "Parallel subagent boundary replay evidence",
+      "layer": "Wiii Core",
+      "workflow": ".github/workflows/subagent-boundary-evidence.yml",
+      "artifact": "subagent-boundary-evidence.json",
+      "schema_version": "wiii.live_subagent_boundary_replay.v1",
+      "freshness": {
+        "timestamp_path": "generated_at",
+        "max_age_hours": 72
+      },
+      "payload_schema_field": "schema",
+      "forbidden_payload_tokens": [
+        "PRIVATE_SUBAGENT_BOUNDARY_RAW_MARKER",
+        "Bearer live-subagent-boundary-token",
+        "access_token",
+        "api_key",
+        "authorization"
+      ],
+      "forbidden_payload_regexes": [],
+      "payload_checks": [
+        {
+          "path": "status",
+          "equals": "pass"
+        },
+        {
+          "path": "request.request_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "request.session_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "request.organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "execution.parallel_task_count",
+          "min": 2
+        },
+        {
+          "path": "execution.max_concurrent",
+          "min": 2
+        },
+        {
+          "path": "execution.duration_ms",
+          "min": 0
+        },
+        {
+          "path": "execution.result_count_matches_task_count",
+          "equals": true
+        },
+        {
+          "path": "execution.parallel_execution_configured",
+          "equals": true
+        },
+        {
+          "path": "execution.result_statuses",
+          "sorted_equals": [
+            "partial",
+            "success"
+          ]
+        },
+        {
+          "path": "runtime_ledger.schema_version",
+          "equals": "wiii.runtime_flow_ledger.v1"
+        },
+        {
+          "path": "runtime_ledger.done_seen",
+          "equals": true
+        },
+        {
+          "path": "runtime_ledger.subagent_schema_version",
+          "equals": "wiii.subagent_boundary_trace.v1"
+        },
+        {
+          "path": "runtime_ledger.subagent_report_count",
+          "min": 2
+        },
+        {
+          "path": "runtime_ledger.subagent_report_count_matches_execution",
+          "equals": true
+        },
+        {
+          "path": "runtime_ledger.raw_request_identifiers_included",
+          "equals": false
+        },
+        {
+          "path": "subagents.schema_version",
+          "equals": "wiii.subagent_boundary_trace.v1"
+        },
+        {
+          "path": "subagents.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "subagents.report_count",
+          "min": 2
+        },
+        {
+          "path": "subagents.counts.report_count",
+          "min": 2
+        },
+        {
+          "path": "subagents.counts.source_count",
+          "min": 1
+        },
+        {
+          "path": "subagents.counts.tool_count",
+          "min": 1
+        },
+        {
+          "path": "subagents.counts.state_projected_key_count",
+          "min": 1
+        },
+        {
+          "path": "subagents.counts.state_dropped_key_count",
+          "min": 1
+        },
+        {
+          "path": "subagents.counts.output_char_count",
+          "min": 1
+        },
+        {
+          "path": "subagents.counts.thinking_dropped_count",
+          "min": 2
+        },
+        {
+          "path": "subagents.warning_counts.state_top_level_keys_dropped",
+          "min": 1
+        },
+        {
+          "path": "subagents.warning_counts.kwargs_top_level_keys_dropped",
+          "min": 1
+        },
+        {
+          "path": "subagents.warning_counts.subagent_output_sanitized_or_truncated",
+          "min": 1
+        },
+        {
+          "path": "subagents.warning_counts.subagent_thinking_dropped",
+          "min": 1
+        },
+        {
+          "path": "handoff_boundary.schema_versions",
+          "sorted_equals": [
+            "wiii.subagent_handoff_boundary.v1"
+          ]
+        },
+        {
+          "path": "handoff_boundary.boundary_count",
+          "min": 2
+        },
+        {
+          "path": "handoff_boundary.state_projected_key_count",
+          "min": 1
+        },
+        {
+          "path": "handoff_boundary.state_dropped_key_count",
+          "min": 1
+        },
+        {
+          "path": "handoff_boundary.kwargs_projected_key_count",
+          "min": 1
+        },
+        {
+          "path": "handoff_boundary.kwargs_dropped_key_count",
+          "min": 1
+        },
+        {
+          "path": "handoff_boundary.warning_counts.state_top_level_keys_dropped",
+          "min": 1
+        },
+        {
+          "path": "handoff_boundary.warning_counts.kwargs_top_level_keys_dropped",
+          "min": 1
+        },
+        {
+          "path": "handoff_boundary.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "result_boundary.schema_versions",
+          "sorted_equals": [
+            "wiii.subagent_result_boundary.v1"
+          ]
+        },
+        {
+          "path": "result_boundary.boundary_count",
+          "min": 2
+        },
+        {
+          "path": "result_boundary.status_counts.success",
+          "min": 1
+        },
+        {
+          "path": "result_boundary.status_counts.partial",
+          "min": 1
+        },
+        {
+          "path": "result_boundary.raw_output_char_count",
+          "min": 1
+        },
+        {
+          "path": "result_boundary.output_char_count",
+          "min": 1
+        },
+        {
+          "path": "result_boundary.output_sanitized_or_truncated",
+          "equals": true
+        },
+        {
+          "path": "result_boundary.data_key_count",
+          "min": 1
+        },
+        {
+          "path": "result_boundary.source_count",
+          "min": 1
+        },
+        {
+          "path": "result_boundary.tool_count",
+          "min": 1
+        },
+        {
+          "path": "result_boundary.evidence_image_count",
+          "min": 1
+        },
+        {
+          "path": "result_boundary.thinking_dropped_count",
+          "min": 2
+        },
+        {
+          "path": "result_boundary.warning_counts.subagent_output_sanitized_or_truncated",
+          "min": 1
+        },
+        {
+          "path": "result_boundary.warning_counts.subagent_thinking_dropped",
+          "min": 1
+        },
+        {
+          "path": "result_boundary.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "doctor.status",
+          "equals": "degraded"
+        },
+        {
+          "path": "doctor.subagents.report_count",
+          "min": 2
+        },
+        {
+          "path": "doctor.subagents.identifier_strategy",
+          "equals": "aggregate_counts_only"
+        },
+        {
+          "path": "doctor.subagents.raw_content_flag_count",
+          "equals": 0
+        },
+        {
+          "path": "doctor.subagents.source_count",
+          "min": 1
+        },
+        {
+          "path": "doctor.subagents.tool_count",
+          "min": 1
+        },
+        {
+          "path": "doctor.subagents.state_projected_key_count",
+          "min": 1
+        },
+        {
+          "path": "doctor.subagents.state_dropped_key_count",
+          "min": 1
+        },
+        {
+          "path": "doctor.subagents.thinking_dropped_count",
+          "min": 2
+        },
+        {
+          "path": "doctor.subagents.warning_count",
+          "min": 3
+        },
+        {
+          "path": "doctor.subagents.warnings.state_top_level_keys_dropped",
+          "min": 1
+        },
+        {
+          "path": "doctor.subagents.warnings.kwargs_top_level_keys_dropped",
+          "min": 1
+        },
+        {
+          "path": "doctor.subagents.warnings.subagent_thinking_dropped",
+          "min": 1
+        },
+        {
+          "path": "privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.identifier_strategy",
+          "equals": "hash_or_count_only"
+        },
+        {
+          "path": "privacy.raw_marker_absent",
+          "equals": true
+        },
+        {
+          "path": "privacy.raw_request_identifiers_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_secret_included",
+          "equals": false
+        }
+      ],
+      "probe": "maritime-ai-service/scripts/probe_live_subagent_boundary_replay.py",
+      "contract_tests": [
+        "maritime-ai-service/tests/unit/test_probe_live_subagent_boundary_replay.py",
+        "maritime-ai-service/tests/unit/test_runtime_flow_doctor.py",
+        "maritime-ai-service/tests/unit/test_wiii_runtime_flow_acceptance.py"
+      ],
+      "live_env_flags": [
+        "WIII_LIVE_SUBAGENT_BOUNDARY_REPLAY"
+      ],
+      "live_guard_tokens": [
+        "--allow-run"
+      ],
+      "dispatch_or_schedule_gate_tokens": [
+        "run_subagent_boundary_replay",
+        "WIII_SUBAGENT_BOUNDARY_EVIDENCE_ENABLED"
+      ],
+      "artifact_tokens": [
+        "subagent-boundary-evidence-${{ github.run_id }}"
+      ]
+    },
+    {
+      "id": "autonomy-scheduler-replay",
+      "title": "Scheduled autonomy replay evidence",
+      "layer": "Wiii Living",
+      "workflow": ".github/workflows/autonomy-runtime-evidence.yml",
+      "artifact": "autonomy-scheduler-evidence.json",
+      "schema_version": "wiii.live_scheduler_replay_probe.v1",
+      "freshness": {
+        "timestamp_path": "generated_at",
+        "max_age_hours": 72
+      },
+      "payload_schema_field": "schema_version",
+      "forbidden_payload_tokens": [
+        "api_key",
+        "access_token",
+        "authorization",
+        "scheduled-live-replay-user",
+        "scheduled-live-replay-session"
+      ],
+      "forbidden_payload_regexes": [
+        "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+      ],
+      "payload_checks": [
+        {
+          "path": "status",
+          "equals": "pass"
+        },
+        {
+          "path": "scope.organization_context",
+          "equals": "request_scoped"
+        },
+        {
+          "path": "scope.request_org_context_set",
+          "equals": true
+        },
+        {
+          "path": "scope.user_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "scope.session_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "scope.organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "database.scheduled_tasks_table",
+          "equals": "present"
+        },
+        {
+          "path": "database.task_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "database.created_status",
+          "equals": "active"
+        },
+        {
+          "path": "database.created_row_org_hash_present",
+          "equals": true
+        },
+        {
+          "path": "database.created_row_matches_scope",
+          "equals": true
+        },
+        {
+          "path": "database.completed_row_present",
+          "equals": true
+        },
+        {
+          "path": "database.completed_status",
+          "equals": "completed"
+        },
+        {
+          "path": "database.completed_run_count",
+          "min": 1
+        },
+        {
+          "path": "database.completed_last_run_present",
+          "equals": true
+        },
+        {
+          "path": "database.completed_next_run_is_null",
+          "equals": true
+        },
+        {
+          "path": "replay_contract.schema_version",
+          "equals": "wiii.scheduler_replay_contract.v1"
+        },
+        {
+          "path": "replay_contract.uses_scheduler_tool",
+          "equals": true
+        },
+        {
+          "path": "replay_contract.uses_scoped_repository_poll",
+          "equals": true
+        },
+        {
+          "path": "replay_contract.executor_observability_path_used",
+          "equals": true
+        },
+        {
+          "path": "replay_contract.websocket_adapter_delivery_used",
+          "equals": true
+        },
+        {
+          "path": "replay_contract.single_created_task_executed",
+          "equals": true
+        },
+        {
+          "path": "replay_contract.cleanup_required_by_default",
+          "equals": true
+        },
+        {
+          "path": "replay_contract.hash_count_only_output",
+          "equals": true
+        },
+        {
+          "path": "replay_contract.raw_scheduler_tool_result_included",
+          "equals": false
+        },
+        {
+          "path": "database_lifecycle_contract.schema_version",
+          "equals": "wiii.scheduler_database_lifecycle_contract.v1"
+        },
+        {
+          "path": "database_lifecycle_contract.created_active_before_execution",
+          "equals": true
+        },
+        {
+          "path": "database_lifecycle_contract.created_row_org_hash_present",
+          "equals": true
+        },
+        {
+          "path": "database_lifecycle_contract.created_row_matches_scope",
+          "equals": true
+        },
+        {
+          "path": "database_lifecycle_contract.completed_row_present",
+          "equals": true
+        },
+        {
+          "path": "database_lifecycle_contract.completed_status_final",
+          "equals": true
+        },
+        {
+          "path": "database_lifecycle_contract.created_to_completed_transition",
+          "equals": true
+        },
+        {
+          "path": "database_lifecycle_contract.completed_run_count_positive",
+          "equals": true
+        },
+        {
+          "path": "database_lifecycle_contract.completed_last_run_present",
+          "equals": true
+        },
+        {
+          "path": "database_lifecycle_contract.completed_next_run_is_null",
+          "equals": true
+        },
+        {
+          "path": "database_lifecycle_contract.completed_org_hash_matches_created",
+          "equals": true
+        },
+        {
+          "path": "database_lifecycle_contract.raw_database_row_included",
+          "equals": false
+        },
+        {
+          "path": "clock.due_poll_seen",
+          "equals": true
+        },
+        {
+          "path": "clock.due_poll_scoped",
+          "equals": true
+        },
+        {
+          "path": "clock.due_poll_allow_all_orgs",
+          "equals": false
+        },
+        {
+          "path": "clock.due_poll_limit",
+          "equals": 10
+        },
+        {
+          "path": "clock.due_task_count",
+          "min": 1
+        },
+        {
+          "path": "clock.due_task_found_by_hash",
+          "equals": true
+        },
+        {
+          "path": "execution.mode",
+          "equals": "notification"
+        },
+        {
+          "path": "execution.status",
+          "equals": "success"
+        },
+        {
+          "path": "execution.description_hash_present",
+          "equals": true
+        },
+        {
+          "path": "execution.response_hash_present",
+          "equals": true
+        },
+        {
+          "path": "execution.response_char_count",
+          "min": 1
+        },
+        {
+          "path": "execution.response_matches_description",
+          "equals": true
+        },
+        {
+          "path": "execution.raw_description_included",
+          "equals": false
+        },
+        {
+          "path": "delivery.delivered",
+          "equals": true
+        },
+        {
+          "path": "delivery.channel",
+          "equals": "websocket"
+        },
+        {
+          "path": "delivery.socket_accepted",
+          "equals": true
+        },
+        {
+          "path": "delivery.socket_message_count",
+          "min": 1
+        },
+        {
+          "path": "delivery.payload_type",
+          "equals": "scheduled_task"
+        },
+        {
+          "path": "delivery.payload_mode",
+          "equals": "notification"
+        },
+        {
+          "path": "delivery.payload_task_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "delivery.payload_task_id_matches_created",
+          "equals": true
+        },
+        {
+          "path": "delivery.payload_content_hash_present",
+          "equals": true
+        },
+        {
+          "path": "delivery.payload_content_matches_response_hash",
+          "equals": true
+        },
+        {
+          "path": "delivery.payload_raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "delivery_contract.schema_version",
+          "equals": "wiii.scheduler_delivery_contract.v1"
+        },
+        {
+          "path": "delivery_contract.websocket_channel_used",
+          "equals": true
+        },
+        {
+          "path": "delivery_contract.scheduled_task_payload_used",
+          "equals": true
+        },
+        {
+          "path": "delivery_contract.notification_mode_used",
+          "equals": true
+        },
+        {
+          "path": "delivery_contract.socket_delivery_count_positive",
+          "equals": true
+        },
+        {
+          "path": "delivery_contract.payload_task_hash_matches_created",
+          "equals": true
+        },
+        {
+          "path": "delivery_contract.payload_content_hash_matches_response",
+          "equals": true
+        },
+        {
+          "path": "delivery_contract.raw_delivery_payload_included",
+          "equals": false
+        },
+        {
+          "path": "metrics.poll_success_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.poll_success_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.due_event_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.runs_event_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.run_success_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.run_success_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.delivery_event_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.delivery_delivered_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.delivery_delivered_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.duration_event_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.duration_success_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.duration_success_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.metric_label_strategy",
+          "equals": "bounded_mode_status_only"
+        },
+        {
+          "path": "metrics.raw_metric_payload_included",
+          "equals": false
+        },
+        {
+          "path": "cleanup.requested",
+          "equals": true
+        },
+        {
+          "path": "cleanup.deleted",
+          "equals": true
+        },
+        {
+          "path": "cleanup.raw_task_id_included",
+          "equals": false
+        },
+        {
+          "path": "cleanup.raw_organization_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "cleanup.identifier_strategy",
+          "equals": "hash_only"
+        },
+        {
+          "path": "privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_task_id_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_user_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_session_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_organization_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_description_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_delivery_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_metric_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_database_row_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.identifier_strategy",
+          "equals": "hash_or_count_only"
+        }
+      ],
+      "probe": "maritime-ai-service/scripts/probe_live_scheduled_task_replay.py",
+      "contract_tests": [
+        "maritime-ai-service/tests/unit/test_probe_live_scheduled_task_replay.py"
+      ],
+      "live_env_flags": [
+        "WIII_LIVE_SCHEDULER_REPLAY"
+      ],
+      "live_guard_tokens": [
+        "--allow-write"
+      ],
+      "dispatch_or_schedule_gate_tokens": [
+        "run_scheduler_replay",
+        "WIII_AUTONOMY_RUNTIME_EVIDENCE_ENABLED"
+      ],
+      "artifact_tokens": [
+        "autonomy-scheduler-evidence-${{ github.run_id }}"
+      ]
+    },
+    {
+      "id": "autonomy-heartbeat-cycle",
+      "title": "Living heartbeat cycle evidence",
+      "layer": "Wiii Living",
+      "workflow": ".github/workflows/autonomy-runtime-evidence.yml",
+      "artifact": "autonomy-heartbeat-evidence.json",
+      "schema_version": "wiii.live_heartbeat_cycle_probe.v1",
+      "freshness": {
+        "timestamp_path": "generated_at",
+        "max_age_hours": 72
+      },
+      "payload_schema_field": "schema_version",
+      "forbidden_payload_tokens": [
+        "api_key",
+        "access_token",
+        "authorization",
+        "live-heartbeat-probe-user",
+        "live-heartbeat-probe-session"
+      ],
+      "forbidden_payload_regexes": [],
+      "payload_checks": [
+        {
+          "path": "status",
+          "equals": "pass"
+        },
+        {
+          "path": "scope.organization_context",
+          "equals": "request_scoped"
+        },
+        {
+          "path": "scope.requested_organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "scope.effective_organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "scope.requested_matches_effective_org",
+          "equals": true
+        },
+        {
+          "path": "scope.user_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "scope.session_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "scope.warnings",
+          "sorted_equals": []
+        },
+        {
+          "path": "heartbeat_cycle.is_noop",
+          "equals": false
+        },
+        {
+          "path": "heartbeat_cycle.error_present",
+          "equals": false
+        },
+        {
+          "path": "heartbeat_cycle.cycle_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "heartbeat_cycle.planned_action_count",
+          "min": 2
+        },
+        {
+          "path": "heartbeat_cycle.reflect_planned",
+          "equals": true
+        },
+        {
+          "path": "heartbeat_cycle.write_journal_planned",
+          "equals": true
+        },
+        {
+          "path": "heartbeat_cycle.planned_actions",
+          "length_equals_path": "heartbeat_cycle.planned_action_count"
+        },
+        {
+          "path": "heartbeat_cycle.planned_actions.*.metadata_values_included",
+          "equals": false
+        },
+        {
+          "path": "heartbeat_cycle.planned_actions.*.raw_target_included",
+          "equals": false
+        },
+        {
+          "path": "heartbeat_cycle.actions_recorded_count",
+          "min": 2
+        },
+        {
+          "path": "heartbeat_cycle.reflect_recorded",
+          "equals": true
+        },
+        {
+          "path": "heartbeat_cycle.write_journal_recorded",
+          "equals": true
+        },
+        {
+          "path": "heartbeat_cycle.actions_recorded",
+          "length_equals_path": "heartbeat_cycle.actions_recorded_count"
+        },
+        {
+          "path": "heartbeat_cycle.actions_recorded.*.metadata_values_included",
+          "equals": false
+        },
+        {
+          "path": "heartbeat_cycle.actions_recorded.*.raw_target_included",
+          "equals": false
+        },
+        {
+          "path": "heartbeat_cycle.raw_action_payload_included",
+          "equals": false
+        },
+        {
+          "path": "lifecycle_contract.schema_version",
+          "equals": "wiii.heartbeat_lifecycle_contract.v1"
+        },
+        {
+          "path": "lifecycle_contract.controlled_plan_used",
+          "equals": true
+        },
+        {
+          "path": "lifecycle_contract.scheduler_execute_heartbeat_used",
+          "equals": true
+        },
+        {
+          "path": "lifecycle_contract.prompt_patch_dependency",
+          "equals": false
+        },
+        {
+          "path": "lifecycle_contract.required_actions_planned",
+          "equals": true
+        },
+        {
+          "path": "lifecycle_contract.required_actions_recorded",
+          "equals": true
+        },
+        {
+          "path": "lifecycle_contract.planned_recorded_action_count_matches",
+          "equals": true
+        },
+        {
+          "path": "lifecycle_contract.planned_recorded_action_types_match",
+          "equals": true
+        },
+        {
+          "path": "lifecycle_contract.briefing_audit_write_explicit",
+          "equals": true
+        },
+        {
+          "path": "lifecycle_contract.proactive_websocket_requires_explicit_flag",
+          "equals": true
+        },
+        {
+          "path": "lifecycle_contract.hash_count_only_output",
+          "equals": true
+        },
+        {
+          "path": "lifecycle_contract.raw_action_metadata_values_absent",
+          "equals": true
+        },
+        {
+          "path": "lifecycle_contract.raw_action_targets_absent",
+          "equals": true
+        },
+        {
+          "path": "briefing.status",
+          "equals": "pass"
+        },
+        {
+          "path": "briefing.briefing_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "briefing.content_hash_present",
+          "equals": true
+        },
+        {
+          "path": "briefing.content_char_count",
+          "min": 1
+        },
+        {
+          "path": "briefing.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "proactive_websocket.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "proactive_websocket.payload_raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "database.core_tables_checked",
+          "equals": true
+        },
+        {
+          "path": "database.deltas.wiii_reflections.after",
+          "min": 1
+        },
+        {
+          "path": "database.deltas.wiii_journal.after",
+          "min": 1
+        },
+        {
+          "path": "database.deltas.wiii_briefings.delta",
+          "min": 1
+        },
+        {
+          "path": "database.deltas.wiii_heartbeat_audit.delta",
+          "min": 1
+        },
+        {
+          "path": "database_scope_contract.schema_version",
+          "equals": "wiii.heartbeat_database_scope_contract.v1"
+        },
+        {
+          "path": "database_scope_contract.request_org_context_set",
+          "equals": true
+        },
+        {
+          "path": "database_scope_contract.counted_table_count_matches_deltas",
+          "equals": true
+        },
+        {
+          "path": "database_scope_contract.core_table_set_checked",
+          "equals": true
+        },
+        {
+          "path": "database_scope_contract.heartbeat_audit_delta_observed",
+          "equals": true
+        },
+        {
+          "path": "database_scope_contract.briefing_delta_observed",
+          "equals": true
+        },
+        {
+          "path": "database_scope_contract.reflection_scope_observed",
+          "equals": true
+        },
+        {
+          "path": "database_scope_contract.journal_scope_observed",
+          "equals": true
+        },
+        {
+          "path": "database_scope_contract.proactive_message_delta_observed_when_requested",
+          "equals": true
+        },
+        {
+          "path": "database_scope_contract.raw_table_rows_included",
+          "equals": false
+        },
+        {
+          "path": "database_scope_contract.raw_sql_payload_included",
+          "equals": false
+        },
+        {
+          "path": "metrics.heartbeat_cycles_event_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.heartbeat_cycle_success_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.heartbeat_cycle_success_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.heartbeat_cycle_duration_event_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.heartbeat_cycle_duration_success_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.heartbeat_cycle_duration_success_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.heartbeat_actions_event_count",
+          "min": 2
+        },
+        {
+          "path": "metrics.heartbeat_action_success_count",
+          "min": 2
+        },
+        {
+          "path": "metrics.heartbeat_action_duration_event_count",
+          "min": 2
+        },
+        {
+          "path": "metrics.heartbeat_action_duration_success_count",
+          "min": 2
+        },
+        {
+          "path": "metrics.heartbeat_action_duration_success_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.heartbeat_reflect_success_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.heartbeat_reflect_success_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.heartbeat_write_journal_success_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.heartbeat_write_journal_success_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.heartbeat_reflect_duration_success_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.heartbeat_reflect_duration_success_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.heartbeat_write_journal_duration_success_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.heartbeat_write_journal_duration_success_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.metric_label_strategy",
+          "equals": "bounded_status_and_action_type_only"
+        },
+        {
+          "path": "metrics.raw_metric_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_user_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_session_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_organization_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_action_target_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_action_metadata_values_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_briefing_content_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_socket_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_metric_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_database_rows_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_emotional_state_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.metric_labels_include_identifiers",
+          "equals": false
+        },
+        {
+          "path": "privacy.identifier_strategy",
+          "equals": "hash_or_count_only"
+        }
+      ],
+      "probe": "maritime-ai-service/scripts/probe_live_heartbeat_cycle.py",
+      "contract_tests": [
+        "maritime-ai-service/tests/unit/test_probe_live_heartbeat_cycle.py"
+      ],
+      "live_env_flags": [
+        "WIII_LIVE_HEARTBEAT_CYCLE_PROBE"
+      ],
+      "live_guard_tokens": [
+        "--allow-write"
+      ],
+      "dispatch_or_schedule_gate_tokens": [
+        "run_heartbeat_cycle",
+        "WIII_AUTONOMY_RUNTIME_EVIDENCE_ENABLED"
+      ],
+      "artifact_tokens": [
+        "autonomy-heartbeat-evidence-${{ github.run_id }}"
+      ]
+    },
+    {
+      "id": "autonomy-proactive-channel",
+      "title": "Proactive outbound channel evidence",
+      "layer": "Wiii Living",
+      "workflow": ".github/workflows/autonomy-runtime-evidence.yml",
+      "artifact": "autonomy-proactive-channel-evidence.json",
+      "schema_version": "wiii.live_proactive_channel_probe.v1",
+      "freshness": {
+        "timestamp_path": "generated_at",
+        "max_age_hours": 72
+      },
+      "payload_schema_field": "schema_version",
+      "forbidden_payload_tokens": [
+        "api_key",
+        "access_token",
+        "authorization",
+        "TELEGRAM_BOT_TOKEN=",
+        "FACEBOOK_PAGE_ACCESS_TOKEN=",
+        "ZALO_OA_ACCESS_TOKEN="
+      ],
+      "forbidden_payload_regexes": [],
+      "payload_checks": [
+        {
+          "path": "status",
+          "equals": "pass"
+        },
+        {
+          "path": "delivered",
+          "equals": true
+        },
+        {
+          "path": "recipient_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "message_hash_present",
+          "equals": true
+        },
+        {
+          "path": "message_char_count",
+          "min": 1
+        },
+        {
+          "path": "trigger",
+          "equals": "operator_live_channel_probe"
+        },
+        {
+          "path": "database.connection_verified",
+          "equals": true
+        },
+        {
+          "path": "database.opt_out_lookup_verifiable",
+          "equals": true
+        },
+        {
+          "path": "database.send_audit_verifiable",
+          "equals": true
+        },
+        {
+          "path": "database.opt_out_scope_request_org",
+          "equals": true
+        },
+        {
+          "path": "database.send_audit_scope_request_org",
+          "equals": true
+        },
+        {
+          "path": "database.raw_connection_details_included",
+          "equals": false
+        },
+        {
+          "path": "evidence_contract.single_outbound_send",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.uses_proactive_messenger",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.requires_live_channel_credentials",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.requires_database_guardrail",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.identifier_strategy",
+          "equals": "hash_or_count_only"
+        },
+        {
+          "path": "org_scope.context_token_set",
+          "equals": true
+        },
+        {
+          "path": "org_scope.organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "org_scope.write_scope_expected",
+          "equals": "request_scoped"
+        },
+        {
+          "path": "org_scope.raw_organization_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "guardrail.allowed",
+          "equals": true
+        },
+        {
+          "path": "guardrail.reason_allowed",
+          "equals": true
+        },
+        {
+          "path": "guardrail.blocked_metric_count",
+          "equals": 0
+        },
+        {
+          "path": "guardrail.decision_source",
+          "equals": "ProactiveMessenger.can_send"
+        },
+        {
+          "path": "guardrail.database_opt_out_check_used",
+          "equals": true
+        },
+        {
+          "path": "guardrail.opt_out_checked_via_database",
+          "equals": true
+        },
+        {
+          "path": "delivery.delivered",
+          "equals": true
+        },
+        {
+          "path": "delivery.status",
+          "equals": "delivered"
+        },
+        {
+          "path": "delivery.channel_matches_request",
+          "equals": true
+        },
+        {
+          "path": "delivery.duration_observed",
+          "equals": true
+        },
+        {
+          "path": "delivery.duration_ms_count",
+          "min": 1
+        },
+        {
+          "path": "delivery.raw_delivery_payload_included",
+          "equals": false
+        },
+        {
+          "path": "send_attempt.channel_supported",
+          "equals": true
+        },
+        {
+          "path": "send_attempt.trigger",
+          "equals": "operator_live_channel_probe"
+        },
+        {
+          "path": "send_attempt.priority",
+          "equals": 0.1
+        },
+        {
+          "path": "send_attempt.single_send_attempt",
+          "equals": true
+        },
+        {
+          "path": "send_attempt.recipient_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "send_attempt.organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "send_attempt.message_hash_present",
+          "equals": true
+        },
+        {
+          "path": "send_attempt.raw_message_included",
+          "equals": false
+        },
+        {
+          "path": "channel_contract.requested_channel_supported",
+          "equals": true
+        },
+        {
+          "path": "channel_contract.requested_channel_matches_delivery",
+          "equals": true
+        },
+        {
+          "path": "channel_contract.supported_channel_count",
+          "min": 3
+        },
+        {
+          "path": "channel_contract.credential_configured",
+          "equals": true
+        },
+        {
+          "path": "channel_contract.credential_value_included",
+          "equals": false
+        },
+        {
+          "path": "channel_contract.credential_name_value_pair_included",
+          "equals": false
+        },
+        {
+          "path": "channel_config.supported",
+          "equals": true
+        },
+        {
+          "path": "channel_config.enabled",
+          "equals": true
+        },
+        {
+          "path": "channel_config.credential_present",
+          "equals": true
+        },
+        {
+          "path": "channel_config.credential_value_included",
+          "equals": false
+        },
+        {
+          "path": "metrics.can_send_event_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.sends_event_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.can_send_allowed_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.send_delivered_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.send_duration_count",
+          "min": 1
+        },
+        {
+          "path": "metrics.send_duration_observed",
+          "equals": true
+        },
+        {
+          "path": "metrics.duration_metric_label_status_delivered_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.metric_labels_include_identifiers",
+          "equals": false
+        },
+        {
+          "path": "metrics.metric_label_strategy",
+          "equals": "bounded_status_reason_channel_only"
+        },
+        {
+          "path": "metrics.raw_metric_payload_included",
+          "equals": false
+        },
+        {
+          "path": "metrics.can_send_allowed_seen",
+          "equals": true
+        },
+        {
+          "path": "metrics.send_delivered_seen",
+          "equals": true
+        },
+        {
+          "path": "privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_message_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_recipient_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_organization_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_channel_credentials_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_delivery_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_metric_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.credential_name_value_pair_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_trigger_target_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.metric_labels_include_identifiers",
+          "equals": false
+        },
+        {
+          "path": "privacy.identifier_strategy",
+          "equals": "hash_or_count_only"
+        }
+      ],
+      "probe": "maritime-ai-service/scripts/probe_live_proactive_channel.py",
+      "contract_tests": [
+        "maritime-ai-service/tests/unit/test_probe_live_proactive_channel.py"
+      ],
+      "live_env_flags": [
+        "WIII_LIVE_PROACTIVE_CHANNEL_PROBE"
+      ],
+      "live_guard_tokens": [
+        "--allow-send"
+      ],
+      "dispatch_or_schedule_gate_tokens": [
+        "run_proactive_channel",
+        "WIII_PROACTIVE_CHANNEL_EVIDENCE_ENABLED"
+      ],
+      "artifact_tokens": [
+        "autonomy-proactive-channel-evidence-${{ github.run_id }}"
+      ],
+      "diagnostic_uploads": [
+        {
+          "artifact": "autonomy-proactive-channel-preflight.json",
+          "path": "maritime-ai-service/autonomy-proactive-channel-preflight.json",
+          "artifact_tokens": [
+            "autonomy-proactive-channel-preflight-${{ github.run_id }}"
+          ],
+          "if_no_files_found": "warn",
+          "retention_days": 14
+        }
+      ]
+    },
+    {
+      "id": "lms-test-course-replay",
+      "title": "LMS test-course preview/apply replay evidence",
+      "layer": "Wiii Host",
+      "workflow": ".github/workflows/lms-test-course-evidence.yml",
+      "artifact": "lms-test-course-evidence.json",
+      "schema_version": "wiii.live_lms_test_course_replay.v1",
+      "freshness": {
+        "timestamp_path": "generated_at",
+        "max_age_hours": 72
+      },
+      "payload_schema_field": "schema_version",
+      "forbidden_payload_tokens": [
+        "WIII_LMS_TEST_COURSE_REPLAY_MARKER",
+        "live-lms-test-course-teacher",
+        "live-lms-test-course-source.docx",
+        "probe-approval-",
+        "probe-preview-",
+        "api_key",
+        "access_token",
+        "authorization"
+      ],
+      "forbidden_payload_regexes": [],
+      "payload_checks": [
+        {
+          "path": "status",
+          "equals": "pass"
+        },
+        {
+          "path": "identity.request_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "identity.session_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "identity.organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "identity.course_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "identity.lesson_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.ledger_schema_version",
+          "equals": "wiii.runtime_flow_ledger.v1"
+        },
+        {
+          "path": "runtime.path",
+          "equals": "lms_document_preview"
+        },
+        {
+          "path": "runtime.stream_transport",
+          "equals": "sse_v3"
+        },
+        {
+          "path": "runtime.metadata_seen",
+          "equals": true
+        },
+        {
+          "path": "runtime.done_seen",
+          "equals": true
+        },
+        {
+          "path": "runtime.terminal_event_name",
+          "equals": "done"
+        },
+        {
+          "path": "runtime.done_event_count",
+          "min": 1
+        },
+        {
+          "path": "runtime.metadata_event_count",
+          "min": 1
+        },
+        {
+          "path": "runtime.host_action_event_count",
+          "min": 1
+        },
+        {
+          "path": "runtime.host_surface",
+          "equals": "embed_lms"
+        },
+        {
+          "path": "runtime.host_capability_lms_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.host_capability_host_action_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.host_capability_document_preview_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.document_context_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.uploaded_document_count",
+          "min": 1
+        },
+        {
+          "path": "runtime.source_ref_count",
+          "min": 1
+        },
+        {
+          "path": "runtime.context_provenance_schema_version",
+          "equals": "wiii.context_provenance_ledger.v1"
+        },
+        {
+          "path": "runtime.context_provenance_raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "runtime.context_provenance_identifier_strategy",
+          "equals": "hash_or_count_only"
+        },
+        {
+          "path": "runtime.context_provenance_document_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.context_provenance_attachment_count",
+          "min": 1
+        },
+        {
+          "path": "runtime.context_provenance_usable_attachment_count",
+          "min": 1
+        },
+        {
+          "path": "runtime.context_provenance_source_ref_count",
+          "min": 1
+        },
+        {
+          "path": "runtime.context_provenance_attachment_id_hash_count",
+          "min": 1
+        },
+        {
+          "path": "runtime.context_provenance_media_kinds",
+          "sorted_equals": [
+            "document"
+          ]
+        },
+        {
+          "path": "runtime.context_provenance_source_ref_kinds",
+          "sorted_equals": [
+            "heading"
+          ]
+        },
+        {
+          "path": "runtime.context_provenance_host_context_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.context_provenance_host_surface",
+          "equals": "embed_lms"
+        },
+        {
+          "path": "runtime.context_provenance_host_capabilities",
+          "sorted_equals": [
+            "document_preview",
+            "host_action",
+            "lms"
+          ]
+        },
+        {
+          "path": "runtime.preview_required",
+          "equals": true
+        },
+        {
+          "path": "runtime.preview_emitted",
+          "equals": true
+        },
+        {
+          "path": "runtime.apply_attempted",
+          "equals": false
+        },
+        {
+          "path": "runtime.approval_token_present",
+          "equals": false
+        },
+        {
+          "path": "runtime.host_action_result_received",
+          "equals": false
+        },
+        {
+          "path": "runtime.finalization_status",
+          "equals": "saved"
+        },
+        {
+          "path": "runtime.finalization_error_absent",
+          "equals": true
+        },
+        {
+          "path": "runtime.post_turn_lifecycle_schema_version",
+          "equals": "wiii.post_turn_lifecycle.v1"
+        },
+        {
+          "path": "runtime.post_turn_lifecycle_raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "runtime.post_turn_lifecycle_identifier_strategy",
+          "equals": "status_only"
+        },
+        {
+          "path": "host_action.request_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "host_action.action",
+          "equals": "authoring.preview_lesson_patch"
+        },
+        {
+          "path": "host_action.source_reference_count",
+          "min": 1
+        },
+        {
+          "path": "host_action.content_present",
+          "equals": true
+        },
+        {
+          "path": "host_action.content_char_count",
+          "min": 1
+        },
+        {
+          "path": "host_action.lesson_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "host_action.course_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "source_contract.schema_version",
+          "equals": "wiii.lms_test_course_source_contract.v1"
+        },
+        {
+          "path": "source_contract.document_context_present",
+          "equals": true
+        },
+        {
+          "path": "source_contract.provenance_schema_version",
+          "equals": "wiii.context_provenance_ledger.v1"
+        },
+        {
+          "path": "source_contract.provenance_privacy_hash_count_only",
+          "equals": true
+        },
+        {
+          "path": "source_contract.provenance_attachment_count_matches_runtime",
+          "equals": true
+        },
+        {
+          "path": "source_contract.provenance_usable_attachment_count_matches_runtime",
+          "equals": true
+        },
+        {
+          "path": "source_contract.provenance_source_ref_count_matches_runtime",
+          "equals": true
+        },
+        {
+          "path": "source_contract.provenance_attachment_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "source_contract.provenance_media_kind_document",
+          "equals": true
+        },
+        {
+          "path": "source_contract.provenance_source_ref_kind_heading",
+          "equals": true
+        },
+        {
+          "path": "source_contract.host_context_matches_lms_surface",
+          "equals": true
+        },
+        {
+          "path": "source_contract.host_capabilities_match_request",
+          "equals": true
+        },
+        {
+          "path": "source_contract.host_action_source_ref_count_matches_runtime",
+          "equals": true
+        },
+        {
+          "path": "source_contract.preview_audit_source_ref_count_matches_runtime",
+          "equals": true
+        },
+        {
+          "path": "source_contract.apply_audit_source_ref_count_matches_runtime",
+          "equals": true
+        },
+        {
+          "path": "source_contract.preview_audit_document_count_matches_runtime",
+          "equals": true
+        },
+        {
+          "path": "source_contract.apply_audit_document_count_matches_runtime",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.schema_version",
+          "equals": "wiii.lms_test_course_evidence_contract.v1"
+        },
+        {
+          "path": "evidence_contract.uses_stream_v3",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.uses_host_action_audit_route",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.requires_live_env_flag",
+          "equals": "WIII_LIVE_LMS_TEST_COURSE_REPLAY"
+        },
+        {
+          "path": "evidence_contract.requires_allow_write",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.requires_allow_external_lms_write",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.requires_live_channel_credentials",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.requires_external_lms_apply_endpoint",
+          "equals": "WIII_LMS_TEST_COURSE_APPLY_URL"
+        },
+        {
+          "path": "evidence_contract.requires_external_lms_apply_token",
+          "equals": "WIII_LMS_TEST_COURSE_APPLY_TOKEN"
+        },
+        {
+          "path": "evidence_contract.external_lms_write_required",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.external_lms_write_mode",
+          "equals": "webhook"
+        },
+        {
+          "path": "evidence_contract.synthetic_host_side_replay",
+          "equals": false
+        },
+        {
+          "path": "evidence_contract.external_lms_write_disabled",
+          "equals": false
+        },
+        {
+          "path": "evidence_contract.hash_count_only_output",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.runtime_apply_forbidden_before_host",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.preview_before_apply_audit_required",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.source_count_parity_required",
+          "equals": true
+        },
+        {
+          "path": "host_side_replay.preview_token_hash_present",
+          "equals": true
+        },
+        {
+          "path": "host_side_replay.approval_token_present",
+          "equals": true
+        },
+        {
+          "path": "host_side_replay.approval_token_in_audit_payload",
+          "equals": false
+        },
+        {
+          "path": "host_side_replay.external_lms_mutated",
+          "equals": true
+        },
+        {
+          "path": "external_lms_write.schema_version",
+          "equals": "wiii.external_lms_test_course_write.v1"
+        },
+        {
+          "path": "external_lms_write.mode",
+          "equals": "webhook"
+        },
+        {
+          "path": "external_lms_write.write_attempted",
+          "equals": true
+        },
+        {
+          "path": "external_lms_write.write_acknowledged",
+          "equals": true
+        },
+        {
+          "path": "external_lms_write.status_code_ok",
+          "equals": true
+        },
+        {
+          "path": "external_lms_write.endpoint_hash_present",
+          "equals": true
+        },
+        {
+          "path": "external_lms_write.credential_hash_present",
+          "equals": true
+        },
+        {
+          "path": "external_lms_write.request_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "external_lms_write.course_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "external_lms_write.lesson_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "external_lms_write.preview_request_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "external_lms_write.preview_token_hash_present",
+          "equals": true
+        },
+        {
+          "path": "external_lms_write.payload_content_hash_present",
+          "equals": true
+        },
+        {
+          "path": "external_lms_write.payload_source_reference_count",
+          "min": 1
+        },
+        {
+          "path": "external_lms_write.raw_request_payload_included",
+          "equals": false
+        },
+        {
+          "path": "external_lms_write.raw_response_payload_included",
+          "equals": false
+        },
+        {
+          "path": "external_lms_write.raw_credential_included",
+          "equals": false
+        },
+        {
+          "path": "audits.sequence_contract.schema_version",
+          "equals": "wiii.lms_host_action_audit_sequence.v1"
+        },
+        {
+          "path": "audits.sequence_contract.event_count",
+          "equals": 2
+        },
+        {
+          "path": "audits.sequence_contract.events",
+          "length_equals_path": "audits.sequence_contract.event_count"
+        },
+        {
+          "path": "audits.sequence_contract.events.0.stage",
+          "equals": "preview"
+        },
+        {
+          "path": "audits.sequence_contract.events.0.event_type",
+          "equals": "preview_created"
+        },
+        {
+          "path": "audits.sequence_contract.events.0.action",
+          "equals": "authoring.preview_lesson_patch"
+        },
+        {
+          "path": "audits.sequence_contract.events.0.status_code_ok",
+          "equals": true
+        },
+        {
+          "path": "audits.sequence_contract.events.1.stage",
+          "equals": "apply"
+        },
+        {
+          "path": "audits.sequence_contract.events.1.event_type",
+          "equals": "apply_confirmed"
+        },
+        {
+          "path": "audits.sequence_contract.events.1.action",
+          "equals": "authoring.apply_lesson_patch"
+        },
+        {
+          "path": "audits.sequence_contract.events.1.status_code_ok",
+          "equals": true
+        },
+        {
+          "path": "audits.sequence_contract.preview_before_apply",
+          "equals": true
+        },
+        {
+          "path": "audits.sequence_contract.preview_request_linked_to_apply",
+          "equals": true
+        },
+        {
+          "path": "audits.sequence_contract.shared_preview_token_hash",
+          "equals": true
+        },
+        {
+          "path": "audits.sequence_contract.response_echo_parity",
+          "equals": true
+        },
+        {
+          "path": "audits.sequence_contract.audit_surface_parity",
+          "equals": true
+        },
+        {
+          "path": "audits.sequence_contract.audit_metadata_parity",
+          "equals": true
+        },
+        {
+          "path": "audits.sequence_contract.raw_audit_payloads_included",
+          "equals": false
+        },
+        {
+          "path": "audits.preview_created.status",
+          "equals": "success"
+        },
+        {
+          "path": "audits.preview_created.status_code",
+          "equals": 200
+        },
+        {
+          "path": "audits.preview_created.status_code_ok",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.status_success",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.event_type",
+          "equals": "preview_created"
+        },
+        {
+          "path": "audits.preview_created.event_type_matches_payload",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.action",
+          "equals": "authoring.preview_lesson_patch"
+        },
+        {
+          "path": "audits.preview_created.action_matches_payload",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.request_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.request_id_hash_matches_payload",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.preview_token_hash_present",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.host_type_matches_lms",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.surface",
+          "equals": "preview_panel"
+        },
+        {
+          "path": "audits.preview_created.workflow_stage_matches_authoring",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.preview_kind_matches_lesson_patch",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.target_type_matches_lesson",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.metadata_probe_matches",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.metadata_audit_stage",
+          "equals": "preview"
+        },
+        {
+          "path": "audits.preview_created.metadata_course_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.metadata_lesson_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "audits.preview_created.metadata_preview_request_id_hash_present",
+          "equals": false
+        },
+        {
+          "path": "audits.preview_created.metadata_raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "audits.preview_created.metadata_raw_lms_document_included",
+          "equals": false
+        },
+        {
+          "path": "audits.preview_created.metadata_raw_host_action_params_included",
+          "equals": false
+        },
+        {
+          "path": "audits.preview_created.metadata_source_reference_count",
+          "min": 1
+        },
+        {
+          "path": "audits.preview_created.metadata_uploaded_document_count",
+          "min": 1
+        },
+        {
+          "path": "audits.preview_created.raw_summary_included",
+          "equals": false
+        },
+        {
+          "path": "audits.preview_created.raw_preview_token_included",
+          "equals": false
+        },
+        {
+          "path": "audits.preview_created.raw_target_id_included",
+          "equals": false
+        },
+        {
+          "path": "audits.apply_confirmed.status",
+          "equals": "success"
+        },
+        {
+          "path": "audits.apply_confirmed.status_code",
+          "equals": 200
+        },
+        {
+          "path": "audits.apply_confirmed.status_code_ok",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.status_success",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.event_type",
+          "equals": "apply_confirmed"
+        },
+        {
+          "path": "audits.apply_confirmed.event_type_matches_payload",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.action",
+          "equals": "authoring.apply_lesson_patch"
+        },
+        {
+          "path": "audits.apply_confirmed.action_matches_payload",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.request_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.request_id_hash_matches_payload",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.preview_token_hash_present",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.host_type_matches_lms",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.surface",
+          "equals": "editor_shell"
+        },
+        {
+          "path": "audits.apply_confirmed.workflow_stage_matches_authoring",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.preview_kind_matches_lesson_patch",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.target_type_matches_lesson",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.metadata_probe_matches",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.metadata_audit_stage",
+          "equals": "apply"
+        },
+        {
+          "path": "audits.apply_confirmed.metadata_course_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.metadata_lesson_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.metadata_preview_request_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.metadata_raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "audits.apply_confirmed.metadata_raw_lms_document_included",
+          "equals": false
+        },
+        {
+          "path": "audits.apply_confirmed.metadata_raw_host_action_params_included",
+          "equals": false
+        },
+        {
+          "path": "audits.apply_confirmed.metadata_source_reference_count",
+          "min": 1
+        },
+        {
+          "path": "audits.apply_confirmed.metadata_uploaded_document_count",
+          "min": 1
+        },
+        {
+          "path": "audits.apply_confirmed.metadata_approval_token_present",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.metadata_approval_credential_present",
+          "equals": true
+        },
+        {
+          "path": "audits.apply_confirmed.raw_summary_included",
+          "equals": false
+        },
+        {
+          "path": "audits.apply_confirmed.raw_preview_token_included",
+          "equals": false
+        },
+        {
+          "path": "audits.apply_confirmed.raw_target_id_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.identifier_strategy",
+          "equals": "hash_or_count_only"
+        },
+        {
+          "path": "privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.event_payloads_printed",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_sse_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_approval_token_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_preview_token_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_request_identifiers_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_auth_header_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_host_action_params_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_audit_payloads_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_lms_document_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_external_lms_request_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_external_lms_response_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_external_lms_token_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_external_lms_endpoint_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_document_marker_hash_present",
+          "equals": true
+        }
+      ],
+      "probe": "maritime-ai-service/scripts/probe_live_lms_test_course_replay.py",
+      "contract_tests": [
+        "maritime-ai-service/tests/unit/test_probe_live_lms_test_course_replay.py"
+      ],
+      "live_env_flags": [
+        "WIII_LIVE_LMS_TEST_COURSE_REPLAY"
+      ],
+      "live_guard_tokens": [
+        "--allow-write",
+        "--allow-external-lms-write"
+      ],
+      "dispatch_or_schedule_gate_tokens": [
+        "run_lms_replay",
+        "WIII_LMS_TEST_COURSE_EVIDENCE_ENABLED"
+      ],
+      "artifact_tokens": [
+        "lms-test-course-evidence-${{ github.run_id }}"
+      ],
+      "diagnostic_uploads": [
+        {
+          "artifact": "lms-test-course-preflight.json",
+          "path": "maritime-ai-service/lms-test-course-preflight.json",
+          "artifact_tokens": [
+            "lms-test-course-preflight-${{ github.run_id }}"
+          ],
+          "if_no_files_found": "warn",
+          "retention_days": 14
+        }
+      ]
+    },
+    {
+      "id": "semantic-memory-write-doctor",
+      "title": "Semantic-memory write doctor evidence",
+      "layer": "Wiii Data",
+      "workflow": ".github/workflows/semantic-memory-write-evidence.yml",
+      "artifact": "semantic-memory-write-evidence.json",
+      "schema_version": "wiii.live_semantic_memory_write_doctor.v1",
+      "freshness": {
+        "timestamp_path": "generated_at",
+        "max_age_hours": 72
+      },
+      "payload_schema_field": "schema_version",
+      "forbidden_payload_tokens": [
+        "PRIVATE SEMANTIC MEMORY MESSAGE",
+        "PRIVATE SEMANTIC MEMORY RESPONSE",
+        "PRIVATE CROSS ORG MEMORY",
+        "user-semantic-memory-private",
+        "org-semantic-memory-private",
+        "session-semantic-memory-",
+        "api_key",
+        "access_token",
+        "authorization",
+        "raw-memory-message-token",
+        "raw-memory-response-token"
+      ],
+      "forbidden_payload_regexes": [],
+      "payload_checks": [
+        {
+          "path": "status",
+          "equals": "pass"
+        },
+        {
+          "path": "runtime.path",
+          "equals": "semantic_memory_write_doctor"
+        },
+        {
+          "path": "semantic_memory_write.audit_schema_version",
+          "equals": "wiii.semantic_memory_write.v1"
+        },
+        {
+          "path": "semantic_memory_write.event_type",
+          "equals": "semantic_memory_write"
+        },
+        {
+          "path": "post_turn_lifecycle.schema_version",
+          "equals": "wiii.post_turn_lifecycle.v1"
+        },
+        {
+          "path": "post_turn_lifecycle.status",
+          "equals": "scheduled"
+        },
+        {
+          "path": "post_turn_lifecycle.reason",
+          "equals": "post_turn_background_tasks_scheduled"
+        },
+        {
+          "path": "post_turn_lifecycle.semantic_memory_policy",
+          "equals": "extract_facts"
+        },
+        {
+          "path": "post_turn_lifecycle.background_tasks_scheduled",
+          "equals": true
+        },
+        {
+          "path": "post_turn_lifecycle.background_schedule.schema_version",
+          "equals": "wiii.background_task_schedule.v1"
+        },
+        {
+          "path": "post_turn_lifecycle.background_schedule.task_count",
+          "equals": 2
+        },
+        {
+          "path": "post_turn_lifecycle.background_schedule.groups.0.group",
+          "equals": "semantic_memory_interaction"
+        },
+        {
+          "path": "post_turn_lifecycle.background_schedule.groups.0.status",
+          "equals": "scheduled"
+        },
+        {
+          "path": "post_turn_lifecycle.background_schedule.groups.0.reason",
+          "equals": "extract_facts"
+        },
+        {
+          "path": "post_turn_lifecycle.background_schedule.groups.1.group",
+          "equals": "semantic_memory_maintenance"
+        },
+        {
+          "path": "post_turn_lifecycle.background_schedule.groups.1.status",
+          "equals": "scheduled"
+        },
+        {
+          "path": "post_turn_lifecycle.background_schedule.groups.1.reason",
+          "equals": "after_interaction_write"
+        },
+        {
+          "path": "post_turn_lifecycle.scheduled_task_count",
+          "equals": 2
+        },
+        {
+          "path": "post_turn_lifecycle.scheduled_task_names.0",
+          "equals": "_store_semantic_interaction"
+        },
+        {
+          "path": "post_turn_lifecycle.scheduled_task_names.1",
+          "equals": "_enqueue_or_run_semantic_memory_maintenance"
+        },
+        {
+          "path": "post_turn_lifecycle.lifecycle_owned_semantic_scheduling",
+          "equals": true
+        },
+        {
+          "path": "post_turn_lifecycle.compatibility_wrapper_used",
+          "equals": false
+        },
+        {
+          "path": "post_turn_lifecycle.privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "runtime_flow_doctor.version",
+          "equals": "wiii.runtime_flow_doctor.v1"
+        },
+        {
+          "path": "runtime_flow_doctor.status",
+          "equals": "ready"
+        },
+        {
+          "path": "runtime_flow_doctor.summary.turn_count",
+          "equals": 1
+        },
+        {
+          "path": "runtime_flow_doctor.finalization_statuses.saved",
+          "equals": 1
+        },
+        {
+          "path": "runtime_flow_doctor.source.runtime_flow_ledger_event_count",
+          "equals": 1
+        },
+        {
+          "path": "runtime_flow_doctor.source.org_scoped",
+          "equals": true
+        },
+        {
+          "path": "runtime_flow_doctor.post_turn_lifecycle_ledger.version",
+          "equals": "wiii.post_turn_lifecycle_ledger.v1"
+        },
+        {
+          "path": "runtime_flow_doctor.post_turn_lifecycle_ledger.event_count",
+          "equals": 1
+        },
+        {
+          "path": "runtime_flow_doctor.post_turn_lifecycle_ledger.missing_count",
+          "equals": 0
+        },
+        {
+          "path": "runtime_flow_doctor.post_turn_lifecycle_ledger.background_tasks_scheduled_count",
+          "equals": 1
+        },
+        {
+          "path": "runtime_flow_doctor.post_turn_lifecycle_ledger.background_schedule.task_count",
+          "equals": 2
+        },
+        {
+          "path": "runtime_flow_doctor.post_turn_lifecycle_ledger.background_schedule.group_counts.semantic_memory_interaction",
+          "equals": 1
+        },
+        {
+          "path": "runtime_flow_doctor.post_turn_lifecycle_ledger.background_schedule.group_counts.semantic_memory_maintenance",
+          "equals": 1
+        },
+        {
+          "path": "runtime_flow_doctor.post_turn_lifecycle_ledger.privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "runtime_flow_doctor_history.version",
+          "equals": "wiii.runtime_flow_doctor_history.v1"
+        },
+        {
+          "path": "runtime_flow_doctor_history.bucket_strategy",
+          "equals": "event_created_at_hour"
+        },
+        {
+          "path": "runtime_flow_doctor_history.source.runtime_flow_ledger_event_count",
+          "equals": 1
+        },
+        {
+          "path": "runtime_flow_doctor_history.source.org_scoped",
+          "equals": true
+        },
+        {
+          "path": "runtime_flow_doctor_history.source.window",
+          "equals": "recent_runtime_flow_ledger_history"
+        },
+        {
+          "path": "runtime_flow_doctor_history.post_turn_lifecycle_ledger.event_count",
+          "equals": 1
+        },
+        {
+          "path": "runtime_flow_doctor_history.buckets.0.post_turn_lifecycle_ledger.event_count",
+          "equals": 1
+        },
+        {
+          "path": "runtime_flow_doctor_history.privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "session_log.backend",
+          "equals": "in_memory"
+        },
+        {
+          "path": "session_log.append_count",
+          "equals": 3
+        },
+        {
+          "path": "session_log.total_event_count",
+          "equals": 6
+        },
+        {
+          "path": "session_log.total_semantic_write_event_count",
+          "equals": 3
+        },
+        {
+          "path": "session_log.org_scoped_semantic_write_event_count",
+          "equals": 2
+        },
+        {
+          "path": "session_log.total_runtime_flow_ledger_event_count",
+          "equals": 2
+        },
+        {
+          "path": "session_log.org_scoped_runtime_flow_ledger_event_count",
+          "equals": 1
+        },
+        {
+          "path": "session_log.cross_org_event_excluded",
+          "equals": true
+        },
+        {
+          "path": "session_log.cross_org_runtime_flow_ledger_excluded",
+          "equals": true
+        },
+        {
+          "path": "session_log.raw_non_memory_event_ignored",
+          "equals": true
+        },
+        {
+          "path": "org_scoped_doctor.version",
+          "equals": "wiii.semantic_memory_write_doctor.v1"
+        },
+        {
+          "path": "org_scoped_doctor.status",
+          "equals": "degraded"
+        },
+        {
+          "path": "org_scoped_doctor.summary.write_count",
+          "equals": 2
+        },
+        {
+          "path": "org_scoped_doctor.summary.stored_fact_total",
+          "equals": 2
+        },
+        {
+          "path": "org_scoped_doctor.summary.stored_insight_total",
+          "equals": 1
+        },
+        {
+          "path": "org_scoped_doctor.summary.warning_count",
+          "equals": 1
+        },
+        {
+          "path": "org_scoped_doctor.source.semantic_memory_write_event_count",
+          "equals": 2
+        },
+        {
+          "path": "org_scoped_doctor.source.org_scoped",
+          "equals": true
+        },
+        {
+          "path": "org_scoped_doctor.privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "org_scoped_history.version",
+          "equals": "wiii.semantic_memory_write_doctor_history.v1"
+        },
+        {
+          "path": "org_scoped_history.bucket_strategy",
+          "equals": "event_created_at_hour"
+        },
+        {
+          "path": "org_scoped_history.identifier_strategy",
+          "equals": "aggregate_counts_only"
+        },
+        {
+          "path": "org_scoped_history.source.semantic_memory_write_event_count",
+          "equals": 2
+        },
+        {
+          "path": "org_scoped_history.source.org_scoped",
+          "equals": true
+        },
+        {
+          "path": "org_scoped_history.source.window",
+          "equals": "recent_semantic_memory_write_history"
+        },
+        {
+          "path": "org_scoped_history.source.bucket_count",
+          "equals": 1
+        },
+        {
+          "path": "org_scoped_history.buckets.0.status",
+          "equals": "degraded"
+        },
+        {
+          "path": "org_scoped_history.buckets.0.summary.write_count",
+          "equals": 2
+        },
+        {
+          "path": "org_scoped_history.buckets.0.summary.stored_fact_total",
+          "equals": 2
+        },
+        {
+          "path": "org_scoped_history.buckets.0.summary.stored_insight_total",
+          "equals": 1
+        },
+        {
+          "path": "org_scoped_history.buckets.0.warnings.insight_store_degraded",
+          "equals": 1
+        },
+        {
+          "path": "org_scoped_history.privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "blocked_missing_org_context.status",
+          "equals": "degraded"
+        },
+        {
+          "path": "blocked_missing_org_context.summary.write_count",
+          "equals": 1
+        },
+        {
+          "path": "blocked_missing_org_context.summary.blocked_count",
+          "equals": 1
+        },
+        {
+          "path": "blocked_missing_org_context.organization_contexts.blocked_missing_org_context",
+          "equals": 1
+        },
+        {
+          "path": "blocked_missing_org_context.warnings.missing_org_context",
+          "equals": 1
+        },
+        {
+          "path": "privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.identifier_strategy",
+          "equals": "hash_or_count_only"
+        },
+        {
+          "path": "privacy.raw_marker_absent",
+          "equals": true
+        },
+        {
+          "path": "privacy.raw_user_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_session_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_organization_identifier_included",
+          "equals": false
+        }
+      ],
+      "probe": "maritime-ai-service/scripts/probe_live_semantic_memory_write_doctor.py",
+      "contract_tests": [
+        "maritime-ai-service/tests/unit/test_probe_live_semantic_memory_write_doctor.py",
+        "maritime-ai-service/tests/unit/test_semantic_memory_privacy.py",
+        "maritime-ai-service/tests/unit/test_post_turn_lifecycle.py",
+        "maritime-ai-service/tests/unit/test_runtime_flow_doctor.py"
+      ],
+      "live_env_flags": [
+        "WIII_LIVE_SEMANTIC_MEMORY_WRITE_DOCTOR"
+      ],
+      "live_guard_tokens": [
+        "--allow-run"
+      ],
+      "dispatch_or_schedule_gate_tokens": [
+        "run_semantic_memory_write_doctor",
+        "WIII_SEMANTIC_MEMORY_WRITE_EVIDENCE_ENABLED"
+      ],
+      "artifact_tokens": [
+        "semantic-memory-write-evidence-${{ github.run_id }}"
+      ]
+    },
+    {
+      "id": "wiii-connect-action-replay",
+      "title": "Wiii Connect external-app action replay evidence",
+      "layer": "Wiii Host",
+      "workflow": ".github/workflows/wiii-connect-action-evidence.yml",
+      "artifact": "wiii-connect-action-evidence.json",
+      "schema_version": "wiii.live_wiii_connect_action_replay.v1",
+      "freshness": {
+        "timestamp_path": "generated_at",
+        "max_age_hours": 72
+      },
+      "payload_schema_field": "schema_version",
+      "forbidden_payload_tokens": [
+        "WIII_CONNECT_ACTION_REPLAY_RAW_ARGUMENT_MARKER",
+        "Bearer live-wiii-connect-action-token",
+        "local-fake-key",
+        "provider-managed://",
+        "ca_wiii_connect_action_replay",
+        "connected_account_id",
+        "connection_ref",
+        "api_key",
+        "access_token",
+        "authorization"
+      ],
+      "forbidden_payload_regexes": [],
+      "payload_checks": [
+        {
+          "path": "status",
+          "equals": "pass"
+        },
+        {
+          "path": "runtime.path",
+          "equals": "external_app_action"
+        },
+        {
+          "path": "runtime.request_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.session_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.user_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.prompt_hash_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.raw_prompt_included",
+          "equals": false
+        },
+        {
+          "path": "runtime.plan.version",
+          "equals": "external_app_action_plan.v1"
+        },
+        {
+          "path": "runtime.plan.status",
+          "equals": "ready"
+        },
+        {
+          "path": "runtime.plan.kind",
+          "equals": "provider_action"
+        },
+        {
+          "path": "runtime.plan.provider_slug",
+          "equals": "gmail"
+        },
+        {
+          "path": "runtime.plan.provider_ready",
+          "equals": true
+        },
+        {
+          "path": "runtime.plan.action_allowlist_count",
+          "min": 1
+        },
+        {
+          "path": "runtime.integration_lane.version",
+          "equals": "external_app_integration_lane.v1"
+        },
+        {
+          "path": "runtime.integration_lane.status",
+          "equals": "ready"
+        },
+        {
+          "path": "runtime.integration_lane.executor",
+          "equals": "provider_worker"
+        },
+        {
+          "path": "runtime.integration_lane.provider_slug",
+          "equals": "gmail"
+        },
+        {
+          "path": "runtime.integration_lane.visible_tool_names",
+          "sorted_equals": [
+            "tool_wiii_connect_delegate_to_integration",
+            "tool_wiii_connect_list_actions"
+          ]
+        },
+        {
+          "path": "runtime.integration_lane.visible_tool_count",
+          "equals": 2
+        },
+        {
+          "path": "runtime.integration_lane.visible_tool_count_matches",
+          "equals": true
+        },
+        {
+          "path": "integration_worker.version",
+          "equals": "wiii_connect_integration_worker.v1"
+        },
+        {
+          "path": "integration_worker.delegate_version",
+          "equals": "wiii_connect_integration_delegate_tool.v1"
+        },
+        {
+          "path": "integration_worker.status",
+          "equals": "ready"
+        },
+        {
+          "path": "integration_worker.executor",
+          "equals": "provider_worker"
+        },
+        {
+          "path": "integration_worker.provider_slug",
+          "equals": "gmail"
+        },
+        {
+          "path": "integration_worker.allowed_provider_slugs",
+          "sorted_equals": [
+            "gmail"
+          ]
+        },
+        {
+          "path": "integration_worker.action_slug",
+          "equals": "GMAIL_FETCH_EMAILS"
+        },
+        {
+          "path": "integration_worker.selected_mutation",
+          "equals": "read"
+        },
+        {
+          "path": "integration_worker.action_allowlist",
+          "sorted_equals": [
+            "GMAIL_FETCH_EMAILS"
+          ]
+        },
+        {
+          "path": "integration_worker.prompt_present",
+          "equals": true
+        },
+        {
+          "path": "integration_worker.stage_sequence",
+          "sorted_equals": [
+            "action_policy",
+            "provider_gate",
+            "ready"
+          ]
+        },
+        {
+          "path": "integration_worker.stage_sequence_ready",
+          "equals": true
+        },
+        {
+          "path": "integration_worker.argument_plan.source",
+          "equals": "caller_provided"
+        },
+        {
+          "path": "integration_worker.argument_plan.argument_keys",
+          "sorted_equals": [
+            "max_results",
+            "query"
+          ]
+        },
+        {
+          "path": "integration_worker.argument_plan.argument_count",
+          "equals": 2
+        },
+        {
+          "path": "integration_worker.argument_plan.required_argument_keys_present",
+          "equals": true
+        },
+        {
+          "path": "integration_worker.raw_prompt_included",
+          "equals": false
+        },
+        {
+          "path": "integration_worker.result_classification.outcome",
+          "equals": "completed"
+        },
+        {
+          "path": "integration_worker.result_classification.status",
+          "equals": "action_completed"
+        },
+        {
+          "path": "integration_worker.result_classification.failed_stage",
+          "equals": ""
+        },
+        {
+          "path": "backend_gateway.status",
+          "equals": "allowed"
+        },
+        {
+          "path": "backend_gateway.connection_present",
+          "equals": true
+        },
+        {
+          "path": "backend_gateway.audit_persistent",
+          "equals": true
+        },
+        {
+          "path": "backend_gateway.scope_policy.status",
+          "equals": "allowed"
+        },
+        {
+          "path": "backend_gateway.scope_policy.required_scopes",
+          "sorted_equals": [
+            "read"
+          ]
+        },
+        {
+          "path": "backend_gateway.scope_policy.allowed_scopes",
+          "sorted_equals": [
+            "read"
+          ]
+        },
+        {
+          "path": "backend_executor.schema.status",
+          "equals": "ready"
+        },
+        {
+          "path": "backend_executor.schema.schema_present",
+          "equals": true
+        },
+        {
+          "path": "backend_executor.schema.required_argument_keys",
+          "sorted_equals": [
+            "query"
+          ]
+        },
+        {
+          "path": "backend_executor.execution.status",
+          "equals": "succeeded"
+        },
+        {
+          "path": "backend_executor.execution.successful",
+          "equals": true
+        },
+        {
+          "path": "backend_executor.execution.data_keys",
+          "sorted_equals": [
+            "messages"
+          ]
+        },
+        {
+          "path": "backend_executor.execution.log_id_present",
+          "equals": true
+        },
+        {
+          "path": "backend_executor.execution.provider_payload_included",
+          "equals": false
+        },
+        {
+          "path": "backend_executor.connected_account_seen",
+          "equals": true
+        },
+        {
+          "path": "backend_executor.observed_execute_argument_keys",
+          "sorted_equals": [
+            "max_results",
+            "query"
+          ]
+        },
+        {
+          "path": "backend_executor.observed_execute_argument_count",
+          "equals": 2
+        },
+        {
+          "path": "backend_executor.required_arguments_present",
+          "equals": true
+        },
+        {
+          "path": "connection_lookup.list_call_count",
+          "min": 1
+        },
+        {
+          "path": "connection_lookup.organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "connection_lookup.user_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "connection_lookup.provider_slug",
+          "equals": "gmail"
+        },
+        {
+          "path": "connection_lookup.provider_scope_matches",
+          "equals": true
+        },
+        {
+          "path": "connection_lookup.raw_connection_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "audits.record_count",
+          "min": 2
+        },
+        {
+          "path": "audits.execution_event_count",
+          "min": 2
+        },
+        {
+          "path": "audits.started_seen",
+          "equals": true
+        },
+        {
+          "path": "audits.succeeded_seen",
+          "equals": true
+        },
+        {
+          "path": "audits.execute_stage_seen",
+          "equals": true
+        },
+        {
+          "path": "audits.execute_result_stage_seen",
+          "equals": true
+        },
+        {
+          "path": "audits.organization_hash_count",
+          "equals": 1
+        },
+        {
+          "path": "audits.user_hash_count",
+          "equals": 1
+        },
+        {
+          "path": "audits.all_records_org_scoped",
+          "equals": true
+        },
+        {
+          "path": "audits.all_records_user_scoped",
+          "equals": true
+        },
+        {
+          "path": "audits.raw_metadata_included",
+          "equals": false
+        },
+        {
+          "path": "final_answer.present",
+          "equals": true
+        },
+        {
+          "path": "final_answer.source",
+          "equals": "external_app_action_final_answer"
+        },
+        {
+          "path": "final_answer.raw_answer_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.identifier_strategy",
+          "equals": "hash_or_count_only"
+        },
+        {
+          "path": "privacy.raw_marker_absent",
+          "equals": true
+        },
+        {
+          "path": "privacy.raw_prompt_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_request_identifiers_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.provider_arguments_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.provider_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_audit_metadata_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.opaque_connection_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.final_answer_text_included",
+          "equals": false
+        }
+      ],
+      "probe": "maritime-ai-service/scripts/probe_live_wiii_connect_action_replay.py",
+      "contract_tests": [
+        "maritime-ai-service/tests/unit/test_probe_live_wiii_connect_action_replay.py",
+        "maritime-ai-service/tests/unit/test_external_app_action_runtime.py",
+        "maritime-ai-service/tests/unit/test_wiii_connect_integration_worker.py",
+        "maritime-ai-service/tests/unit/test_wiii_connect_tools.py"
+      ],
+      "live_env_flags": [
+        "WIII_LIVE_WIII_CONNECT_ACTION_REPLAY"
+      ],
+      "live_guard_tokens": [
+        "--allow-run"
+      ],
+      "dispatch_or_schedule_gate_tokens": [
+        "run_wiii_connect_action_replay",
+        "WIII_CONNECT_ACTION_EVIDENCE_ENABLED"
+      ],
+      "artifact_tokens": [
+        "wiii-connect-action-evidence-${{ github.run_id }}"
+      ]
+    },
+    {
+      "id": "wiii-connect-facebook-post-replay",
+      "title": "Wiii Connect Facebook post preview/apply replay evidence",
+      "layer": "Wiii Host",
+      "workflow": ".github/workflows/wiii-connect-facebook-post-replay-evidence.yml",
+      "artifact": "wiii-connect-facebook-post-replay-evidence.json",
+      "schema_version": "wiii.live_wiii_connect_facebook_post_replay.v1",
+      "freshness": {
+        "timestamp_path": "generated_at",
+        "max_age_hours": 72
+      },
+      "payload_schema_field": "schema_version",
+      "forbidden_payload_tokens": [
+        "WIII_CONNECT_FACEBOOK_POST_REPLAY_MARKER",
+        "9876543210",
+        "ca_wiii_connect_facebook_post_replay",
+        "local-facebook-post-fake-key",
+        "authcfg_facebook_post_replay",
+        "wcn_",
+        "approval_token",
+        "connected_account_id",
+        "connection_ref",
+        "page_id",
+        "api_key",
+        "access_token",
+        "authorization"
+      ],
+      "forbidden_payload_regexes": [],
+      "payload_checks": [
+        {
+          "path": "status",
+          "equals": "pass"
+        },
+        {
+          "path": "provider",
+          "equals": "facebook"
+        },
+        {
+          "path": "action",
+          "equals": "FACEBOOK_CREATE_POST"
+        },
+        {
+          "path": "runtime.path",
+          "equals": "external_app_action"
+        },
+        {
+          "path": "runtime.mutation",
+          "equals": "apply"
+        },
+        {
+          "path": "runtime.request_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.session_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.organization_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.user_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.raw_identifiers_included",
+          "equals": false
+        },
+        {
+          "path": "preview.status",
+          "equals": "ready"
+        },
+        {
+          "path": "preview.http_status",
+          "equals": 200
+        },
+        {
+          "path": "preview.preview_evidence_id_present",
+          "equals": true
+        },
+        {
+          "path": "preview.preview_evidence_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "preview.approval_credential_present",
+          "equals": true
+        },
+        {
+          "path": "preview.approval_credential_hash_present",
+          "equals": true
+        },
+        {
+          "path": "preview.raw_response_payload_included",
+          "equals": false
+        },
+        {
+          "path": "preview.approval_ledger.version",
+          "equals": "wiii_connect_operation_approval.v1"
+        },
+        {
+          "path": "preview.approval_ledger.status",
+          "equals": "pending"
+        },
+        {
+          "path": "preview.approval_ledger.preview_evidence_id_present",
+          "equals": true
+        },
+        {
+          "path": "preview.approval_ledger.request_fingerprint_present",
+          "equals": true
+        },
+        {
+          "path": "preview.approval_ledger.persistent",
+          "equals": true
+        },
+        {
+          "path": "preview.approval_ledger.metadata.selected_connection_present",
+          "equals": true
+        },
+        {
+          "path": "preview.approval_ledger.metadata.selected_page_present",
+          "equals": true
+        },
+        {
+          "path": "preview.approval_ledger.metadata.message_length",
+          "min": 1
+        },
+        {
+          "path": "preview.approval_ledger.metadata.image_present",
+          "equals": false
+        },
+        {
+          "path": "apply.status",
+          "equals": "succeeded"
+        },
+        {
+          "path": "apply.http_status",
+          "equals": 200
+        },
+        {
+          "path": "apply.approval_credential_hash_present",
+          "equals": true
+        },
+        {
+          "path": "apply.preview_evidence_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "apply.gateway.status",
+          "equals": "allowed"
+        },
+        {
+          "path": "apply.gateway.scope_policy.status",
+          "equals": "allowed"
+        },
+        {
+          "path": "apply.schema.status",
+          "equals": "ready"
+        },
+        {
+          "path": "apply.schema.schema_present",
+          "equals": true
+        },
+        {
+          "path": "apply.schema.required_argument_count",
+          "min": 2
+        },
+        {
+          "path": "apply.execution.status",
+          "equals": "succeeded"
+        },
+        {
+          "path": "apply.execution.successful",
+          "equals": true
+        },
+        {
+          "path": "apply.execution.data_key_count",
+          "min": 1
+        },
+        {
+          "path": "apply.execution.log_id_present",
+          "equals": true
+        },
+        {
+          "path": "apply.approval_ledger.version",
+          "equals": "wiii_connect_operation_approval.v1"
+        },
+        {
+          "path": "apply.approval_ledger.status",
+          "equals": "consumed"
+        },
+        {
+          "path": "apply.approval_ledger.preview_evidence_id_present",
+          "equals": true
+        },
+        {
+          "path": "apply.approval_ledger.request_fingerprint_present",
+          "equals": true
+        },
+        {
+          "path": "apply.approval_ledger.consumed",
+          "equals": true
+        },
+        {
+          "path": "apply.approval_ledger.persistent",
+          "equals": true
+        },
+        {
+          "path": "apply.raw_response_payload_included",
+          "equals": false
+        },
+        {
+          "path": "replay.status",
+          "equals": "blocked"
+        },
+        {
+          "path": "replay.reason",
+          "equals": "approval_record_already_consumed"
+        },
+        {
+          "path": "replay.http_status",
+          "equals": 200
+        },
+        {
+          "path": "replay.gateway_evaluated",
+          "equals": false
+        },
+        {
+          "path": "replay.schema_evaluated",
+          "equals": false
+        },
+        {
+          "path": "replay.execution_attempted",
+          "equals": false
+        },
+        {
+          "path": "replay.approval_credential_hash_present",
+          "equals": true
+        },
+        {
+          "path": "replay.preview_evidence_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "replay.approval_ledger.version",
+          "equals": "wiii_connect_operation_approval.v1"
+        },
+        {
+          "path": "replay.approval_ledger.status",
+          "equals": "blocked"
+        },
+        {
+          "path": "replay.approval_ledger.reason",
+          "equals": "approval_record_already_consumed"
+        },
+        {
+          "path": "replay.approval_ledger.preview_evidence_id_present",
+          "equals": true
+        },
+        {
+          "path": "replay.approval_ledger.request_fingerprint_present",
+          "equals": true
+        },
+        {
+          "path": "replay.approval_ledger.blocked",
+          "equals": true
+        },
+        {
+          "path": "replay.approval_ledger.persistent",
+          "equals": true
+        },
+        {
+          "path": "replay.raw_response_payload_included",
+          "equals": false
+        },
+        {
+          "path": "operation_approval.append_count",
+          "equals": 1
+        },
+        {
+          "path": "operation_approval.consume_count",
+          "equals": 2
+        },
+        {
+          "path": "operation_approval.persistent",
+          "equals": true
+        },
+        {
+          "path": "operation_approval.preview_evidence_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "provider_execute_call_count",
+          "equals": 1
+        },
+        {
+          "path": "provider_executor.call_count",
+          "equals": 1
+        },
+        {
+          "path": "provider_executor.argument_count",
+          "equals": 3
+        },
+        {
+          "path": "provider_executor.required_arguments_present",
+          "equals": true
+        },
+        {
+          "path": "provider_executor.connected_account_seen",
+          "equals": true
+        },
+        {
+          "path": "provider_executor.raw_arguments_included",
+          "equals": false
+        },
+        {
+          "path": "provider_executor.raw_response_included",
+          "equals": false
+        },
+        {
+          "path": "provider_executor.provider_account_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "storage_scope.list_call_count",
+          "min": 1
+        },
+        {
+          "path": "storage_scope.get_call_count",
+          "min": 1
+        },
+        {
+          "path": "storage_scope.all_calls_org_scoped",
+          "equals": true
+        },
+        {
+          "path": "storage_scope.all_calls_user_scoped",
+          "equals": true
+        },
+        {
+          "path": "storage_scope.facebook_provider_filter_seen",
+          "equals": true
+        },
+        {
+          "path": "storage_scope.connection_lookup_count",
+          "min": 1
+        },
+        {
+          "path": "storage_scope.raw_identifiers_included",
+          "equals": false
+        },
+        {
+          "path": "audits.record_count",
+          "min": 3
+        },
+        {
+          "path": "audits.statuses",
+          "sorted_equals": [
+            "allowed",
+            "started",
+            "succeeded"
+          ]
+        },
+        {
+          "path": "audits.stages",
+          "sorted_equals": [
+            "execute",
+            "execute_result",
+            "preview"
+          ]
+        },
+        {
+          "path": "privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.identifier_strategy",
+          "equals": "presence_hash_or_count_only"
+        },
+        {
+          "path": "privacy.provider_arguments_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.provider_response_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.request_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.approval_credential_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.opaque_connection_identifier_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.selected_page_value_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.audit_metadata_raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_request_identifiers_included",
+          "equals": false
+        }
+      ],
+      "probe": "maritime-ai-service/scripts/probe_live_wiii_connect_facebook_post_replay.py",
+      "contract_tests": [
+        "maritime-ai-service/tests/unit/test_probe_live_wiii_connect_facebook_post_replay.py",
+        "maritime-ai-service/tests/unit/api/test_wiii_connect_api.py",
+        "maritime-ai-service/tests/unit/test_wiii_connect_persistent_storage.py"
+      ],
+      "live_env_flags": [
+        "WIII_LIVE_WIII_CONNECT_FACEBOOK_POST_REPLAY"
+      ],
+      "live_guard_tokens": [
+        "--allow-run"
+      ],
+      "dispatch_or_schedule_gate_tokens": [
+        "run_wiii_connect_facebook_post_replay",
+        "WIII_CONNECT_FACEBOOK_POST_REPLAY_EVIDENCE_ENABLED"
+      ],
+      "artifact_tokens": [
+        "wiii-connect-facebook-post-replay-evidence-${{ github.run_id }}"
+      ]
+    },
+    {
+      "id": "wiii-connect-composio-acceptance",
+      "title": "Credentialed Wiii Connect Composio acceptance evidence",
+      "layer": "Wiii Host",
+      "workflow": ".github/workflows/wiii-connect-composio-acceptance-evidence.yml",
+      "artifact": "wiii-connect-composio-acceptance-evidence.json",
+      "schema_version": "wiii.live_wiii_connect_composio_acceptance.v1",
+      "freshness": {
+        "timestamp_path": "generated_at",
+        "max_age_hours": 72
+      },
+      "payload_schema_field": "schema_version",
+      "forbidden_payload_tokens": [
+        "WIII_ACCEPTANCE_BEARER_TOKEN",
+        "Bearer ",
+        "authorization_url",
+        "wiii_state=",
+        "access_token",
+        "authorization",
+        "refresh_token",
+        "connected_account_id",
+        "connection_id",
+        "connection_ref",
+        "wcn_",
+        "provider-managed://",
+        "api_key"
+      ],
+      "forbidden_payload_regexes": [],
+      "payload_checks": [
+        {
+          "path": "status",
+          "equals": "pass"
+        },
+        {
+          "path": "summary.success",
+          "equals": true
+        },
+        {
+          "path": "provider",
+          "equals": "gmail"
+        },
+        {
+          "path": "action",
+          "equals": "GMAIL_FETCH_EMAILS"
+        },
+        {
+          "path": "flags.expect_connected",
+          "equals": true
+        },
+        {
+          "path": "flags.require_execution_ready",
+          "equals": true
+        },
+        {
+          "path": "flags.execute_readonly",
+          "equals": true
+        },
+        {
+          "path": "flags.connection_selected_for_action",
+          "equals": true
+        },
+        {
+          "path": "runtime.path",
+          "equals": "external_app_action"
+        },
+        {
+          "path": "runtime.mutation",
+          "equals": "read"
+        },
+        {
+          "path": "runtime.argument_key_count",
+          "min": 1
+        },
+        {
+          "path": "runtime.arguments_present",
+          "equals": true
+        },
+        {
+          "path": "runtime.check_count",
+          "min": 13
+        },
+        {
+          "path": "runtime.observed_section_count",
+          "min": 11
+        },
+        {
+          "path": "evidence_contract.backend_only_harness",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.external_provider_execution",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.requires_connected_account",
+          "equals": true
+        },
+        {
+          "path": "evidence_contract.requires_readonly_execution",
+          "equals": true
+        },
+        {
+          "path": "check_statuses.backend_health",
+          "equals": "passed"
+        },
+        {
+          "path": "check_statuses.authentication",
+          "equals": "passed"
+        },
+        {
+          "path": "check_statuses.provider_registry",
+          "equals": "passed"
+        },
+        {
+          "path": "check_statuses.adapter_readiness",
+          "equals": "passed"
+        },
+        {
+          "path": "check_statuses.storage_readiness",
+          "equals": "passed"
+        },
+        {
+          "path": "check_statuses.audit_readiness",
+          "equals": "passed"
+        },
+        {
+          "path": "check_statuses.activation_readiness_connect",
+          "equals": "passed"
+        },
+        {
+          "path": "check_statuses.curated_actions",
+          "equals": "passed"
+        },
+        {
+          "path": "check_statuses.gateway_fail_closed_control",
+          "equals": "passed"
+        },
+        {
+          "path": "check_statuses.connection_listing",
+          "equals": "passed"
+        },
+        {
+          "path": "check_statuses.activation_readiness_execution",
+          "equals": "passed"
+        },
+        {
+          "path": "check_statuses.execution_gateway_allowed",
+          "equals": "passed"
+        },
+        {
+          "path": "check_statuses.read_only_provider_execution",
+          "equals": "passed"
+        },
+        {
+          "path": "backend.health_status",
+          "equals": "ok"
+        },
+        {
+          "path": "backend.origin_present",
+          "equals": true
+        },
+        {
+          "path": "authentication.status",
+          "equals": "authenticated"
+        },
+        {
+          "path": "authentication.bearer_value_included",
+          "equals": false
+        },
+        {
+          "path": "authentication.bearer_env_name_included",
+          "equals": false
+        },
+        {
+          "path": "provider_registry.provider_slug",
+          "equals": "gmail"
+        },
+        {
+          "path": "provider_registry.provider_kind",
+          "equals": "composio"
+        },
+        {
+          "path": "provider_registry.provider_found",
+          "equals": true
+        },
+        {
+          "path": "adapter.bound",
+          "equals": true
+        },
+        {
+          "path": "adapter.configured",
+          "equals": true
+        },
+        {
+          "path": "adapter.auth_ready",
+          "equals": true
+        },
+        {
+          "path": "adapter.can_execute_actions",
+          "equals": true
+        },
+        {
+          "path": "storage.persistent",
+          "equals": true
+        },
+        {
+          "path": "storage.connection_table_ready",
+          "equals": true
+        },
+        {
+          "path": "storage.audit_ledger_ready",
+          "equals": true
+        },
+        {
+          "path": "audit_ledger.persistent",
+          "equals": true
+        },
+        {
+          "path": "activation.connect.status",
+          "equals": "ready"
+        },
+        {
+          "path": "activation.connect.ready_to_connect",
+          "equals": true
+        },
+        {
+          "path": "activation.execution.status",
+          "equals": "ready"
+        },
+        {
+          "path": "activation.execution.ready_to_execute_readonly",
+          "equals": true
+        },
+        {
+          "path": "activation.execution.selected_connection_hash_present",
+          "equals": true
+        },
+        {
+          "path": "activation.execution.scope_policy.version",
+          "equals": "wiii_connect_scope_policy.v1"
+        },
+        {
+          "path": "activation.execution.scope_policy.status",
+          "equals": "allowed"
+        },
+        {
+          "path": "activation.execution.scope_policy.read_required",
+          "equals": true
+        },
+        {
+          "path": "activation.execution.scope_policy.read_allowed",
+          "equals": true
+        },
+        {
+          "path": "curated_action.provider_slug",
+          "equals": "gmail"
+        },
+        {
+          "path": "curated_action.action_slug",
+          "equals": "GMAIL_FETCH_EMAILS"
+        },
+        {
+          "path": "curated_action.mutation",
+          "equals": "read"
+        },
+        {
+          "path": "curated_action.enabled",
+          "equals": true
+        },
+        {
+          "path": "gateway_fail_closed.status",
+          "equals": "blocked"
+        },
+        {
+          "path": "gateway_fail_closed.reason",
+          "equals": "connection_selection_required"
+        },
+        {
+          "path": "gateway_fail_closed.missing_connection_selection_blocked",
+          "equals": true
+        },
+        {
+          "path": "gateway_fail_closed.provider_execution_attempted",
+          "equals": false
+        },
+        {
+          "path": "connection_selection.list_status",
+          "equals": "ready"
+        },
+        {
+          "path": "connection_selection.account_count",
+          "min": 1
+        },
+        {
+          "path": "connection_selection.active_connection_found",
+          "equals": true
+        },
+        {
+          "path": "connection_selection.selected_connection_hash_present",
+          "equals": true
+        },
+        {
+          "path": "connection_selection.opaque_connection_included",
+          "equals": false
+        },
+        {
+          "path": "execution_gateway.status",
+          "equals": "allowed"
+        },
+        {
+          "path": "execution_gateway.selected_connection_hash_present",
+          "equals": true
+        },
+        {
+          "path": "execution_gateway.argument_key_count",
+          "min": 1
+        },
+        {
+          "path": "execution_gateway.scope_policy.version",
+          "equals": "wiii_connect_scope_policy.v1"
+        },
+        {
+          "path": "execution_gateway.scope_policy.status",
+          "equals": "allowed"
+        },
+        {
+          "path": "execution_gateway.scope_policy.read_required",
+          "equals": true
+        },
+        {
+          "path": "execution_gateway.scope_policy.read_allowed",
+          "equals": true
+        },
+        {
+          "path": "execution_gateway.provider_execution_attempted",
+          "equals": false
+        },
+        {
+          "path": "readonly_execution.status",
+          "equals": "succeeded"
+        },
+        {
+          "path": "readonly_execution.provider_slug",
+          "equals": "gmail"
+        },
+        {
+          "path": "readonly_execution.action_slug",
+          "equals": "GMAIL_FETCH_EMAILS"
+        },
+        {
+          "path": "readonly_execution.selected_connection_hash_present",
+          "equals": true
+        },
+        {
+          "path": "readonly_execution.schema.status",
+          "equals": "ready"
+        },
+        {
+          "path": "readonly_execution.schema.schema_present",
+          "equals": true
+        },
+        {
+          "path": "readonly_execution.schema.argument_key_count",
+          "min": 1
+        },
+        {
+          "path": "readonly_execution.schema.required_argument_keys_present",
+          "equals": true
+        },
+        {
+          "path": "readonly_execution.schema.raw_schema_included",
+          "equals": false
+        },
+        {
+          "path": "readonly_execution.execution.status",
+          "equals": "succeeded"
+        },
+        {
+          "path": "readonly_execution.execution.successful",
+          "equals": true
+        },
+        {
+          "path": "readonly_execution.execution.status_code",
+          "min": 200
+        },
+        {
+          "path": "readonly_execution.execution.data_key_count",
+          "min": 1
+        },
+        {
+          "path": "readonly_execution.execution.provider_response_included",
+          "equals": false
+        },
+        {
+          "path": "readonly_execution.provider_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.identifier_strategy",
+          "equals": "hash_or_count_only"
+        },
+        {
+          "path": "privacy.opaque_connection_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.provider_payload_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.provider_arguments_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.provider_response_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.raw_schema_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.connect_link_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.bearer_value_included",
+          "equals": false
+        },
+        {
+          "path": "privacy.bearer_env_name_included",
+          "equals": false
+        }
+      ],
+      "probe": "maritime-ai-service/scripts/wiii_connect_composio_acceptance.py",
+      "contract_tests": [
+        "maritime-ai-service/tests/unit/test_wiii_connect_composio_acceptance.py"
+      ],
+      "live_env_flags": [
+        "WIII_LIVE_WIII_CONNECT_COMPOSIO_ACCEPTANCE"
+      ],
+      "live_guard_tokens": [
+        "--allow-live"
+      ],
+      "dispatch_or_schedule_gate_tokens": [
+        "run_composio_acceptance",
+        "WIII_CONNECT_COMPOSIO_ACCEPTANCE_EVIDENCE_ENABLED"
+      ],
+      "artifact_tokens": [
+        "wiii-connect-composio-acceptance-evidence-${{ github.run_id }}"
+      ],
+      "diagnostic_uploads": [
+        {
+          "artifact": "wiii-connect-composio-acceptance-preflight.json",
+          "path": "maritime-ai-service/wiii-connect-composio-acceptance-preflight.json",
+          "artifact_tokens": [
+            "wiii-connect-composio-acceptance-preflight-${{ github.run_id }}"
+          ],
+          "if_no_files_found": "warn",
+          "retention_days": 14
+        }
+      ]
+    },
+    {
+      "id": "runtime-ledger-browser-replay",
+      "title": "Backend evidence to desktop Runtime-tab replay summary",
+      "layer": "Wiii Host",
+      "workflow": ".github/workflows/runtime-ledger-browser-replay-evidence.yml",
+      "artifact": "runtime-flow-browser-replay-summary.json",
+      "schema_version": "wiii.runtime_flow_browser_replay_summary.v1",
+      "freshness": {
+        "timestamp_path": "generated_at",
+        "max_age_hours": 72
+      },
+      "payload_schema_field": "schema",
+      "forbidden_payload_tokens": [
+        "WIII_RUNTIME_FLOW_BEARER_TOKEN",
+        "Bearer ",
+        "api_key",
+        "access_token",
+        "authorization"
+      ],
+      "forbidden_payload_regexes": [],
+      "payload_checks": [
+        {
+          "path": "evidence.schema",
+          "equals": "wiii.runtime_flow_acceptance.v1"
+        },
+        {
+          "path": "evidence.browser_replay_schema",
+          "equals": "wiii.runtime_flow_browser_replay.v1"
+        },
+        {
+          "path": "evidence.case_count",
+          "min": 1
+        },
+        {
+          "path": "evidence.byte_count",
+          "min": 1
+        },
+        {
+          "path": "evidence.sha256_present",
+          "equals": true
+        },
+        {
+          "path": "evidence.case_count_matches_browser_replay",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.cases",
+          "length_equals_path": "evidence.case_count"
+        },
+        {
+          "path": "doctor.ready_paths",
+          "min": 1
+        },
+        {
+          "path": "checks.failed",
+          "equals": 0
+        },
+        {
+          "path": "checks.sync_parity_passed",
+          "min": 3
+        },
+        {
+          "path": "browser_replay.validated_by_playwright",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.exact_evidence_file_replayed",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.raw_prompt_answer_or_sse_payload_absent",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.raw_assistant_content_included",
+          "equals": false
+        },
+        {
+          "path": "browser_replay.all_cases_validated_by_playwright",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.all_cases_finalized",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.all_cases_have_post_turn_lifecycle_hash",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.cases.*.case_id_hash_present",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.cases.*.path_hash_present",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.cases.*.ledger_schema_version",
+          "equals": "wiii.runtime_flow_ledger.v1"
+        },
+        {
+          "path": "browser_replay.cases.*.trace_version",
+          "equals": "wiii.runtime_flow_trace.v1"
+        },
+        {
+          "path": "browser_replay.cases.*.prompt_hash_present",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.cases.*.event_name_count",
+          "min": 1
+        },
+        {
+          "path": "browser_replay.cases.*.event_names_hash_present",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.cases.*.raw_prompt_included",
+          "equals": false
+        },
+        {
+          "path": "browser_replay.cases.*.raw_answer_included",
+          "equals": false
+        },
+        {
+          "path": "browser_replay.cases.*.raw_sse_payload_included",
+          "equals": false
+        },
+        {
+          "path": "browser_replay.cases.*.assistant_content_included",
+          "equals": false
+        },
+        {
+          "path": "browser_replay.cases.*.route_reason_hash_present",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.route_path_counts.lms_document_preview",
+          "min": 1
+        },
+        {
+          "path": "browser_replay.route_path_counts.external_connection_status",
+          "min": 1
+        },
+        {
+          "path": "browser_replay.route_path_counts.external_app_action",
+          "min": 1
+        },
+        {
+          "path": "browser_replay.route_path_counts.visual_generation",
+          "min": 2
+        },
+        {
+          "path": "browser_replay.route_reason_hash_present_count",
+          "min": 6
+        },
+        {
+          "path": "browser_replay.validated_case_id_hashes",
+          "length_equals_path": "evidence.case_count"
+        },
+        {
+          "path": "browser_replay.document_context_case_count",
+          "min": 1
+        },
+        {
+          "path": "browser_replay.source_ref_case_count",
+          "min": 1
+        },
+        {
+          "path": "browser_replay.preview_required_case_count",
+          "min": 1
+        },
+        {
+          "path": "browser_replay.apply_attempted_count",
+          "equals": 0
+        },
+        {
+          "path": "browser_replay.visual_lifecycle_case_count",
+          "min": 1
+        },
+        {
+          "path": "browser_replay.code_studio_lifecycle_case_count",
+          "min": 1
+        },
+        {
+          "path": "browser_replay.finalization_status_counts.saved",
+          "min": 6
+        },
+        {
+          "path": "browser_replay.finalization_saved_case_count",
+          "min": 6
+        },
+        {
+          "path": "browser_replay.finalization_error_case_count",
+          "equals": 0
+        },
+        {
+          "path": "browser_replay.finalized_case_id_hashes",
+          "length_equals_path": "evidence.case_count"
+        },
+        {
+          "path": "browser_replay.post_turn_lifecycle_case_id_hashes",
+          "length_equals_path": "evidence.case_count"
+        },
+        {
+          "path": "browser_replay.post_turn_lifecycle_case_count",
+          "min": 6
+        },
+        {
+          "path": "browser_replay.cases.*.finalization_status",
+          "equals": "saved"
+        },
+        {
+          "path": "browser_replay.cases.*.finalization_saved",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.cases.*.finalization_error_type_present",
+          "equals": false
+        },
+        {
+          "path": "browser_replay.cases.*.post_turn_lifecycle_schema_version",
+          "equals": "wiii.post_turn_lifecycle.v1"
+        },
+        {
+          "path": "browser_replay.cases.*.post_turn_lifecycle_background_tasks_scheduled_is_boolean",
+          "equals": true
+        },
+        {
+          "path": "browser_replay.cases.*.post_turn_lifecycle_raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "browser_replay.cases.*.post_turn_lifecycle_identifier_strategy",
+          "equals": "status_only"
+        },
+        {
+          "path": "browser_replay.cases.*.post_turn_lifecycle_raw_scope_keys_present",
+          "equals": false
+        },
+        {
+          "path": "browser_replay.cases.*.apply_attempted",
+          "equals": false
+        },
+        {
+          "path": "wiii_connect_capability.snapshot_version",
+          "equals": "wiii_connect_snapshot.v0"
+        },
+        {
+          "path": "wiii_connect_capability.connection_count",
+          "min": 1
+        },
+        {
+          "path": "wiii_connect_capability.path_capability_count",
+          "min": 5
+        },
+        {
+          "path": "wiii_connect_capability.path_readiness_count",
+          "min": 5
+        },
+        {
+          "path": "wiii_connect_capability.path_count",
+          "min": 5
+        },
+        {
+          "path": "wiii_connect_capability.paths",
+          "length_equals_path": "wiii_connect_capability.path_readiness_count"
+        },
+        {
+          "path": "wiii_connect_capability.path_count_matches_readiness_count",
+          "equals": true
+        },
+        {
+          "path": "wiii_connect_capability.path_reason_hash_present_count",
+          "min": 5
+        },
+        {
+          "path": "wiii_connect_capability.connected_provider_count",
+          "min": 0
+        },
+        {
+          "path": "wiii_connect_capability.connected_scope_count",
+          "min": 0
+        },
+        {
+          "path": "wiii_connect_capability.path_status_counts.ready",
+          "min": 1
+        },
+        {
+          "path": "wiii_connect_capability.paths.*.reason_hash_present",
+          "equals": true
+        },
+        {
+          "path": "wiii_connect_capability.raw_content_included",
+          "equals": false
+        },
+        {
+          "path": "wiii_connect_capability.identifier_strategy",
+          "equals": "hash_or_count_only"
+        },
+        {
+          "path": "summary_archive.schema",
+          "equals": "wiii.runtime_flow_browser_replay_summary_archive.v1"
+        },
+        {
+          "path": "summary_archive.enabled",
+          "equals": true
+        },
+        {
+          "path": "summary_archive.retention_limit",
+          "min": 1
+        },
+        {
+          "path": "summary_archive.raw_prompt_answer_or_sse_payload_absent",
+          "equals": true
+        }
+      ],
+      "probe": "wiii-desktop/scripts/probe-runtime-ledger-browser-replay-evidence.mjs",
+      "contract_tests": [
+        "maritime-ai-service/tests/unit/test_wiii_runtime_flow_acceptance.py",
+        "wiii-desktop/src/__tests__/runtime-flow-trace.test.ts",
+        "tools/wiii_self_harness/test_validate_runtime_evidence_artifact.py"
+      ],
+      "live_env_flags": [
+        "WIII_RUNTIME_LEDGER_BROWSER_REPLAY_EVIDENCE"
+      ],
+      "live_guard_tokens": [
+        "--allow-run"
+      ],
+      "dispatch_or_schedule_gate_tokens": [
+        "run_browser_replay",
+        "WIII_RUNTIME_LEDGER_BROWSER_REPLAY_EVIDENCE_ENABLED"
+      ],
+      "artifact_tokens": [
+        "runtime-ledger-browser-replay-summary-${{ github.run_id }}"
+      ]
+    }
+  ]
+}

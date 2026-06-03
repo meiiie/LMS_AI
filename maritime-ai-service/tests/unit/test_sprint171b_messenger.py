@@ -109,6 +109,36 @@ class TestMessengerNotification:
             assert "429" in result.detail
 
     @pytest.mark.asyncio
+    async def test_messenger_api_error_omits_provider_body_secrets(self):
+        """Provider body is diagnostic-only and must not enter result detail."""
+        from app.services.notifications.adapters.messenger import MessengerAdapter
+
+        adapter = MessengerAdapter()
+        settings = _make_settings()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.text = (
+            "apikey=test-api-key-123 text=private-message user_id=user-1"
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(_SETTINGS_PATCH, settings), \
+             patch("httpx.AsyncClient", return_value=mock_client):
+
+            result = await adapter.send("user-1", "private-message")
+
+            assert result.delivered is False
+            assert result.detail == "CallMeBot API error: 429"
+            assert "test-api-key-123" not in result.detail
+            assert "private-message" not in result.detail
+            assert "user-1" not in result.detail
+
+    @pytest.mark.asyncio
     async def test_messenger_handles_network_error(self):
         """Should handle network exceptions gracefully."""
         import httpx

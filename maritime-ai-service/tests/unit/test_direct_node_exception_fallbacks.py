@@ -9,6 +9,7 @@ from app.engine.multi_agent.direct_node_exception_fallback_contract import (
     DirectNodeExceptionFallbackRequest,
 )
 from app.engine.multi_agent.direct_node_exception_fallbacks import (
+    _emit_synthetic_tool_events,
     handle_direct_node_generation_exception,
 )
 
@@ -172,6 +173,35 @@ async def test_explicit_provider_web_failure_runs_emergency_search_and_emits_eve
     assert state["tool_call_events"] == emergency_events
     assert state["tools_used"] == [{"name": "tool_web_search"}]
     assert emitted == emergency_events
+
+
+@pytest.mark.asyncio
+async def test_emit_synthetic_tool_events_redacts_public_args():
+    emitted = []
+
+    async def push_event(event):
+        emitted.append(event)
+
+    await _emit_synthetic_tool_events(
+        [
+            {
+                "type": "call",
+                "name": "tool_web_search",
+                "id": "emergency-1",
+                "args": {
+                    "query": "lookup",
+                    "connection_ref": "wcn_secret_connection",
+                    "page_id": "private_page",
+                },
+            }
+        ],
+        push_event=push_event,
+    )
+
+    public_args = emitted[0]["content"]["args"]
+    assert public_args["query"] == "lookup"
+    assert public_args["connection_ref"] == "[redacted]"
+    assert public_args["page_id"] == "[redacted]"
 
 
 @pytest.mark.asyncio

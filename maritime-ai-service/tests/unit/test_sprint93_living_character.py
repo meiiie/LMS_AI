@@ -239,12 +239,13 @@ class TestCharacterStateManager:
         """Empty blocks should produce empty string (no noise)."""
         from app.engine.character.character_state import CharacterStateManager
         manager = CharacterStateManager()
-        manager._initialized_defaults.add("__global__")  # Skip DB seed
-        manager._cache = {"__global__": {
+        cache_key = manager._cache_key()
+        manager._initialized_defaults.add(cache_key)  # Skip DB seed
+        manager._cache = {cache_key: {
             "learned_lessons": MagicMock(content="", label="learned_lessons"),
             "self_notes": MagicMock(content="", label="self_notes"),
         }}
-        manager._cache_timestamp = {"__global__": __import__("time").time()}
+        manager._cache_timestamp = {cache_key: __import__("time").time()}
         result = manager.compile_living_state()
         assert result == ""
 
@@ -253,8 +254,9 @@ class TestCharacterStateManager:
         from app.engine.character.character_state import CharacterStateManager
         from app.engine.character.models import CharacterBlock
         manager = CharacterStateManager()
-        manager._initialized_defaults.add("__global__")
-        manager._cache = {"__global__": {
+        cache_key = manager._cache_key()
+        manager._initialized_defaults.add(cache_key)
+        manager._cache = {cache_key: {
             "learned_lessons": CharacterBlock(
                 label="learned_lessons",
                 content="- Rule 15 hay bị hỏi sai\n- User thích ví dụ đời thường",
@@ -270,7 +272,7 @@ class TestCharacterStateManager:
                 label="user_patterns", content="",
             ),
         }}
-        manager._cache_timestamp = {"__global__": __import__("time").time()}
+        manager._cache_timestamp = {cache_key: __import__("time").time()}
         result = manager.compile_living_state()
 
         assert "TRẢI NGHIỆM CỦA WIII" in result
@@ -284,7 +286,8 @@ class TestCharacterStateManager:
         import time
         from app.engine.character.character_state import CharacterStateManager
         manager = CharacterStateManager()
-        manager._cache_timestamp = {"__global__": time.time()}
+        cache_key = manager._cache_key()
+        manager._cache_timestamp = {cache_key: time.time()}
         assert manager._is_cache_fresh()
 
     def test_cache_stale_check(self):
@@ -292,7 +295,8 @@ class TestCharacterStateManager:
         import time
         from app.engine.character.character_state import CharacterStateManager, _CACHE_TTL_SECONDS
         manager = CharacterStateManager()
-        manager._cache_timestamp = {"__global__": time.time() - _CACHE_TTL_SECONDS - 1}
+        cache_key = manager._cache_key()
+        manager._cache_timestamp = {cache_key: time.time() - _CACHE_TTL_SECONDS - 1}
         assert not manager._is_cache_fresh()
 
     def test_invalidate_cache(self):
@@ -300,8 +304,9 @@ class TestCharacterStateManager:
         import time
         from app.engine.character.character_state import CharacterStateManager
         manager = CharacterStateManager()
-        manager._cache = {"__global__": {"test": "data"}}
-        manager._cache_timestamp = {"__global__": time.time()}
+        cache_key = manager._cache_key()
+        manager._cache = {cache_key: {"test": "data"}}
+        manager._cache_timestamp = {cache_key: time.time()}
         manager.invalidate_cache()
         assert manager._cache == {}
         assert manager._cache_timestamp == {}
@@ -313,8 +318,9 @@ class TestCharacterStateManager:
         from app.engine.character.models import CharacterBlock
         manager = CharacterStateManager()
         block = CharacterBlock(label="self_notes", content="My notes")
-        manager._cache = {"__global__": {"self_notes": block}}
-        manager._cache_timestamp = {"__global__": time.time()}
+        cache_key = manager._cache_key()
+        manager._cache = {cache_key: {"self_notes": block}}
+        manager._cache_timestamp = {cache_key: time.time()}
         result = manager.get_block("self_notes")
         assert result.content == "My notes"
 
@@ -323,8 +329,9 @@ class TestCharacterStateManager:
         import time
         from app.engine.character.character_state import CharacterStateManager
         manager = CharacterStateManager()
-        manager._cache = {"__global__": {}}
-        manager._cache_timestamp = {"__global__": time.time()}
+        cache_key = manager._cache_key()
+        manager._cache = {cache_key: {}}
+        manager._cache_timestamp = {cache_key: time.time()}
         result = manager.get_block("nonexistent")
         assert result is None
 
@@ -680,12 +687,13 @@ class TestEdgeCases:
         from app.engine.character.character_state import CharacterStateManager
         from app.engine.character.models import CharacterBlock
         manager = CharacterStateManager()
-        manager._initialized_defaults.add("__global__")
-        manager._cache = {"__global__": {
+        cache_key = manager._cache_key()
+        manager._initialized_defaults.add(cache_key)
+        manager._cache = {cache_key: {
             "self_notes": CharacterBlock(label="self_notes", content="One note"),
             "learned_lessons": CharacterBlock(label="learned_lessons", content=""),
         }}
-        manager._cache_timestamp = {"__global__": __import__("time").time()}
+        manager._cache_timestamp = {cache_key: __import__("time").time()}
         result = manager.compile_living_state()
         assert "Ghi chú cá nhân" in result
         assert "Bài học rút ra" not in result  # Empty, should be skipped

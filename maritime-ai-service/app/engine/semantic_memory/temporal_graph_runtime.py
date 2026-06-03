@@ -1,6 +1,7 @@
 import time
-from datetime import datetime, timezone
 from typing import Any, Callable, Optional
+
+from app.engine.semantic_memory.privacy import hash_memory_identifier
 
 
 def build_context_text_impl(
@@ -195,10 +196,10 @@ async def extract_graph_from_facts_impl(
     context_text = manager.build_context_text(user_id, entity_ids)
 
     logger_obj.info(
-        "[TGraph] Extracted %d entities, %d relations, 1 episode for user %s (%.0fms)",
+        "[TGraph] Extracted %d entities, %d relations, 1 episode for user_hash=%s (%.0fms)",
         len(entities),
         len(relations),
-        user_id,
+        hash_memory_identifier(user_id),
         total_time,
     )
 

@@ -163,6 +163,122 @@ def test_fast_response_answers_facebook_connection_from_host_snapshot():
     assert calls[0]["kwargs"]["provenance"] == "deterministic_wiii_connect_facebook_status"
 
 
+def test_fast_response_answers_provider_connection_from_backend_snapshot(monkeypatch):
+    from app.engine.multi_agent import wiii_connect_intent as intent_module
+
+    class FakeSnapshot:
+        def provider_status(self, provider_slug):
+            assert provider_slug == "gmail"
+            return {
+                "status": "connected",
+                "agent_ready": False,
+                "reason": "connected_provider_not_agent_ready",
+                "connection_count": 1,
+                "active_connection_count": 1,
+                "connection_state": "connected",
+            }
+
+    monkeypatch.setattr(
+        intent_module,
+        "build_wiii_connect_snapshot",
+        lambda **_kwargs: FakeSnapshot(),
+    )
+    calls, record_snapshot = _record_snapshot_calls()
+
+    result = _resolve_fast_response(
+        query="Gmail đã kết nối chưa?",
+        state={"context": {}},
+        ctx={},
+        has_uploaded_document_context=False,
+        record_snapshot=record_snapshot,
+    )
+
+    assert result is not None
+    assert result.response_type == "wiii_connect_provider_status"
+    assert "Gmail" in result.response
+    assert "connected chưa đồng nghĩa agent-ready" in result.response
+    assert calls[0]["kwargs"]["provenance"] == "deterministic_wiii_connect_provider_status"
+
+
+def test_fast_response_blocks_providerless_facebook_action_continuation():
+    calls, record_snapshot = _record_snapshot_calls()
+    state: dict = {
+        "context": {},
+        "messages": [
+            {
+                "role": "user",
+                "content": "Wiii co the dang bai len Facebook khong?",
+            },
+            {
+                "role": "assistant",
+                "content": "Facebook chua agent-ready trong Wiii Connect.",
+            },
+        ],
+    }
+
+    result = _resolve_fast_response(
+        query='dang bai: "xin chao minh la AI" la duoc',
+        state=state,
+        ctx={},
+        has_uploaded_document_context=False,
+        record_snapshot=record_snapshot,
+    )
+
+    assert result is not None
+    assert result.response_type == "wiii_connect_facebook_unavailable"
+    assert state["_external_app_action_plan"]["provider_slug"] == "facebook"
+    assert state["_external_app_action_plan"]["kind"] == "facebook_post_direct_apply"
+    assert calls[0]["kwargs"]["provenance"] == (
+        "deterministic_wiii_connect_facebook_unavailable"
+    )
+
+
+def test_fast_response_blocks_missing_provider_external_action():
+    calls, record_snapshot = _record_snapshot_calls()
+    state: dict = {"context": {}, "messages": []}
+
+    result = _resolve_fast_response(
+        query="dang bai len mang xa hoi di",
+        state=state,
+        ctx={},
+        has_uploaded_document_context=False,
+        record_snapshot=record_snapshot,
+    )
+
+    assert result is not None
+    assert result.response_type == "wiii_connect_external_app_action_unavailable"
+    assert "provider" in result.response
+    assert "Wiii Connect" in result.response
+    assert state["_external_app_action_plan"]["kind"] == "provider_action"
+    assert state["_external_app_action_plan"]["reason"] == "missing_provider_target"
+    assert calls[0]["kwargs"]["provenance"] == (
+        "deterministic_wiii_connect_external_app_action_unavailable"
+    )
+
+
+def test_fast_response_blocks_generic_provider_not_agent_ready():
+    calls, record_snapshot = _record_snapshot_calls()
+    state: dict = {"context": {}, "messages": []}
+
+    result = _resolve_fast_response(
+        query="doc Gmail moi nhat di",
+        state=state,
+        ctx={},
+        has_uploaded_document_context=False,
+        record_snapshot=record_snapshot,
+    )
+
+    assert result is not None
+    assert result.response_type == "wiii_connect_external_app_action_unavailable"
+    assert "Gmail" in result.response
+    assert state["_external_app_action_plan"]["kind"] == "provider_action"
+    assert state["_external_app_action_plan"]["provider_slug"] == "gmail"
+    assert state["_external_app_action_plan"]["reason"] == "provider_not_agent_ready"
+    assert calls[0]["kwargs"]["provenance"] == (
+        "deterministic_wiii_connect_external_app_action_unavailable"
+    )
+
+
 def test_fast_response_leaves_casual_chatter_for_provider_direct_path():
     calls, record_snapshot = _record_snapshot_calls()
     state: dict = {

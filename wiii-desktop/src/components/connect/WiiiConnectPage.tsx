@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Activity,
@@ -31,12 +31,23 @@ import {
   XCircle,
 } from "lucide-react";
 import type {
+  RuntimeFlowDoctorHistoryReport,
+  RuntimeFlowDoctorReport,
+  RuntimeFlowDoctorSubagentSummary,
+  RuntimeFlowSessionEventPruneReport,
+  SemanticMemoryWriteDoctorHistoryReport,
+  SemanticMemoryWriteDoctorReport,
   WiiiConnectActivationGate,
   WiiiConnectActivationReadinessResponse,
   WiiiConnectAuthorizationUrlDecision,
+  WiiiConnectConnectionLifecycleDecision,
+  WiiiConnectDoctorReport,
+  WiiiConnectEffectiveActionInventoryResponse,
+  WiiiConnectEffectiveActionRecord,
   WiiiConnectFacebookPagesResponse,
   WiiiConnectFacebookPostApplyResponse,
   WiiiConnectFacebookPostPreviewResponse,
+  WiiiConnectOperationApprovalLedger,
   WiiiConnectProviderConnectionListResponse,
   WiiiConnectProviderConnectionRecord,
   WiiiConnectProviderDisconnectResponse,
@@ -51,11 +62,19 @@ import {
   buildWiiiConnectProviderCallbackUrl,
   createWiiiConnectProviderAuthorizationUrl,
   disconnectWiiiConnectProviderConnection,
+  fetchRecentRuntimeFlowDoctor,
+  fetchRecentSemanticMemoryDoctor,
+  fetchRuntimeFlowDoctorHistory,
+  fetchSemanticMemoryDoctorHistory,
+  fetchWiiiConnectDoctor,
   fetchWiiiConnectFacebookPages,
   fetchWiiiConnectProviderActivationReadiness,
   fetchWiiiConnectProviderConnections,
+  fetchWiiiConnectProviderEffectiveActions,
   fetchWiiiConnectProviders,
+  fetchWiiiConnectSnapshot,
   grantWiiiConnectProviderConnectionScopes,
+  pruneRuntimeFlowSessionEvents,
   previewWiiiConnectFacebookPost,
   startWiiiConnectProviderSession,
 } from "@/api/wiii-connect";
@@ -69,9 +88,18 @@ import {
   type CapabilityStatusViewModel,
   type RuntimePathSnapshot,
 } from "@/lib/capability-status";
+import {
+  buildRuntimeFlowLedgerViewModel,
+  buildRuntimeFlowTraceViewModel,
+  latestRuntimeFlowLedger,
+  latestRuntimeFlowTrace,
+  type RuntimeFlowLedgerViewModel,
+  type RuntimeFlowTraceViewModel,
+} from "@/lib/runtime-flow-trace";
 import { useChatStore } from "@/stores/chat-store";
 import { useConnectionStore } from "@/stores/connection-store";
 import { useHostContextStore } from "@/stores/host-context-store";
+import { useAuthStore } from "@/stores/auth-store";
 import { useUIStore } from "@/stores/ui-store";
 
 type ConnectTab = "catalog" | "connections" | "paths" | "runtime";
@@ -130,6 +158,8 @@ interface CatalogCard {
   disabledReason?: string;
 }
 
+const WIII_CONNECT_RUNTIME_REFRESH_MS = 5_000;
+
 interface ProviderConnectionListState {
   response?: WiiiConnectProviderConnectionListResponse;
   loading: boolean;
@@ -139,6 +169,13 @@ interface ProviderConnectionListState {
 
 interface ProviderActivationReadinessState {
   response?: WiiiConnectActivationReadinessResponse;
+  loading: boolean;
+  error?: string;
+  lastFetchedAt?: string;
+}
+
+interface ProviderActionInventoryState {
+  response?: WiiiConnectEffectiveActionInventoryResponse;
   loading: boolean;
   error?: string;
   lastFetchedAt?: string;
@@ -176,6 +213,22 @@ interface ProviderLifecycleStage {
   id: string;
   label: string;
   value: string;
+  detail: string;
+  tone: CapabilityStatusTone;
+}
+
+type ProviderConnectionFlowStatus =
+  | "disconnected"
+  | "authorizing"
+  | "waiting"
+  | "connected"
+  | "expired"
+  | "error"
+  | "disconnecting";
+
+interface ProviderConnectionFlowView {
+  status: ProviderConnectionFlowStatus;
+  label: string;
   detail: string;
   tone: CapabilityStatusTone;
 }
@@ -651,10 +704,71 @@ function providerConnectionSummary(
   );
 }
 
-function compactText(value: unknown, fallback = "Chưa có"): string {
+const sensitiveDisplayKeyMarkers = [
+  "access_token",
+  "api_key",
+  "approval_token",
+  "authorization",
+  "bearer",
+  "code=",
+  "connection_id",
+  "connection_ref",
+  "credential",
+  "password",
+  "page_id",
+  "provider_payload",
+  "raw_payload",
+  "refresh_token",
+  "secret",
+  "scheduled_publish_time",
+  "token=",
+  "vault",
+];
+
+function looksSensitiveDisplayText(value: string): boolean {
+  const text = value.trim();
+  const lower = text.toLowerCase();
+  if (!text) return false;
+  if (sensitiveDisplayKeyMarkers.some((marker) => lower.includes(marker))) return true;
+  if (lower.startsWith("bearer ")) return true;
+  if (/^(sk-|ak_|tp-|wcn_|ca_)/i.test(text)) return true;
+  if (/^eyJ[\w-]*\.[\w-]*\.[\w-]*$/.test(text)) return true;
+  return false;
+}
+
+function safeConnectorText(value: unknown, fallback = "Chưa có"): string {
   const text = String(value ?? "").trim();
   if (!text) return fallback;
+  return looksSensitiveDisplayText(text) ? "[đã ẩn]" : text;
+}
+
+function compactText(value: unknown, fallback = "Chưa có"): string {
+  const text = safeConnectorText(value, fallback);
+  if (!text) return fallback;
   return text.length > 72 ? `${text.slice(0, 69)}...` : text;
+}
+
+const safeRuntimeDoctorCounterToken = /^[A-Za-z0-9_.:/-]{1,96}$/;
+const RUNTIME_POST_TURN_LIFECYCLE_METRICS_SCHEMA = "wiii.post_turn_lifecycle_metrics.v1";
+const RUNTIME_POST_TURN_LIFECYCLE_LEDGER_SCHEMA = "wiii.post_turn_lifecycle_ledger.v1";
+
+function safeRuntimeDoctorCounterLabel(value: unknown): string {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return "unknown";
+  if (!safeRuntimeDoctorCounterToken.test(text)) return "[Ä‘Ã£ áº©n]";
+  return compactText(text);
+}
+
+function countMapEntries(
+  value: Record<string, number> | undefined,
+  limit = 5,
+): Array<[string, number]> {
+  if (!value) return [];
+  return Object.entries(value)
+    .filter(([, count]) => typeof count === "number" && Number.isFinite(count))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([label, count]) => [safeRuntimeDoctorCounterLabel(label), count]);
 }
 
 function disconnectResultTone(
@@ -715,9 +829,9 @@ function providerConnectionRef(
 }
 
 function defaultActivationActionSlug(card: CatalogCard): string {
-  if (card.providerSlug === "facebook") return "FACEBOOK_CREATE_PHOTO_POST";
+  if (card.providerSlug === "facebook") return "FACEBOOK_LIST_MANAGED_PAGES";
   if (card.providerSlug === "gmail") return "GMAIL_FETCH_EMAILS";
-  return "GMAIL_FETCH_EMAILS";
+  return "";
 }
 
 function formatCount(value: unknown, label: string): string | null {
@@ -742,13 +856,38 @@ function scopeSummary(scopes: WiiiConnectRuntimeConnection["scopes"]): string {
   if (!scopes) return "Không";
   const enabled = Object.entries(scopes)
     .filter(([, value]) => value)
-    .map(([key]) => key);
+    .map(([key]) => safeConnectorText(key, "scope"));
   return enabled.length > 0 ? enabled.join(", ") : "Không";
+}
+
+function operationApprovalLedgerTone(
+  ledger: WiiiConnectOperationApprovalLedger | null | undefined,
+): CapabilityStatusTone {
+  if (!ledger) return "off";
+  if (ledger.blocked || ledger.status === "blocked" || ledger.status === "expired") {
+    return "warn";
+  }
+  if (ledger.persistent && (ledger.status === "pending" || ledger.status === "consumed")) {
+    return "ok";
+  }
+  if (ledger.status === "unavailable") return "pending";
+  return "off";
+}
+
+function operationApprovalLedgerLabel(
+  ledger: WiiiConnectOperationApprovalLedger | null | undefined,
+): string {
+  if (!ledger) return "Chưa có";
+  if (ledger.blocked || ledger.status === "blocked") return "Bị chặn";
+  if (ledger.status === "consumed" || ledger.consumed) return "Đã consume";
+  if (ledger.status === "pending" && ledger.persistent) return "Đã ghi ledger";
+  if (ledger.status === "unavailable") return "Fallback HMAC";
+  return compactText(ledger.status, "Chưa có");
 }
 
 function pathList(value: string[] | undefined): string {
   if (!value || value.length === 0) return "Không";
-  return value.join(", ");
+  return value.map((item) => compactText(item)).join(", ");
 }
 
 function capabilityCount(connection: WiiiConnectRuntimeConnection): string {
@@ -788,9 +927,8 @@ function toolGroupSummary(names: string[] | undefined): string {
 
 function snapshotStats(snapshot: WiiiConnectRuntimeSnapshot | null) {
   const connections = snapshot?.connections ?? [];
-  const readyCount = connections.filter(
-    (item) => item.agent_ready || item.active || item.status === "connected",
-  ).length;
+  const pathReadiness = snapshot?.capability_summary?.path_readiness ?? [];
+  const readyCount = connections.filter((item) => item.agent_ready).length;
   const warningCount =
     (snapshot?.warnings?.length ?? 0) +
     connections.reduce((total, item) => total + (item.warnings?.length ?? 0), 0);
@@ -798,8 +936,176 @@ function snapshotStats(snapshot: WiiiConnectRuntimeSnapshot | null) {
     total: connections.length,
     ready: readyCount,
     warningCount,
-    pathCount: snapshot?.path_capabilities?.length ?? 0,
+    pathCount: snapshot?.path_capabilities?.length ?? pathReadiness.length,
+    readyPathCount: pathReadiness.filter((item) => item.status === "ready").length,
+    guardedPathCount: pathReadiness.filter((item) => item.status === "guarded").length,
+    blockedPathCount: pathReadiness.filter((item) => item.status === "blocked").length,
   };
+}
+
+function capabilityPathStatusSummary(
+  snapshot: WiiiConnectRuntimeSnapshot | null,
+): string {
+  const paths = snapshot?.capability_summary?.path_readiness ?? [];
+  if (paths.length === 0) return "Chưa có";
+  const ready = paths.filter((path) => path.status === "ready").length;
+  const guarded = paths.filter((path) => path.status === "guarded").length;
+  const blocked = paths.filter((path) => path.status === "blocked").length;
+  return `${ready}/${paths.length} ready · ${guarded} guarded · ${blocked} blocked`;
+}
+
+function capabilityAttentionPath(
+  snapshot: WiiiConnectRuntimeSnapshot | null,
+): string {
+  const paths = snapshot?.capability_summary?.path_readiness ?? [];
+  const path = paths.find((item) => item.status !== "ready") ?? paths[0];
+  if (!path) return "Không";
+  return `${compactText(path.path)}: ${compactText(path.status)} (${compactText(path.reason)})`;
+}
+
+function doctorStatusTone(status: string | undefined): CapabilityStatusTone {
+  if (status === "ready") return "ok";
+  if (status === "degraded" || status === "blocked") return "warn";
+  return "pending";
+}
+
+function pathDoctorTone(status: string | undefined): CapabilityStatusTone {
+  if (status === "ready") return "ok";
+  if (status === "guarded") return "pending";
+  if (status === "blocked") return "warn";
+  return "off";
+}
+
+function doctorMetric(report: WiiiConnectDoctorReport | null, key: string): string {
+  const value = report?.summary?.[key];
+  return typeof value === "number" ? String(value) : "0";
+}
+
+function runtimeDoctorMetric(report: RuntimeFlowDoctorReport | null, key: string): string {
+  const value = report?.summary?.[key];
+  return typeof value === "number" ? String(value) : "0";
+}
+
+function runtimeDoctorConfigNumber(
+  report: { runtime_config?: Record<string, string | number | boolean> } | null | undefined,
+  key: string,
+): number | undefined {
+  const value = report?.runtime_config?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function semanticMemoryDoctorMetric(
+  report: SemanticMemoryWriteDoctorReport | null,
+  key: string,
+): string {
+  const value = report?.summary?.[key];
+  return typeof value === "number" ? String(value) : "0";
+}
+
+function runtimeDoctorCorrelationMetric(
+  report: RuntimeFlowDoctorReport | null,
+  key: string,
+): string {
+  const value = report?.request_correlation?.[key];
+  return typeof value === "number" ? String(value) : "0";
+}
+
+function runtimeDoctorSubagentMetric(
+  report: RuntimeFlowDoctorReport | null,
+  key: keyof RuntimeFlowDoctorSubagentSummary,
+): string {
+  const value = report?.subagents?.[key];
+  return typeof value === "number" ? String(value) : "0";
+}
+
+function runtimeDoctorAlertTone(
+  severity: string | undefined,
+): CapabilityStatusTone {
+  if (severity === "critical" || severity === "error") return "warn";
+  if (severity === "warning") return "pending";
+  return "off";
+}
+
+function importantDoctorPaths(report: WiiiConnectDoctorReport | null) {
+  return (report?.path_diagnostics ?? [])
+    .filter((path) => path.status !== "ready")
+    .slice(0, 6);
+}
+
+function importantDoctorProviders(report: WiiiConnectDoctorReport | null) {
+  return (report?.provider_diagnostics ?? [])
+    .filter((provider) => provider.provider_kind !== "wiii_native" || provider.status !== "ready")
+    .slice(0, 8);
+}
+
+function doctorStageLabel(key: string | undefined): string {
+  const labels: Record<string, string> = {
+    registry: "Registry",
+    adapter: "Adapter",
+    account: "Account",
+    agent_policy: "Agent policy",
+    gateway: "Gateway",
+  };
+  const normalized = String(key ?? "").trim();
+  return labels[normalized] ?? compactText(normalized.replaceAll("_", " "));
+}
+
+function providerDoctorCountSummary(
+  provider: NonNullable<WiiiConnectDoctorReport["provider_diagnostics"]>[number],
+): string {
+  return [
+    formatCount(provider.connection_count, "kết nối"),
+    formatCount(provider.active_connection_count, "active"),
+    formatCount(provider.action_count, "action"),
+    formatCount(provider.scope_count, "scope"),
+  ]
+    .filter(Boolean)
+    .join(" · ") || "Không";
+}
+
+function providerStageTone(status: string | undefined): CapabilityStatusTone {
+  if (status === "ready") return "ok";
+  if (status === "pending") return "pending";
+  if (status === "blocked") return "warn";
+  return "off";
+}
+
+function DoctorProviderStages({
+  provider,
+}: {
+  provider: NonNullable<WiiiConnectDoctorReport["provider_diagnostics"]>[number];
+}) {
+  const stages = provider.stages ?? [];
+  if (stages.length === 0) {
+    return <span className="text-text-tertiary">Chưa có lifecycle</span>;
+  }
+  return (
+    <div className="grid min-w-[280px] gap-1.5">
+      {stages.map((stage) => (
+        <div
+          key={`${provider.provider_slug}-${stage.key}`}
+          className="rounded-md border border-[var(--border)] bg-surface-secondary px-2 py-1.5"
+        >
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <span className="truncate text-xs font-medium text-text">
+              {doctorStageLabel(stage.key)}
+            </span>
+            <StatusPill tone={providerStageTone(stage.status)}>
+              {compactText(stage.status)}
+            </StatusPill>
+          </div>
+          <div className="mt-1 truncate text-xs text-text-secondary">
+            {compactText(stage.reason)}
+          </div>
+          {stage.required_next && stage.required_next.length > 0 && (
+            <div className="mt-1 truncate text-[11px] text-text-tertiary">
+              {pathList(stage.required_next)}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function categoryLabel(category: CatalogCategory): string {
@@ -1117,7 +1423,9 @@ function readinessActionMutation(
 }
 
 function cardDefaultActionIsReadonly(card: CatalogCard): boolean {
-  return defaultActivationActionSlug(card) === "GMAIL_FETCH_EMAILS";
+  return ["FACEBOOK_LIST_MANAGED_PAGES", "GMAIL_FETCH_EMAILS"].includes(
+    defaultActivationActionSlug(card),
+  );
 }
 
 function readinessBooleanLabel(value: boolean | undefined): string {
@@ -1378,6 +1686,241 @@ function providerLifecycleStages({
   ];
 }
 
+function backendConnectionLifecycle(
+  lifecycle: WiiiConnectConnectionLifecycleDecision | null | undefined,
+): ProviderConnectionFlowView | null {
+  const status = String(lifecycle?.status ?? "").toLowerCase();
+  if (
+    ![
+      "disconnected",
+      "authorizing",
+      "waiting",
+      "connected",
+      "expired",
+      "error",
+      "disconnecting",
+    ].includes(status)
+  ) {
+    return null;
+  }
+  const flowStatus = status as ProviderConnectionFlowStatus;
+  const reason = compactText(lifecycle?.reason, "backend_lifecycle");
+  const detail = `Backend lifecycle: ${reason}.`;
+  if (flowStatus === "connected") {
+    return {
+      status: "connected",
+      label: "Đã kết nối",
+      detail,
+      tone: "ok",
+    };
+  }
+  if (flowStatus === "authorizing") {
+    return {
+      status: "authorizing",
+      label: "Đang xác thực OAuth",
+      detail,
+      tone: "pending",
+    };
+  }
+  if (flowStatus === "waiting") {
+    return {
+      status: "waiting",
+      label: "Đang chờ OAuth hoàn tất",
+      detail,
+      tone: "pending",
+    };
+  }
+  if (flowStatus === "expired") {
+    return {
+      status: "expired",
+      label: "Kết nối hết hạn",
+      detail,
+      tone: "warn",
+    };
+  }
+  if (flowStatus === "error") {
+    return {
+      status: "error",
+      label: "Connection lỗi",
+      detail,
+      tone: "warn",
+    };
+  }
+  if (flowStatus === "disconnecting") {
+    return {
+      status: "disconnecting",
+      label: "Đang ngắt kết nối",
+      detail,
+      tone: "pending",
+    };
+  }
+  return {
+    status: "disconnected",
+    label: lifecycle?.ready_to_connect ? "Sẵn sàng kết nối" : "Chưa kết nối",
+    detail,
+    tone: lifecycle?.ready_to_connect ? "pending" : "off",
+  };
+}
+
+function providerConnectionFlow({
+  card,
+  readiness,
+  providerConnection,
+  connectionList,
+  authorizationDecision,
+  authorizationLoading,
+  authorizationError,
+  disconnectState,
+}: {
+  card: CatalogCard;
+  readiness: WiiiConnectActivationReadinessResponse | undefined;
+  providerConnection: WiiiConnectProviderConnectionRecord | undefined;
+  connectionList?: ProviderConnectionListState;
+  authorizationDecision?: WiiiConnectAuthorizationUrlDecision;
+  authorizationLoading?: boolean;
+  authorizationError?: string;
+  disconnectState?: ProviderDisconnectState;
+}): ProviderConnectionFlowView {
+  if (card.provider === "wiii_native") {
+    return {
+      status: card.agentReady ? "connected" : "waiting",
+      label: card.agentReady ? "Runtime ready" : "Chờ runtime",
+      detail: card.agentReady
+        ? "Connection native đã được backend runtime xác nhận."
+        : "Chờ snapshot runtime từ host hoặc lượt chat phù hợp.",
+      tone: card.agentReady ? "ok" : "pending",
+    };
+  }
+
+  if (disconnectState?.loading) {
+    return {
+      status: "disconnecting",
+      label: "Đang ngắt kết nối",
+      detail: "Backend đang khóa local connection trước khi dọn provider.",
+      tone: "pending",
+    };
+  }
+
+  if (disconnectState?.error || authorizationError || (!readiness && connectionList?.error)) {
+    return {
+      status: "error",
+      label: "Lỗi connection flow",
+      detail:
+        disconnectState?.error ||
+        authorizationError ||
+        connectionList?.error ||
+        "Backend chưa trả được trạng thái connection.",
+      tone: "warn",
+    };
+  }
+
+  if (authorizationLoading) {
+    return {
+      status: "authorizing",
+      label: "Đang xin Connect Link",
+      detail: "Wiii đang yêu cầu backend cấp authorization URL.",
+      tone: "pending",
+    };
+  }
+
+  const canonicalFlow = backendConnectionLifecycle(
+    providerConnection?.connection_lifecycle ??
+      readiness?.connection_lifecycle ??
+      connectionList?.response?.connection_lifecycle,
+  );
+  if (canonicalFlow && canonicalFlow.status !== "disconnected") {
+    return canonicalFlow;
+  }
+
+  const connectionState = String(
+    providerConnection?.state ?? readiness?.connection?.state ?? "",
+  ).toLowerCase();
+  const active = Boolean(providerConnection?.active || readiness?.connection?.active);
+
+  if (active || connectionState === "connected") {
+    return {
+      status: "connected",
+      label: "Đã kết nối",
+      detail: "Backend đã thấy account active. Agent policy vẫn do readiness/gateway quyết định.",
+      tone: "ok",
+    };
+  }
+
+  if (connectionState === "expired") {
+    return {
+      status: "expired",
+      label: "Kết nối hết hạn",
+      detail: "OAuth/account đã hết hạn; cần reconnect trước khi agent thấy action.",
+      tone: "warn",
+    };
+  }
+
+  if (connectionState === "error") {
+    return {
+      status: "error",
+      label: "Connection lỗi",
+      detail: compactText(
+        providerConnection?.reason ?? readiness?.connection?.reason,
+        "Backend báo connection không dùng được.",
+      ),
+      tone: "warn",
+    };
+  }
+
+  if (connectionState === "authorizing") {
+    return {
+      status: "authorizing",
+      label: "Đang xác thực OAuth",
+      detail: "OAuth flow đã bắt đầu nhưng backend chưa xác nhận account active.",
+      tone: "pending",
+    };
+  }
+
+  if (
+    connectionState === "waiting" ||
+    connectionState === "pending" ||
+    (authorizationDecision?.status === "ready" && authorizationDecision.authorization_url)
+  ) {
+    return {
+      status: "waiting",
+      label: "Đang chờ OAuth hoàn tất",
+      detail: "Hoàn tất cửa sổ Connect Link; Wiii sẽ poll lại connection thật.",
+      tone: "pending",
+    };
+  }
+
+  if (authorizationDecision?.status === "blocked") {
+    return {
+      status: "error",
+      label: "Connect Link bị chặn",
+      detail: compactText(authorizationDecision.reason, "Backend chưa thể phát hành link."),
+      tone: "warn",
+    };
+  }
+
+  if (connectionList?.loading) {
+    return {
+      status: "waiting",
+      label: "Đang đọc connection backend",
+      detail: "Wiii đang đồng bộ danh sách account thật từ backend.",
+      tone: "pending",
+    };
+  }
+
+  if (canonicalFlow) {
+    return canonicalFlow;
+  }
+
+  return {
+    status: "disconnected",
+    label: readiness?.ready_to_connect ? "Sẵn sàng kết nối" : "Chưa kết nối",
+    detail: readiness?.ready_to_connect
+      ? "Backend đã sẵn sàng phát hành Connect Link khi người dùng bấm kết nối."
+      : "Chưa có account provider hợp lệ trong Wiii Connect.",
+    tone: readiness?.ready_to_connect ? "pending" : "off",
+  };
+}
+
 function readinessStateIsConnectable(
   readiness: WiiiConnectActivationReadinessResponse | undefined,
 ): boolean {
@@ -1389,11 +1932,19 @@ function providerNextAction({
   readiness,
   providerConnection,
   connectionList,
+  authorizationDecision,
+  authorizationLoading,
+  authorizationError,
+  disconnectState,
 }: {
   card: CatalogCard;
   readiness: WiiiConnectActivationReadinessResponse | undefined;
   providerConnection: WiiiConnectProviderConnectionRecord | undefined;
   connectionList?: ProviderConnectionListState;
+  authorizationDecision?: WiiiConnectAuthorizationUrlDecision;
+  authorizationLoading?: boolean;
+  authorizationError?: string;
+  disconnectState?: ProviderDisconnectState;
 }): ProviderNextAction {
   if (card.provider === "wiii_native") {
     return {
@@ -1413,6 +1964,54 @@ function providerNextAction({
         "Provider này mới là catalog cục bộ. Cần backend adapter, vault, policy và audit trước khi mở OAuth thật.",
       tone: "warn",
       items: [],
+    };
+  }
+
+  const flow = providerConnectionFlow({
+    card,
+    readiness,
+    providerConnection,
+    connectionList,
+    authorizationDecision,
+    authorizationLoading,
+    authorizationError,
+    disconnectState,
+  });
+
+  if (flow.status === "disconnecting") {
+    return {
+      title: "Đang ngắt kết nối",
+      detail: "Wiii đang khóa local connection và chờ backend phản hồi.",
+      tone: "pending",
+      items: ["Không mở schema mới trong lúc disconnect"],
+    };
+  }
+
+  if (flow.status === "authorizing" || flow.status === "waiting") {
+    return {
+      title: flow.label,
+      detail: flow.detail,
+      tone: "pending",
+      items: ["Không hiển thị raw connection id", "Không tự coi là agent-ready"],
+    };
+  }
+
+  if (flow.status === "expired") {
+    return {
+      title: "Kết nối hết hạn, cần reconnect",
+      detail:
+        "Account đã từng tồn tại nhưng không còn dùng được. Bấm Kết nối qua Wiii để phát hành link reconnect.",
+      tone: "warn",
+      items: ["Reconnect provider", "Giữ agent tools đóng cho tới khi active"],
+    };
+  }
+
+  if (flow.status === "error") {
+    return {
+      title: "Sửa lỗi connection flow",
+      detail: flow.detail,
+      tone: "warn",
+      items: ["Đọc lại doctor/readiness", "Không retry action khi chưa ready"],
     };
   }
 
@@ -1482,12 +2081,30 @@ function ProviderLifecyclePanel({
   readiness,
   providerConnection,
   connectionList,
+  authorizationDecision,
+  authorizationLoading,
+  authorizationError,
+  disconnectState,
 }: {
   card: CatalogCard;
   readiness: WiiiConnectActivationReadinessResponse | undefined;
   providerConnection: WiiiConnectProviderConnectionRecord | undefined;
   connectionList?: ProviderConnectionListState;
+  authorizationDecision?: WiiiConnectAuthorizationUrlDecision;
+  authorizationLoading?: boolean;
+  authorizationError?: string;
+  disconnectState?: ProviderDisconnectState;
 }) {
+  const flow = providerConnectionFlow({
+    card,
+    readiness,
+    providerConnection,
+    connectionList,
+    authorizationDecision,
+    authorizationLoading,
+    authorizationError,
+    disconnectState,
+  });
   const stages = providerLifecycleStages({
     card,
     readiness,
@@ -1499,6 +2116,10 @@ function ProviderLifecyclePanel({
     readiness,
     providerConnection,
     connectionList,
+    authorizationDecision,
+    authorizationLoading,
+    authorizationError,
+    disconnectState,
   });
 
   return (
@@ -1519,6 +2140,27 @@ function ProviderLifecyclePanel({
                 ? "blocked"
                 : "chưa bật"}
         </StatusPill>
+      </div>
+
+      <div
+        className="mb-3 rounded-md border border-[var(--border)] bg-surface px-3 py-2"
+        data-state={flow.status}
+        data-testid="wiii-connect-connection-flow-state"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase text-text-tertiary">
+              Connection flow
+            </div>
+            <div className="mt-1 truncate text-sm font-semibold text-text">
+              {flow.label}
+            </div>
+          </div>
+          <StatusPill tone={flow.tone}>{flow.status}</StatusPill>
+        </div>
+        <p className="mt-1 text-xs leading-relaxed text-text-secondary">
+          {flow.detail}
+        </p>
       </div>
 
       <ol className="grid gap-2 sm:grid-cols-2">
@@ -1568,6 +2210,200 @@ function ProviderLifecyclePanel({
         Agent không tự cấp quyền. Scope/write/admin phải đến từ policy hoặc approval riêng.
       </p>
     </section>
+  );
+}
+
+function actionInventoryTone(
+  inventory: WiiiConnectEffectiveActionInventoryResponse | undefined,
+): CapabilityStatusTone {
+  const status = String(inventory?.status ?? "").toLowerCase();
+  if (status === "ready") return "ok";
+  if (status === "guarded") return "pending";
+  if (status === "blocked") return "warn";
+  return "off";
+}
+
+function actionRecordTone(action: WiiiConnectEffectiveActionRecord): CapabilityStatusTone {
+  if (action.executable_now || action.status === "ready") return "ok";
+  if (action.visible_to_agent || action.status === "guarded") return "pending";
+  return "off";
+}
+
+function actionStageLabel(key: string | undefined): string {
+  const labels: Record<string, string> = {
+    catalog: "Catalog",
+    runtime_enablement: "Runtime",
+    account: "Account",
+    agent_policy: "Agent policy",
+    gateway: "Gateway",
+  };
+  const normalized = String(key ?? "").trim();
+  return labels[normalized] ?? compactText(normalized.replaceAll("_", " "));
+}
+
+function actionInventorySummary(
+  inventory: WiiiConnectEffectiveActionInventoryResponse | undefined,
+): string {
+  if (!inventory) return "Chưa đồng bộ effective inventory";
+  return `${inventory.visible_action_count}/${inventory.runtime_enabled_action_count} action agent-visible · ${inventory.executable_action_count} executable`;
+}
+
+function actionModelArgumentSummary(action: WiiiConnectEffectiveActionRecord): string {
+  const keys = action.model_argument_keys ?? [];
+  const safeKeys = keys
+    .map((key) => compactText(key, ""))
+    .filter((key) => key && key !== "[đã ẩn]");
+  return safeKeys.length > 0 ? safeKeys.join(", ") : "Không";
+}
+
+function hiddenArgumentSummary(action: WiiiConnectEffectiveActionRecord): string {
+  const count = action.hidden_argument_count ?? 0;
+  return count > 0 ? `${count} backend-owned` : "Không";
+}
+
+function EffectiveActionInventoryPanel({
+  inventoryState,
+}: {
+  inventoryState?: ProviderActionInventoryState;
+}) {
+  const inventory = inventoryState?.response;
+  const actions = inventory?.actions ?? [];
+  return (
+    <section
+      className="mt-4 rounded-md border border-[var(--border)] bg-surface-secondary px-3 py-3"
+      data-testid="wiii-connect-action-inventory-panel"
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold uppercase text-text-tertiary">
+          Effective actions
+        </div>
+        <StatusPill tone={actionInventoryTone(inventory)}>
+          {inventory?.status ?? (inventoryState?.loading ? "đang đọc" : "chưa đọc")}
+        </StatusPill>
+      </div>
+      <p className="text-xs leading-relaxed text-text-secondary">
+        {inventory
+          ? `${actionInventorySummary(inventory)}. Gateway: ${compactText(inventory.reason)}.`
+          : "Danh sách action agent thật sự được thấy sẽ lấy từ backend policy, không lấy từ catalog tĩnh của UI."}
+      </p>
+
+      {actions.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {actions.slice(0, 6).map((action) => (
+            <li
+              key={`${action.provider_slug}-${action.slug}`}
+              className="rounded-md border border-[var(--border)] bg-surface px-2 py-2"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-text">
+                    {action.label || action.slug}
+                  </div>
+                  <div className="mt-0.5 truncate text-xs text-text-tertiary">
+                    {action.slug} · {action.mutation}
+                  </div>
+                </div>
+                <StatusPill tone={actionRecordTone(action)}>
+                  {action.executable_now
+                    ? "execute"
+                    : action.visible_to_agent
+                      ? "agent-visible"
+                      : action.status}
+                </StatusPill>
+              </div>
+              <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
+                <div>
+                  <span className="text-text-tertiary">Runtime</span>
+                  <div className="font-medium text-text">
+                    {action.runtime_enabled ? "Bật" : "Tắt"}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-text-tertiary">Gateway</span>
+                  <div className="font-medium text-text">{compactText(action.reason)}</div>
+                </div>
+                <div>
+                  <span className="text-text-tertiary">Scope</span>
+                  <div className="font-medium text-text">
+                    {action.required_scopes?.join(", ") || "read"}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-text-tertiary">Model args</span>
+                  <div className="font-medium text-text">
+                    {actionModelArgumentSummary(action)}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-text-tertiary">Runtime-owned</span>
+                  <div className="font-medium text-text">
+                    {hiddenArgumentSummary(action)}
+                  </div>
+                </div>
+              </div>
+              {action.stages && action.stages.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {action.stages.slice(0, 5).map((stage) => (
+                    <span
+                      key={`${action.slug}-${stage.key}`}
+                      className="max-w-full rounded-md border border-[var(--border)] px-2 py-1 text-xs text-text-secondary"
+                    >
+                      <span className="font-medium text-text">
+                        {actionStageLabel(stage.key)}:
+                      </span>{" "}
+                      {compactText(stage.status)}
+                      {stage.reason ? <> · {compactText(stage.reason)}</> : null}
+                      {stage.required_next && stage.required_next.length > 0 ? (
+                        <> · Tiếp: {pathList(stage.required_next.slice(0, 2))}</>
+                      ) : null}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {inventoryState?.error && (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-800">
+          {inventoryState.error}
+        </div>
+      )}
+      {inventoryState?.lastFetchedAt && (
+        <p className="mt-2 text-xs text-text-tertiary">
+          Cập nhật {formatDateTime(inventoryState.lastFetchedAt)}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function FacebookOperationApprovalLedgerStatus({
+  ledger,
+}: {
+  ledger: WiiiConnectOperationApprovalLedger | null | undefined;
+}) {
+  if (!ledger) return null;
+  const tone = operationApprovalLedgerTone(ledger);
+  const detail = ledger.persistent
+    ? compactText(ledger.reason, "ready")
+    : "operation_approval_table_ready=false";
+  return (
+    <div
+      data-testid="wiii-connect-facebook-approval-ledger"
+      className="mt-3 rounded-md border border-[var(--border)] bg-surface px-3 py-2 text-xs"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-text">Approval ledger</span>
+        <StatusPill tone={tone}>{operationApprovalLedgerLabel(ledger)}</StatusPill>
+      </div>
+      <div className="mt-1 grid gap-1 text-text-secondary sm:grid-cols-3">
+        <span>Status: {compactText(ledger.status, "unknown")}</span>
+        <span>Reason: {detail}</span>
+        <span>Persistent: {readinessBooleanLabel(ledger.persistent)}</span>
+      </div>
+    </div>
   );
 }
 
@@ -1626,6 +2462,7 @@ function FacebookPostComposer({
     image?.previewUrl && image.previewUrl.startsWith("blob:")
       ? image.previewUrl
       : "";
+  const approvalLedger = state.apply?.approval_ledger ?? state.preview?.approval_ledger;
 
   const clearDecision = () => {
     setState((current) => ({
@@ -1929,9 +2766,11 @@ function FacebookPostComposer({
         </button>
       </div>
 
+      <FacebookOperationApprovalLedgerStatus ledger={approvalLedger} />
+
       {state.preview?.preview && (
         <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-          Preview sẵn sàng cho Page {state.preview.preview.page_id}.
+          Preview sẵn sàng cho Page đã chọn.
         </div>
       )}
       {state.apply?.status === "succeeded" && (
@@ -1971,7 +2810,9 @@ function ConnectionDetailPanel({
   readinessLoading,
   authorizationLoading,
   disconnectState,
+  actionInventoryState,
   readinessError,
+  actionInventoryError,
   sessionError,
   authorizationError,
   connectionList,
@@ -1979,6 +2820,7 @@ function ConnectionDetailPanel({
   onRequestSession,
   onRequestAuthorization,
   onRefreshConnections,
+  onRefreshActionInventory,
   onDisconnectConnection,
 }: {
   card: CatalogCard | null;
@@ -1989,7 +2831,9 @@ function ConnectionDetailPanel({
   readinessLoading?: boolean;
   authorizationLoading?: boolean;
   disconnectState?: ProviderDisconnectState;
+  actionInventoryState?: ProviderActionInventoryState;
   readinessError?: string;
+  actionInventoryError?: string;
   sessionError?: string;
   authorizationError?: string;
   connectionList?: ProviderConnectionListState;
@@ -1997,6 +2841,7 @@ function ConnectionDetailPanel({
   onRequestSession?: (card: CatalogCard) => Promise<void>;
   onRequestAuthorization?: (card: CatalogCard) => Promise<void>;
   onRefreshConnections?: (card: CatalogCard) => Promise<unknown>;
+  onRefreshActionInventory?: (card: CatalogCard) => Promise<unknown>;
   onDisconnectConnection?: (
     card: CatalogCard,
     connection: WiiiConnectProviderConnectionRecord,
@@ -2027,6 +2872,10 @@ function ConnectionDetailPanel({
     card.provider !== "wiii_native" &&
     card.registrySource === "backend" &&
     Boolean(onRefreshReadiness);
+  const canRefreshActionInventory =
+    card.provider !== "wiii_native" &&
+    card.registrySource === "backend" &&
+    Boolean(onRefreshActionInventory);
   const providerConnection = primaryProviderConnection(connectionList?.response);
   const readiness = readinessState?.response;
   const canDisconnectConnection =
@@ -2065,7 +2914,15 @@ function ConnectionDetailPanel({
         readiness={readiness}
         providerConnection={providerConnection}
         connectionList={connectionList}
+        authorizationDecision={authorizationDecision}
+        authorizationLoading={authorizationLoading}
+        authorizationError={authorizationError}
+        disconnectState={disconnectState}
       />
+
+      {(actionInventoryState || canRefreshActionInventory) && (
+        <EffectiveActionInventoryPanel inventoryState={actionInventoryState} />
+      )}
 
       {card.requirements && card.requirements.length > 0 && (
         <div className="mt-4 rounded-md border border-[var(--border)] bg-surface-secondary px-3 py-3">
@@ -2321,6 +3178,12 @@ function ConnectionDetailPanel({
         </div>
       )}
 
+      {actionInventoryError && (
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {actionInventoryError}
+        </div>
+      )}
+
       {disconnectState?.response && (
         <div className="mt-4 rounded-md border border-[var(--border)] bg-surface-secondary px-3 py-3">
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -2472,6 +3335,26 @@ function ConnectionDetailPanel({
         >
           {sessionLoading ? "Đang kiểm tra..." : "Kiểm tra policy"}
         </button>
+
+        <button
+          type="button"
+          disabled={!canRefreshActionInventory || actionInventoryState?.loading}
+          onClick={() => {
+            if (canRefreshActionInventory) void onRefreshActionInventory?.(card);
+          }}
+          className={`inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium ${
+            canRefreshActionInventory
+              ? "border-[var(--border)] bg-surface-secondary text-text-secondary hover:text-text"
+              : "border-[var(--border)] bg-surface-secondary text-text-tertiary"
+          }`}
+        >
+          <RefreshCw
+            size={14}
+            className={actionInventoryState?.loading ? "animate-spin" : ""}
+            aria-hidden="true"
+          />
+          Đồng bộ actions
+        </button>
       </div>
       <p className="mt-2 text-xs text-text-tertiary">
         {card.disabledReason ?? card.statusDetail}
@@ -2485,11 +3368,13 @@ function ConnectionCatalog({
   fallbackModel,
   providerRegistry,
   providerRegistryLoaded,
+  onRuntimeRefresh,
 }: {
   snapshot: WiiiConnectRuntimeSnapshot | null;
   fallbackModel: CapabilityStatusViewModel;
   providerRegistry: WiiiConnectProviderRegistryEntry[] | null;
   providerRegistryLoaded: boolean;
+  onRuntimeRefresh?: () => Promise<unknown>;
 }) {
   const [provider, setProvider] = useState<ProviderFilter>("wiii_native");
   const [category, setCategory] = useState<CatalogCategory>("all");
@@ -2507,6 +3392,9 @@ function ConnectionCatalog({
   const [authorizationLoadingSlug, setAuthorizationLoadingSlug] = useState<string | null>(null);
   const [providerReadinessStates, setProviderReadinessStates] = useState<
     Record<string, ProviderActivationReadinessState>
+  >({});
+  const [providerActionInventories, setProviderActionInventories] = useState<
+    Record<string, ProviderActionInventoryState>
   >({});
   const [providerConnectionLists, setProviderConnectionLists] = useState<
     Record<string, ProviderConnectionListState>
@@ -2593,6 +3481,50 @@ function ConnectionCatalog({
     }
   };
 
+  const refreshActionInventory = async (
+    card: CatalogCard,
+    connection?: WiiiConnectProviderConnectionRecord | null,
+  ): Promise<WiiiConnectEffectiveActionInventoryResponse | null> => {
+    if (card.provider === "wiii_native" || card.registrySource !== "backend") return null;
+    const slug = card.providerSlug;
+    const selectedConnection =
+      connection ?? primaryProviderConnection(providerConnectionLists[slug]?.response);
+    setProviderActionInventories((current) => ({
+      ...current,
+      [slug]: {
+        ...current[slug],
+        loading: true,
+        error: undefined,
+      },
+    }));
+    try {
+      const response = await fetchWiiiConnectProviderEffectiveActions(slug, {
+        connectionRef: providerConnectionRef(selectedConnection),
+        probeDatabase: true,
+      });
+      setProviderActionInventories((current) => ({
+        ...current,
+        [slug]: {
+          response,
+          loading: false,
+          lastFetchedAt: new Date().toISOString(),
+        },
+      }));
+      return response;
+    } catch {
+      setProviderActionInventories((current) => ({
+        ...current,
+        [slug]: {
+          ...current[slug],
+          loading: false,
+          error: "Không thể đọc effective action inventory từ backend.",
+          lastFetchedAt: new Date().toISOString(),
+        },
+      }));
+      return null;
+    }
+  };
+
   useEffect(() => {
     if (
       !selectedCard ||
@@ -2611,8 +3543,13 @@ function ConnectionCatalog({
       return;
     }
     const readinessState = providerReadinessStates[slug];
-    if (readinessState?.loading || readinessState?.response || readinessState?.error) return;
-    void refreshActivationReadiness(selectedCard);
+    if (!readinessState?.loading && !readinessState?.response && !readinessState?.error) {
+      void refreshActivationReadiness(selectedCard);
+    }
+    const inventoryState = providerActionInventories[slug];
+    if (!inventoryState?.loading && !inventoryState?.response && !inventoryState?.error) {
+      void refreshActionInventory(selectedCard);
+    }
   }, [
     selectedCard?.id,
     selectedCard?.provider,
@@ -2624,6 +3561,9 @@ function ConnectionCatalog({
     providerReadinessStates[selectedCard?.providerSlug ?? ""]?.loading,
     providerReadinessStates[selectedCard?.providerSlug ?? ""]?.response,
     providerReadinessStates[selectedCard?.providerSlug ?? ""]?.error,
+    providerActionInventories[selectedCard?.providerSlug ?? ""]?.loading,
+    providerActionInventories[selectedCard?.providerSlug ?? ""]?.response,
+    providerActionInventories[selectedCard?.providerSlug ?? ""]?.error,
   ]);
 
   const requestSessionDecision = async (card: CatalogCard) => {
@@ -2681,6 +3621,8 @@ function ConnectionCatalog({
         },
       }));
       void refreshActivationReadiness(card, primaryProviderConnection(response));
+      void refreshActionInventory(card, primaryProviderConnection(response));
+      void onRuntimeRefresh?.();
       return response;
     } catch {
       setProviderConnectionLists((current) => ({
@@ -2743,6 +3685,8 @@ function ConnectionCatalog({
           },
         }));
         void refreshActivationReadiness(card, disabledConnection);
+        void refreshActionInventory(card, disabledConnection);
+        void onRuntimeRefresh?.();
       }
     } catch {
       setDisconnectStates((current) => ({
@@ -2968,8 +3912,12 @@ function ConnectionCatalog({
           }
           authorizationLoading={selectedCard ? authorizationLoadingSlug === selectedCard.providerSlug : false}
           disconnectState={selectedCard ? disconnectStates[selectedCard.providerSlug] : undefined}
+          actionInventoryState={selectedCard ? providerActionInventories[selectedCard.providerSlug] : undefined}
           readinessError={
             selectedCard ? providerReadinessStates[selectedCard.providerSlug]?.error : undefined
+          }
+          actionInventoryError={
+            selectedCard ? providerActionInventories[selectedCard.providerSlug]?.error : undefined
           }
           sessionError={selectedCard ? sessionErrors[selectedCard.providerSlug] : undefined}
           authorizationError={selectedCard ? authorizationErrors[selectedCard.providerSlug] : undefined}
@@ -2978,6 +3926,7 @@ function ConnectionCatalog({
           onRequestSession={requestSessionDecision}
           onRequestAuthorization={requestAuthorizationUrl}
           onRefreshConnections={refreshProviderConnections}
+          onRefreshActionInventory={refreshActionInventory}
           onDisconnectConnection={disconnectProviderConnection}
         />
       </div>
@@ -3184,6 +4133,57 @@ function LocalRuntimeFallback({
   );
 }
 
+function CapabilitySummaryPanel({
+  snapshot,
+}: {
+  snapshot: WiiiConnectRuntimeSnapshot | null;
+}) {
+  const summary = snapshot?.capability_summary;
+  if (!summary) return null;
+
+  const rows: Array<[string, string]> = [
+    ["Provider đã nối", pathList(summary.connected_provider_slugs)],
+    ["Provider agent-ready", pathList(summary.agent_ready_provider_slugs)],
+    ["Scope đã cấp", pathList(summary.connected_scope_names)],
+    ["Path readiness", capabilityPathStatusSummary(snapshot)],
+    ["Path cần chú ý", capabilityAttentionPath(snapshot)],
+    ["Tool group bị chặn", pathList(summary.suppressed_tool_groups)],
+  ];
+
+  return (
+    <section
+      className="mb-4 rounded-lg border border-[var(--border)] bg-surface p-4"
+      data-testid="wiii-connect-capability-summary"
+    >
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-text">Capability snapshot</h3>
+          <p className="mt-0.5 truncate text-xs text-text-tertiary">
+            Connection, scope, path-ready và tool suppression do backend snapshot sở hữu.
+          </p>
+        </div>
+        <StatusPill
+          tone={
+            (summary.path_readiness ?? []).some((path) => path.status === "blocked")
+              ? "warn"
+              : "ok"
+          }
+        >
+          {capabilityPathStatusSummary(snapshot)}
+        </StatusPill>
+      </div>
+      <dl className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {rows.map(([label, value]) => (
+          <div key={label} className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+            <dt className="text-xs text-text-tertiary">{label}</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 function PathPolicyTable({
   paths,
 }: {
@@ -3248,10 +4248,990 @@ function PathPolicyTable({
   );
 }
 
+function RecentRuntimeFlowDoctorPanel({
+  report,
+  error,
+  historyReport,
+  historyError,
+  pruneReport,
+  pruneLoading,
+  pruneError,
+  onPruneDryRun,
+  onPruneApply,
+}: {
+  report: RuntimeFlowDoctorReport | null;
+  error?: string;
+  historyReport: RuntimeFlowDoctorHistoryReport | null;
+  historyError?: string;
+  pruneReport: RuntimeFlowSessionEventPruneReport | null;
+  pruneLoading?: boolean;
+  pruneError?: string;
+  onPruneDryRun?: () => void;
+  onPruneApply?: () => void;
+}) {
+  const alerts = report?.alerts?.slice(0, 4) ?? [];
+  const routeEntries = countMapEntries(report?.routes);
+  const finalizationEntries = countMapEntries(report?.finalization_statuses, 4);
+  const warningEntries = countMapEntries(report?.context_warnings, 4);
+  const subagentWarningEntries = countMapEntries(report?.subagents?.warnings, 4);
+  const latestBuckets = report?.alert_trend?.buckets?.slice(0, 3) ?? [];
+  const historyBuckets = historyReport?.buckets?.slice(0, 8) ?? [];
+  const backend = safeRuntimeDoctorCounterLabel(report?.runtime_config?.session_event_log_backend);
+  const lifecycle = report?.lifecycle_registrations;
+  const postTurnLifecycle = report?.post_turn_lifecycle;
+  const postTurnLifecycleLedger = report?.post_turn_lifecycle_ledger;
+  const postTurnStatusEntries = countMapEntries(postTurnLifecycle?.post_turn?.status_counts, 4);
+  const postTurnReasonEntries = countMapEntries(postTurnLifecycle?.post_turn?.reason_counts, 4);
+  const postTurnPolicyEntries = countMapEntries(
+    postTurnLifecycle?.post_turn?.semantic_memory_policy_counts,
+    4,
+  );
+  const backgroundGroupEntries = countMapEntries(
+    postTurnLifecycle?.background_tasks?.group_counts,
+    4,
+  );
+  const backgroundStatusEntries = countMapEntries(
+    postTurnLifecycle?.background_tasks?.status_counts,
+    4,
+  );
+  const ledgerBackgroundGroupEntries = countMapEntries(
+    postTurnLifecycleLedger?.background_schedule?.group_counts,
+    4,
+  );
+  const ledgerBackgroundStatusEntries = countMapEntries(
+    postTurnLifecycleLedger?.background_schedule?.status_counts,
+    4,
+  );
+  const lifecycleOwnerFallback = Object.values(lifecycle?.owner_counts ?? {}).filter(
+    (count) => typeof count === "number" && Number.isFinite(count),
+  ).length;
+  const lifecycleHookTotal =
+    runtimeDoctorConfigNumber(report, "lifecycle_hook_total") ??
+    lifecycle?.registration_count ??
+    0;
+  const lifecycleOwnerCount =
+    runtimeDoctorConfigNumber(report, "lifecycle_hook_owner_count") ??
+    lifecycleOwnerFallback;
+  const lifecycleRunEndCount =
+    runtimeDoctorConfigNumber(report, "lifecycle_on_run_end_hook_count") ??
+    lifecycle?.point_counts?.["on_run_end"] ??
+    0;
+  const lifecycleRunErrorCount =
+    runtimeDoctorConfigNumber(report, "lifecycle_on_run_error_hook_count") ??
+    lifecycle?.point_counts?.["on_run_error"] ??
+    0;
+  const lifecycleDefaultStatus = lifecycle?.default_runtime_hooks?.installed
+    ? "installed"
+    : lifecycle
+      ? "missing"
+      : "unknown";
+  const lifecycleDefaultTone: CapabilityStatusTone =
+    lifecycleDefaultStatus === "installed" ? "ok" : lifecycle ? "warn" : "off";
+  const lifecyclePrivacyStrategy = safeRuntimeDoctorCounterLabel(
+    lifecycle?.privacy?.identifier_strategy,
+  );
+  const postTurnPrivacyStrategy = safeRuntimeDoctorCounterLabel(
+    postTurnLifecycle?.privacy?.identifier_strategy,
+  );
+  const postTurnSchema = safeRuntimeDoctorCounterLabel(
+    postTurnLifecycle?.version ?? RUNTIME_POST_TURN_LIFECYCLE_METRICS_SCHEMA,
+  );
+  const postTurnLedgerSchema = safeRuntimeDoctorCounterLabel(
+    postTurnLifecycleLedger?.version ?? RUNTIME_POST_TURN_LIFECYCLE_LEDGER_SCHEMA,
+  );
+  const postTurnWindow = safeRuntimeDoctorCounterLabel(postTurnLifecycle?.source?.window);
+  const postTurnScope = postTurnLifecycle?.source?.org_scoped ? "org-scoped" : "process-wide";
+  const postTurnLedgerWindow =
+    postTurnLifecycleLedger?.source?.window === "runtime_flow_ledger_events"
+      ? "ledger_events"
+      : safeRuntimeDoctorCounterLabel(postTurnLifecycleLedger?.source?.window);
+  const postTurnLedgerPrivacyStrategy = safeRuntimeDoctorCounterLabel(
+    postTurnLifecycleLedger?.privacy?.identifier_strategy,
+  );
+  const privacyStrategy = safeRuntimeDoctorCounterLabel(report?.privacy?.identifier_strategy);
+  const historyPrivacyStrategy = safeRuntimeDoctorCounterLabel(
+    historyReport?.privacy?.identifier_strategy,
+  );
+  const matchedCount = pruneReport?.matched_count ?? 0;
+  const deletedCount = pruneReport?.deleted_count ?? 0;
+  const canApplyPrune =
+    Boolean(pruneReport?.dry_run) &&
+    matchedCount > 0 &&
+    !pruneLoading &&
+    !error &&
+    Boolean(report);
+  const pruneStatus = pruneError
+    ? "unavailable"
+    : pruneReport?.status ?? "not_checked";
+  const pruneTone: CapabilityStatusTone = pruneError
+    ? "warn"
+    : pruneReport?.status === "pruned"
+      ? "ok"
+      : pruneReport?.dry_run
+        ? "pending"
+        : "off";
+
+  return (
+    <section
+      className="rounded-lg border border-[var(--border)] bg-surface p-4 lg:col-span-2"
+      data-testid="wiii-connect-runtime-flow-doctor-panel"
+    >
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Activity size={16} className="text-text-secondary" aria-hidden="true" />
+            <h3 className="text-sm font-semibold text-text">Aggregate runtime doctor</h3>
+          </div>
+          <p className="mt-1 text-xs text-text-secondary">
+            {error
+              ? "Chưa đọc được aggregate doctor report từ backend."
+              : report
+                ? "Recent runtime-flow ledger events, aggregate counts only."
+                : "Đang chờ aggregate doctor report từ backend."}
+          </p>
+        </div>
+        <StatusPill tone={doctorStatusTone(report?.status)}>
+          {report?.status ?? (error ? "unavailable" : "checking")}
+        </StatusPill>
+      </div>
+
+      <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Turns</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {runtimeDoctorMetric(report, "turn_count")}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Done seen</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {runtimeDoctorMetric(report, "done_seen_count")}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Missing request ID</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {runtimeDoctorCorrelationMetric(report, "missing_request_id_count")}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Raw content flags</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {runtimeDoctorMetric(report, "raw_content_flag_count")}
+          </dd>
+        </div>
+      </dl>
+
+      <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Subagent reports</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {runtimeDoctorSubagentMetric(report, "report_count")}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Dropped keys</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {runtimeDoctorSubagentMetric(report, "state_dropped_key_count")}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Thinking dropped</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {runtimeDoctorSubagentMetric(report, "thinking_dropped_count")}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Subagent raw flags</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {runtimeDoctorSubagentMetric(report, "raw_content_flag_count")}
+          </dd>
+        </div>
+      </dl>
+
+      <dl
+        className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+        data-testid="wiii-connect-runtime-lifecycle-hooks"
+      >
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Lifecycle hooks</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {lifecycleHookTotal} hooks / {lifecycleOwnerCount} owners
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Default hooks</dt>
+          <dd className="mt-0.5">
+            <StatusPill tone={lifecycleDefaultTone}>{lifecycleDefaultStatus}</StatusPill>
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Run hooks</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            end {lifecycleRunEndCount} / error {lifecycleRunErrorCount}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Hook privacy</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {lifecyclePrivacyStrategy}
+          </dd>
+        </div>
+      </dl>
+
+      <div
+        className="mt-3 rounded-lg border border-[var(--border)] bg-surface-secondary p-3"
+        data-testid="wiii-connect-runtime-post-turn-lifecycle"
+      >
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-text">Post-turn lifecycle</div>
+            <p className="mt-1 text-xs text-text-secondary">
+              Metrics {postTurnSchema} / ledger {postTurnLedgerSchema}
+            </p>
+          </div>
+          <StatusPill tone={postTurnLifecycle ? "ok" : "off"}>
+            {postTurnLifecycle ? "metrics" : "missing"}
+          </StatusPill>
+        </div>
+
+        <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="min-w-0 rounded-md bg-surface px-3 py-2">
+            <dt className="text-xs text-text-tertiary">Post-turn events</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">
+              {postTurnLifecycle?.post_turn?.event_count ?? 0}
+            </dd>
+          </div>
+          <div className="min-w-0 rounded-md bg-surface px-3 py-2">
+            <dt className="text-xs text-text-tertiary">Background events</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">
+              {postTurnLifecycle?.background_tasks?.event_count ?? 0}
+            </dd>
+          </div>
+          <div className="min-w-0 rounded-md bg-surface px-3 py-2">
+            <dt className="text-xs text-text-tertiary">Metric window</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">
+              {postTurnWindow}
+            </dd>
+          </div>
+          <div className="min-w-0 rounded-md bg-surface px-3 py-2">
+            <dt className="text-xs text-text-tertiary">Metric scope</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">
+              {postTurnScope}
+            </dd>
+          </div>
+        </dl>
+
+        <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="min-w-0 rounded-md bg-surface px-3 py-2">
+            <dt className="text-xs text-text-tertiary">Durable events</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">
+              {postTurnLifecycleLedger?.event_count ?? 0}
+            </dd>
+          </div>
+          <div className="min-w-0 rounded-md bg-surface px-3 py-2">
+            <dt className="text-xs text-text-tertiary">Missing ledger</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">
+              {postTurnLifecycleLedger?.missing_count ?? 0}
+            </dd>
+          </div>
+          <div className="min-w-0 rounded-md bg-surface px-3 py-2">
+            <dt className="text-xs text-text-tertiary">Scheduled turns</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">
+              {postTurnLifecycleLedger?.background_tasks_scheduled_count ?? 0}
+            </dd>
+          </div>
+          <div className="min-w-0 rounded-md bg-surface px-3 py-2">
+            <dt className="text-xs text-text-tertiary">Durable task count</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">
+              {postTurnLifecycleLedger?.background_schedule?.task_count ?? 0}
+            </dd>
+          </div>
+        </dl>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-5">
+          <div className="rounded-md bg-surface p-3">
+            <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Status</div>
+            <ul className="space-y-1 text-sm text-text-secondary">
+              {postTurnStatusEntries.length > 0 ? postTurnStatusEntries.map(([label, count], index) => (
+                <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                  <span className="truncate">{label}</span>
+                  <span className="font-medium text-text">{count}</span>
+                </li>
+              )) : <li>KhÃ´ng</li>}
+            </ul>
+          </div>
+          <div className="rounded-md bg-surface p-3">
+            <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Reasons</div>
+            <ul className="space-y-1 text-sm text-text-secondary">
+              {postTurnReasonEntries.length > 0 ? postTurnReasonEntries.map(([label, count], index) => (
+                <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                  <span className="truncate">{label}</span>
+                  <span className="font-medium text-text">{count}</span>
+                </li>
+              )) : <li>KhÃ´ng</li>}
+            </ul>
+          </div>
+          <div className="rounded-md bg-surface p-3">
+            <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Memory policy</div>
+            <ul className="space-y-1 text-sm text-text-secondary">
+              {postTurnPolicyEntries.length > 0 ? postTurnPolicyEntries.map(([label, count], index) => (
+                <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                  <span className="truncate">{label}</span>
+                  <span className="font-medium text-text">{count}</span>
+                </li>
+              )) : <li>KhÃ´ng</li>}
+            </ul>
+          </div>
+          <div className="rounded-md bg-surface p-3">
+            <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Task groups</div>
+            <ul className="space-y-1 text-sm text-text-secondary">
+              {backgroundGroupEntries.length > 0 ? backgroundGroupEntries.map(([label, count], index) => (
+                <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                  <span className="truncate">{label}</span>
+                  <span className="font-medium text-text">{count}</span>
+                </li>
+              )) : <li>KhÃ´ng</li>}
+            </ul>
+          </div>
+          <div className="rounded-md bg-surface p-3">
+            <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Task status</div>
+            <ul className="space-y-1 text-sm text-text-secondary">
+              {backgroundStatusEntries.length > 0 ? backgroundStatusEntries.map(([label, count], index) => (
+                <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                  <span className="truncate">{label}</span>
+                  <span className="font-medium text-text">{count}</span>
+                </li>
+              )) : <li>KhÃ´ng</li>}
+            </ul>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <div className="rounded-md bg-surface p-3">
+            <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Durable task groups</div>
+            <ul className="space-y-1 text-sm text-text-secondary">
+              {ledgerBackgroundGroupEntries.length > 0 ? ledgerBackgroundGroupEntries.map(([label, count], index) => (
+                <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                  <span className="truncate">{label}</span>
+                  <span className="font-medium text-text">{count}</span>
+                </li>
+              )) : <li>KhÃƒÂ´ng</li>}
+            </ul>
+          </div>
+          <div className="rounded-md bg-surface p-3">
+            <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Durable task status</div>
+            <ul className="space-y-1 text-sm text-text-secondary">
+              {ledgerBackgroundStatusEntries.length > 0 ? ledgerBackgroundStatusEntries.map(([label, count], index) => (
+                <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                  <span className="truncate">{label}</span>
+                  <span className="font-medium text-text">{count}</span>
+                </li>
+              )) : <li>KhÃƒÂ´ng</li>}
+            </ul>
+          </div>
+        </div>
+
+        <div className="mt-2 grid gap-2 text-xs text-text-tertiary sm:grid-cols-3">
+          <div>
+            Backend: {safeRuntimeDoctorCounterLabel(postTurnLifecycle?.source?.metrics_backend)}
+          </div>
+          <div>Privacy: {postTurnPrivacyStrategy}</div>
+          <div>
+            Raw content: {postTurnLifecycle?.privacy?.raw_content_included ? "true" : "false"}
+          </div>
+          <div>Ledger window: {postTurnLedgerWindow}</div>
+          <div>Ledger privacy: {postTurnLedgerPrivacyStrategy}</div>
+          <div>
+            Ledger raw content: {postTurnLifecycleLedger?.privacy?.raw_content_included ? "true" : "false"}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-4">
+        <div className="rounded-lg border border-[var(--border)] p-3">
+          <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Routes</div>
+          <ul className="space-y-1 text-sm text-text-secondary">
+            {routeEntries.length > 0 ? routeEntries.map(([label, count], index) => (
+              <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                <span className="truncate">{label}</span>
+                <span className="font-medium text-text">{count}</span>
+              </li>
+            )) : <li>Không</li>}
+          </ul>
+        </div>
+
+        <div className="rounded-lg border border-[var(--border)] p-3">
+          <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Finalization</div>
+          <ul className="space-y-1 text-sm text-text-secondary">
+            {finalizationEntries.length > 0 ? finalizationEntries.map(([label, count], index) => (
+              <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                <span className="truncate">{label}</span>
+                <span className="font-medium text-text">{count}</span>
+              </li>
+            )) : <li>Không</li>}
+          </ul>
+        </div>
+
+        <div className="rounded-lg border border-[var(--border)] p-3">
+          <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Context warnings</div>
+          <ul className="space-y-1 text-sm text-text-secondary">
+            {warningEntries.length > 0 ? warningEntries.map(([label, count], index) => (
+              <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                <span className="truncate">{label}</span>
+                <span className="font-medium text-text">{count}</span>
+              </li>
+            )) : <li>Không</li>}
+          </ul>
+        </div>
+
+        <div className="rounded-lg border border-[var(--border)] p-3">
+          <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Subagent warnings</div>
+          <ul className="space-y-1 text-sm text-text-secondary">
+            {subagentWarningEntries.length > 0 ? subagentWarningEntries.map(([label, count], index) => (
+              <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                <span className="truncate">{label}</span>
+                <span className="font-medium text-text">{count}</span>
+              </li>
+            )) : <li>KhÃ´ng</li>}
+          </ul>
+        </div>
+      </div>
+
+      {alerts.length > 0 && (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {alerts.map((alert, index) => (
+            <div
+              key={`${alert.code}-${index}`}
+              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            >
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <span className="truncate font-medium">
+                  {safeRuntimeDoctorCounterLabel(alert.code)}
+                </span>
+                <StatusPill tone={runtimeDoctorAlertTone(alert.severity)}>
+                  {safeRuntimeDoctorCounterLabel(alert.severity)}
+                </StatusPill>
+              </div>
+              <div className="mt-1 text-xs">
+                count {typeof alert.count === "number" ? alert.count : 0}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {latestBuckets.length > 0 && (
+        <div className="mt-3 overflow-x-auto rounded-lg border border-[var(--border)]">
+          <table className="w-full min-w-[620px] text-left text-sm">
+            <thead className="border-b border-[var(--border)] bg-surface-secondary text-xs uppercase text-text-tertiary">
+              <tr>
+                <th className="px-3 py-2 font-medium">Bucket</th>
+                <th className="px-3 py-2 font-medium">Turns</th>
+                <th className="px-3 py-2 font-medium">Alerts</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {latestBuckets.map((bucket) => (
+                <tr key={bucket.bucket_start} className="border-b border-[var(--border)] last:border-b-0">
+                  <td className="px-3 py-2 font-medium text-text">
+                    {formatDateTime(bucket.bucket_start)}
+                  </td>
+                  <td className="px-3 py-2 text-text-secondary">{bucket.turn_count}</td>
+                  <td className="px-3 py-2 text-text-secondary">
+                    {countMapEntries(bucket.alert_counts, 3)
+                      .map(([label, count]) => `${label} ${count}`)
+                      .join(", ") || "Không"}
+                  </td>
+                  <td className="px-3 py-2 text-text-secondary">
+                    {countMapEntries(bucket.status_counts, 3)
+                      .map(([label, count]) => `${label} ${count}`)
+                      .join(", ") || "Không"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="mt-4 rounded-lg border border-[var(--border)] bg-surface-secondary p-3">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-text">Doctor history</div>
+            <p className="mt-1 text-xs text-text-secondary">
+              Recent aggregate doctor reports grouped by event hour.
+            </p>
+          </div>
+          <StatusPill tone={historyError ? "warn" : historyBuckets.length > 0 ? "ok" : "off"}>
+            {historyError ? "unavailable" : `${historyBuckets.length} buckets`}
+          </StatusPill>
+        </div>
+
+        <div
+          className="mt-3 overflow-x-auto rounded-lg border border-[var(--border)] bg-surface"
+          data-testid="wiii-connect-runtime-flow-doctor-history"
+        >
+          <table className="w-full min-w-[860px] text-left text-sm">
+            <thead className="border-b border-[var(--border)] bg-surface-secondary text-xs uppercase text-text-tertiary">
+              <tr>
+                <th className="px-3 py-2 font-medium">Bucket</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Turns</th>
+                <th className="px-3 py-2 font-medium">Missing request</th>
+                <th className="px-3 py-2 font-medium">Subagents</th>
+                <th className="px-3 py-2 font-medium">Alerts</th>
+                <th className="px-3 py-2 font-medium">Top route</th>
+              </tr>
+            </thead>
+            <tbody>
+              {historyBuckets.length > 0 ? historyBuckets.map((bucket) => {
+                const topRoute = countMapEntries(bucket.routes, 1)[0];
+                const alertSummary = (bucket.alerts ?? [])
+                  .slice(0, 2)
+                  .map((alert) => `${safeRuntimeDoctorCounterLabel(alert.code)} ${alert.count ?? 0}`)
+                  .join(", ");
+                return (
+                  <tr
+                    key={bucket.bucket_start}
+                    className="border-b border-[var(--border)] last:border-b-0"
+                  >
+                    <td className="px-3 py-2 font-medium text-text">
+                      {formatDateTime(bucket.bucket_start)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <StatusPill tone={doctorStatusTone(bucket.status)}>
+                        {safeRuntimeDoctorCounterLabel(bucket.status)}
+                      </StatusPill>
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {bucket.summary?.turn_count ?? 0}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {typeof bucket.request_correlation?.missing_request_id_count === "number"
+                        ? bucket.request_correlation.missing_request_id_count
+                        : 0}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {`${bucket.subagents?.report_count ?? 0} reports / ${bucket.subagents?.warning_count ?? 0} warnings`}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {alertSummary || "KhÃ´ng"}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {topRoute ? `${topRoute[0]} ${topRoute[1]}` : "KhÃ´ng"}
+                    </td>
+                  </tr>
+                );
+              }) : (
+                <tr>
+                  <td className="px-3 py-3 text-text-secondary" colSpan={7}>
+                    {historyError
+                      ? "ChÆ°a Ä‘á»c Ä‘Æ°á»£c history report tá»« backend."
+                      : "ChÆ°a cÃ³ doctor history."}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-2 grid gap-2 text-xs text-text-tertiary sm:grid-cols-3">
+          <div>
+            Buckets: {historyReport?.source?.bucket_count ?? historyBuckets.length}/
+            {historyReport?.source?.bucket_limit ?? 0}
+          </div>
+          <div>
+            Events: {historyReport?.source?.runtime_flow_ledger_event_count ?? 0}/
+            {historyReport?.source?.session_event_count ?? 0}
+          </div>
+          <div>Privacy: {historyPrivacyStrategy}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs text-text-tertiary sm:grid-cols-3">
+        <div>Backend: {backend}</div>
+        <div>Privacy: {privacyStrategy}</div>
+        <div>
+          Events: {report?.source?.runtime_flow_ledger_event_count ?? 0}/
+          {report?.source?.session_event_count ?? 0}
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-[var(--border)] bg-surface-secondary p-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-semibold text-text">
+              <Database size={15} className="text-text-secondary" aria-hidden="true" />
+              <span>Session event retention</span>
+            </div>
+            <p className="mt-1 text-xs text-text-secondary">
+              Chạy dry-run trước khi prune ledger cũ; kết quả chỉ là aggregate counts.
+            </p>
+          </div>
+          <StatusPill tone={pruneTone}>{pruneStatus}</StatusPill>
+        </div>
+
+        <dl
+          className="mt-3 grid gap-2 text-xs sm:grid-cols-4"
+          data-testid="wiii-connect-runtime-prune-report"
+        >
+          <div className="rounded-md bg-surface px-2 py-2">
+            <dt className="text-text-tertiary">Matched</dt>
+            <dd className="mt-0.5 font-medium text-text">{matchedCount}</dd>
+          </div>
+          <div className="rounded-md bg-surface px-2 py-2">
+            <dt className="text-text-tertiary">Deleted</dt>
+            <dd className="mt-0.5 font-medium text-text">{deletedCount}</dd>
+          </div>
+          <div className="rounded-md bg-surface px-2 py-2">
+            <dt className="text-text-tertiary">Retention</dt>
+            <dd className="mt-0.5 font-medium text-text">
+              {pruneReport?.retention_days ?? "--"} days
+            </dd>
+          </div>
+          <div className="rounded-md bg-surface px-2 py-2">
+            <dt className="text-text-tertiary">Scope</dt>
+            <dd className="mt-0.5 font-medium text-text">
+              {pruneReport?.org_scoped ? "org-scoped" : "aggregate"}
+            </dd>
+          </div>
+        </dl>
+
+        <div className="mt-2 grid gap-2 text-xs text-text-tertiary sm:grid-cols-3">
+          <div>
+            Cutoff: {pruneReport?.cutoff ? formatDateTime(pruneReport.cutoff) : "Chưa có"}
+          </div>
+          <div>
+            Event filter: {pruneReport?.event_type_filter_applied ? "applied" : "not applied"}
+          </div>
+          <div>
+            Privacy: {safeRuntimeDoctorCounterLabel(pruneReport?.privacy?.identifier_strategy)}
+          </div>
+        </div>
+
+        {pruneError && (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Không thể chạy retention control từ backend.
+          </div>
+        )}
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            data-testid="wiii-connect-runtime-prune-dry-run"
+            disabled={pruneLoading || Boolean(error) || !report}
+            onClick={() => onPruneDryRun?.()}
+            className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-[var(--border)] bg-surface px-3 text-sm font-medium text-text-secondary disabled:text-text-tertiary"
+          >
+            <RefreshCw
+              size={14}
+              className={pruneLoading ? "animate-spin" : ""}
+              aria-hidden="true"
+            />
+            Dry-run retention
+          </button>
+          <button
+            type="button"
+            data-testid="wiii-connect-runtime-prune-apply"
+            disabled={!canApplyPrune}
+            onClick={() => onPruneApply?.()}
+            className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 text-sm font-medium text-rose-700 disabled:border-[var(--border)] disabled:bg-surface disabled:text-text-tertiary"
+          >
+            {pruneLoading && canApplyPrune ? (
+              <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <AlertTriangle size={14} aria-hidden="true" />
+            )}
+            Prune matched events
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SemanticMemoryDoctorPanel({
+  report,
+  error,
+  historyReport,
+  historyError,
+}: {
+  report: SemanticMemoryWriteDoctorReport | null;
+  error?: string;
+  historyReport: SemanticMemoryWriteDoctorHistoryReport | null;
+  historyError?: string;
+}) {
+  const writeKindEntries = countMapEntries(report?.write_kinds, 4);
+  const statusEntries = countMapEntries(report?.write_statuses, 4);
+  const orgContextEntries = countMapEntries(report?.organization_contexts, 4);
+  const warningEntries = countMapEntries(report?.warnings, 4);
+  const historyBuckets = historyReport?.buckets?.slice(0, 8) ?? [];
+  const backend = safeRuntimeDoctorCounterLabel(report?.runtime_config?.session_event_log_backend);
+  const privacyStrategy = safeRuntimeDoctorCounterLabel(report?.privacy?.identifier_strategy);
+  const historyPrivacyStrategy = safeRuntimeDoctorCounterLabel(
+    historyReport?.privacy?.identifier_strategy,
+  );
+
+  return (
+    <section
+      className="rounded-lg border border-[var(--border)] bg-surface p-4 lg:col-span-2"
+      data-testid="wiii-connect-semantic-memory-doctor-panel"
+    >
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Database size={16} className="text-text-secondary" aria-hidden="true" />
+            <h3 className="text-sm font-semibold text-text">Semantic memory doctor</h3>
+          </div>
+          <p className="mt-1 text-xs text-text-secondary">
+            {error
+              ? "Backend semantic-memory doctor is unavailable."
+              : report
+                ? "Post-turn memory write audits, aggregate counts only."
+                : "Waiting for semantic-memory doctor report."}
+          </p>
+        </div>
+        <StatusPill tone={doctorStatusTone(report?.status)}>
+          {report?.status ?? (error ? "unavailable" : "checking")}
+        </StatusPill>
+      </div>
+
+      <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Writes</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {semanticMemoryDoctorMetric(report, "write_count")}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Facts</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {semanticMemoryDoctorMetric(report, "stored_fact_total")}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Insights</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {semanticMemoryDoctorMetric(report, "stored_insight_total")}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Blocked</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {semanticMemoryDoctorMetric(report, "blocked_count")}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Warnings</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {semanticMemoryDoctorMetric(report, "warning_count")}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+          <dt className="text-xs text-text-tertiary">Raw flags</dt>
+          <dd className="mt-0.5 truncate text-sm font-medium text-text">
+            {semanticMemoryDoctorMetric(report, "raw_content_flag_count")}
+          </dd>
+        </div>
+      </dl>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-4">
+        <div className="rounded-lg border border-[var(--border)] p-3">
+          <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Write kinds</div>
+          <ul className="space-y-1 text-sm text-text-secondary">
+            {writeKindEntries.length > 0 ? writeKindEntries.map(([label, count], index) => (
+              <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                <span className="truncate">{label}</span>
+                <span className="font-medium text-text">{count}</span>
+              </li>
+            )) : <li>None</li>}
+          </ul>
+        </div>
+
+        <div className="rounded-lg border border-[var(--border)] p-3">
+          <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Statuses</div>
+          <ul className="space-y-1 text-sm text-text-secondary">
+            {statusEntries.length > 0 ? statusEntries.map(([label, count], index) => (
+              <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                <span className="truncate">{label}</span>
+                <span className="font-medium text-text">{count}</span>
+              </li>
+            )) : <li>None</li>}
+          </ul>
+        </div>
+
+        <div className="rounded-lg border border-[var(--border)] p-3">
+          <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Org context</div>
+          <ul className="space-y-1 text-sm text-text-secondary">
+            {orgContextEntries.length > 0 ? orgContextEntries.map(([label, count], index) => (
+              <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                <span className="truncate">{label}</span>
+                <span className="font-medium text-text">{count}</span>
+              </li>
+            )) : <li>None</li>}
+          </ul>
+        </div>
+
+        <div className="rounded-lg border border-[var(--border)] p-3">
+          <div className="mb-2 text-xs font-medium uppercase text-text-tertiary">Warnings</div>
+          <ul className="space-y-1 text-sm text-text-secondary">
+            {warningEntries.length > 0 ? warningEntries.map(([label, count], index) => (
+              <li key={`${label}-${index}`} className="flex min-w-0 justify-between gap-3">
+                <span className="truncate">{label}</span>
+                <span className="font-medium text-text">{count}</span>
+              </li>
+            )) : <li>None</li>}
+          </ul>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-[var(--border)] bg-surface-secondary p-3">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-text">Memory write history</div>
+            <p className="mt-1 text-xs text-text-secondary">
+              Recent write doctor buckets grouped by event hour.
+            </p>
+          </div>
+          <StatusPill tone={historyError ? "warn" : historyBuckets.length > 0 ? "ok" : "off"}>
+            {historyError ? "unavailable" : `${historyBuckets.length} buckets`}
+          </StatusPill>
+        </div>
+
+        <div
+          className="mt-3 overflow-x-auto rounded-lg border border-[var(--border)] bg-surface"
+          data-testid="wiii-connect-semantic-memory-doctor-history"
+        >
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead className="border-b border-[var(--border)] bg-surface-secondary text-xs uppercase text-text-tertiary">
+              <tr>
+                <th className="px-3 py-2 font-medium">Bucket</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Writes</th>
+                <th className="px-3 py-2 font-medium">Facts</th>
+                <th className="px-3 py-2 font-medium">Insights</th>
+                <th className="px-3 py-2 font-medium">Blocked</th>
+                <th className="px-3 py-2 font-medium">Top kind</th>
+                <th className="px-3 py-2 font-medium">Warnings</th>
+              </tr>
+            </thead>
+            <tbody>
+              {historyBuckets.length > 0 ? historyBuckets.map((bucket) => {
+                const topKind = countMapEntries(bucket.write_kinds, 1)[0];
+                const warnings = countMapEntries(bucket.warnings, 2)
+                  .map(([label, count]) => `${label} ${count}`)
+                  .join(", ");
+                return (
+                  <tr
+                    key={bucket.bucket_start}
+                    className="border-b border-[var(--border)] last:border-b-0"
+                  >
+                    <td className="px-3 py-2 font-medium text-text">
+                      {formatDateTime(bucket.bucket_start)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <StatusPill tone={doctorStatusTone(bucket.status)}>
+                        {safeRuntimeDoctorCounterLabel(bucket.status)}
+                      </StatusPill>
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {bucket.summary?.write_count ?? 0}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {bucket.summary?.stored_fact_total ?? 0}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {bucket.summary?.stored_insight_total ?? 0}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {bucket.summary?.blocked_count ?? 0}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {topKind ? `${topKind[0]} ${topKind[1]}` : "None"}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {warnings || "None"}
+                    </td>
+                  </tr>
+                );
+              }) : (
+                <tr>
+                  <td className="px-3 py-3 text-text-secondary" colSpan={8}>
+                    {historyError
+                      ? "Backend semantic-memory history is unavailable."
+                      : "No semantic-memory doctor history."}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-2 grid gap-2 text-xs text-text-tertiary sm:grid-cols-3">
+          <div>
+            Buckets: {historyReport?.source?.bucket_count ?? historyBuckets.length}/
+            {historyReport?.source?.bucket_limit ?? 0}
+          </div>
+          <div>
+            Events: {historyReport?.source?.semantic_memory_write_event_count ?? 0}/
+            {historyReport?.source?.session_event_count ?? 0}
+          </div>
+          <div>Privacy: {historyPrivacyStrategy}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs text-text-tertiary sm:grid-cols-3">
+        <div>Backend: {backend}</div>
+        <div>Privacy: {privacyStrategy}</div>
+        <div>
+          Events: {report?.source?.semantic_memory_write_event_count ?? 0}/
+          {report?.source?.session_event_count ?? 0}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function RuntimeSection({
   runtimePath,
+  runtimeFlowLedger,
+  runtimeFlowTrace,
+  doctorReport,
+  doctorError,
+  recentRuntimeFlowDoctorReport,
+  recentRuntimeFlowDoctorError,
+  runtimeFlowDoctorHistoryReport,
+  runtimeFlowDoctorHistoryError,
+  recentSemanticMemoryDoctorReport,
+  recentSemanticMemoryDoctorError,
+  semanticMemoryDoctorHistoryReport,
+  semanticMemoryDoctorHistoryError,
+  runtimePruneReport,
+  runtimePruneLoading,
+  runtimePruneError,
+  onRuntimePruneDryRun,
+  onRuntimePruneApply,
 }: {
   runtimePath: RuntimePathSnapshot | null;
+  runtimeFlowLedger: RuntimeFlowLedgerViewModel;
+  runtimeFlowTrace: RuntimeFlowTraceViewModel;
+  doctorReport: WiiiConnectDoctorReport | null;
+  doctorError?: string;
+  recentRuntimeFlowDoctorReport: RuntimeFlowDoctorReport | null;
+  recentRuntimeFlowDoctorError?: string;
+  runtimeFlowDoctorHistoryReport: RuntimeFlowDoctorHistoryReport | null;
+  runtimeFlowDoctorHistoryError?: string;
+  recentSemanticMemoryDoctorReport: SemanticMemoryWriteDoctorReport | null;
+  recentSemanticMemoryDoctorError?: string;
+  semanticMemoryDoctorHistoryReport: SemanticMemoryWriteDoctorHistoryReport | null;
+  semanticMemoryDoctorHistoryError?: string;
+  runtimePruneReport: RuntimeFlowSessionEventPruneReport | null;
+  runtimePruneLoading?: boolean;
+  runtimePruneError?: string;
+  onRuntimePruneDryRun?: () => void;
+  onRuntimePruneApply?: () => void;
 }) {
   const rows = [
     ["Path", compactText(runtimePath?.lane, "Chưa phân loại")],
@@ -3265,6 +5245,8 @@ function RuntimeSection({
     ["Apply", runtimePath?.approvalTokenPresent ? "Có approval evidence" : "Không"],
     ["Nhận lúc", runtimePath?.receivedAtMs != null ? formatDateTime(new Date(runtimePath.receivedAtMs).toISOString()) : "Chưa có"],
   ];
+  const doctorPaths = importantDoctorPaths(doctorReport);
+  const doctorProviders = importantDoctorProviders(doctorReport);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
@@ -3303,6 +5285,260 @@ function RuntimeSection({
           </li>
         </ul>
       </section>
+
+      <section
+        className="rounded-lg border border-[var(--border)] bg-surface p-4 lg:col-span-2"
+        data-testid="wiii-connect-runtime-flow-ledger"
+      >
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Activity size={16} className="text-text-secondary" aria-hidden="true" />
+              <h3 className="text-sm font-semibold text-text">Runtime flow ledger</h3>
+            </div>
+            <p className="mt-1 text-xs text-text-secondary">
+              {runtimeFlowLedger.summary}
+            </p>
+          </div>
+          <StatusPill tone={runtimeFlowLedger.tone}>
+            {runtimeFlowLedger.present ? runtimeFlowLedger.version : "Đang chờ"}
+          </StatusPill>
+        </div>
+
+        <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {runtimeFlowLedger.rows.map((row) => (
+            <div key={row.label} className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+              <dt className="flex items-center justify-between gap-2 text-xs text-text-tertiary">
+                <span>{row.label}</span>
+                {row.tone && <span className={`h-2 w-2 rounded-full ${statusDotClasses[row.tone]}`} />}
+              </dt>
+              <dd className="mt-0.5 break-words text-sm font-medium text-text" title={row.value}>
+                {row.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+
+        {runtimeFlowLedger.warnings.length > 0 && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <div className="mb-1 flex items-center gap-2 font-medium">
+              <AlertTriangle size={15} aria-hidden="true" />
+              Cần kiểm tra ledger
+            </div>
+            <ul className="space-y-1 text-xs">
+              {runtimeFlowLedger.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      <section
+        className="rounded-lg border border-[var(--border)] bg-surface p-4 lg:col-span-2"
+        data-testid="wiii-connect-runtime-flow-trace"
+      >
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={16} className="text-text-secondary" aria-hidden="true" />
+              <h3 className="text-sm font-semibold text-text">Runtime flow trace</h3>
+            </div>
+            <p className="mt-1 text-xs text-text-secondary">
+              {runtimeFlowTrace.summary}
+            </p>
+          </div>
+          <StatusPill tone={runtimeFlowTrace.tone}>
+            {runtimeFlowTrace.present ? runtimeFlowTrace.version : "Đang chờ"}
+          </StatusPill>
+        </div>
+
+        <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {runtimeFlowTrace.rows.map((row) => (
+            <div key={row.label} className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+              <dt className="flex items-center justify-between gap-2 text-xs text-text-tertiary">
+                <span>{row.label}</span>
+                {row.tone && <span className={`h-2 w-2 rounded-full ${statusDotClasses[row.tone]}`} />}
+              </dt>
+              <dd className="mt-0.5 break-words text-sm font-medium text-text" title={row.value}>
+                {row.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+
+        {runtimeFlowTrace.warnings.length > 0 && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <div className="mb-1 flex items-center gap-2 font-medium">
+              <AlertTriangle size={15} aria-hidden="true" />
+              Cần kiểm tra trace
+            </div>
+            <ul className="space-y-1 text-xs">
+              {runtimeFlowTrace.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      <section
+        className="rounded-lg border border-[var(--border)] bg-surface p-4 lg:col-span-2"
+        data-testid="wiii-connect-doctor-panel"
+      >
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Activity size={16} className="text-text-secondary" aria-hidden="true" />
+              <h3 className="text-sm font-semibold text-text">Runtime doctor</h3>
+            </div>
+            <p className="mt-1 text-xs text-text-secondary">
+              {doctorError
+                ? "Chưa đọc được doctor report từ backend."
+                : doctorReport
+                  ? "Tóm tắt path, connection và blocker từ cùng snapshot runtime."
+                  : "Đang chờ doctor report từ backend."}
+            </p>
+          </div>
+          <StatusPill tone={doctorStatusTone(doctorReport?.status)}>
+            {doctorReport?.status ?? "checking"}
+          </StatusPill>
+        </div>
+
+        <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+            <dt className="text-xs text-text-tertiary">Path sẵn sàng</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">
+              {doctorMetric(doctorReport, "ready_paths")}
+            </dd>
+          </div>
+          <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+            <dt className="text-xs text-text-tertiary">Path guarded</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">
+              {doctorMetric(doctorReport, "guarded_paths")}
+            </dd>
+          </div>
+          <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+            <dt className="text-xs text-text-tertiary">Path bị chặn</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">
+              {doctorMetric(doctorReport, "blocked_paths")}
+            </dd>
+          </div>
+          <div className="min-w-0 rounded-md bg-surface-secondary px-3 py-2">
+            <dt className="text-xs text-text-tertiary">External ready</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-text">
+              {doctorMetric(doctorReport, "external_agent_ready_connections")}
+            </dd>
+          </div>
+        </dl>
+
+        {doctorPaths.length > 0 && (
+          <div className="mt-3 overflow-x-auto rounded-lg border border-[var(--border)]">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="border-b border-[var(--border)] bg-surface-secondary text-xs uppercase text-text-tertiary">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Path</th>
+                  <th className="px-3 py-2 font-medium">Trạng thái</th>
+                  <th className="px-3 py-2 font-medium">Lý do</th>
+                  <th className="px-3 py-2 font-medium">Thiếu</th>
+                </tr>
+              </thead>
+              <tbody>
+                {doctorPaths.map((path) => (
+                  <tr key={path.path} className="border-b border-[var(--border)] last:border-b-0">
+                    <td className="px-3 py-2 font-medium text-text">{path.path}</td>
+                    <td className="px-3 py-2">
+                      <StatusPill tone={pathDoctorTone(path.status)}>
+                        {path.status}
+                      </StatusPill>
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {compactText(path.reason)}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {pathList(path.missing_connection_slugs)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {doctorProviders.length > 0 && (
+          <div className="mt-3 overflow-x-auto rounded-lg border border-[var(--border)]">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <caption className="sr-only">Provider diagnostics</caption>
+              <thead className="border-b border-[var(--border)] bg-surface-secondary text-xs uppercase text-text-tertiary">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Provider</th>
+                  <th className="px-3 py-2 font-medium">Kết nối</th>
+                  <th className="px-3 py-2 font-medium">Agent</th>
+                  <th className="px-3 py-2 font-medium">Vòng đời</th>
+                  <th className="px-3 py-2 font-medium">Bước tiếp</th>
+                </tr>
+              </thead>
+              <tbody>
+                {doctorProviders.map((provider) => (
+                  <tr key={provider.provider_slug} className="border-b border-[var(--border)] last:border-b-0">
+                    <td className="px-3 py-2">
+                      <div className="font-medium text-text">{provider.label}</div>
+                      <div className="text-xs text-text-tertiary">
+                        {provider.provider_slug} · {compactText(provider.provider_kind)}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      <div className="font-medium text-text">{compactText(provider.connection_status)}</div>
+                      <div className="text-xs text-text-tertiary">
+                        {providerDoctorCountSummary(provider)}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <StatusPill tone={pathDoctorTone(provider.status)}>
+                        {provider.status}
+                      </StatusPill>
+                      <div className="mt-1 text-xs text-text-secondary">
+                        {compactText(provider.reason)}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      <DoctorProviderStages provider={provider} />
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {pathList(provider.required_next)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {doctorReport?.top_blockers && doctorReport.top_blockers.length > 0 && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {pathList(doctorReport.top_blockers.slice(0, 4))}
+          </div>
+        )}
+      </section>
+
+      <RecentRuntimeFlowDoctorPanel
+        report={recentRuntimeFlowDoctorReport}
+        error={recentRuntimeFlowDoctorError}
+        historyReport={runtimeFlowDoctorHistoryReport}
+        historyError={runtimeFlowDoctorHistoryError}
+        pruneReport={runtimePruneReport}
+        pruneLoading={runtimePruneLoading}
+        pruneError={runtimePruneError}
+        onPruneDryRun={onRuntimePruneDryRun}
+        onPruneApply={onRuntimePruneApply}
+      />
+
+      <SemanticMemoryDoctorPanel
+        report={recentSemanticMemoryDoctorReport}
+        error={recentSemanticMemoryDoctorError}
+        historyReport={semanticMemoryDoctorHistoryReport}
+        historyError={semanticMemoryDoctorHistoryError}
+      />
     </div>
   );
 }
@@ -3311,7 +5547,36 @@ export function WiiiConnectPage() {
   const [activeTab, setActiveTab] = useState<ConnectTab>("catalog");
   const [providerRegistry, setProviderRegistry] = useState<WiiiConnectProviderRegistryEntry[] | null>(null);
   const [providerRegistryLoaded, setProviderRegistryLoaded] = useState(false);
+  const [runtimeSnapshot, setRuntimeSnapshot] = useState<WiiiConnectRuntimeSnapshot | null>(null);
+  const [runtimeSnapshotError, setRuntimeSnapshotError] = useState<string | undefined>();
+  const [runtimeRefreshing, setRuntimeRefreshing] = useState(false);
+  const [lastRuntimeRefreshAt, setLastRuntimeRefreshAt] = useState<string | null>(null);
+  const [doctorReport, setDoctorReport] = useState<WiiiConnectDoctorReport | null>(null);
+  const [doctorError, setDoctorError] = useState<string | undefined>();
+  const [recentRuntimeFlowDoctorReport, setRecentRuntimeFlowDoctorReport] =
+    useState<RuntimeFlowDoctorReport | null>(null);
+  const [recentRuntimeFlowDoctorError, setRecentRuntimeFlowDoctorError] =
+    useState<string | undefined>();
+  const [runtimeFlowDoctorHistoryReport, setRuntimeFlowDoctorHistoryReport] =
+    useState<RuntimeFlowDoctorHistoryReport | null>(null);
+  const [runtimeFlowDoctorHistoryError, setRuntimeFlowDoctorHistoryError] =
+    useState<string | undefined>();
+  const [recentSemanticMemoryDoctorReport, setRecentSemanticMemoryDoctorReport] =
+    useState<SemanticMemoryWriteDoctorReport | null>(null);
+  const [recentSemanticMemoryDoctorError, setRecentSemanticMemoryDoctorError] =
+    useState<string | undefined>();
+  const [semanticMemoryDoctorHistoryReport, setSemanticMemoryDoctorHistoryReport] =
+    useState<SemanticMemoryWriteDoctorHistoryReport | null>(null);
+  const [semanticMemoryDoctorHistoryError, setSemanticMemoryDoctorHistoryError] =
+    useState<string | undefined>();
+  const [runtimePruneReport, setRuntimePruneReport] =
+    useState<RuntimeFlowSessionEventPruneReport | null>(null);
+  const [runtimePruneError, setRuntimePruneError] = useState<string | undefined>();
+  const [runtimePruneLoading, setRuntimePruneLoading] = useState(false);
+  const runtimeControlPlaneMountedRef = useRef(false);
   const navigateToChat = useUIStore((state) => state.navigateToChat);
+  const authMode = useAuthStore((state) => state.authMode);
+  const authUser = useAuthStore((state) => state.user);
   const connectionStatus = useConnectionStore((state) => state.status);
   const serverVersion = useConnectionStore((state) => state.serverVersion);
   const lastCheckedAt = useConnectionStore((state) => state.lastCheckedAt);
@@ -3324,6 +5589,16 @@ export function WiiiConnectPage() {
   const lastCompletedLifecycleEvents = useChatStore(
     (state) => state.lastCompletedLifecycleEvents,
   );
+  const activeConversation = useChatStore((state) => state.activeConversation());
+  const pendingStreamMetadata = useChatStore((state) => state.pendingStreamMetadata);
+  const isEmbedded = isEmbeddedWindow();
+
+  useEffect(() => {
+    runtimeControlPlaneMountedRef.current = true;
+    return () => {
+      runtimeControlPlaneMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -3343,6 +5618,210 @@ export function WiiiConnectPage() {
     };
   }, []);
 
+  const refreshRuntimeControlPlane = useCallback(async () => {
+    const surface = isEmbedded ? "embed" : "desktop";
+    const canReadRecentRuntimeDoctor =
+      authMode === "legacy" || authUser?.platform_role === "platform_admin";
+    if (runtimeControlPlaneMountedRef.current) {
+      setRuntimeRefreshing(true);
+    }
+    try {
+      const [
+        snapshotResult,
+        doctorResult,
+        recentDoctorResult,
+        doctorHistoryResult,
+        semanticDoctorResult,
+        semanticDoctorHistoryResult,
+      ] = await Promise.allSettled([
+        fetchWiiiConnectSnapshot({ surface }),
+        fetchWiiiConnectDoctor({ surface }),
+        canReadRecentRuntimeDoctor
+          ? fetchRecentRuntimeFlowDoctor({
+              orgId: authUser?.active_organization_id,
+              limit: 50,
+            })
+          : Promise.resolve(null),
+        canReadRecentRuntimeDoctor
+          ? fetchRuntimeFlowDoctorHistory({
+              orgId: authUser?.active_organization_id,
+              limit: 500,
+              bucketLimit: 24,
+            })
+          : Promise.resolve(null),
+        canReadRecentRuntimeDoctor
+          ? fetchRecentSemanticMemoryDoctor({
+              orgId: authUser?.active_organization_id,
+              limit: 50,
+            })
+          : Promise.resolve(null),
+        canReadRecentRuntimeDoctor
+          ? fetchSemanticMemoryDoctorHistory({
+              orgId: authUser?.active_organization_id,
+              limit: 500,
+              bucketLimit: 24,
+            })
+          : Promise.resolve(null),
+      ]);
+      if (!runtimeControlPlaneMountedRef.current) return;
+      if (snapshotResult.status === "fulfilled") {
+        setRuntimeSnapshot(snapshotResult.value);
+        setRuntimeSnapshotError(undefined);
+      } else {
+        setRuntimeSnapshotError(
+          snapshotResult.reason instanceof Error
+            ? snapshotResult.reason.message
+            : "snapshot_unavailable",
+        );
+      }
+      if (doctorResult.status === "fulfilled") {
+        setDoctorReport(doctorResult.value);
+        setDoctorError(undefined);
+      } else {
+        setDoctorError(
+          doctorResult.reason instanceof Error
+            ? doctorResult.reason.message
+            : "doctor_unavailable",
+        );
+      }
+      if (recentDoctorResult.status === "fulfilled" && recentDoctorResult.value) {
+        setRecentRuntimeFlowDoctorReport(recentDoctorResult.value);
+        setRecentRuntimeFlowDoctorError(undefined);
+      } else {
+        setRecentRuntimeFlowDoctorReport(null);
+        setRecentRuntimeFlowDoctorError(
+          recentDoctorResult.status === "rejected"
+            ? recentDoctorResult.reason instanceof Error
+              ? recentDoctorResult.reason.message
+              : "runtime_flow_doctor_unavailable"
+            : "operator_access_required",
+        );
+      }
+      if (doctorHistoryResult.status === "fulfilled" && doctorHistoryResult.value) {
+        setRuntimeFlowDoctorHistoryReport(doctorHistoryResult.value);
+        setRuntimeFlowDoctorHistoryError(undefined);
+      } else {
+        setRuntimeFlowDoctorHistoryReport(null);
+        setRuntimeFlowDoctorHistoryError(
+          doctorHistoryResult.status === "rejected"
+            ? doctorHistoryResult.reason instanceof Error
+              ? doctorHistoryResult.reason.message
+              : "runtime_flow_doctor_history_unavailable"
+            : "operator_access_required",
+        );
+      }
+      if (semanticDoctorResult.status === "fulfilled" && semanticDoctorResult.value) {
+        setRecentSemanticMemoryDoctorReport(semanticDoctorResult.value);
+        setRecentSemanticMemoryDoctorError(undefined);
+      } else {
+        setRecentSemanticMemoryDoctorReport(null);
+        setRecentSemanticMemoryDoctorError(
+          semanticDoctorResult.status === "rejected"
+            ? semanticDoctorResult.reason instanceof Error
+              ? semanticDoctorResult.reason.message
+              : "semantic_memory_doctor_unavailable"
+            : "operator_access_required",
+        );
+      }
+      if (
+        semanticDoctorHistoryResult.status === "fulfilled" &&
+        semanticDoctorHistoryResult.value
+      ) {
+        setSemanticMemoryDoctorHistoryReport(semanticDoctorHistoryResult.value);
+        setSemanticMemoryDoctorHistoryError(undefined);
+      } else {
+        setSemanticMemoryDoctorHistoryReport(null);
+        setSemanticMemoryDoctorHistoryError(
+          semanticDoctorHistoryResult.status === "rejected"
+            ? semanticDoctorHistoryResult.reason instanceof Error
+              ? semanticDoctorHistoryResult.reason.message
+              : "semantic_memory_doctor_history_unavailable"
+            : "operator_access_required",
+        );
+      }
+      setLastRuntimeRefreshAt(new Date().toISOString());
+    } finally {
+      if (runtimeControlPlaneMountedRef.current) {
+        setRuntimeRefreshing(false);
+      }
+    }
+  }, [authMode, authUser?.active_organization_id, authUser?.platform_role, isEmbedded]);
+
+  const runRuntimePruneDryRun = useCallback(async () => {
+    const canReadRecentRuntimeDoctor =
+      authMode === "legacy" || authUser?.platform_role === "platform_admin";
+    if (!canReadRecentRuntimeDoctor) {
+      setRuntimePruneError("operator_access_required");
+      return;
+    }
+    setRuntimePruneLoading(true);
+    setRuntimePruneError(undefined);
+    try {
+      const report = await pruneRuntimeFlowSessionEvents({
+        orgId: authUser?.active_organization_id,
+        eventType: "runtime_flow_ledger",
+        dryRun: true,
+      });
+      if (!runtimeControlPlaneMountedRef.current) return;
+      setRuntimePruneReport(report);
+    } catch {
+      if (!runtimeControlPlaneMountedRef.current) return;
+      setRuntimePruneError("retention_prune_unavailable");
+    } finally {
+      if (runtimeControlPlaneMountedRef.current) {
+        setRuntimePruneLoading(false);
+      }
+    }
+  }, [authMode, authUser?.active_organization_id, authUser?.platform_role]);
+
+  const runRuntimePruneApply = useCallback(async () => {
+    const canReadRecentRuntimeDoctor =
+      authMode === "legacy" || authUser?.platform_role === "platform_admin";
+    if (
+      !canReadRecentRuntimeDoctor ||
+      !runtimePruneReport?.dry_run ||
+      runtimePruneReport.matched_count <= 0
+    ) {
+      return;
+    }
+    setRuntimePruneLoading(true);
+    setRuntimePruneError(undefined);
+    try {
+      const report = await pruneRuntimeFlowSessionEvents({
+        retentionDays: runtimePruneReport.retention_days,
+        orgId: authUser?.active_organization_id,
+        eventType: "runtime_flow_ledger",
+        dryRun: false,
+      });
+      if (!runtimeControlPlaneMountedRef.current) return;
+      setRuntimePruneReport(report);
+      await refreshRuntimeControlPlane();
+    } catch {
+      if (!runtimeControlPlaneMountedRef.current) return;
+      setRuntimePruneError("retention_prune_unavailable");
+    } finally {
+      if (runtimeControlPlaneMountedRef.current) {
+        setRuntimePruneLoading(false);
+      }
+    }
+  }, [
+    authMode,
+    authUser?.active_organization_id,
+    authUser?.platform_role,
+    refreshRuntimeControlPlane,
+    runtimePruneReport?.dry_run,
+    runtimePruneReport?.matched_count,
+    runtimePruneReport?.retention_days,
+  ]);
+
+  useEffect(() => {
+    void refreshRuntimeControlPlane();
+    const timer = window.setInterval(() => {
+      void refreshRuntimeControlPlane();
+    }, WIII_CONNECT_RUNTIME_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [refreshRuntimeControlPlane]);
+
   const runtimePath = useMemo(
     () =>
       runtimePathFromLifecycleEvents(
@@ -3351,9 +5830,27 @@ export function WiiiConnectPage() {
       ),
     [streamingLifecycleEvents, lastCompletedLifecycleEvents],
   );
-  const snapshot = runtimePath?.wiiiConnect ?? null;
+  const runtimeFlowTrace = useMemo(
+    () =>
+      buildRuntimeFlowTraceViewModel(
+        latestRuntimeFlowTrace(activeConversation?.messages, pendingStreamMetadata),
+      ),
+    [activeConversation?.messages, pendingStreamMetadata],
+  );
+  const runtimeFlowLedger = useMemo(
+    () =>
+      buildRuntimeFlowLedgerViewModel(
+        latestRuntimeFlowLedger(activeConversation?.messages, pendingStreamMetadata),
+      ),
+    [activeConversation?.messages, pendingStreamMetadata],
+  );
+  const snapshot = runtimePath?.wiiiConnect ?? runtimeSnapshot;
   const stats = snapshotStats(snapshot);
-  const isEmbedded = isEmbeddedWindow();
+  const runtimeSyncLabel = runtimeRefreshing
+    ? "Đang đồng bộ"
+    : lastRuntimeRefreshAt
+      ? "Đã đồng bộ"
+      : "Chờ đồng bộ";
 
   const fallbackModel = useMemo(
     () =>
@@ -3406,7 +5903,7 @@ export function WiiiConnectPage() {
             </StatusPill>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <SummaryMetric
               icon={Database}
               label="Kết nối"
@@ -3422,14 +5919,38 @@ export function WiiiConnectPage() {
             <SummaryMetric
               icon={Route}
               label="Path policy"
-              value={snapshot ? `${stats.pathCount}` : "Đang chờ"}
-              tone={stats.pathCount > 0 ? "ok" : "pending"}
+              value={
+                snapshot?.capability_summary
+                  ? `${stats.readyPathCount}/${stats.pathCount} ready`
+                  : snapshot
+                    ? `${stats.pathCount}`
+                    : "Đang chờ"
+              }
+              tone={
+                stats.blockedPathCount > 0
+                  ? "warn"
+                  : stats.pathCount > 0
+                    ? "ok"
+                    : "pending"
+              }
             />
             <SummaryMetric
               icon={AlertTriangle}
               label="Cảnh báo"
-              value={`${stats.warningCount}`}
-              tone={stats.warningCount > 0 ? "warn" : "ok"}
+              value={`${stats.warningCount}${runtimeSnapshotError ? "+API" : ""}`}
+              tone={stats.warningCount > 0 || runtimeSnapshotError ? "warn" : "ok"}
+            />
+            <SummaryMetric
+              icon={RefreshCw}
+              label="Runtime sync"
+              value={runtimeSyncLabel}
+              tone={
+                runtimeSnapshotError || doctorError
+                  ? "warn"
+                  : lastRuntimeRefreshAt
+                    ? "ok"
+                    : "pending"
+              }
             />
           </div>
         </section>
@@ -3440,6 +5961,7 @@ export function WiiiConnectPage() {
             fallbackModel={fallbackModel}
             providerRegistry={providerRegistry}
             providerRegistryLoaded={providerRegistryLoaded}
+            onRuntimeRefresh={refreshRuntimeControlPlane}
           />
         )}
 
@@ -3452,11 +5974,33 @@ export function WiiiConnectPage() {
         )}
 
         {activeTab === "paths" && (
-          <PathPolicyTable paths={snapshot?.path_capabilities ?? []} />
+          <>
+            <CapabilitySummaryPanel snapshot={snapshot} />
+            <PathPolicyTable paths={snapshot?.path_capabilities ?? []} />
+          </>
         )}
 
         {activeTab === "runtime" && (
-          <RuntimeSection runtimePath={runtimePath} />
+            <RuntimeSection
+              runtimePath={runtimePath}
+              runtimeFlowLedger={runtimeFlowLedger}
+              runtimeFlowTrace={runtimeFlowTrace}
+              doctorReport={doctorReport}
+              doctorError={doctorError}
+              recentRuntimeFlowDoctorReport={recentRuntimeFlowDoctorReport}
+              recentRuntimeFlowDoctorError={recentRuntimeFlowDoctorError}
+              runtimeFlowDoctorHistoryReport={runtimeFlowDoctorHistoryReport}
+              runtimeFlowDoctorHistoryError={runtimeFlowDoctorHistoryError}
+              recentSemanticMemoryDoctorReport={recentSemanticMemoryDoctorReport}
+              recentSemanticMemoryDoctorError={recentSemanticMemoryDoctorError}
+              semanticMemoryDoctorHistoryReport={semanticMemoryDoctorHistoryReport}
+              semanticMemoryDoctorHistoryError={semanticMemoryDoctorHistoryError}
+              runtimePruneReport={runtimePruneReport}
+              runtimePruneLoading={runtimePruneLoading}
+              runtimePruneError={runtimePruneError}
+              onRuntimePruneDryRun={runRuntimePruneDryRun}
+              onRuntimePruneApply={runRuntimePruneApply}
+          />
         )}
       </div>
     </FullPageView>

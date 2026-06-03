@@ -8,6 +8,7 @@ Host-local LMS roles remain overlays and do not define global admin authority.
 import logging
 import os
 import tempfile
+from datetime import UTC, datetime, timedelta
 from typing import Any, Mapping, Optional
 from uuid import uuid4
 from fastapi import (
@@ -16,6 +17,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     UploadFile,
 )
@@ -67,6 +69,16 @@ from app.api.deps import RequireAuth, RequireAdmin
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.core.security import is_platform_admin
+from app.engine.multi_agent.runtime_flow_doctor import (
+    build_runtime_flow_doctor_history_from_session_log,
+    build_recent_runtime_flow_doctor_report_from_session_log,
+    build_runtime_flow_doctor_report_from_session_log,
+)
+from app.engine.runtime.session_event_log import get_session_event_log
+from app.engine.semantic_memory.write_doctor import (
+    build_recent_semantic_memory_write_doctor_report_from_session_log,
+    build_semantic_memory_write_doctor_history_from_session_log,
+)
 from app.services.embedding_selectability_service import get_embedding_selectability_snapshot
 from app.services.embedding_space_runtime_service import (
     build_embedding_migration_previews,
@@ -115,6 +127,29 @@ from app.api.v1.admin_runtime_bindings import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
+
+def _resolve_admin_document_org(auth: RequireAdmin) -> Optional[str]:
+    """Resolve the admin's active org for direct knowledge document SQL."""
+    if not settings.enable_multi_tenant:
+        return None
+    org_id = getattr(auth, "organization_id", None)
+    if isinstance(org_id, str) and org_id.strip():
+        return org_id.strip()
+    raise HTTPException(
+        status_code=403,
+        detail="Active organization is required for document administration.",
+    )
+
+
+def _hash_admin_identifier(value) -> str | None:
+    try:
+        from app.engine.semantic_memory.privacy import hash_memory_identifier
+
+        return hash_memory_identifier(value)
+    except Exception:
+        return None
+
 
 def _can_manage_llm_runtime(auth) -> bool:
     if is_platform_admin(auth):
@@ -636,9 +671,211 @@ async def _run_ingestion_background(
     )
 
 
+def _runtime_lifecycle_registration_report() -> dict[str, Any]:
+    """Return operator-safe lifecycle hook registration metadata."""
+
+    from app.engine.runtime.lifecycle import build_lifecycle_registration_report
+
+    return build_lifecycle_registration_report()
+
+
+def _post_turn_lifecycle_metrics_report() -> dict[str, Any]:
+    """Return aggregate post-turn/background scheduling metrics."""
+
+    from app.services.post_turn_lifecycle import (
+        build_post_turn_lifecycle_metrics_report,
+    )
+
+    return build_post_turn_lifecycle_metrics_report()
+
+
+def _runtime_flow_runtime_config(
+    lifecycle_report: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return operator-safe runtime-flow configuration and hook health."""
+
+    report = lifecycle_report or _runtime_lifecycle_registration_report()
+    hook_counts = report.get("point_counts", {})
+    owner_counts = report.get("owner_counts", {})
+    return {
+        "native_stream_dispatch_enabled": bool(
+            settings.enable_native_stream_dispatch
+        ),
+        "session_event_log_backend": (
+            "postgres" if settings.enable_session_event_log else "in_memory"
+        ),
+        "lifecycle_hook_total": report.get("registration_count", 0),
+        "lifecycle_hook_owner_count": len(owner_counts),
+        "lifecycle_on_run_end_hook_count": hook_counts.get("on_run_end", 0),
+        "lifecycle_on_run_error_hook_count": hook_counts.get("on_run_error", 0),
+    }
+
+
 # =============================================================================
 # Endpoints
 # =============================================================================
+
+@router.get("/runtime-flow/doctor")
+@limiter.limit("60/minute")
+async def get_runtime_flow_doctor(
+    request: Request,
+    auth: RequireAdmin,
+    session_id: str = Query(..., min_length=1),
+    org_id: Optional[str] = Query(None, min_length=1),
+    since_seq: Optional[int] = Query(None, ge=0),
+) -> dict[str, Any]:
+    """Return privacy-safe runtime-flow diagnostics for one session window."""
+
+    report = await build_runtime_flow_doctor_report_from_session_log(
+        get_session_event_log(),
+        session_id=session_id,
+        org_id=org_id,
+        since_seq=since_seq,
+    )
+    lifecycle_report = _runtime_lifecycle_registration_report()
+    report["runtime_config"] = _runtime_flow_runtime_config(lifecycle_report)
+    report["lifecycle_registrations"] = lifecycle_report
+    report["post_turn_lifecycle"] = _post_turn_lifecycle_metrics_report()
+    return report
+
+
+@router.get("/runtime-flow/doctor/recent")
+@limiter.limit("60/minute")
+async def get_recent_runtime_flow_doctor(
+    request: Request,
+    auth: RequireAdmin,
+    org_id: Optional[str] = Query(None, min_length=1),
+    limit: int = Query(50, ge=1, le=500),
+) -> dict[str, Any]:
+    """Return aggregate runtime-flow diagnostics for recent session events."""
+
+    report = await build_recent_runtime_flow_doctor_report_from_session_log(
+        get_session_event_log(),
+        org_id=org_id,
+        limit=limit,
+    )
+    lifecycle_report = _runtime_lifecycle_registration_report()
+    report["runtime_config"] = _runtime_flow_runtime_config(lifecycle_report)
+    report["lifecycle_registrations"] = lifecycle_report
+    report["post_turn_lifecycle"] = _post_turn_lifecycle_metrics_report()
+    return report
+
+
+@router.get("/runtime-flow/doctor/history")
+@limiter.limit("60/minute")
+async def get_runtime_flow_doctor_history(
+    request: Request,
+    auth: RequireAdmin,
+    org_id: Optional[str] = Query(None, min_length=1),
+    limit: int = Query(500, ge=1, le=500),
+    bucket_limit: int = Query(24, ge=1, le=48),
+) -> dict[str, Any]:
+    """Return bucketed aggregate runtime-flow diagnostics over recent events."""
+
+    report = await build_runtime_flow_doctor_history_from_session_log(
+        get_session_event_log(),
+        org_id=org_id,
+        limit=limit,
+        bucket_limit=bucket_limit,
+    )
+    lifecycle_report = _runtime_lifecycle_registration_report()
+    report["runtime_config"] = _runtime_flow_runtime_config(lifecycle_report)
+    report["lifecycle_registrations"] = lifecycle_report
+    report["post_turn_lifecycle"] = _post_turn_lifecycle_metrics_report()
+    return report
+
+
+@router.post("/runtime-flow/session-events/prune")
+@limiter.limit("10/minute")
+async def prune_runtime_flow_session_events(
+    request: Request,
+    auth: RequireAdmin,
+    retention_days: Optional[int] = Query(None, ge=1, le=3650),
+    org_id: Optional[str] = Query(None, min_length=1),
+    event_type: Optional[str] = Query(None, min_length=1, max_length=96),
+    dry_run: bool = Query(True),
+) -> dict[str, Any]:
+    """Prune old session_events with aggregate-only operator evidence."""
+
+    days = retention_days or settings.session_event_log_retention_days
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    matched_count = await get_session_event_log().prune_older_than(
+        cutoff=cutoff,
+        org_id=org_id,
+        event_type=event_type,
+        dry_run=dry_run,
+    )
+    return {
+        "schema": "wiii.session_event_log_prune.v1",
+        "status": "dry_run" if dry_run else "pruned",
+        "matched_count": matched_count,
+        "deleted_count": 0 if dry_run else matched_count,
+        "retention_days": days,
+        "cutoff": cutoff.isoformat(),
+        "dry_run": dry_run,
+        "org_scoped": org_id is not None,
+        "event_type_filter_applied": event_type is not None,
+        "privacy": {
+            "raw_content_included": False,
+            "identifier_strategy": "aggregate_counts_only",
+        },
+        "runtime_config": {
+            "session_event_log_backend": (
+                "postgres" if settings.enable_session_event_log else "in_memory"
+            ),
+        },
+    }
+
+
+@router.get("/semantic-memory/doctor/recent")
+@limiter.limit("60/minute")
+async def get_recent_semantic_memory_doctor(
+    request: Request,
+    auth: RequireAdmin,
+    org_id: Optional[str] = Query(None, min_length=1),
+    limit: int = Query(50, ge=1, le=500),
+) -> dict[str, Any]:
+    """Return aggregate diagnostics for recent semantic-memory writes."""
+
+    report = await build_recent_semantic_memory_write_doctor_report_from_session_log(
+        get_session_event_log(),
+        org_id=org_id,
+        limit=limit,
+    )
+    report["runtime_config"] = {
+        "multi_tenant_enabled": bool(settings.enable_multi_tenant),
+        "session_event_log_backend": (
+            "postgres" if settings.enable_session_event_log else "in_memory"
+        ),
+    }
+    return report
+
+
+@router.get("/semantic-memory/doctor/history")
+@limiter.limit("60/minute")
+async def get_semantic_memory_doctor_history(
+    request: Request,
+    auth: RequireAdmin,
+    org_id: Optional[str] = Query(None, min_length=1),
+    limit: int = Query(500, ge=1, le=1000),
+    bucket_limit: int = Query(24, ge=1, le=48),
+) -> dict[str, Any]:
+    """Return aggregate semantic-memory write diagnostics by recent time bucket."""
+
+    report = await build_semantic_memory_write_doctor_history_from_session_log(
+        get_session_event_log(),
+        org_id=org_id,
+        limit=limit,
+        bucket_limit=bucket_limit,
+    )
+    report["runtime_config"] = {
+        "multi_tenant_enabled": bool(settings.enable_multi_tenant),
+        "session_event_log_backend": (
+            "postgres" if settings.enable_session_event_log else "in_memory"
+        ),
+    }
+    return report
+
 
 @router.post("/documents", response_model=DocumentUploadResponse)
 @limiter.limit("10/minute")
@@ -740,17 +977,25 @@ async def list_documents(request: Request, auth: RequireAdmin):  # LMS Integrati
     from sqlalchemy import text
     
     try:
+        org_id = _resolve_admin_document_org(auth)
+        where_clause = ""
+        params: dict[str, object] = {}
+        if org_id:
+            where_clause = "WHERE organization_id = :org_id"
+            params["org_id"] = org_id
+
         session_factory = get_shared_session_factory()
         with session_factory() as session:
-            result = session.execute(text("""
+            result = session.execute(text(f"""
                 SELECT 
                     document_id,
                     COUNT(*) as total_chunks,
                     MIN(created_at) as created_at
                 FROM knowledge_embeddings
+                {where_clause}
                 GROUP BY document_id
                 ORDER BY document_id
-            """))
+            """), params)
             
             documents = []
             for row in result.fetchall():
@@ -762,6 +1007,8 @@ async def list_documents(request: Request, auth: RequireAdmin):  # LMS Integrati
             
             return documents
             
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("[ADMIN] Failed to list documents: %s", e)
         return []
@@ -779,12 +1026,19 @@ async def delete_document(request: Request, document_id: str, auth: RequireAdmin
     from sqlalchemy import text
     
     try:
+        org_id = _resolve_admin_document_org(auth)
+        where_clause = "document_id = :doc_id"
+        params: dict[str, object] = {"doc_id": document_id}
+        if org_id:
+            where_clause += " AND organization_id = :org_id"
+            params["org_id"] = org_id
+
         # Delete from Neon
         session_factory = get_shared_session_factory()
         with session_factory() as session:
             result = session.execute(
-                text("DELETE FROM knowledge_embeddings WHERE document_id = :doc_id"),
-                {"doc_id": document_id}
+                text(f"DELETE FROM knowledge_embeddings WHERE {where_clause}"),
+                params,
             )
             deleted_count = result.rowcount
             session.commit()
@@ -793,9 +1047,17 @@ async def delete_document(request: Request, document_id: str, auth: RequireAdmin
         user_graph = get_user_graph_repository()
         if user_graph.is_available():
             # Note: This would need a delete method in user_graph_repository
-            logger.info("[ADMIN] Module node deletion not implemented yet for %s", document_id)
+            logger.info(
+                "[ADMIN] Module node deletion not implemented yet document_hash=%s",
+                _hash_admin_identifier(document_id),
+            )
         
-        logger.info("[ADMIN] Deleted %d chunks for document %s", deleted_count, document_id)
+        logger.info(
+            "[ADMIN] Deleted %d chunks for document_hash=%s org_hash=%s",
+            deleted_count,
+            _hash_admin_identifier(document_id),
+            _hash_admin_identifier(org_id),
+        )
         
         return {
             "status": "success",
@@ -803,8 +1065,14 @@ async def delete_document(request: Request, document_id: str, auth: RequireAdmin
             "deleted_chunks": deleted_count
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error("[ADMIN] Failed to delete document %s: %s", document_id, e)
+        logger.error(
+            "[ADMIN] Failed to delete document_hash=%s: %s",
+            _hash_admin_identifier(document_id),
+            e,
+        )
         raise HTTPException(status_code=500, detail="Failed to delete document")
 
 

@@ -13,6 +13,8 @@ NOTE: _save_messages removed in Sprint 83 (double-save fix H7).
 Message persistence now handled exclusively by ChatOrchestrator.
 """
 
+import json
+
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, call
 from uuid import uuid4
@@ -77,11 +79,108 @@ class TestScheduleAll:
         background_save = MagicMock()
         session_id = uuid4()
 
-        runner.schedule_all(background_save, "user1", session_id, "Hello", "Hi there")
-        # Should schedule 4 tasks (semantic memory, summarizer, profile stats, character reflection)
+        summary = runner.schedule_all(
+            background_save,
+            "user1",
+            session_id,
+            "Hello",
+            "Hi there",
+        )
+        # Should schedule 5 tasks (semantic memory, maintenance, summarizer, profile stats, reflection)
         # NOTE: message saving is handled by ChatOrchestrator, not here (Sprint 83)
         # Sprint 97: +1 for character reflection (enabled by default)
-        assert background_save.call_count == 4
+        assert background_save.call_count == 5
+        assert summary.task_count == 5
+        payload = summary.to_summary()
+        assert payload["schema_version"] == "wiii.background_task_schedule.v1"
+        assert payload["privacy"] == {
+            "raw_content_included": False,
+            "identifier_strategy": "status_only",
+        }
+        assert {
+            (group["group"], group["status"], group["reason"])
+            for group in payload["groups"]
+        } == {
+            ("semantic_memory_interaction", "scheduled", "extract_facts"),
+            (
+                "semantic_memory_maintenance",
+                "scheduled",
+                "after_interaction_write",
+            ),
+            ("memory_summarizer", "scheduled", "dependency_available"),
+            ("profile_stats", "scheduled", "dependency_available"),
+            ("character_reflection", "scheduled", "enabled"),
+        }
+        serialized = json.dumps(payload, ensure_ascii=False)
+        assert "Hello" not in serialized
+        assert "Hi there" not in serialized
+        assert "user1" not in serialized
+
+    def test_semantic_maintenance_scheduled_after_interaction_write(self):
+        from app.services.background_tasks import BackgroundTaskRunner
+        mock_sm = MagicMock()
+        mock_sm.is_available.return_value = True
+        runner = BackgroundTaskRunner(semantic_memory=mock_sm)
+        background_save = MagicMock()
+        session_id = uuid4()
+
+        runner.schedule_all(
+            background_save,
+            "user1",
+            session_id,
+            "Hello",
+            "Hi there",
+            org_id="org-1",
+        )
+
+        assert background_save.call_args_list[0].args == (
+            runner._store_semantic_interaction,
+            "user1",
+            "Hello",
+            "Hi there",
+            str(session_id),
+            False,
+            "org-1",
+        )
+        assert background_save.call_args_list[1].args == (
+            runner._enqueue_or_run_semantic_memory_maintenance,
+            "user1",
+            str(session_id),
+            "org-1",
+        )
+
+    def test_schedule_all_emits_group_metrics(self):
+        from app.engine.runtime import runtime_metrics as rm
+        from app.services.background_tasks import BackgroundTaskRunner
+
+        rm._reset_for_tests()
+        try:
+            runner = BackgroundTaskRunner()
+            background_save = MagicMock()
+
+            summary = runner.schedule_all(background_save, "user1", uuid4(), "msg", "resp")
+
+            assert summary.task_count == 1
+            snap = rm.snapshot()
+            labels = (
+                ("group", "semantic_memory_interaction"),
+                ("reason", "semantic_memory_unavailable"),
+                ("status", "skipped"),
+            )
+            assert snap["counters"]["runtime.background_tasks.scheduling"][labels] == 1
+            reflection_labels = (
+                ("group", "character_reflection"),
+                ("reason", "enabled"),
+                ("status", "scheduled"),
+            )
+            assert (
+                snap["counters"]["runtime.background_tasks.scheduling"][
+                    reflection_labels
+                ]
+                == 1
+            )
+        finally:
+            rm._reset_for_tests()
 
     def test_no_deps_schedules_reflection_only(self):
         """Sprint 97: Character reflection always runs (no repo dependency)."""
@@ -129,8 +228,21 @@ class TestSaveMessage:
         background_save = MagicMock()
         session_id = uuid4()
 
-        runner.save_message(background_save, session_id, "user", "Hello")
-        background_save.assert_called_once()
+        runner.save_message(
+            background_save,
+            session_id,
+            "user",
+            "Hello",
+            organization_id="org-1",
+        )
+        background_save.assert_called_once_with(
+            mock_ch.save_message,
+            session_id,
+            "user",
+            "Hello",
+            None,
+            organization_id="org-1",
+        )
 
     def test_blocked_message_saves_sync(self):
         from app.services.background_tasks import BackgroundTaskRunner
@@ -142,11 +254,20 @@ class TestSaveMessage:
 
         runner.save_message(
             background_save, session_id, "user", "Bad content",
-            user_id="user1", is_blocked=True, block_reason="Offensive"
+            user_id="user1", is_blocked=True, block_reason="Offensive",
+            organization_id="org-1",
         )
         # Blocked messages saved synchronously, not via background_save
         background_save.assert_not_called()
-        mock_ch.save_message.assert_called_once()
+        mock_ch.save_message.assert_called_once_with(
+            session_id=session_id,
+            role="user",
+            content="Bad content",
+            user_id="user1",
+            is_blocked=True,
+            block_reason="Offensive",
+            organization_id="org-1",
+        )
 
     def test_no_chat_history(self):
         from app.services.background_tasks import BackgroundTaskRunner
@@ -168,13 +289,96 @@ class TestStoreSemanticInteraction:
     async def test_stores_interaction(self):
         from app.services.background_tasks import BackgroundTaskRunner
         mock_sm = AsyncMock()
+        mock_sm.is_available.return_value = True
         mock_sm.extract_and_store_insights = AsyncMock(return_value=[])
         mock_sm.store_interaction = AsyncMock()
         mock_sm.check_and_summarize = AsyncMock()
         runner = BackgroundTaskRunner(semantic_memory=mock_sm)
         await runner._store_semantic_interaction("user1", "msg", "resp", "session1")
         mock_sm.store_interaction.assert_called_once()
-        mock_sm.check_and_summarize.assert_called_once()
+        mock_sm.check_and_summarize.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_runs_semantic_memory_maintenance(self):
+        from app.services.background_tasks import BackgroundTaskRunner
+        mock_sm = AsyncMock()
+        mock_sm.is_available.return_value = True
+        mock_sm.check_and_summarize = AsyncMock()
+        runner = BackgroundTaskRunner(semantic_memory=mock_sm)
+
+        with patch(
+            "app.services.memory_lifecycle.prune_stale_memories",
+            new_callable=AsyncMock,
+            return_value=0,
+        ) as mock_prune:
+            await runner._run_semantic_memory_maintenance(
+                "user1",
+                "session1",
+                org_id="org-1",
+            )
+
+        mock_prune.assert_awaited_once_with("user1", session_id="session1")
+        mock_sm.check_and_summarize.assert_awaited_once_with(
+            user_id="user1",
+            session_id="session1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_enqueue_or_run_semantic_maintenance_uses_broker_when_available(self):
+        from app.services.background_tasks import BackgroundTaskRunner
+
+        mock_sm = AsyncMock()
+        runner = BackgroundTaskRunner(semantic_memory=mock_sm)
+
+        with patch(
+            "app.tasks.semantic_memory_tasks.enqueue_semantic_memory_maintenance",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_enqueue, patch.object(
+            runner,
+            "_run_semantic_memory_maintenance",
+            new_callable=AsyncMock,
+        ) as mock_run:
+            await runner._enqueue_or_run_semantic_memory_maintenance(
+                "user1",
+                "session1",
+                "org-1",
+            )
+
+        mock_enqueue.assert_awaited_once_with(
+            user_id="user1",
+            session_id="session1",
+            org_id="org-1",
+        )
+        mock_run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_enqueue_or_run_semantic_maintenance_falls_back_locally(self):
+        from app.services.background_tasks import BackgroundTaskRunner
+
+        mock_sm = AsyncMock()
+        runner = BackgroundTaskRunner(semantic_memory=mock_sm)
+
+        with patch(
+            "app.tasks.semantic_memory_tasks.enqueue_semantic_memory_maintenance",
+            new_callable=AsyncMock,
+            return_value=False,
+        ), patch.object(
+            runner,
+            "_run_semantic_memory_maintenance",
+            new_callable=AsyncMock,
+        ) as mock_run:
+            await runner._enqueue_or_run_semantic_memory_maintenance(
+                "user1",
+                "session1",
+                "org-1",
+            )
+
+        mock_run.assert_awaited_once_with(
+            user_id="user1",
+            session_id="session1",
+            org_id="org-1",
+        )
 
     @pytest.mark.asyncio
     async def test_error_handling(self):

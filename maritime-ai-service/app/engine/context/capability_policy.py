@@ -11,12 +11,33 @@ from typing import Any, Optional
 from app.core.org_settings import get_org_permissions
 
 
+_PERMISSION_ALIASES = {
+    "course.author": "manage:courses",
+    "course.manage": "manage:courses",
+    "course.write": "manage:courses",
+    "lms.course.author": "manage:courses",
+    "lms.course.manage": "manage:courses",
+    "lms.course.write": "manage:courses",
+}
+
+
+def _normalize_permission_token(value: Any) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return ""
+    return _PERMISSION_ALIASES.get(token.lower(), token)
+
+
 def _normalize_permissions(tool_def: dict[str, Any]) -> list[str]:
     permissions = tool_def.get("required_permissions")
     if isinstance(permissions, list):
-        return [str(item).strip() for item in permissions if str(item).strip()]
+        return [
+            normalized
+            for item in permissions
+            if (normalized := _normalize_permission_token(item))
+        ]
 
-    permission = str(tool_def.get("permission") or "").strip()
+    permission = _normalize_permission_token(tool_def.get("permission"))
     if permission:
         return [permission]
 

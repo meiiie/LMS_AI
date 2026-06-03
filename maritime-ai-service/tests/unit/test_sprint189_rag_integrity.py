@@ -152,8 +152,7 @@ class TestVisionProcessorOrgId:
         mock_factory.return_value.__exit__ = MagicMock(return_value=False)
 
         with patch("app.services.vision_processor.get_shared_session_factory", return_value=mock_factory), \
-             patch("app.services.vision_processor.settings") as mock_settings, \
-             patch("app.core.org_filter.get_effective_org_id", return_value="default"):
+             patch("app.services.vision_processor.settings") as mock_settings:
             mock_settings.default_domain = "maritime"
 
             await processor.store_chunk_in_database(
@@ -170,6 +169,10 @@ class TestVisionProcessorOrgId:
             # Verify INSERT was called (2nd execute call, first is SELECT)
             calls = mock_session.execute.call_args_list
             assert len(calls) >= 2, "Expected at least 2 SQL executions (SELECT + INSERT)"
+
+            select_call = calls[0]
+            select_sql = str(select_call[0][0].text)
+            assert "AND organization_id = :org_id" in select_sql
 
             insert_call = calls[1]
             sql_str = str(insert_call[0][0].text)
@@ -197,8 +200,7 @@ class TestVisionProcessorOrgId:
         mock_factory.return_value.__exit__ = MagicMock(return_value=False)
 
         with patch("app.services.vision_processor.get_shared_session_factory", return_value=mock_factory), \
-             patch("app.services.vision_processor.settings") as mock_settings, \
-             patch("app.core.org_filter.get_effective_org_id", return_value="default"):
+             patch("app.services.vision_processor.settings") as mock_settings:
             mock_settings.default_domain = "maritime"
 
             await processor.store_chunk_in_database(
@@ -217,7 +219,7 @@ class TestVisionProcessorOrgId:
 
             update_call = calls[1]
             sql_str = str(update_call[0][0].text)
-            assert "organization_id = :org_id" in sql_str, "UPDATE SQL must set organization_id"
+            assert "AND organization_id = :org_id" in sql_str, "UPDATE SQL must filter organization_id"
 
             params = update_call[0][1]
             assert params["org_id"] == "org-update-456"
@@ -674,11 +676,88 @@ class TestSourceDedup:
 # ═══════════════════════════════════════════════════════════════════
 
 class TestOrgIdFallback:
-    """Verify org_id fallback to get_effective_org_id() when not explicitly provided."""
+    """Verify knowledge ingestion resolves tenant scope without unsafe fallback."""
 
     @pytest.mark.asyncio
-    async def test_vision_processor_uses_effective_org_id_when_none(self):
-        """When organization_id=None, store_chunk should use get_effective_org_id()."""
+    async def test_vision_processor_uses_current_org_scope_when_none(self, monkeypatch):
+        """When organization_id=None, store_chunk should use request org context."""
+        from app.services.vision_processor import VisionProcessor
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        processor = VisionProcessor.__new__(VisionProcessor)
+
+        mock_session = MagicMock()
+        mock_session.execute = MagicMock(return_value=MagicMock(fetchone=MagicMock(return_value=None)))
+        mock_session.commit = MagicMock()
+
+        mock_factory = MagicMock()
+        mock_factory.return_value.__enter__ = MagicMock(return_value=mock_session)
+        mock_factory.return_value.__exit__ = MagicMock(return_value=False)
+
+        monkeypatch.setattr(settings, "default_domain", "maritime")
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production", raising=False)
+
+        token = current_org_id.set("fallback-org")
+        try:
+            with patch(
+                "app.services.vision_processor.get_shared_session_factory",
+                return_value=mock_factory,
+            ):
+                await processor.store_chunk_in_database(
+                    document_id="doc1",
+                    page_number=1,
+                    chunk_index=0,
+                    content="content",
+                    contextual_content=None,
+                    embedding=[0.1] * 768,
+                    image_url="",
+                    organization_id=None  # No explicit org_id
+                )
+        finally:
+            current_org_id.reset(token)
+
+        insert_call = mock_session.execute.call_args_list[1]
+        params = insert_call[0][1]
+        assert params["org_id"] == "fallback-org"
+
+    @pytest.mark.asyncio
+    async def test_vision_processor_blocks_missing_org_context_before_db(self, monkeypatch):
+        """Production multi-tenant ingestion must not default missing org scope."""
+        from app.services.vision_processor import VisionProcessor
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        processor = VisionProcessor.__new__(VisionProcessor)
+        get_factory = MagicMock()
+
+        monkeypatch.setattr(settings, "default_domain", "maritime")
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production", raising=False)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.services.vision_processor.get_shared_session_factory", get_factory):
+                with pytest.raises(RuntimeError, match="Organization context required"):
+                    await processor.store_chunk_in_database(
+                        document_id="PRIVATE-DOC",
+                        page_number=1,
+                        chunk_index=0,
+                        content="PRIVATE CONTENT",
+                        contextual_content=None,
+                        embedding=[0.1] * 768,
+                        image_url="",
+                        organization_id=None,
+                    )
+        finally:
+            current_org_id.reset(token)
+
+        get_factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_explicit_org_id_overrides_current_scope(self):
+        """When organization_id is provided, it should be used instead of context."""
         from app.services.vision_processor import VisionProcessor
 
         processor = VisionProcessor.__new__(VisionProcessor)
@@ -692,45 +771,7 @@ class TestOrgIdFallback:
         mock_factory.return_value.__exit__ = MagicMock(return_value=False)
 
         with patch("app.services.vision_processor.get_shared_session_factory", return_value=mock_factory), \
-             patch("app.services.vision_processor.settings") as mock_settings, \
-             patch("app.core.org_filter.get_effective_org_id", return_value="fallback-org") as mock_get_org:
-            mock_settings.default_domain = "maritime"
-
-            await processor.store_chunk_in_database(
-                document_id="doc1",
-                page_number=1,
-                chunk_index=0,
-                content="content",
-                contextual_content=None,
-                embedding=[0.1] * 768,
-                image_url="",
-                organization_id=None  # No explicit org_id
-            )
-
-            mock_get_org.assert_called_once()
-
-            insert_call = mock_session.execute.call_args_list[1]
-            params = insert_call[0][1]
-            assert params["org_id"] == "fallback-org"
-
-    @pytest.mark.asyncio
-    async def test_explicit_org_id_overrides_fallback(self):
-        """When organization_id is provided, it should be used instead of fallback."""
-        from app.services.vision_processor import VisionProcessor
-
-        processor = VisionProcessor.__new__(VisionProcessor)
-
-        mock_session = MagicMock()
-        mock_session.execute = MagicMock(return_value=MagicMock(fetchone=MagicMock(return_value=None)))
-        mock_session.commit = MagicMock()
-
-        mock_factory = MagicMock()
-        mock_factory.return_value.__enter__ = MagicMock(return_value=mock_session)
-        mock_factory.return_value.__exit__ = MagicMock(return_value=False)
-
-        with patch("app.services.vision_processor.get_shared_session_factory", return_value=mock_factory), \
-             patch("app.services.vision_processor.settings") as mock_settings, \
-             patch("app.core.org_filter.get_effective_org_id", return_value="should-not-use") as mock_get_org:
+             patch("app.services.vision_processor.settings") as mock_settings:
             mock_settings.default_domain = "maritime"
 
             await processor.store_chunk_in_database(
@@ -743,9 +784,6 @@ class TestOrgIdFallback:
                 image_url="",
                 organization_id="explicit-org"
             )
-
-            # get_effective_org_id should NOT be called when explicit org_id is provided
-            mock_get_org.assert_not_called()
 
             insert_call = mock_session.execute.call_args_list[1]
             params = insert_call[0][1]

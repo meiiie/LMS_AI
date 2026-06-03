@@ -770,12 +770,12 @@ class TestBackgroundTaskOrgContext:
             "_store_semantic_interaction should reset ContextVar in finally block"
 
     def test_orchestrator_passes_org_id(self):
-        """ChatOrchestrator should pass org_id to background runner."""
+        """ChatOrchestrator should pass org scope into post-turn finalization."""
         import inspect
         from app.services import chat_orchestrator
         source = inspect.getsource(chat_orchestrator)
-        assert "org_id=" in source, \
-            "ChatOrchestrator should pass org_id to schedule_all()"
+        assert "organization_id=org_id" in source, \
+            "ChatOrchestrator should pass org_id into post-turn lifecycle"
 
 
 # =============================================================================

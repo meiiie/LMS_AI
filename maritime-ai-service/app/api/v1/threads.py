@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Threads"])
 
 
+def _active_org_id(auth: RequireAuth) -> Optional[str]:
+    org_id = getattr(auth, "organization_id", None)
+    return org_id.strip() if isinstance(org_id, str) and org_id.strip() else None
+
+
 # =============================================================================
 # Request/Response Schemas
 # =============================================================================
@@ -84,8 +89,14 @@ async def list_threads(
         repo = get_thread_repository()
 
         user_id = auth.user_id
-        threads = repo.list_threads(user_id=user_id, limit=limit, offset=offset)
-        total = repo.count_threads(user_id=user_id)
+        organization_id = _active_org_id(auth)
+        threads = repo.list_threads(
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+            organization_id=organization_id,
+        )
+        total = repo.count_threads(user_id=user_id, organization_id=organization_id)
 
         return ThreadListResponse(
             threads=[ThreadView(**t) for t in threads],
@@ -116,13 +127,22 @@ async def get_thread(
         from app.repositories.thread_repository import get_thread_repository
         repo = get_thread_repository()
 
+        organization_id = _active_org_id(auth)
+
         # Try with ownership filter first
-        thread = repo.get_thread(thread_id=thread_id, user_id=auth.user_id)
+        thread = repo.get_thread(
+            thread_id=thread_id,
+            user_id=auth.user_id,
+            organization_id=organization_id,
+        )
 
         if not thread:
             # Admin can access any thread — re-query without user filter
             if is_platform_admin(auth):
-                thread = repo.get_thread(thread_id=thread_id)
+                thread = repo.get_thread(
+                    thread_id=thread_id,
+                    organization_id=organization_id,
+                )
             if not thread:
                 return JSONResponse(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -155,7 +175,11 @@ async def delete_thread(
         from app.repositories.thread_repository import get_thread_repository
         repo = get_thread_repository()
 
-        success = repo.delete_thread(thread_id=thread_id, user_id=auth.user_id)
+        success = repo.delete_thread(
+            thread_id=thread_id,
+            user_id=auth.user_id,
+            organization_id=_active_org_id(auth),
+        )
 
         if not success:
             return JSONResponse(
@@ -197,6 +221,7 @@ async def rename_thread(
             thread_id=thread_id,
             user_id=auth.user_id,
             title=body.title,
+            organization_id=_active_org_id(auth),
         )
 
         if not success:
@@ -252,12 +277,20 @@ async def get_thread_messages(
     try:
         from app.repositories.thread_repository import get_thread_repository
         repo = get_thread_repository()
+        organization_id = _active_org_id(auth)
 
         # Ownership check: user must own the thread (admin bypasses)
-        thread = repo.get_thread(thread_id=thread_id, user_id=auth.user_id)
+        thread = repo.get_thread(
+            thread_id=thread_id,
+            user_id=auth.user_id,
+            organization_id=organization_id,
+        )
         if not thread:
             if is_platform_admin(auth):
-                thread = repo.get_thread(thread_id=thread_id)
+                thread = repo.get_thread(
+                    thread_id=thread_id,
+                    organization_id=organization_id,
+                )
             if not thread:
                 return JSONResponse(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -291,6 +324,7 @@ async def get_thread_messages(
             session_id=norm_session_id,
             limit=limit,
             offset=offset,
+            organization_id=organization_id,
         )
 
         return ThreadMessagesResponse(

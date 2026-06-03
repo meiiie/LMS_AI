@@ -240,14 +240,15 @@ def _summarize_host_action_feedback(feedback: dict[str, Any] | None) -> str | No
     if not isinstance(data, dict):
         data = {}
 
-    preview_token = str(data.get("preview_token") or "").strip()
+    preview_available = bool(data.get("preview_available")) or bool(
+        str(data.get("preview_token") or "").strip()
+    )
     preview_kind = str(data.get("preview_kind") or "").strip()
-    if preview_token:
-        token_suffix = f" (token={preview_token})"
+    if preview_available:
         label = preview_kind or action or "preview"
         if summary:
-            return f"{summary}{token_suffix}. Dang cho xac nhan ro rang truoc khi apply."
-        return f"Preview {label} san sang{token_suffix}. Dang cho xac nhan ro rang truoc khi apply."
+            return f"{summary}. Dang cho xac nhan ro rang truoc khi apply."
+        return f"Preview {label} san sang. Dang cho xac nhan ro rang truoc khi apply."
 
     if summary:
         return summary

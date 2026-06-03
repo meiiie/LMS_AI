@@ -1,0 +1,57 @@
+# Prometheus alert rules for the living-agent heartbeat loop.
+#
+# Source metrics:
+# - runtime.living_agent.heartbeat.cycles
+# - runtime.living_agent.heartbeat.actions
+# GET /metrics serializes them as:
+# - runtime_living_agent_heartbeat_cycles
+# - runtime_living_agent_heartbeat_actions
+# Labels: cycles has status; actions has action_type/status.
+groups:
+  - name: wiii-living-agent-heartbeat
+    interval: 30s
+    rules:
+      - alert: WiiiLivingAgentHeartbeatCycleError
+        expr: |
+          sum (
+            increase(runtime_living_agent_heartbeat_cycles{status="error"}[30m])
+          ) > 0
+        for: 5m
+        labels:
+          service: wiii-ai
+          component: living-agent-heartbeat
+          severity: p3_ticket
+        annotations:
+          summary: "Living-agent heartbeat cycle failed"
+          description: "A heartbeat cycle reached the autonomy engine but ended with an error. User chat can continue, but living-agent continuity may stop progressing."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/living-agent-heartbeat.md"
+
+      - alert: WiiiLivingAgentHeartbeatActionFailure
+        expr: |
+          sum by (action_type, status) (
+            increase(runtime_living_agent_heartbeat_actions{status=~"error|timeout"}[30m])
+          ) > 0
+        for: 5m
+        labels:
+          service: wiii-ai
+          component: living-agent-heartbeat
+          severity: p3_ticket
+        annotations:
+          summary: "Heartbeat action {{ $labels.action_type }} ended with {{ $labels.status }}"
+          description: "A living-agent heartbeat action failed or timed out. Inspect the bounded action type before changing autonomy permissions."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/living-agent-heartbeat.md"
+
+      - alert: WiiiLivingAgentHeartbeatApprovalBacklog
+        expr: |
+          sum by (action_type) (
+            increase(runtime_living_agent_heartbeat_actions{status="queued"}[1h])
+          ) > 10
+        for: 15m
+        labels:
+          service: wiii-ai
+          component: living-agent-heartbeat
+          severity: p3_ticket
+        annotations:
+          summary: "Heartbeat approval queue is growing for {{ $labels.action_type }}"
+          description: "Approval-gated heartbeat actions are being queued repeatedly. This may be expected during a guarded rollout, but sustained growth can hide blocked autonomy."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/living-agent-heartbeat.md"

@@ -8,6 +8,8 @@ from sqlalchemy import text
 from app.models.semantic_memory import MemoryType, SemanticMemorySearchResult
 
 logger = logging.getLogger(__name__)
+_FACT_REPOSITORY_MISSING_ORG_WARNING = "fact_repository_blocked_missing_org_context"
+_FACT_ORG_FILTER = " AND organization_id = :org_id"
 
 
 class FactRepositoryQueryRuntimeMixin:
@@ -20,11 +22,32 @@ class FactRepositoryQueryRuntimeMixin:
     - self.TABLE_NAME
     """
 
-    def _get_org_scope(self) -> tuple[Optional[str], str]:
-        from app.core.org_filter import get_effective_org_id, org_where_clause
+    def _resolve_fact_org_scope(self, *, write: bool = False):
+        from app.engine.semantic_memory.write_audit import (
+            resolve_memory_read_scope,
+            resolve_memory_write_scope,
+        )
 
-        effective_org_id = get_effective_org_id()
-        return effective_org_id, org_where_clause(effective_org_id)
+        scope = resolve_memory_write_scope() if write else resolve_memory_read_scope()
+        if not self._scope_allows_facts(scope):
+            return scope, None
+        return scope, _FACT_ORG_FILTER
+
+    def _scope_allows_facts(self, scope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _log_fact_scope_blocked(self, operation: str, scope, *, user_id: Optional[str] = None) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_FACT_REPOSITORY_MISSING_ORG_WARNING)
+        logger.warning(
+            "[FACTS] %s blocked user_hash=%s org_hash=%s org_scope=%s warnings=%s",
+            operation,
+            _hash_memory_identifier(user_id),
+            _hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
     def _row_to_search_result(self, row, *, similarity: Optional[float] = None):
         return SemanticMemorySearchResult(
@@ -47,11 +70,13 @@ class FactRepositoryQueryRuntimeMixin:
     ) -> List[SemanticMemorySearchResult]:
         """Get user facts across all sessions for personalization."""
         self._ensure_initialized()
+        scope, org_filter = self._resolve_fact_org_scope()
+        if org_filter is None:
+            self._log_fact_scope_blocked("get_user_facts", scope, user_id=user_id)
+            return []
 
         try:
             with self._session_factory() as session:
-                effective_org_id, org_filter = self._get_org_scope()
-
                 if deduplicate:
                     query = text(
                         f"""
@@ -98,8 +123,7 @@ class FactRepositoryQueryRuntimeMixin:
                     "user_id": user_id,
                     "memory_type": MemoryType.USER_FACT.value,
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
                 if not deduplicate:
                     params["limit"] = limit
 
@@ -176,9 +200,13 @@ class FactRepositoryQueryRuntimeMixin:
         except Exception:
             alpha, beta, gamma = 0.3, 0.5, 0.2
 
+        scope, org_filter = self._resolve_fact_org_scope()
+        if org_filter is None:
+            self._log_fact_scope_blocked("search_relevant_facts", scope, user_id=user_id)
+            return []
+
         try:
             with self._session_factory() as session:
-                effective_org_id, org_filter = self._get_org_scope()
                 query = text(
                     f"""
                     SELECT
@@ -209,8 +237,7 @@ class FactRepositoryQueryRuntimeMixin:
                     "min_similarity": min_similarity,
                     "fetch_limit": limit * 3,
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 rows = session.execute(query, params).fetchall()
                 if not rows:
@@ -294,10 +321,13 @@ class FactRepositoryQueryRuntimeMixin:
     ) -> List[SemanticMemorySearchResult]:
         """Get all user facts for API endpoints and eviction logic."""
         self._ensure_initialized()
+        scope, org_filter = self._resolve_fact_org_scope()
+        if org_filter is None:
+            self._log_fact_scope_blocked("get_all_user_facts", scope, user_id=user_id)
+            return []
 
         try:
             with self._session_factory() as session:
-                effective_org_id, org_filter = self._get_org_scope()
                 query = text(
                     f"""
                     SELECT
@@ -321,8 +351,7 @@ class FactRepositoryQueryRuntimeMixin:
                     "user_id": user_id,
                     "memory_type": MemoryType.USER_FACT.value,
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 rows = session.execute(query, params).fetchall()
                 facts = [self._row_to_search_result(row) for row in rows]
@@ -339,7 +368,10 @@ class FactRepositoryQueryRuntimeMixin:
     ) -> Optional[SemanticMemorySearchResult]:
         """Find an existing fact by user and fact_type for upsert logic."""
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_fact_org_scope()
+        if org_filter is None:
+            self._log_fact_scope_blocked("find_fact_by_type", scope, user_id=user_id)
+            return None
 
         try:
             with self._session_factory() as session:
@@ -368,8 +400,7 @@ class FactRepositoryQueryRuntimeMixin:
                     "memory_type": MemoryType.USER_FACT.value,
                     "fact_type": fact_type,
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 row = session.execute(query, params).fetchone()
                 return self._row_to_search_result(row) if row else None
@@ -392,7 +423,10 @@ class FactRepositoryQueryRuntimeMixin:
                 user_id,
             )
             return None
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_fact_org_scope()
+        if org_filter is None:
+            self._log_fact_scope_blocked("find_similar_fact_by_embedding", scope, user_id=user_id)
+            return None
 
         try:
             with self._session_factory() as session:
@@ -421,8 +455,7 @@ class FactRepositoryQueryRuntimeMixin:
                     "memory_type": memory_type.value,
                     "embedding": str(embedding),
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 row = session.execute(query, params).fetchone()
                 if row and row.similarity >= similarity_threshold:
@@ -439,3 +472,9 @@ class FactRepositoryQueryRuntimeMixin:
         except Exception as exc:
             logger.error("Failed to find similar fact by embedding: %s", exc)
             return None
+
+
+def _hash_memory_identifier(value) -> str | None:
+    from app.engine.semantic_memory.privacy import hash_memory_identifier
+
+    return hash_memory_identifier(value)

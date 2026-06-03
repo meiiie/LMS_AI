@@ -65,8 +65,15 @@ def get_brief_context(organization_id: Optional[str] = None) -> str:
         manager = get_goal_manager()
         # Use cached goals if available (no DB call in hot path)
         if hasattr(manager, "_goal_cache") and manager._goal_cache:
-            active = [g for g in manager._goal_cache
-                      if getattr(g, "status", None) and g.status.value in ("active", "in_progress")]
+            active = [
+                g for g in manager._goal_cache
+                if getattr(g, "status", None)
+                and g.status.value in ("active", "in_progress")
+                and (
+                    not organization_id
+                    or getattr(g, "organization_id", None) == organization_id
+                )
+            ]
             if active:
                 top = active[0]
                 progress_pct = int(getattr(top, "progress", 0) * 100)
@@ -79,7 +86,7 @@ def get_brief_context(organization_id: Optional[str] = None) -> str:
         from app.engine.living_agent.skill_builder import get_skill_builder
         from app.engine.living_agent.models import SkillStatus
         builder = get_skill_builder()
-        all_skills = builder.get_all_skills()
+        all_skills = builder.get_all_skills(organization_id=organization_id)
         mastered = [s for s in all_skills if s.status == SkillStatus.MASTERED]
         practicing = [s for s in all_skills if s.status in (SkillStatus.PRACTICING, SkillStatus.EVALUATING)]
         if mastered:
@@ -216,7 +223,7 @@ async def compile_autobiography(
         from app.engine.living_agent.skill_builder import get_skill_builder
         from app.engine.living_agent.models import SkillStatus
         builder = get_skill_builder()
-        all_skills = builder.get_all_skills()
+        all_skills = builder.get_all_skills(organization_id=organization_id)
         result["skills"] = {
             "mastered": [
                 {"name": s.skill_name, "domain": s.domain, "confidence": round(s.confidence, 2)}

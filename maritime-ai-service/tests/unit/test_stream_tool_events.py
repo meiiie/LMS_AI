@@ -6,10 +6,10 @@ factory functions in stream_utils.py, and verifies graph_streaming.py
 forwards tool events from agentic loop nodes.
 """
 
+import json
 import sys
 import types
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 # Break circular import chain — temporarily inject mock, then restore
 _cs_key = "app.services.chat_service"
@@ -28,9 +28,6 @@ from app.engine.multi_agent.stream_utils import (
     StreamEventType,
     create_tool_call_event,
     create_tool_result_event,
-    create_status_event,
-    create_thinking_event,
-    create_answer_event,
 )
 from app.engine.multi_agent.state import AgentState
 
@@ -97,6 +94,34 @@ class TestCreateToolCallEvent:
         )
         assert event.content["args"] == {}
 
+    @pytest.mark.asyncio
+    async def test_redacts_sensitive_args(self):
+        event = await create_tool_call_event(
+            tool_name="tool_wiii_connect_execute_action",
+            tool_args={
+                "provider_slug": "facebook",
+                "connection_ref": "wcn_secret_connection",
+                "page_id": "page_secret",
+                "code_html": "<script>secret</script>",
+                "nested": {"image_base64": "raw_image_payload"},
+                "safe": "ok",
+            },
+            tool_call_id="c4",
+        )
+
+        args = event.content["args"]
+        assert args["provider_slug"] == "facebook"
+        assert args["safe"] == "ok"
+        assert args["connection_ref"] == "[redacted]"
+        assert args["page_id"] == "[redacted]"
+        assert args["code_html"] == "[redacted]"
+        assert args["nested"]["image_base64"] == "[redacted]"
+        payload = json.dumps(event.to_dict(), ensure_ascii=False)
+        assert "wcn_secret_connection" not in payload
+        assert "page_secret" not in payload
+        assert "<script>secret</script>" not in payload
+        assert "raw_image_payload" not in payload
+
 
 # ============================================================================
 # create_tool_result_event
@@ -140,6 +165,28 @@ class TestCreateToolResultEvent:
         assert d["type"] == "tool_result"
         assert d["content"]["result"] == "4"
         assert d["node"] == "tutor_agent"
+
+    @pytest.mark.asyncio
+    async def test_redacts_sensitive_result_summary(self):
+        event = await create_tool_result_event(
+            tool_name="external_tool",
+            result_summary=(
+                '{"ok": true, "provider_payload": {"access_token": '
+                '"raw-result-token-123456"}, "message": '
+                '"Bearer raw-bearer-token-12345678"}'
+            ),
+            tool_call_id="c3",
+            node="direct",
+        )
+
+        payload = json.dumps(event.to_dict(), ensure_ascii=False)
+
+        assert '"ok": true' in event.content["result"]
+        assert "provider_payload" not in payload
+        assert "access_token" not in payload
+        assert "raw-result-token" not in payload
+        assert "raw-bearer-token" not in payload
+        assert "Bearer <redacted-secret>" in payload
 
 
 # ============================================================================
@@ -327,3 +374,53 @@ class TestGraphStreamingToolForwarding:
 
         tool_call_events = node_output.get("tool_call_events", [])
         assert len(tool_call_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_state_tool_events_forwarding_sanitizes_args_results_and_lifecycle(self):
+        from app.engine.multi_agent.graph_stream_node_runtime import (
+            emit_tool_call_events_impl,
+        )
+
+        lifecycle_state = {}
+
+        events = [
+            event
+            async for event in emit_tool_call_events_impl(
+                tool_call_events=[
+                    {
+                        "name": "external_tool",
+                        "args": {
+                            "access_token": "raw-state-arg-token-123456",
+                            "query": "Bearer raw-state-query-token-12345678",
+                            "safe": "ok",
+                        },
+                        "id": "tc_state_1",
+                        "result": (
+                            '{"summary": "done", "access_token": '
+                            '"raw-state-result-token-123456"}'
+                        ),
+                    }
+                ],
+                node_name="direct",
+                lifecycle_state=lifecycle_state,
+                create_tool_call_event=create_tool_call_event,
+                create_tool_result_event=create_tool_result_event,
+            )
+        ]
+
+        serialized_events = json.dumps(
+            [event.to_dict() for event in events],
+            ensure_ascii=False,
+        )
+        serialized_lifecycle = json.dumps(lifecycle_state, ensure_ascii=False)
+
+        assert len(events) == 2
+        assert events[0].content["args"]["safe"] == "ok"
+        assert events[0].content["args"]["access_token"] == "[redacted]"
+        assert events[0].content["args"]["query"] == "[redacted]"
+        assert "raw-state-arg-token" not in serialized_events
+        assert "raw-state-query-token" not in serialized_events
+        assert "raw-state-result-token" not in serialized_events
+        assert "raw-state-arg-token" not in serialized_lifecycle
+        assert "raw-state-query-token" not in serialized_lifecycle
+        assert "raw-state-result-token" not in serialized_lifecycle

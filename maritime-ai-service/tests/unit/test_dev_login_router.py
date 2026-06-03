@@ -12,6 +12,7 @@ Coverage:
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -150,6 +151,81 @@ async def test_dev_login_success_returns_token_pair_shape():
     assert payload["user"]["id"] == "dev-user-1"
     assert payload["user"]["email"] == "dev@localhost"
     assert payload["user"]["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_dev_login_logs_hash_refs_without_raw_identity(caplog):
+    """Successful dev-login diagnostics should not expose raw user IDs or email."""
+    raw_user_id = "dev-user-private"
+    raw_email = "private-dev@example.local"
+
+    s = MagicMock()
+    s.enable_dev_login = True
+    s.dev_login_default_email = raw_email
+    s.dev_login_default_role = "admin"
+    s.enable_multi_tenant = False
+    s.default_organization_id = ""
+
+    from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+    with (
+        patch("app.auth.dev_login_router.settings", s),
+        patch(
+            "app.auth.dev_login_router.find_or_create_by_provider",
+            new=AsyncMock(return_value=_user_dict(id=raw_user_id, email=raw_email)),
+        ),
+        patch(
+            "app.auth.dev_login_router.create_token_pair",
+            new=AsyncMock(return_value=_token_pair()),
+        ),
+        patch("app.auth.auth_audit.log_auth_event", new_callable=AsyncMock),
+    ):
+        from app.auth.dev_login_router import dev_login
+
+        with caplog.at_level(logging.INFO, logger="app.auth.dev_login_router"):
+            await dev_login(_mock_request("127.0.0.1"), body=None)
+
+    assert raw_user_id not in caplog.text
+    assert raw_email not in caplog.text
+    assert f"user_ref={hash_runtime_identifier(raw_user_id)}" in caplog.text
+    assert f"email_ref={hash_runtime_identifier(raw_email)}" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_dev_login_mints_token_with_default_org_claim():
+    """Multi-tenant dev login must embed the same org it returns to the client."""
+    s = MagicMock()
+    s.enable_dev_login = True
+    s.dev_login_default_email = "dev@localhost"
+    s.dev_login_default_role = "admin"
+    s.enable_multi_tenant = True
+    s.default_organization_id = "default"
+
+    create_pair = AsyncMock(return_value=_token_pair())
+
+    with (
+        patch("app.auth.dev_login_router.settings", s),
+        patch(
+            "app.auth.dev_login_router.find_or_create_by_provider",
+            new=AsyncMock(return_value=_user_dict()),
+        ),
+        patch("app.auth.dev_login_router.create_token_pair", new=create_pair),
+        patch(
+            "app.auth.dev_login_router.ensure_user_org_membership",
+            new=AsyncMock(return_value=True),
+        ) as ensure_membership,
+    ):
+        from app.auth.dev_login_router import dev_login
+        response = await dev_login(_mock_request("127.0.0.1"), body=None)
+
+    import json
+    payload = json.loads(response.body)
+    kwargs = create_pair.call_args.kwargs
+    assert kwargs["active_organization_id"] == "default"
+    assert kwargs["role_source"] == "platform"
+    assert payload["organization_id"] == "default"
+    assert payload["user"]["active_organization_id"] == "default"
+    ensure_membership.assert_awaited_once_with("dev-user-1", "default")
 
 
 @pytest.mark.asyncio

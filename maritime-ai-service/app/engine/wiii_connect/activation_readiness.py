@@ -16,6 +16,7 @@ from .adapter_v1 import (
     WiiiConnectConnectionRecordV1,
     WiiiConnectProviderRegistryEntry,
 )
+from .connection_lifecycle import build_connection_lifecycle_decision
 from .execution_gateway import WiiiConnectExecutionGatewayDecision
 from .provider_adapters import WiiiConnectProviderAdapterCapability
 from .vault import WiiiConnectVaultCapability
@@ -102,6 +103,19 @@ def build_activation_readiness_metadata(
         _connection_gate(connection),
         _execution_gateway_gate(execution_gateway),
     )
+    lifecycle_reason = (
+        _safe_reason(connection.reason)
+        if connection is not None and connection.reason
+        else _first_blocked_gate_reason(gates)
+    )
+    connection_lifecycle = build_connection_lifecycle_decision(
+        provider_slug=provider_slug,
+        connection=connection,
+        reason=lifecycle_reason,
+        agent_ready=bool(execution_entry is not None and execution_entry.agent_ready),
+        ready_to_connect=ready_to_connect,
+        ready_to_execute_action=ready_to_execute_action,
+    )
     return {
         "version": WIII_CONNECT_ACTIVATION_READINESS_VERSION,
         "status": "ready" if ready_to_execute_action else "blocked",
@@ -120,6 +134,7 @@ def build_activation_readiness_metadata(
         "storage": _safe_storage_metadata(storage_metadata),
         "action": _action_metadata(action, runtime_enabled=action_runtime_enabled),
         "connection": _connection_metadata(connection),
+        "connection_lifecycle": connection_lifecycle.to_public_metadata(),
         "execution_gateway": (
             execution_gateway.to_public_metadata() if execution_gateway else None
         ),
@@ -353,6 +368,13 @@ def _connection_metadata(
         "reason": _safe_reason(connection.reason),
         "warnings": [_safe_reason(warning) for warning in connection.warnings],
     }
+
+
+def _first_blocked_gate_reason(gates: tuple[WiiiConnectActivationGate, ...]) -> str:
+    for gate in gates:
+        if not gate.ready:
+            return gate.reason
+    return "connected"
 
 
 def _safe_storage_metadata(storage: dict[str, Any]) -> dict[str, Any]:

@@ -22,8 +22,31 @@ def test_sanitize_code_studio_tool_call_args_redacts_code_html_without_mutation(
     assert public_args["title"] == "Pendulum simulation"
     assert public_args["code_html"]["redacted"] is True
     assert public_args["code_html"]["chars"] == len(code_html)
+
+
+def test_sanitize_code_studio_tool_call_args_redacts_sensitive_control_keys():
+    args = {
+        "query": "build",
+        "connection_ref": "wcn_secret_connection",
+        "page_id": "private_page",
+        "nested_token": "Bearer provider-token",
+    }
+
+    public_args = sanitize_code_studio_tool_call_args_for_stream(
+        "tool_create_visual_code",
+        args,
+    )
+
+    assert public_args["query"] == "build"
+    assert public_args["connection_ref"] == "[redacted]"
+    assert public_args["page_id"] == "[redacted]"
+    assert public_args["nested_token"] == "[redacted]"
+    assert args["connection_ref"] == "wcn_secret_connection"
     assert public_args["_public_contract"] == "code_studio_tool_call_args.v1"
-    assert "secret-code" not in json.dumps(public_args, ensure_ascii=False)
+    serialized = json.dumps(public_args, ensure_ascii=False)
+    assert "wcn_secret_connection" not in serialized
+    assert "private_page" not in serialized
+    assert "provider-token" not in serialized
 
 
 def test_sanitize_code_studio_tool_call_args_summarizes_large_nested_values():

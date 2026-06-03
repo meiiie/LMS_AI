@@ -1,0 +1,24 @@
+# Prometheus alert rules for native stream dispatch finalization.
+#
+# Source metric: app code emits runtime.native_stream_dispatch.finalization and
+# GET /metrics serializes it as runtime_native_stream_dispatch_finalization.
+# Labels on the source counter: stage, status, stream_status, transport.
+# Current stage values: assistant_message_append, runtime_flow_ledger_append.
+groups:
+  - name: wiii-native-stream-dispatch
+    interval: 30s
+    rules:
+      - alert: WiiiNativeStreamFinalizationFailure
+        expr: |
+          sum by (stage, stream_status, transport) (
+            increase(runtime_native_stream_dispatch_finalization{status="error"}[10m])
+          ) > 0
+        for: 2m
+        labels:
+          service: wiii-ai
+          component: native-stream-dispatch
+          severity: p2_page
+        annotations:
+          summary: "Native stream finalization failure: {{ $labels.stage }}"
+          description: "A stream reached finalization but failed to append durable evidence for {{ $labels.stage }} on {{ $labels.transport }} after stream_status={{ $labels.stream_status }}."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/native-stream-finalization.md"

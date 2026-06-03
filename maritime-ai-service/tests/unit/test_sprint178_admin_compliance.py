@@ -40,6 +40,7 @@ _ADMIN_USER = AuthenticatedUser(
     user_id="admin-1",
     auth_method="api_key",
     role="admin",
+    organization_id="org-admin",
 )
 
 _STUDENT_USER = AuthenticatedUser(
@@ -658,6 +659,64 @@ class TestGDPRExport:
         assert memories[0]["memory_type"] == "fact"
 
     @pytest.mark.asyncio
+    async def test_memory_export_filters_by_active_org(self, admin_app, monkeypatch):
+        """semantic_memories export is scoped to the active organization."""
+        from app.api.v1 import admin_gdpr
+
+        monkeypatch.setattr(admin_gdpr.settings, "enable_multi_tenant", True)
+        async_pool_fn, mock_conn = _mock_pool_and_conn()
+        mock_conn.fetchrow = AsyncMock(return_value=self._profile_row())
+        mock_conn.fetch = AsyncMock(
+            side_effect=[
+                [],
+                [self._memory_row()],
+                [],
+                [],
+            ]
+        )
+
+        p1, p2, p3 = _settings_patches()
+        with (
+            p1, p2, p3,
+            patch(_POOL_PATCH, async_pool_fn, create=True),
+            patch(
+                "app.services.admin_audit.log_admin_action",
+                new_callable=AsyncMock,
+            ),
+        ):
+            async with _make_client(admin_app) as client:
+                resp = await client.post("/api/v1/admin/users/user-123/export")
+
+        assert resp.status_code == 200
+        memory_call = mock_conn.fetch.await_args_list[1]
+        assert "FROM semantic_memories WHERE user_id = $1 AND organization_id = $2" in memory_call.args[0]
+        assert memory_call.args[1:] == ("user-123", "org-admin")
+
+    @pytest.mark.asyncio
+    async def test_memory_export_requires_active_org_before_pool(self, admin_app, monkeypatch):
+        """Multi-tenant export must not open DB without active organization."""
+        from app.api.v1 import admin_gdpr
+
+        monkeypatch.setattr(admin_gdpr.settings, "enable_multi_tenant", True)
+        no_org_admin = AuthenticatedUser(
+            user_id="admin-1",
+            auth_method="api_key",
+            role="admin",
+            organization_id=None,
+        )
+        admin_app.dependency_overrides[require_auth] = lambda: no_org_admin
+        get_pool = AsyncMock()
+
+        p1, p2, p3 = _settings_patches()
+        with p1, p2, p3, patch("app.api.v1.admin_gdpr._get_pool", get_pool):
+            async with _make_client(admin_app) as client:
+                resp = await client.post("/api/v1/admin/users/user-123/export")
+
+        assert resp.status_code == 403
+        assert "Active organization" in resp.json()["detail"]
+        get_pool.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_unknown_user_returns_404(self, admin_app):
         """Returns 404 when the user row is not found (fetchrow returns None)."""
         async_pool_fn, mock_conn = _mock_pool_and_conn()
@@ -815,6 +874,64 @@ class TestGDPRForget:
         assert resp.json()["memories_deleted"] == 5
         delete_mem_sql = mock_conn.execute.call_args_list[3].args[0]
         assert "semantic_memories" in delete_mem_sql
+
+    @pytest.mark.asyncio
+    async def test_forget_semantic_memory_delete_filters_by_active_org(self, admin_app, monkeypatch):
+        """semantic_memories deletion is scoped to the active organization."""
+        from app.api.v1 import admin_gdpr
+
+        monkeypatch.setattr(admin_gdpr.settings, "enable_multi_tenant", True)
+        async_pool_fn, mock_conn = _mock_pool_and_conn()
+        self._setup_conn_for_forget(mock_conn)
+
+        p1, p2, p3 = _settings_patches()
+        with (
+            p1, p2, p3,
+            patch(_POOL_PATCH, async_pool_fn, create=True),
+            patch(
+                "app.services.admin_audit.log_admin_action",
+                new_callable=AsyncMock,
+            ),
+        ):
+            async with _make_client(admin_app) as client:
+                resp = await client.post(
+                    "/api/v1/admin/users/user-del-1/forget",
+                    json={"confirm": True},
+                )
+
+        assert resp.status_code == 200
+        delete_mem_call = mock_conn.execute.await_args_list[3]
+        assert delete_mem_call.args[0] == (
+            "DELETE FROM semantic_memories WHERE user_id = $1 AND organization_id = $2"
+        )
+        assert delete_mem_call.args[1:] == ("user-del-1", "org-admin")
+
+    @pytest.mark.asyncio
+    async def test_forget_requires_active_org_before_pool(self, admin_app, monkeypatch):
+        """Multi-tenant forget must not open DB without active organization."""
+        from app.api.v1 import admin_gdpr
+
+        monkeypatch.setattr(admin_gdpr.settings, "enable_multi_tenant", True)
+        no_org_admin = AuthenticatedUser(
+            user_id="admin-1",
+            auth_method="api_key",
+            role="admin",
+            organization_id=None,
+        )
+        admin_app.dependency_overrides[require_auth] = lambda: no_org_admin
+        get_pool = AsyncMock()
+
+        p1, p2, p3 = _settings_patches()
+        with p1, p2, p3, patch("app.api.v1.admin_gdpr._get_pool", get_pool):
+            async with _make_client(admin_app) as client:
+                resp = await client.post(
+                    "/api/v1/admin/users/user-del-1/forget",
+                    json={"confirm": True},
+                )
+
+        assert resp.status_code == 403
+        assert "Active organization" in resp.json()["detail"]
+        get_pool.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_requires_confirm_true_succeeds(self, admin_app):

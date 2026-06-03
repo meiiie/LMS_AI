@@ -188,16 +188,17 @@ class TestSentimentAnalyzerLLM:
         })
 
         mock_llm = MagicMock()
-        # structured_output raises
-        mock_structured = MagicMock()
-        mock_structured.ainvoke = AsyncMock(side_effect=Exception("no structured"))
-        mock_llm.with_structured_output = MagicMock(return_value=mock_structured)
         # raw invoke returns JSON string
         mock_response = MagicMock()
         mock_response.content = raw_json
         mock_llm.ainvoke = AsyncMock(return_value=mock_response)
 
-        with patch.object(analyzer, '_get_llm', return_value=mock_llm):
+        with patch.object(analyzer, '_get_llm', return_value=mock_llm), \
+             patch(
+                 "app.services.structured_invoke_service.StructuredInvokeService.ainvoke",
+                 new_callable=AsyncMock,
+                 side_effect=Exception("no structured"),
+             ):
             result = await analyzer.analyze("COLREG la gi?", "COLREG la...", "student")
 
         assert isinstance(result, SentimentResult)

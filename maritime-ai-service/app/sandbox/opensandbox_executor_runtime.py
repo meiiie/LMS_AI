@@ -11,6 +11,16 @@ from datetime import timedelta
 from typing import Any, Optional
 from urllib.parse import urlparse
 
+from app.engine.runtime.event_payload_sanitizer import (
+    hash_runtime_identifier,
+    sanitize_runtime_payload,
+)
+
+
+def _safe_metadata(value: Any) -> dict[str, Any]:
+    safe_value = sanitize_runtime_payload(value or {})
+    return safe_value if isinstance(safe_value, dict) else {}
+
 
 def build_network_policy_impl(
     network_mode: Any,
@@ -49,7 +59,7 @@ def build_provider_metadata_impl(
     request: Any,
 ) -> dict[str, Any]:
     """Expose provider plan details alongside execution results."""
-    metadata = dict(request.metadata or {})
+    metadata = _safe_metadata(request.metadata)
     metadata.update(
         {
             "provider": provider_value,
@@ -64,12 +74,14 @@ def build_provider_metadata_impl(
     if request.organization_id:
         metadata.setdefault("organization_id", request.organization_id)
     if request.user_id:
-        metadata.setdefault("user_id", request.user_id)
+        user_id_hash = hash_runtime_identifier(request.user_id)
+        if user_id_hash:
+            metadata.setdefault("user_id_hash", user_id_hash)
     if request.session_id:
         metadata.setdefault("session_id", request.session_id)
     if request.request_id:
         metadata.setdefault("request_id", request.request_id)
-    return metadata
+    return _safe_metadata(metadata)
 
 
 def stringify_metadata_value_impl(value: Any) -> str:

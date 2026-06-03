@@ -398,6 +398,7 @@ async def test_composio_connection_list_client_filters_and_sanitizes_accounts():
     async def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
         captured["api_key"] = request.headers.get("x-api-key")
+        captured["request_id"] = request.headers.get("X-Request-ID")
         return httpx.Response(
             200,
             json={
@@ -540,6 +541,7 @@ async def test_composio_tool_schema_client_uses_v31_and_redacts_shape():
     async def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
         captured["api_key"] = request.headers.get("x-api-key")
+        captured["request_id"] = request.headers.get("X-Request-ID")
         return httpx.Response(
             200,
             json={
@@ -566,6 +568,7 @@ async def test_composio_tool_schema_client_uses_v31_and_redacts_shape():
             config=config,
             provider_slug="gmail",
             action_slug="GMAIL_FETCH_EMAILS",
+            request_id="req-composio-schema-1",
             http_client=client,
         )
 
@@ -577,8 +580,10 @@ async def test_composio_tool_schema_client_uses_v31_and_redacts_shape():
         "?toolkit_versions=latest"
     )
     assert captured["api_key"] == "secret-api-key"
+    assert captured["request_id"] == "req-composio-schema-1"
     assert public["status"] == "ready"
     assert public["reason"] == "ready"
+    assert public["request_id"] == "req-composio-schema-1"
     assert public["schema_present"] is True
     assert "query" in public["argument_keys"]
     assert "max_results" in public["argument_keys"]
@@ -600,6 +605,7 @@ async def test_composio_execute_client_uses_allowlist_and_redacts_provider_data(
     async def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
         captured["api_key"] = request.headers.get("x-api-key")
+        captured["request_id"] = request.headers.get("X-Request-ID")
         captured["body"] = json.loads(request.content.decode("utf-8"))
         return httpx.Response(
             200,
@@ -631,6 +637,7 @@ async def test_composio_execute_client_uses_allowlist_and_redacts_provider_data(
             user_id="wiii_user_hash",
             connected_account_id="ca_active",
             arguments={"query": "from:me", "access_token": "client-secret"},
+            request_id="req-composio-execute-1",
             http_client=client,
         )
 
@@ -641,6 +648,7 @@ async def test_composio_execute_client_uses_allowlist_and_redacts_provider_data(
         "https://backend.composio.dev/api/v3.1/tools/execute/GMAIL_FETCH_EMAILS"
     )
     assert captured["api_key"] == "secret-api-key"
+    assert captured["request_id"] == "req-composio-execute-1"
     assert captured["body"] == {
         "user_id": "wiii_user_hash",
         "connected_account_id": "ca_active",
@@ -648,6 +656,7 @@ async def test_composio_execute_client_uses_allowlist_and_redacts_provider_data(
     }
     assert public["status"] == "succeeded"
     assert public["reason"] == "ready"
+    assert public["request_id"] == "req-composio-execute-1"
     assert "messages" in public["data_keys"]
     assert "redacted_sensitive_field" in public["data_keys"]
     assert public["session_info_present"] is True
@@ -670,7 +679,14 @@ async def test_composio_file_upload_stages_descriptor_without_leaking_s3_key():
     calls = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        calls.append((request.method, str(request.url), request.headers.get("x-api-key")))
+        calls.append(
+            (
+                request.method,
+                str(request.url),
+                request.headers.get("x-api-key"),
+                request.headers.get("X-Request-ID"),
+            )
+        )
         if request.method == "POST":
             body = json.loads(request.content.decode("utf-8"))
             assert body["toolkit_slug"] == "facebook"
@@ -708,6 +724,7 @@ async def test_composio_file_upload_stages_descriptor_without_leaking_s3_key():
             filename="post.png",
             mimetype="image/png",
             content=b"fake-image",
+            request_id="req-composio-upload-1",
             http_client=client,
         )
 
@@ -717,7 +734,9 @@ async def test_composio_file_upload_stages_descriptor_without_leaking_s3_key():
     assert len(calls) == 2
     assert calls[0][1] == "https://backend.composio.dev/api/v3/files/upload/request"
     assert calls[0][2] == "secret-api-key"
+    assert calls[0][3] == "req-composio-upload-1"
     assert calls[1][1] == "https://upload.example.test/file"
+    assert calls[1][3] is None
     assert result.ready is True
     assert result.file_descriptor == {
         "name": "post.png",
@@ -725,6 +744,7 @@ async def test_composio_file_upload_stages_descriptor_without_leaking_s3_key():
         "s3key": "secret-s3-key",
     }
     assert public["file_ref_present"] is True
+    assert public["request_id"] == "req-composio-upload-1"
     assert "secret-s3-key" not in serialized
     assert "secret-api-key" not in serialized
 
@@ -740,6 +760,7 @@ async def test_composio_facebook_pages_client_strips_tokens():
 
     async def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
+        captured["request_id"] = request.headers.get("X-Request-ID")
         captured["body"] = json.loads(request.content.decode("utf-8"))
         return httpx.Response(
             200,
@@ -775,6 +796,7 @@ async def test_composio_facebook_pages_client_strips_tokens():
             config=config,
             user_id="wiii_user_hash",
             connected_account_id="ca_active",
+            request_id="req-composio-pages-1",
             http_client=client,
         )
 
@@ -786,8 +808,10 @@ async def test_composio_facebook_pages_client_strips_tokens():
     )
     assert captured["body"]["user_id"] == "wiii_user_hash"
     assert captured["body"]["connected_account_id"] == "ca_active"
+    assert captured["request_id"] == "req-composio-pages-1"
     assert result.ready is True
     assert public["page_count"] == 1
+    assert public["request_id"] == "req-composio-pages-1"
     assert public["pages"][0]["page_id"] == "123456"
     assert public["pages"][0]["name"] == "Wiii Page"
     assert "secret-page-token" not in serialized

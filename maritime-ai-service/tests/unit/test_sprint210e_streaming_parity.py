@@ -10,8 +10,8 @@ Critical fix: `/chat/stream/v3` was missing 5 background tasks that the sync
   - No character reflection from streaming conversations
   - No routine tracking from streaming conversations
 
-The fix adds `_background_runner.schedule_all()` + Sprint 208 routine tracking
-to `chat_stream.py` post-stream section.
+The fix runs post-turn lifecycle scheduling plus Sprint 208 routine tracking
+from the stream finalization path.
 """
 
 import asyncio
@@ -21,15 +21,15 @@ from uuid import uuid4, UUID
 
 
 # ============================================================================
-# GROUP 1: BackgroundTaskRunner.schedule_all() called from streaming path
+# GROUP 1: Compatibility wrapper schedules post-turn background tasks
 # ============================================================================
 
 
 class TestStreamingBackgroundTasksScheduled:
-    """Verify that the streaming path calls schedule_all with correct args."""
+    """Verify the compatibility wrapper preserves post-turn scheduling args."""
 
     def test_schedule_all_called_with_background_tasks_add_task(self):
-        """schedule_all receives BackgroundTasks.add_task as background_save."""
+        """schedule_all still accepts BackgroundTasks.add_task as background_save."""
         from app.services.background_tasks import BackgroundTaskRunner
 
         mock_ch = MagicMock()
@@ -65,8 +65,9 @@ class TestStreamingBackgroundTasksScheduled:
             org_id=org_id,
         )
 
-        # Should schedule 4 tasks
-        assert background_tasks_add_task.call_count == 4
+        # Should schedule 5 tasks: semantic write, maintenance, summarizer,
+        # profile stats, and reflection.
+        assert background_tasks_add_task.call_count == 5
 
     def test_schedule_all_with_empty_response(self):
         """When accumulated_answer is empty, schedule_all still runs with ''."""
@@ -272,18 +273,20 @@ class TestSyncStreamingParity:
     """Validate that streaming post-processing matches sync path."""
 
     def test_sync_path_has_background_tasks(self):
-        """Sync path (ChatOrchestrator.process) calls schedule_all."""
+        """Sync path finalizes through the post-turn lifecycle contract."""
         import inspect
         from app.services.chat_orchestrator import ChatOrchestrator
         source = inspect.getsource(ChatOrchestrator.process)
-        assert "schedule_all" in source, "Sync path must call schedule_all"
+        assert "finalize_response_turn" in source
+        assert "post_turn_lifecycle" in source
 
     def test_streaming_path_has_background_tasks(self):
-        """Streaming path (chat_stream.py) now calls schedule_all (Sprint 210e)."""
+        """Streaming path finalizes through the same orchestrator contract."""
         import inspect
-        from app.api.v1 import chat_stream
-        source = inspect.getsource(chat_stream)
-        assert "schedule_all" in source, "Streaming path must call schedule_all (Sprint 210e)"
+        from app.services.chat_stream_coordinator import generate_stream_v3_events
+        source = inspect.getsource(generate_stream_v3_events)
+        assert "finalize_response_turn" in source
+        assert "post_turn_lifecycle" in source
 
     def test_sync_path_has_routine_tracking(self):
         """Sync path has Sprint 208 routine tracking."""
@@ -317,9 +320,8 @@ class TestSyncStreamingParity:
         assert "_analyze_and_process_sentiment" in source, \
             "Streaming path must have sentiment analysis"
 
-    def test_both_paths_schedule_4_background_tasks(self):
-        """Both paths use the same BackgroundTaskRunner.schedule_all() which
-        schedules exactly 4 tasks when all dependencies are available."""
+    def test_both_paths_schedule_5_background_tasks(self):
+        """Compatibility wrapper still schedules 5 tasks with all deps available."""
         from app.services.background_tasks import BackgroundTaskRunner
 
         mock_ch = MagicMock()
@@ -339,7 +341,7 @@ class TestSyncStreamingParity:
 
         bg_save = MagicMock()
         runner.schedule_all(bg_save, "u1", uuid4(), "msg", "resp")
-        assert bg_save.call_count == 4
+        assert bg_save.call_count == 5
 
     def test_streaming_passes_session_id_as_uuid(self):
         """Streaming path uses _v3_session_id which is a UUID, matching sync."""
@@ -365,36 +367,36 @@ class TestStreamingPostStreamBlock:
     """Verify the post-stream block has all required sections in order."""
 
     def _get_post_stream_source(self):
-        """Extract the post-stream section from chat_stream.py."""
+        """Extract the authoritative finalization helper source."""
         import inspect
-        from app.api.v1 import chat_stream
-        return inspect.getsource(chat_stream)
+        from app.services.chat_orchestrator_support import finalize_response_turn_impl
+        return inspect.getsource(finalize_response_turn_impl)
 
     def test_assistant_message_saved_before_background_tasks(self):
         """Assistant message must be saved BEFORE background tasks run."""
         source = self._get_post_stream_source()
-        save_pos = source.find("save_message")
-        schedule_pos = source.find("schedule_all")
-        assert save_pos > 0, "save_message must exist"
-        assert schedule_pos > 0, "schedule_all must exist"
+        save_pos = source.find("persist_chat_message")
+        schedule_pos = source.find("schedule_post_turn_lifecycle")
+        assert save_pos > 0, "persist_chat_message must exist"
+        assert schedule_pos > 0, "schedule_post_turn_lifecycle must exist"
         assert save_pos < schedule_pos, \
-            "save_message must come BEFORE schedule_all"
+            "message persistence must come before post-turn lifecycle scheduling"
 
-    def test_background_tasks_before_sentiment(self):
-        """Background tasks must run BEFORE sentiment analysis (ordering)."""
+    def test_background_tasks_before_continuity_hooks(self):
+        """Background tasks must be scheduled before continuity hooks."""
         source = self._get_post_stream_source()
-        schedule_pos = source.find("schedule_all")
-        sentiment_pos = source.find("_analyze_and_process_sentiment")
-        assert schedule_pos > 0, "schedule_all must exist"
-        assert sentiment_pos > 0, "_analyze_and_process_sentiment must exist"
-        assert schedule_pos < sentiment_pos, \
-            "schedule_all must come BEFORE sentiment analysis"
+        schedule_pos = source.find("schedule_post_turn_lifecycle")
+        continuity_pos = source.find("scheduled_hooks = schedule_post_response_continuity_fn")
+        assert schedule_pos > 0, "schedule_post_turn_lifecycle must exist"
+        assert continuity_pos > 0, "continuity scheduling call must exist"
+        assert schedule_pos < continuity_pos, \
+            "post-turn lifecycle must come before continuity hooks"
 
-    def test_routine_tracking_between_background_and_sentiment(self):
-        """Routine tracking should be between background tasks and sentiment."""
+    def test_lifecycle_summary_logged_after_continuity_hooks(self):
+        """Final summary should include lifecycle and continuity evidence."""
         source = self._get_post_stream_source()
-        schedule_pos = source.find("schedule_all")
-        routine_pos = source.find("routine_tracker")
-        sentiment_pos = source.find("_analyze_and_process_sentiment")
-        assert schedule_pos < routine_pos < sentiment_pos, \
-            "Order: schedule_all → routine_tracker → sentiment"
+        schedule_pos = source.find("schedule_post_turn_lifecycle")
+        continuity_pos = source.find("scheduled_hooks = schedule_post_response_continuity_fn")
+        summary_pos = source.find("continuity_summary")
+        assert schedule_pos < continuity_pos < summary_pos, \
+            "Order: post_turn_lifecycle -> continuity_summary"

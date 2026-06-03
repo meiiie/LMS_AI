@@ -53,7 +53,11 @@ def test_persistent_storage_status_reports_ready_when_tables_exist():
     from app.engine.wiii_connect.persistent_storage import WiiiConnectPersistentStorage
 
     session = _FakeSession(
-        row=("wiii_connect_connections", "wiii_connect_audit_ledger"),
+        row=(
+            "wiii_connect_connections",
+            "wiii_connect_audit_ledger",
+            "wiii_connect_operation_approvals",
+        ),
     )
     storage = WiiiConnectPersistentStorage(session_factory=lambda: session)
 
@@ -64,6 +68,7 @@ def test_persistent_storage_status_reports_ready_when_tables_exist():
     assert metadata["persistent"] is True
     assert metadata["connection_table_ready"] is True
     assert metadata["audit_ledger_ready"] is True
+    assert metadata["operation_approval_table_ready"] is True
     assert metadata["reason"] == "ready"
 
 
@@ -257,6 +262,106 @@ def test_persistent_storage_rejects_missing_owner_boundary():
         is False
     )
     assert session.executions == []
+
+
+def test_operation_approval_append_stores_only_fingerprints():
+    from app.engine.wiii_connect.operation_approval import (
+        build_wiii_connect_operation_approval_record,
+        build_wiii_connect_operation_fingerprint,
+    )
+    from app.engine.wiii_connect.persistent_storage import WiiiConnectPersistentStorage
+
+    fingerprint = build_wiii_connect_operation_fingerprint(
+        provider_slug="facebook",
+        action_slug="FACEBOOK_CREATE_POST",
+        connection_ref="wcn_secret_connection",
+        page_id="page_123",
+        message="secret post message",
+    )
+    record = build_wiii_connect_operation_approval_record(
+        provider_slug="facebook",
+        action_slug="FACEBOOK_CREATE_POST",
+        preview_evidence_id="wcp_preview",
+        request_fingerprint=fingerprint,
+        ttl_seconds=300,
+        metadata={
+            "selected_connection_present": True,
+            "page_selected": True,
+            "message_length": 19,
+            "unsafe_page_id": "page_123",
+        },
+    )
+    session = _FakeSession()
+    storage = WiiiConnectPersistentStorage(session_factory=lambda: session)
+
+    assert storage.append_operation_approval_record(
+        record,
+        organization_id="org_1",
+        user_id="user_1",
+    )
+    params = session.executions[-1]["params"]
+    metadata = json.loads(params["metadata"])
+    serialized = json.dumps(params, sort_keys=True, default=str)
+
+    assert params["organization_id"] == "org_1"
+    assert params["user_id"] == "user_1"
+    assert params["provider_slug"] == "facebook"
+    assert params["preview_evidence_id"] == "wcp_preview"
+    assert params["request_fingerprint"] == fingerprint
+    assert metadata["selected_connection_present"] is True
+    assert metadata["page_selected"] is True
+    assert "unsafe_page_id" not in metadata
+    assert "secret post message" not in serialized
+    assert "page_123" not in serialized
+    assert "wcn_secret_connection" not in serialized
+    assert session.commits == 1
+
+
+def test_operation_approval_consume_is_org_user_scoped_and_one_way():
+    from app.engine.wiii_connect.operation_approval import (
+        build_wiii_connect_operation_fingerprint,
+    )
+    from app.engine.wiii_connect.persistent_storage import WiiiConnectPersistentStorage
+
+    fingerprint = build_wiii_connect_operation_fingerprint(
+        provider_slug="facebook",
+        action_slug="FACEBOOK_CREATE_POST",
+        connection_ref="wcn_safe_ref",
+        page_id="page_123",
+        message="secret post message",
+    )
+    session = _FakeSession(
+        row={
+            "provider_slug": "facebook",
+            "action_slug": "FACEBOOK_CREATE_POST",
+            "request_fingerprint": fingerprint,
+            "status": "pending",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+        },
+    )
+    storage = WiiiConnectPersistentStorage(session_factory=lambda: session)
+
+    decision = storage.consume_operation_approval_record(
+        preview_evidence_id="wcp_preview",
+        request_fingerprint=fingerprint,
+        organization_id="org_1",
+        user_id="user_1",
+        provider_slug="facebook",
+        action_slug="FACEBOOK_CREATE_POST",
+    )
+
+    assert decision.status == "consumed"
+    assert decision.reason == "approval_consumed"
+    assert decision.consumed is True
+    select_sql = session.executions[-2]["statement"]
+    update_sql = session.executions[-1]["statement"]
+    assert "FOR UPDATE" in select_sql
+    assert "organization_id = :organization_id" in update_sql
+    assert "user_id = :user_id" in update_sql
+    assert "status = 'consumed'" in update_sql
+    assert session.executions[-1]["params"]["organization_id"] == "org_1"
+    assert session.executions[-1]["params"]["user_id"] == "user_1"
+    assert session.commits == 1
 
 
 def test_expire_stale_pending_connections_is_org_user_provider_scoped():

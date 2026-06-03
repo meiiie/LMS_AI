@@ -18,6 +18,7 @@ from app.engine.embedding_runtime import (
     EmbeddingBackendProtocol,
     get_semantic_embedding_backend,
 )
+from app.engine.semantic_memory.privacy import hash_memory_identifier
 from app.services.output_processor import extract_thinking_from_response
 from app.models.semantic_memory import (
     ConversationSummary,
@@ -46,6 +47,12 @@ from .session_runtime import (
     get_session_messages_impl,
     store_explicit_insight_impl,
     summarize_session_impl,
+)
+from .write_audit import (
+    append_semantic_memory_write_audit_event,
+    build_semantic_memory_write_audit,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,6 +221,15 @@ class SemanticMemoryEngine:
         **SOTA Pattern:** MemGPT/Mem0 style archival memory access
         **Validates: Requirements 2.2, 4.3**
         """
+        read_scope = resolve_memory_read_scope()
+        if not read_scope.write_allowed:
+            logger.warning(
+                "User fact retrieval blocked for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                read_scope.state,
+            )
+            return {}
+
         try:
             # Get facts from repository (returns List[SemanticMemorySearchResult])
             facts_list = self._repository.get_user_facts(
@@ -223,7 +239,10 @@ class SemanticMemoryEngine:
             )
 
             if not facts_list:
-                logger.debug("No user facts found for %s", user_id)
+                logger.debug(
+                    "No user facts found for user_hash=%s",
+                    hash_memory_identifier(user_id),
+                )
                 return {}
 
             # Convert to dict format
@@ -248,11 +267,20 @@ class SemanticMemoryEngine:
                     ts = fact.updated_at or fact.created_at
                     result[f"{fact_type}__updated_at"] = ts
 
-            logger.debug("Retrieved %d user facts for %s: %s", len(result), user_id, list(result.keys()))
+            logger.debug(
+                "Retrieved %d user facts for user_hash=%s: %s",
+                len(result),
+                hash_memory_identifier(user_id),
+                list(result.keys()),
+            )
             return result
 
         except Exception as e:
-            logger.error("Failed to get user facts for %s: %s", user_id, e)
+            logger.error(
+                "Failed to get user facts for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                e,
+            )
             return {}
 
     def search_relevant_facts(
@@ -269,6 +297,15 @@ class SemanticMemoryEngine:
         prompt-context builder, so semantic fact retrieval does not silently
         fall back to broad fact injection.
         """
+        read_scope = resolve_memory_read_scope()
+        if not read_scope.write_allowed:
+            logger.warning(
+                "Relevant fact search blocked for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                read_scope.state,
+            )
+            return []
+
         try:
             return self._repository.search_relevant_facts(
                 user_id=user_id,
@@ -277,7 +314,11 @@ class SemanticMemoryEngine:
                 min_similarity=min_similarity,
             )
         except Exception as exc:
-            logger.warning("Failed to search relevant facts for %s: %s", user_id, exc)
+            logger.warning(
+                "Failed to search relevant facts for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                exc,
+            )
             return []
 
     # ==================== FACT EXTRACTION (Delegated) ====================
@@ -286,7 +327,8 @@ class SemanticMemoryEngine:
         self,
         user_id: str,
         message: str,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        emit_write_audit: bool = True,
     ) -> List[UserFact]:
         """
         Extract user facts from a message using LLM.
@@ -308,6 +350,7 @@ class SemanticMemoryEngine:
             message=message,
             session_id=session_id,
             existing_facts=existing_facts,
+            emit_write_audit=emit_write_audit,
         )
 
     async def extract_user_facts(
@@ -328,7 +371,8 @@ class SemanticMemoryEngine:
         fact_content: str,
         fact_type: str = "name",
         confidence: float = 0.9,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        source_message: Optional[str] = None,
     ) -> bool:
         """
         Store or update a user fact using upsert logic.
@@ -340,7 +384,8 @@ class SemanticMemoryEngine:
             fact_content=fact_content,
             fact_type=fact_type,
             confidence=confidence,
-            session_id=session_id
+            session_id=session_id,
+            source_message=source_message,
         )
 
     # ==================== INTERACTION STORAGE ====================
@@ -368,6 +413,36 @@ class SemanticMemoryEngine:
 
         Requirements: 2.1
         """
+        message_saved = False
+        response_saved = False
+        stored_fact_count = 0
+        audit_scope = resolve_memory_write_scope()
+        if not audit_scope.write_allowed:
+            audit_payload = build_semantic_memory_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                message=message,
+                response=response,
+                scope=audit_scope,
+                message_saved=False,
+                response_saved=False,
+                extract_facts=extract_facts,
+                stored_fact_count=0,
+                status="blocked",
+                warnings=["semantic_memory_write_blocked_missing_org_context"],
+            )
+            await append_semantic_memory_write_audit_event(
+                session_id=session_id,
+                org_id=audit_scope.org_id,
+                payload=audit_payload,
+            )
+            logger.warning(
+                "Semantic memory interaction write blocked for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                audit_scope.state,
+            )
+            return False
+
         try:
             async def _safe_embed(text: str, label: str) -> list[float]:
                 try:
@@ -376,9 +451,9 @@ class SemanticMemoryEngine:
                         return embeddings[0]
                 except Exception as exc:
                     logger.warning(
-                        "Interaction embedding unavailable for %s of user %s: %s",
+                        "Interaction embedding unavailable for %s of user_hash=%s: %s",
                         label,
-                        user_id,
+                        hash_memory_identifier(user_id),
                         exc,
                     )
                 return []
@@ -409,13 +484,58 @@ class SemanticMemoryEngine:
 
             # Extract and store user facts if enabled
             if extract_facts:
-                await self._extract_and_store_facts(user_id, message, session_id)
+                stored_facts = await self._extract_and_store_facts(
+                    user_id, message, session_id, emit_write_audit=False
+                )
+                stored_fact_count = len(stored_facts or [])
 
-            logger.debug("Stored interaction for user %s", user_id)
+            logger.debug(
+                "Stored interaction for user_hash=%s",
+                hash_memory_identifier(user_id),
+            )
+            audit_payload = build_semantic_memory_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                message=message,
+                response=response,
+                scope=audit_scope,
+                message_saved=message_saved,
+                response_saved=response_saved,
+                extract_facts=extract_facts,
+                stored_fact_count=stored_fact_count,
+                status=(
+                    "saved"
+                    if message_saved and response_saved
+                    else "degraded"
+                ),
+            )
+            await append_semantic_memory_write_audit_event(
+                session_id=session_id,
+                org_id=audit_scope.org_id,
+                payload=audit_payload,
+            )
             return message_saved and response_saved
 
         except Exception as e:
             logger.error("Failed to store interaction: %s", e)
+            audit_payload = build_semantic_memory_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                message=message,
+                response=response,
+                scope=audit_scope,
+                message_saved=message_saved,
+                response_saved=response_saved,
+                extract_facts=extract_facts,
+                stored_fact_count=stored_fact_count,
+                status="failed",
+                warnings=["semantic_memory_write_failed"],
+            )
+            await append_semantic_memory_write_audit_event(
+                session_id=session_id,
+                org_id=audit_scope.org_id,
+                payload=audit_payload,
+            )
             return False
 
     # ==================== TOKEN COUNTING ====================

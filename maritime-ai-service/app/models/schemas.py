@@ -10,8 +10,8 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, field_validator
 from app.models.host_context_schemas import (
     ImageInput,
-    PageContext,
-    StudentPageState,
+    PageContext,  # noqa: F401 - compatibility re-export
+    StudentPageState,  # noqa: F401 - compatibility re-export
     UserContext,
     UserRole,
     utc_now,
@@ -325,6 +325,14 @@ class ChatResponseMetadata(BaseModel):
     routing_metadata: Optional[dict] = Field(
         default=None,
         description="Supervisor routing decision: intent, confidence, reasoning, method"
+    )
+    runtime_flow_trace: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Privacy-safe turn-path/tool-policy/action trace for runtime observability",
+    )
+    post_turn_lifecycle: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Status-only post-turn lifecycle scheduling summary",
     )
 
 

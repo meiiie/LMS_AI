@@ -41,6 +41,10 @@ from typing import Optional
 
 from app.engine.runtime.lifecycle import HookPoint, get_lifecycle
 from app.engine.runtime.runtime_metrics import inc_counter, record_latency_ms
+from app.engine.runtime.event_payload_sanitizer import (
+    redact_runtime_secret_text,
+    sanitize_runtime_payload,
+)
 from app.engine.runtime.session_event_log import (
     SessionEventLog,
     get_session_event_log,
@@ -62,11 +66,14 @@ def _serialise_tool_calls(metadata) -> list[dict]:
         return []
     raw = metadata.get("tool_calls")
     if isinstance(raw, list) and raw:
-        return [c if isinstance(c, dict) else {"raw": str(c)} for c in raw]
+        return [
+            sanitize_runtime_payload(c if isinstance(c, dict) else {"raw": str(c)})
+            for c in raw
+        ]
     raw = metadata.get("tools_used")
     if isinstance(raw, list) and raw:
         return [
-            c if isinstance(c, dict) else {"name": str(c)}
+            sanitize_runtime_payload(c if isinstance(c, dict) else {"name": str(c)})
             for c in raw
         ]
     return []
@@ -84,6 +91,60 @@ async def _invoke_inner(chat_request, background_save):
 
     return await get_chat_service().process_message(
         chat_request, background_save=background_save
+    )
+
+
+def _emit_finalization_metric(
+    *,
+    stage: str,
+    status: str,
+    run_status: str,
+    transport: str = "chat",
+) -> None:
+    inc_counter(
+        "runtime.native_dispatch.finalization",
+        labels={
+            "stage": str(stage or "unknown"),
+            "status": str(status or "unknown"),
+            "run_status": str(run_status or "unknown"),
+            "transport": str(transport or "unknown"),
+        },
+    )
+
+
+async def _append_finalization_event(
+    log: SessionEventLog,
+    *,
+    session_id: str,
+    org_id: Optional[str],
+    event_type: str,
+    payload: dict,
+    stage: str,
+    run_status: str,
+) -> None:
+    try:
+        await log.append(
+            session_id=session_id,
+            event_type=event_type,
+            payload=payload,
+            org_id=org_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _emit_finalization_metric(
+            stage=stage,
+            status="error",
+            run_status=run_status,
+        )
+        logger.debug(
+            "[native_dispatch] finalization append %s skipped: %s",
+            event_type,
+            exc,
+        )
+        raise
+    _emit_finalization_metric(
+        stage=stage,
+        status="success",
+        run_status=run_status,
     )
 
 
@@ -151,16 +212,20 @@ async def native_chat_dispatch(
             response = await _invoke_inner(chat_request, background_save)
     except Exception as exc:  # noqa: BLE001
         duration_ms = int((time.monotonic() - started) * 1000)
-        await log.append(
+        error_text = redact_runtime_secret_text(f"{type(exc).__name__}: {exc}")
+        await _append_finalization_event(
+            log,
             session_id=session_id,
             event_type="assistant_message",
             payload={
                 "text": "",
                 "status": "error",
-                "error": f"{type(exc).__name__}: {exc}",
+                "error": error_text,
                 "duration_ms": duration_ms,
             },
             org_id=org_id,
+            stage="assistant_message_append",
+            run_status="error",
         )
         inc_counter(
             "runtime.native_dispatch.runs", labels={"status": "error"}
@@ -176,7 +241,7 @@ async def native_chat_dispatch(
                 "session_id": session_id,
                 "org_id": org_id,
                 "duration_ms": duration_ms,
-                "error": f"{type(exc).__name__}: {exc}",
+                "error": error_text,
             },
         )
         await lifecycle.fire(
@@ -195,7 +260,8 @@ async def native_chat_dispatch(
     tool_calls = _serialise_tool_calls(metadata)
     response_text = getattr(response, "message", "") or ""
 
-    await log.append(
+    await _append_finalization_event(
+        log,
         session_id=session_id,
         event_type="assistant_message",
         payload={
@@ -209,9 +275,12 @@ async def native_chat_dispatch(
             ),
         },
         org_id=org_id,
+        stage="assistant_message_append",
+        run_status="success",
     )
     for call in tool_calls:
-        await log.append(
+        await _append_finalization_event(
+            log,
             session_id=session_id,
             event_type="tool_result",
             payload={
@@ -222,6 +291,8 @@ async def native_chat_dispatch(
                 "content": str(call.get("result", call.get("description", ""))),
             },
             org_id=org_id,
+            stage="tool_result_append",
+            run_status="success",
         )
 
     inc_counter(

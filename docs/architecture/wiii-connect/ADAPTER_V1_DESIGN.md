@@ -100,7 +100,9 @@ The durable storage contract and schema live in:
 
 ```text
 maritime-ai-service/app/engine/wiii_connect/persistent_storage.py
+maritime-ai-service/app/engine/wiii_connect/operation_approval.py
 maritime-ai-service/alembic/versions/049_create_wiii_connect_storage.py
+maritime-ai-service/alembic/versions/056_create_wiii_connect_operation_approvals.py
 ```
 
 Current session/status API projections:
@@ -394,6 +396,11 @@ without guessing from logs.
   evidence presence, and sanitized argument key names;
 - never accepts raw provider arguments, raw provider payloads, OAuth tokens,
   approval token values, Composio API keys, or provider response bodies;
+- generic execution filters caller arguments through the curated
+  `wiii_connect_argument_key_policy.v1` before provider execution, and
+  mutating actions do not trust caller/model preview IDs or approval-present
+  booleans. Only a specialized backend flow that verifies a backend-issued
+  preview/apply token may pass trusted operation policy into the executor;
 - remains the required preflight boundary for both execution-decision and real
   execution routes. The execute route may call Composio only after this gateway
   returns `allowed`, the live schema check passes, required schema argument
@@ -415,7 +422,18 @@ specific `connection_ref`, grant read/preview/apply scope for that connection,
 select a Page, review the generated preview, and submit the backend-issued
 approval token before Wiii can call Composio. User-selected images are staged
 through Composio's file upload request flow; Wiii never accepts arbitrary local
-file paths from a model/tool call for this mutation.
+file paths from a model/tool call for this mutation. When the operation approval
+table is deployed, the preview also records a pending request fingerprint and
+apply must consume that pending row, making replay of the same approved preview
+a backend-ledger denial rather than a prompt-level convention. The row stores
+only hashes, status, expiry, and safe shape metadata; it does not store the post
+message, Page ID, connection ref, media bytes/URL, provider payload, or approval
+token.
+`probe_live_wiii_connect_facebook_post_replay.py` and
+`.github/workflows/wiii-connect-facebook-post-replay-evidence.yml` turn that
+contract into opt-in runtime evidence: preview must record a pending ledger row,
+first apply must consume it, and replay must block before schema or provider
+execution.
 
 ## Lifecycle States
 
@@ -569,6 +587,12 @@ Before real Composio OAuth is enabled:
 - read-only Composio execution must verify the live tool schema before the
   provider call, block if required schema argument keys are missing, and append
   privacy-safe started plus completion audit events when execution proceeds;
+- credentialed acceptance evidence must record only structured hash/count
+  observations for selected-account presence, gateway decisions, live schema
+  readiness, required argument coverage, provider execution metadata, and
+  privacy flags; it must not archive connection refs, account IDs, bearer
+  values/env names, raw schemas, provider arguments, provider payloads, or
+  provider responses;
 - durable persistence must bind every connection/audit write to a Wiii
   organization and user boundary;
 - frontend may receive connect URLs and state labels, not tokens;
@@ -589,6 +613,8 @@ External writes are never casual chat behavior. They require:
 - user/org scope grants allow the mutation class;
 - preview evidence when the adapter marks it required;
 - approval token presence for apply-style mutations;
+- durable operation approval consumption when the optional approval ledger table
+  is present;
 - audit event before execution and after completion.
 
 The gateway stores only token presence and evidence IDs in public metadata. Raw

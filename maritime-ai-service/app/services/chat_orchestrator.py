@@ -207,6 +207,7 @@ class ChatOrchestrator:
         role: str,
         content: str,
         user_id: str | None = None,
+        organization_id: str | None = None,
         background_save: Optional[Callable] = None,
         immediate: bool = False,
     ) -> None:
@@ -217,6 +218,7 @@ class ChatOrchestrator:
             role=role,
             content=content,
             user_id=user_id,
+            organization_id=organization_id,
             background_save=background_save,
             immediate=immediate,
         )
@@ -270,9 +272,10 @@ class ChatOrchestrator:
         include_lms_insights: bool = True,
         continuity_channel: str = "web",
         transport_type: str = "sync",
-    ) -> None:
+        request_id: str | None = None,
+    ) -> dict:
         """Run the authoritative post-response scheduling contract."""
-        finalize_response_turn_impl(
+        return finalize_response_turn_impl(
             logger_obj=logger,
             session_manager=self._session_manager,
             persist_chat_message=self.persist_chat_message,
@@ -294,6 +297,7 @@ class ChatOrchestrator:
             include_lms_insights=include_lms_insights,
             continuity_channel=continuity_channel,
             transport_type=transport_type,
+            request_id=request_id,
         )
 
     @staticmethod
@@ -317,6 +321,8 @@ class ChatOrchestrator:
         return await resolve_request_scope_impl(
             request,
             default_organization_id=settings.default_organization_id,
+            enable_multi_tenant=settings.enable_multi_tenant,
+            environment=settings.environment,
             get_current_org_id_fn=get_current_org_id,
             get_current_org_allowed_domains_fn=get_current_org_allowed_domains,
             get_domain_router_fn=get_domain_router,
@@ -521,13 +527,14 @@ class ChatOrchestrator:
         # STAGE 6: POST-PROCESSING & BACKGROUND TASKS
         # ================================================================
         # Source-inspection compatibility: this stage still covers
-        # save_message, schedule_all, routine_tracker.record_interaction,
-        # and _analyze_and_process_sentiment via finalize_response_turn()
+        # save_message, post-turn lifecycle scheduling,
+        # routine_tracker.record_interaction, and _analyze_and_process_sentiment
+        # via finalize_response_turn()
         # and living_continuity.schedule_post_response_continuity().
-        # Tenant-isolation marker: finalize_response_turn_impl forwards
-        # org_id=organization_id to BackgroundTaskRunner.schedule_all().
+        # Tenant-isolation marker: finalize_response_turn_impl forwards the
+        # resolved organization_id into lifecycle-owned background scheduling.
         
-        self.finalize_response_turn(
+        post_turn_lifecycle = self.finalize_response_turn(
             session_id=session_id,
             user_id=user_id,
             user_role=user_role,
@@ -541,6 +548,10 @@ class ChatOrchestrator:
             continuity_channel="web",
             transport_type="sync",
         )
+        response.metadata = {
+            **(response.metadata or {}),
+            "post_turn_lifecycle": post_turn_lifecycle,
+        }
 
         if record and getattr(settings, "enable_eval_recording", False):
             await self._record_eval_turn(
@@ -570,7 +581,11 @@ class ChatOrchestrator:
         try:
             from pathlib import Path
 
-            from app.engine.runtime.eval_recorder import EvalRecord, EvalRecorder
+            from app.engine.runtime.eval_recorder import (
+                EvalRecord,
+                EvalRecorder,
+                sanitize_eval_payload,
+            )
 
             base_dir = Path(getattr(settings, "eval_recording_dir", "eval_recordings"))
             recorder = EvalRecorder(base_dir=base_dir)
@@ -587,26 +602,33 @@ class ChatOrchestrator:
                 "organization_id": getattr(request, "organization_id", None),
             }
 
-            metadata = dict(result.metadata or {})
+            request_payload = sanitize_eval_payload(request_payload)
+
+            metadata = sanitize_eval_payload(dict(result.metadata or {}))
             metadata.setdefault("current_agent", metadata.get("current_agent", ""))
 
             sources_payload: list[dict] = []
             for src in getattr(response, "sources", None) or []:
                 if hasattr(src, "model_dump"):
-                    sources_payload.append(src.model_dump())
+                    sources_payload.append(sanitize_eval_payload(src.model_dump()))
                 elif isinstance(src, dict):
-                    sources_payload.append(src)
+                    sources_payload.append(sanitize_eval_payload(src))
 
             tool_calls_payload: list[dict] = []
             for call in metadata.get("tool_calls", []) or []:
                 if isinstance(call, dict):
-                    tool_calls_payload.append(call)
+                    tool_calls_payload.append(sanitize_eval_payload(call))
 
             record_obj = EvalRecord(
                 session_id=session_id,
                 org_id=org_id,
                 request=request_payload,
-                response=getattr(response, "response", "") or "",
+                response=(
+                    getattr(response, "message", None)
+                    or getattr(response, "response", "")
+                    or result.message
+                    or ""
+                ),
                 tool_calls=tool_calls_payload,
                 sources=sources_payload,
                 metadata=metadata,
@@ -675,6 +697,7 @@ class ChatOrchestrator:
         self,
         background_save: Callable,
         user_id: str,
+        organization_id: str | None = None,
     ) -> None:
         """Sprint 79: Trigger background summarization of user's previous session.
 
@@ -684,6 +707,7 @@ class ChatOrchestrator:
         maybe_summarize_previous_session_impl(
             background_save=background_save,
             user_id=user_id,
+            organization_id=organization_id,
         )
 
     async def _process_with_multi_agent(

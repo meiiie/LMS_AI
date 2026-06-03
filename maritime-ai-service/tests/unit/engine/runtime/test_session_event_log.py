@@ -6,6 +6,8 @@ dict-payload immutability, since_seq replay window.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from app.engine.runtime.session_event_log import (
@@ -39,11 +41,60 @@ async def test_append_returns_immutable_event(log):
     assert event.payload == {"q": "x"}  # snapshot, not aliased
 
 
+async def test_append_returned_event_payload_cannot_mutate_inmemory_log(log):
+    event = await log.append(
+        session_id="s",
+        event_type="tool_call",
+        payload={"nested": {"q": "x"}},
+    )
+
+    event.payload["nested"]["q"] = "mutated"
+
+    events = await log.get_events(session_id="s")
+    assert events[0].payload == {"nested": {"q": "x"}}
+
+
 async def test_append_records_org_id_when_supplied(log):
     event = await log.append(
         session_id="s", event_type="user_message", payload={}, org_id="org-1"
     )
     assert event.org_id == "org-1"
+    assert event.created_at is not None
+
+
+async def test_append_sanitizes_payload_before_storage(log):
+    event = await log.append(
+        session_id="s",
+        event_type="tool_result",
+        payload={
+            "user_id": "raw-user-id",
+            "args": {
+                "message": "hello",
+                "access_token": "raw-access-token",
+            },
+            "content": (
+                '{"status":"ok","approval_token":"raw-approval-token",'
+                '"data":{"safe_id":"post-1","provider_payload":{"id":"raw"}}}'
+            ),
+            "error": (
+                "provider returned Bearer raw-bearer-token-123 "
+                "api_key=raw-api-key-inline"
+            ),
+        },
+    )
+
+    assert event.payload["user_id_hash"].startswith("sha256:")
+    assert event.payload["args"]["message"] == "hello"
+    assert event.payload["content"]["status"] == "ok"
+    assert event.payload["content"]["data"]["safe_id"] == "post-1"
+    assert "<redacted-secret>" in event.payload["error"]
+    serialized = str(event.payload)
+    assert "raw-user-id" not in serialized
+    assert "raw-access-token" not in serialized
+    assert "raw-approval-token" not in serialized
+    assert "raw-bearer-token-123" not in serialized
+    assert "raw-api-key-inline" not in serialized
+    assert "provider_payload" not in serialized
 
 
 # ── get_events ──
@@ -54,6 +105,20 @@ async def test_get_events_returns_in_append_order(log):
     await log.append(session_id="s", event_type="user_message", payload={"i": 3})
     events = await log.get_events(session_id="s")
     assert [e.payload["i"] for e in events] == [1, 2, 3]
+
+
+async def test_get_events_returns_payload_snapshots(log):
+    await log.append(
+        session_id="s",
+        event_type="tool_call",
+        payload={"nested": {"q": "x"}},
+    )
+
+    events = await log.get_events(session_id="s")
+    events[0].payload["nested"]["q"] = "mutated"
+
+    fresh_events = await log.get_events(session_id="s")
+    assert fresh_events[0].payload == {"nested": {"q": "x"}}
 
 
 async def test_get_events_unknown_session_returns_empty(log):
@@ -99,6 +164,127 @@ async def test_latest_seq_respects_org_filter(log):
 
 
 # ── singleton ──
+
+async def test_get_recent_events_filters_across_sessions(log):
+    await log.append(
+        session_id="s1",
+        event_type="runtime_flow_ledger",
+        payload={"i": 1},
+        org_id="A",
+    )
+    await log.append(
+        session_id="s2",
+        event_type="user_message",
+        payload={"i": 2},
+        org_id="A",
+    )
+    await log.append(
+        session_id="s3",
+        event_type="runtime_flow_ledger",
+        payload={"i": 3},
+        org_id="B",
+    )
+    await log.append(
+        session_id="s4",
+        event_type="runtime_flow_ledger",
+        payload={"i": 4},
+        org_id="A",
+    )
+
+    events = await log.get_recent_events(
+        org_id="A",
+        event_type="runtime_flow_ledger",
+        limit=5,
+    )
+
+    assert [(event.session_id, event.payload["i"]) for event in events] == [
+        ("s4", 4),
+        ("s1", 1),
+    ]
+
+
+async def test_get_recent_events_bounds_limit(log):
+    for idx in range(3):
+        await log.append(
+            session_id=f"s{idx}",
+            event_type="runtime_flow_ledger",
+            payload={"i": idx},
+        )
+
+    events = await log.get_recent_events(
+        event_type="runtime_flow_ledger",
+        limit=0,
+    )
+
+    assert len(events) == 1
+    assert events[0].payload["i"] == 2
+
+
+def _rewrite_created_at(log: InMemorySessionEventLog, event: SessionEvent, created_at: str) -> None:
+    rewritten = SessionEvent(
+        session_id=event.session_id,
+        event_type=event.event_type,
+        payload=event.payload,
+        seq=event.seq,
+        org_id=event.org_id,
+        created_at=created_at,
+    )
+    state = log._sessions[event.session_id]
+    state.events = [
+        rewritten if item.seq == event.seq and item.session_id == event.session_id else item
+        for item in state.events
+    ]
+    log._events = [
+        rewritten if item.seq == event.seq and item.session_id == event.session_id else item
+        for item in log._events
+    ]
+
+
+async def test_prune_older_than_dry_run_counts_without_deleting(log):
+    old = await log.append(
+        session_id="s-old",
+        event_type="runtime_flow_ledger",
+        payload={"i": 1},
+        org_id="A",
+    )
+    kept = await log.append(
+        session_id="s-new",
+        event_type="runtime_flow_ledger",
+        payload={"i": 2},
+        org_id="A",
+    )
+    _rewrite_created_at(log, old, "2026-05-01T00:00:00+00:00")
+    _rewrite_created_at(log, kept, "2026-05-20T00:00:00+00:00")
+
+    count = await log.prune_older_than(
+        cutoff=datetime(2026, 5, 10, tzinfo=UTC),
+        org_id="A",
+        event_type="runtime_flow_ledger",
+        dry_run=True,
+    )
+
+    assert count == 1
+    assert len(await log.get_recent_events(org_id="A", event_type="runtime_flow_ledger")) == 2
+
+
+async def test_prune_older_than_removes_matching_events_only(log):
+    old_a = await log.append(session_id="s-a", event_type="runtime_flow_ledger", payload={"i": 1}, org_id="A")
+    old_b = await log.append(session_id="s-b", event_type="runtime_flow_ledger", payload={"i": 2}, org_id="B")
+    new_a = await log.append(session_id="s-c", event_type="runtime_flow_ledger", payload={"i": 3}, org_id="A")
+    _rewrite_created_at(log, old_a, "2026-05-01T00:00:00+00:00")
+    _rewrite_created_at(log, old_b, "2026-05-01T00:00:00+00:00")
+    _rewrite_created_at(log, new_a, "2026-05-20T00:00:00+00:00")
+
+    count = await log.prune_older_than(
+        cutoff=datetime(2026, 5, 10, tzinfo=UTC),
+        org_id="A",
+        event_type="runtime_flow_ledger",
+        dry_run=False,
+    )
+
+    assert count == 1
+    assert [event.payload["i"] for event in await log.get_recent_events(event_type="runtime_flow_ledger", limit=10)] == [3, 2]
+
 
 def test_get_session_event_log_returns_singleton():
     a = get_session_event_log()
@@ -149,7 +335,6 @@ class _FakeConn:
             return self.rows.pop(0)
         # Default: synthesise a row using args.
         session_id, org_id, event_type, payload_json = args
-        import json
         return _FakeRow(
             id=1,
             session_id=session_id,
@@ -215,6 +400,7 @@ async def test_postgres_append_round_trips_payload(pg_log, fake_conn):
     assert event.payload == {"text": "hi"}
     assert event.org_id == "org-1"
     assert event.seq == 1
+    assert event.created_at == "2026-05-03T00:00:00Z"
     # SQL was issued with the right shape — no jsonb cast missing etc.
     sql_first, args = fake_conn.fetchrow_calls[0]
     assert "INSERT INTO session_events" in sql_first
@@ -275,6 +461,88 @@ async def test_postgres_latest_seq_without_org(pg_log, fake_conn):
     assert seq == 0
 
 
+async def test_postgres_get_recent_events_filters_by_org_and_event_type(
+    pg_log,
+    fake_conn,
+):
+    fake_conn.rows = [
+        _FakeRow(
+            id=1,
+            session_id="s-new",
+            org_id="A",
+            event_type="runtime_flow_ledger",
+            payload='{"i": 2}',
+            seq=1,
+            created_at=None,
+        ),
+        _FakeRow(
+            id=2,
+            session_id="s-old",
+            org_id="A",
+            event_type="runtime_flow_ledger",
+            payload='{"i": 1}',
+            seq=1,
+            created_at=None,
+        ),
+    ]
+
+    events = await pg_log.get_recent_events(
+        org_id="A",
+        event_type="runtime_flow_ledger",
+        limit=25,
+    )
+
+    sql, args = fake_conn.fetch_calls[0]
+    assert "org_id = $1" in sql
+    assert "event_type = $2" in sql
+    assert "ORDER BY created_at DESC, id DESC" in sql
+    assert "LIMIT $3" in sql
+    assert args == ("A", "runtime_flow_ledger", 25)
+    assert [event.session_id for event in events] == ["s-new", "s-old"]
+
+
+async def test_postgres_prune_older_than_dry_run_counts_matching_rows(
+    pg_log,
+    fake_conn,
+):
+    fake_conn.fetchval_value = 7
+    count = await pg_log.prune_older_than(
+        cutoff=datetime(2026, 5, 10, tzinfo=UTC),
+        org_id="A",
+        event_type="runtime_flow_ledger",
+        dry_run=True,
+    )
+
+    sql, args = fake_conn.fetchval_calls[0]
+    assert count == 7
+    assert "SELECT COUNT(*) FROM session_events" in sql
+    assert "created_at < $1" in sql
+    assert "org_id = $2" in sql
+    assert "event_type = $3" in sql
+    assert args[1:] == ("A", "runtime_flow_ledger")
+
+
+async def test_postgres_prune_older_than_deletes_matching_rows(
+    pg_log,
+    fake_conn,
+):
+    fake_conn.fetchval_value = 4
+    count = await pg_log.prune_older_than(
+        cutoff=datetime(2026, 5, 10, tzinfo=UTC),
+        org_id=None,
+        event_type="runtime_flow_ledger",
+        dry_run=False,
+    )
+
+    sql, args = fake_conn.fetchval_calls[0]
+    assert count == 4
+    assert "DELETE FROM session_events" in sql
+    assert "RETURNING 1" in sql
+    assert "created_at < $1" in sql
+    assert "event_type = $2" in sql
+    assert args[1:] == ("runtime_flow_ledger",)
+
+
 async def test_postgres_payload_revives_str_jsonb(pg_log, fake_conn):
     """asyncpg returns jsonb as str; backend must json.loads."""
     fake_conn.rows = [
@@ -288,6 +556,37 @@ async def test_postgres_payload_revives_str_jsonb(pg_log, fake_conn):
 
 
 # ── get_session_event_log routing ──
+
+async def test_postgres_payload_sanitizes_legacy_rows_on_read(pg_log, fake_conn):
+    fake_conn.rows = [
+        _FakeRow(
+            id=1,
+            session_id="s",
+            org_id=None,
+            event_type="tool_result",
+            payload=(
+                '{"user_id":"raw-user-id","content":'
+                '"{\\"status\\":\\"ok\\",\\"approval_token\\":\\"raw-approval-token\\"}",'
+                '"error":"Authorization: Bearer raw-bearer-token-123",'
+                '"access_token":"raw-access-token"}'
+            ),
+            seq=1,
+            created_at=None,
+        ),
+    ]
+
+    events = await pg_log.get_events(session_id="s")
+
+    assert events[0].payload["user_id_hash"].startswith("sha256:")
+    assert events[0].payload["content"]["status"] == "ok"
+    assert events[0].payload["content"]["redacted_secret_count"] == 1
+    assert "<redacted-secret>" in events[0].payload["error"]
+    serialized = str(events[0].payload)
+    assert "raw-user-id" not in serialized
+    assert "raw-approval-token" not in serialized
+    assert "raw-bearer-token-123" not in serialized
+    assert "raw-access-token" not in serialized
+
 
 def test_get_session_event_log_returns_inmemory_when_flag_off(monkeypatch):
     from app.engine.runtime import session_event_log as mod

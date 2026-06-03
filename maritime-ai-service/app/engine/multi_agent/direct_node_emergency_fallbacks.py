@@ -17,6 +17,7 @@ from app.engine.multi_agent.direct_node_visible_thought import (
     _should_surface_direct_visible_thought,
     _strip_direct_inline_private_asides,
 )
+from app.engine.multi_agent.tool_event_sanitizer import sanitize_tool_args_for_event
 from app.engine.multi_agent.visual_events import _summarize_tool_result_for_stream
 
 logger = logging.getLogger(__name__)
@@ -107,12 +108,13 @@ async def _emit_synthetic_tool_events(
         name = str(event.get("name") or "")
         event_id = str(event.get("id") or "")
         if event_type == "call":
+            public_args = sanitize_tool_args_for_event(event.get("args") or {})
             await push_event(
                 {
                     "type": "tool_call",
                     "content": {
                         "name": name,
-                        "args": event.get("args") or {},
+                        "args": public_args,
                         "id": event_id,
                     },
                     "node": "direct",

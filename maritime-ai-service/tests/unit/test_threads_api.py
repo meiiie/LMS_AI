@@ -11,7 +11,7 @@ complexity. This is the established pattern in this codebase (see test_auth_owne
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import call, patch, MagicMock
 
 from pydantic import ValidationError
 
@@ -44,12 +44,17 @@ def _make_request():
     return Request(scope)
 
 
-def _make_auth(user_id: str = "test-user", role: str = "student") -> AuthenticatedUser:
+def _make_auth(
+    user_id: str = "test-user",
+    role: str = "student",
+    organization_id: str | None = None,
+) -> AuthenticatedUser:
     """Create a mock authenticated user."""
     return AuthenticatedUser(
         user_id=user_id,
         auth_method="api_key",
         role=role,
+        organization_id=organization_id,
     )
 
 
@@ -177,9 +182,15 @@ class TestListThreads:
             assert result.total == 1
 
             mock_repo.list_threads.assert_called_once_with(
-                user_id="student-1", limit=50, offset=0,
+                user_id="student-1",
+                limit=50,
+                offset=0,
+                organization_id=None,
             )
-            mock_repo.count_threads.assert_called_once_with(user_id="student-1")
+            mock_repo.count_threads.assert_called_once_with(
+                user_id="student-1",
+                organization_id=None,
+            )
 
     @pytest.mark.asyncio
     async def test_returns_empty_list(self):
@@ -197,6 +208,30 @@ class TestListThreads:
             assert isinstance(result, ThreadListResponse)
             assert result.threads == []
             assert result.total == 0
+
+    @pytest.mark.asyncio
+    async def test_passes_active_org_scope_to_repository(self):
+        """list_threads keeps the conversation index inside the active org."""
+        auth = _make_auth("student-1", organization_id="org-active")
+
+        with patch("app.repositories.thread_repository.get_thread_repository") as mock_get_repo:
+            mock_repo = MagicMock()
+            mock_repo.list_threads.return_value = []
+            mock_repo.count_threads.return_value = 0
+            mock_get_repo.return_value = mock_repo
+
+            await list_threads(request=_make_request(), auth=auth, limit=25, offset=5)
+
+            mock_repo.list_threads.assert_called_once_with(
+                user_id="student-1",
+                limit=25,
+                offset=5,
+                organization_id="org-active",
+            )
+            mock_repo.count_threads.assert_called_once_with(
+                user_id="student-1",
+                organization_id="org-active",
+            )
 
     @pytest.mark.asyncio
     async def test_repo_exception_returns_500(self):
@@ -246,6 +281,7 @@ class TestGetThread:
             mock_repo.get_thread.assert_called_once_with(
                 thread_id="user_student-1__session_s1",
                 user_id="student-1",
+                organization_id=None,
             )
 
     @pytest.mark.asyncio
@@ -263,6 +299,41 @@ class TestGetThread:
             )
 
             assert result.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_admin_fallback_keeps_active_org_scope(self):
+        """Platform admin fallback does not drop the active org boundary."""
+        auth = _make_auth("admin-1", role="admin", organization_id="org-active")
+        thread_data = _sample_thread_dict(
+            thread_id="user_other__session_s1",
+            user_id="other",
+        )
+
+        with patch("app.repositories.thread_repository.get_thread_repository") as mock_get_repo:
+            mock_repo = MagicMock()
+            mock_repo.get_thread.side_effect = [None, thread_data]
+            mock_get_repo.return_value = mock_repo
+
+            result = await get_thread(
+                request=_make_request(),
+                thread_id="user_other__session_s1",
+                auth=auth,
+            )
+
+            assert isinstance(result, ThreadView)
+            mock_repo.get_thread.assert_has_calls(
+                [
+                    call(
+                        thread_id="user_other__session_s1",
+                        user_id="admin-1",
+                        organization_id="org-active",
+                    ),
+                    call(
+                        thread_id="user_other__session_s1",
+                        organization_id="org-active",
+                    ),
+                ]
+            )
 
     @pytest.mark.asyncio
     async def test_repo_exception_returns_500(self):
@@ -308,6 +379,7 @@ class TestDeleteThread:
             mock_repo.delete_thread.assert_called_once_with(
                 thread_id="user_student-1__session_s1",
                 user_id="student-1",
+                organization_id=None,
             )
 
     @pytest.mark.asyncio
@@ -325,6 +397,28 @@ class TestDeleteThread:
             )
 
             assert result.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_passes_active_org_scope(self):
+        """delete_thread binds mutations to the active org."""
+        auth = _make_auth("student-1", organization_id="org-active")
+
+        with patch("app.repositories.thread_repository.get_thread_repository") as mock_get_repo:
+            mock_repo = MagicMock()
+            mock_repo.delete_thread.return_value = True
+            mock_get_repo.return_value = mock_repo
+
+            await delete_thread(
+                request=_make_request(),
+                thread_id="user_student-1__session_s1",
+                auth=auth,
+            )
+
+            mock_repo.delete_thread.assert_called_once_with(
+                thread_id="user_student-1__session_s1",
+                user_id="student-1",
+                organization_id="org-active",
+            )
 
     @pytest.mark.asyncio
     async def test_repo_exception_returns_500(self):
@@ -374,6 +468,7 @@ class TestRenameThread:
                 thread_id="user_student-1__session_s1",
                 user_id="student-1",
                 title="My new title",
+                organization_id=None,
             )
 
     @pytest.mark.asyncio
@@ -392,6 +487,31 @@ class TestRenameThread:
             )
 
             assert result.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_rename_passes_active_org_scope(self):
+        """rename_thread binds mutations to the active org."""
+        auth = _make_auth("student-1", organization_id="org-active")
+        body = ThreadRenameRequest(title="Scoped title")
+
+        with patch("app.repositories.thread_repository.get_thread_repository") as mock_get_repo:
+            mock_repo = MagicMock()
+            mock_repo.rename_thread.return_value = True
+            mock_get_repo.return_value = mock_repo
+
+            await rename_thread(
+                request=_make_request(),
+                thread_id="user_student-1__session_s1",
+                body=body,
+                auth=auth,
+            )
+
+            mock_repo.rename_thread.assert_called_once_with(
+                thread_id="user_student-1__session_s1",
+                user_id="student-1",
+                title="Scoped title",
+                organization_id="org-active",
+            )
 
     @pytest.mark.asyncio
     async def test_repo_exception_returns_500(self):

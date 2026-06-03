@@ -10,6 +10,9 @@ from typing import Any, AsyncGenerator, Optional
 
 from app.core.constants import MAX_CONTENT_SNIPPET_LENGTH
 from app.engine.multi_agent.public_thinking import _resolve_public_thinking_content
+from app.engine.multi_agent.runtime_flow_ledger import (
+    build_runtime_flow_trace_from_state,
+)
 from app.engine.reasoning import (
     build_thinking_lifecycle_snapshot,
     merge_thinking_trajectory_state,
@@ -18,6 +21,17 @@ from app.engine.multi_agent.state import AgentState
 from app.services.llm_runtime_audit_service import infer_runtime_completion_degraded_reason
 
 logger = logging.getLogger(__name__)
+
+
+def _split_model_context(context: dict | None) -> tuple[dict, dict | None]:
+    """Remove backend-only continuation data from model-facing context."""
+
+    model_context = dict(context or {})
+    host_action_control_feedback = model_context.pop(
+        "_host_action_control_feedback",
+        None,
+    )
+    return model_context, host_action_control_feedback
 
 
 async def build_stream_bootstrap_impl(
@@ -44,7 +58,8 @@ async def build_stream_bootstrap_impl(
     register_event_queue(bus_id, event_queue)
     cleanup_stale_queues()
 
-    langchain_messages = (context or {}).get("langchain_messages", [])
+    model_context, host_action_control_feedback = _split_model_context(context)
+    langchain_messages = model_context.get("langchain_messages", [])
     serialized_messages = []
     for message in langchain_messages:
         if isinstance(message, dict):
@@ -61,7 +76,7 @@ async def build_stream_bootstrap_impl(
         "query": query,
         "user_id": user_id,
         "session_id": session_id,
-        "context": context or {},
+        "context": model_context,
         "messages": serialized_messages,
         "current_agent": "",
         "next_agent": "",
@@ -79,9 +94,10 @@ async def build_stream_bootstrap_impl(
         "provider": provider,
         "model": model,
         "routing_metadata": None,
-        "organization_id": (context or {}).get("organization_id"),
+        "organization_id": model_context.get("organization_id"),
         "_event_bus_id": bus_id,
-        **build_turn_local_state_defaults(context),
+        "_host_action_control_feedback": host_action_control_feedback,
+        **build_turn_local_state_defaults(model_context),
     }
 
     from app.engine.multi_agent.graph_runtime_bindings import (
@@ -339,7 +355,7 @@ async def emit_stream_finalization_impl(
             runtime_authoritative=runtime_authoritative,
             failover=runtime_failover,
             doc_count=len(sources),
-            thinking=effective_state.get("thinking"),
+            thinking=public_thinking_content or None,
             thinking_content=public_thinking_content,
             thinking_lifecycle=thinking_lifecycle,
             agent_type=agent_type,
@@ -348,6 +364,7 @@ async def emit_stream_finalization_impl(
             evidence_images=effective_state.get("evidence_images", []),
             thread_id=meta_thread_id,
             routing_metadata=routing_metadata,
+            runtime_flow_trace=build_runtime_flow_trace_from_state(effective_state),
             runtime_latency=runtime_latency,
             request_id=request_id,
         )

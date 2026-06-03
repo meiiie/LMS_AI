@@ -59,20 +59,33 @@ def load_chat_history_page(
     user_id: str,
     limit: int,
     offset: int,
+    organization_id: str | None = None,
 ):
     """Load paginated chat history from the repository."""
     from app.repositories.chat_history_repository import get_chat_history_repository
 
     chat_history_repo = get_chat_history_repository()
-    return chat_history_repo.get_user_history(user_id, limit, offset)
+    return chat_history_repo.get_user_history(
+        user_id,
+        limit,
+        offset,
+        organization_id=organization_id,
+    )
 
 
-def delete_chat_history_records(*, user_id: str) -> int:
+def delete_chat_history_records(
+    *,
+    user_id: str,
+    organization_id: str | None = None,
+) -> int:
     """Delete all chat history for a user via the repository."""
     from app.repositories.chat_history_repository import get_chat_history_repository
 
     chat_history_repo = get_chat_history_repository()
-    return chat_history_repo.delete_user_history(user_id)
+    return chat_history_repo.delete_user_history(
+        user_id,
+        organization_id=organization_id,
+    )
 
 
 def process_get_chat_history_request(
@@ -81,6 +94,7 @@ def process_get_chat_history_request(
     user_id: str,
     limit: int,
     offset: int,
+    organization_id: str | None = None,
 ):
     """Load, shape, and log the standard get-history response."""
     limit, offset = _chat_endpoint_presenter.normalize_history_pagination(
@@ -91,6 +105,7 @@ def process_get_chat_history_request(
         user_id=user_id,
         limit=limit,
         offset=offset,
+        organization_id=organization_id,
     )
     response = _chat_endpoint_presenter.build_get_chat_history_response(
         messages=messages,
@@ -113,9 +128,13 @@ def process_delete_chat_history_request(
     user_id: str,
     deleted_by: str,
     role: str,
+    organization_id: str | None = None,
 ):
     """Delete, shape, and log the standard delete-history response."""
-    deleted_count = delete_chat_history_records(user_id=user_id)
+    deleted_count = delete_chat_history_records(
+        user_id=user_id,
+        organization_id=organization_id,
+    )
     _chat_endpoint_presenter.log_delete_chat_history_response(
         logger=logger,
         deleted_count=deleted_count,

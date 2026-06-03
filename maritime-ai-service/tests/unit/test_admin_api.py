@@ -7,6 +7,9 @@ Tests document upload/status/list/delete and domain management endpoints.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+from fastapi import HTTPException
+
+from app.core.security_models import AuthenticatedUser
 
 from app.api.v1.admin import (
     _ingestion_jobs,
@@ -14,6 +17,16 @@ from app.api.v1.admin import (
     _MAX_TRACKED_JOBS,
     _run_ingestion_background,
 )
+
+
+def _admin_auth(organization_id="org-admin") -> AuthenticatedUser:
+    return AuthenticatedUser(
+        user_id="admin-1",
+        auth_method="jwt",
+        role="admin",
+        platform_role="platform_admin",
+        organization_id=organization_id,
+    )
 
 
 # =============================================================================
@@ -544,6 +557,106 @@ class TestUploadDocumentValidation:
     def test_background_task_callable(self):
         """Background task function can be referenced."""
         assert callable(_run_ingestion_background)
+
+
+# =============================================================================
+# Document Administration Tenant Scope
+# =============================================================================
+
+
+class TestDocumentAdministrationTenantScope:
+    """Tests for tenant scoping in direct document administration SQL."""
+
+    def _session_factory(self, session):
+        factory = MagicMock()
+        factory.return_value.__enter__ = MagicMock(return_value=session)
+        factory.return_value.__exit__ = MagicMock(return_value=False)
+        return factory
+
+    @pytest.mark.asyncio
+    async def test_list_documents_filters_by_active_org(self, monkeypatch):
+        from app.api.v1.admin import list_documents
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        session = MagicMock()
+        session.execute.return_value.fetchall.return_value = []
+
+        with patch(
+            "app.api.v1.admin.get_shared_session_factory",
+            return_value=self._session_factory(session),
+        ):
+            result = await list_documents(request=MagicMock(), auth=_admin_auth("org-A"))
+
+        assert result == []
+        sql = str(session.execute.call_args[0][0])
+        params = session.execute.call_args[0][1]
+        assert "WHERE organization_id = :org_id" in sql
+        assert params["org_id"] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_list_documents_requires_active_org_before_db(self, monkeypatch):
+        from app.api.v1.admin import list_documents
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        get_factory = MagicMock()
+
+        with patch("app.api.v1.admin.get_shared_session_factory", get_factory):
+            with pytest.raises(HTTPException) as exc_info:
+                await list_documents(request=MagicMock(), auth=_admin_auth(None))
+
+        assert exc_info.value.status_code == 403
+        get_factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_document_filters_by_active_org(self, monkeypatch):
+        from app.api.v1.admin import delete_document
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        session = MagicMock()
+        delete_result = MagicMock()
+        delete_result.rowcount = 3
+        session.execute.return_value = delete_result
+        graph = MagicMock()
+        graph.is_available.return_value = False
+
+        with patch(
+            "app.api.v1.admin.get_shared_session_factory",
+            return_value=self._session_factory(session),
+        ), patch("app.api.v1.admin.get_user_graph_repository", return_value=graph):
+            result = await delete_document(
+                request=MagicMock(),
+                document_id="PRIVATE-DOC",
+                auth=_admin_auth("org-B"),
+            )
+
+        sql = str(session.execute.call_args[0][0])
+        params = session.execute.call_args[0][1]
+        assert "DELETE FROM knowledge_embeddings WHERE document_id = :doc_id" in sql
+        assert "AND organization_id = :org_id" in sql
+        assert params == {"doc_id": "PRIVATE-DOC", "org_id": "org-B"}
+        assert result["deleted_chunks"] == 3
+
+    @pytest.mark.asyncio
+    async def test_delete_document_requires_active_org_before_db(self, monkeypatch):
+        from app.api.v1.admin import delete_document
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        get_factory = MagicMock()
+
+        with patch("app.api.v1.admin.get_shared_session_factory", get_factory):
+            with pytest.raises(HTTPException) as exc_info:
+                await delete_document(
+                    request=MagicMock(),
+                    document_id="PRIVATE-DOC",
+                    auth=_admin_auth(None),
+                )
+
+        assert exc_info.value.status_code == 403
+        get_factory.assert_not_called()
 
 
 # =============================================================================

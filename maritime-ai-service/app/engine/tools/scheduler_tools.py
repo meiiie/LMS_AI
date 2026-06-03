@@ -30,6 +30,7 @@ class SchedulerToolState:
     """Per-request state for scheduler tools."""
     user_id: Optional[str] = None
     domain_id: str = "maritime"
+    identity_key: Optional[str] = None
 
 
 _scheduler_tool_state: contextvars.ContextVar[Optional[SchedulerToolState]] = contextvars.ContextVar(
@@ -37,20 +38,93 @@ _scheduler_tool_state: contextvars.ContextVar[Optional[SchedulerToolState]] = co
 )
 
 
-def _get_scheduler_state() -> SchedulerToolState:
-    """Get or create per-request scheduler tool state."""
+def _tool_identity(
+    user_id: Optional[str] = None,
+    domain_id: str = "maritime",
+) -> tuple[str, Optional[str], str, bool]:
+    """Resolve the current scheduler tool identity for state isolation."""
+    runtime_user_id = None
+    runtime_org_id = ""
+    runtime_session_id = ""
+    identity_available = bool(user_id)
+
+    try:
+        from app.engine.tools.runtime_context import get_current_tool_runtime_context
+
+        runtime = get_current_tool_runtime_context()
+        if runtime:
+            runtime_user_id = runtime.user_id
+            runtime_org_id = str(runtime.organization_id or "").strip()
+            runtime_session_id = str(runtime.session_id or "").strip()
+            identity_available = identity_available or bool(
+                runtime_user_id or runtime_org_id or runtime_session_id
+            )
+    except Exception:
+        pass
+
+    if not runtime_org_id:
+        try:
+            from app.core.org_context import get_current_org_id
+
+            runtime_org_id = str(get_current_org_id() or "").strip()
+            identity_available = identity_available or bool(runtime_org_id)
+        except Exception:
+            pass
+
+    resolved_user_id = (
+        str(user_id or runtime_user_id).strip()
+        if user_id or runtime_user_id
+        else None
+    )
+    resolved_domain_id = str(domain_id or "maritime").strip() or "maritime"
+    identity_key = (
+        f"user={resolved_user_id or ''}|org={runtime_org_id}|"
+        f"session={runtime_session_id}|domain={resolved_domain_id}"
+    )
+    return identity_key, resolved_user_id, resolved_domain_id, identity_available
+
+
+def _new_scheduler_state(
+    user_id: Optional[str] = None,
+    domain_id: str = "maritime",
+) -> SchedulerToolState:
+    identity_key, resolved_user_id, resolved_domain_id, _ = _tool_identity(
+        user_id,
+        domain_id,
+    )
+    return SchedulerToolState(
+        user_id=resolved_user_id,
+        domain_id=resolved_domain_id,
+        identity_key=identity_key,
+    )
+
+
+def _get_scheduler_state(
+    user_id: Optional[str] = None,
+    domain_id: str = "maritime",
+) -> SchedulerToolState:
+    """Get or create identity-scoped scheduler tool state."""
+    identity_key, resolved_user_id, resolved_domain_id, identity_available = (
+        _tool_identity(user_id, domain_id)
+    )
     state = _scheduler_tool_state.get(None)
     if state is None:
-        state = SchedulerToolState()
+        state = _new_scheduler_state(user_id, domain_id)
         _scheduler_tool_state.set(state)
+    elif identity_available and state.identity_key != identity_key:
+        state = _new_scheduler_state(user_id, domain_id)
+        _scheduler_tool_state.set(state)
+    elif state.identity_key is None:
+        state.identity_key = identity_key
+        if resolved_user_id:
+            state.user_id = resolved_user_id
+        state.domain_id = resolved_domain_id
     return state
 
 
 def set_scheduler_user(user_id: str, domain_id: str = "maritime") -> None:
     """Set current user context for scheduler tools (per-request)."""
-    state = _get_scheduler_state()
-    state.user_id = user_id
-    state.domain_id = domain_id
+    _get_scheduler_state(user_id, domain_id)
 
 
 @tool

@@ -29,11 +29,20 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from app.auth.organization_context import (
+    ensure_user_org_membership,
+    resolve_default_login_organization_id,
+)
 from app.auth.token_service import create_token_pair
 from app.auth.user_service import find_or_create_by_provider
 from app.core.config import settings
+from app.engine.runtime.event_payload_sanitizer import (
+    hash_runtime_identifier,
+    redact_runtime_secret_text,
+)
 
 logger = logging.getLogger(__name__)
+_MAX_DEV_LOGIN_DIAGNOSTIC_LENGTH = 500
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -72,6 +81,19 @@ def _is_private_source(host: Optional[str]) -> bool:
         # private IP at the proxy layer.
         return host == "localhost"
     return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
+def _dev_login_ref(value: object) -> str:
+    return hash_runtime_identifier(value) or "sha256:empty"
+
+
+def _safe_dev_login_detail(value: object, *secret_values: object) -> str:
+    text = str(value or "")
+    for secret_value in secret_values:
+        secret = str(secret_value or "")
+        if secret:
+            text = text.replace(secret, "<redacted-secret>")
+    return redact_runtime_secret_text(text, max_length=_MAX_DEV_LOGIN_DIAGNOSTIC_LENGTH)
 
 
 def _build_stateless_dev_user(*, email: str, name: str, role: str) -> dict:
@@ -135,7 +157,7 @@ async def _find_or_create_dev_user(
             pass
         logger.warning(
             "/auth/dev-login using stateless fallback because user DB is unavailable: %s",
-            exc,
+            _safe_dev_login_detail(exc, fallback_email, provider_sub),
         )
         return _build_stateless_dev_user(
             email=fallback_email,
@@ -197,12 +219,18 @@ async def dev_login(request: Request, body: Optional[DevLoginRequest] = None) ->
             detail="dev-login: failed to materialise dev user",
         )
 
+    assigned_org_id = resolve_default_login_organization_id(settings)
+    if assigned_org_id:
+        await ensure_user_org_membership(user["id"], assigned_org_id)
+
     token_pair = await create_token_pair(
         user_id=user["id"],
         email=user.get("email"),
         name=user.get("name"),
         role=user.get("role", role),
         platform_role=user.get("platform_role"),
+        role_source="platform",
+        active_organization_id=assigned_org_id,
         auth_method="dev",
     )
 
@@ -218,15 +246,16 @@ async def dev_login(request: Request, body: Optional[DevLoginRequest] = None) ->
             user_agent=request.headers.get("user-agent"),
         )
     except Exception as audit_err:
-        logger.debug("dev-login audit log failed: %s", audit_err)
+        logger.debug(
+            "dev-login audit log failed: %s",
+            _safe_dev_login_detail(audit_err, user["id"], email),
+        )
 
-    assigned_org_id = settings.default_organization_id if (
-        settings.enable_multi_tenant and settings.default_organization_id
-    ) else ""
+    assigned_org_id = assigned_org_id or ""
 
     logger.info(
-        "/auth/dev-login issued JWT for user_id=%s email=%s role=%s (source=%s)",
-        user["id"], email, role, source_host,
+        "/auth/dev-login issued JWT user_ref=%s email_ref=%s role=%s (source=%s)",
+        _dev_login_ref(user["id"]), _dev_login_ref(email), role, source_host,
     )
 
     return JSONResponse({

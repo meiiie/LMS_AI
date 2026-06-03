@@ -811,6 +811,8 @@ def conservative_fast_route_impl(
     direct_agent_name: str,
     memory_agent_name: str | None = None,
     rag_agent_name: str | None = None,
+    code_studio_agent_name: str | None = None,
+    needs_code_studio_fn: Any | None = None,
 ) -> tuple[str, str, float, str] | None:
     """Route only the most obvious turns without invoking the supervisor LLM."""
     normalized = normalize_router_text_fn(query)
@@ -906,6 +908,22 @@ def conservative_fast_route_impl(
             "personal",
             1.0,
             "obvious memory write turn",
+        )
+
+    if (
+        code_studio_agent_name
+        and needs_code_studio_fn
+        and needs_code_studio_fn(query)
+        and (
+            _looks_obvious_maritime_lookup_turn(normalized)
+            or _looks_colreg_rule_explanation_turn(normalized)
+        )
+    ):
+        return (
+            code_studio_agent_name,
+            "code_execution",
+            1.0,
+            "obvious Code Studio visual app turn",
         )
 
     if rag_agent_name and _looks_obvious_maritime_lookup_turn(normalized):

@@ -122,7 +122,11 @@ def test_reembed_legacy_rows_updates_and_stamps_metadata(monkeypatch):
 
     monkeypatch.setattr(mod, "_update_row_embedding", _capture)
 
-    result = mod.reembed_legacy_embedding_rows(dry_run=False, batch_size=2)
+    result = mod.reembed_legacy_embedding_rows(
+        dry_run=False,
+        batch_size=2,
+        acknowledge_maintenance_window=True,
+    )
 
     assert sum(item.updated_rows for item in result.tables) == 2
     assert len(writes) == 2
@@ -131,6 +135,16 @@ def test_reembed_legacy_rows_updates_and_stamps_metadata(monkeypatch):
         item["metadata"]["embedding_space_fingerprint"] == "ollama:embeddinggemma:768"
         for item in writes
     )
+
+
+def test_reembed_legacy_rows_apply_requires_maintenance_ack(monkeypatch):
+    from app.services import legacy_embedding_reembed_service as mod
+
+    with pytest.raises(RuntimeError, match="Maintenance window acknowledgement"):
+        mod.reembed_legacy_embedding_rows(
+            dry_run=False,
+            acknowledge_maintenance_window=False,
+        )
 
 
 def test_reembed_legacy_rows_requires_active_backend(monkeypatch):

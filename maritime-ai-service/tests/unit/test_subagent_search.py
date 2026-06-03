@@ -15,10 +15,8 @@ Tests cover:
 """
 
 import asyncio
-import json
 import operator
 from types import SimpleNamespace
-from typing import Annotated, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -254,6 +252,8 @@ class TestPlatformWorker:
             "price": "15.000.000đ",
             "extracted_price": 15000000,
             "link": "https://shopee.vn/test",
+            "provider_payload": {"id": "raw-provider"},
+            "access_token": "raw-product-token",
         }
 
         mock_adapter = MagicMock()
@@ -279,6 +279,11 @@ class TestPlatformWorker:
 
         assert len(result["all_products"]) == 1
         assert result["all_products"][0]["title"] == "Laptop ABC"
+        serialized = str(result)
+        assert "provider_payload" not in serialized
+        assert "raw-provider" not in serialized
+        assert "access_token" not in serialized
+        assert "raw-product-token" not in serialized
         assert result["platforms_searched"] == ["shopee"]
         assert len(result["platform_errors"]) == 0
 
@@ -313,7 +318,9 @@ class TestPlatformWorker:
         from app.engine.multi_agent.subagents.search.workers import platform_worker
 
         mock_adapter = MagicMock()
-        mock_adapter.search_sync.side_effect = RuntimeError("Connection failed")
+        mock_adapter.search_sync.side_effect = RuntimeError(
+            "Connection failed access_token=raw-search-token"
+        )
 
         mock_registry = MagicMock()
         mock_registry.get.return_value = mock_adapter
@@ -336,6 +343,9 @@ class TestPlatformWorker:
         assert len(result["all_products"]) == 0
         assert len(result["platform_errors"]) == 1
         assert "RuntimeError" in result["platform_errors"][0]
+        serialized = str(result)
+        assert "raw-search-token" not in serialized
+        assert "access_token" not in serialized
 
     @pytest.mark.asyncio
     async def test_tools_used_returned(self):
@@ -354,7 +364,7 @@ class TestPlatformWorker:
             return_value=None,
         ):
             result = await platform_worker({
-                "query": "test",
+                "query": "Bearer raw-tool-query-token-12345678",
                 "platform_id": "google_shopping",
                 "max_results": 20,
                 "page": 1,
@@ -363,6 +373,8 @@ class TestPlatformWorker:
 
         assert len(result["tools_used"]) == 1
         assert result["tools_used"][0]["name"] == "tool_search_google_shopping"
+        assert result["tools_used"][0]["args"]["query"] == "Bearer <redacted-secret>"
+        assert "raw-tool-query-token-12345678" not in str(result)
 
     @pytest.mark.asyncio
     async def test_events_pushed_to_queue(self):
@@ -877,6 +889,28 @@ class TestWorkerHelpers:
 
 class TestStreamingEvents:
     """Event bus integration tests."""
+
+    @pytest.mark.asyncio
+    async def test_worker_push_sanitizes_event_payloads(self):
+        from app.engine.multi_agent.subagents.search.workers import _push
+
+        queue = asyncio.Queue()
+        await _push(
+            queue,
+            {
+                "type": "thinking_delta",
+                "content": "Bearer raw-search-event-token-12345678",
+                "node": "search",
+                "details": {"access_token": "raw-access-token"},
+            },
+        )
+
+        event = queue.get_nowait()
+        serialized = str(event)
+        assert event["content"] == "Bearer <redacted-secret>"
+        assert "<redacted-secret>" in serialized
+        assert "raw-search-event-token-12345678" not in serialized
+        assert "raw-access-token" not in serialized
 
     @pytest.mark.asyncio
     async def test_plan_search_emits_thinking_events(self):

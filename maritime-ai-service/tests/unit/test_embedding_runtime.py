@@ -406,6 +406,208 @@ async def test_input_processor_semantic_fact_retrieval_uses_embedding_generator(
     semantic_memory.search_relevant_facts.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_input_processor_blocks_semantic_memory_without_org_context(
+    monkeypatch,
+):
+    from app.core.config import settings
+    from app.core.org_context import current_org_id
+    from app.services.input_processor_context_runtime import (
+        _populate_semantic_memory_context,
+    )
+
+    context = SimpleNamespace(
+        user_facts=["PRIVATE FACT"],
+        semantic_context="",
+        memory_warnings=[],
+    )
+    semantic_memory = MagicMock()
+    semantic_memory.retrieve_insights_prioritized = AsyncMock(return_value=[])
+    semantic_memory.retrieve_context = AsyncMock()
+    semantic_memory.search_relevant_facts = MagicMock()
+    settings_obj = SimpleNamespace(
+        enable_semantic_fact_retrieval=True,
+        fact_min_similarity=0.3,
+        max_injected_facts=5,
+    )
+
+    monkeypatch.setattr(settings, "enable_multi_tenant", True)
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "default_organization_id", "default")
+    token = current_org_id.set(None)
+    try:
+        await _populate_semantic_memory_context(
+            semantic_memory=semantic_memory,
+            context=context,
+            user_id="user-private-123",
+            message="PRIVATE MESSAGE",
+            settings_obj=settings_obj,
+            logger_obj=MagicMock(),
+        )
+    finally:
+        current_org_id.reset(token)
+
+    assert context.user_facts == []
+    assert context.semantic_context == ""
+    assert context.memory_warnings == [
+        "semantic_memory_read_blocked_missing_org_context"
+    ]
+    semantic_memory.retrieve_insights_prioritized.assert_not_called()
+    semantic_memory.retrieve_context.assert_not_called()
+    semantic_memory.search_relevant_facts.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_input_processor_records_typed_memory_retrieval_summary():
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from app.models.semantic_memory import MemoryType
+    from app.services.input_processor_context_runtime import (
+        _populate_semantic_memory_context,
+    )
+
+    context = SimpleNamespace(
+        user_facts=[],
+        semantic_context="",
+        memory_warnings=[],
+        memory_retrieval_summary={},
+    )
+    insight = SimpleNamespace(
+        category=SimpleNamespace(value="learning_style"),
+        content="PRIVATE INSIGHT CONTENT",
+    )
+    memory = SimpleNamespace(
+        memory_type=MemoryType.MESSAGE,
+        content="PRIVATE MEMORY CONTENT",
+    )
+    semantic_context = SimpleNamespace(
+        relevant_memories=[memory],
+        to_prompt_context=MagicMock(return_value="PRIVATE PROMPT CONTEXT"),
+    )
+    fact = SimpleNamespace(
+        id="fact-1",
+        metadata={"fact_type": "goal", "confidence": 0.9, "access_count": 2},
+        content="goal: PRIVATE FACT CONTENT",
+        importance=0.8,
+        created_at=datetime(2026, 5, 31, tzinfo=timezone.utc),
+    )
+    semantic_memory = MagicMock()
+    semantic_memory.retrieve_insights_prioritized = AsyncMock(return_value=[insight])
+    semantic_memory.retrieve_context = AsyncMock(return_value=semantic_context)
+    semantic_memory.search_relevant_facts.return_value = [fact]
+
+    generator = MagicMock()
+    generator.agenerate = AsyncMock(return_value=[0.1, 0.2, 0.3])
+    settings_obj = SimpleNamespace(
+        enable_semantic_fact_retrieval=True,
+        fact_min_similarity=0.3,
+        max_injected_facts=5,
+        similarity_threshold=0.7,
+    )
+
+    with patch(
+        "app.engine.semantic_memory.embeddings.get_embedding_generator",
+        return_value=generator,
+    ):
+        await _populate_semantic_memory_context(
+            semantic_memory=semantic_memory,
+            context=context,
+            user_id="user-1",
+            message="mÃ¬nh muá»‘n há»c SOLAS",
+            settings_obj=settings_obj,
+            logger_obj=MagicMock(),
+        )
+
+    summary = context.memory_retrieval_summary
+    assert summary["status"] == "ready"
+    assert summary["relevant_memory_count"] == 1
+    assert summary["insight_count"] == 1
+    assert summary["user_fact_count"] == 1
+    assert summary["semantic_memory_count"] == 3
+    assert summary["memory_type_names"] == ["message"]
+    assert summary["fact_type_names"] == ["goal"]
+    assert summary["insight_category_names"] == ["learning_style"]
+    assert summary["warning_codes"] == []
+    assert "PRIVATE" not in str(summary)
+
+
+@pytest.mark.asyncio
+async def test_input_processor_records_typed_episodic_retrieval_summary():
+    from app.engine.runtime.episodic_retrieval import EpisodicMatch
+    from app.services.input_processor import ChatContext
+    from app.services.input_processor_context_runtime import build_context_impl
+
+    request = SimpleNamespace(
+        user_id="user-episode",
+        message="SOLAS",
+        role="student",
+        user_context=None,
+        organization_id="org-A",
+    )
+    settings_obj = SimpleNamespace(
+        enable_cross_platform_memory=False,
+        enable_visual_memory=False,
+        enable_episodic_retrieval=True,
+        enable_vision=False,
+        enable_emotional_state=False,
+    )
+    core_block = SimpleNamespace(
+        get_block=AsyncMock(return_value="CORE PROFILE"),
+    )
+    matches = [
+        EpisodicMatch(
+            session_id="prior-session",
+            seq=7,
+            event_type="user_message",
+            text="PRIVATE PRIOR TURN ABOUT SOLAS",
+            created_at="2026-05-31T00:00:00Z",
+            score=0.6,
+        )
+    ]
+
+    with patch(
+        "app.engine.semantic_memory.core_memory_block.get_core_memory_block",
+        return_value=core_block,
+    ), patch(
+        "app.engine.runtime.episodic_retrieval.search_prior_user_turns",
+        new=AsyncMock(return_value=matches),
+    ) as search_mock, patch(
+        "app.services.input_processor_context_runtime._apply_budgeted_history",
+        new=AsyncMock(return_value=None),
+    ):
+        context = await build_context_impl(
+            request=request,
+            session_id="current-session",
+            user_name=None,
+            recent_history_fallback=None,
+            chat_context_cls=ChatContext,
+            semantic_memory=None,
+            chat_history=None,
+            learning_graph=None,
+            memory_summarizer=None,
+            conversation_analyzer=None,
+            settings_obj=settings_obj,
+            logger_obj=MagicMock(),
+        )
+
+    summary = context.episodic_retrieval_summary
+    assert summary["schema_version"] == "wiii.episodic_retrieval.v1"
+    assert summary["status"] == "ready"
+    assert summary["match_count"] == 1
+    assert summary["event_types"] == ["user_message"]
+    assert summary["max_score"] == 0.6
+    assert summary["min_score"] == 0.6
+    assert summary["current_session_excluded"] is True
+    assert summary["org_scoped"] is True
+    assert summary["raw_content_included"] is False
+    assert summary["warning_codes"] == []
+    assert "PRIVATE" not in str(summary)
+    assert "PRIVATE PRIOR TURN ABOUT SOLAS" in context.core_memory_block
+    search_mock.assert_awaited_once()
+    assert search_mock.call_args.kwargs["org_id"] == "org-A"
+
+
 def test_semantic_memory_engine_search_relevant_facts_facade_delegates_to_repository():
     from app.engine.semantic_memory.core import SemanticMemoryEngine
 

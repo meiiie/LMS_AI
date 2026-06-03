@@ -29,8 +29,16 @@ from app.engine.multi_agent.tool_policy_session import (
     finalize_tool_policy_visible_tools,
     record_tool_policy_session,
 )
+from app.engine.multi_agent.external_app_action_runtime import (
+    record_external_app_action_plan,
+    resolve_external_app_action_plan,
+)
 from app.engine.multi_agent.wiii_connect_intent import (
+    looks_wiii_connect_external_app_action_request,
+    looks_wiii_connect_external_app_action_request_for_state,
     looks_wiii_connect_facebook_post_request,
+    looks_wiii_connect_facebook_post_request_for_state,
+    resolve_wiii_connect_status_provider_slugs,
 )
 from app.engine.tools.tool_capability_registry import (
     DOC_COURSE_HOST_ACTION_TOOL,
@@ -38,10 +46,13 @@ from app.engine.tools.tool_capability_registry import (
     DOCUMENT_PREVIEW_CAPABILITY_NAMES,
     HOST_ACTION_PREFIX,
     POINTY_TOOL_PREFIX,
+    WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL,
+    WIII_CONNECT_FACEBOOK_POST_APPLY_ACTION,
     WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION,
     WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
     WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION,
 )
+from app.engine.wiii_connect.snapshot import build_wiii_connect_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -99,10 +110,45 @@ def _needs_maritime_search(query: str) -> bool:
     return _load_attr("app.engine.multi_agent.direct_intent", "_needs_maritime_search")(query)
 
 
-def _looks_wiii_connect_facebook_post_request(query: str) -> bool:
+def _looks_wiii_connect_facebook_post_request(
+    query: str,
+    state: Optional[AgentState] = None,
+) -> bool:
     """Detect explicit requests to create/publish a Facebook post via Wiii Connect."""
 
+    if state is not None:
+        return looks_wiii_connect_facebook_post_request_for_state(query, state)
     return looks_wiii_connect_facebook_post_request(query)
+
+
+def _looks_wiii_connect_external_app_action_request(
+    query: str,
+    state: Optional[AgentState] = None,
+) -> bool:
+    """Detect explicit external app actions routed through Wiii Connect."""
+
+    if state is not None:
+        return looks_wiii_connect_external_app_action_request_for_state(query, state)
+    return looks_wiii_connect_external_app_action_request(query)
+
+
+def _wiii_connect_agent_ready_provider_slugs(
+    state: Optional[AgentState],
+    query: str,
+) -> tuple[str, ...]:
+    """Return connected external providers that may be exposed to the model."""
+
+    if not getattr(settings, "enable_wiii_connect_composio", False):
+        return ()
+    try:
+        snapshot = build_wiii_connect_snapshot(
+            state=state if isinstance(state, dict) else {},
+            query=query,
+        )
+        return snapshot.agent_ready_external_provider_slugs()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[DIRECT] Wiii Connect readiness snapshot unavailable: %s", exc)
+        return ()
 
 
 def _wiii_connect_facebook_post_preview_capability() -> dict[str, Any]:
@@ -125,9 +171,6 @@ def _wiii_connect_facebook_post_preview_capability() -> dict[str, Any]:
         "input_schema": {
             "type": "object",
             "properties": {
-                "provider_slug": {"type": "string", "default": "facebook"},
-                "connection_ref": {"type": "string"},
-                "page_id": {"type": "string"},
                 "message": {
                     "type": "string",
                     "description": "The final Facebook post copy to preview.",
@@ -165,9 +208,6 @@ def _wiii_connect_facebook_post_direct_apply_capability() -> dict[str, Any]:
         "input_schema": {
             "type": "object",
             "properties": {
-                "provider_slug": {"type": "string", "default": "facebook"},
-                "connection_ref": {"type": "string"},
-                "page_id": {"type": "string"},
                 "message": {
                     "type": "string",
                     "description": "The final Facebook post copy to publish.",
@@ -611,6 +651,36 @@ def _safe_document_preview_capability_tools(
     ]
 
 
+def _filter_host_capability_tools_for_external_action_plan(
+    capabilities_tools: list[dict[str, Any]],
+    external_action_plan: Any | None,
+) -> list[dict[str, Any]]:
+    """Remove host-declared actions owned by a backend Wiii Connect lane.
+
+    OpenHuman keeps external app execution behind one toolkit owner. Wiii should
+    do the same: when the direct Facebook publish lane is active, the backend
+    Wiii Connect gateway owns preview/apply/result synthesis. The host can still
+    expose other actions, but it must not generate a same-name host action tool
+    that shadows the backend gateway tool.
+    """
+
+    if str(getattr(external_action_plan, "kind", "") or "") not in {
+        "facebook_post_direct_apply",
+        "provider_action",
+    }:
+        return capabilities_tools
+    backend_owned_actions = {
+        WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION,
+        WIII_CONNECT_FACEBOOK_POST_APPLY_ACTION,
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION,
+    }
+    return [
+        tool
+        for tool in capabilities_tools
+        if str(tool.get("name") or "").strip() not in backend_owned_actions
+    ]
+
+
 def _safe_intent_flag(fn, query: str, *, default: bool = False) -> bool:
     try:
         return bool(fn(query))
@@ -692,7 +762,13 @@ def _resolve_direct_turn_path_decision(
         looks_document_preview=_looks_like_document_preview_request(query, state),
         looks_reasoning_safety_meta=_looks_reasoning_safety_meta_turn(query),
         looks_wiii_pipeline_meta=_looks_wiii_pipeline_meta_turn(query),
-        needs_external_app_action=_looks_wiii_connect_facebook_post_request(query),
+        needs_external_connection_status=bool(
+            resolve_wiii_connect_status_provider_slugs(query)
+        ),
+        needs_external_app_action=_looks_wiii_connect_external_app_action_request(
+            query,
+            state,
+        ),
         needs_weather_lookup=_safe_intent_flag(_needs_weather_lookup, query),
         needs_web_search=_safe_intent_flag(_needs_web_search, query),
         needs_datetime=_safe_intent_flag(_needs_datetime, query),
@@ -754,6 +830,57 @@ def _record_empty_tool_policy_session(
             candidate_tool_names=(),
         ),
     )
+
+
+def ensure_direct_turn_policy_metadata(
+    *,
+    query: str,
+    state: Optional[AgentState],
+    user_role: str = "student",
+    record_empty_policy: bool = False,
+) -> TurnPathDecision | None:
+    """Record direct-turn path facts even when no tool loop is entered.
+
+    Direct fast paths and intentionally tool-less chat turns can bypass
+    ``_collect_direct_tools``. Without this baseline, the public runtime ledger
+    cannot explain why no tools were visible. This helper records the same
+    governor decision used by the tool collector and, when requested, an empty
+    policy session for a final no-tool turn.
+    """
+
+    if not isinstance(state, dict):
+        return None
+
+    force_skills = _force_skills_from_state(state)
+    structured_visuals_enabled = getattr(settings, "enable_structured_visuals", False)
+    visual_decision = _safe_resolve_visual_decision(query)
+    visual_requirement = _safe_build_visual_requirement(
+        visual_decision,
+        structured_visuals_enabled=structured_visuals_enabled,
+    )
+    try:
+        thinking_mode = _infer_direct_thinking_mode(query, state, [])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[DIRECT] Thinking mode unavailable for baseline turn path: %s", exc)
+        thinking_mode = ""
+
+    decision = _resolve_direct_turn_path_decision(
+        query=query,
+        state=state,
+        visual_decision=visual_decision,
+        visual_requirement=visual_requirement,
+        thinking_mode=thinking_mode,
+        force_skills=force_skills,
+    )
+    _record_turn_path_decision(state, decision)
+    if record_empty_policy and not isinstance(state.get("_tool_policy_session"), dict):
+        _record_empty_tool_policy_session(
+            state=state,
+            decision=decision,
+            query=query,
+            user_role=user_role,
+        )
+    return decision
 
 
 def _apply_tool_policy_session(
@@ -873,6 +1000,22 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
             user_role=user_role,
         )
         return [], False
+
+    ready_wiii_connect_providers: tuple[str, ...] = ()
+    external_action_plan: Any | None = None
+    try:
+        ready_wiii_connect_providers = _wiii_connect_agent_ready_provider_slugs(
+            state,
+            query,
+        )
+        external_action_plan = resolve_external_app_action_plan(
+            query=query,
+            state=state,
+            ready_provider_slugs=ready_wiii_connect_providers,
+        )
+        record_external_app_action_plan(state, external_action_plan)
+    except Exception as _e:
+        logger.debug("[DIRECT] Wiii Connect action plan unavailable: %s", _e)
 
     _direct_tools = []
     try:
@@ -1048,6 +1191,10 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
                 state=state,
                 ctx=state_context,
             )
+            capabilities_tools = _filter_host_capability_tools_for_external_action_plan(
+                capabilities_tools,
+                external_action_plan,
+            )
             host_actions_enabled = getattr(settings, "enable_host_actions", False)
             safe_doc_preview_fallback = (
                 not host_actions_enabled
@@ -1070,7 +1217,10 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
                         event_bus_id=state.get("_event_bus_id") or state.get("session_id") or "",
                         approval_context={
                             "query": query,
-                            "host_action_feedback": ((state.get("context") or {}).get("host_action_feedback") or {}),
+                            "host_action_feedback": (
+                                state.get("_host_action_control_feedback")
+                                or ((state.get("context") or {}).get("host_action_feedback") or {})
+                            ),
                         },
                     )
                 )
@@ -1078,37 +1228,61 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
         logger.debug("[DIRECT] Host action tools unavailable: %s", _e)
 
     try:
-        if (
-            _looks_wiii_connect_facebook_post_request(query)
-            and getattr(settings, "enable_wiii_connect_composio", False)
-        ):
-            try:
-                make_backend_facebook_tool = _load_attr(
-                    "app.engine.tools.wiii_connect_tools",
-                    "make_wiii_connect_facebook_post_direct_apply_tool",
-                )
-                _direct_tools.append(
-                    make_backend_facebook_tool(
-                        state=state if isinstance(state, dict) else {},
+        if external_action_plan is not None and external_action_plan.ready:
+            scoped_wiii_connect_providers = (
+                (external_action_plan.provider_slug,)
+                if external_action_plan.provider_slug
+                else ready_wiii_connect_providers
+            )
+            if external_action_plan.kind == "provider_action":
+                try:
+                    make_list_actions_tool = _load_attr(
+                        "app.engine.tools.wiii_connect_tools",
+                        "make_wiii_connect_list_actions_tool",
                     )
-                )
-            except Exception as backend_tool_error:  # noqa: BLE001
-                logger.debug(
-                    "[DIRECT] Backend Wiii Connect Facebook tool unavailable: %s",
-                    backend_tool_error,
-                )
-                generate_host_action_tools = _load_attr(
-                    "app.engine.context.action_tools",
-                    "generate_host_action_tools",
-                )
-                _direct_tools.extend(
-                    generate_host_action_tools(
-                        [_wiii_connect_facebook_post_direct_apply_capability()],
-                        user_role,
-                        event_bus_id=state.get("_event_bus_id") if isinstance(state, dict) else "",
-                        approval_context={"query": query},
+                    make_delegate_tool = _load_attr(
+                        "app.engine.tools.wiii_connect_tools",
+                        "make_wiii_connect_delegate_to_integration_tool",
                     )
-                )
+                    _direct_tools.append(
+                        make_list_actions_tool(
+                            state=state if isinstance(state, dict) else {},
+                            allowed_provider_slugs=scoped_wiii_connect_providers,
+                            allowed_action_slugs_by_provider=(
+                                external_action_plan.action_allowlists_by_provider
+                            ),
+                        )
+                    )
+                    _direct_tools.append(
+                        make_delegate_tool(
+                            state=state if isinstance(state, dict) else {},
+                            allowed_provider_slugs=scoped_wiii_connect_providers,
+                            allowed_action_slugs_by_provider=(
+                                external_action_plan.action_allowlists_by_provider
+                            ),
+                        )
+                    )
+                except Exception as backend_tool_error:  # noqa: BLE001
+                    logger.debug(
+                        "[DIRECT] Backend Wiii Connect integration delegate unavailable: %s",
+                        backend_tool_error,
+                    )
+            if external_action_plan.kind == "facebook_post_direct_apply":
+                try:
+                    make_backend_facebook_tool = _load_attr(
+                        "app.engine.tools.wiii_connect_tools",
+                        "make_wiii_connect_facebook_post_direct_apply_tool",
+                    )
+                    _direct_tools.append(
+                        make_backend_facebook_tool(
+                            state=state if isinstance(state, dict) else {},
+                        )
+                    )
+                except Exception as backend_tool_error:  # noqa: BLE001
+                    logger.debug(
+                        "[DIRECT] Backend Wiii Connect Facebook tool unavailable: %s",
+                        backend_tool_error,
+                    )
     except Exception as _e:
         logger.debug("[DIRECT] Wiii Connect Facebook post tool unavailable: %s", _e)
 
@@ -1452,6 +1626,8 @@ def _direct_required_tool_names(query: str, user_role: str = "student") -> list[
         required.append("tool_search_maritime")
     if _looks_wiii_connect_facebook_post_request(query):
         required.append(WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL)
+    elif _looks_wiii_connect_external_app_action_request(query):
+        required.append(WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL)
     # WAVE-001: browser_snapshot and execute_python removed from direct.
     # These capabilities now live exclusively in code_studio_agent.
 

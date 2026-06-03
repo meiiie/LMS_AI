@@ -72,6 +72,47 @@ def _runtime_flow_ledgers(chunks):
     ]
 
 
+def _all_runtime_flow_ledgers(chunks):
+    ledgers = []
+    for chunk in chunks:
+        for line in chunk.splitlines():
+            if not line.startswith("data: "):
+                continue
+            payload = json.loads(line.removeprefix("data: "))
+            if isinstance(payload, dict) and "runtime_flow_ledger" in payload:
+                ledgers.append(payload["runtime_flow_ledger"])
+            break
+    return ledgers
+
+
+def _terminal_runtime_flow_ledger(chunks):
+    ledgers = _all_runtime_flow_ledgers(chunks)
+    assert ledgers
+    return ledgers[-1]
+
+
+def _runtime_flow_traces(chunks):
+    return [
+        payload["runtime_flow_trace"]
+        for payload in _event_payloads(chunks, "metadata")
+        if isinstance(payload, dict) and "runtime_flow_trace" in payload
+    ]
+
+
+def _post_turn_lifecycle_summary():
+    return {
+        "schema_version": "wiii.post_turn_lifecycle.v1",
+        "status": "scheduled",
+        "reason": "post_turn_background_tasks_scheduled",
+        "semantic_memory_policy": "extract_facts",
+        "background_tasks_scheduled": True,
+        "privacy": {
+            "raw_content_included": False,
+            "identifier_strategy": "status_only",
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_generate_stream_v3_events_emits_blocked_sequence():
     orchestrator = MagicMock()
@@ -120,6 +161,14 @@ async def test_generate_stream_v3_events_emits_blocked_sequence():
     ledgers = _runtime_flow_ledgers(chunks)
     assert ledgers
     assert ledgers[0]["schema_version"] == RUNTIME_FLOW_LEDGER_SCHEMA_VERSION
+    generated_request_id = ledgers[0]["request"]["request_id"]
+    assert generated_request_id.startswith("req_")
+    lifecycle_request_ids = {
+        payload["request_id"]
+        for payload in _lifecycle_payloads(chunks)
+        if payload.get("request_id")
+    }
+    assert lifecycle_request_ids == {generated_request_id}
     assert ledgers[0]["route"]["lane"] == "blocked"
 
 
@@ -187,6 +236,66 @@ async def test_generate_stream_v3_events_finalizes_answer_after_stream():
         ]
         is False
     )
+    finalize_request_id = orchestrator.finalize_response_turn.call_args.kwargs[
+        "request_id"
+    ]
+    assert finalize_request_id.startswith("req_")
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_v3_events_clears_facebook_cookie_scope(monkeypatch):
+    """Stream request without a Facebook header must not inherit stale cookies."""
+    from app.engine.search_platforms.facebook_context import (
+        get_facebook_cookie,
+        reset_facebook_cookie,
+        set_facebook_cookie,
+    )
+    from app.services import chat_stream_coordinator as coordinator
+
+    monkeypatch.setattr(coordinator.settings, "enable_facebook_cookie", True, raising=False)
+    outer_token = set_facebook_cookie("outer=1")
+    observed_cookie = None
+
+    orchestrator = MagicMock()
+    prepared_turn = SimpleNamespace(
+        request_scope=RequestScope("org-1", "maritime"),
+        session_id="session-1",
+        validation=SimpleNamespace(blocked=False),
+        chat_context=SimpleNamespace(user_name="Minh"),
+    )
+    orchestrator.prepare_turn = AsyncMock(return_value=prepared_turn)
+    orchestrator.build_multi_agent_execution_input = AsyncMock(return_value=(
+        SimpleNamespace(
+            query="Explain Rule 5",
+            user_id="user-1",
+            session_id="session-1",
+            context={"conversation_history": ""},
+            domain_id="maritime",
+            thinking_effort=None,
+            provider=None,
+        )
+    ))
+
+    async def fake_stream_fn(**_kwargs):
+        nonlocal observed_cookie
+        observed_cookie = get_facebook_cookie()
+        yield SimpleNamespace(type="done", content={"processing_time": 0.01})
+
+    try:
+        async for _chunk in generate_stream_v3_events(
+            chat_request=_make_request(),
+            request_headers={},
+            background_save=MagicMock(),
+            start_time=0.0,
+            orchestrator=orchestrator,
+            stream_fn=fake_stream_fn,
+        ):
+            pass
+
+        assert observed_cookie == ""
+        assert get_facebook_cookie() == "outer=1"
+    finally:
+        reset_facebook_cookie(outer_token)
 
 
 @pytest.mark.asyncio
@@ -285,7 +394,9 @@ async def test_generate_stream_v3_events_does_not_finalize_interrupted_provider_
             model="qwen/qwen3-next-80b-a3b-instruct",
         )
     )
-    orchestrator.finalize_response_turn = MagicMock()
+    orchestrator.finalize_response_turn = MagicMock(
+        return_value=_post_turn_lifecycle_summary()
+    )
 
     async def fake_stream_fn(**_kwargs):
         yield SimpleNamespace(type="answer", content="À... vì mình thấy cậu đang")
@@ -345,6 +456,9 @@ async def test_generate_stream_v3_events_emits_flow_ledger_when_runtime_omits_me
             model="deepseek-ai/deepseek-v4-flash",
         )
     )
+    orchestrator.finalize_response_turn = MagicMock(
+        return_value=_post_turn_lifecycle_summary()
+    )
 
     async def fake_stream_fn(**_kwargs):
         yield SimpleNamespace(type="answer", content="Hello")
@@ -373,6 +487,8 @@ async def test_generate_stream_v3_events_emits_flow_ledger_when_runtime_omits_me
     assert ledger["runtime"]["model"] == "deepseek-ai/deepseek-v4-flash"
     assert ledger["stream"]["event_counts"]["answer"] == 1
     assert ledger["stream"]["metadata_seen"] is True
+    assert ledger["finalization"]["status"] == "saved"
+    assert ledger["finalization"]["post_turn_lifecycle"] == _post_turn_lifecycle_summary()
     assert "Explain Rule 5" not in json.dumps(ledger, ensure_ascii=False)
 
 
@@ -397,6 +513,9 @@ async def test_generate_stream_v3_events_flow_ledger_omits_uploaded_document_bod
             provider=None,
             model=None,
         )
+    )
+    orchestrator.finalize_response_turn = MagicMock(
+        return_value=_post_turn_lifecycle_summary()
     )
 
     async def fake_stream_fn(**_kwargs):
@@ -434,6 +553,11 @@ async def test_generate_stream_v3_events_flow_ledger_omits_uploaded_document_bod
     assert ledger["context"]["document_context_present"] is True
     assert ledger["context"]["uploaded_document_count"] == 1
     assert ledger["host_actions"]["preview_required"] is True
+    terminal_ledger = _terminal_runtime_flow_ledger(chunks)
+    assert (
+        terminal_ledger["finalization"]["post_turn_lifecycle"]
+        == _post_turn_lifecycle_summary()
+    )
     ledger_json = json.dumps(ledger, ensure_ascii=False)
     assert "SECRET DOCUMENT BODY" not in ledger_json
     assert "Tao cho minh bai hoc" not in ledger_json
@@ -465,7 +589,9 @@ async def test_generate_stream_v3_events_bypasses_context_build_for_pointy_highl
     orchestrator.build_multi_agent_execution_input = AsyncMock(
         side_effect=AssertionError("pointy highlight should not build full context")
     )
-    orchestrator.finalize_response_turn = MagicMock()
+    orchestrator.finalize_response_turn = MagicMock(
+        return_value=_post_turn_lifecycle_summary()
+    )
 
     request = _make_request(
         message="Pointy hãy chỉ vào nút Gửi tin nhắn.",
@@ -508,6 +634,11 @@ async def test_generate_stream_v3_events_bypasses_context_build_for_pointy_highl
     assert ledgers
     assert ledgers[0]["route"]["lane"] == "pointy_fast_path"
     assert "ui.highlight" in ledgers[0]["tools"]["observed"]
+    terminal_ledger = _terminal_runtime_flow_ledger(chunks)
+    assert (
+        terminal_ledger["finalization"]["post_turn_lifecycle"]
+        == _post_turn_lifecycle_summary()
+    )
     orchestrator.build_multi_agent_execution_input.assert_not_called()
     orchestrator.finalize_response_turn.assert_called_once()
     assert (
@@ -535,7 +666,9 @@ async def test_generate_stream_v3_events_bypasses_provider_for_visual_fast_path(
     orchestrator.build_multi_agent_execution_input = AsyncMock(
         side_effect=AssertionError("visual fast path should not build full context")
     )
-    orchestrator.finalize_response_turn = MagicMock()
+    orchestrator.finalize_response_turn = MagicMock(
+        return_value=_post_turn_lifecycle_summary()
+    )
 
     request = _make_request(
         message=(
@@ -560,8 +693,18 @@ async def test_generate_stream_v3_events_bypasses_provider_for_visual_fast_path(
     assert any("v3-visual_fast_path" in chunk for chunk in chunks)
     ledgers = _runtime_flow_ledgers(chunks)
     assert ledgers
-    assert ledgers[0]["route"]["lane"] == "visual_fast_path"
+    assert ledgers[0]["route"]["lane"] == "visual_generation"
     assert "visual_runtime" in ledgers[0]["tools"]["observed"]
+    terminal_ledger = _terminal_runtime_flow_ledger(chunks)
+    assert (
+        terminal_ledger["finalization"]["post_turn_lifecycle"]
+        == _post_turn_lifecycle_summary()
+    )
+    traces = _runtime_flow_traces(chunks)
+    assert traces
+    assert traces[0]["version"] == "wiii.runtime_flow_trace.v1"
+    assert traces[0]["turn_path_decision"]["path"] == "visual_generation"
+    assert "tool_generate_visual" in traces[0]["tool_policy_session"]["visible_tool_names"]
     orchestrator.build_multi_agent_execution_input.assert_not_called()
     orchestrator.finalize_response_turn.assert_called_once()
     assert (
@@ -704,6 +847,10 @@ async def test_generate_stream_v3_events_social_turn_invokes_native_llm_stream()
         == "req-fast-social"
     )
     orchestrator.finalize_response_turn.assert_called_once()
+    assert (
+        orchestrator.finalize_response_turn.call_args.kwargs["request_id"]
+        == "req-fast-social"
+    )
     assert (
         orchestrator.finalize_response_turn.call_args.kwargs["response_text"]
         == "LLM says hello"
@@ -1091,6 +1238,9 @@ async def test_generate_stream_v3_events_uses_sync_fallback_when_multi_agent_dis
             },
         )
     )
+    orchestrator.finalize_response_turn = MagicMock(
+        return_value=_post_turn_lifecycle_summary()
+    )
 
     chunks = []
     async for chunk in generate_stream_v3_events(
@@ -1110,6 +1260,11 @@ async def test_generate_stream_v3_events_uses_sync_fallback_when_multi_agent_dis
     assert any('"streaming_version": "v3-local_direct_llm"' in chunk for chunk in chunks)
     assert any('"last_reason_code": "auth_error"' in chunk for chunk in chunks)
     orchestrator.finalize_response_turn.assert_called_once()
+    terminal_ledger = _terminal_runtime_flow_ledger(chunks)
+    assert (
+        terminal_ledger["finalization"]["post_turn_lifecycle"]
+        == _post_turn_lifecycle_summary()
+    )
 
 
 @pytest.mark.asyncio
@@ -1143,6 +1298,9 @@ async def test_generate_stream_v3_events_includes_request_id_and_routing_metadat
             },
         )
     )
+    orchestrator.finalize_response_turn = MagicMock(
+        return_value=_post_turn_lifecycle_summary()
+    )
 
     chunks = []
     async for chunk in generate_stream_v3_events(
@@ -1165,6 +1323,11 @@ async def test_generate_stream_v3_events_includes_request_id_and_routing_metadat
     assert ledgers[0]["route"]["lane"] == "fallback"
     assert ledgers[0]["runtime"]["fallback_used"] is True
     assert ledgers[0]["runtime"]["model"] == "glm-5"
+    terminal_ledger = _terminal_runtime_flow_ledger(chunks)
+    assert (
+        terminal_ledger["finalization"]["post_turn_lifecycle"]
+        == _post_turn_lifecycle_summary()
+    )
 
 
 @pytest.mark.asyncio

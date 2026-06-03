@@ -20,6 +20,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,7 +72,10 @@ async def send_messenger_message(recipient_id: str, text: str) -> DeliveryResult
             )
 
         if resp.status_code == 200:
-            logger.info("[CHANNEL] Messenger reply sent to %s", recipient_id)
+            logger.info(
+                "[CHANNEL] Messenger reply sent to recipient_hash=%s",
+                hash_memory_identifier(recipient_id),
+            )
             return DeliveryResult(
                 success=True,
                 channel="messenger",
@@ -147,7 +152,10 @@ async def send_zalo_message(recipient_id: str, text: str) -> DeliveryResult:
                     error=error_msg,
                     status_code=resp.status_code,
                 )
-            logger.info("[CHANNEL] Zalo reply sent to %s", recipient_id)
+            logger.info(
+                "[CHANNEL] Zalo reply sent to recipient_hash=%s",
+                hash_memory_identifier(recipient_id),
+            )
             return DeliveryResult(
                 success=True,
                 channel="zalo",

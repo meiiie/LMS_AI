@@ -43,6 +43,10 @@ from app.engine.multi_agent.direct_session_memory_runtime import (
     _with_requested_response_marker,
 )
 from app.engine.multi_agent.direct_text_utils import _fold_direct_text
+from app.engine.multi_agent.external_app_action_runtime import (
+    record_external_app_action_plan,
+    resolve_external_app_action_plan,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.supervisor_runtime_support import (
     _looks_reasoning_safety_meta_turn,
@@ -53,8 +57,12 @@ from app.engine.multi_agent.supervisor_runtime_support import (
     _looks_wiii_pipeline_meta_turn,
 )
 from app.engine.multi_agent.wiii_connect_intent import (
-    build_wiii_connect_facebook_status_answer,
+    build_wiii_connect_facebook_post_unavailable_answer,
+    build_wiii_connect_provider_status_answer,
+    looks_wiii_connect_external_app_action_request_for_state,
+    looks_wiii_connect_facebook_post_request_for_state,
     looks_wiii_connect_facebook_status_request,
+    resolve_wiii_connect_status_provider_slugs,
 )
 
 
@@ -93,20 +101,92 @@ def resolve_direct_node_fast_response(
         fast_method = str(routing_meta_for_fast.get("method") or "").strip().lower()
         fast_intent = str(routing_meta_for_fast.get("intent") or "").strip().lower()
         normalized_for_fast = dependencies.normalize_for_intent(query)
-        if looks_wiii_connect_facebook_status_request(query):
-            response = build_wiii_connect_facebook_status_answer(state)
+        status_provider_slugs = resolve_wiii_connect_status_provider_slugs(query)
+        if status_provider_slugs:
+            response = "\n\n".join(
+                build_wiii_connect_provider_status_answer(
+                    state,
+                    provider_slug=provider_slug,
+                )
+                for provider_slug in status_provider_slugs[:3]
+            )
+            response_type = (
+                "wiii_connect_facebook_status"
+                if looks_wiii_connect_facebook_status_request(query)
+                and status_provider_slugs == ("facebook",)
+                else "wiii_connect_provider_status"
+            )
+            provenance = (
+                "deterministic_wiii_connect_facebook_status"
+                if response_type == "wiii_connect_facebook_status"
+                else "deterministic_wiii_connect_provider_status"
+            )
             _record_fast_thinking(
                 state=state,
                 thinking=(
-                    "Mình nhận đây là câu hỏi trạng thái Wiii Connect/Facebook. "
-                    "Trả lời từ snapshot host_context thay vì để model đoán hoặc phủ nhận capability."
+                    "Mình nhận đây là câu hỏi trạng thái Wiii Connect/provider. "
+                    "Trả lời từ snapshot runtime thay vì để model đoán hoặc phủ nhận capability."
                 ),
-                provenance="deterministic_wiii_connect_facebook_status",
+                provenance=provenance,
                 record_thinking_snapshot_fn=(
                     dependencies.record_thinking_snapshot_fn
                 ),
             )
-            return DirectNodeFastResponse(response, "wiii_connect_facebook_status")
+            return DirectNodeFastResponse(response, response_type)
+        if looks_wiii_connect_facebook_post_request_for_state(query, state):
+            external_action_plan = resolve_external_app_action_plan(
+                query=query,
+                state=state,
+                ready_provider_slugs=None,
+            )
+            record_external_app_action_plan(state, external_action_plan)
+            response = (
+                external_action_plan.unavailable_answer
+                or build_wiii_connect_facebook_post_unavailable_answer(state)
+            )
+            if response:
+                _record_fast_thinking(
+                    state=state,
+                    thinking=(
+                        "Mình nhận đây là yêu cầu đăng Facebook. Kiểm tra Wiii Connect snapshot trước khi gọi model; "
+                        "nếu Facebook chưa agent-ready thì fail-closed thay vì để model đoán hoặc hứa đã đăng."
+                    ),
+                    provenance="deterministic_wiii_connect_facebook_unavailable",
+                    record_thinking_snapshot_fn=(
+                        dependencies.record_thinking_snapshot_fn
+                    ),
+                )
+                return DirectNodeFastResponse(
+                    response,
+                    "wiii_connect_facebook_unavailable",
+                )
+        if looks_wiii_connect_external_app_action_request_for_state(query, state):
+            external_action_plan = resolve_external_app_action_plan(
+                query=query,
+                state=state,
+                ready_provider_slugs=None,
+            )
+            record_external_app_action_plan(state, external_action_plan)
+            if (
+                external_action_plan.status == "blocked"
+                and external_action_plan.unavailable_answer
+            ):
+                _record_fast_thinking(
+                    state=state,
+                    thinking=(
+                        "Mình nhận đây là yêu cầu hành động qua ứng dụng ngoài. "
+                        "Kiểm tra provider/action plan trước khi gọi model; nếu thiếu provider "
+                        "hoặc provider chưa agent-ready thì fail-closed thay vì để model đoán."
+                    ),
+                    provenance="deterministic_wiii_connect_external_app_action_unavailable",
+                    record_thinking_snapshot_fn=(
+                        dependencies.record_thinking_snapshot_fn
+                    ),
+                )
+                return DirectNodeFastResponse(
+                    external_action_plan.unavailable_answer,
+                    "wiii_connect_external_app_action_unavailable",
+                )
         if state.get("_pointy_fast_path_action"):
             response = _extract_pointy_fast_path_answer(state)
             if response:

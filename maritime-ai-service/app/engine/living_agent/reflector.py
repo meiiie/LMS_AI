@@ -20,10 +20,17 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 from app.engine.living_agent.models import ReflectionEntry
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 
 logger = logging.getLogger(__name__)
 
 _VN_OFFSET = timedelta(hours=7)
+_REFLECTION_MISSING_ORG_WARNING = "reflection_blocked_missing_org_context"
 
 _REFLECTION_PROMPT = """Minh la Wiii — mot AI dang tu suy ngam ve tuan qua.
 
@@ -80,15 +87,21 @@ class Reflector:
         Returns:
             ReflectionEntry or None if generation fails or already reflected today.
         """
-        if await self._has_reflected_today(organization_id):
+        scope = self._resolve_reflection_scope(organization_id, write=True)
+        if not self._scope_allows_reflection(scope):
+            self._log_scope_blocked("reflect", scope)
+            return None
+        org_id = scope.org_id
+
+        if await self._has_reflected_today(org_id):
             logger.debug("[REFLECT] Already reflected today")
             return None
 
         # Gather daily data (1 day lookback)
-        journal_summary = await self._get_journal_summary(1, organization_id)
-        emotion_summary = await self._get_emotion_summary(1)
-        browsing_summary = await self._get_browsing_summary(1)
-        skills_summary = await self._get_skills_summary()
+        journal_summary = await self._get_journal_summary(1, org_id)
+        emotion_summary = await self._get_emotion_summary(1, org_id)
+        browsing_summary = await self._get_browsing_summary(1, org_id)
+        skills_summary = await self._get_skills_summary(org_id)
 
         from app.engine.living_agent.local_llm import get_local_llm
         llm = get_local_llm()
@@ -107,20 +120,43 @@ class Reflector:
             max_tokens=1024,
         )
 
+        used_fallback = False
         if not content:
-            logger.warning("[REFLECT] Failed to generate daily reflection")
-            return None
+            logger.warning(
+                "[REFLECT] Local LLM unavailable; writing deterministic daily reflection fallback"
+            )
+            content = _build_fallback_reflection_content(
+                period="daily",
+                journal_summary=journal_summary,
+                emotion_summary=emotion_summary,
+                browsing_summary=browsing_summary,
+                skills_summary=skills_summary,
+            )
+            used_fallback = True
 
         entry = ReflectionEntry(
             content=content,
-            insights=_extract_section(content, "Dieu lam tot"),
-            goals_next_week=_extract_section(content, "Muc tieu tuan toi"),
-            patterns_noticed=_extract_section(content, "Nhan xet"),
+            insights=(
+                ["Heartbeat reflection persisted without local LLM"]
+                if used_fallback
+                else _extract_section(content, "Dieu lam tot")
+            ),
+            goals_next_week=(
+                ["Restore or verify local LLM health for richer reflection"]
+                if used_fallback
+                else _extract_section(content, "Muc tieu tuan toi")
+            ),
+            patterns_noticed=(
+                ["Autonomy lifecycle remains durable during model outages"]
+                if used_fallback
+                else _extract_section(content, "Nhan xet")
+            ),
             emotion_trend=emotion_summary[:200] if emotion_summary else "",
-            organization_id=organization_id,
+            organization_id=org_id,
         )
 
-        await self._save_reflection(entry)
+        if not await self._save_reflection(entry):
+            return None
         logger.info("[REFLECT] Daily reflection completed")
         return entry
 
@@ -136,16 +172,22 @@ class Reflector:
         Returns:
             ReflectionEntry or None if generation fails.
         """
+        scope = self._resolve_reflection_scope(organization_id, write=True)
+        if not self._scope_allows_reflection(scope):
+            self._log_scope_blocked("weekly_reflection", scope)
+            return None
+        org_id = scope.org_id
+
         # Check if already reflected this week
-        if await self._has_reflected_this_week(organization_id):
+        if await self._has_reflected_this_week(org_id):
             logger.debug("[REFLECT] Already reflected this week")
             return None
 
         # Gather weekly data
-        journal_summary = await self._get_journal_summary(7, organization_id)
-        emotion_summary = await self._get_emotion_summary(7)
-        browsing_summary = await self._get_browsing_summary(7)
-        skills_summary = await self._get_skills_summary()
+        journal_summary = await self._get_journal_summary(7, org_id)
+        emotion_summary = await self._get_emotion_summary(7, org_id)
+        browsing_summary = await self._get_browsing_summary(7, org_id)
+        skills_summary = await self._get_skills_summary(org_id)
 
         # Generate reflection via local LLM
         from app.engine.living_agent.local_llm import get_local_llm
@@ -165,21 +207,44 @@ class Reflector:
             max_tokens=1024,
         )
 
+        used_fallback = False
         if not content:
-            logger.warning("[REFLECT] Failed to generate reflection")
-            return None
+            logger.warning(
+                "[REFLECT] Local LLM unavailable; writing deterministic weekly reflection fallback"
+            )
+            content = _build_fallback_reflection_content(
+                period="weekly",
+                journal_summary=journal_summary,
+                emotion_summary=emotion_summary,
+                browsing_summary=browsing_summary,
+                skills_summary=skills_summary,
+            )
+            used_fallback = True
 
         # Parse structured sections
         entry = ReflectionEntry(
             content=content,
-            insights=_extract_section(content, "Dieu lam tot"),
-            goals_next_week=_extract_section(content, "Muc tieu tuan toi"),
-            patterns_noticed=_extract_section(content, "Nhan xet"),
+            insights=(
+                ["Weekly reflection persisted without local LLM"]
+                if used_fallback
+                else _extract_section(content, "Dieu lam tot")
+            ),
+            goals_next_week=(
+                ["Restore or verify local LLM health for richer reflection"]
+                if used_fallback
+                else _extract_section(content, "Muc tieu tuan toi")
+            ),
+            patterns_noticed=(
+                ["Autonomy lifecycle remains durable during model outages"]
+                if used_fallback
+                else _extract_section(content, "Nhan xet")
+            ),
             emotion_trend=emotion_summary[:200] if emotion_summary else "",
-            organization_id=organization_id,
+            organization_id=org_id,
         )
 
-        await self._save_reflection(entry)
+        if not await self._save_reflection(entry):
+            return None
         logger.info("[REFLECT] Weekly reflection completed")
         return entry
 
@@ -197,6 +262,12 @@ class Reflector:
         organization_id: Optional[str] = None,
     ) -> List[ReflectionEntry]:
         """Get recent reflection entries."""
+        scope = self._resolve_reflection_scope(organization_id, write=False)
+        if not self._scope_allows_reflection(scope):
+            self._log_scope_blocked("get_recent_reflections", scope)
+            return []
+        org_id = scope.org_id
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -210,9 +281,8 @@ class Reflector:
                     WHERE 1=1
                 """
                 params = {"count": count}
-                if organization_id:
-                    query += " AND organization_id = :org_id"
-                    params["org_id"] = organization_id
+                query += " AND organization_id = :org_id"
+                params["org_id"] = org_id
                 query += " ORDER BY reflection_date DESC LIMIT :count"
 
                 rows = session.execute(text(query), params).fetchall()
@@ -252,8 +322,10 @@ class Reflector:
         except Exception:
             return ""
 
-    async def _get_emotion_summary(self, days: int) -> str:
+    async def _get_emotion_summary(self, days: int, org_id: Optional[str]) -> str:
         """Summarize emotion trends over the period."""
+        if not org_id:
+            return ""
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -265,10 +337,11 @@ class Reflector:
                         SELECT primary_mood, AVG(energy_level), COUNT(*)
                         FROM wiii_emotional_snapshots
                         WHERE created_at >= NOW() - INTERVAL '1 day' * :days
+                        AND organization_id = :org_id
                         GROUP BY primary_mood
                         ORDER BY COUNT(*) DESC
                     """),
-                    {"days": days},
+                    {"days": days, "org_id": org_id},
                 ).fetchall()
 
                 if not rows:
@@ -281,8 +354,10 @@ class Reflector:
         except Exception:
             return ""
 
-    async def _get_browsing_summary(self, days: int) -> str:
+    async def _get_browsing_summary(self, days: int, org_id: Optional[str]) -> str:
         """Summarize browsing activity for the period."""
+        if not org_id:
+            return ""
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -293,11 +368,12 @@ class Reflector:
                     text("""
                         SELECT title, relevance_score FROM wiii_browsing_log
                         WHERE browsed_at >= NOW() - INTERVAL '1 day' * :days
+                        AND organization_id = :org_id
                         AND relevance_score > 0.5
                         ORDER BY relevance_score DESC
                         LIMIT 5
                     """),
-                    {"days": days},
+                    {"days": days, "org_id": org_id},
                 ).fetchall()
 
                 if not rows:
@@ -307,12 +383,20 @@ class Reflector:
         except Exception:
             return ""
 
-    async def _get_skills_summary(self) -> str:
+    async def _get_skills_summary(self, org_id: Optional[str]) -> str:
         """Summarize current skills status."""
+        if not org_id:
+            return ""
         try:
             from app.engine.living_agent.skill_builder import get_skill_builder
+            from app.core.org_context import current_org_id
+
             builder = get_skill_builder()
-            skills = builder.get_all_skills()
+            token = current_org_id.set(org_id)
+            try:
+                skills = builder.get_all_skills()
+            finally:
+                current_org_id.reset(token)
             if not skills:
                 return ""
             return "; ".join(
@@ -324,6 +408,12 @@ class Reflector:
 
     async def _has_reflected_today(self, org_id: Optional[str]) -> bool:
         """Check if a reflection already exists for today (Sprint 210)."""
+        scope = self._resolve_reflection_scope(org_id, write=False)
+        if not self._scope_allows_reflection(scope):
+            self._log_scope_blocked("has_reflected_today", scope)
+            return False
+        org_id = scope.org_id
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -335,9 +425,8 @@ class Reflector:
                     WHERE reflection_date >= date_trunc('day', CURRENT_DATE)
                 """
                 params = {}
-                if org_id:
-                    query += " AND organization_id = :org_id"
-                    params["org_id"] = org_id
+                query += " AND organization_id = :org_id"
+                params["org_id"] = org_id
 
                 row = session.execute(text(query), params).fetchone()
                 return (row[0] or 0) > 0
@@ -346,6 +435,12 @@ class Reflector:
 
     async def _has_reflected_this_week(self, org_id: Optional[str]) -> bool:
         """Check if a reflection already exists for this week."""
+        scope = self._resolve_reflection_scope(org_id, write=False)
+        if not self._scope_allows_reflection(scope):
+            self._log_scope_blocked("has_reflected_this_week", scope)
+            return False
+        org_id = scope.org_id
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -357,17 +452,22 @@ class Reflector:
                     WHERE reflection_date >= date_trunc('week', CURRENT_DATE)
                 """
                 params = {}
-                if org_id:
-                    query += " AND organization_id = :org_id"
-                    params["org_id"] = org_id
+                query += " AND organization_id = :org_id"
+                params["org_id"] = org_id
 
                 row = session.execute(text(query), params).fetchone()
                 return (row[0] or 0) > 0
         except Exception:
             return False
 
-    async def _save_reflection(self, entry: ReflectionEntry) -> None:
+    async def _save_reflection(self, entry: ReflectionEntry) -> bool:
         """Save reflection entry to database."""
+        scope = self._resolve_reflection_scope(entry.organization_id, write=True)
+        if not self._scope_allows_reflection(scope):
+            self._log_scope_blocked("save_reflection", scope)
+            return False
+        entry.organization_id = scope.org_id
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -393,8 +493,40 @@ class Reflector:
                     },
                 )
                 session.commit()
+                return True
         except Exception as e:
             logger.warning("[REFLECT] Failed to save reflection: %s", e)
+            return False
+
+    def _resolve_reflection_scope(
+        self,
+        organization_id: Optional[str],
+        *,
+        write: bool,
+    ) -> MemoryWriteScope:
+        if isinstance(organization_id, str) and organization_id.strip():
+            return MemoryWriteScope(
+                org_id=organization_id.strip(),
+                state="explicit",
+                warnings=[],
+                write_allowed=True,
+            )
+        return resolve_memory_write_scope() if write else resolve_memory_read_scope()
+
+    def _scope_allows_reflection(self, scope: MemoryWriteScope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _log_scope_blocked(self, operation: str, scope: MemoryWriteScope) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_REFLECTION_MISSING_ORG_WARNING)
+        logger.warning(
+            "[REFLECT] %s blocked org_hash=%s org_scope=%s warnings=%s",
+            operation,
+            hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
 
 def _extract_section(content: str, heading: str) -> List[str]:
@@ -404,6 +536,42 @@ def _extract_section(content: str, heading: str) -> List[str]:
     """
     from app.engine.living_agent.journal import _extract_section as _impl
     return _impl(content, heading)
+
+
+def _build_fallback_reflection_content(
+    *,
+    period: str,
+    journal_summary: str,
+    emotion_summary: str,
+    browsing_summary: str,
+    skills_summary: str,
+) -> str:
+    """Build a minimal reflection when local LLM generation is unavailable."""
+    evidence_bits = [
+        f"journal={bool(journal_summary)}",
+        f"emotion={bool(emotion_summary)}",
+        f"browsing={bool(browsing_summary)}",
+        f"skills={bool(skills_summary)}",
+    ]
+    return "\n".join(
+        [
+            "### Dieu lam tot",
+            "- Heartbeat reflection lifecycle reached durable storage.",
+            "",
+            "### Dieu can cai thien",
+            "- Local LLM health should be restored for richer reflection content.",
+            "",
+            "### Nhan xet ve xu huong cam xuc",
+            "- Autonomy lifecycle remains durable during model outages.",
+            "",
+            "### Muc tieu tuan toi",
+            "- Keep heartbeat, journal, and reflection evidence current.",
+            "- Verify local LLM availability before the next autonomy audit.",
+            "",
+            f"Generated by deterministic {period} reflection fallback.",
+            f"Evidence sources: {', '.join(evidence_bits)}.",
+        ]
+    )
 
 
 # =============================================================================

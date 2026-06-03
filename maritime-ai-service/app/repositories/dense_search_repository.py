@@ -24,6 +24,10 @@ from app.repositories.dense_search_repository_runtime import (
     store_embedding_impl,
     upsert_embedding_impl,
 )
+from app.repositories.knowledge_search_org_scope import (
+    log_knowledge_search_scope_blocked,
+    resolve_knowledge_search_org_scope,
+)
 from app.services.embedding_space_registry_service import get_active_embedding_read_space
 
 logger = logging.getLogger(__name__)
@@ -196,6 +200,15 @@ class DenseSearchRepository:
             logger.warning("Dense search not available")
             return []
 
+        scope = resolve_knowledge_search_org_scope(org_id)
+        if not scope.write_allowed or not scope.org_id:
+            log_knowledge_search_scope_blocked(
+                logger,
+                "dense_search",
+                scope,
+            )
+            return []
+
         try:
             pool = await self._get_pool()
 
@@ -269,7 +282,7 @@ class DenseSearchRepository:
 
                 # Sprint 160: Org-scoped filtering (NULL-aware for shared KB)
                 from app.core.org_filter import org_where_positional
-                query += org_where_positional(org_id, params, allow_null=True)
+                query += org_where_positional(scope.org_id, params, allow_null=True)
                 param_idx = len(params) + 1
 
                 # Add content type filter

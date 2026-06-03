@@ -12,6 +12,7 @@ from app.engine.context.host_action_result_bridge import (
 )
 from app.engine.multi_agent.direct_reasoning import _DIRECT_HOST_ACTION_PREFIX
 from app.engine.multi_agent.state import AgentState
+from app.engine.runtime.event_payload_sanitizer import sanitize_runtime_payload
 from typing import Any, Optional
 import asyncio
 import json
@@ -134,13 +135,17 @@ async def _maybe_emit_host_action_event(
     parsed = _parse_host_action_result(tool_name, result)
     if not parsed:
         return False
+    safe_params = sanitize_runtime_payload(parsed["params"])
+    if not isinstance(safe_params, dict):
+        safe_params = {}
+    safe_params.pop("redacted_secret_count", None)
 
     await push_event({
         "type": "host_action",
         "content": {
             "id": parsed["request_id"],
             "action": parsed["action"],
-            "params": parsed["params"],
+            "params": safe_params,
         },
         "node": node,
     })
@@ -148,7 +153,7 @@ async def _maybe_emit_host_action_event(
         "type": "host_action",
         "id": parsed["request_id"],
         "action": parsed["action"],
-        "params": parsed["params"],
+        "params": safe_params,
         "node": node,
     })
     return True

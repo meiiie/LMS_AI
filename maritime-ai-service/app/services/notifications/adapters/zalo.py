@@ -28,6 +28,10 @@ from app.services.notifications.base import (
     NotificationChannelAdapter,
     NotificationResult,
 )
+from app.services.notifications.privacy import (
+    notification_recipient_ref,
+    sanitize_notification_detail,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +71,12 @@ class ZaloAdapter(NotificationChannelAdapter):
         message: str,
         metadata: Optional[dict] = None,
     ) -> NotificationResult:
+        recipient_ref = notification_recipient_ref(user_id)
+        access_token = ""
         try:
             from app.core.config import settings
 
-            access_token = settings.zalo_oa_access_token
+            access_token = settings.zalo_oa_access_token or ""
             if not access_token:
                 return NotificationResult(
                     delivered=False,
@@ -120,8 +126,8 @@ class ZaloAdapter(NotificationChannelAdapter):
 
             if response.status_code == 200 and error_code == 0:
                 logger.info(
-                    "[NOTIFY] Zalo OA message sent to %s",
-                    user_id,
+                    "[NOTIFY] Zalo OA message sent recipient_ref=%s",
+                    recipient_ref,
                 )
                 return NotificationResult(
                     delivered=True,
@@ -130,21 +136,38 @@ class ZaloAdapter(NotificationChannelAdapter):
                 )
             else:
                 err_msg = resp_data.get("message", "Unknown")
-                detail = (
-                    f"Zalo API error {error_code}: {err_msg}"
+                safe_err_msg = sanitize_notification_detail(
+                    err_msg,
+                    access_token,
+                    user_id,
                 )
-                logger.warning("[NOTIFY] %s", detail)
+                detail = (
+                    f"Zalo API error {error_code}: {safe_err_msg}"
+                )
+                logger.warning(
+                    "[NOTIFY] %s recipient_ref=%s",
+                    detail,
+                    recipient_ref,
+                )
                 return NotificationResult(
                     delivered=False, channel="zalo",
                     detail=detail,
                 )
 
         except Exception as e:
+            safe_detail = sanitize_notification_detail(
+                e,
+                access_token,
+                user_id,
+                message,
+            )
             logger.error(
-                "[NOTIFY] Zalo notification failed: %s", e,
+                "[NOTIFY] Zalo notification failed recipient_ref=%s: %s",
+                recipient_ref,
+                safe_detail,
             )
             return NotificationResult(
                 delivered=False,
                 channel="zalo",
-                detail=str(e),
+                detail=safe_detail,
             )

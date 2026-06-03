@@ -10,6 +10,7 @@ when the feature is disabled.
 
 import json
 import importlib
+import logging
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 from uuid import uuid4
@@ -24,6 +25,7 @@ def _make_settings(**overrides):
     s = MagicMock()
     s.enable_multi_tenant = overrides.get("enable_multi_tenant", False)
     s.default_organization_id = overrides.get("default_organization_id", "default")
+    s.environment = overrides.get("environment", "development")
     s.cross_domain_search = overrides.get("cross_domain_search", False)
     s.semantic_cache_enabled = False
     s.context_window_size = 50
@@ -171,7 +173,7 @@ class TestDataclassFields:
 
 
 # ============================================================================
-# Group 3: semantic_memory_repository (6 tests)
+# Group 3: semantic_memory_repository (8 tests)
 # ============================================================================
 
 class TestSemanticMemoryRepoOrgIsolation:
@@ -185,6 +187,44 @@ class TestSemanticMemoryRepoOrgIsolation:
         repo._session_factory = MagicMock()
         repo._engine = MagicMock()
         return repo
+
+    def test_save_memory_blocks_missing_org_context_before_embedding_or_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Repository writes fail closed before embedding/DB work when org context is missing."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.models.semantic_memory import MemoryType, SemanticMemoryCreate
+
+        repo = self._make_repo()
+        repo._resolve_inline_embedding = MagicMock()
+        repo._store_shadow_vectors = MagicMock()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        memory = SemanticMemoryCreate(
+            user_id="PRIVATE-USER",
+            content="private memory",
+            embedding=[0.1] * 768,
+            memory_type=MemoryType.USER_FACT,
+            importance=0.8,
+        )
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.save_memory(memory)
+        finally:
+            current_org_id.reset(token)
+
+        assert result is None
+        repo._resolve_inline_embedding.assert_not_called()
+        repo._session_factory.assert_not_called()
+        assert "semantic_memory_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
 
     def test_save_memory_includes_org_id_when_enabled(self):
         """save_memory INSERT should include organization_id param."""
@@ -208,18 +248,24 @@ class TestSemanticMemoryRepoOrgIsolation:
             memory_type=MemoryType.USER_FACT, importance=0.8
         )
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value="org-test"), \
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True), \
              patch.object(repo, "_resolve_inline_embedding", return_value=(memory.embedding, json.dumps({}, ensure_ascii=False), tuple())), \
              patch.object(repo, "_store_shadow_vectors", return_value=None):
-            repo.save_memory(memory)
+            token = current_org_id.set("org-test")
+            try:
+                repo.save_memory(memory)
+            finally:
+                current_org_id.reset(token)
 
         # Verify the execute was called with org_id in params
         call_args = mock_session.execute.call_args
         params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("params", {})
         assert params.get("org_id") == "org-test"
 
-    def test_save_memory_org_id_none_when_disabled(self):
-        """save_memory org_id should be None when multi-tenant disabled."""
+    def test_save_memory_uses_default_org_when_single_tenant(self):
+        """save_memory still scopes rows to the configured default org."""
         repo = self._make_repo()
 
         mock_session = MagicMock()
@@ -240,14 +286,14 @@ class TestSemanticMemoryRepoOrgIsolation:
             memory_type=MemoryType.USER_FACT, importance=0.8
         )
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value=None), \
+        with _patch_settings(enable_multi_tenant=False, default_org="default"), \
              patch.object(repo, "_resolve_inline_embedding", return_value=(memory.embedding, json.dumps({}, ensure_ascii=False), tuple())), \
              patch.object(repo, "_store_shadow_vectors", return_value=None):
             repo.save_memory(memory)
 
         call_args = mock_session.execute.call_args
         params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("params", {})
-        assert params.get("org_id") is None
+        assert params.get("org_id") == "default"
 
     def test_get_memories_by_type_filters_org_when_enabled(self):
         """get_memories_by_type should include org filter in query when enabled."""
@@ -261,15 +307,23 @@ class TestSemanticMemoryRepoOrgIsolation:
 
         from app.models.semantic_memory import MemoryType
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value="org-test"), \
-             patch("app.core.org_filter.org_where_clause", return_value=" AND organization_id = :org_id") as mock_clause:
-            repo.get_memories_by_type("u1", MemoryType.USER_FACT)
+        from app.core.org_context import current_org_id
 
-        # Verify org clause was called
-        mock_clause.assert_called_once_with("org-test")
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set("org-test")
+            try:
+                repo.get_memories_by_type("u1", MemoryType.USER_FACT)
+            finally:
+                current_org_id.reset(token)
 
-    def test_get_memories_by_type_no_filter_when_disabled(self):
-        """get_memories_by_type should NOT add org filter when disabled."""
+        call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
+        params = call_args[0][1] if len(call_args[0]) > 1 else {}
+        assert "organization_id = :org_id" in sql_text
+        assert params.get("org_id") == "org-test"
+
+    def test_get_memories_by_type_uses_default_org_when_single_tenant(self):
+        """get_memories_by_type scopes to default org when multi-tenant is disabled."""
         repo = self._make_repo()
 
         mock_session = MagicMock()
@@ -280,11 +334,14 @@ class TestSemanticMemoryRepoOrgIsolation:
 
         from app.models.semantic_memory import MemoryType
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value=None), \
-             patch("app.core.org_filter.org_where_clause", return_value="") as mock_clause:
+        with _patch_settings(enable_multi_tenant=False, default_org="default"):
             repo.get_memories_by_type("u1", MemoryType.USER_FACT)
 
-        mock_clause.assert_called_once_with(None)
+        call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
+        params = call_args[0][1] if len(call_args[0]) > 1 else {}
+        assert "organization_id = :org_id" in sql_text
+        assert params.get("org_id") == "default"
 
     def test_get_memories_by_type_includes_org_id_in_params(self):
         """When org is effective, org_id should be in query params."""
@@ -298,16 +355,21 @@ class TestSemanticMemoryRepoOrgIsolation:
 
         from app.models.semantic_memory import MemoryType
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value="org-xyz"), \
-             patch("app.core.org_filter.org_where_clause", return_value=" AND organization_id = :org_id"):
-            repo.get_memories_by_type("u1", MemoryType.USER_FACT)
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set("org-xyz")
+            try:
+                repo.get_memories_by_type("u1", MemoryType.USER_FACT)
+            finally:
+                current_org_id.reset(token)
 
         call_args = mock_session.execute.call_args
         params = call_args[0][1] if len(call_args[0]) > 1 else {}
         assert params.get("org_id") == "org-xyz"
 
-    def test_get_memories_by_type_no_org_id_in_params_when_disabled(self):
-        """When disabled, org_id should NOT be in query params."""
+    def test_get_memories_by_type_default_org_in_params_when_single_tenant(self):
+        """Single-tenant reads still bind the default org_id."""
         repo = self._make_repo()
 
         mock_session = MagicMock()
@@ -318,17 +380,43 @@ class TestSemanticMemoryRepoOrgIsolation:
 
         from app.models.semantic_memory import MemoryType
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value=None), \
-             patch("app.core.org_filter.org_where_clause", return_value=""):
+        with _patch_settings(enable_multi_tenant=False, default_org="default"):
             repo.get_memories_by_type("u1", MemoryType.USER_FACT)
 
         call_args = mock_session.execute.call_args
         params = call_args[0][1] if len(call_args[0]) > 1 else {}
-        assert "org_id" not in params
+        assert params.get("org_id") == "default"
+
+    def test_get_memories_by_type_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Repository reads fail closed before DB work when org context is missing."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.models.semantic_memory import MemoryType
+
+        repo = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.get_memories_by_type("PRIVATE-USER", MemoryType.USER_FACT)
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        repo._session_factory.assert_not_called()
+        assert "semantic_memory_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
 
 
 # ============================================================================
-# Group 4: chat_history_repository (6 tests)
+# Group 4: chat_history_repository (8 tests)
 # ============================================================================
 
 class TestChatHistoryRepoOrgIsolation:
@@ -346,6 +434,32 @@ class TestChatHistoryRepoOrgIsolation:
         repo.WINDOW_SIZE = 50
         return repo
 
+    def test_save_message_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """save_message fails closed before DB when production org context is missing."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo = self._make_repo(use_new_schema=True)
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.save_message(uuid4(), "user", "hello", user_id="PRIVATE-USER")
+        finally:
+            current_org_id.reset(token)
+
+        assert result is None
+        repo._session_factory.assert_not_called()
+        assert "chat_history_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+
     def test_save_message_new_schema_includes_org_id(self):
         """save_message (new schema) INSERT includes organization_id."""
         repo = self._make_repo(use_new_schema=True)
@@ -355,15 +469,21 @@ class TestChatHistoryRepoOrgIsolation:
         mock_session.__exit__ = MagicMock(return_value=False)
         repo._session_factory.return_value = mock_session
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value="org-test"):
-            repo.save_message(uuid4(), "user", "hello", user_id="u1")
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set("org-test")
+            try:
+                repo.save_message(uuid4(), "user", "hello", user_id="u1")
+            finally:
+                current_org_id.reset(token)
 
         call_args = mock_session.execute.call_args
         params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
         assert params.get("org_id") == "org-test"
 
-    def test_save_message_new_schema_org_id_none_when_disabled(self):
-        """save_message org_id is None when multi-tenant disabled."""
+    def test_save_message_accepts_explicit_org_scope(self):
+        """Message persistence can bind org scope from the active request."""
         repo = self._make_repo(use_new_schema=True)
 
         mock_session = MagicMock()
@@ -371,12 +491,69 @@ class TestChatHistoryRepoOrgIsolation:
         mock_session.__exit__ = MagicMock(return_value=False)
         repo._session_factory.return_value = mock_session
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value=None):
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set(None)
+            try:
+                message = repo.save_message(
+                    uuid4(),
+                    "user",
+                    "hello",
+                    user_id="u1",
+                    organization_id="org-explicit",
+                )
+            finally:
+                current_org_id.reset(token)
+
+        assert message is not None
+        call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
+        params = call_args[0][1]
+        assert "organization_id" in sql_text
+        assert params.get("org_id") == "org-explicit"
+
+    def test_save_message_uses_default_org_when_single_tenant(self):
+        """save_message scopes rows to default org when multi-tenant is disabled."""
+        repo = self._make_repo(use_new_schema=True)
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        repo._session_factory.return_value = mock_session
+
+        with _patch_settings(enable_multi_tenant=False, default_org="default"):
             repo.save_message(uuid4(), "user", "hello", user_id="u1")
 
         call_args = mock_session.execute.call_args
         params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
-        assert params.get("org_id") is None
+        assert params.get("org_id") == "default"
+
+    def test_get_recent_messages_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """get_recent_messages fails closed before DB when production org context is missing."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo = self._make_repo(use_new_schema=True)
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.get_recent_messages(uuid4(), user_id="PRIVATE-USER")
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        repo._session_factory.assert_not_called()
+        assert "chat_history_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
 
     def test_get_recent_messages_filters_org_when_enabled(self):
         """get_recent_messages adds org filter when enabled."""
@@ -388,16 +565,23 @@ class TestChatHistoryRepoOrgIsolation:
         mock_session.__exit__ = MagicMock(return_value=False)
         repo._session_factory.return_value = mock_session
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value="org-xyz"), \
-             patch("app.core.org_filter.org_where_clause", return_value=" AND organization_id = :org_id"):
-            repo.get_recent_messages(uuid4())
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set("org-xyz")
+            try:
+                repo.get_recent_messages(uuid4())
+            finally:
+                current_org_id.reset(token)
 
         call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
         params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
+        assert "organization_id = :org_id" in sql_text
         assert params.get("org_id") == "org-xyz"
 
-    def test_get_recent_messages_no_filter_when_disabled(self):
-        """get_recent_messages has no org filter when disabled."""
+    def test_get_recent_messages_accepts_explicit_org_scope(self):
+        """Live history context reads can bind org scope from the request."""
         repo = self._make_repo(use_new_schema=True)
 
         mock_session = MagicMock()
@@ -406,13 +590,75 @@ class TestChatHistoryRepoOrgIsolation:
         mock_session.__exit__ = MagicMock(return_value=False)
         repo._session_factory.return_value = mock_session
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value=None), \
-             patch("app.core.org_filter.org_where_clause", return_value=""):
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set(None)
+            try:
+                result = repo.get_recent_messages(
+                    uuid4(),
+                    organization_id="org-explicit",
+                )
+            finally:
+                current_org_id.reset(token)
+
+        assert result == []
+        call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
+        params = call_args[0][1]
+        assert "organization_id = :org_id" in sql_text
+        assert params.get("org_id") == "org-explicit"
+
+    def test_get_session_history_accepts_explicit_org_scope(self):
+        """Thread message pagination can bind org scope from the API auth boundary."""
+        repo = self._make_repo(use_new_schema=True)
+
+        mock_session = MagicMock()
+        count_result = MagicMock()
+        count_result.scalar.return_value = 0
+        rows_result = MagicMock()
+        rows_result.fetchall.return_value = []
+        mock_session.execute.side_effect = [count_result, rows_result]
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        repo._session_factory.return_value = mock_session
+
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set(None)
+            try:
+                messages, total = repo.get_session_history(
+                    uuid4(),
+                    organization_id="org-explicit",
+                )
+            finally:
+                current_org_id.reset(token)
+
+        assert messages == []
+        assert total == 0
+        for execute_call in mock_session.execute.call_args_list:
+            sql_text = str(execute_call[0][0])
+            params = execute_call[0][1]
+            assert "organization_id = :org_id" in sql_text
+            assert params.get("org_id") == "org-explicit"
+
+    def test_get_recent_messages_uses_default_org_when_single_tenant(self):
+        """get_recent_messages scopes to default org when multi-tenant is disabled."""
+        repo = self._make_repo(use_new_schema=True)
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value = MagicMock(fetchall=MagicMock(return_value=[]))
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        repo._session_factory.return_value = mock_session
+
+        with _patch_settings(enable_multi_tenant=False, default_org="default"):
             repo.get_recent_messages(uuid4())
 
         call_args = mock_session.execute.call_args
         params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
-        assert "org_id" not in params
+        assert params.get("org_id") == "default"
 
     def test_delete_user_history_scoped_by_org(self):
         """delete_user_history respects org filter when enabled."""
@@ -426,17 +672,55 @@ class TestChatHistoryRepoOrgIsolation:
         mock_session.__exit__ = MagicMock(return_value=False)
         repo._session_factory.return_value = mock_session
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value="org-test"), \
-             patch("app.core.org_filter.org_where_clause", return_value=" AND organization_id = :org_id"):
-            deleted = repo.delete_user_history("u1")
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set("org-test")
+            try:
+                deleted = repo.delete_user_history("u1")
+            finally:
+                current_org_id.reset(token)
 
         assert deleted == 3
         call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
         params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
+        assert "organization_id = :org_id" in sql_text
         assert params.get("org_id") == "org-test"
 
-    def test_delete_user_history_no_org_filter_when_disabled(self):
-        """delete_user_history has no org filter when disabled."""
+    def test_delete_user_history_accepts_explicit_org_scope(self):
+        """History deletion can bind org scope from the API auth boundary."""
+        repo = self._make_repo(use_new_schema=True)
+
+        mock_session = MagicMock()
+        mock_result = MagicMock()
+        mock_result.rowcount = 2
+        mock_session.execute.return_value = mock_result
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        repo._session_factory.return_value = mock_session
+
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set(None)
+            try:
+                deleted = repo.delete_user_history(
+                    "u1",
+                    organization_id="org-explicit",
+                )
+            finally:
+                current_org_id.reset(token)
+
+        assert deleted == 2
+        call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
+        params = call_args[0][1]
+        assert "organization_id = :org_id" in sql_text
+        assert params.get("org_id") == "org-explicit"
+
+    def test_delete_user_history_uses_default_org_when_single_tenant(self):
+        """delete_user_history scopes to default org when multi-tenant is disabled."""
         repo = self._make_repo(use_new_schema=True)
 
         mock_session = MagicMock()
@@ -447,14 +731,117 @@ class TestChatHistoryRepoOrgIsolation:
         mock_session.__exit__ = MagicMock(return_value=False)
         repo._session_factory.return_value = mock_session
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value=None), \
-             patch("app.core.org_filter.org_where_clause", return_value=""):
+        with _patch_settings(enable_multi_tenant=False, default_org="default"):
             deleted = repo.delete_user_history("u1")
 
         assert deleted == 5
         call_args = mock_session.execute.call_args
         params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
-        assert "org_id" not in params
+        assert params.get("org_id") == "default"
+
+    def test_get_user_history_accepts_explicit_org_scope(self):
+        """History API page reads can bind org scope from the auth boundary."""
+        repo = self._make_repo(use_new_schema=True)
+
+        mock_session = MagicMock()
+        count_result = MagicMock()
+        count_result.scalar.return_value = 0
+        rows_result = MagicMock()
+        rows_result.fetchall.return_value = []
+        mock_session.execute.side_effect = [count_result, rows_result]
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        repo._session_factory.return_value = mock_session
+
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set(None)
+            try:
+                messages, total = repo.get_user_history(
+                    "u1",
+                    limit=10,
+                    offset=0,
+                    organization_id="org-explicit",
+                )
+            finally:
+                current_org_id.reset(token)
+
+        assert messages == []
+        assert total == 0
+        for execute_call in mock_session.execute.call_args_list:
+            sql_text = str(execute_call[0][0])
+            params = execute_call[0][1]
+            assert "organization_id = :org_id" in sql_text
+            assert params.get("org_id") == "org-explicit"
+
+    def test_update_user_name_accepts_explicit_org_scope(self):
+        """User-name writes can bind org scope from the active request."""
+        repo = self._make_repo(use_new_schema=True)
+
+        mock_session = MagicMock()
+        mock_result = MagicMock()
+        mock_result.rowcount = 1
+        mock_session.execute.return_value = mock_result
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        repo._session_factory.return_value = mock_session
+
+        from app.core.org_context import current_org_id
+
+        session_id = uuid4()
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set(None)
+            try:
+                updated = repo.update_user_name(
+                    session_id,
+                    "Scoped name",
+                    organization_id="org-explicit",
+                )
+            finally:
+                current_org_id.reset(token)
+
+        assert updated is True
+        call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
+        params = call_args[0][1]
+        assert "organization_id = :org_id" in sql_text
+        assert params["session_id"] == str(session_id)
+        assert params["org_id"] == "org-explicit"
+        mock_session.commit.assert_called_once()
+
+    def test_get_user_name_accepts_explicit_org_scope(self):
+        """User-name reads can bind org scope from the active request."""
+        repo = self._make_repo(use_new_schema=True)
+
+        mock_session = MagicMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = "Scoped name"
+        mock_session.execute.return_value = mock_result
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        repo._session_factory.return_value = mock_session
+
+        from app.core.org_context import current_org_id
+
+        session_id = uuid4()
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set(None)
+            try:
+                user_name = repo.get_user_name(
+                    session_id,
+                    organization_id="org-explicit",
+                )
+            finally:
+                current_org_id.reset(token)
+
+        assert user_name == "Scoped name"
+        call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
+        params = call_args[0][1]
+        assert "organization_id = :org_id" in sql_text
+        assert params["session_id"] == str(session_id)
+        assert params["org_id"] == "org-explicit"
 
 
 # ============================================================================
@@ -508,7 +895,7 @@ class TestSearchRepoOrgIsolation:
 
     @pytest.mark.asyncio
     async def test_dense_search_no_org_filter_when_none(self):
-        """Dense search with org_id=None does not add filter."""
+        """Dense search with org_id=None resolves default scope in single-tenant mode."""
         from app.repositories.dense_search_repository import DenseSearchRepository
         repo = DenseSearchRepository.__new__(DenseSearchRepository)
         repo._available = True
@@ -530,7 +917,36 @@ class TestSearchRepoOrgIsolation:
             mock_org.return_value = ""
             await repo.search([0.1]*768, limit=5, org_id=None)
             mock_org.assert_called_once()
-            assert mock_org.call_args[0][0] is None
+            assert mock_org.call_args[0][0] == "default"
+
+    @pytest.mark.asyncio
+    async def test_dense_search_blocks_missing_org_context_before_pool(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Production multi-tenant dense search fails closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.repositories.dense_search_repository import DenseSearchRepository
+
+        repo = DenseSearchRepository.__new__(DenseSearchRepository)
+        repo._available = True
+        repo._get_pool = AsyncMock()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = await repo.search([0.1] * 768, limit=5, org_id=None)
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        repo._get_pool.assert_not_called()
+        assert "knowledge_search_blocked_missing_org_context" in caplog.text
 
     @pytest.mark.asyncio
     async def test_sparse_search_passes_org_to_filter(self):
@@ -559,7 +975,7 @@ class TestSearchRepoOrgIsolation:
 
     @pytest.mark.asyncio
     async def test_sparse_search_no_org_filter_when_none(self):
-        """Sparse search with org_id=None does not add filter."""
+        """Sparse search with org_id=None resolves default scope in single-tenant mode."""
         from app.repositories.sparse_search_repository import SparseSearchRepository
         repo = SparseSearchRepository.__new__(SparseSearchRepository)
         repo._available = True
@@ -580,7 +996,37 @@ class TestSearchRepoOrgIsolation:
             mock_org.return_value = ""
             await repo.search("test query", limit=5, org_id=None)
             mock_org.assert_called_once()
-            assert mock_org.call_args[0][0] is None
+            assert mock_org.call_args[0][0] == "default"
+
+    @pytest.mark.asyncio
+    async def test_sparse_search_blocks_missing_org_context_before_pool(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Production multi-tenant sparse search fails closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.repositories.sparse_search_repository import SparseSearchRepository
+
+        repo = SparseSearchRepository.__new__(SparseSearchRepository)
+        repo._available = True
+        repo._get_pool = AsyncMock()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = await repo.search("PRIVATE QUERY", limit=5, org_id=None)
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        repo._get_pool.assert_not_called()
+        assert "knowledge_search_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE QUERY" not in caplog.text
 
 
 # ============================================================================
@@ -838,7 +1284,7 @@ class TestEdgeCases:
 
 
 # ============================================================================
-# Group 10: Fact repository org isolation (5 tests)
+# Group 10: Fact repository org isolation (7 tests)
 # ============================================================================
 
 class TestFactRepoOrgIsolation:
@@ -854,6 +1300,32 @@ class TestFactRepoOrgIsolation:
         repo.TABLE_NAME = "semantic_memories"
         return repo
 
+    def test_get_user_facts_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Fact reads fail closed when production org context is missing."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.get_user_facts("PRIVATE-USER", limit=10, deduplicate=False)
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        repo._session_factory.assert_not_called()
+        assert "fact_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+
     def test_get_user_facts_filters_org_when_enabled(self):
         """get_user_facts includes org filter when multi-tenant enabled."""
         repo = self._make_repo()
@@ -864,16 +1336,23 @@ class TestFactRepoOrgIsolation:
         mock_session.__exit__ = MagicMock(return_value=False)
         repo._session_factory.return_value = mock_session
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value="org-test"), \
-             patch("app.core.org_filter.org_where_clause", return_value=" AND organization_id = :org_id"):
-            repo.get_user_facts("u1", limit=10, deduplicate=False)
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set("org-test")
+            try:
+                repo.get_user_facts("u1", limit=10, deduplicate=False)
+            finally:
+                current_org_id.reset(token)
 
         call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
         params = call_args[0][1] if len(call_args[0]) > 1 else {}
+        assert "organization_id = :org_id" in sql_text
         assert params.get("org_id") == "org-test"
 
-    def test_get_user_facts_no_filter_when_disabled(self):
-        """get_user_facts has no org filter when disabled."""
+    def test_get_user_facts_uses_default_org_when_single_tenant(self):
+        """get_user_facts still scopes to the configured default org in single-tenant mode."""
         repo = self._make_repo()
 
         mock_session = MagicMock()
@@ -882,13 +1361,14 @@ class TestFactRepoOrgIsolation:
         mock_session.__exit__ = MagicMock(return_value=False)
         repo._session_factory.return_value = mock_session
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value=None), \
-             patch("app.core.org_filter.org_where_clause", return_value=""):
+        with _patch_settings(enable_multi_tenant=False, default_org="default"):
             repo.get_user_facts("u1", limit=10, deduplicate=False)
 
         call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
         params = call_args[0][1] if len(call_args[0]) > 1 else {}
-        assert "org_id" not in params
+        assert "organization_id = :org_id" in sql_text
+        assert params.get("org_id") == "default"
 
     def test_get_user_facts_dedup_includes_org_filter(self):
         """get_user_facts with deduplicate=True also includes org filter."""
@@ -900,14 +1380,21 @@ class TestFactRepoOrgIsolation:
         mock_session.__exit__ = MagicMock(return_value=False)
         repo._session_factory.return_value = mock_session
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value="org-xyz"), \
-             patch("app.core.org_filter.org_where_clause", return_value=" AND organization_id = :org_id"):
-            repo.get_user_facts("u1", deduplicate=True)
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set("org-xyz")
+            try:
+                repo.get_user_facts("u1", deduplicate=True)
+            finally:
+                current_org_id.reset(token)
 
         call_args = mock_session.execute.call_args
         # Check the SQL text contains org filter
         sql_text = str(call_args[0][0])
+        params = call_args[0][1]
         assert "organization_id" in sql_text
+        assert params["org_id"] == "org-xyz"
 
     def test_get_all_user_facts_includes_org(self):
         """get_all_user_facts includes org filter when enabled."""
@@ -919,12 +1406,19 @@ class TestFactRepoOrgIsolation:
         mock_session.__exit__ = MagicMock(return_value=False)
         repo._session_factory.return_value = mock_session
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value="org-test"), \
-             patch("app.core.org_filter.org_where_clause", return_value=" AND organization_id = :org_id"):
-            repo.get_all_user_facts("u1")
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set("org-test")
+            try:
+                repo.get_all_user_facts("u1")
+            finally:
+                current_org_id.reset(token)
 
         call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
         params = call_args[0][1] if len(call_args[0]) > 1 else {}
+        assert "organization_id = :org_id" in sql_text
         assert params.get("org_id") == "org-test"
 
     def test_search_relevant_facts_includes_org(self):
@@ -937,10 +1431,47 @@ class TestFactRepoOrgIsolation:
         mock_session.__exit__ = MagicMock(return_value=False)
         repo._session_factory.return_value = mock_session
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value="org-xyz"), \
-             patch("app.core.org_filter.org_where_clause", return_value=" AND organization_id = :org_id"):
-            repo.search_relevant_facts("u1", [0.1]*768, limit=5)
+        from app.core.org_context import current_org_id
+
+        with _patch_settings(enable_multi_tenant=True):
+            token = current_org_id.set("org-xyz")
+            try:
+                repo.search_relevant_facts("u1", [0.1] * 768, limit=5)
+            finally:
+                current_org_id.reset(token)
 
         call_args = mock_session.execute.call_args
+        sql_text = str(call_args[0][0])
         params = call_args[0][1] if len(call_args[0]) > 1 else {}
+        assert "organization_id = :org_id" in sql_text
         assert params.get("org_id") == "org-xyz"
+
+    def test_update_metadata_only_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Fact metadata writes fail closed when production org context is missing."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.update_metadata_only(
+                uuid4(),
+                {"fact_type": "preference"},
+                user_id="PRIVATE-USER",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result is False
+        repo._session_factory.assert_not_called()
+        assert "fact_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text

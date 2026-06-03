@@ -373,6 +373,72 @@ class TestEvidenceImagesCollection:
         assert evidence_images == []
 
     @pytest.mark.asyncio
+    async def test_collect_evidence_images_filters_by_current_org(self, monkeypatch):
+        """Evidence image lookup must filter by active org plus shared KB rows."""
+        from app.engine.agentic_rag.document_retriever import DocumentRetriever
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production", raising=False)
+
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[
+            {
+                "node_id": "n1",
+                "image_url": "http://img1.png",
+                "page_number": 1,
+                "document_id": "d1",
+            }
+        ])
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_cm
+        mock_repo = MagicMock()
+        mock_repo._get_pool = AsyncMock(return_value=mock_pool)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch(
+                "app.repositories.dense_search_repository.get_dense_search_repository",
+                return_value=mock_repo,
+            ):
+                images = await DocumentRetriever.collect_evidence_images(["n1"])
+        finally:
+            current_org_id.reset(token)
+
+        query = mock_conn.fetch.await_args.args[0]
+        assert "AND (organization_id = $2 OR organization_id IS NULL)" in query
+        assert mock_conn.fetch.await_args.args[1:] == (["n1"], "org-A")
+        assert len(images) == 1
+
+    @pytest.mark.asyncio
+    async def test_collect_evidence_images_blocks_missing_org_before_pool(self, monkeypatch):
+        """Production evidence lookup should not hit DB without org context."""
+        from app.engine.agentic_rag.document_retriever import DocumentRetriever
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production", raising=False)
+        get_repo = MagicMock()
+
+        token = current_org_id.set(None)
+        try:
+            with patch(
+                "app.repositories.dense_search_repository.get_dense_search_repository",
+                get_repo,
+            ):
+                images = await DocumentRetriever.collect_evidence_images(["PRIVATE-NODE"])
+        finally:
+            current_org_id.reset(token)
+
+        assert images == []
+        get_repo.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_evidence_images_graceful_on_error(self):
         """Evidence image collection failure should not break process."""
         from app.engine.agentic_rag.corrective_rag import CorrectiveRAGResult

@@ -18,6 +18,7 @@ Auth flow:
 Fallback: If native API fails or credentials missing → Serper site:tiktok.com/shop
 """
 
+import hashlib
 import logging
 import threading
 import time
@@ -32,19 +33,40 @@ from app.engine.search_platforms.base import (
 
 logger = logging.getLogger(__name__)
 
-# Token cache (in-memory, thread-safe)
-_token_cache: dict = {"access_token": None, "expires_at": 0.0}
+# Token cache (in-memory, thread-safe). The cache key is a non-reversible
+# fingerprint of the active credential pair so rotated credentials never reuse
+# a previous provider token.
+_token_cache: dict = {"cache_key": None, "access_token": None, "expires_at": 0.0}
 _token_lock = threading.Lock()
+_TOKEN_CACHE_NAMESPACE = "wiii.tiktok_research.token_cache.v1"
+
+
+def _credential_cache_key(client_key: str, client_secret: str) -> str:
+    digest = hashlib.sha256()
+    digest.update(_TOKEN_CACHE_NAMESPACE.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(client_key.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(client_secret.encode("utf-8"))
+    return digest.hexdigest()
 
 
 def _get_access_token(client_key: str, client_secret: str) -> str:
     """Get or refresh TikTok Client Access Token (thread-safe)."""
     global _token_cache
 
+    cache_key = _credential_cache_key(client_key, client_secret)
+
     # Sprint 153: Hold lock through entire refresh to prevent thundering herd
     with _token_lock:
-        if _token_cache["access_token"] and time.time() < _token_cache["expires_at"] - 60:
-            return _token_cache["access_token"]
+        cached_token = _token_cache.get("access_token")
+        expires_at = float(_token_cache.get("expires_at") or 0.0)
+        if (
+            _token_cache.get("cache_key") == cache_key
+            and cached_token
+            and time.time() < expires_at - 60
+        ):
+            return str(cached_token)
 
         import httpx
         resp = httpx.post(
@@ -66,8 +88,11 @@ def _get_access_token(client_key: str, client_secret: str) -> str:
 
         expires_in = data.get("expires_in", 7200)
 
-        _token_cache["access_token"] = access_token
-        _token_cache["expires_at"] = time.time() + expires_in
+        _token_cache = {
+            "cache_key": cache_key,
+            "access_token": access_token,
+            "expires_at": time.time() + expires_in,
+        }
 
         logger.debug("TikTok access token refreshed (expires in %ds)", expires_in)
         return access_token

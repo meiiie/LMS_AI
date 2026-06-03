@@ -29,9 +29,14 @@ Failure modes:
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 
+from app.engine.runtime.event_payload_sanitizer import (
+    redact_runtime_secret_text,
+    sanitize_runtime_payload,
+)
 from app.engine.runtime.subagent_runner import (
     SubagentResult,
     SubagentRunner,
@@ -40,6 +45,57 @@ from app.engine.runtime.subagent_runner import (
 )
 
 logger = logging.getLogger(__name__)
+
+_MAX_CONTEXT_HINTS = 12
+_MAX_CONTEXT_HINT_VALUE_CHARS = 480
+_MAX_SOURCES = 16
+_MAX_SOURCE_TEXT_CHARS = 240
+_SAFE_SOURCE_KEYS = {
+    "id",
+    "node_id",
+    "source_id",
+    "title",
+    "source",
+    "source_type",
+    "content_type",
+    "page",
+    "page_number",
+    "document_id",
+    "image_url",
+    "url",
+    "relevance_score",
+    "score",
+    "bounding_boxes",
+}
+
+
+def _compact_public_value(value: Any, *, max_chars: int) -> str:
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    else:
+        text = str(value)
+    text = redact_runtime_secret_text(" ".join(text.split()))
+    if len(text) > max_chars:
+        return text[: max_chars - 1] + "..."
+    return text
+
+
+def _safe_context_hints(context_hints: dict) -> dict[str, str]:
+    safe_hints = sanitize_runtime_payload(context_hints)
+    if not isinstance(safe_hints, dict):
+        return {}
+    rendered: dict[str, str] = {}
+    for raw_key, raw_value in list(safe_hints.items())[:_MAX_CONTEXT_HINTS]:
+        key = redact_runtime_secret_text(str(raw_key)).strip()
+        if not key:
+            continue
+        value = _compact_public_value(
+            raw_value,
+            max_chars=_MAX_CONTEXT_HINT_VALUE_CHARS,
+        )
+        if value:
+            rendered[key] = value
+    return rendered
 
 
 def _format_description(task: SubagentTask) -> str:
@@ -50,10 +106,11 @@ def _format_description(task: SubagentTask) -> str:
     free-form prose.
     """
     lines = [task.description.strip()]
-    if task.context_hints:
+    context_hints = _safe_context_hints(task.context_hints)
+    if context_hints:
         lines.append("")
         lines.append("Context hints (do not echo verbatim):")
-        for key, value in task.context_hints.items():
+        for key, value in context_hints.items():
             lines.append(f"- {key}: {value}")
     return "\n".join(lines)
 
@@ -73,17 +130,47 @@ def _count_tool_calls(internal_response) -> int:
 def _coerce_sources(internal_response) -> list[dict]:
     """Return citation dicts; fall back to ``[]`` on any shape mismatch."""
     raw_sources = getattr(internal_response, "sources", None) or []
+    if not isinstance(raw_sources, (list, tuple)):
+        return []
     sources: list[dict] = []
-    for src in raw_sources:
+    for src in raw_sources[:_MAX_SOURCES]:
+        raw: dict | None = None
         if hasattr(src, "model_dump"):
             try:
-                sources.append(src.model_dump())
-                continue
+                raw = src.model_dump()
             except Exception:  # noqa: BLE001
                 pass
-        if isinstance(src, dict):
-            sources.append(src)
+        elif isinstance(src, dict):
+            raw = src
+        if not isinstance(raw, dict):
+            continue
+        safe_source = sanitize_runtime_payload(raw)
+        if not isinstance(safe_source, dict):
+            continue
+        citation = {
+            str(key): _sanitize_source_value(value)
+            for key, value in safe_source.items()
+            if key in _SAFE_SOURCE_KEYS and value not in (None, "", [], {})
+        }
+        if citation:
+            sources.append(citation)
     return sources
+
+
+def _sanitize_source_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _compact_public_value(value, max_chars=_MAX_SOURCE_TEXT_CHARS)
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    if isinstance(value, list):
+        return value[:8]
+    if isinstance(value, dict):
+        return {
+            str(key): item
+            for key, item in list(value.items())[:16]
+            if isinstance(item, (str, bool, int, float)) or item is None
+        }
+    return _compact_public_value(value, max_chars=_MAX_SOURCE_TEXT_CHARS)
 
 
 async def chatservice_subagent_runner(

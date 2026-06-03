@@ -25,11 +25,15 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from app.engine.runtime.event_payload_sanitizer import (
+    redact_runtime_secret_text,
+    sanitize_runtime_payload,
+)
+
 logger = logging.getLogger(__name__)
 
 
 _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
-
 
 def _safe_segment(value: Optional[str], default: str) -> str:
     """Sanitise a path segment so eval recordings can't escape ``base_dir``.
@@ -41,6 +45,45 @@ def _safe_segment(value: Optional[str], default: str) -> str:
     cleaned = _SAFE_SEGMENT.sub("_", value or "")
     cleaned = cleaned.strip("._-")
     return cleaned or default
+
+
+def sanitize_eval_payload(value: Any, *, _depth: int = 0) -> Any:
+    """Sanitize eval snapshots without destroying replay-useful structure."""
+    return sanitize_runtime_payload(value, _depth=_depth)
+
+
+def _restore_replay_text_shape(raw_value: Any, safe_value: Any) -> Any:
+    if isinstance(raw_value, dict) and isinstance(safe_value, dict):
+        restored = dict(safe_value)
+        for raw_key, raw_item in raw_value.items():
+            key = str(raw_key)
+            if key in {"content", "message", "text"} and isinstance(
+                raw_item, str
+            ):
+                restored[key] = redact_runtime_secret_text(raw_item)
+                continue
+            if key in restored:
+                restored[key] = _restore_replay_text_shape(
+                    raw_item, restored[key]
+                )
+        return restored
+    if isinstance(raw_value, list) and isinstance(safe_value, list):
+        return [
+            _restore_replay_text_shape(raw_item, safe_item)
+            for raw_item, safe_item in zip(raw_value, safe_value)
+        ] + safe_value[len(raw_value) :]
+    return safe_value
+
+
+def _safe_record_payload(record: "EvalRecord") -> dict[str, Any]:
+    raw_payload = record.model_dump(mode="json")
+    safe_payload = sanitize_eval_payload(raw_payload)
+    if not isinstance(safe_payload, dict):
+        return {}
+    safe_payload["request"] = _restore_replay_text_shape(
+        raw_payload.get("request"), safe_payload.get("request")
+    )
+    return safe_payload
 
 
 class EvalRecord(BaseModel):
@@ -121,7 +164,7 @@ class EvalRecorder:
         path = self._path_for(record)
         async with self._lock:
             path.parent.mkdir(parents=True, exist_ok=True)
-            line = record.model_dump_json() + "\n"
+            line = json.dumps(_safe_record_payload(record), ensure_ascii=False) + "\n"
             # ``newline=""`` keeps the literal "\n" byte on Windows so JSONL
             # tools downstream see a UNIX-style line-terminated stream.
             with path.open("a", encoding="utf-8", newline="") as f:
@@ -286,4 +329,4 @@ def diff_records(original: EvalRecord, replayed: dict[str, Any]) -> dict[str, An
     }
 
 
-__all__ = ["EvalRecord", "EvalRecorder", "diff_records"]
+__all__ = ["EvalRecord", "EvalRecorder", "diff_records", "sanitize_eval_payload"]

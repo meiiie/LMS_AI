@@ -862,15 +862,22 @@ export function useSSEStream() {
     const store = useChatStore.getState();
     if (!store.isStreaming) return;
 
-    if (metadata) {
-      store.setPendingStreamMetadata(metadata);
+    const effectiveMetadata = metadata
+      ? ({
+          ...(store.pendingStreamMetadata || {}),
+          ...metadata,
+        } as ChatResponseMetadata)
+      : undefined;
+
+    if (effectiveMetadata) {
+      store.setPendingStreamMetadata(effectiveMetadata);
     }
 
     if (hasStreamingOutput()) {
       if (TRACE_SSE) {
         console.debug("[SSE] finalize", { reason, eventOrder: [...eventOrderRef.current] });
       }
-      store.finalizeStream();
+      store.finalizeStream(effectiveMetadata);
       void useModelStore.getState().fetchProviders({ force: true });
       return;
     }
@@ -1223,7 +1230,7 @@ export function useSSEStream() {
         });
         useChatStore.getState().addChatLifecycleEvent(data);
       },
-      onDone: () => {
+      onDone: (data) => {
         traceEvent("done");
         // Some backend paths (notably source-backed web synthesis) emit the
         // final answer as a compact chunk right before `done`. Drain before
@@ -1254,7 +1261,10 @@ export function useSSEStream() {
           tryStreamingDispatch(fullText);
         }
         queueMicrotask(() => {
-          finalizeFromTransport("done");
+          finalizeFromTransport(
+            "done",
+            data as Partial<ChatResponseMetadata> as ChatResponseMetadata,
+          );
           const activeConv = useChatStore.getState().activeConversation();
           const sid = activeConv?.session_id || activeConv?.id || "";
           if (sid) {
@@ -1786,7 +1796,7 @@ export function useSSEStream() {
       const visualContext = useChatStore.getState().getActiveVisualContext();
       const widgetFeedback = useChatStore.getState().getActiveWidgetFeedbackContext();
       const codeStudioContext = useCodeStudioStore.getState().getActiveSessionContext();
-      const hostCapabilities = useHostContextStore.getState().capabilities;
+      const hostCapabilities = useHostContextStore.getState().getCapabilitiesForRequest();
       const hostActionFeedback = useHostContextStore.getState().getActionFeedbackForRequest();
       const displayName = _resolveRequestDisplayName(
         authMode,

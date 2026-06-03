@@ -7,12 +7,14 @@ Endpoints:
 """
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.core.admin_security import check_admin_module as _check_admin_module
 from app.api.deps import RequireAdmin
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,19 @@ router = APIRouter(prefix="/admin", tags=["admin-gdpr"])
 async def _get_pool():
     from app.core.database import get_asyncpg_pool
     return await get_asyncpg_pool()
+
+
+def _resolve_gdpr_memory_org(auth: RequireAdmin) -> Optional[str]:
+    """Resolve active org for GDPR semantic-memory export/delete SQL."""
+    if not settings.enable_multi_tenant:
+        return None
+    org_id = getattr(auth, "organization_id", None)
+    if isinstance(org_id, str) and org_id.strip():
+        return org_id.strip()
+    raise HTTPException(
+        status_code=403,
+        detail="Active organization is required for GDPR memory operations.",
+    )
 
 
 # =============================================================================
@@ -34,6 +49,7 @@ async def _get_pool():
 )
 async def gdpr_export(user_id: str, request: Request, auth: RequireAdmin):
     """Export all data for a user (GDPR Article 15 — Right of Access)."""
+    memory_org_id = _resolve_gdpr_memory_org(auth)
     pool = await _get_pool()
 
     async with pool.acquire() as conn:
@@ -89,11 +105,16 @@ async def gdpr_export(user_id: str, request: Request, auth: RequireAdmin):
         # Memories
         memories = []
         try:
-            mem_rows = await conn.fetch(
+            mem_query = (
                 "SELECT memory_type, content, importance, created_at "
-                "FROM semantic_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500",
-                user_id,
+                "FROM semantic_memories WHERE user_id = $1"
             )
+            mem_params = [user_id]
+            if memory_org_id:
+                mem_query += " AND organization_id = $2"
+                mem_params.append(memory_org_id)
+            mem_query += " ORDER BY created_at DESC LIMIT 500"
+            mem_rows = await conn.fetch(mem_query, *mem_params)
             memories = [
                 {
                     "memory_type": r["memory_type"],
@@ -190,6 +211,7 @@ async def gdpr_forget(user_id: str, body: ForgetBody, request: Request, auth: Re
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Must set confirm=true to proceed with data deletion")
 
+    memory_org_id = _resolve_gdpr_memory_org(auth)
     pool = await _get_pool()
 
     async with pool.acquire() as conn:
@@ -220,9 +242,17 @@ async def gdpr_forget(user_id: str, body: ForgetBody, request: Request, auth: Re
             )
 
             # 4. Delete semantic memories
-            memories_deleted = await conn.execute(
-                "DELETE FROM semantic_memories WHERE user_id = $1", user_id
-            )
+            if memory_org_id:
+                memories_deleted = await conn.execute(
+                    "DELETE FROM semantic_memories WHERE user_id = $1 AND organization_id = $2",
+                    user_id,
+                    memory_org_id,
+                )
+            else:
+                memories_deleted = await conn.execute(
+                    "DELETE FROM semantic_memories WHERE user_id = $1",
+                    user_id,
+                )
 
     # 5. Log audit (does NOT delete audit logs — regulatory requirement)
     from app.services.admin_audit import log_admin_action, extract_audit_context

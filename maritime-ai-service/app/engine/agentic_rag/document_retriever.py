@@ -188,11 +188,25 @@ class DocumentRetriever:
             List of EvidenceImage objects
         """
         from app.repositories.dense_search_repository import get_dense_search_repository
+        from app.repositories.knowledge_search_org_scope import (
+            log_knowledge_search_scope_blocked,
+            resolve_knowledge_search_org_scope,
+        )
 
         evidence_images = []
         seen_urls = set()
 
         try:
+            scope = resolve_knowledge_search_org_scope()
+            if not scope.write_allowed or not scope.org_id:
+                log_knowledge_search_scope_blocked(
+                    logger,
+                    "collect_evidence_images",
+                    scope,
+                    node_id=node_ids[0] if node_ids else None,
+                )
+                return evidence_images
+
             repo = get_dense_search_repository()
             pool = await repo._get_pool()
 
@@ -203,9 +217,11 @@ class DocumentRetriever:
                     FROM knowledge_embeddings
                     WHERE id::text = ANY($1)
                     AND image_url IS NOT NULL
+                    AND (organization_id = $2 OR organization_id IS NULL)
                     ORDER BY page_number
                     """,
-                    node_ids
+                    node_ids,
+                    scope.org_id,
                 )
 
                 for row in rows:

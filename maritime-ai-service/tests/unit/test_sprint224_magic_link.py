@@ -1,6 +1,7 @@
 """Sprint 224: Magic Link Email Auth — Unit Tests."""
 import asyncio
 import hashlib
+import logging
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -70,6 +71,29 @@ class TestEmailService:
             assert call_args["to"] == "test@example.com"
 
     @pytest.mark.asyncio
+    async def test_send_magic_link_email_success_logs_hash_ref(self, caplog):
+        from app.auth.email_service import send_magic_link_email
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+        raw_email = "private-login@example.com"
+        verify_url = "https://wiii.app/verify/raw-token-private"
+        mock_settings = MagicMock()
+        mock_settings.resend_api_key = "re_test_key"
+        mock_settings.magic_link_from_email = "Wiii <noreply@wiii.app>"
+
+        with patch("app.auth.email_service.resend") as mock_resend, \
+             patch("app.auth.email_service.settings", mock_settings), \
+             caplog.at_level(logging.INFO, logger="app.auth.email_service"):
+            mock_resend.Emails.send.return_value = {"id": "email_123"}
+            result = await send_magic_link_email(raw_email, verify_url)
+
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        assert result is True
+        assert raw_email not in log_text
+        assert verify_url not in log_text
+        assert f"email_ref={hash_runtime_identifier(raw_email)}" in log_text
+
+    @pytest.mark.asyncio
     async def test_send_magic_link_email_handles_error(self):
         from app.auth.email_service import send_magic_link_email
 
@@ -82,6 +106,35 @@ class TestEmailService:
             mock_resend.Emails.send.side_effect = Exception("API error")
             result = await send_magic_link_email("test@example.com", "https://wiii.app/verify/abc")
             assert result is False
+
+    @pytest.mark.asyncio
+    async def test_send_magic_link_email_error_redacts_recipient_url_and_secrets(self, caplog):
+        from app.auth.email_service import send_magic_link_email
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+        raw_email = "private-login@example.com"
+        raw_url = "https://wiii.app/verify/raw-token-private"
+        raw_key = "re_private_api_key_123"
+        raw_from = "Wiii <private-from@example.com>"
+        mock_settings = MagicMock()
+        mock_settings.resend_api_key = raw_key
+        mock_settings.magic_link_from_email = raw_from
+
+        with patch("app.auth.email_service.resend") as mock_resend, \
+             patch("app.auth.email_service.settings", mock_settings), \
+             caplog.at_level(logging.ERROR, logger="app.auth.email_service"):
+            mock_resend.Emails.send.side_effect = Exception(
+                f"provider failed email={raw_email} url={raw_url} "
+                f"api_key={raw_key} from={raw_from}"
+            )
+            result = await send_magic_link_email(raw_email, raw_url)
+
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        assert result is False
+        for raw_value in (raw_email, raw_url, raw_key, raw_from):
+            assert raw_value not in log_text
+        assert f"email_ref={hash_runtime_identifier(raw_email)}" in log_text
+        assert "<redacted-secret>" in log_text
 
     @pytest.mark.asyncio
     async def test_send_magic_link_email_fails_closed_in_production_without_resend(self):
@@ -114,6 +167,27 @@ class TestEmailService:
             )
 
         assert result is True
+
+    @pytest.mark.asyncio
+    async def test_send_magic_link_email_dev_fallback_logs_hash_ref_without_url(self, caplog):
+        from app.auth.email_service import send_magic_link_email
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+        raw_email = "private-dev@example.com"
+        raw_url = "https://wiii.app/verify/dev-token-private"
+        mock_settings = MagicMock()
+        mock_settings.environment = "development"
+        mock_settings.resend_api_key = ""
+
+        with patch("app.auth.email_service.settings", mock_settings), \
+             caplog.at_level(logging.WARNING, logger="app.auth.email_service"):
+            result = await send_magic_link_email(raw_email, raw_url)
+
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        assert result is True
+        assert raw_email not in log_text
+        assert raw_url not in log_text
+        assert f"email_ref={hash_runtime_identifier(raw_email)}" in log_text
 
 
 class TestMagicLinkTokenGeneration:
@@ -205,6 +279,32 @@ class TestSessionManager:
         mgr = MagicLinkSessionManager()
         assert mgr.active_count == 0
 
+    @pytest.mark.asyncio
+    async def test_websocket_error_logs_hash_ref(self, caplog):
+        """WebSocket diagnostics must not expose raw magic-link session ids."""
+        from app.auth.magic_link_router import magic_link_websocket
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+        raw_session = "magic-link-ws-secret-session"
+        mock_mgr = MagicMock()
+        mock_mgr.register = AsyncMock()
+        mock_mgr.remove = MagicMock()
+
+        with patch("app.auth.magic_link_router.get_session_manager", return_value=mock_mgr), \
+             patch("app.auth.magic_link_router.settings") as mock_settings, \
+             patch(
+                 "app.auth.magic_link_router._ws_keepalive",
+                 new=AsyncMock(side_effect=RuntimeError(f"ws failed {raw_session}")),
+             ), caplog.at_level(logging.ERROR, logger="app.auth.magic_link_router"):
+            mock_settings.magic_link_ws_timeout_seconds = 30
+            await magic_link_websocket(MagicMock(), raw_session)
+
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        assert raw_session not in log_text
+        assert f"session_ref={hash_runtime_identifier(raw_session)}" in log_text
+        assert "<redacted-secret>" in log_text
+        mock_mgr.remove.assert_called_once_with(raw_session)
+
 
 # ===================================================================
 # Router tests (Sprint 224 Task 3)
@@ -237,6 +337,41 @@ class TestMagicLinkRequest:
             assert "message" in result
             mock_send.assert_called_once()
             mock_conn.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_magic_link_logs_hash_refs(self, caplog):
+        """Create diagnostics must not expose raw email or WS session id."""
+        from app.auth.magic_link_router import _create_magic_link
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+        raw_email = "private-login@example.com"
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value=0)
+        mock_conn.execute = AsyncMock()
+
+        with patch(
+            "app.auth.magic_link_router.send_magic_link_email",
+            new_callable=AsyncMock,
+            return_value=True,
+        ), patch("app.auth.magic_link_router.settings") as mock_settings, caplog.at_level(
+            logging.INFO,
+            logger="app.auth.magic_link_router",
+        ):
+            mock_settings.environment = "production"
+            mock_settings.resend_api_key = ""
+            mock_settings.magic_link_expires_seconds = 600
+            mock_settings.magic_link_base_url = "https://wiii.example"
+            mock_settings.magic_link_max_per_hour = 5
+            mock_settings.api_v1_prefix = "/api/v1"
+
+            result = await _create_magic_link(raw_email, mock_conn)
+
+        raw_session = result["session_id"]
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        assert raw_email not in log_text
+        assert raw_session not in log_text
+        assert f"email_ref={hash_runtime_identifier(raw_email)}" in log_text
+        assert f"session_ref={hash_runtime_identifier(raw_session)}" in log_text
 
     @pytest.mark.asyncio
     async def test_create_magic_link_rate_limited(self):
@@ -370,6 +505,94 @@ class TestMagicLinkVerify:
         from app.auth.magic_link_service import hash_token
         expected = hashlib.sha256(b"test_token").hexdigest()
         assert hash_token("test_token") == expected
+
+    @pytest.mark.asyncio
+    async def test_verify_mints_token_with_default_org_claim(self, caplog):
+        """Magic-link token payload must carry the same default org sent to the app."""
+        from app.auth.magic_link_router import verify_magic_link
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+        raw_email = "test@example.com"
+        raw_session = "session-1"
+        raw_user_id = "user-1"
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value={
+            "email": raw_email,
+            "ws_session_id": raw_session,
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+            "used_at": None,
+        })
+        mock_conn.execute = AsyncMock()
+
+        class _PoolCtx:
+            async def __aenter__(self_inner): return mock_conn
+            async def __aexit__(self_inner, *_): return None
+
+        mock_pool = MagicMock()
+        mock_pool.acquire = MagicMock(return_value=_PoolCtx())
+
+        mock_settings = MagicMock()
+        mock_settings.enable_multi_tenant = True
+        mock_settings.default_organization_id = "default"
+
+        mock_pair = MagicMock(
+            access_token="ACCESS",
+            refresh_token="REFRESH",
+            token_type="bearer",
+            expires_in=900,
+        )
+        mock_session_manager = MagicMock()
+        mock_session_manager.push_tokens = AsyncMock(return_value=True)
+
+        request = MagicMock()
+        request.client = MagicMock(host="127.0.0.1")
+
+        create_pair = AsyncMock(return_value=mock_pair)
+        with (
+            patch("app.auth.magic_link_router.settings", mock_settings),
+            patch("app.core.database.get_asyncpg_pool", new=AsyncMock(return_value=mock_pool)),
+            patch(
+                "app.auth.user_service.find_or_create_by_provider",
+                new=AsyncMock(return_value={
+                    "id": raw_user_id,
+                    "email": raw_email,
+                    "name": "Test User",
+                    "role": "student",
+                    "platform_role": "user",
+                }),
+            ),
+            patch("app.auth.token_service.create_token_pair", new=create_pair),
+            patch(
+                "app.auth.magic_link_router.ensure_user_org_membership",
+                new=AsyncMock(return_value=True),
+            ),
+            patch("app.auth.magic_link_router.get_session_manager", return_value=mock_session_manager),
+            patch("app.auth.auth_audit.log_auth_event", new_callable=AsyncMock) as mock_audit,
+            caplog.at_level(logging.INFO, logger="app.auth.magic_link_router"),
+        ):
+            handler = getattr(verify_magic_link, "__wrapped__", verify_magic_link)
+            response = await handler("raw-token", request)
+
+        assert response.status_code == 200
+        kwargs = create_pair.call_args.kwargs
+        assert kwargs["active_organization_id"] == "default"
+        assert kwargs["role_source"] == "platform"
+
+        pushed_payload = mock_session_manager.push_tokens.call_args.args[1]
+        assert pushed_payload["organization_id"] == "default"
+        assert pushed_payload["user"]["active_organization_id"] == "default"
+
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        assert raw_email not in log_text
+        assert raw_session not in log_text
+        assert raw_user_id not in log_text
+        assert f"email_ref={hash_runtime_identifier(raw_email)}" in log_text
+        assert f"user_ref={hash_runtime_identifier(raw_user_id)}" in log_text
+
+        audit_kwargs = mock_audit.await_args.kwargs
+        assert audit_kwargs["metadata"] == {
+            "email_ref": hash_runtime_identifier(raw_email)
+        }
 
 
 class TestMagicLinkHTMLPages:
@@ -663,6 +886,7 @@ class TestVerifyEndpointHardening:
     @pytest.mark.asyncio
     async def test_audit_helper_extracts_ip(self):
         from app.auth.magic_link_router import _audit_verify_failure
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
 
         mock_request = MagicMock()
         mock_request.client = MagicMock(host="9.8.7.6")
@@ -678,3 +902,6 @@ class TestVerifyEndpointHardening:
         assert captured.get("ip_address") == "9.8.7.6"
         assert captured.get("provider") == "magic_link"
         assert captured.get("reason") == "token_expired"
+        assert captured.get("metadata") == {
+            "email_ref": hash_runtime_identifier("abc@example.com")
+        }

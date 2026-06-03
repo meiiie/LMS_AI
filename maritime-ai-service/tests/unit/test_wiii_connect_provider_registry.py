@@ -153,8 +153,11 @@ def test_snapshot_projects_external_provider_registry_fail_closed(monkeypatch):
     facebook = next(item for item in metadata["connections"] if item["slug"] == "facebook")
 
     assert status["facebook"]["active"] is False
-    assert status["facebook"]["status"] == "disabled"
-    assert status["facebook"]["reason"] == "provider_adapter_disabled"
+    assert status["facebook"]["status"] == "not_connected"
+    assert status["facebook"]["reason"] == "connection_storage_unavailable"
     assert status["facebook"]["agent_ready"] is False
+    assert status["facebook"]["adapter_bound"] is False
+    assert "adapter_disabled" in status["facebook"]["warnings"]
+    assert "connection_storage_unavailable" in status["facebook"]["warnings"]
     assert facebook["provider_kind"] == "composio"
     assert facebook["requirement_count"] == 6

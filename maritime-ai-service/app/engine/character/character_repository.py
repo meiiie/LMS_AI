@@ -15,6 +15,7 @@ Tables:
 
 import logging
 import time
+from dataclasses import dataclass
 from typing import List, Optional
 
 from sqlalchemy import text
@@ -31,6 +32,16 @@ from app.engine.character.models import (
 logger = logging.getLogger(__name__)
 
 _DB_RETRY_COOLDOWN_SECONDS = 30.0
+_CHARACTER_REPOSITORY_MISSING_ORG_WARNING = "character_repository_blocked_missing_org_context"
+_CHARACTER_ORG_FILTER = " AND organization_id = :org_id"
+
+
+@dataclass(frozen=True)
+class CharacterOrgScope:
+    org_id: Optional[str]
+    state: str
+    warnings: list[str]
+    write_allowed: bool
 
 
 class CharacterRepository:
@@ -103,11 +114,79 @@ class CharacterRepository:
             logger.warning("CharacterRepository init failed (DB may not be running): %s", e)
             self._mark_unavailable(e)
 
+    def _org_scope(
+        self,
+        organization_id: Optional[str] = None,
+        *,
+        write: bool = False,
+    ) -> tuple[CharacterOrgScope, Optional[str], dict[str, object]]:
+        scope = self._resolve_character_org_scope(
+            organization_id=organization_id,
+            write=write,
+        )
+        if not scope.write_allowed or not scope.org_id:
+            return scope, None, {}
+        return scope, _CHARACTER_ORG_FILTER, {"org_id": scope.org_id}
+
+    def _resolve_character_org_scope(
+        self,
+        *,
+        organization_id: Optional[str] = None,
+        write: bool = False,
+    ) -> CharacterOrgScope:
+        if isinstance(organization_id, str) and organization_id.strip():
+            return CharacterOrgScope(
+                org_id=organization_id.strip(),
+                state="explicit",
+                warnings=[],
+                write_allowed=True,
+            )
+
+        from app.engine.semantic_memory.write_audit import (
+            resolve_memory_read_scope,
+            resolve_memory_write_scope,
+        )
+
+        scope = resolve_memory_write_scope() if write else resolve_memory_read_scope()
+        return CharacterOrgScope(
+            org_id=scope.org_id,
+            state=scope.state,
+            warnings=list(scope.warnings),
+            write_allowed=scope.write_allowed,
+        )
+
+    def _log_character_scope_blocked(
+        self,
+        operation: str,
+        scope: CharacterOrgScope,
+        *,
+        user_id: Optional[str] = None,
+        label: Optional[str] = None,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_CHARACTER_REPOSITORY_MISSING_ORG_WARNING)
+        logger.warning(
+            "[CHARACTER_REPO] %s blocked user_hash=%s label_hash=%s org_hash=%s "
+            "org_scope=%s warnings=%s",
+            operation,
+            _hash_memory_identifier(user_id),
+            _hash_memory_identifier(label),
+            _hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
+
     # =========================================================================
     # CHARACTER BLOCKS — CRUD
     # =========================================================================
 
-    def get_all_blocks(self, user_id: str = "__global__") -> List[CharacterBlock]:
+    def get_all_blocks(
+        self,
+        user_id: str = "__global__",
+        *,
+        organization_id: Optional[str] = None,
+    ) -> List[CharacterBlock]:
         """Get all character blocks for a specific user.
 
         Args:
@@ -116,16 +195,18 @@ class CharacterRepository:
         if not self._can_query():
             return []
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_character_scope_blocked(
+                "get_all_blocks",
+                scope,
+                user_id=user_id,
+            )
+            return []
 
         try:
             with self._session_factory() as session:
-                params: dict = {"user_id": user_id}
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
+                params: dict = {"user_id": user_id, **org_params}
 
                 result = session.execute(
                     text(f"""
@@ -152,11 +233,21 @@ class CharacterRepository:
                     for row in rows
                 ]
         except Exception as e:
-            logger.error("Failed to get character blocks for user '%s': %s", user_id, e)
+            logger.error(
+                "Failed to get character blocks for user_hash=%s: %s",
+                _hash_memory_identifier(user_id),
+                e,
+            )
             self._mark_unavailable(e)
             return []
 
-    def get_block(self, label: str, user_id: str = "__global__") -> Optional[CharacterBlock]:
+    def get_block(
+        self,
+        label: str,
+        user_id: str = "__global__",
+        *,
+        organization_id: Optional[str] = None,
+    ) -> Optional[CharacterBlock]:
         """Get a specific character block by label and user.
 
         Args:
@@ -166,16 +257,19 @@ class CharacterRepository:
         if not self._can_query():
             return None
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_character_scope_blocked(
+                "get_block",
+                scope,
+                user_id=user_id,
+                label=label,
+            )
+            return None
 
         try:
             with self._session_factory() as session:
-                params: dict = {"label": label, "user_id": user_id}
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
+                params: dict = {"label": label, "user_id": user_id, **org_params}
 
                 result = session.execute(
                     text(f"""
@@ -200,11 +294,22 @@ class CharacterRepository:
                     updated_at=row.updated_at,
                 )
         except Exception as e:
-            logger.error("Failed to get block '%s' for user '%s': %s", label, user_id, e)
+            logger.error(
+                "Failed to get block label_hash=%s user_hash=%s: %s",
+                _hash_memory_identifier(label),
+                _hash_memory_identifier(user_id),
+                e,
+            )
             self._mark_unavailable(e)
             return None
 
-    def create_block(self, create: CharacterBlockCreate, user_id: str = "__global__") -> Optional[CharacterBlock]:
+    def create_block(
+        self,
+        create: CharacterBlockCreate,
+        user_id: str = "__global__",
+        *,
+        organization_id: Optional[str] = None,
+    ) -> Optional[CharacterBlock]:
         """Create a new character block for a specific user.
 
         Args:
@@ -214,9 +319,18 @@ class CharacterRepository:
         if not self._can_query():
             return None
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id
-        eff_org_id = get_effective_org_id()
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_character_scope_blocked(
+                "create_block",
+                scope,
+                user_id=user_id,
+                label=create.label,
+            )
+            return None
 
         try:
             with self._session_factory() as session:
@@ -226,20 +340,16 @@ class CharacterRepository:
                     "char_limit": create.char_limit,
                     "metadata": "{}",
                     "user_id": user_id,
+                    **org_params,
                 }
-                insert_cols = "label, content, char_limit, metadata, user_id"
-                insert_vals = ":label, :content, :char_limit, CAST(:metadata AS jsonb), :user_id"
-                if eff_org_id is not None:
-                    insert_cols += ", organization_id"
-                    insert_vals += ", :org_id"
-                    params["org_id"] = eff_org_id
 
                 result = session.execute(
                     text(f"""
                         INSERT INTO {self.BLOCKS_TABLE}
-                            ({insert_cols})
-                        VALUES ({insert_vals})
-                        ON CONFLICT (user_id, label) DO UPDATE
+                            (organization_id, label, content, char_limit, metadata, user_id)
+                        VALUES (:org_id, :label, :content, :char_limit,
+                                CAST(:metadata AS jsonb), :user_id)
+                        ON CONFLICT (organization_id, user_id, label) DO UPDATE
                             SET content = EXCLUDED.content,
                                 char_limit = EXCLUDED.char_limit,
                                 metadata = EXCLUDED.metadata,
@@ -263,7 +373,12 @@ class CharacterRepository:
                         updated_at=row.updated_at,
                     )
         except Exception as e:
-            logger.error("Failed to create block '%s' for user '%s': %s", create.label, user_id, e)
+            logger.error(
+                "Failed to create block label_hash=%s user_hash=%s: %s",
+                _hash_memory_identifier(create.label),
+                _hash_memory_identifier(user_id),
+                e,
+            )
             self._mark_unavailable(e)
         return None
 
@@ -273,6 +388,7 @@ class CharacterRepository:
         update: CharacterBlockUpdate,
         expected_version: Optional[int] = None,
         user_id: str = "__global__",
+        organization_id: Optional[str] = None,
     ) -> Optional[CharacterBlock]:
         """Update a character block with optional optimistic locking.
 
@@ -285,16 +401,22 @@ class CharacterRepository:
         if not self._can_query():
             return None
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_character_scope_blocked(
+                "update_block",
+                scope,
+                user_id=user_id,
+                label=label,
+            )
+            return None
 
         try:
             with self._session_factory() as session:
-                base_params: dict = {"label": label, "user_id": user_id}
-                if eff_org_id is not None:
-                    base_params["org_id"] = eff_org_id
+                base_params: dict = {"label": label, "user_id": user_id, **org_params}
 
                 # Build update query
                 if update.content is not None:
@@ -342,7 +464,11 @@ class CharacterRepository:
                         {**base_params, "append": update.append},
                     )
                 else:
-                    return self.get_block(label, user_id=user_id)
+                    return self.get_block(
+                        label,
+                        user_id=user_id,
+                        organization_id=scope.org_id,
+                    )
 
                 session.commit()
                 row = result.fetchone()
@@ -359,11 +485,19 @@ class CharacterRepository:
                     )
                 elif expected_version is not None:
                     logger.warning(
-                        "Optimistic lock failed for block '%s' user '%s' (expected version %d)",
-                        label, user_id, expected_version,
+                        "Optimistic lock failed for block label_hash=%s user_hash=%s "
+                        "(expected version %d)",
+                        _hash_memory_identifier(label),
+                        _hash_memory_identifier(user_id),
+                        expected_version,
                     )
         except Exception as e:
-            logger.error("Failed to update block '%s' for user '%s': %s", label, user_id, e)
+            logger.error(
+                "Failed to update block label_hash=%s user_hash=%s: %s",
+                _hash_memory_identifier(label),
+                _hash_memory_identifier(user_id),
+                e,
+            )
             self._mark_unavailable(e)
         return None
 
@@ -371,36 +505,46 @@ class CharacterRepository:
     # EXPERIENCES — Log and query
     # =========================================================================
 
-    def log_experience(self, create: CharacterExperienceCreate) -> Optional[CharacterExperience]:
+    def log_experience(
+        self,
+        create: CharacterExperienceCreate,
+        *,
+        organization_id: Optional[str] = None,
+    ) -> Optional[CharacterExperience]:
         """Log a new experience event."""
         if not self._can_query():
             return None
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id
-        eff_org_id = get_effective_org_id()
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_character_scope_blocked(
+                "log_experience",
+                scope,
+                user_id=create.user_id,
+            )
+            return None
 
         try:
             with self._session_factory() as session:
-                insert_cols = "experience_type, content, importance, user_id, metadata"
-                insert_vals = ":type, :content, :importance, :user_id, CAST(:metadata AS jsonb)"
                 params: dict = {
                     "type": create.experience_type,
                     "content": create.content,
                     "importance": create.importance,
                     "user_id": create.user_id,
                     "metadata": "{}",
+                    **org_params,
                 }
-                if eff_org_id is not None:
-                    insert_cols += ", organization_id"
-                    insert_vals += ", :org_id"
-                    params["org_id"] = eff_org_id
 
                 result = session.execute(
                     text(f"""
                         INSERT INTO {self.EXPERIENCES_TABLE}
-                            ({insert_cols})
-                        VALUES ({insert_vals})
+                            (organization_id, experience_type, content, importance,
+                             user_id, metadata)
+                        VALUES (:org_id, :type, :content, :importance,
+                                :user_id, CAST(:metadata AS jsonb))
                         RETURNING id, experience_type, content, importance,
                                   user_id, metadata, created_at
                     """),
@@ -419,7 +563,12 @@ class CharacterRepository:
                         created_at=row.created_at,
                     )
         except Exception as e:
-            logger.error("Failed to log experience: %s", e)
+            logger.error(
+                "Failed to log experience user_hash=%s type=%s: %s",
+                _hash_memory_identifier(create.user_id),
+                create.experience_type,
+                e,
+            )
             self._mark_unavailable(e)
         return None
 
@@ -428,6 +577,7 @@ class CharacterRepository:
         limit: int = 20,
         experience_type: Optional[str] = None,
         user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
     ) -> List[CharacterExperience]:
         """Get recent experiences, optionally filtered by type and user.
 
@@ -436,9 +586,14 @@ class CharacterRepository:
         if not self._can_query():
             return []
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_character_scope_blocked(
+                "get_recent_experiences",
+                scope,
+                user_id=user_id,
+            )
+            return []
 
         try:
             with self._session_factory() as session:
@@ -453,12 +608,8 @@ class CharacterRepository:
                     conditions.append("user_id = :user_id")
                     params["user_id"] = user_id
 
-                # Add org filter
-                org_clause = org_where_clause(eff_org_id)
-                if org_clause:
-                    # Strip leading " AND " and add as a condition
-                    conditions.append(org_clause.lstrip(" AND "))
-                    params["org_id"] = eff_org_id
+                conditions.append(org_filter.lstrip(" AND "))
+                params.update(org_params)
 
                 where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
                 result = session.execute(
@@ -486,27 +637,36 @@ class CharacterRepository:
                     for row in rows
                 ]
         except Exception as e:
-            logger.error("Failed to get experiences: %s", e)
+            logger.error(
+                "Failed to get experiences user_hash=%s type=%s: %s",
+                _hash_memory_identifier(user_id),
+                experience_type,
+                e,
+            )
             self._mark_unavailable(e)
             return []
 
-    def count_experiences(self) -> int:
+    def count_experiences(
+        self,
+        *,
+        organization_id: Optional[str] = None,
+    ) -> int:
         """Count total logged experiences."""
         if not self._can_query():
             return 0
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_character_scope_blocked(
+                "count_experiences",
+                scope,
+            )
+            return 0
 
         try:
             with self._session_factory() as session:
-                params: dict = {}
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
-
-                where = f"WHERE 1=1{org_filter}" if org_filter else ""
+                params: dict = dict(org_params)
+                where = f"WHERE 1=1{org_filter}"
                 result = session.execute(
                     text(f"SELECT COUNT(*) FROM {self.EXPERIENCES_TABLE} {where}"),
                     params,
@@ -522,6 +682,7 @@ class CharacterRepository:
         max_age_days: int = 90,
         keep_min: int = 100,
         user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
     ) -> int:
         """Delete old experiences while keeping at least keep_min most recent.
 
@@ -540,20 +701,29 @@ class CharacterRepository:
         if not self._can_query():
             return 0
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_character_scope_blocked(
+                "cleanup_old_experiences",
+                scope,
+                user_id=user_id,
+            )
+            return 0
 
         try:
             with self._session_factory() as session:
                 # Build user filter
                 user_filter = "AND user_id = :user_id" if user_id else ""
-                params: dict = {"days": str(max_age_days), "keep_min": keep_min}
+                params: dict = {
+                    "days": str(max_age_days),
+                    "keep_min": keep_min,
+                    **org_params,
+                }
                 if user_id:
                     params["user_id"] = user_id
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
 
                 # Check total count first
                 total = session.execute(
@@ -588,8 +758,12 @@ class CharacterRepository:
 
                 if deleted > 0:
                     logger.info(
-                        "[CLEANUP] Deleted %d old experiences (older than %d days, kept min %d, user=%s)",
-                        deleted, max_age_days, keep_min, user_id or "all",
+                        "[CLEANUP] Deleted %d old experiences "
+                        "(older than %d days, kept min %d, user_hash=%s)",
+                        deleted,
+                        max_age_days,
+                        keep_min,
+                        _hash_memory_identifier(user_id or "all"),
                     )
                 return deleted
 
@@ -612,3 +786,12 @@ def get_character_repository() -> CharacterRepository:
     if _character_repo is None:
         _character_repo = CharacterRepository()
     return _character_repo
+
+
+def _hash_memory_identifier(value) -> str | None:
+    try:
+        from app.engine.semantic_memory.privacy import hash_memory_identifier
+
+        return hash_memory_identifier(value)
+    except Exception:
+        return None

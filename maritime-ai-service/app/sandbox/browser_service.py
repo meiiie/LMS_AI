@@ -14,6 +14,10 @@ from app.engine.context.browser_agent import (
     get_browser_limiter,
     validate_browser_url,
 )
+from app.engine.runtime.event_payload_sanitizer import (
+    redact_runtime_secret_text,
+    sanitize_runtime_payload,
+)
 from app.sandbox.models import SandboxExecutionResult
 from app.sandbox.service import (
     SandboxExecutionContext,
@@ -30,6 +34,11 @@ _VALID_WAIT_UNTIL = {"load", "domcontentloaded", "networkidle", "commit"}
 _BROWSER_WORKDIR = "/opt/wiii-browser"
 _RUNNER_FILE = f"{_BROWSER_WORKDIR}/browser_runner.mjs"
 _JOB_FILE = f"{_BROWSER_WORKDIR}/browser_job.json"
+
+
+def _safe_metadata(value: Any) -> dict[str, Any]:
+    safe_value = sanitize_runtime_payload(value or {})
+    return safe_value if isinstance(safe_value, dict) else {}
 
 
 @dataclass(slots=True)
@@ -157,7 +166,7 @@ class BrowserSandboxService:
 
     def build_execution_context(self, request: BrowserAutomationRequest) -> SandboxExecutionContext:
         """Translate browser request metadata into the shared sandbox execution context."""
-        context_metadata = dict(request.metadata or {})
+        context_metadata = _safe_metadata(request.metadata)
         if request.node:
             context_metadata.setdefault("node", request.node)
         return SandboxExecutionContext(
@@ -173,7 +182,7 @@ class BrowserSandboxService:
 
     def build_execution_metadata(self, request: BrowserAutomationRequest) -> dict[str, Any]:
         """Attach browser-specific metadata to the sandbox run."""
-        metadata = dict(request.metadata)
+        metadata = _safe_metadata(request.metadata)
         metadata.setdefault("target_url", request.url)
         metadata.setdefault("capture_screenshot", request.capture_screenshot)
         metadata.setdefault("wait_until", request.wait_until)
@@ -182,7 +191,7 @@ class BrowserSandboxService:
             "height": request.viewport_height,
         })
         metadata.setdefault("result_format", "wiii.browser.v1")
-        return metadata
+        return _safe_metadata(metadata)
 
     def build_command(self) -> list[str]:
         """Return the stable command used for all browser workload runs."""
@@ -225,7 +234,7 @@ class BrowserSandboxService:
         sandbox_result: SandboxExecutionResult,
     ) -> BrowserAutomationResult:
         """Convert the generic sandbox result into the browser-specific result model."""
-        metadata = dict(sandbox_result.metadata)
+        metadata = _safe_metadata(sandbox_result.metadata)
         if not sandbox_result.success:
             return BrowserAutomationResult(
                 success=False,
@@ -233,7 +242,9 @@ class BrowserSandboxService:
                 screenshot_label=request.screenshot_label or _DEFAULT_SCREENSHOT_LABEL,
                 stdout=sandbox_result.stdout,
                 stderr=sandbox_result.stderr,
-                error=sandbox_result.error or "Browser sandbox execution failed.",
+                error=redact_runtime_secret_text(
+                    sandbox_result.error or "Browser sandbox execution failed."
+                ),
                 metadata=metadata,
                 sandbox_result=sandbox_result,
             )
@@ -246,7 +257,9 @@ class BrowserSandboxService:
                 screenshot_label=request.screenshot_label or _DEFAULT_SCREENSHOT_LABEL,
                 stdout=sandbox_result.stdout,
                 stderr=sandbox_result.stderr,
-                error="Browser sandbox did not return a structured result payload.",
+                error=redact_runtime_secret_text(
+                    "Browser sandbox did not return a structured result payload."
+                ),
                 metadata=metadata,
                 sandbox_result=sandbox_result,
             )
@@ -371,13 +384,13 @@ class BrowserSandboxService:
         result: BrowserAutomationResult,
     ) -> dict[str, Any]:
         """Expose sandbox correlation metadata in browser stream payloads."""
-        metadata = dict(result.metadata or {})
+        metadata = _safe_metadata(result.metadata)
         sandbox_result = result.sandbox_result
         if sandbox_result and sandbox_result.sandbox_id:
             metadata.setdefault("sandbox_id", sandbox_result.sandbox_id)
         if sandbox_result and sandbox_result.duration_ms is not None:
             metadata.setdefault("duration_ms", sandbox_result.duration_ms)
-        return metadata
+        return _safe_metadata(metadata)
 
 
 def _safe_int(value: Any) -> Optional[int]:

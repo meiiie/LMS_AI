@@ -32,12 +32,15 @@ from PIL import Image
 
 from app.core.config import settings
 from app.core.database import get_shared_session_factory
+from app.repositories.knowledge_search_org_scope import (
+    log_knowledge_search_scope_blocked,
+    resolve_knowledge_search_org_scope,
+)
 from app.services.vision_processor_runtime_bindings import (
     ChunkResult,
     PageResult,
     _analyze_image_with_vision,
     _fetch_image_as_base64,
-    get_effective_org_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -414,7 +417,17 @@ class VisionProcessor:
         """
         domain_id = domain_id or settings.default_domain
         from sqlalchemy import text as sql_text
-        organization_id = organization_id or get_effective_org_id()
+
+        org_scope = resolve_knowledge_search_org_scope(organization_id, write=True)
+        if not org_scope.write_allowed or not org_scope.org_id:
+            log_knowledge_search_scope_blocked(
+                logger,
+                "vision_store_chunk",
+                org_scope,
+                node_id=document_id,
+            )
+            raise RuntimeError("Organization context required for knowledge ingestion")
+        organization_id = org_scope.org_id
 
         session_factory = get_shared_session_factory()
 
@@ -437,8 +450,14 @@ class VisionProcessor:
                     WHERE document_id = :doc_id
                     AND page_number = :page_num
                     AND chunk_index = :chunk_idx
+                    AND organization_id = :org_id
                 """),
-                {"doc_id": document_id, "page_num": page_number, "chunk_idx": chunk_index}
+                {
+                    "doc_id": document_id,
+                    "page_num": page_number,
+                    "chunk_idx": chunk_index,
+                    "org_id": organization_id,
+                }
             ).fetchone()
 
             if result:
@@ -460,6 +479,7 @@ class VisionProcessor:
                         WHERE document_id = :doc_id
                         AND page_number = :page_num
                         AND chunk_index = :chunk_idx
+                        AND organization_id = :org_id
                     """),
                     {
                         "content": content,

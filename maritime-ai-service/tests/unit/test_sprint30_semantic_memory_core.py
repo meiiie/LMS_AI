@@ -302,6 +302,54 @@ class TestGetUserFacts:
         result = await engine.get_user_facts("user-1")
         assert result == {}
 
+    @pytest.mark.asyncio
+    async def test_blocks_without_org_context_when_multi_tenant(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        mock_repo = MagicMock()
+        engine = _make_engine(repo=mock_repo)
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            result = await engine.get_user_facts("user-private-123")
+        finally:
+            current_org_id.reset(token)
+
+        assert result == {}
+        mock_repo.get_user_facts.assert_not_called()
+
+    def test_search_relevant_facts_blocks_without_org_context_when_multi_tenant(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        mock_repo = MagicMock()
+        engine = _make_engine(repo=mock_repo)
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            result = engine.search_relevant_facts(
+                "user-private-123",
+                [0.1] * 768,
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        mock_repo.search_relevant_facts.assert_not_called()
+
 
 # =============================================================================
 # store_interaction
@@ -387,6 +435,101 @@ class TestStoreInteraction:
         second_memory = mock_repo.save_memory.call_args_list[1][0][0]
         assert first_memory.embedding == []
         assert second_memory.embedding == []
+
+    @pytest.mark.asyncio
+    async def test_store_interaction_appends_privacy_safe_write_audit(
+        self,
+        monkeypatch,
+    ):
+        from app.engine.runtime.session_event_log import InMemorySessionEventLog
+
+        log = InMemorySessionEventLog()
+        monkeypatch.setattr(
+            "app.engine.runtime.session_event_log.get_session_event_log",
+            lambda: log,
+        )
+        mock_repo = MagicMock()
+        mock_repo.save_memory.return_value = MagicMock()
+        mock_embeddings = MagicMock()
+        mock_embeddings.aembed_documents = AsyncMock(return_value=[[0.1] * 768])
+
+        engine = _make_engine(repo=mock_repo, embeddings=mock_embeddings)
+        engine._fact_extractor.extract_and_store_facts = AsyncMock(
+            return_value=[object(), object()]
+        )
+
+        result = await engine.store_interaction(
+            user_id="user-private-123",
+            message="PRIVATE USER MESSAGE access_token=raw-user-token-12345",
+            response="PRIVATE ASSISTANT RESPONSE",
+            session_id="session-private-123",
+            extract_facts=True,
+        )
+
+        assert result is True
+        events = await log.get_events(session_id="session-private-123")
+        assert [event.event_type for event in events] == [
+            "semantic_memory_write"
+        ]
+        payload = events[0].payload
+        assert payload["schema_version"] == "wiii.semantic_memory_write.v1"
+        assert payload["write"]["stored_fact_count"] == 2
+        assert payload["write"]["status"] == "saved"
+        serialized = str(payload)
+        assert "user-private-123" not in serialized
+        assert "session-private-123" not in serialized
+        assert "PRIVATE USER MESSAGE" not in serialized
+        assert "PRIVATE ASSISTANT RESPONSE" not in serialized
+        assert "raw-user-token" not in serialized
+
+    @pytest.mark.asyncio
+    async def test_store_interaction_blocks_without_org_context_when_multi_tenant(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.runtime.session_event_log import InMemorySessionEventLog
+
+        log = InMemorySessionEventLog()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        monkeypatch.setattr(
+            "app.engine.runtime.session_event_log.get_session_event_log",
+            lambda: log,
+        )
+        token = current_org_id.set(None)
+        try:
+            mock_repo = MagicMock()
+            mock_embeddings = MagicMock()
+            mock_embeddings.aembed_documents = AsyncMock(return_value=[[0.1] * 768])
+            engine = _make_engine(repo=mock_repo, embeddings=mock_embeddings)
+
+            result = await engine.store_interaction(
+                user_id="user-private-123",
+                message="PRIVATE USER MESSAGE",
+                response="PRIVATE ASSISTANT RESPONSE",
+                session_id="session-private-123",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result is False
+        mock_repo.save_memory.assert_not_called()
+        mock_embeddings.aembed_documents.assert_not_called()
+        events = await log.get_events(session_id="session-private-123")
+        assert len(events) == 1
+        payload = events[0].payload
+        assert payload["write"]["status"] == "blocked"
+        assert payload["scope"]["write_allowed"] is False
+        assert (
+            payload["scope"]["organization_context"]
+            == "blocked_missing_org_context"
+        )
+        serialized = str(payload)
+        assert "PRIVATE USER MESSAGE" not in serialized
+        assert "PRIVATE ASSISTANT RESPONSE" not in serialized
 
 
 # =============================================================================
@@ -481,6 +624,32 @@ class TestDeleteMemoryByKeyword:
         result = await engine.delete_memory_by_keyword("user-1", "test")
         assert result == 0
 
+    @pytest.mark.asyncio
+    async def test_blocks_without_org_context_when_multi_tenant(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        mock_repo = MagicMock()
+        engine = _make_engine(repo=mock_repo)
+
+        token = current_org_id.set(None)
+        try:
+            result = await engine.delete_memory_by_keyword(
+                "user-private-123",
+                "PRIVATE KEYWORD",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result == 0
+        mock_repo.delete_memories_by_keyword.assert_not_called()
+
 
 # =============================================================================
 # delete_all_user_memories
@@ -507,6 +676,29 @@ class TestDeleteAllUserMemories:
         engine = _make_engine(repo=mock_repo)
         result = await engine.delete_all_user_memories("user-1")
         assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_blocks_without_org_context_when_multi_tenant(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        mock_repo = MagicMock()
+        engine = _make_engine(repo=mock_repo)
+
+        token = current_org_id.set(None)
+        try:
+            result = await engine.delete_all_user_memories("user-private-123")
+        finally:
+            current_org_id.reset(token)
+
+        assert result == 0
+        mock_repo.delete_all_user_memories.assert_not_called()
 
 
 # =============================================================================
@@ -554,3 +746,51 @@ class TestStoreExplicitInsight:
         engine._insight_provider._store_insight = AsyncMock(side_effect=RuntimeError("fail"))
         result = await engine.store_explicit_insight("user-1", "Test")
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_store_explicit_insight_blocks_without_org_context_when_multi_tenant(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.runtime.session_event_log import InMemorySessionEventLog
+
+        log = InMemorySessionEventLog()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        monkeypatch.setattr(
+            "app.engine.runtime.session_event_log.get_session_event_log",
+            lambda: log,
+        )
+
+        mock_repo = MagicMock()
+        mock_embeddings = MagicMock()
+        mock_embeddings.aembed_documents = AsyncMock(return_value=[[0.1] * 768])
+        engine = _make_engine(repo=mock_repo, embeddings=mock_embeddings)
+
+        token = current_org_id.set(None)
+        try:
+            result = await engine.store_explicit_insight(
+                user_id="user-private-123",
+                insight_text="PRIVATE INSIGHT access_token=raw-insight-token-12345",
+                category="preference",
+                session_id="session-private-123",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result is False
+        mock_embeddings.aembed_documents.assert_not_awaited()
+        mock_repo.save_memory.assert_not_called()
+        events = await log.get_events(session_id="session-private-123")
+        assert len(events) == 1
+        payload = events[0].payload
+        assert payload["write"]["kind"] == "insight_store"
+        assert payload["write"]["status"] == "blocked"
+        assert payload["scope"]["write_allowed"] is False
+        serialized = str(payload)
+        assert "PRIVATE INSIGHT" not in serialized
+        assert "raw-insight-token" not in serialized
+        assert "user-private-123" not in serialized

@@ -160,6 +160,54 @@ def test_turn_path_governor_narrows_visual_app_to_required_tool():
     assert decision.should_keep_tool_name("tool_pointy_show") is False
 
 
+def test_turn_path_governor_keeps_visual_app_ahead_of_domain_search():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(
+            normalized_query="tao mini app mo phong colreg rule 15",
+            visual_force_tool=True,
+            visual_mode="app",
+            visual_presentation_intent="code_studio_app",
+            visual_required_tool_names=("tool_create_visual_code",),
+            needs_maritime_search=True,
+            suppress_pointy_for_output=True,
+        )
+    )
+
+    assert decision.path == "visual_generation"
+    assert decision.reason == "visual_intent_code_studio_app"
+    assert decision.should_keep_tool_name("tool_create_visual_code") is True
+    assert decision.should_keep_tool_name("tool_search_maritime") is False
+
+
+def test_collect_direct_tools_routes_code_studio_app_to_visual_lane():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {"context": {}, "messages": []}
+    tools, force_tools = module._collect_direct_tools(
+        (
+            "Tao mot mini app Code Studio mo phong COLREG Rule 15 "
+            "co slider va canvas tuong tac."
+        ),
+        user_role="student",
+        state=state,
+    )
+
+    visible = state["_tool_policy_session"]["visible_tool_names"]
+    assert force_tools is True
+    assert state["_turn_path_decision"]["path"] == "visual_generation"
+    assert "tool_create_visual_code" in visible
+    assert all(
+        (getattr(tool, "name", None) or getattr(tool, "__name__", ""))
+        == "tool_create_visual_code"
+        for tool in tools
+    )
+
+
 def test_turn_path_governor_routes_weather_to_weather_tool_only():
     from app.engine.multi_agent.turn_path_governor import (
         TurnPathSignals,
@@ -190,8 +238,10 @@ def test_turn_path_governor_forces_wiii_connect_facebook_post_tools():
         resolve_turn_path_decision,
     )
     from app.engine.tools.tool_capability_registry import (
+        WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL,
         WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
-        WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+        WIII_CONNECT_EXECUTE_ACTION_TOOL,
+        WIII_CONNECT_LIST_ACTIONS_TOOL,
     )
 
     decision = resolve_turn_path_decision(
@@ -208,9 +258,31 @@ def test_turn_path_governor_forces_wiii_connect_facebook_post_tools():
     assert decision.bind_tools is True
     assert decision.allow_all_tools is False
     assert decision.should_keep_tool_name(WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL) is True
-    assert decision.should_keep_tool_name(WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL) is True
+    assert decision.should_keep_tool_name(WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL) is True
+    assert decision.should_keep_tool_name(WIII_CONNECT_LIST_ACTIONS_TOOL) is True
+    assert decision.should_keep_tool_name(WIII_CONNECT_EXECUTE_ACTION_TOOL) is False
     assert decision.should_keep_tool_name("host_action__ui_click") is False
     assert decision.should_keep_tool_name("tool_pointy_show") is False
+
+
+def test_turn_path_governor_marks_connection_status_as_no_tool_control_path():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(
+            normalized_query="wiii co ket noi duoc facebook khong",
+            routing_intent="off_topic",
+            needs_external_connection_status=True,
+        )
+    )
+
+    assert decision.path == "external_connection_status"
+    assert decision.reason == "wiii_connect_provider_status_request"
+    assert decision.bind_tools is False
+    assert decision.allow_agent_handoff is False
 
 
 def test_turn_path_filter_keeps_only_lms_document_preview_tools():
@@ -333,6 +405,107 @@ def test_collect_direct_tools_marks_wiii_pipeline_meta_as_no_tool():
     assert force_tools is False
     assert state["_turn_path_decision"]["path"] == "direct_prose"
     assert state["_turn_path_decision"]["reason"] == "wiii_pipeline_meta_no_tool"
+
+
+def test_collect_direct_tools_records_connection_status_control_path():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {"context": {}, "routing_metadata": {"intent": "off_topic"}}
+    tools, force_tools = module._collect_direct_tools(
+        "Wiii co ket noi duoc facebook khong?",
+        user_role="student",
+        state=state,
+    )
+
+    assert tools == []
+    assert force_tools is False
+    assert state["_turn_path_decision"]["path"] == "external_connection_status"
+    assert state["_tool_policy_session"]["visible_tool_names"] == []
+
+
+def test_collect_direct_tools_routes_providerless_facebook_action_continuation():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {
+        "context": {},
+        "messages": [
+            {
+                "role": "user",
+                "content": "Wiii co the dang bai len Facebook khong?",
+            },
+            {
+                "role": "assistant",
+                "content": "Facebook chua agent-ready trong Wiii Connect.",
+            },
+        ],
+    }
+    tools, force_tools = module._collect_direct_tools(
+        'dang bai: "xin chao minh la AI" la duoc',
+        user_role="student",
+        state=state,
+    )
+
+    assert tools == []
+    assert force_tools is False
+    assert state["_turn_path_decision"]["path"] == "external_app_action"
+    assert state["_external_app_action_plan"]["kind"] == "facebook_post_direct_apply"
+    assert state["_external_app_action_plan"]["provider_slug"] == "facebook"
+    assert state["_tool_policy_session"]["external_app_action_plan"][
+        "provider_slug"
+    ] == "facebook"
+
+
+def test_collect_direct_tools_routes_providerless_gmail_action_continuation():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {
+        "context": {},
+        "messages": [
+            {
+                "role": "user",
+                "content": "Wiii co the doc Gmail khong?",
+            },
+            {
+                "role": "assistant",
+                "content": "Gmail chua agent-ready trong Wiii Connect.",
+            },
+        ],
+    }
+    tools, force_tools = module._collect_direct_tools(
+        "doc email moi nhat di",
+        user_role="student",
+        state=state,
+    )
+
+    assert tools == []
+    assert force_tools is False
+    assert state["_turn_path_decision"]["path"] == "external_app_action"
+    assert state["_external_app_action_plan"]["kind"] == "provider_action"
+    assert state["_external_app_action_plan"]["provider_slug"] == "gmail"
+    assert state["_tool_policy_session"]["external_app_action_plan"][
+        "provider_slug"
+    ] == "gmail"
+
+
+def test_collect_direct_tools_routes_missing_provider_external_action():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {"context": {}, "messages": []}
+    tools, force_tools = module._collect_direct_tools(
+        "dang bai len mang xa hoi di",
+        user_role="student",
+        state=state,
+    )
+
+    assert tools == []
+    assert force_tools is False
+    assert state["_turn_path_decision"]["path"] == "external_app_action"
+    assert state["_external_app_action_plan"]["kind"] == "provider_action"
+    assert state["_external_app_action_plan"]["reason"] == "missing_provider_target"
+    assert state["_external_app_action_plan"]["provider_slug"] == ""
+    assert state["_tool_policy_session"]["external_app_action_plan"][
+        "reason"
+    ] == "missing_provider_target"
 
 
 def test_collect_direct_tools_keeps_explicit_web_search_path():

@@ -37,6 +37,9 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+from app.engine.semantic_memory.write_audit import resolve_memory_read_scope
+
 logger = logging.getLogger(__name__)
 
 
@@ -80,6 +83,20 @@ async def search_prior_user_turns(
         return []
     if limit <= 0:
         return []
+    user_id_hash = hash_runtime_identifier(user_id)
+    if not user_id_hash:
+        return []
+    scope = resolve_memory_read_scope()
+    if not scope.write_allowed:
+        logger.warning(
+            "[episodic] retrieval blocked for user_hash=%s: %s",
+            user_id_hash,
+            scope.state,
+        )
+        return []
+    effective_org_id = org_id
+    if not effective_org_id and scope.state != "single_tenant_default":
+        effective_org_id = scope.org_id
 
     try:
         from app.core.database import get_asyncpg_pool
@@ -91,19 +108,19 @@ async def search_prior_user_turns(
         )
         return []
 
-    # Build the WHERE clause defensively. The user_id filter is on the
-    # payload jsonb (we don't have a dedicated user_id column on
-    # session_events). org_id is a top-level column from Alembic 047.
-    params: list = [user_id, f"%{cleaned.lower()}%"]
+    # Build the WHERE clause defensively. New session_events store only
+    # user_id_hash; the raw user_id fallback keeps pre-sanitizer rows
+    # searchable until they are backfilled or aged out.
+    params: list = [user_id_hash, user_id, f"%{cleaned.lower()}%"]
     where_parts = [
-        "(payload->>'user_id') = $1",
-        "lower(payload->>'text') LIKE $2",
+        "((payload->>'user_id_hash') = $1 OR (payload->>'user_id') = $2)",
+        "lower(payload->>'text') LIKE $3",
     ]
     if exclude_session_id:
         params.append(exclude_session_id)
         where_parts.append(f"session_id <> ${len(params)}")
-    if org_id:
-        params.append(org_id)
+    if effective_org_id:
+        params.append(effective_org_id)
         where_parts.append(f"org_id = ${len(params)}")
 
     sql = (

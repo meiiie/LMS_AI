@@ -179,6 +179,41 @@ class TestZaloAdapterSend:
         assert "invalid" in result.detail.lower()
 
     @pytest.mark.asyncio
+    async def test_send_api_error_redacts_provider_secret_and_recipient(self):
+        """Provider error message must not expose token or raw recipient."""
+        from app.services.notifications.adapters.zalo import (
+            ZaloAdapter,
+        )
+
+        adapter = ZaloAdapter()
+        settings = _make_settings()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "error": -216,
+            "message": (
+                "invalid access_token=test-zalo-token-abc user_id=user-secret"
+            ),
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(
+            return_value=mock_client,
+        )
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(_SETTINGS_PATCH, settings), \
+             patch("httpx.AsyncClient", return_value=mock_client):
+            result = await adapter.send("user-secret", "Hello")
+
+        assert result.delivered is False
+        assert "invalid" in result.detail
+        assert "test-zalo-token-abc" not in result.detail
+        assert "user-secret" not in result.detail
+
+    @pytest.mark.asyncio
     async def test_send_http_error(self):
         """Should handle HTTP non-200 with error body."""
         from app.services.notifications.adapters.zalo import (

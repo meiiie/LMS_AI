@@ -26,6 +26,7 @@ if "app.services.chat_service" not in sys.modules:
     _mock_chat_svc = types.ModuleType("app.services.chat_service")
     _mock_chat_svc.ChatService = MagicMock  # noqa: F811
     _mock_chat_svc.get_chat_service = MagicMock
+    _mock_chat_svc.reset_chat_service = MagicMock
     sys.modules["app.services.chat_service"] = _mock_chat_svc
 
 from app.engine.messages import Message
@@ -209,6 +210,105 @@ class TestRunningSummaryPersistence:
         assert result == "Summary"
         mock_factory.assert_not_called()
 
+    def test_running_summary_blocks_missing_org_context_before_cache_or_db(
+        self,
+        monkeypatch,
+    ):
+        """Multi-tenant production without org must not read cache or DB."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.context_manager import ConversationCompactor
+
+        compactor = ConversationCompactor()
+        compactor._running_summaries["user1::s1"] = "Legacy unscoped summary"
+        compactor._running_summaries["org-A::user1::s1"] = "Org A summary"
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                result = compactor.get_running_summary("s1", user_id="user1")
+                compactor.set_running_summary("s1", "Blocked summary", user_id="user1")
+                compactor.clear_session("s1", user_id="user1")
+        finally:
+            current_org_id.reset(token)
+
+        assert result == ""
+        assert "Blocked summary" not in compactor._running_summaries.values()
+        assert compactor._running_summaries["user1::s1"] == "Legacy unscoped summary"
+        assert compactor._running_summaries["org-A::user1::s1"] == "Org A summary"
+        mock_factory.assert_not_called()
+
+    def test_running_summary_cache_is_scoped_per_org(self, monkeypatch):
+        """Same user/session pair keeps separate cached summaries per org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.context_manager import ConversationCompactor
+
+        compactor = ConversationCompactor()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        factory, _ = _mock_db_factory()
+
+        with patch("app.core.database.get_shared_session_factory", return_value=factory), \
+             patch.object(compactor, "_persist_session_summary"):
+            token = current_org_id.set("org-A")
+            try:
+                compactor.set_running_summary("s1", "Org A summary", user_id="user1")
+            finally:
+                current_org_id.reset(token)
+
+            token = current_org_id.set("org-B")
+            try:
+                compactor.set_running_summary("s1", "Org B summary", user_id="user1")
+            finally:
+                current_org_id.reset(token)
+
+        token = current_org_id.set("org-A")
+        try:
+            assert compactor.get_running_summary("s1", user_id="user1") == "Org A summary"
+        finally:
+            current_org_id.reset(token)
+
+        token = current_org_id.set("org-B")
+        try:
+            assert compactor.get_running_summary("s1", user_id="user1") == "Org B summary"
+        finally:
+            current_org_id.reset(token)
+
+        assert compactor._running_summaries["org-A::user1::s1"] == "Org A summary"
+        assert compactor._running_summaries["org-B::user1::s1"] == "Org B summary"
+
+    def test_running_summary_db_read_filters_by_current_org(self, monkeypatch):
+        """DB fallback reads only the request-scoped organization."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.context_manager import ConversationCompactor
+
+        compactor = ConversationCompactor()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        factory, mock_session = _mock_db_factory(rows=("DB summary",))
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=factory):
+                result = compactor.get_running_summary("s2", user_id="user1")
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert result == "DB summary"
+        assert "organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+        assert compactor._running_summaries["org-A::user1::s2"] == "DB summary"
+
 
 # =============================================================================
 # Part 2: Session Summary Milestones
@@ -304,6 +404,57 @@ class TestSessionSummaryMilestones:
             mock_create_task.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_summary_trigger_passes_org_scope(self):
+        """Milestone summary jobs inherit the thread org scope."""
+        from app.engine.multi_agent.graph_process import _upsert_thread_view
+
+        mock_repo = MagicMock()
+        mock_repo.upsert_thread.return_value = {
+            "thread_id": "tid",
+            "message_count": 6,
+        }
+
+        summary_calls = []
+
+        def _fake_summary(thread_id, user_id, organization_id=None):
+            summary_calls.append((thread_id, user_id, organization_id))
+
+            async def _noop():
+                return None
+
+            return _noop()
+
+        with patch(
+            "app.repositories.thread_repository.get_thread_repository",
+            return_value=mock_repo,
+        ), patch(
+            "app.core.thread_utils.build_thread_id",
+            return_value="thread-org",
+        ), patch(
+            "asyncio.create_task",
+            side_effect=_close_background_coro,
+        ) as mock_create_task:
+            await _upsert_thread_view(
+                query="Test",
+                user_id="u1",
+                session_id="s1",
+                domain_id="maritime",
+                context={"organization_id": "org-active"},
+                summary_milestones={6},
+                generate_session_summary_bg=_fake_summary,
+            )
+
+        mock_repo.upsert_thread.assert_called_once_with(
+            thread_id="thread-org",
+            user_id="u1",
+            domain_id="maritime",
+            title="Test",
+            organization_id="org-active",
+        )
+        mock_create_task.assert_called_once()
+        assert summary_calls == [("thread-org", "u1", "org-active")]
+
+    @pytest.mark.asyncio
     async def test_summary_not_triggered_below_threshold(self):
         """No trigger when message_count is not a milestone."""
         from app.engine.multi_agent import graph as graph_mod
@@ -377,6 +528,7 @@ class TestIntegration:
     def test_persist_session_summary_calls_thread_repo(self):
         """_persist_session_summary calls thread_repository.update_extra_data."""
         from app.engine.context_manager import ConversationCompactor
+        from app.engine.semantic_memory.write_audit import MemoryWriteScope
 
         compactor = ConversationCompactor()
 
@@ -385,10 +537,23 @@ class TestIntegration:
 
         with patch("app.core.thread_utils.build_thread_id", return_value="user_u1__session_s1"), \
              patch("app.repositories.thread_repository.get_thread_repository", return_value=mock_repo):
-            compactor._persist_session_summary("s1", "u1", "Summary text")
+            compactor._persist_session_summary(
+                "s1",
+                "u1",
+                "Summary text",
+                scope=MemoryWriteScope(
+                    org_id="org-active",
+                    state="request_scoped",
+                    warnings=[],
+                    write_allowed=True,
+                ),
+            )
 
         mock_repo.update_extra_data.assert_called_once_with(
-            "user_u1__session_s1", "u1", {"summary": "Summary text"}
+            "user_u1__session_s1",
+            "u1",
+            {"summary": "Summary text"},
+            organization_id="org-active",
         )
 
     @pytest.mark.asyncio
@@ -561,13 +726,23 @@ class TestAutoSessionSummarization:
             "app.repositories.thread_repository.get_thread_repository",
             return_value=mock_repo,
         ):
-            orch._maybe_summarize_previous_session(background_save, "user1")
+            orch._maybe_summarize_previous_session(
+                background_save,
+                "user1",
+                "org-active",
+            )
 
         background_save.assert_called_once()
+        mock_repo.list_threads.assert_called_once_with(
+            user_id="user1",
+            limit=2,
+            organization_id="org-active",
+        )
         # Verify the function and args passed
         args = background_save.call_args[0]
         assert args[1] == "previous"  # thread_id
         assert args[2] == "user1"     # user_id
+        assert args[3] == "org-active"
 
     def test_already_summarized_session_skips(self):
         """Previous session with existing summary is not re-summarized."""

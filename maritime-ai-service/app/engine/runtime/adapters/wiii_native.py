@@ -15,7 +15,13 @@ from __future__ import annotations
 from typing import Optional
 
 from app.engine.messages import Message
+from app.engine.runtime.event_payload_sanitizer import sanitize_runtime_payload
 from app.engine.runtime.turn_request import TurnRequest
+
+
+def _safe_metadata(value: Optional[dict]) -> dict:
+    safe_value = sanitize_runtime_payload(value or {})
+    return safe_value if isinstance(safe_value, dict) else {}
 
 
 def wiii_chat_request_to_turn_request(
@@ -47,7 +53,7 @@ def wiii_chat_request_to_turn_request(
         role=role,
         requested_streaming=requested_streaming,
         requested_capabilities=list(requested_capabilities or []),
-        metadata=dict(metadata or {}),
+        metadata=_safe_metadata(metadata),
     )
 
 

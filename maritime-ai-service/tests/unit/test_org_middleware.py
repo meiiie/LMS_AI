@@ -14,6 +14,7 @@ dispatch). Patch at SOURCE module (app.core.config.settings).
 """
 
 import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from starlette.requests import Request
@@ -225,3 +226,160 @@ class TestOrgContextMiddlewareEnabled:
             await middleware.dispatch(request, call_next)
 
         assert get_current_org_id() is None
+
+    @pytest.mark.asyncio
+    @patch("app.repositories.organization_repository.get_organization_repository")
+    @patch("app.core.config.settings")
+    async def test_bearer_org_mismatch_rejected_before_context(
+        self,
+        mock_settings,
+        mock_repo_fn,
+    ):
+        mock_settings.enable_multi_tenant = True
+        mock_settings.environment = "production"
+        mock_settings.subdomain_base_domain = ""
+
+        from app.core.org_context import get_current_org_id
+
+        middleware = OrgContextMiddleware(app=MagicMock())
+        request = _make_request(
+            {
+                "X-Organization-ID": "org-header",
+                "Authorization": "Bearer token-1",
+            }
+        )
+
+        async def call_next(req):
+            raise AssertionError("request should be rejected before handler")
+
+        with patch(
+            "app.core.security.verify_jwt_token",
+            return_value=SimpleNamespace(active_organization_id="org-token"),
+        ):
+            response = await middleware.dispatch(request, call_next)
+
+        assert response.status_code == 403
+        assert get_current_org_id() is None
+        mock_repo_fn.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("app.repositories.organization_repository.get_organization_repository")
+    @patch("app.core.config.settings")
+    async def test_bearer_header_only_org_rejected_before_context(
+        self,
+        mock_settings,
+        mock_repo_fn,
+    ):
+        mock_settings.enable_multi_tenant = True
+        mock_settings.environment = "production"
+        mock_settings.subdomain_base_domain = ""
+
+        from app.core.org_context import get_current_org_id
+
+        middleware = OrgContextMiddleware(app=MagicMock())
+        request = _make_request(
+            {
+                "X-Organization-ID": "org-header-only",
+                "Authorization": "Bearer token-1",
+            }
+        )
+
+        async def call_next(req):
+            raise AssertionError("request should be rejected before handler")
+
+        with patch(
+            "app.core.security.verify_jwt_token",
+            return_value=SimpleNamespace(active_organization_id=None),
+        ):
+            response = await middleware.dispatch(request, call_next)
+
+        assert response.status_code == 403
+        assert get_current_org_id() is None
+        mock_repo_fn.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("app.repositories.organization_repository.get_organization_repository")
+    @patch("app.core.config.settings")
+    async def test_bearer_matching_org_sets_context(
+        self,
+        mock_settings,
+        mock_repo_fn,
+    ):
+        mock_settings.enable_multi_tenant = True
+        mock_settings.environment = "production"
+        mock_settings.subdomain_base_domain = ""
+
+        mock_repo = MagicMock()
+        mock_org = MagicMock()
+        mock_org.allowed_domains = ["maritime"]
+        mock_repo.get_organization.return_value = mock_org
+        mock_repo_fn.return_value = mock_repo
+
+        from app.core.org_context import get_current_org_id
+
+        middleware = OrgContextMiddleware(app=MagicMock())
+        request = _make_request(
+            {
+                "X-Organization-ID": "org-token",
+                "Authorization": "Bearer token-1",
+            }
+        )
+
+        captured_org_id = None
+
+        async def call_next(req):
+            nonlocal captured_org_id
+            captured_org_id = get_current_org_id()
+            return Response(status_code=200)
+
+        with patch(
+            "app.core.security.verify_jwt_token",
+            return_value=SimpleNamespace(active_organization_id="org-token"),
+        ):
+            response = await middleware.dispatch(request, call_next)
+
+        assert response.status_code == 200
+        assert captured_org_id == "org-token"
+        assert get_current_org_id() is None
+
+    @pytest.mark.asyncio
+    @patch("app.repositories.organization_repository.get_organization_repository")
+    @patch("app.core.config.settings")
+    async def test_development_bearer_org_override_keeps_legacy_behavior(
+        self,
+        mock_settings,
+        mock_repo_fn,
+    ):
+        mock_settings.enable_multi_tenant = True
+        mock_settings.environment = "development"
+        mock_settings.subdomain_base_domain = ""
+
+        mock_repo = MagicMock()
+        mock_repo.get_organization.return_value = None
+        mock_repo_fn.return_value = mock_repo
+
+        from app.core.org_context import get_current_org_id
+
+        middleware = OrgContextMiddleware(app=MagicMock())
+        request = _make_request(
+            {
+                "X-Organization-ID": "org-header",
+                "Authorization": "Bearer token-1",
+            }
+        )
+
+        captured_org_id = None
+
+        async def call_next(req):
+            nonlocal captured_org_id
+            captured_org_id = get_current_org_id()
+            return Response(status_code=200)
+
+        with patch(
+            "app.core.security.verify_jwt_token",
+            side_effect=AssertionError("development should not inspect bearer org"),
+        ):
+            response = await middleware.dispatch(request, call_next)
+
+        assert response.status_code == 200
+        assert captured_org_id == "org-header"

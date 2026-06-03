@@ -1156,8 +1156,15 @@ function formatMemoryValue(type: string, value: string): string {
 }
 
 export function MemoryTab({ userId }: { userId: string }) {
-  const { memories, isLoading, error, fetchMemories, deleteOne, clearAll } =
-    useMemoryStore();
+  const {
+    memories,
+    memorySummary,
+    isLoading,
+    error,
+    fetchMemories,
+    deleteOne,
+    clearAll,
+  } = useMemoryStore();
   const { addToast } = useToastStore();
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1243,6 +1250,17 @@ export function MemoryTab({ userId }: { userId: string }) {
   };
 
   const uniqueTypes = Object.keys(typeCounts).sort();
+  const summaryTypeCount = memorySummary
+    ? Object.keys(memorySummary.type_counts).length
+    : uniqueTypes.length;
+  const latestMemoryLabel = memorySummary?.latest_created_at
+    ? new Date(memorySummary.latest_created_at).toLocaleDateString("vi-VN", {
+        day: "numeric",
+        month: "numeric",
+        year: "numeric",
+      })
+    : "Chưa có";
+  const scopeLabel = memorySummary?.org_scoped ? "Theo tổ chức" : "Cá nhân";
 
   return (
     <div className="space-y-4">
@@ -1265,6 +1283,43 @@ export function MemoryTab({ userId }: { userId: string }) {
           </button>
         )}
       </div>
+
+      {memorySummary && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-lg border border-border bg-surface-secondary px-3 py-2">
+            <div className="text-[10px] font-medium uppercase text-text-tertiary">
+              Tổng
+            </div>
+            <div className="text-sm font-semibold text-text">
+              {memorySummary.total}
+            </div>
+          </div>
+          <div className="rounded-lg border border-border bg-surface-secondary px-3 py-2">
+            <div className="text-[10px] font-medium uppercase text-text-tertiary">
+              Loại
+            </div>
+            <div className="text-sm font-semibold text-text">
+              {summaryTypeCount}
+            </div>
+          </div>
+          <div className="rounded-lg border border-border bg-surface-secondary px-3 py-2">
+            <div className="text-[10px] font-medium uppercase text-text-tertiary">
+              Gần nhất
+            </div>
+            <div className="truncate text-sm font-semibold text-text">
+              {latestMemoryLabel}
+            </div>
+          </div>
+          <div className="rounded-lg border border-border bg-surface-secondary px-3 py-2">
+            <div className="text-[10px] font-medium uppercase text-text-tertiary">
+              Phạm vi
+            </div>
+            <div className="truncate text-sm font-semibold text-text">
+              {scopeLabel}
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         open={showClearConfirm}

@@ -182,7 +182,10 @@ def _build_runtime_notes(
     try:
         from app.engine.character.character_state import get_character_state_manager
 
-        living_state = get_character_state_manager().compile_living_state(user_id=user_id)
+        living_state = get_character_state_manager().compile_living_state(
+            user_id=user_id,
+            organization_id=organization_id,
+        )
         if living_state:
             notes.append(living_state)
     except Exception:

@@ -55,7 +55,23 @@ def _reset_ffs_cache():
 
 from app.core.security import AuthenticatedUser
 
-_ADMIN_USER = AuthenticatedUser(user_id="admin-1", auth_method="api_key", role="admin")
+_ADMIN_USER = AuthenticatedUser(
+    user_id="admin-1",
+    auth_method="api_key",
+    role="admin",
+    organization_id="org-active",
+)
+_ADMIN_NO_ORG_USER = AuthenticatedUser(
+    user_id="admin-1",
+    auth_method="api_key",
+    role="admin",
+)
+_ADMIN_ORG_USER = AuthenticatedUser(
+    user_id="admin-1",
+    auth_method="api_key",
+    role="admin",
+    organization_id="org-active",
+)
 _STUDENT_USER = AuthenticatedUser(user_id="student-1", auth_method="api_key", role="student")
 
 
@@ -756,7 +772,12 @@ class TestAnalyticsOverview:
         with patch(_POOL_PATCH, async_pool_fn, create=True):
             from app.api.v1.admin_analytics import analytics_overview
             await analytics_overview(
-                auth=_ADMIN_USER,
+                auth=AuthenticatedUser(
+                    user_id="admin-1",
+                    auth_method="api_key",
+                    role="admin",
+                    organization_id="lms-hang-hai",
+                ),
                 from_date=None,
                 to_date=None,
                 org_id="lms-hang-hai",
@@ -765,6 +786,77 @@ class TestAnalyticsOverview:
         # org_id should appear in at least one fetch call's arguments
         all_call_str = str(mock_conn.fetch.call_args_list)
         assert "lms-hang-hai" in all_call_str
+
+    @pytest.mark.asyncio
+    async def test_multi_tenant_defaults_to_active_org_scope(self, monkeypatch):
+        """Multi-tenant overview analytics use active org before querying."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        async_pool_fn, mock_conn = _mock_pool_and_conn()
+        mock_conn.fetch.return_value = []
+
+        with patch(_POOL_PATCH, async_pool_fn, create=True):
+            from app.api.v1.admin_analytics import analytics_overview
+            result = await analytics_overview(
+                auth=_ADMIN_ORG_USER,
+                from_date=None,
+                to_date=None,
+                org_id=None,
+            )
+
+        all_call_str = str(mock_conn.fetch.call_args_list)
+        assert "org-active" in all_call_str
+        assert result["scope"] == {
+            "org_scoped": True,
+            "org_filter_applied": True,
+            "identifier_strategy": "active_org_id_not_echoed",
+        }
+        assert "org-active" not in str(result)
+
+    @pytest.mark.asyncio
+    async def test_multi_tenant_requires_active_org_before_db(self, monkeypatch):
+        """Missing active org fails closed before opening the pool."""
+        from fastapi import HTTPException
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        async_pool_fn = AsyncMock()
+
+        with patch(_POOL_PATCH, async_pool_fn, create=True):
+            from app.api.v1.admin_analytics import analytics_overview
+            with pytest.raises(HTTPException) as exc_info:
+                await analytics_overview(
+                    auth=_ADMIN_NO_ORG_USER,
+                    from_date=None,
+                    to_date=None,
+                    org_id=None,
+                )
+
+        assert exc_info.value.status_code == 403
+        async_pool_fn.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_multi_tenant_rejects_mismatched_org_before_db(self, monkeypatch):
+        """Requested org_id cannot override the authenticated active org."""
+        from fastapi import HTTPException
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        async_pool_fn = AsyncMock()
+
+        with patch(_POOL_PATCH, async_pool_fn, create=True):
+            from app.api.v1.admin_analytics import analytics_overview
+            with pytest.raises(HTTPException) as exc_info:
+                await analytics_overview(
+                    auth=_ADMIN_ORG_USER,
+                    from_date=None,
+                    to_date=None,
+                    org_id="org-other",
+                )
+
+        assert exc_info.value.status_code == 403
+        async_pool_fn.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_requires_admin(self):
@@ -830,6 +922,35 @@ class TestLLMUsageAnalytics:
         assert result["total_tokens"] == 500000
         assert result["total_cost_usd"] == 2.50
         assert result["total_requests"] == 1200
+
+    @pytest.mark.asyncio
+    async def test_multi_tenant_llm_usage_uses_active_org_scope(self, monkeypatch):
+        """LLM usage analytics bind active org and do not echo it in response."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        async_pool_fn, mock_conn = _mock_pool_and_conn()
+        mock_conn.fetchrow.return_value = {
+            "total_tokens": 10,
+            "total_cost": 0.01,
+            "total_requests": 1,
+        }
+        mock_conn.fetch.return_value = []
+
+        with patch(_POOL_PATCH, async_pool_fn, create=True):
+            from app.api.v1.admin_analytics import analytics_llm_usage
+            result = await analytics_llm_usage(
+                auth=_ADMIN_ORG_USER,
+                from_date=None,
+                to_date=None,
+                org_id=None,
+                model=None,
+                group_by="day",
+            )
+
+        assert "org-active" in str(mock_conn.fetchrow.call_args_list)
+        assert result["scope"]["org_scoped"] is True
+        assert "org-active" not in str(result)
 
     @pytest.mark.asyncio
     async def test_group_by_model(self):
@@ -982,6 +1103,40 @@ class TestUserAnalytics:
         assert result["user_growth"][0]["new_users"] == 3
 
     @pytest.mark.asyncio
+    async def test_multi_tenant_user_analytics_uses_active_org_scope(self, monkeypatch):
+        """User analytics use active org when no org_id query is supplied."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        async_pool_fn, mock_conn = _mock_pool_and_conn()
+        mock_conn.fetchval.side_effect = [24, 6, 5]
+        mock_conn.fetch.side_effect = [
+            [],
+            [],
+            [],
+            [],
+            [],
+        ]
+
+        with patch(_POOL_PATCH, async_pool_fn, create=True):
+            from app.api.v1.admin_analytics import analytics_users
+            result = await analytics_users(
+                auth=_ADMIN_ORG_USER,
+                from_date=None,
+                to_date=None,
+                org_id=None,
+            )
+
+        assert "org-active" in str(mock_conn.fetchval.call_args_list)
+        assert "org-active" in str(mock_conn.fetch.call_args_list)
+        assert result["scope"] == {
+            "org_scoped": True,
+            "org_filter_applied": True,
+            "identifier_strategy": "active_org_id_not_echoed",
+        }
+        assert "org-active" not in str(result)
+
+    @pytest.mark.asyncio
     async def test_role_distribution(self):
         """Returns both canonical and compatibility role distributions."""
         async_pool_fn, mock_conn = _mock_pool_and_conn()
@@ -1028,6 +1183,7 @@ class TestUserAnalytics:
             [],  # user_growth
             [],  # role_distribution
             [],  # platform_role_distribution
+            [],  # organization_role_distribution
             [
                 {"user_id": "power-user", "sessions": 42},
                 {"user_id": "regular-user", "sessions": 7},
@@ -1083,7 +1239,12 @@ class TestUserAnalytics:
         with patch(_POOL_PATCH, async_pool_fn, create=True):
             from app.api.v1.admin_analytics import analytics_users
             result = await analytics_users(
-                auth=_ADMIN_USER,
+                auth=AuthenticatedUser(
+                    user_id="admin-1",
+                    auth_method="api_key",
+                    role="admin",
+                    organization_id="org-lms",
+                ),
                 from_date=None,
                 to_date=None,
                 org_id="org-lms",

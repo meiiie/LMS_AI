@@ -10,6 +10,8 @@ from sqlalchemy import text
 from app.models.semantic_memory import MemoryType
 
 logger = logging.getLogger(__name__)
+_FACT_REPOSITORY_MISSING_ORG_WARNING = "fact_repository_blocked_missing_org_context"
+_FACT_ORG_FILTER = " AND organization_id = :org_id"
 
 
 class FactRepositoryMutationRuntimeMixin:
@@ -23,11 +25,38 @@ class FactRepositoryMutationRuntimeMixin:
     - self.TABLE_NAME
     """
 
-    def _get_org_scope(self) -> tuple[Optional[str], str]:
-        from app.core.org_filter import get_effective_org_id, org_where_clause
+    def _resolve_fact_org_scope(self, *, write: bool = False):
+        from app.engine.semantic_memory.write_audit import (
+            resolve_memory_read_scope,
+            resolve_memory_write_scope,
+        )
 
-        effective_org_id = get_effective_org_id()
-        return effective_org_id, org_where_clause(effective_org_id)
+        scope = resolve_memory_write_scope() if write else resolve_memory_read_scope()
+        if not self._scope_allows_facts(scope):
+            return scope, None
+        return scope, _FACT_ORG_FILTER
+
+    def _scope_allows_facts(self, scope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _log_fact_scope_blocked(
+        self,
+        operation: str,
+        scope,
+        *,
+        user_id: Optional[str] = None,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_FACT_REPOSITORY_MISSING_ORG_WARNING)
+        logger.warning(
+            "[FACTS] %s blocked user_hash=%s org_hash=%s org_scope=%s warnings=%s",
+            operation,
+            _hash_memory_identifier(user_id),
+            _hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
     def _load_existing_metadata(
         self,
@@ -36,7 +65,7 @@ class FactRepositoryMutationRuntimeMixin:
         fact_id: UUID,
         user_id: Optional[str],
         org_filter: str,
-        effective_org_id: Optional[str],
+        org_id: str,
     ) -> dict:
         if user_id:
             query = text(
@@ -60,8 +89,7 @@ class FactRepositoryMutationRuntimeMixin:
                 """
             )
             params = {"fact_id": str(fact_id)}
-        if effective_org_id is not None:
-            params["org_id"] = effective_org_id
+        params["org_id"] = org_id
         row = session.execute(query, params).fetchone()
         return dict((row.metadata or {}) if row else {})
 
@@ -81,7 +109,10 @@ class FactRepositoryMutationRuntimeMixin:
             )
 
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_fact_org_scope(write=True)
+        if org_filter is None:
+            self._log_fact_scope_blocked("update_fact", scope, user_id=user_id)
+            return False
 
         try:
             with self._session_factory() as session:
@@ -95,8 +126,7 @@ class FactRepositoryMutationRuntimeMixin:
                     metadata=stamp_embedding_metadata(metadata),
                     org_filter=org_filter,
                 )
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 row = session.execute(query, params).fetchone()
                 session.commit()
@@ -177,7 +207,14 @@ class FactRepositoryMutationRuntimeMixin:
     ) -> bool:
         """Update fact content/metadata while preserving the existing embedding."""
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_fact_org_scope(write=True)
+        if org_filter is None:
+            self._log_fact_scope_blocked(
+                "update_fact_preserve_embedding",
+                scope,
+                user_id=user_id,
+            )
+            return False
 
         try:
             with self._session_factory() as session:
@@ -188,7 +225,7 @@ class FactRepositoryMutationRuntimeMixin:
                     fact_id=fact_id,
                     user_id=user_id,
                     org_filter=org_filter,
-                    effective_org_id=effective_org_id,
+                    org_id=scope.org_id,
                 )
                 metadata_json = json.dumps(
                     preserve_embedding_space_metadata(metadata, existing_metadata)
@@ -233,8 +270,7 @@ class FactRepositoryMutationRuntimeMixin:
                         "importance": metadata.get("confidence", 0.5),
                     }
 
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 row = session.execute(query, params).fetchone()
                 session.commit()
@@ -259,7 +295,10 @@ class FactRepositoryMutationRuntimeMixin:
             logger.warning("[BUGFIX] Invalid fact_id: %s, skipping metadata update", fact_id)
             return False
 
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_fact_org_scope(write=True)
+        if org_filter is None:
+            self._log_fact_scope_blocked("update_metadata_only", scope, user_id=user_id)
+            return False
 
         try:
             with self._session_factory() as session:
@@ -270,7 +309,7 @@ class FactRepositoryMutationRuntimeMixin:
                     fact_id=fact_id,
                     user_id=user_id,
                     org_filter=org_filter,
-                    effective_org_id=effective_org_id,
+                    org_id=scope.org_id,
                 )
                 query, params = self._build_update_metadata_statement(
                     fact_id=fact_id,
@@ -278,8 +317,7 @@ class FactRepositoryMutationRuntimeMixin:
                     metadata=preserve_embedding_space_metadata(metadata, existing_metadata),
                     org_filter=org_filter,
                 )
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 row = session.execute(query, params).fetchone()
                 session.commit()
@@ -345,7 +383,10 @@ class FactRepositoryMutationRuntimeMixin:
         if count <= 0:
             return 0
 
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_fact_org_scope(write=True)
+        if org_filter is None:
+            self._log_fact_scope_blocked("delete_oldest_facts", scope, user_id=user_id)
+            return 0
 
         try:
             with self._session_factory() as session:
@@ -369,8 +410,7 @@ class FactRepositoryMutationRuntimeMixin:
                     "memory_type": MemoryType.USER_FACT.value,
                     "count": count,
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 deleted_count = len(session.execute(query, params).fetchall())
                 session.commit()
@@ -384,3 +424,9 @@ class FactRepositoryMutationRuntimeMixin:
         except Exception as exc:
             logger.error("Failed to delete oldest facts: %s", exc)
             return 0
+
+
+def _hash_memory_identifier(value) -> str | None:
+    from app.engine.semantic_memory.privacy import hash_memory_identifier
+
+    return hash_memory_identifier(value)

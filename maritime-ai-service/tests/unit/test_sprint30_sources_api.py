@@ -103,6 +103,7 @@ class TestListSourcesLimitClamping:
         mock_pool = self._make_pool_mock()
         mock_auth = MagicMock()
         mock_auth.user_id = "user-1"
+        mock_auth.organization_id = "org-test"
 
         with patch("app.api.v1.sources.get_pool", AsyncMock(return_value=mock_pool)):
             result = await list_sources(
@@ -117,11 +118,141 @@ class TestListSourcesLimitClamping:
 
         mock_pool = self._make_pool_mock()
         mock_auth = MagicMock()
+        mock_auth.organization_id = "org-test"
 
         with patch("app.api.v1.sources.get_pool", AsyncMock(return_value=mock_pool)):
             result = await list_sources(request=_make_request(), auth=mock_auth, limit=-5, offset=0)
 
         assert result["pagination"]["limit"] == 1
+
+    @pytest.mark.asyncio
+    async def test_list_sources_filters_by_active_org(self, monkeypatch):
+        from app.api.v1.sources import list_sources
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production", raising=False)
+
+        mock_pool = self._make_pool_mock()
+        mock_auth = MagicMock()
+        mock_auth.organization_id = "org-A"
+
+        with patch("app.api.v1.sources.get_pool", AsyncMock(return_value=mock_pool)):
+            await list_sources(request=_make_request(), auth=mock_auth, limit=20, offset=0)
+
+        mock_conn = mock_pool.acquire.return_value.__aenter__.return_value
+        count_query = mock_conn.fetchrow.call_args[0][0]
+        fetch_query = mock_conn.fetch.call_args[0][0]
+        assert "(organization_id = $1 OR organization_id IS NULL)" in count_query
+        assert "(organization_id = $1 OR organization_id IS NULL)" in fetch_query
+        assert mock_conn.fetchrow.call_args[0][1] == "org-A"
+        assert mock_conn.fetch.call_args[0][1] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_list_sources_requires_org_before_pool(self, monkeypatch):
+        from fastapi import HTTPException
+        from app.api.v1.sources import list_sources
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production", raising=False)
+        mock_auth = MagicMock()
+        mock_auth.organization_id = None
+        get_pool = AsyncMock()
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.api.v1.sources.get_pool", get_pool):
+                with pytest.raises(HTTPException) as exc_info:
+                    await list_sources(request=_make_request(), auth=mock_auth, limit=20, offset=0)
+        finally:
+            current_org_id.reset(token)
+
+        assert exc_info.value.status_code == 403
+        get_pool.assert_not_awaited()
+
+
+class TestGetSourceDetailsTenantScope:
+    """Source detail reads must stay scoped to the active org."""
+
+    @staticmethod
+    def _make_pool_mock(row):
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow.return_value = row
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_pool = MagicMock()
+        mock_pool.acquire.return_value = mock_cm
+        return mock_pool
+
+    @pytest.mark.asyncio
+    async def test_get_source_details_filters_by_active_org(self, monkeypatch):
+        from app.api.v1.sources import get_source_details
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production", raising=False)
+
+        row = {
+            "node_id": "node-1",
+            "content": "chunk",
+            "document_id": "doc-1",
+            "page_number": 1,
+            "image_url": None,
+            "bounding_boxes": None,
+            "content_type": "text",
+            "chunk_index": 0,
+            "confidence_score": 1.0,
+            "metadata": None,
+        }
+        mock_pool = self._make_pool_mock(row)
+        mock_auth = MagicMock()
+        mock_auth.organization_id = "org-A"
+
+        with patch("app.api.v1.sources.get_pool", AsyncMock(return_value=mock_pool)):
+            result = await get_source_details(
+                request=_make_request(),
+                node_id="node-1",
+                auth=mock_auth,
+            )
+
+        mock_conn = mock_pool.acquire.return_value.__aenter__.return_value
+        query = mock_conn.fetchrow.call_args[0][0]
+        assert "AND (organization_id = $2 OR organization_id IS NULL)" in query
+        assert mock_conn.fetchrow.call_args[0][1:] == ("node-1", "org-A")
+        assert result.node_id == "node-1"
+
+    @pytest.mark.asyncio
+    async def test_get_source_details_requires_org_before_pool(self, monkeypatch):
+        from fastapi import HTTPException
+        from app.api.v1.sources import get_source_details
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production", raising=False)
+        mock_auth = MagicMock()
+        mock_auth.organization_id = None
+        get_pool = AsyncMock()
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.api.v1.sources.get_pool", get_pool):
+                with pytest.raises(HTTPException) as exc_info:
+                    await get_source_details(
+                        request=_make_request(),
+                        node_id="PRIVATE-NODE",
+                        auth=mock_auth,
+                    )
+        finally:
+            current_org_id.reset(token)
+
+        assert exc_info.value.status_code == 403
+        get_pool.assert_not_awaited()
 
 
 # =============================================================================

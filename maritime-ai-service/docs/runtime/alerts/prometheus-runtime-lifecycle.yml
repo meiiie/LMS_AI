@@ -1,0 +1,23 @@
+# Prometheus alert rules for runtime lifecycle hook failures.
+#
+# Source metric: app code emits runtime.lifecycle.hook_failures and
+# GET /metrics serializes it as runtime_lifecycle_hook_failures.
+# Labels on the source counter: owner, point.
+groups:
+  - name: wiii-runtime-lifecycle
+    interval: 30s
+    rules:
+      - alert: WiiiRuntimeLifecycleHookFailure
+        expr: |
+          sum by (owner, point) (
+            increase(runtime_lifecycle_hook_failures[15m])
+          ) > 0
+        for: 5m
+        labels:
+          service: wiii-ai
+          component: runtime-lifecycle
+          severity: p3_ticket
+        annotations:
+          summary: "Runtime lifecycle hook failure: {{ $labels.owner }} {{ $labels.point }}"
+          description: "One or more lifecycle hooks failed. Requests continue, but post-turn observability or side effects may be incomplete."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/runtime-lifecycle-hook-failures.md"

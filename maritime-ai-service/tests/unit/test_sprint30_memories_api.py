@@ -67,6 +67,10 @@ class TestGetUserMemories:
 
         assert result.total == 0
         assert result.data == []
+        assert result.summary.total == 0
+        assert result.summary.type_counts == {}
+        assert result.summary.provenance.source_kinds == {}
+        assert result.summary.privacy.raw_content_included is False
 
     @pytest.mark.asyncio
     async def test_returns_facts(self):
@@ -86,6 +90,17 @@ class TestGetUserMemories:
         assert result.data[0].type == "learning_style"
         assert result.data[0].value == "visual"
         assert result.data[1].value == "John"
+        assert result.summary.total == 2
+        assert result.summary.type_counts == {
+            "learning_style": 1,
+            "user_info": 1,
+        }
+        assert result.summary.latest_created_at == facts[0].created_at
+        assert result.summary.provenance.source_kinds == {"semantic_fact": 2}
+        assert result.summary.provenance.raw_content_included is False
+        assert result.summary.privacy.identifier_strategy == "hash_or_count_only"
+        assert result.summary.controls.can_delete_one is True
+        assert result.summary.controls.can_clear_all is True
 
     @pytest.mark.asyncio
     async def test_extracts_value_from_content(self):
@@ -151,6 +166,41 @@ class TestGetUserMemories:
 
         assert exc_info.value.status_code == 500
         assert "Internal server error" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_blocks_missing_org_context_before_read(
+        self,
+        monkeypatch,
+    ):
+        from app.api.v1.memories import get_user_memories
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from fastapi import HTTPException
+
+        mock_repo = MagicMock()
+        repo_factory = MagicMock(return_value=mock_repo)
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        token = current_org_id.set(None)
+        try:
+            with patch(
+                "app.api.v1.memories.SemanticMemoryRepository",
+                repo_factory,
+            ):
+                with pytest.raises(HTTPException) as exc_info:
+                    await get_user_memories(
+                        request=_make_request(),
+                        user_id="user-private-123",
+                        auth=_make_auth("user-private-123"),
+                    )
+        finally:
+            current_org_id.reset(token)
+
+        assert exc_info.value.status_code == 403
+        assert "Organization context required for memory access" in exc_info.value.detail
+        repo_factory.assert_not_called()
+        mock_repo.get_all_user_facts.assert_not_called()
 
 
 # =============================================================================
@@ -225,6 +275,42 @@ class TestDeleteUserMemory:
         assert exc_info.value.status_code == 500
         assert "DB fail" not in exc_info.value.detail  # No leak
 
+    @pytest.mark.asyncio
+    async def test_blocks_missing_org_context_before_delete(
+        self,
+        monkeypatch,
+    ):
+        from app.api.v1.memories import delete_user_memory
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from fastapi import HTTPException
+
+        mock_repo = MagicMock()
+        repo_factory = MagicMock(return_value=mock_repo)
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        token = current_org_id.set(None)
+        try:
+            with patch(
+                "app.api.v1.memories.SemanticMemoryRepository",
+                repo_factory,
+            ):
+                with pytest.raises(HTTPException) as exc_info:
+                    await delete_user_memory(
+                        request=_make_request(),
+                        user_id="user-private-123",
+                        memory_id="memory-private-123",
+                        auth=_make_auth("user-private-123"),
+                    )
+        finally:
+            current_org_id.reset(token)
+
+        assert exc_info.value.status_code == 403
+        assert "Organization context required for memory mutation" in exc_info.value.detail
+        repo_factory.assert_not_called()
+        mock_repo.delete_memory.assert_not_called()
+
 
 # =============================================================================
 # DELETE /{user_id} — Clear all memories
@@ -282,3 +368,38 @@ class TestClearUserMemories:
 
         assert result.success is True
         assert result.deleted_count == 3
+
+    @pytest.mark.asyncio
+    async def test_blocks_missing_org_context_before_clear(
+        self,
+        monkeypatch,
+    ):
+        from app.api.v1.memories import clear_user_memories
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from fastapi import HTTPException
+
+        mock_repo = MagicMock()
+        repo_factory = MagicMock(return_value=mock_repo)
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        token = current_org_id.set(None)
+        try:
+            with patch(
+                "app.api.v1.memories.SemanticMemoryRepository",
+                repo_factory,
+            ):
+                with pytest.raises(HTTPException) as exc_info:
+                    await clear_user_memories(
+                        request=_make_request(),
+                        user_id="user-private-123",
+                        auth=_make_auth("user-private-123"),
+                    )
+        finally:
+            current_org_id.reset(token)
+
+        assert exc_info.value.status_code == 403
+        assert "Organization context required for memory mutation" in exc_info.value.detail
+        repo_factory.assert_not_called()
+        mock_repo.delete_all_user_memories.assert_not_called()

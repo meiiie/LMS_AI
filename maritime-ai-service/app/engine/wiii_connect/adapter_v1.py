@@ -16,6 +16,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from app.engine.runtime.event_payload_sanitizer import redact_runtime_secret_text
+
+from .argument_key_policy import safe_public_argument_key
+from .connection_lifecycle import build_connection_lifecycle_decision
+
 
 WIII_CONNECT_ADAPTER_VERSION = "wiii_connect_adapter.v1"
 WIII_CONNECT_PUBLIC_CONNECTION_REF_PREFIX = "wcn_"
@@ -260,6 +265,10 @@ class WiiiConnectConnectionRecordV1:
             "last_checked_at": self.last_checked_at,
             "reason": self.reason,
             "warnings": list(self.warnings),
+            "connection_lifecycle": build_connection_lifecycle_decision(
+                provider_slug=self.provider_slug,
+                connection=self,
+            ).to_public_metadata(),
         }
 
 
@@ -275,9 +284,10 @@ class WiiiConnectExecutionRequest:
     preview_evidence_id: str | None = None
     preview_evidence_required: bool = False
     argument_keys: tuple[str, ...] = ()
+    request_id: str = ""
 
     def to_audit_metadata(self) -> dict[str, Any]:
-        return {
+        metadata = {
             "provider_slug": self.provider_slug,
             "action_slug": self.action_slug,
             "path": self.path,
@@ -286,6 +296,10 @@ class WiiiConnectExecutionRequest:
             "preview_evidence_present": bool(self.preview_evidence_id),
             "argument_keys": [_safe_audit_key(key) for key in self.argument_keys],
         }
+        request_id = _safe_request_id(self.request_id)
+        if request_id:
+            metadata["request_id"] = request_id
+        return metadata
 
 
 @dataclass(frozen=True, slots=True)
@@ -491,13 +505,11 @@ def _deny(
     )
 
 
-_SENSITIVE_KEY_MARKERS = ("token", "secret", "password", "credential", "key", "code")
-
-
 def _safe_audit_key(key: str) -> str:
-    normalized = str(key or "").strip().lower()
-    if not normalized:
-        return "empty"
-    if any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS):
-        return "redacted_sensitive_field"
-    return normalized[:80]
+    return safe_public_argument_key(key)
+
+
+def _safe_request_id(value: Any) -> str:
+    text = redact_runtime_secret_text(value, max_length=160)
+    text = " ".join(text.split())
+    return text[:96]

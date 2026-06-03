@@ -14,8 +14,7 @@ Tests graph-enhanced retrieval including:
 
 import time
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from dataclasses import dataclass
+from unittest.mock import AsyncMock, MagicMock
 
 
 # ============================================================================
@@ -371,6 +370,65 @@ class TestGetEntityContext:
         assert len(context["entities"]) == 2
         assert "Rule 15" in context["regulations"]
         assert "Rule 15" in context["summary"]
+
+    @pytest.mark.asyncio
+    async def test_passes_current_org_to_neo4j(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_result = MagicMock()
+        mock_result.node_id = "n1"
+        mock_result.content = "Rule 15 content"
+        mock_result.rrf_score = 0.85
+        mock_result.page_number = 5
+        mock_result.document_id = "doc1"
+        mock_result.image_url = None
+        mock_result.bounding_boxes = None
+        mock_result.category = "Knowledge"
+        mock_result.search_method = "hybrid"
+        mock_result.dense_score = 0.88
+        mock_result.sparse_score = 0.75
+
+        mock_hybrid = MagicMock()
+        mock_hybrid.search = AsyncMock(return_value=[mock_result])
+        mock_neo4j = MagicMock()
+        mock_neo4j.is_available.return_value = True
+        mock_neo4j.get_document_entities = AsyncMock(return_value=[])
+        mock_neo4j.get_entity_relations = AsyncMock(return_value=[])
+        mock_kg = MagicMock()
+        mock_kg.is_available.return_value = True
+        mock_entity = MagicMock()
+        mock_entity.id = "entity1"
+        mock_kg.extract = AsyncMock(return_value=MagicMock(entities=[mock_entity]))
+
+        from app.services.graph_rag_service import GraphRAGService
+        import app.services.graph_rag_service as mod
+        mod._entity_cache.clear()
+
+        token = current_org_id.set("org-service")
+        try:
+            svc = GraphRAGService(
+                hybrid_service=mock_hybrid,
+                neo4j_repo=mock_neo4j,
+                kg_builder=mock_kg,
+            )
+            await svc.search("Rule 15")
+        finally:
+            current_org_id.reset(token)
+            mod._entity_cache.clear()
+
+        mock_neo4j.get_document_entities.assert_awaited_once_with(
+            "doc1",
+            organization_id="org-service",
+        )
+        mock_neo4j.get_entity_relations.assert_awaited_once_with(
+            "entity1",
+            organization_id="org-service",
+        )
 
     @pytest.mark.asyncio
     async def test_with_query_entities(self):

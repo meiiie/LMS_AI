@@ -16,6 +16,8 @@ from typing import Any
 
 import httpx
 
+from app.engine.runtime.event_payload_sanitizer import redact_runtime_secret_text
+
 from .adapter_v1 import (
     WiiiConnectConnectionRecordV1,
     WiiiConnectProviderRegistryEntry,
@@ -27,6 +29,11 @@ from .action_catalog import (
     configured_action_slugs_for_provider,
     get_wiii_connect_curated_action,
     list_wiii_connect_curated_actions,
+)
+from .argument_key_policy import (
+    WIII_CONNECT_ARGUMENT_KEY_POLICY_VERSION,
+    hidden_model_argument_key_count,
+    safe_public_argument_keys,
 )
 from .provider_adapters import WiiiConnectProviderAdapterCapability
 from .vault import WiiiConnectVaultCapability, default_wiii_connect_vault_capability
@@ -203,23 +210,34 @@ class WiiiConnectComposioToolSchemaResult:
     provider_slug: str = ""
     action_slug: str = ""
     reason: str = "not_requested"
+    request_id: str = ""
     schema_present: bool = False
     argument_keys: tuple[str, ...] = ()
     required_argument_keys: tuple[str, ...] = ()
 
     def to_public_metadata(self) -> dict[str, Any]:
-        return {
+        metadata = {
             "version": WIII_CONNECT_COMPOSIO_TOOL_SCHEMA_VERSION,
             "status": "ready" if self.ready else "blocked",
             "reason": _safe_tool_schema_reason(self.reason),
             "provider_slug": _normalize_provider_slug(self.provider_slug),
             "action_slug": _normalize_action_slug(self.action_slug),
             "schema_present": self.schema_present,
-            "argument_keys": [_safe_public_key(key) for key in self.argument_keys],
-            "required_argument_keys": [
-                _safe_public_key(key) for key in self.required_argument_keys
-            ],
+            "argument_policy_version": WIII_CONNECT_ARGUMENT_KEY_POLICY_VERSION,
+            "argument_keys": list(safe_public_argument_keys(self.argument_keys)),
+            "required_argument_keys": list(
+                safe_public_argument_keys(self.required_argument_keys)
+            ),
+            "hidden_argument_count": hidden_model_argument_key_count(
+                provider_slug=self.provider_slug,
+                action_slug=self.action_slug,
+                argument_keys=self.argument_keys,
+            ),
         }
+        request_id = _safe_request_id(self.request_id)
+        if request_id:
+            metadata["request_id"] = request_id
+        return metadata
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +248,7 @@ class WiiiConnectComposioExecuteResult:
     provider_slug: str = ""
     action_slug: str = ""
     reason: str = "not_requested"
+    request_id: str = ""
     successful: bool = False
     status_code: int = 0
     data_keys: tuple[str, ...] = ()
@@ -246,7 +265,7 @@ class WiiiConnectComposioExecuteResult:
         return "blocked"
 
     def to_public_metadata(self) -> dict[str, Any]:
-        return {
+        metadata = {
             "version": WIII_CONNECT_COMPOSIO_EXECUTION_VERSION,
             "status": self.status,
             "reason": _safe_execute_reason(self.reason),
@@ -259,6 +278,10 @@ class WiiiConnectComposioExecuteResult:
             "session_info_present": self.session_info_present,
             "log_id_present": self.log_id_present,
         }
+        request_id = _safe_request_id(self.request_id)
+        if request_id:
+            metadata["request_id"] = request_id
+        return metadata
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,6 +292,7 @@ class WiiiConnectComposioFileUploadResult:
     provider_slug: str = ""
     action_slug: str = ""
     reason: str = "not_requested"
+    request_id: str = ""
     status_code: int = 0
     file_descriptor: dict[str, str] = field(default_factory=dict, repr=False)
     file_ref_present: bool = False
@@ -276,7 +300,7 @@ class WiiiConnectComposioFileUploadResult:
     size_bytes: int = 0
 
     def to_public_metadata(self) -> dict[str, Any]:
-        return {
+        metadata = {
             "version": WIII_CONNECT_COMPOSIO_FILE_UPLOAD_VERSION,
             "status": "ready" if self.ready else "blocked",
             "reason": _safe_execute_reason(self.reason),
@@ -287,6 +311,10 @@ class WiiiConnectComposioFileUploadResult:
             "size_bytes": self.size_bytes,
             "status_code": self.status_code,
         }
+        request_id = _safe_request_id(self.request_id)
+        if request_id:
+            metadata["request_id"] = request_id
+        return metadata
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,6 +343,7 @@ class WiiiConnectFacebookPageListResult:
     reason: str = "not_requested"
     provider_slug: str = "facebook"
     action_slug: str = "FACEBOOK_LIST_MANAGED_PAGES"
+    request_id: str = ""
     status_code: int = 0
     pages: tuple[WiiiConnectFacebookPageOption, ...] = ()
     error_present: bool = False
@@ -324,7 +353,7 @@ class WiiiConnectFacebookPageListResult:
         return "ready" if self.ready else "blocked"
 
     def to_public_metadata(self) -> dict[str, Any]:
-        return {
+        metadata = {
             "version": WIII_CONNECT_FACEBOOK_PAGE_LIST_VERSION,
             "status": self.status,
             "reason": _safe_execute_reason(self.reason),
@@ -335,6 +364,10 @@ class WiiiConnectFacebookPageListResult:
             "error_present": self.error_present,
             "pages": [page.to_public_metadata() for page in self.pages],
         }
+        request_id = _safe_request_id(self.request_id)
+        if request_id:
+            metadata["request_id"] = request_id
+        return metadata
 
 
 @dataclass(frozen=True, slots=True)
@@ -965,30 +998,35 @@ async def verify_composio_tool_schema(
     config: WiiiConnectComposioAdapterConfig,
     provider_slug: str,
     action_slug: str,
+    request_id: str | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> WiiiConnectComposioToolSchemaResult:
     """Fetch one Composio tool schema and return only safe shape metadata."""
 
     provider = _normalize_provider_slug(provider_slug)
     action = _normalize_action_slug(action_slug)
+    safe_request_id = _safe_request_id(request_id)
     curated = get_wiii_connect_curated_action(provider, action)
     if curated is None:
         return WiiiConnectComposioToolSchemaResult(
             provider_slug=provider,
             action_slug=action,
             reason="action_not_curated",
+            request_id=safe_request_id,
         )
     if action not in config.executable_action_slugs_for_provider(provider):
         return WiiiConnectComposioToolSchemaResult(
             provider_slug=provider,
             action_slug=action,
             reason="action_not_allowlisted",
+            request_id=safe_request_id,
         )
     if not config.enabled or not config.api_key_present:
         return WiiiConnectComposioToolSchemaResult(
             provider_slug=provider,
             action_slug=action,
             reason="provider_adapter_not_configured",
+            request_id=safe_request_id,
         )
 
     url = (
@@ -1001,13 +1039,14 @@ async def verify_composio_tool_schema(
         response = await client.get(
             url,
             params={"toolkit_versions": "latest"},
-            headers={"x-api-key": config.api_key},
+            headers=_provider_request_headers(config, request_id=safe_request_id),
         )
     except httpx.HTTPError:
         return WiiiConnectComposioToolSchemaResult(
             provider_slug=provider,
             action_slug=action,
             reason="provider_transport_error",
+            request_id=safe_request_id,
         )
     finally:
         if client_created:
@@ -1018,6 +1057,7 @@ async def verify_composio_tool_schema(
             provider_slug=provider,
             action_slug=action,
             reason="provider_response_rejected",
+            request_id=safe_request_id,
         )
     try:
         data = response.json()
@@ -1026,12 +1066,14 @@ async def verify_composio_tool_schema(
             provider_slug=provider,
             action_slug=action,
             reason="provider_response_invalid",
+            request_id=safe_request_id,
         )
     if not isinstance(data, Mapping):
         return WiiiConnectComposioToolSchemaResult(
             provider_slug=provider,
             action_slug=action,
             reason="provider_response_invalid",
+            request_id=safe_request_id,
         )
     schema_action = _normalize_action_slug(
         data.get("slug")
@@ -1045,6 +1087,7 @@ async def verify_composio_tool_schema(
             provider_slug=provider,
             action_slug=action,
             reason="tool_schema_not_found",
+            request_id=safe_request_id,
         )
     toolkit_slug = _extract_composio_toolkit_slug(data)
     if toolkit_slug and toolkit_slug != provider:
@@ -1052,6 +1095,7 @@ async def verify_composio_tool_schema(
             provider_slug=provider,
             action_slug=action,
             reason="tool_schema_not_found",
+            request_id=safe_request_id,
         )
 
     schema = _extract_composio_input_schema(data)
@@ -1062,6 +1106,7 @@ async def verify_composio_tool_schema(
             provider_slug=provider,
             action_slug=action,
             reason="tool_schema_missing_arguments",
+            request_id=safe_request_id,
             schema_present=bool(schema),
         )
     return WiiiConnectComposioToolSchemaResult(
@@ -1069,6 +1114,7 @@ async def verify_composio_tool_schema(
         provider_slug=provider,
         action_slug=action,
         reason="ready",
+        request_id=safe_request_id,
         schema_present=True,
         argument_keys=argument_keys,
         required_argument_keys=required_argument_keys,
@@ -1083,29 +1129,34 @@ async def execute_composio_tool(
     user_id: str,
     connected_account_id: str,
     arguments: Mapping[str, Any] | None = None,
+    request_id: str | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> WiiiConnectComposioExecuteResult:
     """Execute one curated Composio action and redact provider output."""
 
     provider = _normalize_provider_slug(provider_slug)
     action = _normalize_action_slug(action_slug)
+    safe_request_id = _safe_request_id(request_id)
     if not config.enabled or not config.api_key_present:
         return WiiiConnectComposioExecuteResult(
             provider_slug=provider,
             action_slug=action,
             reason="provider_adapter_not_configured",
+            request_id=safe_request_id,
         )
     if action not in config.executable_action_slugs_for_provider(provider):
         return WiiiConnectComposioExecuteResult(
             provider_slug=provider,
             action_slug=action,
             reason="action_not_allowlisted",
+            request_id=safe_request_id,
         )
     if not user_id or not connected_account_id:
         return WiiiConnectComposioExecuteResult(
             provider_slug=provider,
             action_slug=action,
             reason="missing_user_or_connection",
+            request_id=safe_request_id,
         )
 
     url = (
@@ -1123,13 +1174,14 @@ async def execute_composio_tool(
         response = await client.post(
             url,
             json=payload,
-            headers={"x-api-key": config.api_key},
+            headers=_provider_request_headers(config, request_id=safe_request_id),
         )
     except httpx.HTTPError:
         return WiiiConnectComposioExecuteResult(
             provider_slug=provider,
             action_slug=action,
             reason="provider_transport_error",
+            request_id=safe_request_id,
         )
     finally:
         if client_created:
@@ -1141,6 +1193,7 @@ async def execute_composio_tool(
             action_slug=action,
             status_code=response.status_code,
             reason="provider_response_rejected",
+            request_id=safe_request_id,
         )
     try:
         data = response.json()
@@ -1150,6 +1203,7 @@ async def execute_composio_tool(
             action_slug=action,
             status_code=response.status_code,
             reason="provider_response_invalid",
+            request_id=safe_request_id,
         )
     if not isinstance(data, Mapping):
         return WiiiConnectComposioExecuteResult(
@@ -1157,6 +1211,7 @@ async def execute_composio_tool(
             action_slug=action,
             status_code=response.status_code,
             reason="provider_response_invalid",
+            request_id=safe_request_id,
         )
     successful = bool(data.get("successful"))
     data_shape = data.get("data")
@@ -1170,6 +1225,7 @@ async def execute_composio_tool(
         provider_slug=provider,
         action_slug=action,
         reason="ready" if successful else "provider_execution_failed",
+        request_id=safe_request_id,
         successful=successful,
         status_code=response.status_code,
         data_keys=data_keys,
@@ -1187,12 +1243,14 @@ async def stage_composio_file_upload(
     filename: str,
     mimetype: str,
     content: bytes,
+    request_id: str | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> WiiiConnectComposioFileUploadResult:
     """Stage one user-selected file for a curated Composio tool argument."""
 
     provider = _normalize_provider_slug(provider_slug)
     action = _normalize_action_slug(action_slug)
+    safe_request_id = _safe_request_id(request_id)
     safe_filename = _safe_filename(filename)
     safe_mimetype = _safe_mimetype(mimetype)
     if not config.enabled or not config.api_key_present:
@@ -1200,18 +1258,21 @@ async def stage_composio_file_upload(
             provider_slug=provider,
             action_slug=action,
             reason="provider_adapter_not_configured",
+            request_id=safe_request_id,
         )
     if action not in config.executable_action_slugs_for_provider(provider):
         return WiiiConnectComposioFileUploadResult(
             provider_slug=provider,
             action_slug=action,
             reason="action_not_allowlisted",
+            request_id=safe_request_id,
         )
     if not content or not safe_filename or not safe_mimetype:
         return WiiiConnectComposioFileUploadResult(
             provider_slug=provider,
             action_slug=action,
             reason="missing_file",
+            request_id=safe_request_id,
         )
 
     request_url = f"{config.base_url.rstrip('/')}/api/v3/files/upload/request"
@@ -1228,13 +1289,14 @@ async def stage_composio_file_upload(
         response = await client.post(
             request_url,
             json=payload,
-            headers={"x-api-key": config.api_key},
+            headers=_provider_request_headers(config, request_id=safe_request_id),
         )
     except httpx.HTTPError:
         return WiiiConnectComposioFileUploadResult(
             provider_slug=provider,
             action_slug=action,
             reason="provider_transport_error",
+            request_id=safe_request_id,
             size_bytes=len(content),
         )
 
@@ -1245,6 +1307,7 @@ async def stage_composio_file_upload(
                 action_slug=action,
                 status_code=response.status_code,
                 reason="provider_response_rejected",
+                request_id=safe_request_id,
                 size_bytes=len(content),
             )
         try:
@@ -1255,6 +1318,7 @@ async def stage_composio_file_upload(
                 action_slug=action,
                 status_code=response.status_code,
                 reason="provider_response_invalid",
+                request_id=safe_request_id,
                 size_bytes=len(content),
             )
         if not isinstance(data, Mapping):
@@ -1263,6 +1327,7 @@ async def stage_composio_file_upload(
                 action_slug=action,
                 status_code=response.status_code,
                 reason="provider_response_invalid",
+                request_id=safe_request_id,
                 size_bytes=len(content),
             )
         s3key = str(
@@ -1284,6 +1349,7 @@ async def stage_composio_file_upload(
                 action_slug=action,
                 status_code=response.status_code,
                 reason="provider_response_invalid",
+                request_id=safe_request_id,
                 size_bytes=len(content),
             )
         if upload_url:
@@ -1299,6 +1365,7 @@ async def stage_composio_file_upload(
                     action_slug=action,
                     status_code=response.status_code,
                     reason="provider_transport_error",
+                    request_id=safe_request_id,
                     file_ref_present=True,
                     upload_url_present=True,
                     size_bytes=len(content),
@@ -1309,6 +1376,7 @@ async def stage_composio_file_upload(
                     action_slug=action,
                     status_code=upload_response.status_code,
                     reason="provider_response_rejected",
+                    request_id=safe_request_id,
                     file_ref_present=True,
                     upload_url_present=True,
                     size_bytes=len(content),
@@ -1318,6 +1386,7 @@ async def stage_composio_file_upload(
             provider_slug=provider,
             action_slug=action,
             reason="ready",
+            request_id=safe_request_id,
             status_code=response.status_code,
             file_descriptor={
                 "name": safe_filename,
@@ -1338,20 +1407,29 @@ async def list_composio_facebook_pages(
     config: WiiiConnectComposioAdapterConfig,
     user_id: str,
     connected_account_id: str,
+    request_id: str | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> WiiiConnectFacebookPageListResult:
     """List sanitized Facebook Pages for the user-approved account."""
 
     provider = "facebook"
     action = "FACEBOOK_LIST_MANAGED_PAGES"
+    safe_request_id = _safe_request_id(request_id)
     if not config.enabled or not config.api_key_present:
         return WiiiConnectFacebookPageListResult(
             reason="provider_adapter_not_configured",
+            request_id=safe_request_id,
         )
     if action not in config.executable_action_slugs_for_provider(provider):
-        return WiiiConnectFacebookPageListResult(reason="action_not_allowlisted")
+        return WiiiConnectFacebookPageListResult(
+            reason="action_not_allowlisted",
+            request_id=safe_request_id,
+        )
     if not user_id or not connected_account_id:
-        return WiiiConnectFacebookPageListResult(reason="missing_user_or_connection")
+        return WiiiConnectFacebookPageListResult(
+            reason="missing_user_or_connection",
+            request_id=safe_request_id,
+        )
 
     url = (
         f"{config.base_url.rstrip('/')}/api/"
@@ -1368,10 +1446,13 @@ async def list_composio_facebook_pages(
         response = await client.post(
             url,
             json=payload,
-            headers={"x-api-key": config.api_key},
+            headers=_provider_request_headers(config, request_id=safe_request_id),
         )
     except httpx.HTTPError:
-        return WiiiConnectFacebookPageListResult(reason="provider_transport_error")
+        return WiiiConnectFacebookPageListResult(
+            reason="provider_transport_error",
+            request_id=safe_request_id,
+        )
     finally:
         if client_created:
             await client.aclose()
@@ -1380,6 +1461,7 @@ async def list_composio_facebook_pages(
         return WiiiConnectFacebookPageListResult(
             status_code=response.status_code,
             reason="provider_response_rejected",
+            request_id=safe_request_id,
         )
     try:
         data = response.json()
@@ -1387,11 +1469,13 @@ async def list_composio_facebook_pages(
         return WiiiConnectFacebookPageListResult(
             status_code=response.status_code,
             reason="provider_response_invalid",
+            request_id=safe_request_id,
         )
     if not isinstance(data, Mapping):
         return WiiiConnectFacebookPageListResult(
             status_code=response.status_code,
             reason="provider_response_invalid",
+            request_id=safe_request_id,
         )
     pages = tuple(
         page
@@ -1401,6 +1485,7 @@ async def list_composio_facebook_pages(
     return WiiiConnectFacebookPageListResult(
         ready=bool(data.get("successful", True)),
         reason="ready" if bool(data.get("successful", True)) else "provider_execution_failed",
+        request_id=safe_request_id,
         status_code=response.status_code,
         pages=pages,
         error_present=bool(data.get("error")),
@@ -1857,6 +1942,24 @@ def _safe_public_key(value: str) -> str:
     if any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS):
         return "redacted_sensitive_field"
     return normalized[:80]
+
+
+def _safe_request_id(value: Any) -> str:
+    text = redact_runtime_secret_text(value, max_length=160)
+    text = " ".join(text.split())
+    return text[:96]
+
+
+def _provider_request_headers(
+    config: WiiiConnectComposioAdapterConfig,
+    *,
+    request_id: str | None = None,
+) -> dict[str, str]:
+    headers = {"x-api-key": config.api_key}
+    safe_request_id = _safe_request_id(request_id)
+    if safe_request_id:
+        headers["X-Request-ID"] = safe_request_id
+    return headers
 
 
 def _safe_tool_schema_reason(value: str) -> str:

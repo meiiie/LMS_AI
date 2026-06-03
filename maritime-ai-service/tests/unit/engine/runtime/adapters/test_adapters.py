@@ -6,6 +6,8 @@ shipped in this phase.
 
 from __future__ import annotations
 
+import json
+
 from app.engine.messages import Message
 from app.engine.runtime.adapters import (
     anthropic_messages_to_turn_request,
@@ -51,6 +53,29 @@ def test_wiii_native_passes_streaming_and_capabilities():
     assert req.requested_streaming is True
     assert "tools" in req.requested_capabilities
     assert req.metadata["preferred_provider"] == "google"
+
+
+def test_wiii_native_sanitizes_metadata():
+    req = wiii_chat_request_to_turn_request(
+        message="Hi",
+        user_id="u1",
+        session_id="s1",
+        metadata={
+            "preferred_provider": "openai",
+            "user_id": "raw-user-id",
+            "access_token": "raw-access-token",
+            "error": "Bearer raw-bearer-token-123",
+        },
+    )
+    serialized = json.dumps(req.metadata, ensure_ascii=False)
+
+    assert req.metadata["preferred_provider"] == "openai"
+    assert req.metadata["user_id_hash"].startswith("sha256:")
+    assert "<redacted-secret>" in req.metadata["error"]
+    assert "raw-user-id" not in serialized
+    assert "raw-access-token" not in serialized
+    assert "raw-bearer-token-123" not in serialized
+    assert "access_token" not in serialized
 
 
 # ── OpenAI Chat Completions adapter ──
@@ -114,9 +139,64 @@ def test_openai_compat_vision_block_detection():
     req = openai_chat_completions_to_turn_request(body, user_id="u", session_id="s")
     assert "vision" in req.requested_capabilities
     # Multimodal content collapses to text for the canonical Message; raw
-    # body is preserved in metadata for downstream vision-aware code.
+    # provider body is summarized for observability without raw image data.
     assert req.messages[0].content == "what is this?"
-    assert req.metadata["original_messages"] == body["messages"]
+    summary = req.metadata["original_messages_summary"][0]["content"]
+    assert summary["kind"] == "blocks"
+    assert summary["blocks"][0]["text"]["present"] is True
+    assert summary["blocks"][1]["image_url"]["is_data_url"] is True
+    assert "original_messages" not in req.metadata
+    assert "data:..." not in json.dumps(summary)
+
+
+def test_openai_compat_metadata_summary_omits_raw_secrets():
+    body = {
+        "model": "x",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Bearer raw-bearer-token-123",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,raw-image-data"
+                        },
+                    },
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {
+                            "name": "publish",
+                            "arguments": (
+                                '{"message":"ok",'
+                                '"access_token":"raw-access-token"}'
+                            ),
+                        },
+                    }
+                ],
+            },
+        ],
+    }
+    req = openai_chat_completions_to_turn_request(body, user_id="u", session_id="s")
+    serialized = json.dumps(req.metadata, ensure_ascii=False)
+
+    assert "raw-bearer-token-123" not in serialized
+    assert "raw-image-data" not in serialized
+    assert "raw-access-token" not in serialized
+    assert "access_token" not in serialized
+    assert req.metadata["original_messages_summary"][1]["tool_calls"][0][
+        "argument_keys"
+    ] == ["message"]
 
 
 def test_openai_compat_assistant_tool_calls_round_trip():
@@ -295,6 +375,44 @@ def test_anthropic_compat_image_block_sets_vision_capability():
     }
     req = anthropic_messages_to_turn_request(body, user_id="u", session_id="s")
     assert "vision" in req.requested_capabilities
+    summary = req.metadata["original_messages_summary"][0]["content"]
+    assert summary["blocks"][1]["source"]["data_present"] is True
+    assert "..." not in json.dumps(summary)
+
+
+def test_anthropic_compat_metadata_summary_omits_raw_secrets():
+    body = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "publish",
+                        "input": {
+                            "message": "ok",
+                            "access_token": "raw-access-token",
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": "token=raw-inline-token",
+                    },
+                ],
+            }
+        ],
+    }
+    req = anthropic_messages_to_turn_request(body, user_id="u", session_id="s")
+    serialized = json.dumps(req.metadata, ensure_ascii=False)
+
+    assert "raw-access-token" not in serialized
+    assert "raw-inline-token" not in serialized
+    assert "access_token" not in serialized
+    tool_use = req.metadata["original_messages_summary"][0]["content"]["blocks"][0][
+        "tool_use"
+    ]
+    assert tool_use["argument_keys"] == ["message"]
 
 
 def test_anthropic_compat_tools_capability_and_streaming_flag():

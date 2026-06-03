@@ -48,6 +48,55 @@ def _normalize_optional_header(value: object) -> Optional[str]:
     return normalized or None
 
 
+def _is_strict_identity_org_mode() -> bool:
+    env = getattr(settings, "environment", "development")
+    return (
+        getattr(settings, "enable_multi_tenant", False) is True
+        and isinstance(env, str)
+        and env in ("production", "staging")
+    )
+
+
+def _resolve_token_authenticated_org_id(
+    header_org_id: Optional[str],
+    token_org_id: Optional[str],
+) -> Optional[str]:
+    header_org_id = _normalize_optional_header(header_org_id)
+    token_org_id = _normalize_optional_header(token_org_id)
+
+    if not _is_strict_identity_org_mode():
+        return header_org_id or token_org_id
+
+    if token_org_id:
+        if header_org_id and header_org_id != token_org_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Active organization does not match authenticated organization.",
+            )
+        return token_org_id
+
+    if header_org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Authenticated token does not carry an active organization; "
+                "X-Organization-ID cannot establish tenant context."
+            ),
+        )
+
+    return None
+
+
+def _optional_auth_credentials_present(
+    api_key: Optional[str],
+    credentials: Optional[HTTPAuthorizationCredentials],
+) -> bool:
+    return bool(
+        _normalize_optional_header(api_key)
+        or isinstance(credentials, HTTPAuthorizationCredentials)
+    )
+
+
 
 
 # =============================================================================
@@ -370,6 +419,15 @@ async def require_auth(
                 )
                 effective_role = "student"
 
+            organization_id = (
+                _resolve_token_authenticated_org_id(
+                    x_org_id,
+                    token_payload.active_organization_id,
+                )
+                if token_payload
+                else x_org_id
+            )
+
             user = AuthenticatedUser(
                 user_id=token_payload.sub if token_payload else x_user_id,
                 auth_method="lms_service",
@@ -387,10 +445,7 @@ async def require_auth(
                     else "lms_host"
                 ),
                 session_id=x_session_id,
-                organization_id=(
-                    x_org_id
-                    or (token_payload.active_organization_id if token_payload else None)
-                ),
+                organization_id=organization_id,
                 connector_id=token_payload.connector_id if token_payload else None,
                 identity_version=(
                     token_payload.identity_version
@@ -435,7 +490,10 @@ async def require_auth(
                 role_source=token_payload.role_source,
             )
         )
-        organization_id = x_org_id or token_payload.active_organization_id
+        organization_id = _resolve_token_authenticated_org_id(
+            x_org_id,
+            token_payload.active_organization_id,
+        )
 
         user = AuthenticatedUser(
             user_id=token_payload.sub,
@@ -515,11 +573,14 @@ async def optional_auth(
 
     LMS Integration: Passes all headers to require_auth.
     """
+    credentials_present = _optional_auth_credentials_present(api_key, credentials)
     try:
         return await require_auth(
             api_key,
             credentials,
             x_user_id, x_role, x_session_id, x_org_id, x_host_role
         )
-    except HTTPException:
+    except HTTPException as exc:
+        if credentials_present:
+            raise exc
         return None

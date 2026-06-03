@@ -274,6 +274,7 @@ async def route_structured_impl(
 
     if needs_code_studio_fn(query) and chosen_agent in (
         agent_type_enum.DIRECT.value,
+        agent_type_enum.RAG.value,
         agent_type_enum.TUTOR.value,
     ) and not is_wiii_capability_inventory:
         logger_obj.info("[SUPERVISOR] Capability override: %s -> code_studio_agent", chosen_agent)

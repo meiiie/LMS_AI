@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from queue import Queue
 from typing import Any, Callable, Optional
 
+from app.engine.runtime.event_payload_sanitizer import sanitize_runtime_payload
 from app.sandbox.catalog import (
     SandboxWorkloadCatalog,
     SandboxWorkloadProfile,
@@ -22,6 +23,11 @@ from app.sandbox.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_metadata(value: Any) -> dict[str, Any]:
+    safe_value = sanitize_runtime_payload(value or {})
+    return safe_value if isinstance(safe_value, dict) else {}
 
 
 @dataclass(slots=True)
@@ -201,7 +207,7 @@ class SandboxExecutionService:
             merged.setdefault("organization_id", context.organization_id)
         if context.user_id:
             merged.setdefault("user_id", context.user_id)
-        return merged
+        return _safe_metadata(merged)
 
 
 def run_awaitable_sync(awaitable):

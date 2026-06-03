@@ -312,9 +312,11 @@ def build_operator_session_v1(
     if isinstance(last_result, dict):
         data = last_result.get("data")
         if isinstance(data, dict):
-            preview_token = str(data.get("preview_token") or "").strip()
+            preview_available = bool(data.get("preview_available")) or bool(
+                str(data.get("preview_token") or "").strip()
+            )
             preview_kind = str(data.get("preview_kind") or "").strip()
-            if preview_token:
+            if preview_available:
                 pending_approval = True
                 follow_up_action = {
                     "lesson_patch": "authoring.apply_lesson_patch",
@@ -322,7 +324,7 @@ def build_operator_session_v1(
                     "quiz_publish": "publish.apply_quiz",
                 }.get(preview_kind, "matching apply/publish action")
                 next_best_step = (
-                    f"Nếu người dùng xác nhận rõ, gọi `{follow_up_action}` với preview token hiện tại; "
+                    f"Nếu người dùng xác nhận rõ, gọi `{follow_up_action}` cho preview hiện tại; "
                     "nếu chưa chắc, tiếp tục giải thích preview thay vì áp dụng ngay."
                 )
 

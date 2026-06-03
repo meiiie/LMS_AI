@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import logging
 import time
+import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Awaitable, Mapping
@@ -14,7 +15,11 @@ from app.core.exceptions import (
     ProviderUnavailableError,
 )
 from app.engine.llm_runtime_metadata import resolve_runtime_llm_metadata
-from app.engine.multi_agent.runtime_flow_ledger import RuntimeFlowLedger
+from app.engine.multi_agent.runtime_flow_ledger import (
+    RUNTIME_FLOW_TRACE_VERSION,
+    RuntimeFlowLedger,
+)
+from app.engine.runtime.event_payload_sanitizer import redact_runtime_secret_text
 from app.engine.wiii_connect.snapshot import build_wiii_connect_snapshot
 from app.services.chat_orchestrator_runtime import build_wiii_turn_request
 from app.services.chat_runtime_lifecycle import (
@@ -42,6 +47,20 @@ _FINALIZABLE_AGENT_NODES = {
     "grader",
     "colleague_agent",
 }
+
+
+def _stream_request_id_from_headers(request_headers: Mapping[str, str]) -> str:
+    """Return a stable, public-safe correlation id for one stream turn."""
+
+    raw_request_id = str(
+        request_headers.get("X-Request-ID")
+        or request_headers.get("x-request-id")
+        or ""
+    ).strip()
+    if not raw_request_id:
+        return f"req_{uuid.uuid4().hex[:16]}"
+    normalized = " ".join(redact_runtime_secret_text(raw_request_id).split())
+    return normalized[:96] if len(normalized) > 96 else normalized
 
 
 def _record_llm_runtime_observation(**kwargs: Any) -> None:
@@ -462,6 +481,42 @@ def _with_runtime_flow_metadata(
     )
 
 
+def _visual_fast_path_runtime_flow_trace() -> dict[str, Any]:
+    return {
+        "version": RUNTIME_FLOW_TRACE_VERSION,
+        "turn_path_decision": {
+            "version": "turn_path_decision.v1",
+            "path": "visual_generation",
+            "reason": "structured_visual_fast_path",
+            "bind_tools": True,
+            "force_tools": True,
+            "allow_all_tools": False,
+            "allowed_tool_names": ["tool_generate_visual"],
+            "allowed_tool_prefixes": [],
+            "forbidden_tool_names": [],
+            "forbidden_tool_prefixes": ["tool_pointy_", "tool_wiii_connect_"],
+            "allow_agent_handoff": False,
+            "allow_rag_delegation": False,
+        },
+        "tool_policy_session": {
+            "version": "tool_policy_session.v1",
+            "path": "visual_generation",
+            "reason": "structured_visual_fast_path",
+            "bind_tools": True,
+            "force_tools": True,
+            "allow_all_tools": False,
+            "allowed_tool_names": ["tool_generate_visual"],
+            "allowed_tool_prefixes": [],
+            "forbidden_tool_names": [],
+            "forbidden_tool_prefixes": ["tool_pointy_", "tool_wiii_connect_"],
+            "candidate_tool_names": ["tool_generate_visual"],
+            "visible_tool_names": ["tool_generate_visual"],
+            "allow_agent_handoff": False,
+            "allow_rag_delegation": False,
+        },
+    }
+
+
 def _source_to_payload(source):
     """Serialize Source-like objects for SSE transport."""
     if hasattr(source, "model_dump"):
@@ -524,11 +579,8 @@ async def generate_stream_v3_events(
     event_counter = 0
     presentation_state = StreamPresentationState()
     latency_tracker = _StreamLatencyTracker()
-    request_id = str(
-        request_headers.get("X-Request-ID")
-        or request_headers.get("x-request-id")
-        or ""
-    ).strip() or None
+    request_id = _stream_request_id_from_headers(request_headers)
+    logger.info("[STREAM-V3] Stream correlation established request_id=%s", request_id)
     flow_ledger = RuntimeFlowLedger.from_chat_request(
         chat_request=chat_request,
         request_id=request_id,
@@ -623,12 +675,14 @@ async def generate_stream_v3_events(
         return
 
     fb_cookie = request_headers.get("x-facebook-cookie", "")
-    if fb_cookie and settings.enable_facebook_cookie:
-        from app.engine.search_platforms.facebook_context import (
-            set_facebook_cookie,
-        )
+    from app.engine.search_platforms.facebook_context import (
+        reset_facebook_cookie,
+        set_facebook_cookie,
+    )
 
-        set_facebook_cookie(fb_cookie)
+    facebook_cookie_token = set_facebook_cookie(
+        fb_cookie if fb_cookie and settings.enable_facebook_cookie else ""
+    )
 
     try:
         requested_provider = getattr(chat_request, "provider", None)
@@ -881,6 +935,7 @@ async def generate_stream_v3_events(
                     session_id=effective_session_id_str,
                     request_id=request_id,
                     routing_metadata=visual_fast_path.routing_metadata,
+                    runtime_flow_trace=_visual_fast_path_runtime_flow_trace(),
                     stream_latency=latency_tracker.to_payload(),
                     streaming_version="v3-visual_fast_path",
                 ),
@@ -904,7 +959,7 @@ async def generate_stream_v3_events(
                     return
 
             try:
-                orchestrator.finalize_response_turn(
+                post_turn_lifecycle = orchestrator.finalize_response_turn(
                     session_id=effective_session_id,
                     user_id=str(chat_request.user_id),
                     user_role=chat_request.role,
@@ -919,10 +974,12 @@ async def generate_stream_v3_events(
                     include_lms_insights=False,
                     continuity_channel="web",
                     transport_type="stream",
+                    request_id=request_id,
                 )
                 flow_ledger.mark_finalization(
                     "saved",
                     save_response_immediately=False,
+                    post_turn_lifecycle=post_turn_lifecycle,
                 )
             except Exception as finalize_err:
                 flow_ledger.mark_finalization(
@@ -1110,7 +1167,7 @@ async def generate_stream_v3_events(
                     return
 
             try:
-                orchestrator.finalize_response_turn(
+                post_turn_lifecycle = orchestrator.finalize_response_turn(
                     session_id=effective_session_id,
                     user_id=str(chat_request.user_id),
                     user_role=chat_request.role,
@@ -1125,10 +1182,12 @@ async def generate_stream_v3_events(
                     include_lms_insights=False,
                     continuity_channel="web",
                     transport_type="stream",
+                    request_id=request_id,
                 )
                 flow_ledger.mark_finalization(
                     "saved",
                     save_response_immediately=False,
+                    post_turn_lifecycle=post_turn_lifecycle,
                 )
             except Exception as finalize_err:
                 flow_ledger.mark_finalization(
@@ -1353,7 +1412,7 @@ async def generate_stream_v3_events(
                     return
 
             try:
-                orchestrator.finalize_response_turn(
+                post_turn_lifecycle = orchestrator.finalize_response_turn(
                     session_id=effective_session_id,
                     user_id=str(chat_request.user_id),
                     user_role=chat_request.role,
@@ -1368,10 +1427,12 @@ async def generate_stream_v3_events(
                     include_lms_insights=True,
                     continuity_channel="web",
                     transport_type="stream",
+                    request_id=request_id,
                 )
                 flow_ledger.mark_finalization(
                     "saved",
                     save_response_immediately=True,
+                    post_turn_lifecycle=post_turn_lifecycle,
                 )
             except Exception as finalize_err:
                 flow_ledger.mark_finalization(
@@ -1716,7 +1777,7 @@ async def generate_stream_v3_events(
                     "[STREAM-V3] Persisting partial answer (%d chars) after %s",
                     len(full_answer), early_stop_reason,
                 )
-            orchestrator.finalize_response_turn(
+            post_turn_lifecycle = orchestrator.finalize_response_turn(
                 session_id=effective_session_id,
                 user_id=str(chat_request.user_id),
                 user_role=chat_request.role,
@@ -1731,10 +1792,12 @@ async def generate_stream_v3_events(
                 include_lms_insights=True,
                 continuity_channel="web",
                 transport_type="stream",
+                request_id=request_id,
             )
             flow_ledger.mark_finalization(
                 "saved",
                 save_response_immediately=bool(early_stop_reason),
+                post_turn_lifecycle=post_turn_lifecycle,
             )
         except Exception as finalize_err:
             flow_ledger.mark_finalization(
@@ -2066,3 +2129,5 @@ async def generate_stream_v3_events(
         )
         for chunk in error_chunks:
             yield chunk
+    finally:
+        reset_facebook_cookie(facebook_cookie_token)

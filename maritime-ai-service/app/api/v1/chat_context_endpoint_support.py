@@ -44,11 +44,16 @@ def load_recent_history_payload(
     chat_history,
     session_id: str,
     user_id: str,
+    organization_id: str | None = None,
 ) -> list[dict[str, str]]:
     """Load recent chat history into the compact context payload shape."""
     history_list: list[dict[str, str]] = []
     if chat_history.is_available():
-        recent = chat_history.get_recent_messages(session_id, user_id=user_id)
+        recent = chat_history.get_recent_messages(
+            session_id,
+            user_id=user_id,
+            organization_id=organization_id,
+        )
         history_list = [{"role": m.role, "content": m.content} for m in recent]
     return history_list
 
@@ -57,6 +62,7 @@ async def compact_context_session(
     *,
     session_id: str,
     user_id: str,
+    organization_id: str | None = None,
 ) -> tuple[str, list[dict[str, str]]]:
     """Run the context compactor with the standard history-loading flow."""
     from app.engine.context_manager import get_compactor
@@ -68,6 +74,7 @@ async def compact_context_session(
         chat_history=chat_history,
         session_id=session_id,
         user_id=user_id,
+        organization_id=organization_id,
     )
     summary = await compactor.force_compact(
         session_id,
@@ -92,6 +99,7 @@ def load_context_info_inputs(
     *,
     session_id: str,
     user_id: str,
+    organization_id: str | None = None,
 ):
     """Load the standard compactor and history payload for context info."""
     from app.engine.context_manager import get_compactor
@@ -103,6 +111,7 @@ def load_context_info_inputs(
         chat_history=chat_history,
         session_id=session_id,
         user_id=user_id,
+        organization_id=organization_id,
     )
     return compactor, history_list
 

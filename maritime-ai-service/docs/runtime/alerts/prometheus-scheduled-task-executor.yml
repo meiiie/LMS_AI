@@ -1,0 +1,59 @@
+# Prometheus alert rules for autonomous scheduled task execution.
+#
+# Source metrics:
+# - runtime.scheduled_tasks.polls
+# - runtime.scheduled_tasks.runs
+# - runtime.scheduled_tasks.delivery
+# GET /metrics serializes them as:
+# - runtime_scheduled_tasks_polls
+# - runtime_scheduled_tasks_runs
+# - runtime_scheduled_tasks_delivery
+# Labels: polls has status; runs has mode/status; delivery has mode/status.
+groups:
+  - name: wiii-scheduled-task-executor
+    interval: 30s
+    rules:
+      - alert: WiiiScheduledTaskExecutorPollError
+        expr: |
+          sum (
+            increase(runtime_scheduled_tasks_polls{status="error"}[15m])
+          ) > 0
+        for: 5m
+        labels:
+          service: wiii-ai
+          component: scheduled-task-executor
+          severity: p3_ticket
+        annotations:
+          summary: "Scheduled task executor polling failed"
+          description: "The autonomous scheduled task executor could not poll due tasks. Proactive reminders and agent-invoke tasks may stop running."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/scheduled-task-executor.md"
+
+      - alert: WiiiScheduledTaskExecutionFailure
+        expr: |
+          sum by (mode, status) (
+            increase(runtime_scheduled_tasks_runs{status=~"error|timeout"}[15m])
+          ) > 0
+        for: 5m
+        labels:
+          service: wiii-ai
+          component: scheduled-task-executor
+          severity: p3_ticket
+        annotations:
+          summary: "Scheduled task {{ $labels.mode }} run ended with {{ $labels.status }}"
+          description: "A due scheduled task reached execution but failed or timed out. Inspect tenant-scoped task rows before retrying or disabling autonomous execution."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/scheduled-task-executor.md"
+
+      - alert: WiiiScheduledTaskDeliveryMissed
+        expr: |
+          sum by (mode) (
+            increase(runtime_scheduled_tasks_delivery{status="not_delivered"}[30m])
+          ) > 5
+        for: 10m
+        labels:
+          service: wiii-ai
+          component: scheduled-task-executor
+          severity: p3_ticket
+        annotations:
+          summary: "Scheduled task results are not being delivered for {{ $labels.mode }}"
+          description: "Scheduled tasks are executing, but result notification delivery repeatedly reports not_delivered."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/scheduled-task-executor.md"

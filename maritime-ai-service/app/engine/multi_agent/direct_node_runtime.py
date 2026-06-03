@@ -20,6 +20,7 @@ from app.engine.multi_agent.direct_node_pre_llm_pipeline import (
     execute_direct_node_pre_llm_pipeline,
 )
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.tool_collection import ensure_direct_turn_policy_metadata
 from app.engine.reasoning import (
     record_thinking_snapshot,
 )
@@ -27,6 +28,13 @@ from app.engine.reasoning import (
 logger = logging.getLogger(__name__)
 
 _HOST_UI_DIRECT_TOTAL_TIMEOUT_SECONDS = 45.0  # Phase F3 (2026-05-06): bumped 24->45s. Tool-heavy pointy turns regularly hit 25-35s; 24s caused canned fallback even when LLM was actively succeeding.
+
+
+def _user_role_for_turn_policy(state: AgentState) -> str:
+    ctx = state.get("context") if isinstance(state.get("context"), dict) else {}
+    role = str(ctx.get("user_role") or state.get("role") or "student").strip()
+    return role or "student"
+
 
 async def direct_response_node_impl(
     state: AgentState,
@@ -63,6 +71,12 @@ async def direct_response_node_impl(
 ) -> AgentState:
     """Direct response node - conversational responses without RAG."""
     query = state.get("query", "")
+    user_role = _user_role_for_turn_policy(state)
+    ensure_direct_turn_policy_metadata(
+        query=query,
+        state=state,
+        user_role=user_role,
+    )
 
     bus_id = state.get("_event_bus_id")
     event_sink = build_direct_node_event_sink(
@@ -167,6 +181,25 @@ async def direct_response_node_impl(
             ),
         )
         response = llm_pipeline.response
+    elif not state.get("tool_call_events") and not state.get("tools_used"):
+        ensure_direct_turn_policy_metadata(
+            query=query,
+            state=state,
+            user_role=user_role,
+            record_empty_policy=True,
+        )
+
+    if (
+        not isinstance(state.get("_tool_policy_session"), dict)
+        and not state.get("tool_call_events")
+        and not state.get("tools_used")
+    ):
+        ensure_direct_turn_policy_metadata(
+            query=query,
+            state=state,
+            user_role=user_role,
+            record_empty_policy=True,
+        )
 
     from app.core.org_context import get_current_org_id
 

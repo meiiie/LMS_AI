@@ -10,10 +10,11 @@ Locks the contract:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
 from app.engine.runtime.episodic_retrieval import (
     EpisodicMatch,
     render_for_prompt,
@@ -89,8 +90,6 @@ def mock_pool_with_rows():
 
     class FakePool:
         def acquire(self):
-            outer = self
-
             class _CtxManager:
                 async def __aenter__(self):
                     return FakeConn()
@@ -137,9 +136,11 @@ async def test_query_composition_includes_user_filter(
     await search_prior_user_turns(user_id="user-A", query="search me")
     sql, args = captured[0]
     assert "session_events" in sql
-    assert "(payload->>'user_id') = $1" in sql
-    assert args[0] == "user-A"
-    assert args[1] == "%search me%"
+    assert "(payload->>'user_id_hash') = $1" in sql
+    assert "(payload->>'user_id') = $2" in sql
+    assert args[0] == hash_runtime_identifier("user-A")
+    assert args[1] == "user-A"
+    assert args[2] == "%search me%"
 
 
 async def test_query_composition_excludes_current_session(
@@ -157,8 +158,8 @@ async def test_query_composition_excludes_current_session(
         user_id="u", query="hello world", exclude_session_id="current-sess"
     )
     sql, args = captured[0]
-    assert "session_id <> $3" in sql
-    assert args[2] == "current-sess"
+    assert "session_id <> $4" in sql
+    assert args[3] == "current-sess"
 
 
 async def test_query_composition_filters_by_org(
@@ -176,8 +177,61 @@ async def test_query_composition_filters_by_org(
         user_id="u", query="hello world", org_id="org-A"
     )
     sql, args = captured[0]
-    assert "org_id = $3" in sql
-    assert args[2] == "org-A"
+    assert "org_id = $4" in sql
+    assert args[3] == "org-A"
+
+
+async def test_multi_tenant_missing_org_context_blocks_db(monkeypatch):
+    from app.core.config import settings
+    from app.core.org_context import current_org_id
+
+    monkeypatch.setattr(settings, "enable_multi_tenant", True)
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "default_organization_id", "default")
+    token = current_org_id.set(None)
+    try:
+        with patch(
+            "app.core.database.get_asyncpg_pool",
+            new_callable=AsyncMock,
+        ) as pool_mock:
+            out = await search_prior_user_turns(
+                user_id="user-private",
+                query="hello world",
+            )
+    finally:
+        current_org_id.reset(token)
+
+    assert out == []
+    pool_mock.assert_not_called()
+
+
+async def test_query_uses_current_org_context_when_org_arg_missing(
+    monkeypatch,
+    mock_pool_with_rows,
+):
+    from app.core.config import settings
+    from app.core.org_context import current_org_id
+
+    pool, captured = mock_pool_with_rows
+
+    async def get_pool():
+        return pool
+
+    monkeypatch.setattr(settings, "enable_multi_tenant", True)
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "default_organization_id", "default")
+    monkeypatch.setattr(
+        "app.core.database.get_asyncpg_pool", get_pool, raising=False
+    )
+    token = current_org_id.set("org-A")
+    try:
+        await search_prior_user_turns(user_id="u", query="hello world")
+    finally:
+        current_org_id.reset(token)
+
+    sql, args = captured[0]
+    assert "org_id = $4" in sql
+    assert args[3] == "org-A"
 
 
 async def test_db_error_returns_empty_no_raise(monkeypatch):

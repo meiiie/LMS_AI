@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -20,8 +19,9 @@ from app.engine.multi_agent.direct_web_search_policy import (
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
 )
-from app.engine.tools.tool_capability_registry import (
-    WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+from app.engine.multi_agent.external_app_action_runtime import (
+    external_app_action_final_answer as _external_app_action_final_answer,
+    facebook_direct_apply_final_answer as _facebook_direct_apply_final_answer,
 )
 
 
@@ -32,22 +32,6 @@ class DirectToolResponseFinalization:
     llm_response: Any
     messages: list[Any]
     resolved_provider: str | None
-
-
-def _parse_tool_result_payload(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if not isinstance(value, str):
-        return {}
-    text = value.strip()
-    if not text:
-        return {}
-    try:
-        decoded = json.loads(text)
-    except json.JSONDecodeError:
-        return {}
-    return decoded if isinstance(decoded, dict) else {}
-
 
 def facebook_direct_apply_final_answer(
     tool_call_events: list[dict[str, Any]],
@@ -60,58 +44,25 @@ def facebook_direct_apply_final_answer(
     audited connector state.
     """
 
-    saw_direct_apply = any(
-        event.get("name") == WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
-        for event in tool_call_events
-    )
-    if not saw_direct_apply:
-        return ""
+    return _facebook_direct_apply_final_answer(tool_call_events)
 
-    for event in reversed(tool_call_events):
-        if (
-            event.get("type") != "result"
-            or event.get("name") != WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
-        ):
-            continue
-        payload = _parse_tool_result_payload(event.get("result"))
-        status = str(payload.get("status") or "").strip()
-        if status == "action_completed":
-            summary = str(payload.get("summary") or "").strip()
-            if summary:
-                return summary
-            return "Đã đăng bài lên Facebook qua Wiii Connect."
-        if status == "action_failed":
-            reason = str(payload.get("error") or payload.get("summary") or "").strip()
-            suffix = f": {reason}" if reason else "."
-            return f"Facebook chưa đăng được{suffix}"
-        if status == "action_requested":
-            return (
-                "Mình đã gửi yêu cầu đăng bài Facebook qua Wiii Connect. "
-                "Host action sẽ dùng kết nối Facebook hiện tại để preview/apply "
-                "qua gateway đã bật và hiển thị kết quả sau khi chạy xong."
-            )
-        if status == "validation_failed":
-            missing = payload.get("missing_fields")
-            missing_fields = ", ".join(
-                str(item)
-                for item in missing
-                if str(item or "").strip()
-            ) if isinstance(missing, list) else ""
-            suffix = f" Trường thiếu: {missing_fields}." if missing_fields else ""
-            return (
-                "Mình chưa thể đăng Facebook vì yêu cầu host action "
-                "thiếu dữ liệu bắt buộc."
-                f"{suffix}"
-            )
-        if status == "approval_required":
-            return (
-                "Mình cần bạn xác nhận rõ trước khi Wiii Connect "
-                "thực hiện thao tác đăng."
-            )
-        if status == "preview_required":
-            return "Mình cần tạo preview Facebook hợp lệ trước khi đăng."
 
-    return ""
+def _record_final_answer_trace(
+    state: dict[str, Any] | None,
+    *,
+    source: str,
+    reason: str,
+    status: str = "resolved",
+) -> None:
+    if not isinstance(state, dict):
+        return
+    state["_final_answer_trace"] = {
+        "version": "final_answer_trace.v1",
+        "source": source,
+        "reason": reason,
+        "status": status,
+        "answer_present": True,
+    }
 
 
 async def finalize_direct_tool_response(
@@ -152,15 +103,20 @@ async def finalize_direct_tool_response(
         getattr(next_response, "content", "")
     )
 
-    facebook_host_action_answer = facebook_direct_apply_final_answer(
+    external_action_answer = _external_app_action_final_answer(
         tool_call_events,
     )
-    if facebook_host_action_answer:
+    if external_action_answer:
+        _record_final_answer_trace(
+            state,
+            source="wiii_connect_action_result",
+            reason="external_app_action_payload",
+        )
         next_response = build_assistant_message(
-            facebook_host_action_answer,
+            external_action_answer,
             native_tool_messages=native_tool_messages,
         )
-        visible_response_text = facebook_host_action_answer
+        visible_response_text = external_action_answer
         remaining_tool_calls = False
 
     if (

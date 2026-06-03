@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -13,8 +11,11 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.core.generated_files import build_generated_file_url
 from app.core.config import Settings
+from app.engine.runtime.event_payload_sanitizer import (
+    hash_runtime_identifier,
+    sanitize_runtime_payload,
+)
 from app.sandbox.base import SandboxExecutor
 from app.sandbox.opensandbox_artifacts import (
     attach_inline_content_impl,
@@ -67,6 +68,11 @@ from app.sandbox.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_metadata(value: Any) -> dict[str, Any]:
+    safe_value = sanitize_runtime_payload(value or {})
+    return safe_value if isinstance(safe_value, dict) else {}
 
 
 @dataclass(slots=True)
@@ -232,7 +238,9 @@ class OpenSandboxExecutor(SandboxExecutor):
         if request.organization_id:
             labels["wiii.org"] = request.organization_id
         if request.user_id:
-            labels["wiii.user"] = request.user_id
+            user_id_hash = hash_runtime_identifier(request.user_id)
+            if user_id_hash:
+                labels["wiii.user"] = user_id_hash
         if request.session_id:
             labels["wiii.session"] = request.session_id
         if request.request_id:
@@ -253,7 +261,7 @@ class OpenSandboxExecutor(SandboxExecutor):
             network_mode=network_mode,
             timeout_seconds=timeout_seconds,
             labels=self.build_labels(request),
-            metadata=metadata,
+            metadata=_safe_metadata(metadata),
         )
 
     def build_network_policy(

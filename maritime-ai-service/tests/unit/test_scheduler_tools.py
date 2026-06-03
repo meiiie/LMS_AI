@@ -249,6 +249,52 @@ class TestHelperFunctions:
         state = scheduler_tools_module._get_scheduler_state()
         assert state.user_id == "user-42"
         assert state.domain_id == "traffic_law"
+        assert "user=user-42" in (state.identity_key or "")
+        assert "domain=traffic_law" in (state.identity_key or "")
+
+    def test_set_scheduler_user_replaces_previous_identity(self):
+        """Changing user context should replace the scheduler tool identity."""
+        set_scheduler_user("user-a", "maritime")
+        first_state = scheduler_tools_module._get_scheduler_state()
+
+        set_scheduler_user("user-b", "traffic_law")
+        second_state = scheduler_tools_module._get_scheduler_state()
+
+        assert second_state is not first_state
+        assert second_state.user_id == "user-b"
+        assert second_state.domain_id == "traffic_law"
+        assert "user=user-b" in (second_state.identity_key or "")
+        assert "domain=traffic_law" in (second_state.identity_key or "")
+
+    def test_runtime_context_identity_isolates_scheduler_state(self):
+        """Runtime org/session identity should prevent scheduler state reuse."""
+        from app.engine.tools.runtime_context import (
+            build_tool_runtime_context,
+            tool_runtime_scope,
+        )
+
+        ctx_a = build_tool_runtime_context(
+            user_id="user-a",
+            organization_id="org-a",
+            session_id="session-a",
+        )
+        ctx_b = build_tool_runtime_context(
+            user_id="user-a",
+            organization_id="org-b",
+            session_id="session-a",
+        )
+
+        with tool_runtime_scope(ctx_a):
+            set_scheduler_user("user-a", "maritime")
+            state_a = scheduler_tools_module._get_scheduler_state()
+            assert state_a.user_id == "user-a"
+            assert "org=org-a" in (state_a.identity_key or "")
+
+        with tool_runtime_scope(ctx_b):
+            state_b = scheduler_tools_module._get_scheduler_state()
+            assert state_b is not state_a
+            assert state_b.user_id == "user-a"
+            assert "org=org-b" in (state_b.identity_key or "")
 
     def test_set_scheduler_user_default_domain(self):
         """set_scheduler_user with default domain_id."""

@@ -19,10 +19,39 @@ from app.models.semantic_memory import (
 )
 
 logger = logging.getLogger(__name__)
+_TRIPLE_REPOSITORY_MISSING_ORG_WARNING = "triple_repository_blocked_missing_org_context"
+_TRIPLE_ORG_FILTER = " AND organization_id = :org_id"
 
 
 class FactRepositoryTripleMixin:
     """Semantic triple operations for SemanticMemoryRepository."""
+
+    def _resolve_triple_org_scope(self, *, write: bool = False):
+        from app.engine.semantic_memory.write_audit import (
+            resolve_memory_read_scope,
+            resolve_memory_write_scope,
+        )
+
+        scope = resolve_memory_write_scope() if write else resolve_memory_read_scope()
+        if not self._scope_allows_triples(scope):
+            return scope, None
+        return scope, _TRIPLE_ORG_FILTER
+
+    def _scope_allows_triples(self, scope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _log_triple_scope_blocked(self, operation: str, scope, *, user_id: str) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_TRIPLE_REPOSITORY_MISSING_ORG_WARNING)
+        logger.warning(
+            "[TRIPLES] %s blocked user_hash=%s org_hash=%s org_scope=%s warnings=%s",
+            operation,
+            _hash_memory_identifier(user_id),
+            _hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
     def save_triple(
         self,
@@ -30,6 +59,14 @@ class FactRepositoryTripleMixin:
         generate_embedding: bool = True,
     ) -> Optional[SemanticMemory]:
         self._ensure_initialized()
+        scope, org_filter = self._resolve_triple_org_scope(write=True)
+        if org_filter is None:
+            self._log_triple_scope_blocked(
+                "save_triple",
+                scope,
+                user_id=triple.subject,
+            )
+            return None
 
         try:
             embedding = triple.embedding
@@ -64,11 +101,14 @@ class FactRepositoryTripleMixin:
         predicate: Predicate,
     ) -> Optional[SemanticMemorySearchResult]:
         self._ensure_initialized()
-
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter = self._resolve_triple_org_scope()
+        if org_filter is None:
+            self._log_triple_scope_blocked(
+                "find_by_predicate",
+                scope,
+                user_id=user_id,
+            )
+            return None
 
         try:
             with self._session_factory() as session:
@@ -110,8 +150,7 @@ class FactRepositoryTripleMixin:
                     "predicate": predicate.value,
                     "fact_type": fact_type_map.get(predicate, predicate.value),
                 }
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
+                params["org_id"] = scope.org_id
 
                 row = session.execute(query, params).fetchone()
                 if not row:
@@ -137,6 +176,14 @@ class FactRepositoryTripleMixin:
         new_metadata: dict,
     ) -> Optional[SemanticMemory]:
         self._ensure_initialized()
+        scope, org_filter = self._resolve_triple_org_scope(write=True)
+        if org_filter is None:
+            self._log_triple_scope_blocked(
+                "update_memory_content",
+                scope,
+                user_id=user_id,
+            )
+            return None
 
         try:
             embedding = []
@@ -165,11 +212,6 @@ class FactRepositoryTripleMixin:
 
             metadata_json = json.dumps(stamp_embedding_metadata(new_metadata))
 
-            from app.core.org_filter import get_effective_org_id, org_where_clause
-
-            eff_org_id = get_effective_org_id()
-            org_filter = org_where_clause(eff_org_id)
-
             with self._session_factory() as session:
                 query = text(
                     f"""
@@ -194,8 +236,7 @@ class FactRepositoryTripleMixin:
                     "metadata": metadata_json,
                     "importance": new_metadata.get("confidence", 0.5),
                 }
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
+                params["org_id"] = scope.org_id
 
                 row = session.execute(query, params).fetchone()
                 session.commit()
@@ -231,3 +272,9 @@ class FactRepositoryTripleMixin:
                 new_metadata=triple.to_metadata(),
             )
         return self.save_triple(triple, generate_embedding=True)
+
+
+def _hash_memory_identifier(value) -> str | None:
+    from app.engine.semantic_memory.privacy import hash_memory_identifier
+
+    return hash_memory_identifier(value)

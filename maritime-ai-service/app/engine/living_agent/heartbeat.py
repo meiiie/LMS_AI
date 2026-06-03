@@ -57,12 +57,40 @@ from app.engine.living_agent.heartbeat_action_runtime import (
 from app.engine.living_agent.heartbeat_runtime_state import (
     set_current_heartbeat_count,
 )
+from app.engine.runtime.runtime_metrics import inc_counter, record_latency_ms
 
 logger = logging.getLogger(__name__)
 
 # Actions that require human approval when require_human_approval=True
 # Low-risk actions (no external I/O) are always auto-approved.
 _APPROVAL_REQUIRED_ACTIONS = {ActionType.BROWSE_SOCIAL, ActionType.LEARN_TOPIC}
+_ACTION_TYPE_LABELS = {action_type.value for action_type in ActionType}
+
+
+def _action_type_metric_label(action: HeartbeatAction) -> str:
+    value = getattr(action.action_type, "value", None)
+    if value in _ACTION_TYPE_LABELS:
+        return str(value)
+    return "unknown"
+
+
+def _emit_action_metric(
+    *,
+    action: HeartbeatAction,
+    status: str,
+    started: float,
+) -> None:
+    labels = {
+        "action_type": _action_type_metric_label(action),
+        "status": status,
+    }
+    inc_counter("runtime.living_agent.heartbeat.actions", labels=labels)
+    elapsed_ms = (time.monotonic() - started) * 1000.0
+    record_latency_ms(
+        "runtime.living_agent.heartbeat.action_duration_ms",
+        elapsed_ms,
+        labels=labels,
+    )
 
 
 class HeartbeatScheduler:
@@ -349,13 +377,17 @@ class HeartbeatScheduler:
         Each action type delegates to the appropriate subsystem.
         Extensible: add new action types by adding cases here.
         """
+        started = time.monotonic()
         try:
             async with asyncio.timeout(60):
                 await self._dispatch_action(action, soul, engine)
+            _emit_action_metric(action=action, status="success", started=started)
         except asyncio.TimeoutError:
             logger.warning("[HEARTBEAT] Action %s timed out (60s)", action.action_type.value)
+            _emit_action_metric(action=action, status="timeout", started=started)
         except Exception as e:
             logger.warning("[HEARTBEAT] Action %s error: %s", action.action_type.value, e)
+            _emit_action_metric(action=action, status="error", started=started)
 
     async def _dispatch_action(self, action: HeartbeatAction, soul, engine) -> None:
         """Dispatch action to the appropriate handler (internal, called with timeout)."""

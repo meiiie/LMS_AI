@@ -6,6 +6,7 @@ OTP database, auth audit events, security payload.
 """
 import asyncio
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -386,6 +387,43 @@ class TestRefreshFamily:
             assert "identity_snapshot" not in fallback_sql
             assert "family_id" in fallback_sql
 
+    @pytest.mark.asyncio
+    async def test_strict_schema_missing_uses_stateless_refresh_with_org(self):
+        """Strict multi-tenant issuance must not persist org-less legacy refresh rows."""
+        async_pool_fn, mock_conn = _mock_pool_and_conn()
+        mock_conn.execute.side_effect = [
+            Exception('column "identity_snapshot" of relation "refresh_tokens" does not exist'),
+        ]
+
+        with patch("app.auth.token_service.settings") as mock_settings, \
+             patch(_POOL_PATCH, create=True, new=async_pool_fn):
+            mock_settings.jwt_expire_minutes = 30
+            mock_settings.jwt_secret_key = "test-secret-key-12345"
+            mock_settings.jwt_algorithm = "HS256"
+            mock_settings.jwt_refresh_expire_days = 30
+            mock_settings.jwt_audience = "wiii"
+            mock_settings.environment = "production"
+            mock_settings.enable_multi_tenant = True
+
+            from app.auth.token_service import create_token_pair
+            pair = await create_token_pair(
+                user_id="user-1",
+                role="student",
+                active_organization_id="org-default",
+            )
+
+            import jwt
+            refresh_payload = jwt.decode(
+                pair.refresh_token,
+                "test-secret-key-12345",
+                algorithms=["HS256"],
+                audience="wiii",
+            )
+            assert refresh_payload["type"] == "refresh"
+            assert refresh_payload["stateless"] is True
+            assert refresh_payload["active_organization_id"] == "org-default"
+            assert mock_conn.execute.await_count == 1
+
 
 # ============================================================================
 # TestReplayDetection
@@ -423,6 +461,51 @@ class TestReplayDetection:
                 if "family_id" in str(c)
             ]
             assert len(purge_calls) > 0
+
+    @pytest.mark.asyncio
+    async def test_replay_diagnostics_hash_user_and_family_refs(self, caplog):
+        """Replay diagnostics must not expose raw user_id or token family_id."""
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+        async_pool_fn, mock_conn = _mock_pool_and_conn()
+        raw_user_id = "user-replay-secret"
+        raw_family_id = "family-replay-secret"
+
+        mock_conn.fetchrow.return_value = {
+            "id": "token-1",
+            "user_id": raw_user_id,
+            "expires_at": datetime.now(timezone.utc) + timedelta(days=30),
+            "revoked_at": datetime.now(timezone.utc),
+            "auth_method": "google",
+            "family_id": raw_family_id,
+            "email": "a@b.com",
+            "name": "Test",
+            "role": "student",
+        }
+        mock_conn.fetchval.return_value = 2
+
+        with patch(_POOL_PATCH, create=True, new=async_pool_fn), \
+             patch("app.auth.auth_audit.log_auth_event", new_callable=AsyncMock) as mock_audit, \
+             caplog.at_level(logging.WARNING, logger="app.auth.token_service"):
+            from app.auth.token_service import refresh_access_token
+
+            result = await refresh_access_token("fake-refresh-token")
+
+        assert result is None
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        assert raw_user_id not in log_text
+        assert raw_family_id not in log_text
+        assert f"user_ref={hash_runtime_identifier(raw_user_id)}" in log_text
+        assert f"family_ref={hash_runtime_identifier(raw_family_id)}" in log_text
+
+        replay_audit = [
+            call
+            for call in mock_audit.await_args_list
+            if call.args and call.args[0] == "token_replay_detected"
+        ][0]
+        reason = replay_audit.kwargs["reason"]
+        assert raw_family_id not in reason
+        assert f"family_ref={hash_runtime_identifier(raw_family_id)}" in reason
 
     @pytest.mark.asyncio
     async def test_revoked_no_active_siblings_returns_none(self):
@@ -563,6 +646,52 @@ class TestReplayDetection:
             assert kwargs["family_id"] == "family-xyz"
 
     @pytest.mark.asyncio
+    async def test_refresh_uses_row_organization_when_snapshot_missing(self):
+        """Rotated tokens keep the stored org even when snapshot JSON is absent."""
+        async_pool_fn, mock_conn = _mock_pool_and_conn()
+
+        mock_conn.fetchrow.return_value = {
+            "id": "token-1",
+            "user_id": "user-1",
+            "expires_at": datetime.now(timezone.utc) + timedelta(days=30),
+            "revoked_at": None,
+            "auth_method": "google",
+            "family_id": "family-xyz",
+            "organization_id": "org-default",
+            "identity_snapshot": None,
+            "email": "a@b.com",
+            "name": "Test",
+            "role": "student",
+            "platform_role": "user",
+        }
+
+        with patch(_POOL_PATCH, create=True, new=async_pool_fn), \
+             patch("app.auth.token_service.settings") as mock_settings, \
+             patch("app.auth.token_service.create_token_pair", new_callable=AsyncMock) as mock_create, \
+             patch("app.auth.auth_audit.log_auth_event", new_callable=AsyncMock):
+            mock_settings.jwt_expire_minutes = 30
+            mock_settings.jwt_secret_key = "test-secret-key-12345"
+            mock_settings.jwt_algorithm = "HS256"
+            mock_settings.jwt_refresh_expire_days = 30
+            mock_settings.jwt_audience = "wiii"
+            mock_settings.environment = "production"
+            mock_settings.enable_multi_tenant = True
+            mock_create.return_value = MagicMock(
+                access_token="at",
+                refresh_token="rt",
+                token_type="bearer",
+                expires_in=1800,
+            )
+
+            from app.auth.token_service import refresh_access_token
+            result = await refresh_access_token("persisted-org-token")
+
+            assert result is not None
+            kwargs = mock_create.call_args.kwargs
+            assert kwargs["active_organization_id"] == "org-default"
+            assert kwargs["family_id"] == "family-xyz"
+
+    @pytest.mark.asyncio
     async def test_not_found_returns_none(self):
         """Token not found returns None."""
         async_pool_fn, mock_conn = _mock_pool_and_conn()
@@ -609,6 +738,32 @@ class TestReplayDetection:
             kwargs = mock_create.call_args.kwargs
             assert kwargs["role"] == "student"
             assert kwargs["family_id"] == "family-legacy"
+
+    @pytest.mark.asyncio
+    async def test_refresh_lookup_missing_identity_columns_rejected_in_strict_mode(self):
+        """Strict multi-tenant refresh must not mint a token from legacy org-less rows."""
+        async_pool_fn, mock_conn = _mock_pool_and_conn()
+        mock_conn.fetchrow.side_effect = [
+            Exception('column "identity_snapshot" does not exist'),
+        ]
+
+        with patch(_POOL_PATCH, create=True, new=async_pool_fn), \
+             patch("app.auth.token_service.settings") as mock_settings, \
+             patch("app.auth.token_service.create_token_pair", new_callable=AsyncMock) as mock_create:
+            mock_settings.jwt_expire_minutes = 30
+            mock_settings.jwt_secret_key = "test-secret-key-12345"
+            mock_settings.jwt_algorithm = "HS256"
+            mock_settings.jwt_refresh_expire_days = 30
+            mock_settings.jwt_audience = "wiii"
+            mock_settings.environment = "production"
+            mock_settings.enable_multi_tenant = True
+
+            from app.auth.token_service import refresh_access_token
+            result = await refresh_access_token("legacy-refresh-token")
+
+            assert result is None
+            assert mock_conn.fetchrow.await_count == 1
+            mock_create.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_refresh_uses_persisted_platform_role_when_snapshot_missing(self):
@@ -852,6 +1007,67 @@ class TestAuthAudit:
 
             from app.auth.auth_audit import log_auth_event
             await log_auth_event("login_failed", user_id="user-1")
+
+    @pytest.mark.asyncio
+    async def test_log_auth_event_failure_log_redacts_raw_identity_and_metadata(self, caplog):
+        """Audit persistence failure diagnostics must not expose raw auth data."""
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+        async_pool_fn, mock_conn = _mock_pool_and_conn()
+        raw_user_id = "audit-private-user"
+        raw_org = "audit-private-org"
+        raw_ip = "203.0.113.77"
+        raw_user_agent = "audit-private-user-agent"
+        raw_reason = "audit-private-reason-with-token"
+        metadata = {
+            "provider_sub": "audit-private-provider-sub",
+            "nested": {"refresh_token": "audit-private-metadata-token"},
+        }
+        mock_conn.execute.side_effect = RuntimeError(
+            "insert failed "
+            f"user_id={raw_user_id} "
+            f"organization_id={raw_org} "
+            f"ip_address={raw_ip} "
+            f"user_agent={raw_user_agent} "
+            f"reason={raw_reason} "
+            f"provider_sub={metadata['provider_sub']} "
+            f"refresh_token={metadata['nested']['refresh_token']}"
+        )
+
+        with patch("app.core.config.settings") as mock_settings, \
+             patch(_POOL_PATCH, create=True, new=async_pool_fn), \
+             caplog.at_level(logging.WARNING, logger="app.auth.auth_audit"):
+            mock_settings.enable_auth_audit = True
+
+            from app.auth.auth_audit import log_auth_event
+            await log_auth_event(
+                "login_failed",
+                user_id=raw_user_id,
+                provider="google",
+                result="failed",
+                reason=raw_reason,
+                ip_address=raw_ip,
+                user_agent=raw_user_agent,
+                organization_id=raw_org,
+                metadata=metadata,
+            )
+
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        for raw_value in (
+            raw_user_id,
+            raw_org,
+            raw_ip,
+            raw_user_agent,
+            raw_reason,
+            metadata["provider_sub"],
+            metadata["nested"]["refresh_token"],
+        ):
+            assert raw_value not in log_text
+        assert f"user_ref={hash_runtime_identifier(raw_user_id)}" in log_text
+        assert f"org_ref={hash_runtime_identifier(raw_org)}" in log_text
+        assert "provider=google" in log_text
+        assert "result=failed" in log_text
+        assert "<redacted-secret>" in log_text
 
     @pytest.mark.asyncio
     async def test_metadata_json_serialized(self):

@@ -14,6 +14,7 @@ def _make_context() -> PostResponseContinuityContext:
         user_role="student",
         message="Explain Rule 5",
         response_text="Rule 5 is lookout.",
+        session_id="session-1",
         domain_id="maritime",
         organization_id="org-1",
         channel="web",
@@ -72,6 +73,7 @@ def test_sentiment_post_response_schedules_analysis_when_enabled():
         message="Explain Rule 5",
         response_text="Rule 5 is lookout.",
         organization_id="org-1",
+        session_id="session-1",
     )
     mock_ensure_future.assert_called_once()
 
@@ -127,4 +129,5 @@ def test_sentiment_post_response_swallows_schedule_errors():
         message="Explain Rule 5",
         response_text="Rule 5 is lookout.",
         organization_id="org-1",
+        session_id="session-1",
     )

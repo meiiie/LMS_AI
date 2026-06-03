@@ -21,6 +21,15 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    append_semantic_memory_write_audit_event,
+    build_semantic_memory_write_audit,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,6 +49,7 @@ class CrossPlatformMemory:
         canonical_user_id: str,
         legacy_user_id: str,
         channel_type: str = "",
+        session_id: str | None = None,
     ) -> Dict[str, int]:
         """Merge semantic memories from legacy user ID to canonical user ID.
 
@@ -53,6 +63,7 @@ class CrossPlatformMemory:
             canonical_user_id: The canonical (real) user UUID.
             legacy_user_id: The platform-specific ID (e.g., "messenger_12345").
             channel_type: Source channel for merge provenance.
+            session_id: Optional session ID for privacy-safe write audit events.
 
         Returns:
             {"migrated": N, "duplicates_resolved": M}
@@ -61,24 +72,65 @@ class CrossPlatformMemory:
         from app.core.database import get_shared_session_factory
 
         result = {"migrated": 0, "duplicates_resolved": 0}
+        scope = resolve_memory_write_scope()
+        canonical_hash = hash_memory_identifier(canonical_user_id)
+        legacy_hash = hash_memory_identifier(legacy_user_id)
+
+        if not scope.write_allowed or not scope.org_id:
+            await self._append_merge_audit(
+                canonical_user_id=canonical_user_id,
+                session_id=session_id,
+                scope=scope,
+                result=result,
+                status="blocked",
+                warnings=["cross_platform_merge_blocked_missing_org_context"],
+            )
+            logger.warning(
+                "[XP_MEMORY] Merge blocked for canonical_hash=%s legacy_hash=%s scope=%s",
+                canonical_hash,
+                legacy_hash,
+                scope.state,
+            )
+            return result
 
         try:
             session_factory = get_shared_session_factory()
             with session_factory() as session:
                 # 1. Get all legacy memories
                 legacy_rows = session.execute(
-                    text("SELECT id, content, importance, memory_type, metadata, created_at FROM semantic_memories WHERE user_id = :legacy_id"),
-                    {"legacy_id": legacy_user_id},
+                    text("""
+                        SELECT id, content, importance, memory_type, metadata, created_at
+                        FROM semantic_memories
+                        WHERE user_id = :legacy_id
+                          AND organization_id = :org_id
+                    """),
+                    {"legacy_id": legacy_user_id, "org_id": scope.org_id},
                 ).fetchall()
 
                 if not legacy_rows:
-                    logger.debug("[XP_MEMORY] No memories to merge for %s", legacy_user_id)
+                    await self._append_merge_audit(
+                        canonical_user_id=canonical_user_id,
+                        session_id=session_id,
+                        scope=scope,
+                        result=result,
+                        status="skipped",
+                        warnings=["cross_platform_merge_no_legacy_memories"],
+                    )
+                    logger.debug(
+                        "[XP_MEMORY] No memories to merge for legacy_hash=%s",
+                        legacy_hash,
+                    )
                     return result
 
                 # 2. Get canonical memories for conflict detection
                 canonical_rows = session.execute(
-                    text("SELECT id, content, importance, memory_type, metadata, created_at FROM semantic_memories WHERE user_id = :canonical_id"),
-                    {"canonical_id": canonical_user_id},
+                    text("""
+                        SELECT id, content, importance, memory_type, metadata, created_at
+                        FROM semantic_memories
+                        WHERE user_id = :canonical_id
+                          AND organization_id = :org_id
+                    """),
+                    {"canonical_id": canonical_user_id, "org_id": scope.org_id},
                 ).fetchall()
 
                 canonical_contents = {}
@@ -119,7 +171,7 @@ class CrossPlatformMemory:
                             # Incoming wins — update canonical row with incoming data
                             merge_history = metadata.get("merge_history", [])
                             merge_history.append({
-                                "from": legacy_user_id,
+                                "from_hash": legacy_hash,
                                 "channel": channel_type,
                                 "action": "replaced",
                                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -133,23 +185,33 @@ class CrossPlatformMemory:
                                         metadata = :metadata,
                                         updated_at = NOW()
                                     WHERE id = :id
+                                      AND organization_id = :org_id
                                 """),
                                 {
                                     "id": canonical_info["id"],
+                                    "org_id": scope.org_id,
                                     "importance": importance,
                                     "metadata": json.dumps(metadata, ensure_ascii=False),
                                 },
                             )
                             # Delete incoming duplicate
                             session.execute(
-                                text("DELETE FROM semantic_memories WHERE id = :id"),
-                                {"id": legacy_id},
+                                text("""
+                                    DELETE FROM semantic_memories
+                                    WHERE id = :id
+                                      AND organization_id = :org_id
+                                """),
+                                {"id": legacy_id, "org_id": scope.org_id},
                             )
                         else:
                             # Canonical wins — just delete incoming
                             session.execute(
-                                text("DELETE FROM semantic_memories WHERE id = :id"),
-                                {"id": legacy_id},
+                                text("""
+                                    DELETE FROM semantic_memories
+                                    WHERE id = :id
+                                      AND organization_id = :org_id
+                                """),
+                                {"id": legacy_id, "org_id": scope.org_id},
                             )
 
                         result["duplicates_resolved"] += 1
@@ -157,7 +219,7 @@ class CrossPlatformMemory:
                         # No conflict — migrate by updating user_id
                         merge_history = metadata.get("merge_history", [])
                         merge_history.append({
-                            "from": legacy_user_id,
+                            "from_hash": legacy_hash,
                             "channel": channel_type,
                             "action": "migrated",
                             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -168,13 +230,16 @@ class CrossPlatformMemory:
                             text("""
                                 UPDATE semantic_memories SET
                                     user_id = :canonical_id,
+                                    organization_id = :org_id,
                                     metadata = :metadata,
                                     updated_at = NOW()
                                 WHERE id = :id
+                                  AND organization_id = :org_id
                             """),
                             {
                                 "id": legacy_id,
                                 "canonical_id": canonical_user_id,
+                                "org_id": scope.org_id,
                                 "metadata": json.dumps(metadata, ensure_ascii=False),
                             },
                         )
@@ -183,14 +248,68 @@ class CrossPlatformMemory:
                 session.commit()
 
             logger.info(
-                "[XP_MEMORY] Merged %d memories (%d duplicates resolved) from %s → %s",
+                "[XP_MEMORY] Merged %d memories (%d duplicates resolved) "
+                "from legacy_hash=%s to canonical_hash=%s",
                 result["migrated"], result["duplicates_resolved"],
-                legacy_user_id, canonical_user_id,
+                legacy_hash, canonical_hash,
+            )
+            await self._append_merge_audit(
+                canonical_user_id=canonical_user_id,
+                session_id=session_id,
+                scope=scope,
+                result=result,
+                status="saved",
             )
         except Exception as e:
-            logger.error("[XP_MEMORY] Memory merge failed: %s", e)
+            logger.error(
+                "[XP_MEMORY] Memory merge failed for canonical_hash=%s legacy_hash=%s: %s",
+                canonical_hash,
+                legacy_hash,
+                e,
+            )
+            await self._append_merge_audit(
+                canonical_user_id=canonical_user_id,
+                session_id=session_id,
+                scope=scope,
+                result=result,
+                status="failed",
+                warnings=["cross_platform_merge_failed"],
+            )
 
         return result
+
+    async def _append_merge_audit(
+        self,
+        *,
+        canonical_user_id: str,
+        session_id: str | None,
+        scope: MemoryWriteScope,
+        result: Dict[str, int],
+        status: str,
+        warnings: list[str] | None = None,
+    ) -> None:
+        """Append a privacy-safe audit summary for cross-platform merges."""
+
+        payload = build_semantic_memory_write_audit(
+            user_id=canonical_user_id,
+            session_id=session_id,
+            message="",
+            response="",
+            scope=scope,
+            write_kind="cross_platform_memory_merge",
+            message_saved=False,
+            response_saved=False,
+            extract_facts=False,
+            stored_fact_count=result.get("migrated", 0),
+            stored_insight_count=result.get("duplicates_resolved", 0),
+            status=status,
+            warnings=warnings,
+        )
+        await append_semantic_memory_write_audit_event(
+            session_id=session_id,
+            org_id=scope.org_id,
+            payload=payload,
+        )
 
     @staticmethod
     def resolve_fact_conflict(
@@ -241,6 +360,16 @@ class CrossPlatformMemory:
         if max_items <= 0:
             max_items = settings.cross_platform_context_max_items
 
+        scope = resolve_memory_read_scope()
+        user_hash = hash_memory_identifier(user_id)
+        if not scope.write_allowed or not scope.org_id:
+            logger.warning(
+                "[XP_MEMORY] Cross-platform summary blocked for user_hash=%s scope=%s",
+                user_hash,
+                scope.state,
+            )
+            return ""
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -253,12 +382,13 @@ class CrossPlatformMemory:
                         SELECT content, session_id, memory_type, created_at
                         FROM semantic_memories
                         WHERE user_id = :user_id
+                          AND organization_id = :org_id
                           AND session_id IS NOT NULL
                           AND session_id != ''
                         ORDER BY created_at DESC
                         LIMIT :limit
                     """),
-                    {"user_id": user_id, "limit": max_items * 5},
+                    {"user_id": user_id, "org_id": scope.org_id, "limit": max_items * 5},
                 ).fetchall()
 
             if not rows:
@@ -301,7 +431,11 @@ class CrossPlatformMemory:
             return "\n".join(other_platform_items)
 
         except Exception as e:
-            logger.debug("[XP_MEMORY] Cross-platform summary failed: %s", e)
+            logger.debug(
+                "[XP_MEMORY] Cross-platform summary failed for user_hash=%s: %s",
+                user_hash,
+                e,
+            )
             return ""
 
     async def get_platform_activity(self, user_id: str) -> Dict[str, int]:
@@ -310,6 +444,16 @@ class CrossPlatformMemory:
         Returns:
             Dict mapping channel → message count.
         """
+        scope = resolve_memory_read_scope()
+        user_hash = hash_memory_identifier(user_id)
+        if not scope.write_allowed or not scope.org_id:
+            logger.warning(
+                "[XP_MEMORY] Platform activity blocked for user_hash=%s scope=%s",
+                user_hash,
+                scope.state,
+            )
+            return {}
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -321,10 +465,11 @@ class CrossPlatformMemory:
                         SELECT session_id, COUNT(*) as cnt
                         FROM semantic_memories
                         WHERE user_id = :user_id
+                          AND organization_id = :org_id
                           AND session_id IS NOT NULL
                         GROUP BY session_id
                     """),
-                    {"user_id": user_id},
+                    {"user_id": user_id, "org_id": scope.org_id},
                 ).fetchall()
 
             activity: Dict[str, int] = {}
@@ -337,7 +482,11 @@ class CrossPlatformMemory:
 
             return activity
         except Exception as e:
-            logger.debug("[XP_MEMORY] Platform activity query failed: %s", e)
+            logger.debug(
+                "[XP_MEMORY] Platform activity query failed for user_hash=%s: %s",
+                user_hash,
+                e,
+            )
             return {}
 
     @staticmethod

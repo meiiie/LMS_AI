@@ -45,6 +45,27 @@ def test_teacher_can_access_manage_courses_action():
         ) is True
 
 
+def test_teacher_can_access_legacy_lms_course_author_permission():
+    from app.engine.context.capability_policy import is_host_action_allowed
+
+    tool = {
+        "name": "authoring.preview_lesson_patch",
+        "permission": "course.author",
+        "roles": ["teacher", "admin"],
+    }
+
+    with patch(
+        "app.engine.context.capability_policy.get_org_permissions",
+        return_value=["read:chat", "use:tools", "manage:courses"],
+    ):
+        assert is_host_action_allowed(
+            tool,
+            user_role="teacher",
+            organization_id="org-1",
+            user_id="teacher-1",
+        ) is True
+
+
 def test_role_restriction_wins_even_if_permission_exists():
     from app.engine.context.capability_policy import is_host_action_allowed
 
@@ -114,3 +135,33 @@ def test_filter_host_capabilities_removes_disallowed_tools():
 
     tool_names = [tool["name"] for tool in filtered["tools"]]
     assert tool_names == ["navigation.go_to"]
+
+
+def test_filter_host_capabilities_keeps_legacy_lms_authoring_permission():
+    from app.engine.context.capability_policy import filter_host_capabilities_for_org
+
+    caps = {
+        "host_type": "lms",
+        "tools": [
+            {
+                "name": "authoring.preview_lesson_patch",
+                "permission": "course.author",
+                "roles": ["teacher", "admin"],
+            }
+        ],
+    }
+
+    with patch(
+        "app.engine.context.capability_policy.get_org_permissions",
+        return_value=["read:chat", "use:tools", "manage:courses"],
+    ):
+        filtered = filter_host_capabilities_for_org(
+            caps,
+            user_role="teacher",
+            organization_id="org-1",
+            user_id="teacher-1",
+        )
+
+    assert [tool["name"] for tool in filtered["tools"]] == [
+        "authoring.preview_lesson_patch"
+    ]

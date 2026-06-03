@@ -8,7 +8,27 @@ import logging
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from app.engine.runtime.event_payload_sanitizer import (
+    redact_runtime_secret_text,
+    sanitize_runtime_payload,
+)
+
 logger = logging.getLogger(__name__)
+
+
+def _safe_search_text(value: Any, *, max_length: int = 200) -> str:
+    return redact_runtime_secret_text(str(value or "")[:max_length])
+
+
+def _safe_product_payload(value: Any) -> Dict[str, Any]:
+    safe_value = sanitize_runtime_payload(value)
+    if not isinstance(safe_value, dict):
+        return {}
+    return {
+        str(key): item
+        for key, item in safe_value.items()
+        if str(key) != "redacted_secret_count"
+    }
 
 
 async def plan_search_impl(
@@ -138,20 +158,22 @@ async def platform_worker_impl(
     extract_sold: Callable[[str], Optional[int]],
 ) -> dict:
     platform_id = state.get("platform_id", "")
+    safe_platform_id = _safe_search_text(platform_id, max_length=80) or "unknown"
     query = state.get("query", "")
+    safe_query = _safe_search_text(query, max_length=1000)
     max_results = state.get("max_results", 20)
     page = state.get("page", 1)
 
     event_queue = get_event_queue(state.get("_event_bus_id"))
-    tool_name = f"tool_search_{platform_id}"
+    tool_name = f"tool_search_{safe_platform_id}"
     await push(
         event_queue,
         {
             "type": "tool_call",
             "content": {
                 "name": tool_name,
-                "args": {"query": query, "max_results": max_results},
-                "id": f"sw_{platform_id}",
+                "args": {"query": safe_query, "max_results": max_results},
+                "id": f"sw_{safe_platform_id}",
             },
             "node": "product_search_agent",
         },
@@ -166,13 +188,17 @@ async def platform_worker_impl(
 
         adapter = get_search_platform_registry().get(platform_id)
         if adapter is None:
-            error = f"Platform {platform_id} not found in registry"
+            error = f"Platform {safe_platform_id} not found in registry"
         else:
             results = await asyncio.to_thread(adapter.search_sync, query, max_results, page)
-            products = [result.to_dict() for result in results]
+            products = [_safe_product_payload(result.to_dict()) for result in results]
     except Exception as exc:
-        error = f"{platform_id}: {type(exc).__name__}: {str(exc)[:200]}"
-        logger.warning("[SEARCH_WORKER] %s failed: %s", platform_id, error)
+        error = f"{safe_platform_id}: {type(exc).__name__}"
+        logger.warning(
+            "[SEARCH_WORKER] %s failed: %s",
+            safe_platform_id,
+            type(exc).__name__,
+        )
 
     duration_ms = int((time.monotonic() - start) * 1000)
 
@@ -183,7 +209,7 @@ async def platform_worker_impl(
             tool_name=tool_name,
             success=bool(products),
             latency_ms=duration_ms,
-            query_snippet=query[:100],
+            query_snippet=_safe_search_text(query, max_length=100),
             error_message=error or "",
         )
     except Exception as exc:
@@ -197,7 +223,7 @@ async def platform_worker_impl(
             "content": {
                 "name": tool_name,
                 "result": result_summary,
-                "id": f"sw_{platform_id}",
+                "id": f"sw_{safe_platform_id}",
             },
             "node": "product_search_agent",
         },
@@ -205,12 +231,12 @@ async def platform_worker_impl(
     ack_narration = await render_search_narration(
         state=state,
         phase="act",
-        cue=platform_id,
+        cue=safe_platform_id,
         tool_names=[tool_name],
         result=result_summary,
         next_action="Lồng mặt bằng giá mới này vào bức tranh chung rồi đi tiếp.",
         observations=[
-            f"platform={platform_id}",
+            f"platform={safe_platform_id}",
             f"results={len(products)}",
             f"duration_ms={duration_ms}",
         ],
@@ -225,8 +251,13 @@ async def platform_worker_impl(
             from app.engine.search_platforms.image_enricher import enrich_product_images
 
             products = enrich_product_images(products, query, platform_id)
+            products = [_safe_product_payload(product) for product in products]
     except Exception as exc:
-        logger.debug("[WORKER] Image enrichment failed for %s: %s", platform_id, exc)
+        logger.debug(
+            "[WORKER] Image enrichment failed for %s: %s",
+            safe_platform_id,
+            type(exc).__name__,
+        )
 
     for product in products:
         if not product.get("rating"):
@@ -254,9 +285,9 @@ async def platform_worker_impl(
                         continue
                     link = product.get("link") or product.get("url", "")
                     preview_id = (
-                        f"sw_{platform_id}_{hash(link) % 100000}_{index}"
+                        f"sw_{safe_platform_id}_{hash(link) % 100000}_{index}"
                         if link
-                        else f"sw_{platform_id}_{index}"
+                        else f"sw_{safe_platform_id}_{index}"
                     )
                     await push(
                         event_queue,
@@ -278,7 +309,7 @@ async def platform_worker_impl(
                                 ),
                                 "metadata": {
                                     "price": product.get("price", ""),
-                                    "platform": platform_id,
+                                    "platform": safe_platform_id,
                                     "seller": product.get("seller", ""),
                                     "rating": product.get("rating"),
                                     "sold_count": product.get("sold_count"),
@@ -291,13 +322,23 @@ async def platform_worker_impl(
                         },
                     )
         except Exception as exc:
-            logger.debug("[WORKER] Preview emission failed for %s: %s", platform_id, exc)
+            logger.debug(
+                "[WORKER] Preview emission failed for %s: %s",
+                safe_platform_id,
+                type(exc).__name__,
+            )
 
     return {
         "all_products": products,
         "platform_errors": [error] if error else [],
-        "platforms_searched": [platform_id],
-        "tools_used": [{"name": tool_name, "args": {"query": query}, "duration_ms": duration_ms}],
+        "platforms_searched": [safe_platform_id],
+        "tools_used": [
+            {
+                "name": tool_name,
+                "args": {"query": safe_query},
+                "duration_ms": duration_ms,
+            }
+        ],
     }
 
 

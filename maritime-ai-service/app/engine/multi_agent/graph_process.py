@@ -4,14 +4,39 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from app.core.config import settings
 from app.engine.llm_runtime_metadata import resolve_runtime_failover_metadata
+from app.engine.multi_agent.runtime_flow_ledger import build_runtime_flow_trace_from_state
 from app.engine.multi_agent.state import AgentState
 from app.engine.reasoning import build_thinking_lifecycle_snapshot
+from app.engine.runtime.event_payload_sanitizer import sanitize_runtime_payload
 
 logger = logging.getLogger(__name__)
+
+
+_TOKEN_USAGE_NUMERIC_KEYS = {
+    "total_calls",
+    "total_input_tokens",
+    "total_output_tokens",
+    "total_tokens",
+    "estimated_cost_usd",
+    "duration_ms",
+}
+
+
+def _sanitize_token_usage(value: Any) -> dict[str, Any] | None:
+    """Preserve usage counters while applying an allowlist boundary."""
+
+    if not isinstance(value, dict):
+        return None
+    safe: dict[str, Any] = {}
+    for key in _TOKEN_USAGE_NUMERIC_KEYS:
+        item = value.get(key)
+        if isinstance(item, (int, float)) and not isinstance(item, bool):
+            safe[key] = item
+    return safe or None
 
 
 def _serialize_langchain_messages(context: dict | None) -> list[dict]:
@@ -29,6 +54,17 @@ def _serialize_langchain_messages(context: dict | None) -> list[dict]:
                 }
             )
     return serialized_messages
+
+
+def _split_model_context(context: dict | None) -> tuple[dict, dict | None]:
+    """Remove backend-only continuation data from model-facing context."""
+
+    model_context = dict(context or {})
+    host_action_control_feedback = model_context.pop(
+        "_host_action_control_feedback",
+        None,
+    )
+    return model_context, host_action_control_feedback
 
 
 def _apply_graph_context_prompts(
@@ -100,18 +136,26 @@ async def _upsert_thread_view(
         from app.repositories.thread_repository import get_thread_repository
         from app.core.thread_utils import build_thread_id as _build_tid
 
-        thread_id = _build_tid(user_id, session_id, org_id=(context or {}).get("organization_id"))
+        organization_id = (context or {}).get("organization_id")
+        thread_id = _build_tid(user_id, session_id, org_id=organization_id)
         title = query[:60] + ("..." if len(query) > 60 else "")
         thread_data = get_thread_repository().upsert_thread(
             thread_id=thread_id,
             user_id=user_id,
             domain_id=domain_id,
             title=title,
+            organization_id=organization_id,
         )
         if thread_data:
             count = thread_data.get("message_count", 0)
             if count in summary_milestones:
-                asyncio.create_task(generate_session_summary_bg(thread_id, user_id))
+                asyncio.create_task(
+                    generate_session_summary_bg(
+                        thread_id,
+                        user_id,
+                        organization_id,
+                    )
+                )
     except Exception as exc:  # pragma: no cover - defensive logging only
         logger.warning("Thread upsert failed: %s", exc)
 
@@ -125,39 +169,56 @@ def _build_process_result_payload(
     resolve_public_thinking_content,
 ) -> dict:
     """Shape the final sync API payload from graph state."""
-    thinking_lifecycle = build_thinking_lifecycle_snapshot(
-        result,
-        fallback=result.get("thinking_content") or result.get("thinking") or "",
-    )
+    public_source_state = dict(result)
+    public_source_state["thinking"] = ""
     thinking_content = resolve_public_thinking_content(
-        result,
+        public_source_state,
         fallback=result.get("thinking_content") or "",
     )
+
+    lifecycle_state = {
+        "current_agent": result.get("current_agent"),
+        "next_agent": result.get("next_agent"),
+        "routing_metadata": result.get("routing_metadata"),
+        "thinking_content": thinking_content,
+    }
+    thinking_lifecycle = build_thinking_lifecycle_snapshot(
+        lifecycle_state,
+        fallback=thinking_content,
+    )
+    token_usage = _sanitize_token_usage(tracker.summary() if tracker else None)
     return {
-        "response": result.get("final_response", ""),
-        "sources": result.get("sources", []),
-        "tools_used": result.get("tools_used", []),
+        "response": sanitize_runtime_payload(result.get("final_response", "")),
+        "sources": sanitize_runtime_payload(result.get("sources", [])),
+        "tools_used": sanitize_runtime_payload(result.get("tools_used", [])),
         "grader_score": result.get("grader_score", 0),
-        "agent_outputs": result.get("agent_outputs", {}),
+        "agent_outputs": sanitize_runtime_payload(result.get("agent_outputs", {})),
         "current_agent": result.get("current_agent", ""),
         "next_agent": result.get("next_agent", ""),
-        "error": result.get("error"),
-        "reasoning_trace": result.get("reasoning_trace"),
-        "thinking": result.get("thinking"),
-        "thinking_content": thinking_content,
-        "thinking_lifecycle": thinking_lifecycle,
-        "domain_notice": result.get("domain_notice"),
-        "routing_metadata": result.get("routing_metadata"),
-        "evidence_images": result.get("evidence_images", []),
+        "error": sanitize_runtime_payload(result.get("error")),
+        "reasoning_trace": sanitize_runtime_payload(result.get("reasoning_trace")),
+        "thinking": thinking_content or None,
+        "thinking_content": sanitize_runtime_payload(thinking_content),
+        "thinking_lifecycle": sanitize_runtime_payload(thinking_lifecycle),
+        "domain_notice": sanitize_runtime_payload(result.get("domain_notice")),
+        "routing_metadata": sanitize_runtime_payload(result.get("routing_metadata")),
+        "evidence_images": sanitize_runtime_payload(result.get("evidence_images", [])),
         "provider": result.get("_execution_provider") or result.get("provider"),
         "model": result.get("_execution_model") or result.get("model"),
         "_execution_provider": result.get("_execution_provider"),
         "_execution_model": result.get("_execution_model"),
-        "_llm_failover_events": result.get("_llm_failover_events", []),
-        "failover": result.get("failover") or resolve_runtime_failover_metadata(result),
+        "_llm_failover_events": sanitize_runtime_payload(
+            result.get("_llm_failover_events", []),
+        ),
+        "failover": sanitize_runtime_payload(
+            result.get("failover") or resolve_runtime_failover_metadata(result),
+        ),
         "trace_id": trace_id,
-        "trace_summary": trace_summary,
-        "token_usage": tracker.summary() if tracker else None,
+        "trace_summary": sanitize_runtime_payload(trace_summary),
+        "runtime_flow_trace": sanitize_runtime_payload(
+            build_runtime_flow_trace_from_state(result),
+        ),
+        "token_usage": token_usage,
     }
 
 
@@ -194,6 +255,7 @@ async def process_with_multi_agent_impl(
 
     domain_id = domain_id or settings.default_domain
     registry = get_agent_registry()
+    model_context, host_action_control_feedback = _split_model_context(context)
 
     start_tracking(request_id=session_id or "")
     trace_id = registry.start_request_trace()
@@ -203,8 +265,8 @@ async def process_with_multi_agent_impl(
         "query": query,
         "user_id": user_id,
         "session_id": session_id,
-        "context": context or {},
-        "messages": _serialize_langchain_messages(context),
+        "context": model_context,
+        "messages": _serialize_langchain_messages(model_context),
         "current_agent": "",
         "next_agent": "",
         "agent_outputs": {},
@@ -221,8 +283,9 @@ async def process_with_multi_agent_impl(
         "provider": provider,
         "model": model,
         "routing_metadata": None,
-        "organization_id": (context or {}).get("organization_id"),
-        **build_turn_local_state_defaults(context),
+        "organization_id": model_context.get("organization_id"),
+        "_host_action_control_feedback": host_action_control_feedback,
+        **build_turn_local_state_defaults(model_context),
     }
 
     _apply_graph_context_prompts(

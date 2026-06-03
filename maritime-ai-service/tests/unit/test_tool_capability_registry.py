@@ -94,3 +94,44 @@ def test_tool_capability_registry_handles_dynamic_host_actions():
         "host_action__dashboard__focus_widget",
         {"host_actions": {"active": False}},
     ) is True
+
+
+def test_wiii_connect_facebook_direct_apply_requires_agent_ready_connection():
+    from app.engine.tools.tool_capability_registry import (
+        WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL,
+        WIII_CONNECT_EXECUTE_ACTION_TOOL,
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+        WIII_CONNECT_LIST_ACTIONS_TOOL,
+        lookup_tool_capability,
+        tool_requires_inactive_connection,
+    )
+
+    capability = lookup_tool_capability(WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL)
+    assert capability is not None
+    assert capability.required_connection == "facebook"
+    assert capability.requires_agent_ready is True
+
+    assert tool_requires_inactive_connection(
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+        {"facebook": {"active": True, "agent_ready": False}},
+    ) is True
+    assert tool_requires_inactive_connection(
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+        {"facebook": {"active": True, "agent_ready": True}},
+    ) is False
+
+    delegate = lookup_tool_capability(WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL)
+    assert delegate is not None
+    assert delegate.group == "external_app_action"
+    assert delegate.permission == "write"
+    assert delegate.mutates_state is True
+    assert delegate.surface_scopes == ("direct_chat",)
+
+    list_actions = lookup_tool_capability(WIII_CONNECT_LIST_ACTIONS_TOOL)
+    assert list_actions is not None
+    assert list_actions.surface_scopes == ("direct_chat",)
+
+    execute_action = lookup_tool_capability(WIII_CONNECT_EXECUTE_ACTION_TOOL)
+    assert execute_action is not None
+    assert execute_action.surface_scopes == ("diagnostic",)
+    assert "direct_chat" not in execute_action.surface_scopes

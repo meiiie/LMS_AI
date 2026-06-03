@@ -22,7 +22,10 @@ from app.engine.multi_agent.subagents.report import (
     AggregatorDecision,
     ReportVerdict,
     SubagentReport,
+    sanitize_subagent_report_for_parent,
 )
+from app.engine.multi_agent.subagents.event_stream import push_subagent_stream_event
+from app.engine.runtime.event_payload_sanitizer import redact_runtime_secret_text
 
 logger = logging.getLogger(__name__)
 
@@ -203,13 +206,16 @@ async def aggregator_node(state: Dict[str, Any]) -> Dict[str, Any]:
     reports: List[SubagentReport] = []
     for item in raw_reports:
         if isinstance(item, SubagentReport):
-            reports.append(item)
+            reports.append(sanitize_subagent_report_for_parent(item))
         elif isinstance(item, dict):
             try:
-                reports.append(SubagentReport(**item))
+                reports.append(
+                    sanitize_subagent_report_for_parent(SubagentReport(**item))
+                )
             except Exception as e:
                 logger.warning("[AGGREGATOR] Bad report dict: %s", e)
         # else skip
+    state["subagent_reports"] = [report.model_dump() for report in reports]
 
     logger.info(
         "[AGGREGATOR] Processing %d reports: %s",
@@ -224,7 +230,7 @@ async def aggregator_node(state: Dict[str, Any]) -> Dict[str, Any]:
             from app.engine.multi_agent.graph_event_bus import _get_event_queue
             queue = _get_event_queue(_bus_id)
             if queue:
-                queue.put_nowait({
+                push_subagent_stream_event(queue, {
                     "type": "status",
                     "content": "Tổng hợp báo cáo từ các agent...",
                     "node": "aggregator",
@@ -263,6 +269,21 @@ async def aggregator_node(state: Dict[str, Any]) -> Dict[str, Any]:
         )
         decision = _fallback_decision(reports)
 
+    decision = decision.model_copy(
+        update={
+            "reasoning": redact_runtime_secret_text(decision.reasoning),
+            "primary_agent": redact_runtime_secret_text(decision.primary_agent),
+            "secondary_agents": [
+                redact_runtime_secret_text(agent)
+                for agent in (decision.secondary_agents or [])
+            ],
+            "re_route_target": (
+                redact_runtime_secret_text(decision.re_route_target)
+                if decision.re_route_target
+                else None
+            ),
+        }
+    )
     logger.info(
         "[AGGREGATOR] Decision: action=%s, primary=%s, confidence=%.2f | %s",
         decision.action,
@@ -277,7 +298,7 @@ async def aggregator_node(state: Dict[str, Any]) -> Dict[str, Any]:
             from app.engine.multi_agent.graph_event_bus import _get_event_queue
             queue = _get_event_queue(_bus_id)
             if queue:
-                queue.put_nowait({
+                push_subagent_stream_event(queue, {
                     "type": "status",
                     "content": f"Quyết định: {decision.action}",
                     "node": "aggregator",

@@ -1,0 +1,162 @@
+name: Subagent Boundary Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/subagent-boundary-evidence.yml"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/engine/multi_agent/runtime_flow_doctor.py"
+      - "maritime-ai-service/app/engine/multi_agent/runtime_flow_ledger.py"
+      - "maritime-ai-service/app/engine/multi_agent/subagents/**"
+      - "maritime-ai-service/scripts/probe_live_subagent_boundary_replay.py"
+      - "maritime-ai-service/scripts/wiii_runtime_flow_acceptance.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_subagent_boundary_replay.py"
+      - "maritime-ai-service/tests/unit/test_runtime_flow_doctor.py"
+      - "maritime-ai-service/tests/unit/test_wiii_runtime_flow_acceptance.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/subagent-boundary-evidence.yml"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/engine/multi_agent/runtime_flow_doctor.py"
+      - "maritime-ai-service/app/engine/multi_agent/runtime_flow_ledger.py"
+      - "maritime-ai-service/app/engine/multi_agent/subagents/**"
+      - "maritime-ai-service/scripts/probe_live_subagent_boundary_replay.py"
+      - "maritime-ai-service/scripts/wiii_runtime_flow_acceptance.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_subagent_boundary_replay.py"
+      - "maritime-ai-service/tests/unit/test_runtime_flow_doctor.py"
+      - "maritime-ai-service/tests/unit/test_wiii_runtime_flow_acceptance.py"
+  schedule:
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+    inputs:
+      run_subagent_boundary_replay:
+        description: "Run the guarded parallel subagent boundary replay."
+        required: true
+        type: boolean
+        default: false
+      allow_production:
+        description: "Permit production settings.environment."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Subagent Boundary Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run subagent boundary contract tests
+        working-directory: maritime-ai-service
+        run: |
+          python -m pytest \
+            tests/unit/test_probe_live_subagent_boundary_replay.py \
+            tests/unit/test_runtime_evidence_output.py \
+            tests/unit/test_wiii_runtime_flow_acceptance.py \
+            tests/unit/test_runtime_flow_doctor.py \
+            -q --tb=short
+
+  replay:
+    name: Parallel Subagent Boundary Replay
+    runs-on: ubuntu-latest
+    environment: wiii-runtime-evidence
+    timeout-minutes: 30
+    needs: contract
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && inputs.run_subagent_boundary_replay == true) ||
+        (github.event_name == 'schedule' && vars.WIII_SUBAGENT_BOUNDARY_EVIDENCE_ENABLED == '1')
+      }}
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      WIII_LIVE_SUBAGENT_BOUNDARY_REPLAY: "1"
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate hash-count boundary evidence
+        working-directory: maritime-ai-service
+        env:
+          ALLOW_PRODUCTION_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_production || false }}
+        run: |
+          set -euo pipefail
+
+          args=()
+          if [[ "${ALLOW_PRODUCTION_INPUT}" == "true" ]]; then
+            args+=(--allow-production)
+          fi
+
+          python scripts/probe_live_subagent_boundary_replay.py --allow-run "${args[@]}" \
+            --out subagent-boundary-evidence.json
+
+      - name: Validate evidence payload
+        working-directory: maritime-ai-service
+        run: |
+          python ../tools/wiii_self_harness/validate_runtime_evidence_artifact.py \
+            subagent-boundary-evidence.json \
+            --requirement-id subagent-boundary-replay
+
+      - name: Upload boundary evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: subagent-boundary-evidence-${{ github.run_id }}
+          path: maritime-ai-service/subagent-boundary-evidence.json
+          if-no-files-found: error
+          retention-days: 30

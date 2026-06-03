@@ -39,7 +39,6 @@ from app.engine.multi_agent.direct_tool_followup_runtime import (
     invoke_direct_tool_followup,
 )
 from app.engine.multi_agent.direct_tool_response_finalization_runtime import (
-    facebook_direct_apply_final_answer,
     finalize_direct_tool_response,
 )
 from app.engine.multi_agent.direct_reasoning import (
@@ -70,17 +69,9 @@ from app.engine.multi_agent.direct_document_preview_payloads import (
     _build_uploaded_doc_course_params,
     _build_uploaded_doc_preview_params,
 )
-from app.engine.multi_agent.direct_wiii_connect_host_action_runtime import (
-    find_wiii_connect_facebook_post_direct_apply_tool,
-    find_wiii_connect_facebook_post_preview_tool,
-    preflight_requested_wiii_connect_facebook_post,
-)
-from app.engine.multi_agent.wiii_connect_intent import (
-    looks_wiii_connect_facebook_post_request,
-)
-from app.engine.tools.tool_capability_registry import (
-    WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
-    WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL,
+from app.engine.multi_agent.external_app_action_runtime import (
+    external_app_action_final_answer,
+    prepare_external_app_action_turn,
 )
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.tool_call_text_parser import (
@@ -187,26 +178,22 @@ async def execute_direct_tool_rounds_impl(
     )
     streamed_direct_answer = False
     try:
-        facebook_post_preflight_response = (
-            await preflight_requested_wiii_connect_facebook_post(
-                query=query,
-                state=state,
-                native_tool_messages=native_tool_messages,
-                build_assistant_message=_build_assistant_message,
-            )
+        external_action_preparation = prepare_external_app_action_turn(
+            query=query,
+            state=state,
+            tools=tools,
+            forced_tool_choice=forced_tool_choice,
+            native_tool_messages=native_tool_messages,
+            build_assistant_message=_build_assistant_message,
         )
-        if facebook_post_preflight_response is not None:
-            return facebook_post_preflight_response, messages, tool_call_events
-
-        if looks_wiii_connect_facebook_post_request(query):
-            direct_apply_tool = find_wiii_connect_facebook_post_direct_apply_tool(tools)
-            preview_tool = find_wiii_connect_facebook_post_preview_tool(tools)
-            if direct_apply_tool is not None:
-                tools = [direct_apply_tool]
-                forced_tool_choice = WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
-            elif preview_tool is not None:
-                tools = [preview_tool]
-                forced_tool_choice = WIII_CONNECT_FACEBOOK_POST_PREVIEW_TOOL
+        if external_action_preparation.preempted:
+            return (
+                external_action_preparation.preflight_response,
+                messages,
+                tool_call_events,
+            )
+        tools = external_action_preparation.tools
+        forced_tool_choice = external_action_preparation.forced_tool_choice
 
         forced_web_response = await execute_forced_web_search_shortcut(
             query=query,
@@ -366,13 +353,20 @@ async def execute_direct_tool_rounds_impl(
         if search_template_response is not None:
             return search_template_response, messages, tool_call_events
 
-        facebook_host_action_answer = facebook_direct_apply_final_answer(
+        external_action_answer = external_app_action_final_answer(
             tool_call_events,
         )
-        if facebook_host_action_answer:
+        if external_action_answer:
+            state["_final_answer_trace"] = {
+                "version": "final_answer_trace.v1",
+                "source": "wiii_connect_action_result",
+                "reason": "external_app_action_payload",
+                "status": "resolved",
+                "answer_present": True,
+            }
             return (
                 _build_assistant_message(
-                    facebook_host_action_answer,
+                    external_action_answer,
                     native_tool_messages=native_tool_messages,
                 ),
                 messages,

@@ -497,4 +497,101 @@ describe("useSSEStream concurrency", () => {
       blocked_reason: "provider_connection_list",
     });
   });
+
+  it("sanitizes host context and action feedback before sending chat request", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    useHostContextStore.getState().updateContext({
+      host_type: "lms",
+      page: {
+        type: "lesson",
+        title: "COLREGs",
+        metadata: {
+          safe: "visible metadata",
+          connection_ref: "conn-secret",
+          connection_id: "conn-secret-id",
+          page_id: "page-secret",
+          access_token: "access-secret",
+          wiii_connect: {
+            provider_slug: "facebook",
+            status: "connected",
+            connection_ref: "conn-secret",
+            page_id: "page-secret",
+          },
+        },
+      },
+      selection: {
+        text: "visible selection",
+        approval_token: "approval-secret",
+      },
+      available_actions: [
+        {
+          action: "safe.action",
+          label: "Safe action",
+          input_schema: {
+            properties: {
+              message: { type: "string" },
+              connection_ref: { type: "string" },
+              image_base64: { type: "string" },
+            },
+          },
+        },
+      ],
+    });
+    useHostContextStore.setState({
+      lastActionResult: {
+        request_id: "req-secret",
+        action: "wiii_connect.facebook_post.preview",
+        params: {
+          message: "visible message",
+          connection_ref: "conn-secret",
+          page_id: "page-secret",
+        },
+        success: true,
+        summary: "Visible summary.",
+        data: {
+          preview_kind: "facebook_post",
+          message: "visible message",
+          approval_token: "approval-secret",
+          facebook_post_body: {
+            connection_ref: "conn-secret",
+            page_id: "page-secret",
+            message: "visible message",
+          },
+        },
+        timestamp: "2026-05-29T00:00:00.000Z",
+      },
+      recentActionResults: [],
+    });
+    sendMessageStreamMock.mockResolvedValueOnce({
+      lastEventId: null,
+      sawDone: true,
+      eventOrder: ["done"],
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Summarize the current page");
+    });
+
+    const request = sendMessageStreamMock.mock.calls[0]?.[0] as any;
+    const userContext = request.user_context;
+    const serialized = JSON.stringify(userContext);
+    expect(userContext?.host_context?.page?.metadata?.safe).toBe("visible metadata");
+    expect(userContext?.page_context?.safe).toBe("visible metadata");
+    expect(serialized).toContain("visible selection");
+    expect(serialized).toContain("Visible summary.");
+    expect(serialized).toContain("visible message");
+    expect(serialized).not.toContain("conn-secret");
+    expect(serialized).not.toContain("conn-secret-id");
+    expect(serialized).not.toContain("page-secret");
+    expect(serialized).not.toContain("access-secret");
+    expect(serialized).not.toContain("approval-secret");
+    expect(serialized).not.toContain("connection_ref");
+    expect(serialized).not.toContain("connection_id");
+    expect(serialized).not.toContain("page_id");
+    expect(serialized).not.toContain("access_token");
+    expect(serialized).not.toContain("approval_token");
+    expect(serialized).not.toContain("image_base64");
+  });
 });

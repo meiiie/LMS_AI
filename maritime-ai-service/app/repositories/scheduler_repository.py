@@ -11,12 +11,23 @@ picks them up and runs them at the scheduled time.
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
+_SCHEDULER_REPOSITORY_MISSING_ORG_WARNING = "scheduler_repository_blocked_missing_org_context"
+_SCHEDULER_ORG_FILTER = " AND organization_id = :org_id"
+
+
+@dataclass(frozen=True)
+class SchedulerOrgScope:
+    org_id: Optional[str]
+    state: str
+    warnings: list[str]
+    write_allowed: bool
 
 
 class SchedulerRepository:
@@ -44,6 +55,69 @@ class SchedulerRepository:
                 self._initialized = True
             except Exception as e:
                 logger.error("SchedulerRepository init failed: %s", e)
+
+    def _org_scope(
+        self,
+        organization_id: Optional[str] = None,
+        *,
+        write: bool = False,
+    ) -> tuple[SchedulerOrgScope, Optional[str], dict[str, object]]:
+        scope = self._resolve_scheduler_org_scope(
+            organization_id=organization_id,
+            write=write,
+        )
+        if not scope.write_allowed or not scope.org_id:
+            return scope, None, {}
+        return scope, _SCHEDULER_ORG_FILTER, {"org_id": scope.org_id}
+
+    def _resolve_scheduler_org_scope(
+        self,
+        *,
+        organization_id: Optional[str] = None,
+        write: bool = False,
+    ) -> SchedulerOrgScope:
+        if isinstance(organization_id, str) and organization_id.strip():
+            return SchedulerOrgScope(
+                org_id=organization_id.strip(),
+                state="explicit",
+                warnings=[],
+                write_allowed=True,
+            )
+
+        from app.engine.semantic_memory.write_audit import (
+            resolve_memory_read_scope,
+            resolve_memory_write_scope,
+        )
+
+        scope = resolve_memory_write_scope() if write else resolve_memory_read_scope()
+        return SchedulerOrgScope(
+            org_id=scope.org_id,
+            state=scope.state,
+            warnings=list(scope.warnings),
+            write_allowed=scope.write_allowed,
+        )
+
+    def _log_scheduler_scope_blocked(
+        self,
+        operation: str,
+        scope: SchedulerOrgScope,
+        *,
+        user_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_SCHEDULER_REPOSITORY_MISSING_ORG_WARNING)
+        logger.warning(
+            "[SCHEDULER_REPO] %s blocked user_hash=%s task_hash=%s org_hash=%s "
+            "org_scope=%s warnings=%s",
+            operation,
+            _hash_memory_identifier(user_id),
+            _hash_memory_identifier(task_id),
+            _hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
     def create_task(
         self,
@@ -89,9 +163,18 @@ class SchedulerRepository:
                 logger.warning("Invalid schedule_expr for 'once': %s", schedule_expr)
                 return None
 
-        # Sprint 160b: Resolve org_id for multi-tenant isolation
-        from app.core.org_filter import get_effective_org_id
-        eff_org_id = organization_id or get_effective_org_id()
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_scheduler_scope_blocked(
+                "create_task",
+                scope,
+                user_id=user_id,
+                task_id=task_id,
+            )
+            return None
 
         try:
             with self._session_factory() as session:
@@ -116,12 +199,17 @@ class SchedulerRepository:
                         "max_runs": max_runs,
                         "channel": channel,
                         "extra": json.dumps(extra_data or {}),
-                        "org_id": eff_org_id,
+                        **org_params,
                     },
                 )
                 session.commit()
 
-            logger.info("[SCHEDULER] Created task %s for user %s: %s", task_id, user_id, description[:50])
+            logger.info(
+                "[SCHEDULER] Created task %s for user_hash=%s org_hash=%s",
+                task_id[:8],
+                _hash_memory_identifier(user_id),
+                _hash_memory_identifier(scope.org_id),
+            )
             return task_id
 
         except Exception as e:
@@ -149,23 +237,30 @@ class SchedulerRepository:
         if not self._session_factory:
             return []
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope()
+        if org_filter is None:
+            self._log_scheduler_scope_blocked(
+                "list_tasks",
+                scope,
+                user_id=user_id,
+            )
+            return []
 
         try:
             with self._session_factory() as session:
-                params: dict = {"user_id": user_id, "status": status, "limit": limit}
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
+                params: dict = {
+                    "user_id": user_id,
+                    "status": status,
+                    "limit": limit,
+                    **org_params,
+                }
 
                 result = session.execute(
                     text(
                         f"SELECT id, user_id, domain_id, description, "
                         f"schedule_type, schedule_expr, next_run, last_run, "
                         f"run_count, max_runs, status, channel, created_at, "
-                        f"extra_data "
+                        f"extra_data, organization_id "
                         f"FROM {self.TABLE_NAME} "
                         f"WHERE user_id = :user_id AND status = :status"
                         f"{org_filter} "
@@ -196,16 +291,23 @@ class SchedulerRepository:
         if not self._session_factory:
             return False
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(write=True)
+        if org_filter is None:
+            self._log_scheduler_scope_blocked(
+                "cancel_task",
+                scope,
+                user_id=user_id,
+                task_id=task_id,
+            )
+            return False
 
         try:
             with self._session_factory() as session:
-                params: dict = {"task_id": task_id, "user_id": user_id}
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
+                params: dict = {
+                    "task_id": task_id,
+                    "user_id": user_id,
+                    **org_params,
+                }
 
                 result = session.execute(
                     text(
@@ -224,7 +326,13 @@ class SchedulerRepository:
             logger.error("Cancel scheduled task failed: %s", e)
             return False
 
-    def get_due_tasks(self, limit: int = 100) -> list[dict]:
+    def get_due_tasks(
+        self,
+        limit: int = 100,
+        *,
+        organization_id: Optional[str] = None,
+        allow_all_orgs: bool = False,
+    ) -> list[dict]:
         """
         Get tasks that are due for execution.
 
@@ -240,25 +348,34 @@ class SchedulerRepository:
 
         now = datetime.now(timezone.utc)
 
-        # Sprint 160b: Org-scoped filtering.
-        # Note: Background executor may have no ContextVar → eff_org_id=None → no filter
-        # (correct: worker processes tasks for ALL orgs).
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        # Background workers must opt into all-org polling and carry the
+        # returned task organization_id into execution and status updates.
+        if allow_all_orgs:
+            org_filter = ""
+            org_params: dict[str, object] = {}
+        else:
+            scope, org_filter_value, org_params = self._org_scope(
+                organization_id,
+                write=False,
+            )
+            if org_filter_value is None:
+                self._log_scheduler_scope_blocked(
+                    "get_due_tasks",
+                    scope,
+                )
+                return []
+            org_filter = org_filter_value
 
         try:
             with self._session_factory() as session:
-                params: dict = {"now": now, "limit": limit}
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
+                params: dict = {"now": now, "limit": limit, **org_params}
 
                 result = session.execute(
                     text(
                         f"SELECT id, user_id, domain_id, description, "
                         f"schedule_type, schedule_expr, next_run, last_run, "
                         f"run_count, max_runs, status, channel, created_at, "
-                        f"extra_data "
+                        f"extra_data, organization_id "
                         f"FROM {self.TABLE_NAME} "
                         f"WHERE status = 'active' "
                         f"AND next_run IS NOT NULL "
@@ -277,7 +394,13 @@ class SchedulerRepository:
             logger.error("Get due tasks failed: %s", e)
             return []
 
-    def mark_failed(self, task_id: str, error: str = "") -> bool:
+    def mark_failed(
+        self,
+        task_id: str,
+        error: str = "",
+        *,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """
         Increment failure_count for a task. If >= 3, set status='failed'.
 
@@ -295,6 +418,17 @@ class SchedulerRepository:
             return False
 
         now = datetime.now(timezone.utc)
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_scheduler_scope_blocked(
+                "mark_failed",
+                scope,
+                task_id=task_id,
+            )
+            return False
 
         try:
             with self._session_factory() as session:
@@ -310,14 +444,23 @@ class SchedulerRepository:
                         f"  ELSE status "
                         f"END "
                         f"WHERE id = :task_id"
+                        f"{org_filter}"
                     ),
-                    {"task_id": task_id, "error": error, "now": now},
+                    {
+                        "task_id": task_id,
+                        "error": error,
+                        "now": now,
+                        **org_params,
+                    },
                 )
 
                 session.commit()
                 logger.warning(
-                    "[SCHEDULER] Task %s failure recorded: %s",
-                    task_id[:8], error,
+                    "[SCHEDULER] Task failure recorded task_hash=%s org_hash=%s "
+                    "error_chars=%d",
+                    _hash_memory_identifier(task_id),
+                    _hash_memory_identifier(scope.org_id),
+                    len(error or ""),
                 )
                 return True
 
@@ -325,7 +468,13 @@ class SchedulerRepository:
             logger.error("Mark task failed error: %s", e)
             return False
 
-    def mark_executed(self, task_id: str, next_run: Optional[datetime] = None) -> bool:
+    def mark_executed(
+        self,
+        task_id: str,
+        next_run: Optional[datetime] = None,
+        *,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """
         Mark a task as executed, update run_count, and set next_run.
 
@@ -344,6 +493,17 @@ class SchedulerRepository:
             return False
 
         now = datetime.now(timezone.utc)
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_scheduler_scope_blocked(
+                "mark_executed",
+                scope,
+                task_id=task_id,
+            )
+            return False
 
         try:
             with self._session_factory() as session:
@@ -356,8 +516,14 @@ class SchedulerRepository:
                             f"run_count = run_count + 1, "
                             f"next_run = :next_run "
                             f"WHERE id = :task_id"
+                            f"{org_filter}"
                         ),
-                        {"task_id": task_id, "now": now, "next_run": next_run},
+                        {
+                            "task_id": task_id,
+                            "now": now,
+                            "next_run": next_run,
+                            **org_params,
+                        },
                     )
                 else:
                     # One-time: mark completed
@@ -366,20 +532,24 @@ class SchedulerRepository:
                             f"UPDATE {self.TABLE_NAME} SET "
                             f"last_run = :now, "
                             f"run_count = run_count + 1, "
+                            f"next_run = NULL, "
                             f"status = 'completed' "
                             f"WHERE id = :task_id"
+                            f"{org_filter}"
                         ),
-                        {"task_id": task_id, "now": now},
+                        {"task_id": task_id, "now": now, **org_params},
                     )
 
                 # Check max_runs limit
                 session.execute(
                     text(
-                        f"UPDATE {self.TABLE_NAME} SET status = 'completed' "
+                        f"UPDATE {self.TABLE_NAME} "
+                        f"SET status = 'completed', next_run = NULL "
                         f"WHERE id = :task_id AND max_runs IS NOT NULL "
                         f"AND run_count >= max_runs"
+                        f"{org_filter}"
                     ),
-                    {"task_id": task_id},
+                    {"task_id": task_id, **org_params},
                 )
 
                 session.commit()
@@ -418,6 +588,7 @@ class SchedulerRepository:
             "channel": row[11],
             "created_at": str(row[12]) if row[12] else None,
             "extra_data": extra_data,
+            "organization_id": row[14] if len(row) > 14 else None,
         }
 
 
@@ -434,3 +605,12 @@ def get_scheduler_repository() -> SchedulerRepository:
     if _scheduler_repo is None:
         _scheduler_repo = SchedulerRepository()
     return _scheduler_repo
+
+
+def _hash_memory_identifier(value) -> str | None:
+    try:
+        from app.engine.semantic_memory.privacy import hash_memory_identifier
+
+        return hash_memory_identifier(value)
+    except Exception:
+        return None

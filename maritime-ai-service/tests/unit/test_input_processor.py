@@ -141,6 +141,7 @@ class TestValidateGuardian:
     @pytest.mark.asyncio
     async def test_validate_block(self, processor, mock_guardian, mock_chat_history, sample_request, session_id):
         """Guardian BLOCK returns blocked response and logs to history."""
+        sample_request.organization_id = "org-1"
         decision = MagicMock()
         decision.action = "BLOCK"
         decision.reason = "Nội dung bạo lực"
@@ -155,6 +156,7 @@ class TestValidateGuardian:
         assert result.blocked_response is blocked_resp
         create_blocked.assert_called_once_with(["Nội dung bạo lực"])
         mock_chat_history.save_message.assert_called_once()
+        assert mock_chat_history.save_message.call_args.kwargs["organization_id"] == "org-1"
 
     @pytest.mark.asyncio
     async def test_validate_flag(self, processor, mock_guardian, sample_request, session_id):
@@ -260,7 +262,13 @@ class TestLogBlockedMessage:
 
     def test_log_blocked_message_saves(self, processor, mock_chat_history, session_id):
         """Logs blocked message to chat history with is_blocked=True."""
-        processor._log_blocked_message(session_id, "bad message", "user-1", "spam")
+        processor._log_blocked_message(
+            session_id,
+            "bad message",
+            "user-1",
+            "spam",
+            organization_id="org-1",
+        )
 
         mock_chat_history.save_message.assert_called_once_with(
             session_id=session_id,
@@ -269,6 +277,7 @@ class TestLogBlockedMessage:
             user_id="user-1",
             is_blocked=True,
             block_reason="spam",
+            organization_id="org-1",
         )
 
     def test_log_blocked_no_history(self, session_id):
@@ -358,6 +367,7 @@ class TestBuildContext:
     @pytest.mark.asyncio
     async def test_build_context_chat_history(self, mock_chat_history, sample_request, session_id):
         """Context includes chat history."""
+        sample_request.organization_id = "org-active"
         msg1 = MagicMock()
         msg1.role = "user"
         msg1.content = "Hello"
@@ -378,6 +388,26 @@ class TestBuildContext:
         assert "Hello" in context.conversation_history
         assert context.user_name == "Linh"
         assert len(context.history_list) == 2
+        assert context.history_retrieval_summary == {
+            "schema_version": "wiii.chat_history_retrieval.v1",
+            "status": "ready",
+            "source": "persisted_chat_history",
+            "persisted_history_item_count": 2,
+            "fallback_history_item_count": 0,
+            "selected_history_item_count": 2,
+            "org_scoped": True,
+            "user_name_present": True,
+            "raw_content_included": False,
+            "warning_codes": [],
+        }
+        mock_chat_history.get_recent_messages.assert_called_once_with(
+            session_id,
+            organization_id="org-active",
+        )
+        mock_chat_history.get_user_name.assert_called_once_with(
+            session_id,
+            organization_id="org-active",
+        )
 
     @pytest.mark.asyncio
     async def test_build_context_uses_recent_history_fallback_when_chat_history_unavailable(
@@ -405,6 +435,81 @@ class TestBuildContext:
         assert len(context.history_list) == 3
         assert "Quy tắc 15" in context.conversation_history
         assert "tạo visual" in context.conversation_history
+        assert context.history_retrieval_summary["status"] == "fallback"
+        assert (
+            context.history_retrieval_summary["source"]
+            == "session_continuity_fallback"
+        )
+        assert context.history_retrieval_summary["fallback_history_item_count"] == 3
+        assert context.history_retrieval_summary["selected_history_item_count"] == 3
+        assert context.history_retrieval_summary["raw_content_included"] is False
+        assert "chat_history_unavailable" in context.history_retrieval_summary[
+            "warning_codes"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_build_context_records_typed_budget_summary(
+        self,
+        sample_request,
+        session_id,
+    ):
+        """Context budget/compaction is recorded as count-only turn input."""
+        mock_chat_history = MagicMock()
+        mock_chat_history.is_available.return_value = False
+        processor = InputProcessor(chat_history=mock_chat_history)
+        mock_budget = MagicMock()
+        mock_budget.to_dict.return_value = {
+            "total_budget": 20000,
+            "total_used": 12000,
+            "utilization": 0.6,
+            "needs_compaction": True,
+            "messages_included": 4,
+            "messages_dropped": 8,
+            "has_summary": True,
+            "layers": {
+                "recent_messages": {"budget": 12000, "used": 8000},
+            },
+        }
+        mock_compactor = MagicMock()
+        mock_compactor.maybe_compact = AsyncMock(
+            return_value=(
+                "running summary",
+                [MagicMock(role="user", content="kept")],
+                mock_budget,
+            )
+        )
+
+        with patch("app.services.input_processor.settings") as mock_settings, patch(
+            "app.engine.context_manager.get_compactor",
+            return_value=mock_compactor,
+        ):
+            mock_settings.similarity_threshold = 0.7
+            context = await processor.build_context(
+                sample_request,
+                session_id,
+                recent_history_fallback=[
+                    {"role": "user", "content": "private dropped turn"},
+                ],
+            )
+
+        assert context.context_budget_summary == {
+            "schema_version": "wiii.context_budget.v1",
+            "status": "ready",
+            "total_budget": 20000,
+            "total_used": 12000,
+            "utilization": 0.6,
+            "needs_compaction": True,
+            "messages_included": 4,
+            "messages_dropped": 8,
+            "has_summary": True,
+            "langchain_message_count": 1,
+            "layers": {
+                "recent_messages": {"budget": 12000, "used": 8000},
+            },
+            "raw_content_included": False,
+            "warning_codes": [],
+        }
+        mock_compactor.maybe_compact.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_build_context_learning_graph_student(

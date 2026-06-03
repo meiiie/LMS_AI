@@ -27,9 +27,10 @@ ToolCapabilityGroup = Literal[
     "code_studio_output",
 ]
 ToolPermissionLevel = Literal["read", "write", "host_control"]
-ToolConnectionName = Literal["lms_authoring", "weather", "host_actions"]
+ToolConnectionName = Literal["lms_authoring", "weather", "host_actions", "facebook"]
 ToolSurfaceScope = Literal[
     "direct_chat",
+    "diagnostic",
     "tutor",
     "code_studio",
     "host",
@@ -62,6 +63,11 @@ WIII_CONNECT_FACEBOOK_POST_APPLY_TOOL = "host_action__wiii_connect__facebook_pos
 WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL = (
     "host_action__wiii_connect__facebook_post__direct_apply"
 )
+WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL = (
+    "tool_wiii_connect_delegate_to_integration"
+)
+WIII_CONNECT_LIST_ACTIONS_TOOL = "tool_wiii_connect_list_actions"
+WIII_CONNECT_EXECUTE_ACTION_TOOL = "tool_wiii_connect_execute_action"
 
 DOCUMENT_PREVIEW_CAPABILITY_NAMES = frozenset(
     {
@@ -115,6 +121,7 @@ class ToolCapability:
     group: ToolCapabilityGroup
     permission: ToolPermissionLevel = "read"
     required_connection: ToolConnectionName | None = None
+    requires_agent_ready: bool = False
     expose_when_connection_inactive: bool = False
     mutates_state: bool = False
     requires_approval: bool = False
@@ -127,6 +134,7 @@ class ToolCapability:
             "group": self.group,
             "permission": self.permission,
             "required_connection": self.required_connection,
+            "requires_agent_ready": self.requires_agent_ready,
             "expose_when_connection_inactive": self.expose_when_connection_inactive,
             "mutates_state": self.mutates_state,
             "requires_approval": self.requires_approval,
@@ -216,6 +224,8 @@ def tool_requires_inactive_connection(
     status = status_map.get(capability.required_connection)
     if not isinstance(status, dict):
         return True
+    if capability.requires_agent_ready:
+        return not bool(status.get("agent_ready"))
     return not bool(status.get("active"))
 
 
@@ -283,6 +293,7 @@ def _capability(
     *,
     permission: ToolPermissionLevel = "read",
     required_connection: ToolConnectionName | None = None,
+    requires_agent_ready: bool = False,
     expose_when_connection_inactive: bool = False,
     mutates_state: bool = False,
     requires_approval: bool = False,
@@ -294,6 +305,7 @@ def _capability(
         group=group,
         permission=permission,
         required_connection=required_connection,
+        requires_agent_ready=requires_agent_ready,
         expose_when_connection_inactive=expose_when_connection_inactive,
         mutates_state=mutates_state,
         requires_approval=requires_approval,
@@ -454,9 +466,35 @@ TOOL_CAPABILITIES: dict[str, ToolCapability] = {
         WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
         "external_app_action",
         permission="write",
+        required_connection="facebook",
+        requires_agent_ready=True,
         mutates_state=True,
         requires_approval=False,
         surface_scopes=("direct_chat", "host"),
         host_action_name=WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION,
+    ),
+    WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL: _capability(
+        WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL,
+        "external_app_action",
+        permission="write",
+        mutates_state=True,
+        requires_approval=True,
+        surface_scopes=("direct_chat",),
+    ),
+    WIII_CONNECT_LIST_ACTIONS_TOOL: _capability(
+        WIII_CONNECT_LIST_ACTIONS_TOOL,
+        "external_app_action",
+        permission="read",
+        mutates_state=False,
+        requires_approval=False,
+        surface_scopes=("direct_chat",),
+    ),
+    WIII_CONNECT_EXECUTE_ACTION_TOOL: _capability(
+        WIII_CONNECT_EXECUTE_ACTION_TOOL,
+        "external_app_action",
+        permission="write",
+        mutates_state=True,
+        requires_approval=True,
+        surface_scopes=("diagnostic",),
     ),
 }

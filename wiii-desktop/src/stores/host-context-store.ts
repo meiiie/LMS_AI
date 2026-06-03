@@ -151,6 +151,7 @@ interface HostContextState {
   ) => void;
   clear: () => void;
   getContextForRequest: () => HostContext | null;
+  getCapabilitiesForRequest: () => HostCapabilities | null;
   getActionFeedbackForRequest: () => {
     last_action_result?: HostActionFeedbackItem;
     recent_action_results?: HostActionFeedbackItem[];
@@ -183,6 +184,96 @@ function truncateSnippet(ctx: HostContext): HostContext {
     };
   }
   return ctx;
+}
+
+const REQUEST_SENSITIVE_KEY_MARKERS = [
+  "access_token",
+  "refresh_token",
+  "approval_token",
+  "authorization",
+  "bearer",
+  "api_key",
+  "apikey",
+  "client_secret",
+  "password",
+  "secret",
+  "cookie",
+  "credential",
+  "private_key",
+  "connection_ref",
+  "connection_id",
+  "page_id",
+  "vault_ref",
+  "external_account_ref",
+  "provider_payload",
+  "raw_provider",
+  "image_base64",
+  "ak_secret",
+];
+const REQUEST_SENSITIVE_EXACT_KEYS = new Set(["token"]);
+const MAX_REQUEST_ARRAY_ITEMS = 20;
+const MAX_REQUEST_DEPTH = 6;
+
+function isSensitiveRequestKey(key: string): boolean {
+  const normalized = key.trim().toLowerCase();
+  if (!normalized) return false;
+  if (REQUEST_SENSITIVE_EXACT_KEYS.has(normalized)) return true;
+  return REQUEST_SENSITIVE_KEY_MARKERS.some((marker) => normalized.includes(marker));
+}
+
+function sanitizeRequestValue(
+  value: unknown,
+  key = "",
+  depth = 0,
+): unknown {
+  if (key && isSensitiveRequestKey(key)) return undefined;
+  if (value === null || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return value.length > MAX_SNIPPET_LENGTH ? value.slice(0, MAX_SNIPPET_LENGTH) : value;
+  }
+  if (depth >= MAX_REQUEST_DEPTH) return undefined;
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, MAX_REQUEST_ARRAY_ITEMS)
+      .map((item) => sanitizeRequestValue(item, "", depth + 1))
+      .filter((item) => item !== undefined);
+    return items.length > 0 ? items : undefined;
+  }
+  if (!value || typeof value !== "object") return undefined;
+
+  const output = Object.create(null) as Record<string, unknown>;
+  for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+    if (
+      childKey === "__proto__" ||
+      childKey === "prototype" ||
+      childKey === "constructor"
+    ) {
+      continue;
+    }
+    const sanitized = sanitizeRequestValue(childValue, childKey, depth + 1);
+    if (sanitized !== undefined) output[childKey] = sanitized;
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+}
+
+function sanitizeHostContextForRequest(ctx: HostContext | null): HostContext | null {
+  const sanitized = sanitizeRequestValue(ctx) as HostContext | undefined;
+  return sanitized?.host_type && sanitized?.page ? sanitized : null;
+}
+
+function sanitizeCapabilitiesForRequest(caps: HostCapabilities | null): HostCapabilities | null {
+  const sanitized = sanitizeRequestValue(caps) as HostCapabilities | undefined;
+  return sanitized?.host_type && Array.isArray(sanitized.resources) && Array.isArray(sanitized.tools)
+    ? sanitized
+    : null;
+}
+
+function sanitizeActionFeedbackForRequest(
+  feedback: HostActionFeedbackItem | null | undefined,
+): HostActionFeedbackItem | undefined {
+  return sanitizeRequestValue(feedback) as HostActionFeedbackItem | undefined;
 }
 
 function legacyToHostContext(
@@ -567,7 +658,9 @@ export const useHostContextStore = create<HostContextState>((set, get) => ({
     });
   },
 
-  getContextForRequest: () => get().currentContext,
+  getContextForRequest: () => sanitizeHostContextForRequest(get().currentContext),
+
+  getCapabilitiesForRequest: () => sanitizeCapabilitiesForRequest(get().capabilities),
 
   getActionFeedbackForRequest: () => {
     const last = get().lastActionResult;
@@ -575,9 +668,13 @@ export const useHostContextStore = create<HostContextState>((set, get) => ({
     if (!last && recent.length === 0) {
       return null;
     }
+    const sanitizedLast = sanitizeActionFeedbackForRequest(last);
+    const sanitizedRecent = recent
+      .map((item) => sanitizeActionFeedbackForRequest(item))
+      .filter((item): item is HostActionFeedbackItem => Boolean(item));
     return {
-      last_action_result: last || undefined,
-      recent_action_results: recent.length > 0 ? recent : undefined,
+      last_action_result: sanitizedLast,
+      recent_action_results: sanitizedRecent.length > 0 ? sanitizedRecent : undefined,
     };
   },
 

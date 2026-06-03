@@ -5,9 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from app.engine.multi_agent.direct_prompt_tool_binding import _tool_name
+from app.engine.multi_agent.external_app_action_runtime import (
+    prepare_external_app_action_turn,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.wiii_connect_intent import (
-    build_wiii_connect_facebook_post_unavailable_answer,
     looks_wiii_connect_facebook_post_request,
 )
 from app.engine.tools.tool_capability_registry import (
@@ -52,11 +54,15 @@ async def preflight_requested_wiii_connect_facebook_post(
     if not looks_wiii_connect_facebook_post_request(query):
         return None
 
-    unavailable_answer = build_wiii_connect_facebook_post_unavailable_answer(state)
-    if unavailable_answer:
-        return build_assistant_message(
-            unavailable_answer,
-            native_tool_messages=native_tool_messages,
-        )
+    preparation = prepare_external_app_action_turn(
+        query=query,
+        state=state,
+        tools=[],
+        forced_tool_choice=None,
+        native_tool_messages=native_tool_messages,
+        build_assistant_message=build_assistant_message,
+    )
+    if preparation.preempted:
+        return preparation.preflight_response
 
     return None

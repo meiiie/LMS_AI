@@ -9,6 +9,10 @@ from __future__ import annotations
 from typing import Any
 
 from app.engine.multi_agent.state import AgentState
+from app.engine.runtime.event_payload_sanitizer import (
+    redact_runtime_secret_text,
+    sanitize_runtime_payload,
+)
 from app.engine.reasoning import (
     capture_thinking_lifecycle_event,
     resolve_visible_thinking_from_lifecycle,
@@ -61,7 +65,9 @@ def _append_public_thinking_fragment(
     node: str | None = None,
     capture: bool = True,
 ) -> None:
-    clean = sanitize_visible_reasoning_text(str(content or "")).strip()
+    clean = sanitize_visible_reasoning_text(
+        redact_runtime_secret_text(str(content or ""))
+    ).strip()
     if len(clean) < 12:
         return
 
@@ -89,16 +95,24 @@ def _append_public_thinking_fragment(
     state["_public_thinking_fragments"] = fragments[-12:]
 
 
+def _sanitize_public_thinking_event(event: dict[str, Any]) -> dict[str, Any]:
+    safe_event = sanitize_runtime_payload(event)
+    return safe_event if isinstance(safe_event, dict) else {}
+
+
 def _capture_public_thinking_event(state: AgentState, event: dict) -> None:
     if not isinstance(event, dict):
         return
-    capture_thinking_lifecycle_event(state, event)
-    if str(event.get("type") or "").strip().lower() != "thinking_delta":
+    safe_event = _sanitize_public_thinking_event(event)
+    if not safe_event:
+        return
+    capture_thinking_lifecycle_event(state, safe_event)
+    if str(safe_event.get("type") or "").strip().lower() != "thinking_delta":
         return
     _append_public_thinking_fragment(
         state,
-        str(event.get("content") or ""),
-        node=str(event.get("node") or "").strip() or None,
+        str(safe_event.get("content") or ""),
+        node=str(safe_event.get("node") or "").strip() or None,
         capture=False,
     )
 

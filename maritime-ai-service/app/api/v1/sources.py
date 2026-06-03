@@ -16,6 +16,10 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import RequireAuth
 from app.core.rate_limit import limiter
+from app.repositories.knowledge_search_org_scope import (
+    log_knowledge_search_scope_blocked,
+    resolve_knowledge_search_org_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +36,31 @@ async def close_pool() -> None:
     pass
 
 router = APIRouter(prefix="/sources", tags=["sources"])
+
+
+def _hash_source_identifier(value) -> str | None:
+    try:
+        from app.engine.semantic_memory.privacy import hash_memory_identifier
+
+        return hash_memory_identifier(value)
+    except Exception:
+        return None
+
+
+def _resolve_source_access_org(auth: RequireAuth, *, operation: str, node_id: str | None = None) -> str:
+    scope = resolve_knowledge_search_org_scope(getattr(auth, "organization_id", None))
+    if not scope.write_allowed or not scope.org_id:
+        log_knowledge_search_scope_blocked(
+            logger,
+            operation,
+            scope,
+            node_id=node_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization context required for source access",
+        )
+    return scope.org_id
 
 
 # =============================================================================
@@ -127,6 +156,7 @@ async def get_source_details(request: Request, node_id: str, auth: RequireAuth) 
         HTTPException 500: If database error
     """
     try:
+        org_id = _resolve_source_access_org(auth, operation="source_details", node_id=node_id)
         pool = await get_pool()
         if pool is None:
             logger.error("Database pool not available")
@@ -151,12 +181,14 @@ async def get_source_details(request: Request, node_id: str, auth: RequireAuth) 
                     metadata
                 FROM knowledge_embeddings
                 WHERE id::text = $1
+                AND (organization_id = $2 OR organization_id IS NULL)
                 """,
-                node_id
+                node_id,
+                org_id,
             )
             
             if row is None:
-                logger.warning("Source not found: %s", node_id)
+                logger.warning("Source not found node_hash=%s", _hash_source_identifier(node_id))
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail={
@@ -182,7 +214,11 @@ async def get_source_details(request: Request, node_id: str, auth: RequireAuth) 
                 else:
                     metadata = row["metadata"]
             
-            logger.info("Retrieved source details for node_id: %s", node_id)
+            logger.info(
+                "Retrieved source details node_hash=%s org_hash=%s",
+                _hash_source_identifier(node_id),
+                _hash_source_identifier(org_id),
+            )
             
             return SourceDetailResponse(
                 node_id=row["node_id"],
@@ -200,7 +236,11 @@ async def get_source_details(request: Request, node_id: str, auth: RequireAuth) 
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error retrieving source details for {node_id}: {e}")
+        logger.exception(
+            "Error retrieving source details node_hash=%s: %s",
+            _hash_source_identifier(node_id),
+            e,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve source details"
@@ -237,6 +277,7 @@ async def list_sources(
     limit = min(max(1, limit), 100)
     
     try:
+        org_id = _resolve_source_access_org(auth, operation="list_sources")
         pool = await get_pool()
         if pool is None:
             raise HTTPException(
@@ -248,9 +289,9 @@ async def list_sources(
             # Build query with optional filters
             # SECURITY: Only these columns may appear in WHERE clauses.
             # Column names are hardcoded below — NEVER interpolate user input as column names.
-            conditions = []
-            params = []
-            param_idx = 1
+            conditions = ["(organization_id = $1 OR organization_id IS NULL)"]
+            params = [org_id]
+            param_idx = 2
 
             if document_id:
                 # Column name is hardcoded (not user input) — safe for f-string

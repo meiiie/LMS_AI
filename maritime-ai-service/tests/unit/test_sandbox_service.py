@@ -54,7 +54,7 @@ class TestSandboxExecutionService:
             "python_exec",
             code="print('hello')",
             timeout_seconds=45,
-            metadata={"job": "unit-test"},
+            metadata={"job": "unit-test", "access_token": "raw-access-token"},
             context=SandboxExecutionContext(
                 tool_name="tool_execute_python",
                 source="tool_registry",
@@ -83,6 +83,11 @@ class TestSandboxExecutionService:
         assert request.metadata["job"] == "unit-test"
         assert request.metadata["risk_level"] == "high"
         assert request.metadata["capabilities"] == ["python"]
+        assert request.metadata["user_id_hash"].startswith("sha256:")
+        serialized = str(request.metadata)
+        assert "user_456" not in serialized
+        assert "raw-access-token" not in serialized
+        assert "access_token" not in serialized
 
     @pytest.mark.asyncio
     async def test_execute_profile_fails_closed_when_executor_missing(self, tmp_path):

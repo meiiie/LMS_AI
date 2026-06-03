@@ -11,7 +11,12 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 from app.channels.websocket_adapter import WebSocketAdapter
 from app.channels.base import ChannelMessage
-from app.api.v1.websocket import ConnectionManager
+from app.api.v1.websocket import (
+    ConnectionManager,
+    _resolve_ws_auth_identity,
+    _resolve_ws_connection_org_id,
+    _resolve_ws_message_org_id,
+)
 
 
 # ============================================================================
@@ -131,6 +136,152 @@ class TestWebSocketAdapter:
     def test_format_typing_false(self):
         result = json.loads(self.adapter.format_typing(False))
         assert result["content"] is False
+
+
+# ============================================================================
+# WebSocket org projection tests
+# ============================================================================
+
+
+class TestWebSocketOrgProjection:
+    def test_connection_org_strict_requires_org_context(self):
+        with pytest.raises(ValueError, match="Organization context required"):
+            _resolve_ws_connection_org_id({}, "", strict=True)
+
+    def test_connection_org_strict_rejects_auth_query_mismatch(self):
+        with pytest.raises(ValueError, match="mismatch"):
+            _resolve_ws_connection_org_id(
+                {"organization_id": "org-A"},
+                "org-B",
+                strict=True,
+            )
+
+    def test_message_org_strict_pins_connection_org(self):
+        assert (
+            _resolve_ws_message_org_id(
+                {},
+                connection_org_id="org-A",
+                strict=True,
+            )
+            == "org-A"
+        )
+
+    def test_message_org_strict_rejects_message_override(self):
+        with pytest.raises(ValueError, match="mismatch"):
+            _resolve_ws_message_org_id(
+                {"organization_id": "org-B"},
+                connection_org_id="org-A",
+                strict=True,
+            )
+
+    def test_message_org_strict_rejects_body_only_org(self):
+        with pytest.raises(ValueError, match="established during auth"):
+            _resolve_ws_message_org_id(
+                {"organization_id": "org-body-only"},
+                connection_org_id="",
+                strict=True,
+            )
+
+    def test_message_org_legacy_allows_metadata_override(self):
+        assert (
+            _resolve_ws_message_org_id(
+                {"organization_id": "org-message"},
+                connection_org_id="org-connection",
+                strict=False,
+            )
+            == "org-message"
+        )
+
+
+# ============================================================================
+# WebSocket first-message auth tests
+# ============================================================================
+
+
+class TestWebSocketFirstMessageAuth:
+    def test_jwt_auth_uses_token_identity_even_when_api_key_is_configured(self, monkeypatch):
+        from app.auth.token_service import create_access_token
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "api_key", "configured-api-key", raising=False)
+        monkeypatch.setattr(settings, "environment", "production", raising=False)
+        monkeypatch.setattr(settings, "jwt_secret_key", "test-secret-key-for-wiii-ws-auth-123", raising=False)
+        monkeypatch.setattr(settings, "jwt_algorithm", "HS256", raising=False)
+        monkeypatch.setattr(settings, "jwt_audience", "wiii", raising=False)
+
+        token = create_access_token(
+            user_id="jwt-user",
+            role="teacher",
+            active_organization_id="org-token",
+            auth_method="google",
+        )
+
+        identity = _resolve_ws_auth_identity(
+            {
+                "type": "auth",
+                "access_token": token,
+                "api_key": "wrong-api-key",
+                "user_id": "spoofed-user",
+                "role": "admin",
+                "organization_id": "org-token",
+            },
+            strict_org_mode=True,
+        )
+
+        assert identity == {
+            "user_id": "jwt-user",
+            "role": "teacher",
+            "organization_id": "org-token",
+            "auth_method": "google",
+        }
+
+    def test_jwt_auth_rejects_body_org_mismatch(self, monkeypatch):
+        from app.auth.token_service import create_access_token
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "jwt_secret_key", "test-secret-key-for-wiii-ws-auth-123", raising=False)
+        monkeypatch.setattr(settings, "jwt_algorithm", "HS256", raising=False)
+        monkeypatch.setattr(settings, "jwt_audience", "wiii", raising=False)
+
+        token = create_access_token(
+            user_id="jwt-user",
+            role="teacher",
+            active_organization_id="org-token",
+        )
+
+        with pytest.raises(ValueError, match="organization context mismatch"):
+            _resolve_ws_auth_identity(
+                {
+                    "type": "auth",
+                    "authorization": f"Bearer {token}",
+                    "organization_id": "org-other",
+                },
+                strict_org_mode=True,
+            )
+
+    def test_legacy_api_key_auth_still_uses_first_message_identity(self, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "api_key", "configured-api-key", raising=False)
+        monkeypatch.setattr(settings, "environment", "development", raising=False)
+
+        identity = _resolve_ws_auth_identity(
+            {
+                "type": "auth",
+                "api_key": "configured-api-key",
+                "user_id": "legacy-user",
+                "role": "teacher",
+                "organization_id": "org-legacy",
+            },
+            strict_org_mode=False,
+        )
+
+        assert identity == {
+            "user_id": "legacy-user",
+            "role": "teacher",
+            "organization_id": "org-legacy",
+            "auth_method": "api_key",
+        }
 
 
 # ============================================================================

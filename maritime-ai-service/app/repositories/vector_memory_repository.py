@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
+from app.engine.semantic_memory.privacy import hash_memory_identifier
 from app.models.semantic_memory import (
     MemoryType,
     SemanticMemorySearchResult,
@@ -23,6 +24,10 @@ from app.models.semantic_memory import (
 from app.services.embedding_space_registry_service import get_active_embedding_read_space
 
 logger = logging.getLogger(__name__)
+_VECTOR_MEMORY_REPOSITORY_MISSING_ORG_WARNING = (
+    "vector_memory_repository_blocked_missing_org_context"
+)
+_VECTOR_MEMORY_ORG_FILTER = " AND organization_id = :org_id"
 
 _TEXT_SEARCH_STOPWORDS = {
     "la",
@@ -63,6 +68,30 @@ class VectorMemoryRepositoryMixin:
     - self.DEFAULT_SEARCH_LIMIT -> int
     - self.DEFAULT_SIMILARITY_THRESHOLD -> float
     """
+
+    def _resolve_vector_memory_org_scope(self):
+        from app.engine.semantic_memory.write_audit import resolve_memory_read_scope
+
+        scope = resolve_memory_read_scope()
+        if not self._scope_allows_vector_memory(scope):
+            return scope, None
+        return scope, _VECTOR_MEMORY_ORG_FILTER
+
+    def _scope_allows_vector_memory(self, scope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _log_vector_memory_scope_blocked(self, operation: str, scope, *, user_id: str) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_VECTOR_MEMORY_REPOSITORY_MISSING_ORG_WARNING)
+        logger.warning(
+            "[VECTOR_MEMORY] %s blocked user_hash=%s org_hash=%s org_scope=%s warnings=%s",
+            operation,
+            hash_memory_identifier(user_id),
+            hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
     def _extract_text_search_terms(self, query_text: str) -> List[str]:
         raw_terms = re.findall(r"\w+", (query_text or "").lower(), flags=re.UNICODE)
@@ -119,7 +148,19 @@ class VectorMemoryRepositoryMixin:
         self._ensure_initialized()
 
         if not query_embedding:
-            logger.warning("search_similar called with empty query embedding for user %s", user_id)
+            logger.warning(
+                "search_similar called with empty query embedding for user_hash=%s",
+                hash_memory_identifier(user_id),
+            )
+            return []
+
+        scope, org_filter = self._resolve_vector_memory_org_scope()
+        if org_filter is None:
+            self._log_vector_memory_scope_blocked(
+                "search_similar",
+                scope,
+                user_id=user_id,
+            )
             return []
 
         # Stanford ranking fetches more candidates for re-ranking
@@ -138,18 +179,12 @@ class VectorMemoryRepositoryMixin:
                     "threshold": threshold,
                     "limit": fetch_limit
                 }
+                params["org_id"] = scope.org_id
 
                 if memory_types:
                     type_values = [t.value for t in memory_types]
                     type_filter = "AND memory_type = ANY(:memory_types)"
                     params["memory_types"] = type_values
-
-                # Sprint 160: Org-scoped filtering
-                from app.core.org_filter import get_effective_org_id, org_where_clause
-                eff_org_id = get_effective_org_id()
-                org_filter = org_where_clause(eff_org_id)
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
 
                 if active_space is not None and active_space.storage_kind == "shadow":
                     safe_dims = max(1, int(active_space.dimensions))
@@ -236,7 +271,11 @@ class VectorMemoryRepositoryMixin:
                         })
                     memories = self._stanford_rerank(memories, row_data, limit)
 
-                logger.debug("Found %d similar memories for user %s", len(memories), user_id)
+                logger.debug(
+                    "Found %d similar memories for user_hash=%s",
+                    len(memories),
+                    hash_memory_identifier(user_id),
+                )
                 return memories
 
         except Exception as e:
@@ -262,6 +301,15 @@ class VectorMemoryRepositoryMixin:
         if not terms:
             return []
 
+        scope, org_filter = self._resolve_vector_memory_org_scope()
+        if org_filter is None:
+            self._log_vector_memory_scope_blocked(
+                "search_similar_text",
+                scope,
+                user_id=user_id,
+            )
+            return []
+
         try:
             with self._session_factory() as session:
                 type_filter = ""
@@ -269,17 +317,11 @@ class VectorMemoryRepositoryMixin:
                     "user_id": user_id,
                     "limit": limit,
                 }
+                params["org_id"] = scope.org_id
 
                 if memory_types:
                     params["memory_types"] = [item.value for item in memory_types]
                     type_filter = "AND memory_type = ANY(:memory_types)"
-
-                from app.core.org_filter import get_effective_org_id, org_where_clause
-
-                eff_org_id = get_effective_org_id()
-                org_filter = org_where_clause(eff_org_id)
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
 
                 score_clauses = []
                 match_clauses = []
@@ -330,13 +372,17 @@ class VectorMemoryRepositoryMixin:
                     )
 
                 logger.debug(
-                    "Fallback text recall found %d memories for user %s",
+                    "Fallback text recall found %d memories for user_hash=%s",
                     len(memories),
-                    user_id,
+                    hash_memory_identifier(user_id),
                 )
                 return memories
         except Exception as exc:
-            logger.error("Failed fallback text recall for user %s: %s", user_id, exc)
+            logger.error(
+                "Failed fallback text recall for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                exc,
+            )
             return []
 
     def _stanford_rerank(

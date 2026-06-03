@@ -20,10 +20,29 @@ const mockMemories = [
   { id: "mem-3", type: "goal", value: "Learn COLREGs", created_at: "2026-02-12T08:00:00Z" },
 ];
 
+const mockSummary = {
+  total: 3,
+  type_counts: { age: 1, goal: 1, name: 1 },
+  latest_created_at: "2026-02-14T08:00:00Z",
+  scope_state: "request_scoped",
+  org_scoped: true,
+  controls: { can_delete_one: true, can_clear_all: true },
+  provenance: {
+    source_kinds: { semantic_fact: 3 },
+    raw_content_included: false,
+    identifier_strategy: "count_only",
+  },
+  privacy: {
+    raw_content_included: false,
+    identifier_strategy: "hash_or_count_only",
+  },
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   useMemoryStore.setState({
     memories: [],
+    memorySummary: null,
     isLoading: false,
     error: null,
   });
@@ -34,12 +53,14 @@ describe("Memory Store — Fetch", () => {
     vi.mocked(memoriesApi.fetchMemories).mockResolvedValue({
       data: mockMemories,
       total: 3,
+      summary: mockSummary,
     });
 
     await useMemoryStore.getState().fetchMemories("user-1");
 
     const state = useMemoryStore.getState();
     expect(state.memories).toEqual(mockMemories);
+    expect(state.memorySummary).toEqual(mockSummary);
     expect(state.isLoading).toBe(false);
     expect(state.error).toBeNull();
   });
@@ -65,7 +86,7 @@ describe("Memory Store — Fetch", () => {
 
 describe("Memory Store — Delete", () => {
   it("should delete a single memory optimistically", async () => {
-    useMemoryStore.setState({ memories: mockMemories });
+    useMemoryStore.setState({ memories: mockMemories, memorySummary: mockSummary });
     vi.mocked(memoriesApi.deleteMemory).mockResolvedValue({
       success: true,
       message: "Deleted",
@@ -76,6 +97,11 @@ describe("Memory Store — Delete", () => {
     const state = useMemoryStore.getState();
     expect(state.memories).toHaveLength(2);
     expect(state.memories.find((m) => m.id === "mem-2")).toBeUndefined();
+    expect(state.memorySummary?.total).toBe(2);
+    expect(state.memorySummary?.type_counts).toEqual({ goal: 1, name: 1 });
+    expect(state.memorySummary?.provenance.source_kinds).toEqual({
+      semantic_fact: 2,
+    });
     expect(memoriesApi.deleteMemory).toHaveBeenCalledWith("user-1", "mem-2");
   });
 
@@ -93,7 +119,7 @@ describe("Memory Store — Delete", () => {
 
 describe("Memory Store — Clear All", () => {
   it("should clear all memories via bulk endpoint", async () => {
-    useMemoryStore.setState({ memories: mockMemories });
+    useMemoryStore.setState({ memories: mockMemories, memorySummary: mockSummary });
     vi.mocked(memoriesApi.clearMemories).mockResolvedValue({
       success: true,
       deleted_count: 3,
@@ -104,6 +130,9 @@ describe("Memory Store — Clear All", () => {
 
     const state = useMemoryStore.getState();
     expect(state.memories).toEqual([]);
+    expect(state.memorySummary?.total).toBe(0);
+    expect(state.memorySummary?.type_counts).toEqual({});
+    expect(state.memorySummary?.provenance.source_kinds).toEqual({});
     expect(memoriesApi.clearMemories).toHaveBeenCalledTimes(1);
     expect(memoriesApi.clearMemories).toHaveBeenCalledWith("user-1");
     // Should NOT call deleteMemory individually

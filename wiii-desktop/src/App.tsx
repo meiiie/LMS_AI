@@ -15,6 +15,7 @@ import { useChatStore } from "@/stores/chat-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useToastStore } from "@/stores/toast-store";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useScheduledTaskNotifications } from "@/hooks/useScheduledTaskNotifications";
 import { WiiiAvatar } from "@/components/common/WiiiAvatar";
 import { initClient } from "@/api/client";
 import { buildAuthUserFromPayload, toCompatibilitySettingsRole } from "@/lib/auth-user";
@@ -89,6 +90,7 @@ export default function App() {
 
   // Register global keyboard shortcuts
   useKeyboardShortcuts();
+  useScheduledTaskNotifications();
 
   // Sprint 193: Handle web OAuth callback (hash-based token delivery)
   // Must run BEFORE auth state is checked so tokens are available immediately.

@@ -28,6 +28,14 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from app.engine.embedding_runtime import get_embedding_backend
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    append_semantic_memory_write_audit_event,
+    build_semantic_memory_write_audit,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 from app.engine.vision_runtime import describe_image_content
 
 logger = logging.getLogger(__name__)
@@ -406,8 +414,9 @@ class VisualMemoryManager:
             # 2. Check if already stored (dedup by hash)
             if image_hash in self._description_cache:
                 logger.info(
-                    "[VisualMemory] Duplicate image %s for user %s, skipping",
-                    image_hash[:12], user_id,
+                    "[VisualMemory] Duplicate image %s for user_hash=%s, skipping",
+                    image_hash[:12],
+                    hash_memory_identifier(user_id),
                 )
                 return None
 
@@ -415,6 +424,23 @@ class VisualMemoryManager:
             from app.core.config import get_settings
             settings = get_settings()
             if not settings.enable_visual_memory:
+                return None
+
+            audit_scope = resolve_memory_write_scope()
+            if not audit_scope.write_allowed:
+                await self._append_visual_memory_write_audit(
+                    user_id=user_id,
+                    session_id=session_id,
+                    source_message=context_hint,
+                    scope=audit_scope,
+                    status="blocked",
+                    warnings=["visual_memory_blocked_missing_org_context"],
+                )
+                logger.warning(
+                    "[VisualMemory] Store blocked for user_hash=%s: %s",
+                    hash_memory_identifier(user_id),
+                    audit_scope.state,
+                )
                 return None
 
             description = await self.describe_image(
@@ -441,16 +467,38 @@ class VisualMemoryManager:
             )
 
             # 6. Store as semantic memory
-            stored = await self._store_as_semantic_memory(entry)
+            stored = await self._store_as_semantic_memory(
+                entry,
+                audit_scope=audit_scope,
+                emit_write_audit=False,
+            )
             if stored:
                 self._description_cache[image_hash] = description
                 elapsed = (time.time() - start) * 1000
                 logger.info(
-                    "[VisualMemory] Stored image memory for %s: %s (%s, %.0fms)",
-                    user_id, image_hash[:12], concept_type.value, elapsed,
+                    "[VisualMemory] Stored image memory for user_hash=%s: %s (%s, %.0fms)",
+                    hash_memory_identifier(user_id),
+                    image_hash[:12],
+                    concept_type.value,
+                    elapsed,
+                )
+                await self._append_visual_memory_write_audit(
+                    user_id=user_id,
+                    session_id=session_id,
+                    source_message=description,
+                    scope=audit_scope,
+                    status="saved",
                 )
                 return entry
 
+            await self._append_visual_memory_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                source_message=description,
+                scope=audit_scope,
+                status="degraded",
+                warnings=["visual_memory_not_persisted"],
+            )
             return None
 
         except Exception as e:
@@ -458,9 +506,30 @@ class VisualMemoryManager:
             return None
 
     async def _store_as_semantic_memory(
-        self, entry: ImageMemoryEntry,
+        self,
+        entry: ImageMemoryEntry,
+        audit_scope: Optional[MemoryWriteScope] = None,
+        emit_write_audit: bool = True,
     ) -> bool:
         """Persist image memory entry to semantic_memories table."""
+        scope = audit_scope or resolve_memory_write_scope()
+        if not scope.write_allowed:
+            await self._append_visual_memory_write_audit(
+                user_id=entry.user_id,
+                session_id=entry.session_id,
+                source_message=entry.description,
+                scope=scope,
+                status="blocked",
+                warnings=["visual_memory_blocked_missing_org_context"],
+                emit_write_audit=emit_write_audit,
+            )
+            logger.warning(
+                "[VisualMemory] Semantic storage blocked for user_hash=%s: %s",
+                hash_memory_identifier(entry.user_id),
+                scope.state,
+            )
+            return False
+
         try:
             from app.repositories.semantic_memory_repository import (
                 SemanticMemoryRepository,
@@ -493,11 +562,63 @@ class VisualMemoryManager:
             )
 
             result = repo.save_memory(memory)
+            await self._append_visual_memory_write_audit(
+                user_id=entry.user_id,
+                session_id=entry.session_id,
+                source_message=entry.description,
+                scope=scope,
+                status="saved" if result is not None else "degraded",
+                warnings=[] if result is not None else ["visual_memory_not_persisted"],
+                emit_write_audit=emit_write_audit,
+            )
             return result is not None
 
         except Exception as e:
             logger.error("[VisualMemory] Semantic memory storage failed: %s", e)
+            await self._append_visual_memory_write_audit(
+                user_id=entry.user_id,
+                session_id=entry.session_id,
+                source_message=entry.description,
+                scope=scope,
+                status="failed",
+                warnings=["visual_memory_store_failed"],
+                emit_write_audit=emit_write_audit,
+            )
             return False
+
+    async def _append_visual_memory_write_audit(
+        self,
+        *,
+        user_id: str,
+        session_id: Optional[str],
+        source_message: Optional[str],
+        scope: MemoryWriteScope,
+        status: str,
+        warnings: Optional[list[str]] = None,
+        emit_write_audit: bool = True,
+    ) -> bool:
+        if not emit_write_audit:
+            return False
+        audit_payload = build_semantic_memory_write_audit(
+            user_id=user_id,
+            session_id=session_id,
+            message=source_message or "",
+            response="",
+            scope=scope,
+            write_kind="visual_memory",
+            message_saved=False,
+            response_saved=False,
+            extract_facts=False,
+            stored_fact_count=0,
+            stored_insight_count=0,
+            status=status,
+            warnings=warnings,
+        )
+        return await append_semantic_memory_write_audit_event(
+            session_id=session_id,
+            org_id=scope.org_id,
+            payload=audit_payload,
+        )
 
     async def retrieve_visual_memories(
         self,
@@ -520,6 +641,15 @@ class VisualMemoryManager:
             VisualMemoryContext with matching entries and formatted text.
         """
         start = time.time()
+
+        read_scope = resolve_memory_read_scope()
+        if not read_scope.write_allowed:
+            logger.warning(
+                "[VisualMemory] Retrieval blocked for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                read_scope.state,
+            )
+            return VisualMemoryContext()
 
         try:
             from app.repositories.semantic_memory_repository import (

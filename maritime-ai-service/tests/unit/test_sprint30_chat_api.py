@@ -200,6 +200,27 @@ class TestBuildChatResponse:
                 "tools_used": [{"name": "tool_knowledge_search", "args": {"query": "Rule 5"}}],
                 "thinking": "Tôi sẽ tra cứu đúng điều khoản liên quan.",
                 "routing_metadata": {"intent": "lookup"},
+                "runtime_flow_trace": {
+                    "version": "wiii.runtime_flow_trace.v1",
+                    "turn_path_decision": {
+                        "path": "external_app_action",
+                        "reason": "facebook_post_request",
+                        "approval_token": "raw-approval-token",
+                    },
+                    "external_action_trace": {
+                        "version": "wiii.external_action_trace.v1",
+                        "observed_action_result": True,
+                        "last_status": "action_completed",
+                        "events": [
+                            {
+                                "type": "result",
+                                "tool_name": "tool_wiii_connect_delegate_to_integration",
+                                "provider_slug": "facebook",
+                                "approval_token": "raw-approval-token",
+                            }
+                        ],
+                    },
+                },
                 "domain_notice": "ngoài domain nhẹ",
             },
         )
@@ -223,6 +244,11 @@ class TestBuildChatResponse:
         assert response.metadata.tools_used[0].description == "Tra cứu: Rule 5"
         assert response.metadata.topics_accessed == ["COLREG Rule 5"]
         assert response.metadata.document_ids_used == ["doc-1"]
+        assert (
+            response.metadata.runtime_flow_trace["turn_path_decision"]["path"]
+            == "external_app_action"
+        )
+        assert "raw-approval-token" not in response.model_dump_json()
         assert response.metadata.thinking == "Tôi sẽ tra cứu đúng điều khoản liên quan."
 
     def test_build_chat_response_handles_empty_sources_and_tools(self):
@@ -253,6 +279,86 @@ class TestBuildChatResponse:
         assert response.metadata.topics_accessed is None
         assert response.metadata.document_ids_used is None
         assert response.metadata.confidence_score is None
+
+    def test_build_chat_response_sanitizes_public_json_boundary(self):
+        from app.models.schemas import ChatRequest, InternalChatResponse, Source, UserRole
+        from app.services.chat_response_presenter import build_chat_response
+
+        request = ChatRequest(
+            user_id="user-1",
+            message="show source",
+            role=UserRole.STUDENT,
+        )
+        internal_response = InternalChatResponse(
+            message="Done access_token=raw-answer-token",
+            agent_type="direct",
+            sources=[
+                Source(
+                    node_id="n1",
+                    title="Bearer raw-source-title-token-12345678",
+                    source_type="knowledge_graph",
+                    content_snippet="token=raw-source-content-token",
+                    image_url="https://example.com?token=raw-source-url-token",
+                    document_id="doc-token=raw-document-token",
+                    page_number=1,
+                )
+            ],
+            metadata={
+                "session_id": "session-1",
+                "tools_used": [
+                    {
+                        "name": "tool_knowledge_search",
+                        "args": {
+                            "query": "Bearer raw-tool-query-token-12345678",
+                            "access_token": "raw-tool-token",
+                        },
+                    }
+                ],
+                "thinking": "private thinking access_token=raw-thinking-token",
+                "thinking_content": "Public thinking.",
+                "routing_metadata": {
+                    "final_agent": "direct",
+                    "connection_ref": "wcn_raw_connection",
+                    "safe": "ok",
+                },
+                "failover": {
+                    "last_reason_code": "token=raw-failover-token",
+                },
+                "runtime_flow_trace": {
+                    "version": "wiii.runtime_flow_trace.v1",
+                    "turn_path_decision": {
+                        "path": "direct",
+                        "approval_token": "raw-approval-token",
+                    },
+                },
+                "domain_notice": "Bearer raw-domain-token-12345678",
+            },
+        )
+
+        response = build_chat_response(
+            chat_request=request,
+            internal_response=internal_response,
+            processing_time=0.25,
+            provider_name="google",
+            model_name="gemini",
+        )
+
+        serialized = response.model_dump_json()
+
+        assert response.metadata.thinking == "Public thinking."
+        assert response.metadata.routing_metadata["safe"] == "ok"
+        assert "raw-answer-token" not in serialized
+        assert "raw-source-title-token" not in serialized
+        assert "raw-source-content-token" not in serialized
+        assert "raw-source-url-token" not in serialized
+        assert "raw-document-token" not in serialized
+        assert "raw-tool-query-token" not in serialized
+        assert "raw-tool-token" not in serialized
+        assert "raw-thinking-token" not in serialized
+        assert "wcn_raw_connection" not in serialized
+        assert "raw-failover-token" not in serialized
+        assert "raw-approval-token" not in serialized
+        assert "raw-domain-token" not in serialized
 
 
 class TestChatEndpointPresenter:
@@ -616,6 +722,7 @@ class TestChatContextEndpointSupport:
             summary, history_list = await compact_context_session(
                 session_id="session-1",
                 user_id="user-1",
+                organization_id="org-1",
             )
 
         assert summary == "summary"
@@ -627,6 +734,11 @@ class TestChatContextEndpointSupport:
             "session-1",
             history_list,
             user_id="user-1",
+        )
+        mock_chat_history.get_recent_messages.assert_called_once_with(
+            "session-1",
+            user_id="user-1",
+            organization_id="org-1",
         )
 
     def test_load_context_info_inputs_returns_compactor_and_history(self):
@@ -649,10 +761,16 @@ class TestChatContextEndpointSupport:
             compactor, history_list = load_context_info_inputs(
                 session_id="session-1",
                 user_id="user-1",
+                organization_id="org-1",
             )
 
         assert compactor is mock_compactor
         assert history_list == [{"role": "user", "content": "hi"}]
+        mock_chat_history.get_recent_messages.assert_called_once_with(
+            "session-1",
+            user_id="user-1",
+            organization_id="org-1",
+        )
 
     def test_build_context_operation_error_response_logs_and_builds_payload(self):
         from app.api.v1.chat_context_endpoint_support import (
@@ -773,10 +891,16 @@ class TestChatHistoryEndpointSupport:
                 user_id="user-1",
                 limit=20,
                 offset=5,
+                organization_id="org-1",
             )
 
         assert result == ([], 0)
-        mock_repo.get_user_history.assert_called_once_with("user-1", 20, 5)
+        mock_repo.get_user_history.assert_called_once_with(
+            "user-1",
+            20,
+            5,
+            organization_id="org-1",
+        )
 
     def test_process_get_chat_history_request_shapes_and_logs_response(self):
         from types import SimpleNamespace
@@ -791,7 +915,7 @@ class TestChatHistoryEndpointSupport:
         with patch(
             "app.api.v1.chat_history_endpoint_support.load_chat_history_page",
             return_value=([mock_message], 1),
-        ), patch(
+        ) as mock_load, patch(
             "app.api.v1.chat_history_endpoint_support._chat_endpoint_presenter"
             ".build_get_chat_history_response",
             return_value=SimpleNamespace(data=[1]),
@@ -801,9 +925,16 @@ class TestChatHistoryEndpointSupport:
                 user_id="user-1",
                 limit=999,
                 offset=-1,
+                organization_id="org-1",
             )
 
         assert response.data == [1]
+        mock_load.assert_called_once_with(
+            user_id="user-1",
+            limit=100,
+            offset=0,
+            organization_id="org-1",
+        )
         mock_build.assert_called_once_with(
             messages=[mock_message],
             total=1,
@@ -827,7 +958,7 @@ class TestChatHistoryEndpointSupport:
         with patch(
             "app.api.v1.chat_history_endpoint_support.delete_chat_history_records",
             return_value=3,
-        ), patch(
+        ) as mock_delete, patch(
             "app.api.v1.chat_history_endpoint_support._chat_endpoint_presenter"
             ".build_delete_chat_history_response",
             return_value="response",
@@ -837,9 +968,14 @@ class TestChatHistoryEndpointSupport:
                 user_id="user-1",
                 deleted_by="admin-1",
                 role="admin",
+                organization_id="org-1",
             )
 
         assert response == "response"
+        mock_delete.assert_called_once_with(
+            user_id="user-1",
+            organization_id="org-1",
+        )
         mock_build.assert_called_once_with(
             user_id="user-1",
             deleted_count=3,
@@ -870,13 +1006,19 @@ class TestGetChatHistory:
         mock_repo.get_user_history.return_value = ([], 0)
         mock_auth = MagicMock()
         mock_auth.user_id = "user-1"  # Match path param for ownership check
+        mock_auth.organization_id = "org-1"
 
         # Lazy import inside function body — patch at source module
         with patch("app.repositories.chat_history_repository.get_chat_history_repository", return_value=mock_repo):
             result = await get_chat_history("user-1", auth=mock_auth, limit=999, offset=0)
 
         # Limit should be clamped to 100
-        mock_repo.get_user_history.assert_called_once_with("user-1", 100, 0)
+        mock_repo.get_user_history.assert_called_once_with(
+            "user-1",
+            100,
+            0,
+            organization_id="org-1",
+        )
 
     @pytest.mark.asyncio
     async def test_limit_below_1_set_to_20(self):
@@ -886,11 +1028,17 @@ class TestGetChatHistory:
         mock_repo.get_user_history.return_value = ([], 0)
         mock_auth = MagicMock()
         mock_auth.user_id = "user-1"  # Match path param for ownership check
+        mock_auth.organization_id = "org-1"
 
         with patch("app.repositories.chat_history_repository.get_chat_history_repository", return_value=mock_repo):
             result = await get_chat_history("user-1", auth=mock_auth, limit=-5, offset=0)
 
-        mock_repo.get_user_history.assert_called_once_with("user-1", 20, 0)
+        mock_repo.get_user_history.assert_called_once_with(
+            "user-1",
+            20,
+            0,
+            organization_id="org-1",
+        )
 
     @pytest.mark.asyncio
     async def test_negative_offset_set_to_zero(self):
@@ -900,11 +1048,17 @@ class TestGetChatHistory:
         mock_repo.get_user_history.return_value = ([], 0)
         mock_auth = MagicMock()
         mock_auth.user_id = "user-1"  # Match path param for ownership check
+        mock_auth.organization_id = "org-1"
 
         with patch("app.repositories.chat_history_repository.get_chat_history_repository", return_value=mock_repo):
             result = await get_chat_history("user-1", auth=mock_auth, limit=10, offset=-1)
 
-        mock_repo.get_user_history.assert_called_once_with("user-1", 10, 0)
+        mock_repo.get_user_history.assert_called_once_with(
+            "user-1",
+            10,
+            0,
+            organization_id="org-1",
+        )
 
     @pytest.mark.asyncio
     async def test_returns_messages(self):
@@ -920,6 +1074,7 @@ class TestGetChatHistory:
         mock_repo.get_user_history.return_value = ([mock_msg], 1)
         mock_auth = MagicMock()
         mock_auth.user_id = "user-1"  # Match path param for ownership check
+        mock_auth.organization_id = "org-1"
 
         with patch("app.repositories.chat_history_repository.get_chat_history_repository", return_value=mock_repo):
             result = await get_chat_history("user-1", auth=mock_auth, limit=20, offset=0)
@@ -950,6 +1105,7 @@ class TestDeleteChatHistory:
         mock_auth = MagicMock()
         mock_auth.role = "admin"
         mock_auth.user_id = "admin-1"
+        mock_auth.organization_id = "org-1"
 
         mock_request = MagicMock()
         mock_request.requesting_user_id = "admin-1"
@@ -963,6 +1119,10 @@ class TestDeleteChatHistory:
 
         assert result.status == "deleted"
         assert result.messages_deleted == 5
+        mock_repo.delete_user_history.assert_called_once_with(
+            "user-2",
+            organization_id="org-1",
+        )
 
     @pytest.mark.asyncio
     async def test_student_cannot_delete_others(self):
@@ -971,6 +1131,7 @@ class TestDeleteChatHistory:
         mock_auth = MagicMock()
         mock_auth.role = "student"
         mock_auth.user_id = "user-1"
+        mock_auth.organization_id = "org-1"
 
         mock_request = MagicMock()
         mock_request.requesting_user_id = "user-1"
@@ -988,6 +1149,7 @@ class TestDeleteChatHistory:
         mock_auth = MagicMock()
         mock_auth.role = "student"
         mock_auth.user_id = "user-1"
+        mock_auth.organization_id = "org-1"
 
         mock_request = MagicMock()
         mock_request.requesting_user_id = "user-1"
@@ -1000,6 +1162,10 @@ class TestDeleteChatHistory:
             result = await delete_chat_history("user-1", mock_request, auth=mock_auth)
 
         assert result.status == "deleted"
+        mock_repo.delete_user_history.assert_called_once_with(
+            "user-1",
+            organization_id="org-1",
+        )
 
     @pytest.mark.asyncio
     async def test_unknown_role_can_delete_own_history(self):
@@ -1008,6 +1174,7 @@ class TestDeleteChatHistory:
         mock_auth = MagicMock()
         mock_auth.role = "unknown"
         mock_auth.user_id = "user-1"
+        mock_auth.organization_id = "org-1"
 
         mock_request = MagicMock()
         mock_repo = MagicMock()
@@ -1016,6 +1183,10 @@ class TestDeleteChatHistory:
         with patch("app.repositories.chat_history_repository.get_chat_history_repository", return_value=mock_repo):
             result = await delete_chat_history("user-1", mock_request, auth=mock_auth)
         assert result.status == "deleted"
+        mock_repo.delete_user_history.assert_called_once_with(
+            "user-1",
+            organization_id="org-1",
+        )
 
     @pytest.mark.asyncio
     async def test_auth_param_exists(self):

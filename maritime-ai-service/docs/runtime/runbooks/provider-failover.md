@@ -38,6 +38,61 @@ indicates either:
    you have correlated failure. Page on-call for **chat-5xx-surge.md**
    immediately.
 
+## Live provider runtime probe
+
+Use this only against approved staging or a controlled live operator account.
+It makes credentialed provider calls through `LLMPool` and `WiiiChatModel`,
+forces a harmless `record_probe_fact` tool call, feeds back a synthetic tool
+result, and reports hash/count-only evidence.
+
+```powershell
+cd maritime-ai-service
+$env:WIII_LIVE_PROVIDER_RUNTIME_PROBE='1'
+python scripts\probe_live_provider_runtime.py --allow-call --provider auto
+```
+
+To also prove the terminal `/api/v1/chat/stream/v3` `runtime_flow_ledger`, add
+the stream flags. This path may persist a chat turn, so keep it out of
+production unless explicitly approved.
+
+```powershell
+python scripts\probe_live_provider_runtime.py --allow-call --include-stream-ledger --allow-stream-write --provider auto
+```
+
+Expected pass evidence:
+
+- `direct_provider_tool_roundtrip.status=pass`
+- `direct_provider_tool_roundtrip.provider_present=true`,
+  `model_present=true`, and `selectable_provider_count>=1`
+- request/session and organization scope are hash-present, with
+  `raw_request_identifiers_included=false`
+- exactly one tool call is observed:
+  `tool_call_count_exactly_one=true`, `tool_call.name=record_probe_fact`,
+  `tool_call.id_hash_present=true`, and
+  `tool_call.argument_values_included=false`
+- the runtime boundary remains Wiii-native:
+  `runtime_boundary.llm_pool_route_used=true`,
+  `runtime_boundary.wiii_chat_model_interface_used=true`,
+  `runtime_boundary.raw_provider_http_used=false`, and
+  `tool_contract.forced_tool_choice_used=true`
+- `tool_result.role=tool`, `tool_result_linked_to_tool_call=true`, and no
+  raw tool argument/content values in the artifact
+- two tracing spans:
+  `live_provider_runtime_probe.tool_call` and
+  `live_provider_runtime_probe.tool_result`, with duration evidence and
+  `trace.raw_attribute_values_included=false`
+- when stream mode is included, `stream_runtime_ledger.status=pass`,
+  `metadata_seen=true`, `done_seen=true`, `runtime_authoritative=true`,
+  `finalization_status=saved`, `post_turn_lifecycle_schema_version=wiii.post_turn_lifecycle.v1`,
+  provider/model authority is present in `runtime_flow_ledger.runtime`,
+  done-event counts match the terminal ledger, request/session/org hashes are
+  present, and `stream_runtime_ledger.privacy.stream_prompt_included=false`
+  plus `stream_runtime_ledger.privacy.auth_secret_included=false`
+- root `privacy` must report `raw_content_included=false`,
+  `tool_argument_values_included=false`, `provider_arguments_included=false`,
+  `provider_payload_included=false`, `provider_response_included=false`, and
+  `stream_payload_included=false`
+
 ## Decision tree
 
 ### Branch A — Primary provider has a public incident

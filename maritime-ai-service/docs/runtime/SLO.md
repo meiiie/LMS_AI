@@ -87,6 +87,83 @@ as an artifact + dashboard tile. The on-call only gets paged if the
 failure persists across **two consecutive nights** (operational
 debounce).
 
+## Targets - runtime-flow ledger observability
+
+| Metric                                                       | Target            |
+|--------------------------------------------------------------|-------------------|
+| `runtime.runtime_flow_ledger.events{doctor_status="ready"}`  | >= 99% of ledger events |
+| `runtime.runtime_flow_ledger.alerts{severity="critical"}`    | 0 events          |
+| `runtime.runtime_flow_ledger.alerts{severity="error"}`       | 0 events          |
+| `runtime.native_dispatch.finalization{status="error"}`       | 0 events          |
+| `runtime.native_stream_dispatch.finalization{status="error"}` | 0 events          |
+| `runtime.lifecycle.hook_runs{owner="engine.runtime"}`        | present after native runtime traffic |
+| `runtime.lifecycle.hook_failures`                            | 0 events          |
+| `runtime.semantic_memory.maintenance.runs{status="error"}`   | 0 events          |
+| `runtime.scheduled_tasks.polls{status="error"}`              | 0 events          |
+| `runtime.scheduled_tasks.runs{status=~"error\|timeout"}`     | 0 events          |
+| `runtime.living_agent.heartbeat.cycles{status="error"}`      | 0 events          |
+| `runtime.living_agent.heartbeat.actions{status=~"error\|timeout"}` | 0 events    |
+| `runtime.living_agent.proactive.sends{status="delivery_failed"}` | 0 events      |
+
+The `/metrics` endpoint exposes these as Prometheus-safe names such as
+`runtime_runtime_flow_ledger_alerts` and
+`runtime_native_stream_dispatch_finalization`. Deployable example alert rules
+live in `docs/runtime/alerts/prometheus-runtime-flow-ledger.yml`,
+`docs/runtime/alerts/prometheus-native-stream-dispatch.yml`,
+`docs/runtime/alerts/prometheus-native-dispatch.yml`, and
+`docs/runtime/alerts/prometheus-runtime-lifecycle.yml`.
+
+## Targets - post-turn memory maintenance
+
+| Metric | Target |
+|--------|--------|
+| `runtime.semantic_memory.maintenance.enqueue{status="error"}` | 0 events |
+| `runtime.semantic_memory.maintenance.runs{status="error"}` | 0 events |
+| `runtime.semantic_memory.maintenance.enqueue{status="skipped",reason="broker_unavailable"}` | 0 sustained bursts |
+
+These counters prove the OpenHuman-style contract that heavy memory pruning and
+summarization stay observable after the response path. Deployable alert rules
+live in `docs/runtime/alerts/prometheus-semantic-memory-maintenance.yml`.
+
+## Targets - autonomous scheduled tasks
+
+| Metric | Target |
+|--------|--------|
+| `runtime.scheduled_tasks.polls{status="error"}` | 0 events |
+| `runtime.scheduled_tasks.runs{status="error"}` | 0 events |
+| `runtime.scheduled_tasks.runs{status="timeout"}` | 0 events |
+| `runtime.scheduled_tasks.delivery{status="not_delivered"}` | 0 sustained bursts |
+
+These counters prove the scheduled autonomy loop can be operated without
+looking at task, user, or organization identifiers. Deployable alert rules live
+in `docs/runtime/alerts/prometheus-scheduled-task-executor.yml`.
+
+## Targets - living-agent heartbeat
+
+| Metric | Target |
+|--------|--------|
+| `runtime.living_agent.heartbeat.cycles{status="error"}` | 0 events |
+| `runtime.living_agent.heartbeat.actions{status="error"}` | 0 events |
+| `runtime.living_agent.heartbeat.actions{status="timeout"}` | 0 events |
+| `runtime.living_agent.heartbeat.actions{status="queued"}` | no unexplained sustained backlog |
+
+These counters prove the periodic living-agent autonomy loop has bounded
+operator evidence for cycles, actions, approval queues, and latency without raw
+action targets. Deployable alert rules live in
+`docs/runtime/alerts/prometheus-living-agent-heartbeat.yml`.
+
+## Targets - proactive messenger
+
+| Metric | Target |
+|--------|--------|
+| `runtime.living_agent.proactive.sends{status="delivery_failed"}` | 0 events |
+| `runtime.living_agent.proactive.sends{status="blocked_missing_org_context"}` | 0 events |
+| `runtime.living_agent.proactive.can_send{reason="missing_org_context"}` | 0 events |
+
+Blocked guardrails for `feature_disabled`, `quiet_hours`, `daily_limit`,
+`cooloff`, and `opted_out` are product controls, not paging symptoms. Deployable
+alert rules live in `docs/runtime/alerts/prometheus-proactive-messenger.yml`.
+
 ## Error budget
 
 A 99.9% availability target gives **43.2 minutes of budgeted downtime
@@ -113,6 +190,22 @@ budget is consumed.
 | Subagent error rate                                  | 15 minutes | ≥ 5%      | P2 page  |
 | Postgres connection pool exhausted                   | 1 minute   | ≥ 3 occurrences | P1 page  |
 | Provider failover triggered                          | 5 minutes  | ≥ 5 events | P3 ticket |
+| Runtime-flow critical ledger alert                   | 10 minutes | > 0 events | P1 page   |
+| Runtime-flow error ledger alert                      | 15 minutes | > 0 events | P2 page   |
+| Runtime-flow warning burst                           | 30 minutes | > 10 events | P3 ticket |
+| Native stream finalization failure                   | 10 minutes | > 0 events | P2 page   |
+| Native dispatch finalization failure                 | 10 minutes | > 0 events | P2 page   |
+| Runtime lifecycle hook failure                       | 15 minutes | > 0 events | P3 ticket |
+| Semantic memory maintenance error                    | 15 minutes | > 0 events | P3 ticket |
+| Semantic memory maintenance broker unavailable       | 30 minutes | > 20 skipped enqueues | P3 ticket |
+| Scheduled task executor poll error                   | 15 minutes | > 0 events | P3 ticket |
+| Scheduled task execution failure or timeout          | 15 minutes | > 0 events | P3 ticket |
+| Scheduled task delivery misses                       | 30 minutes | > 5 not-delivered events | P3 ticket |
+| Living-agent heartbeat cycle error                   | 30 minutes | > 0 events | P3 ticket |
+| Living-agent heartbeat action failure or timeout     | 30 minutes | > 0 events | P3 ticket |
+| Living-agent heartbeat approval backlog              | 1 hour     | > 10 queued actions | P3 ticket |
+| Proactive messenger missing org context              | 30 minutes | > 0 events | P3 ticket |
+| Proactive messenger delivery failure                 | 30 minutes | > 0 events | P3 ticket |
 | Two consecutive nightly replay failures              | n/a        | n/a       | P2 page  |
 
 ## On-call playbook entries
@@ -129,6 +222,14 @@ specific findings back into them.
 | Subagent error rate spike            | [`runbooks/subagent-errors.md`](runbooks/subagent-errors.md)       |
 | Postgres pool exhaustion             | [`runbooks/db-pool-exhaustion.md`](runbooks/db-pool-exhaustion.md) |
 | Provider failover storm              | [`runbooks/provider-failover.md`](runbooks/provider-failover.md)   |
+| Runtime-flow ledger alert            | [`runbooks/runtime-flow-ledger-alerts.md`](runbooks/runtime-flow-ledger-alerts.md) |
+| Native stream finalization failure   | [`runbooks/native-stream-finalization.md`](runbooks/native-stream-finalization.md) |
+| Native dispatch finalization failure | [`runbooks/native-dispatch-finalization.md`](runbooks/native-dispatch-finalization.md) |
+| Runtime lifecycle hook failure       | [`runbooks/runtime-lifecycle-hook-failures.md`](runbooks/runtime-lifecycle-hook-failures.md) |
+| Semantic memory maintenance failure  | [`runbooks/semantic-memory-maintenance.md`](runbooks/semantic-memory-maintenance.md) |
+| Scheduled task executor failure      | [`runbooks/scheduled-task-executor.md`](runbooks/scheduled-task-executor.md) |
+| Living-agent heartbeat failure       | [`runbooks/living-agent-heartbeat.md`](runbooks/living-agent-heartbeat.md) |
+| Proactive messenger failure          | [`runbooks/proactive-messenger.md`](runbooks/proactive-messenger.md) |
 | Nightly replay double-failure        | [`runbooks/replay-regression.md`](runbooks/replay-regression.md)   |
 
 ## What is NOT in scope for v1
@@ -147,4 +248,5 @@ specific findings back into them.
 
 | Date       | Reviewer | Change                                   |
 |------------|----------|------------------------------------------|
+| 2026-06-01 | runtime  | Added runtime-flow ledger, native dispatch finalization, lifecycle hook, semantic-memory maintenance, scheduled-task executor, living-agent heartbeat, and proactive messenger alert targets, Prometheus rules, and runbooks |
 | 2026-05-03 | runtime  | v1 — initial draft, derived from Phase 9-17 work |

@@ -11,6 +11,10 @@ from app.engine.multi_agent.direct_search_synthesis_fallback import (
 from app.engine.multi_agent.direct_tool_message_runtime import (
     build_assistant_message,
 )
+from app.engine.multi_agent.tool_event_sanitizer import (
+    sanitize_tool_args_for_event,
+    sanitize_tool_result_for_event,
+)
 from app.engine.multi_agent.direct_web_search_policy import (
     FORCED_WEB_SEARCH_TOOL_NAMES,
     _clean_forced_web_search_query,
@@ -63,12 +67,13 @@ async def execute_forced_web_search_shortcut(
 
     tc_id = "forced_web_search_0"
     tc_args = {"query": _clean_forced_web_search_query(query)}
+    public_tc_args = sanitize_tool_args_for_event(tc_args)
     await push_event(
         {
             "type": "tool_call",
             "content": {
                 "name": forced_search_tool_name,
-                "args": tc_args,
+                "args": public_tc_args,
                 "id": tc_id,
             },
             "node": "direct",
@@ -78,7 +83,7 @@ async def execute_forced_web_search_shortcut(
         {
             "type": "call",
             "name": forced_search_tool_name,
-            "args": tc_args,
+            "args": public_tc_args,
             "id": tc_id,
         }
     )
@@ -115,7 +120,7 @@ async def execute_forced_web_search_shortcut(
         {
             "type": "result",
             "name": forced_search_tool_name,
-            "result": result,
+            "result": sanitize_tool_result_for_event(result),
             "id": tc_id,
         }
     )

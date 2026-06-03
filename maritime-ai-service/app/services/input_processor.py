@@ -64,6 +64,11 @@ class ChatContext:
     conversation_history: str = ""
     history_list: List[Dict[str, str]] = None
     user_facts: List[Any] = None
+    memory_warnings: List[str] = None
+    memory_retrieval_summary: Optional[Dict[str, Any]] = None
+    episodic_retrieval_summary: Optional[Dict[str, Any]] = None
+    history_retrieval_summary: Optional[Dict[str, Any]] = None
+    context_budget_summary: Optional[Dict[str, Any]] = None
     conversation_summary: Optional[str] = None
 
     # Sprint 77: LangChain messages for agent nodes (no truncation)
@@ -92,6 +97,7 @@ class ChatContext:
     host_context: Optional[Any] = None
     host_capabilities: Optional[Any] = None
     host_action_feedback: Optional[Any] = None
+    host_action_control_feedback: Optional[Any] = None
     visual_context: Optional[Any] = None
     widget_feedback: Optional[Any] = None
     code_studio_context: Optional[Any] = None
@@ -116,6 +122,16 @@ class ChatContext:
             self.history_list = []
         if self.user_facts is None:
             self.user_facts = []
+        if self.memory_warnings is None:
+            self.memory_warnings = []
+        if self.memory_retrieval_summary is None:
+            self.memory_retrieval_summary = {}
+        if self.episodic_retrieval_summary is None:
+            self.episodic_retrieval_summary = {}
+        if self.history_retrieval_summary is None:
+            self.history_retrieval_summary = {}
+        if self.context_budget_summary is None:
+            self.context_budget_summary = {}
         if self.langchain_messages is None:
             self.langchain_messages = []
 
@@ -199,6 +215,7 @@ class InputProcessor:
                     message,
                     user_id,
                     guardian_decision.reason,
+                    organization_id=getattr(request, "organization_id", None),
                 )
             elif guardian_decision.action == "FLAG":
                 logger.info(
@@ -224,6 +241,7 @@ class InputProcessor:
                         message,
                         user_id,
                         "; ".join(input_result.issues),
+                        organization_id=getattr(request, "organization_id", None),
                     )
 
         return result
@@ -234,6 +252,7 @@ class InputProcessor:
         message: str,
         user_id: str,
         reason: str,
+        organization_id: Optional[str] = None,
     ) -> None:
         """Log blocked message to chat history for admin review."""
         if self._chat_history and self._chat_history.is_available():
@@ -244,6 +263,7 @@ class InputProcessor:
                 user_id=user_id,
                 is_blocked=True,
                 block_reason=reason,
+                organization_id=organization_id,
             )
             logger.info(
                 "[MEMORY ISOLATION] Blocked message saved to chat_history with is_blocked=True"

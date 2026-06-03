@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -96,14 +97,81 @@ async def test_emit_stream_finalization_prefers_public_thinking_fragments():
     ]
 
     metadata_event = next(event for event in events if event.type == "metadata")
-    assert metadata_event.content["thinking"] == "native private thinking"
     expected_thinking = (
         "Mình đang gom các biến số thị trường quan trọng trước.\n\n"
         "Sau đó mình đối chiếu cung cầu với yếu tố địa chính trị để tránh nhận định bề mặt."
     )
+    assert metadata_event.content["thinking"] == expected_thinking
     assert metadata_event.content["thinking_content"] == expected_thinking
     assert metadata_event.content["thinking_lifecycle"]["final_text"] == expected_thinking
+    assert "native private thinking" not in json.dumps(
+        metadata_event.to_dict(),
+        ensure_ascii=False,
+    )
     assert events[-1].type == "done"
+
+
+@pytest.mark.asyncio
+async def test_emit_stream_finalization_sanitizes_public_metadata_payload():
+    final_state = {
+        "session_id": "session-metadata-safe",
+        "grader_score": 8.0,
+        "thinking": "Bearer raw-private-thinking-token-12345678",
+        "_public_thinking_fragments": ["safe public thinking"],
+        "routing_metadata": {
+            "final_agent": "direct",
+            "access_token": "raw-routing-token-123456",
+            "safe": "ok",
+        },
+        "evidence_images": [
+            {
+                "label": "screen",
+                "image_base64": "raw-image-payload",
+            }
+        ],
+        "_runtime_latency": {
+            "elapsed_ms": 10,
+            "timeline": [
+                {
+                    "stage": "runtime_step",
+                    "access_token": "raw-latency-token-123456",
+                }
+            ],
+        },
+    }
+
+    events = [
+        event
+        async for event in emit_stream_finalization_impl(
+            final_state=final_state,
+            session_id="session-metadata-safe",
+            context={"user_id": "user-metadata-safe"},
+            start_time=0.0,
+            resolve_runtime_llm_metadata=lambda *_args, **_kwargs: {
+                "provider": "google",
+                "model": "gemini-3.1-flash-lite-preview",
+                "runtime_authoritative": True,
+            },
+            create_sources_event=create_sources_event,
+            create_metadata_event=create_metadata_event,
+            create_done_event=create_done_event,
+            registry=_RegistryStub(),
+            trace_id="trace-metadata-safe",
+        )
+    ]
+
+    metadata_event = next(event for event in events if event.type == "metadata")
+    metadata = metadata_event.content
+    serialized = json.dumps(metadata, ensure_ascii=False)
+
+    assert metadata["thinking"] == "safe public thinking"
+    assert metadata["routing_metadata"]["safe"] == "ok"
+    assert "access_token" not in metadata["routing_metadata"]
+    assert "image_base64" not in metadata["evidence_images"][0]
+    assert "raw-private-thinking-token" not in serialized
+    assert "raw-routing-token" not in serialized
+    assert "raw-image-payload" not in serialized
+    assert "raw-latency-token" not in serialized
 
 
 @pytest.mark.asyncio
@@ -280,6 +348,71 @@ async def test_emit_stream_finalization_matches_sync_runtime_metadata_contract()
     assert events[-1].type == "done"
 
 
+def test_sync_process_payload_includes_sanitized_runtime_flow_trace() -> None:
+    final_state = {
+        "session_id": "session-sync-trace",
+        "grader_score": 8.0,
+        "final_response": "Posted.",
+        "_turn_path_decision": {
+            "version": "turn_path_decision.v1",
+            "path": "external_app_action",
+            "reason": "facebook_post_request",
+        },
+        "_tool_policy_session": {
+            "version": "tool_policy_session.v1",
+            "path": "external_app_action",
+            "reason": "facebook_post_request",
+            "visible_tool_names": [
+                "host_action__wiii_connect__facebook_post__direct_apply"
+            ],
+        },
+        "_final_answer_trace": {
+            "version": "final_answer_trace.v1",
+            "source": "wiii_connect_action_result",
+            "reason": "external_app_action_payload",
+            "status": "resolved",
+            "answer_present": True,
+        },
+        "tool_call_events": [
+            {
+                "type": "result",
+                "name": "host_action__wiii_connect__facebook_post__direct_apply",
+                "result": json.dumps(
+                    {
+                        "version": "wiii_connect_facebook_direct_tool.v1",
+                        "status": "action_completed",
+                        "success": True,
+                        "provider_slug": "facebook",
+                        "action": "wiii_connect.facebook_post.direct_apply",
+                        "summary": "Posted.",
+                        "data": {
+                            "access_token": "raw-provider-token",
+                            "provider_payload": {"id": "raw"},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        ],
+    }
+
+    payload = _build_process_result_payload(
+        result=final_state,
+        trace_id="trace-sync-runtime-flow",
+        trace_summary={"span_count": 0},
+        tracker=None,
+        resolve_public_thinking_content=lambda state, fallback="": fallback,
+    )
+
+    trace = payload["runtime_flow_trace"]
+    assert trace["turn_path_decision"]["path"] == "external_app_action"
+    assert trace["external_action_trace"]["last_status"] == "action_completed"
+    assert trace["final_answer"]["source"] == "wiii_connect_action_result"
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert "raw-provider-token" not in serialized
+    assert "provider_payload" not in serialized
+
+
 @pytest.mark.asyncio
 async def test_emit_stream_finalization_includes_runtime_latency_timeline():
     runtime_latency = {
@@ -331,3 +464,103 @@ async def test_emit_stream_finalization_includes_runtime_latency_timeline():
 
     metadata_event = next(event for event in events if event.type == "metadata")
     assert metadata_event.content["runtime_latency"] == runtime_latency
+
+
+@pytest.mark.asyncio
+async def test_emit_stream_finalization_includes_runtime_flow_trace() -> None:
+    final_state = {
+        "session_id": "session-trace",
+        "grader_score": 8.0,
+        "final_response": "Posted.",
+        "routing_metadata": {"final_agent": "direct"},
+        "_turn_path_decision": {
+            "version": "turn_path_decision.v1",
+            "path": "external_app_action",
+            "reason": "facebook_post_request",
+            "bind_tools": True,
+            "force_tools": True,
+            "allow_all_tools": False,
+        },
+        "_tool_policy_session": {
+            "version": "tool_policy_session.v1",
+            "path": "external_app_action",
+            "reason": "facebook_post_request",
+            "bind_tools": True,
+            "force_tools": True,
+            "allow_all_tools": False,
+            "visible_tool_names": [
+                "host_action__wiii_connect__facebook_post__direct_apply"
+            ],
+        },
+        "_external_app_action_plan": {
+            "version": "external_app_action_plan.v1",
+            "status": "ready",
+            "kind": "facebook_post_direct_apply",
+            "provider_slug": "facebook",
+            "action_slug": "wiii_connect.facebook_post.direct_apply",
+        },
+        "_external_app_integration_lane": {
+            "version": "external_app_integration_lane.v1",
+            "status": "ready",
+            "executor": "specialized_direct_tool",
+            "provider_slug": "facebook",
+            "visible_tool_names": [
+                "host_action__wiii_connect__facebook_post__direct_apply"
+            ],
+        },
+        "_final_answer_trace": {
+            "version": "final_answer_trace.v1",
+            "source": "wiii_connect_action_result",
+            "reason": "external_app_action_payload",
+            "status": "resolved",
+            "answer_present": True,
+        },
+        "tool_call_events": [
+            {
+                "type": "result",
+                "name": "host_action__wiii_connect__facebook_post__direct_apply",
+                "result": (
+                    '{"version":"wiii_connect_facebook_direct_tool.v1",'
+                    '"status":"action_completed","success":true,'
+                    '"provider_slug":"facebook",'
+                    '"action":"wiii_connect.facebook_post.direct_apply",'
+                    '"summary":"Posted.","access_token":"raw-token"}'
+                ),
+            }
+        ],
+    }
+
+    events = [
+        event
+        async for event in emit_stream_finalization_impl(
+            final_state=final_state,
+            session_id="session-trace",
+            context={"user_id": "user-trace"},
+            start_time=0.0,
+            resolve_runtime_llm_metadata=lambda *_args, **_kwargs: {
+                "provider": "nvidia",
+                "model": "qwen/qwen3-next-80b-a3b-instruct",
+                "runtime_authoritative": True,
+            },
+            create_sources_event=create_sources_event,
+            create_metadata_event=create_metadata_event,
+            create_done_event=create_done_event,
+            registry=_RegistryStub(),
+            trace_id="trace-runtime-flow",
+        )
+    ]
+
+    metadata_event = next(event for event in events if event.type == "metadata")
+    trace = metadata_event.content["runtime_flow_trace"]
+
+    assert trace["turn_path_decision"]["path"] == "external_app_action"
+    assert trace["tool_policy_session"]["visible_tool_names"] == [
+        "host_action__wiii_connect__facebook_post__direct_apply"
+    ]
+    assert trace["external_app_action_plan"]["provider_slug"] == "facebook"
+    assert trace["external_app_integration_lane"]["executor"] == (
+        "specialized_direct_tool"
+    )
+    assert trace["external_action_trace"]["last_status"] == "action_completed"
+    assert trace["final_answer"]["source"] == "wiii_connect_action_result"
+    assert "raw-token" not in str(trace)

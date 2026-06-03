@@ -1,0 +1,231 @@
+name: LMS Test Course Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/lms-test-course-evidence.yml"
+      - "docs/integration/WIII_LMS_DOC_TO_COURSE_CONTRACT.md"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/api/v1/host_actions.py"
+      - "maritime-ai-service/app/api/v1/chat_stream.py"
+      - "maritime-ai-service/app/services/chat_stream_coordinator.py"
+      - "maritime-ai-service/app/engine/context/**"
+      - "maritime-ai-service/app/engine/multi_agent/**"
+      - "maritime-ai-service/scripts/probe_live_lms_test_course_replay.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_lms_test_course_replay.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lms-test-course-evidence.yml"
+      - "docs/integration/WIII_LMS_DOC_TO_COURSE_CONTRACT.md"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/api/v1/host_actions.py"
+      - "maritime-ai-service/app/api/v1/chat_stream.py"
+      - "maritime-ai-service/app/services/chat_stream_coordinator.py"
+      - "maritime-ai-service/app/engine/context/**"
+      - "maritime-ai-service/app/engine/multi_agent/**"
+      - "maritime-ai-service/scripts/probe_live_lms_test_course_replay.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_lms_test_course_replay.py"
+  schedule:
+    - cron: "35 4 * * *"
+  workflow_dispatch:
+    inputs:
+      run_lms_replay:
+        description: "Run the guarded LMS test-course replay."
+        required: true
+        type: boolean
+        default: false
+      transport_mode:
+        description: "Backend transport to use."
+        required: true
+        type: choice
+        default: asgi
+        options:
+          - asgi
+          - http
+      base_url:
+        description: "Backend base URL for http transport."
+        required: false
+        type: string
+        default: "http://127.0.0.1:8000"
+      allow_production:
+        description: "Permit production or non-local targets."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: LMS Replay Probe Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      GOOGLE_API_KEY: fake-key-for-unit-tests
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run LMS replay probe unit tests
+        working-directory: maritime-ai-service
+        run: python -m pytest tests/unit/test_probe_live_lms_test_course_replay.py tests/unit/test_runtime_evidence_output.py -q --tb=short
+
+  live-lms-evidence:
+    name: Live LMS Test Course Replay Evidence
+    runs-on: ubuntu-latest
+    environment: wiii-runtime-evidence
+    timeout-minutes: 45
+    needs: contract
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && inputs.run_lms_replay == true) ||
+        (github.event_name == 'schedule' && vars.WIII_LMS_TEST_COURSE_EVIDENCE_ENABLED == '1')
+      }}
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      WIII_LIVE_LMS_TEST_COURSE_REPLAY: "1"
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      POSTGRES_URL_SYNC: ${{ secrets.POSTGRES_URL_SYNC }}
+      API_KEY: ${{ secrets.API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      WIII_LMS_TEST_COURSE_BEARER_TOKEN: ${{ secrets.WIII_LMS_TEST_COURSE_BEARER_TOKEN }}
+      WIII_LMS_TEST_COURSE_APPLY_URL: ${{ secrets.WIII_LMS_TEST_COURSE_APPLY_URL }}
+      WIII_LMS_TEST_COURSE_APPLY_TOKEN: ${{ secrets.WIII_LMS_TEST_COURSE_APPLY_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate LMS replay evidence
+        working-directory: maritime-ai-service
+        env:
+          TRANSPORT_MODE_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.transport_mode || 'asgi' }}
+          BASE_URL_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || 'http://127.0.0.1:8000' }}
+          ALLOW_PRODUCTION_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_production || false }}
+        run: |
+          set -euo pipefail
+
+          args=(--transport-mode "${TRANSPORT_MODE_INPUT:-asgi}" --base-url "${BASE_URL_INPUT:-http://127.0.0.1:8000}")
+          if [[ "${ALLOW_PRODUCTION_INPUT}" == "true" ]]; then
+            args+=(--allow-production)
+          fi
+
+          preflight_status=0
+          python scripts/probe_live_lms_test_course_replay.py \
+            --preflight-only \
+            --allow-write \
+            --allow-external-lms-write \
+            "${args[@]}" \
+            --out lms-test-course-preflight.json \
+            || preflight_status=$?
+          preflight_validation_status=0
+          python ../tools/wiii_self_harness/validate_runtime_evidence_preflight.py \
+            lms-test-course-preflight.json \
+            --requirement-id lms-test-course-replay \
+            || preflight_validation_status=$?
+          if [[ "${preflight_validation_status}" -ne 0 ]]; then
+            rm -f lms-test-course-preflight.json
+            exit "${preflight_validation_status}"
+          fi
+          cat lms-test-course-preflight.json
+          if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            {
+              echo "### LMS test-course replay preflight"
+              echo '```json'
+              cat lms-test-course-preflight.json
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          if [[ "${preflight_status}" -ne 0 ]]; then
+            echo "LMS test-course preflight blocked live replay; writing failed evidence artifact."
+            python scripts/probe_live_lms_test_course_replay.py \
+              --failure-from-preflight \
+              --failure-preflight-json lms-test-course-preflight.json \
+              --allow-write \
+              --allow-external-lms-write \
+              "${args[@]}" \
+              --out lms-test-course-evidence.json || true
+            exit "${preflight_status}"
+          fi
+
+          python scripts/probe_live_lms_test_course_replay.py \
+            --allow-write \
+            --allow-external-lms-write \
+            "${args[@]}" \
+            --out lms-test-course-evidence.json
+
+      - name: Validate LMS replay evidence
+        working-directory: maritime-ai-service
+        run: |
+          python ../tools/wiii_self_harness/validate_runtime_evidence_artifact.py \
+            lms-test-course-evidence.json \
+            --requirement-id lms-test-course-replay
+
+      - name: Upload LMS replay preflight diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: lms-test-course-preflight-${{ github.run_id }}
+          path: maritime-ai-service/lms-test-course-preflight.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload LMS replay evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: lms-test-course-evidence-${{ github.run_id }}
+          path: maritime-ai-service/lms-test-course-evidence.json
+          if-no-files-found: error
+          retention-days: 30

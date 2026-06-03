@@ -32,6 +32,19 @@ from app.engine.multi_agent.subagents.report import (
     AggregatorDecision,
     build_report,
 )
+from app.engine.multi_agent.subagents.handoff_context import (
+    build_subagent_handoff_boundary_summary,
+    project_kwargs_for_subagent,
+    project_state_for_subagent,
+)
+from app.engine.multi_agent.subagents.result_boundary import (
+    build_subagent_result_boundary_summary,
+    sanitize_subagent_result_for_executor,
+)
+from app.engine.multi_agent.subagents.event_stream import (
+    push_subagent_stream_event,
+    sanitize_subagent_stream_event,
+)
 
 __all__ = [
     "SubagentResult",
@@ -49,4 +62,11 @@ __all__ = [
     "ReportVerdict",
     "AggregatorDecision",
     "build_report",
+    "build_subagent_handoff_boundary_summary",
+    "build_subagent_result_boundary_summary",
+    "project_kwargs_for_subagent",
+    "project_state_for_subagent",
+    "push_subagent_stream_event",
+    "sanitize_subagent_result_for_executor",
+    "sanitize_subagent_stream_event",
 ]

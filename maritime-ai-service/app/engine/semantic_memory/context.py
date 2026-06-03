@@ -11,6 +11,7 @@ import logging
 from typing import List
 from datetime import datetime
 
+from app.engine.semantic_memory.privacy import hash_memory_identifier
 from app.models.semantic_memory import (
     InsightCategory,
     MemoryType,
@@ -19,6 +20,7 @@ from app.models.semantic_memory import (
     Insight,
 )
 from app.engine.embedding_runtime import EmbeddingBackendProtocol
+from app.engine.semantic_memory.write_audit import resolve_memory_read_scope
 from app.repositories.semantic_memory_repository import SemanticMemoryRepository
 
 logger = logging.getLogger(__name__)
@@ -72,8 +74,9 @@ class ContextRetriever:
             query_embedding = await self._embeddings.aembed_query(query)
         except Exception as exc:
             logger.warning(
-                "Semantic query embedding failed for user %s, falling back to lexical recall: %s",
-                user_id,
+                "Semantic query embedding failed for user_hash=%s, "
+                "falling back to lexical recall: %s",
+                hash_memory_identifier(user_id),
                 exc,
             )
             query_embedding = []
@@ -90,8 +93,8 @@ class ContextRetriever:
             )
 
         logger.info(
-            "Using fallback lexical recall for semantic context: user=%s",
-            user_id,
+            "Using fallback lexical recall for semantic context: user_hash=%s",
+            hash_memory_identifier(user_id),
         )
         return self._repository.search_similar_text(
             user_id=user_id,
@@ -133,6 +136,19 @@ class ContextRetriever:
         """
         search_limit = search_limit or self.DEFAULT_SEARCH_LIMIT
         similarity_threshold = similarity_threshold or self.DEFAULT_SIMILARITY_THRESHOLD
+        read_scope = resolve_memory_read_scope()
+        if not read_scope.write_allowed:
+            logger.warning(
+                "Semantic context retrieval blocked for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                read_scope.state,
+            )
+            return SemanticContext(
+                relevant_memories=[],
+                user_facts=[],
+                recent_messages=[],
+                total_tokens=0,
+            )
 
         relevant_memories: List[SemanticMemorySearchResult] = []
         user_facts: List[SemanticMemorySearchResult] = []
@@ -172,8 +188,10 @@ class ContextRetriever:
         )
 
         logger.debug(
-            "Retrieved context for user %s: %d memories, %d facts",
-            user_id, len(relevant_memories), len(user_facts),
+            "Retrieved context for user_hash=%s: %d memories, %d facts",
+            hash_memory_identifier(user_id),
+            len(relevant_memories),
+            len(user_facts),
         )
 
         return context
@@ -201,6 +219,15 @@ class ContextRetriever:
             
         **Validates: Requirements 4.3, 4.4**
         """
+        read_scope = resolve_memory_read_scope()
+        if not read_scope.write_allowed:
+            logger.warning(
+                "Insight retrieval blocked for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                read_scope.state,
+            )
+            return []
+
         try:
             # Get all insights
             all_insights = await self._get_user_insights(user_id)
@@ -250,6 +277,15 @@ class ContextRetriever:
         cosine similarity. Previous implementation used zero-vector
         search_similar() which produced NaN with pgvector (BUG-1).
         """
+        read_scope = resolve_memory_read_scope()
+        if not read_scope.write_allowed:
+            logger.warning(
+                "Insight list retrieval blocked for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                read_scope.state,
+            )
+            return []
+
         try:
             insight_memories = self._repository.get_user_insights(
                 user_id=user_id,

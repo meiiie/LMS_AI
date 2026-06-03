@@ -16,6 +16,8 @@ from app.core.config import settings
 from app.models.database import Base, ChatHistoryModel
 
 logger = logging.getLogger(__name__)
+_CHAT_HISTORY_MISSING_ORG_WARNING = "chat_history_blocked_missing_org_context"
+_CHAT_HISTORY_ORG_FILTER = " AND organization_id = :org_id"
 
 
 def _normalize_session_id(session_id: Union[str, UUID]) -> UUID:
@@ -50,6 +52,14 @@ class ChatSession:
     user_name: Optional[str]
     created_at: datetime
     messages: List[ChatMessage]
+
+
+@dataclass(frozen=True)
+class ChatHistoryOrgScope:
+    org_id: Optional[str]
+    state: str
+    warnings: list[str]
+    write_allowed: bool
 
 
 class ChatHistoryRepository:
@@ -168,18 +178,67 @@ class ChatHistoryRepository:
     def _org_scope(
         self,
         organization_id: Optional[str] = None,
-    ) -> tuple[Optional[str], str, dict[str, object]]:
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-
-        effective_org_id = (
-            organization_id
-            if organization_id is not None
-            else get_effective_org_id()
+        *,
+        write: bool = False,
+    ) -> tuple[ChatHistoryOrgScope, Optional[str], dict[str, object]]:
+        scope = self._resolve_chat_history_org_scope(
+            organization_id=organization_id,
+            write=write,
         )
+        if not scope.write_allowed or not scope.org_id:
+            return scope, None, {}
         params: dict[str, object] = {}
-        if effective_org_id is not None:
-            params["org_id"] = effective_org_id
-        return effective_org_id, org_where_clause(effective_org_id), params
+        params["org_id"] = scope.org_id
+        return scope, _CHAT_HISTORY_ORG_FILTER, params
+
+    def _resolve_chat_history_org_scope(
+        self,
+        *,
+        organization_id: Optional[str] = None,
+        write: bool = False,
+    ) -> ChatHistoryOrgScope:
+        if isinstance(organization_id, str) and organization_id.strip():
+            return ChatHistoryOrgScope(
+                org_id=organization_id.strip(),
+                state="explicit",
+                warnings=[],
+                write_allowed=True,
+            )
+
+        from app.engine.semantic_memory.write_audit import (
+            resolve_memory_read_scope,
+            resolve_memory_write_scope,
+        )
+
+        scope = resolve_memory_write_scope() if write else resolve_memory_read_scope()
+        return ChatHistoryOrgScope(
+            org_id=scope.org_id,
+            state=scope.state,
+            warnings=list(scope.warnings),
+            write_allowed=scope.write_allowed,
+        )
+
+    def _log_chat_history_scope_blocked(
+        self,
+        operation: str,
+        scope: ChatHistoryOrgScope,
+        *,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_CHAT_HISTORY_MISSING_ORG_WARNING)
+        logger.warning(
+            "[CHAT_HISTORY] %s blocked user_hash=%s session_hash=%s org_hash=%s "
+            "org_scope=%s warnings=%s",
+            operation,
+            _hash_memory_identifier(user_id),
+            _hash_memory_identifier(session_id),
+            _hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
     def _rows_to_messages(self, rows, fallback_session_id: UUID) -> List[ChatMessage]:
         return [
@@ -205,11 +264,18 @@ class ChatHistoryRepository:
         organization_id: Optional[str] = None,
     ) -> Optional[ChatSession]:
         """Return the latest session for the user or a fresh transient session."""
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_chat_history_scope_blocked(
+                "get_or_create_session",
+                scope,
+                user_id=user_id,
+            )
+            return None
         if not self._ensure_chat_history_ready():
             return None
 
         try:
-            _, org_filter, org_params = self._org_scope(organization_id)
             params = {"user_id": user_id, **org_params}
 
             with self._session_factory() as session:
@@ -256,15 +322,24 @@ class ChatHistoryRepository:
         user_id: Optional[str] = None,
         is_blocked: bool = False,
         block_reason: Optional[str] = None,
+        organization_id: Optional[str] = None,
     ) -> Optional[ChatMessage]:
         """Persist a message into chat_history."""
+        norm_session_id = _normalize_session_id(session_id)
+        effective_user_id = user_id or str(norm_session_id)
+        scope, _, org_params = self._org_scope(organization_id, write=True)
+        if not org_params.get("org_id"):
+            self._log_chat_history_scope_blocked(
+                "save_message",
+                scope,
+                user_id=effective_user_id,
+                session_id=str(norm_session_id),
+            )
+            return None
         if not self._ensure_chat_history_ready():
             return None
 
-        norm_session_id = _normalize_session_id(session_id)
-
         try:
-            _, _, org_params = self._org_scope()
             msg_id = uuid4()
             created_at = datetime.now(timezone.utc)
             with self._session_factory() as session:
@@ -297,7 +372,7 @@ class ChatHistoryRepository:
                     ),
                     {
                         "id": str(msg_id),
-                        "user_id": user_id or str(norm_session_id),
+                        "user_id": effective_user_id,
                         "session_id": str(norm_session_id),
                         "role": role,
                         "content": content,
@@ -328,11 +403,9 @@ class ChatHistoryRepository:
         limit: Optional[int] = None,
         user_id: Optional[str] = None,
         include_blocked: bool = False,
+        organization_id: Optional[str] = None,
     ) -> List[ChatMessage]:
         """Return recent messages in chronological order."""
-        if not self._ensure_chat_history_ready():
-            return []
-
         norm_session_id = _normalize_session_id(session_id)
         limit = limit or self.WINDOW_SIZE
         blocked_filter = (
@@ -342,9 +415,19 @@ class ChatHistoryRepository:
         )
         query_field = "user_id" if user_id else "session_id"
         query_value = user_id if user_id else str(norm_session_id)
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_chat_history_scope_blocked(
+                "get_recent_messages",
+                scope,
+                user_id=user_id,
+                session_id=str(norm_session_id),
+            )
+            return []
+        if not self._ensure_chat_history_ready():
+            return []
 
         try:
-            _, org_filter, org_params = self._org_scope()
             params = {
                 "query_value": query_value,
                 "limit": limit,
@@ -379,20 +462,27 @@ class ChatHistoryRepository:
         limit: int = 100,
         offset: int = 0,
         include_blocked: bool = False,
+        organization_id: Optional[str] = None,
     ) -> tuple[List[ChatMessage], int]:
         """Get paginated history for a session."""
-        if not self._ensure_chat_history_ready():
-            return [], 0
-
         norm_session_id = _normalize_session_id(session_id)
         blocked_filter = (
             ""
             if include_blocked
             else "AND (is_blocked = FALSE OR is_blocked IS NULL)"
         )
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_chat_history_scope_blocked(
+                "get_session_history",
+                scope,
+                session_id=str(norm_session_id),
+            )
+            return [], 0
+        if not self._ensure_chat_history_ready():
+            return [], 0
 
         try:
-            _, org_filter, org_params = self._org_scope()
             count_params = {"session_id": str(norm_session_id), **org_params}
             query_params = {
                 "session_id": str(norm_session_id),
@@ -439,15 +529,29 @@ class ChatHistoryRepository:
             logger.error("Failed to get session history: %s", exc)
             return [], 0
 
-    def update_user_name(self, session_id: UUID, user_name: str) -> bool:
+    def update_user_name(
+        self,
+        session_id: UUID,
+        user_name: str,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """Persist the discovered user name on existing rows of a session."""
+        norm_session_id = _normalize_session_id(session_id)
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_chat_history_scope_blocked(
+                "update_user_name",
+                scope,
+                session_id=str(norm_session_id),
+            )
+            return False
         if not self._ensure_chat_history_ready():
             return False
 
-        norm_session_id = _normalize_session_id(session_id)
-
         try:
-            _, org_filter, org_params = self._org_scope()
             with self._session_factory() as session:
                 result = session.execute(
                     text(
@@ -468,21 +572,34 @@ class ChatHistoryRepository:
 
             updated = (result.rowcount or 0) > 0
             if updated:
-                logger.info("Updated user name to '%s'", user_name)
+                logger.info(
+                    "Updated user name for session_hash=%s",
+                    _hash_memory_identifier(str(norm_session_id)),
+                )
             return updated
         except Exception as exc:
             logger.error("Failed to update user name: %s", exc)
             return False
 
-    def get_user_name(self, session_id: UUID) -> Optional[str]:
+    def get_user_name(
+        self,
+        session_id: UUID,
+        organization_id: Optional[str] = None,
+    ) -> Optional[str]:
         """Read the latest non-empty user name stored for a session."""
+        norm_session_id = _normalize_session_id(session_id)
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_chat_history_scope_blocked(
+                "get_user_name",
+                scope,
+                session_id=str(norm_session_id),
+            )
+            return None
         if not self._ensure_chat_history_ready():
             return None
 
-        norm_session_id = _normalize_session_id(session_id)
-
         try:
-            _, org_filter, org_params = self._org_scope()
             with self._session_factory() as session:
                 return session.execute(
                     text(
@@ -517,13 +634,24 @@ class ChatHistoryRepository:
             lines.append(f"{role_label}: {content}")
         return "\n".join(lines)
 
-    def delete_user_history(self, user_id: str) -> int:
+    def delete_user_history(
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None,
+    ) -> int:
         """Delete all chat_history rows for a user in the current org scope."""
+        scope, org_filter, org_params = self._org_scope(organization_id, write=True)
+        if org_filter is None:
+            self._log_chat_history_scope_blocked(
+                "delete_user_history",
+                scope,
+                user_id=user_id,
+            )
+            return 0
         if not self._ensure_chat_history_ready():
             return 0
 
         try:
-            _, org_filter, org_params = self._org_scope()
             with self._session_factory() as session:
                 result = session.execute(
                     text(
@@ -541,7 +669,11 @@ class ChatHistoryRepository:
                 session.commit()
 
             deleted_count = result.rowcount or 0
-            logger.info("Deleted %d messages for user %s", deleted_count, user_id)
+            logger.info(
+                "Deleted %d messages for user_hash=%s",
+                deleted_count,
+                _hash_memory_identifier(user_id),
+            )
             return deleted_count
         except Exception as exc:
             logger.error("Failed to delete user history: %s", exc)
@@ -552,13 +684,21 @@ class ChatHistoryRepository:
         user_id: str,
         limit: int = 20,
         offset: int = 0,
+        organization_id: Optional[str] = None,
     ) -> tuple[List[ChatMessage], int]:
         """Get paginated history for a user."""
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_chat_history_scope_blocked(
+                "get_user_history",
+                scope,
+                user_id=user_id,
+            )
+            return [], 0
         if not self._ensure_chat_history_ready():
             return [], 0
 
         try:
-            _, org_filter, org_params = self._org_scope()
             count_params = {"user_id": user_id, **org_params}
             query_params = {
                 "user_id": user_id,
@@ -613,3 +753,9 @@ def get_chat_history_repository() -> ChatHistoryRepository:
     if _chat_history_repo is None:
         _chat_history_repo = ChatHistoryRepository()
     return _chat_history_repo
+
+
+def _hash_memory_identifier(value) -> str | None:
+    from app.engine.semantic_memory.privacy import hash_memory_identifier
+
+    return hash_memory_identifier(value)

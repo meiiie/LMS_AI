@@ -13,9 +13,8 @@ Covers:
 - Edge cases and error handling
 """
 
-import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from dataclasses import asdict
 
 # =============================================================================
@@ -348,6 +347,40 @@ class TestGetNeo4jContext:
         assert "SOLAS Chapter V" in result.related_regulations
 
     @pytest.mark.asyncio
+    async def test_neo4j_context_passes_current_org(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.agentic_rag.graph_rag_retriever import _get_neo4j_context
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_neo4j = MagicMock()
+        mock_neo4j.is_available.return_value = True
+        mock_neo4j.get_entity_relations = AsyncMock(return_value=[])
+        mock_neo4j.get_document_entities = AsyncMock(return_value=[])
+
+        token = current_org_id.set("org-graph")
+        try:
+            with patch(
+                "app.repositories.neo4j_knowledge_repository.Neo4jKnowledgeRepository",
+                return_value=mock_neo4j,
+            ):
+                await _get_neo4j_context([_make_entity_info()], ["doc-1"])
+        finally:
+            current_org_id.reset(token)
+
+        mock_neo4j.get_entity_relations.assert_awaited_once_with(
+            "ent-COLREGs",
+            organization_id="org-graph",
+        )
+        mock_neo4j.get_document_entities.assert_awaited_once_with(
+            "doc-1",
+            organization_id="org-graph",
+        )
+
+    @pytest.mark.asyncio
     async def test_neo4j_limits_entities_to_5(self):
         from app.engine.agentic_rag.graph_rag_retriever import _get_neo4j_context
 
@@ -471,6 +504,58 @@ class TestGetPostgresContext:
         assert "Quy tắc liên quan" in result.entity_context_text
         assert len(result.additional_docs) == 1
         assert result.additional_docs[0]["node_id"] == "extra-1"
+
+    @pytest.mark.asyncio
+    async def test_postgres_context_filters_by_current_org(self, monkeypatch):
+        from app.engine.agentic_rag.graph_rag_retriever import _get_postgres_context
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production", raising=False)
+
+        entities = [_make_entity_info(name="COLREGs", entity_type="REGULATION")]
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_settings = _make_settings()
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("asyncpg.connect", AsyncMock(return_value=mock_conn)), \
+                 patch("app.core.config.get_settings", return_value=mock_settings):
+                result = await _get_postgres_context(entities, _make_documents())
+        finally:
+            current_org_id.reset(token)
+
+        query = mock_conn.fetch.await_args.args[0]
+        assert "AND (organization_id = $2 OR organization_id IS NULL)" in query
+        assert mock_conn.fetch.await_args.args[1] == "COLREGs"
+        assert mock_conn.fetch.await_args.args[2] == "org-A"
+        assert result.mode == "postgres"
+
+    @pytest.mark.asyncio
+    async def test_postgres_context_blocks_missing_org_before_connect(self, monkeypatch):
+        from app.engine.agentic_rag.graph_rag_retriever import _get_postgres_context
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production", raising=False)
+
+        entities = [_make_entity_info(name="PRIVATE ENTITY", entity_type="REGULATION")]
+        connect = AsyncMock()
+
+        token = current_org_id.set(None)
+        try:
+            with patch("asyncpg.connect", connect):
+                result = await _get_postgres_context(entities, _make_documents())
+        finally:
+            current_org_id.reset(token)
+
+        assert result.mode == "postgres"
+        assert result.additional_docs == []
+        assert "PRIVATE ENTITY" in result.entity_context_text
+        connect.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_postgres_filters_existing_docs(self):
@@ -604,7 +689,6 @@ class TestEnrichWithGraphContext:
         from app.engine.agentic_rag.graph_rag_retriever import (
             enrich_with_graph_context,
             GraphRAGContext,
-            EntityInfo,
         )
 
         entity = _make_entity_info()
@@ -777,8 +861,6 @@ class TestCorrativeRAGSyncIntegration:
     @pytest.mark.asyncio
     async def test_graph_rag_disabled_skips_enrichment(self):
         """When enable_graph_rag=False, no graph enrichment occurs."""
-        from app.engine.agentic_rag.graph_rag_retriever import enrich_with_graph_context
-
         # This tests the feature gate at the corrective_rag level
         # We verify the function itself works correctly regardless
         mock_settings = _make_settings(enable_graph_rag=False)
@@ -790,10 +872,7 @@ class TestCorrativeRAGSyncIntegration:
     @pytest.mark.asyncio
     async def test_graph_context_injected_into_context_dict(self):
         """Graph entity context should be injected into context['entity_context']."""
-        from app.engine.agentic_rag.graph_rag_retriever import (
-            enrich_with_graph_context,
-            GraphRAGContext,
-        )
+        from app.engine.agentic_rag.graph_rag_retriever import GraphRAGContext
 
         entity = _make_entity_info()
         graph_ctx = GraphRAGContext(

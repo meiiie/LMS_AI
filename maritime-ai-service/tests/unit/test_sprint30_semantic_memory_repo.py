@@ -16,6 +16,7 @@ Covers:
 """
 
 import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -430,6 +431,19 @@ class TestDeleteMemoriesByKeyword:
 
         result = repo.delete_memories_by_keyword("user-1", "nonexistent")
         assert result == 0
+
+    def test_delete_log_hashes_keyword_and_user(self, caplog):
+        repo = _make_repo()
+        _mock_session(repo, rows=[MagicMock()])
+        caplog.set_level(logging.INFO)
+
+        result = repo.delete_memories_by_keyword("user-private-123", "PRIVATE KEYWORD")
+
+        assert result == 1
+        assert "keyword_ref=sha256:" in caplog.text
+        assert "user_hash=sha256:" in caplog.text
+        assert "PRIVATE KEYWORD" not in caplog.text
+        assert "user-private-123" not in caplog.text
 
     def test_returns_zero_on_error(self):
         repo = _make_repo()

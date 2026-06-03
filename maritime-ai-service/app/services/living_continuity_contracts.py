@@ -20,6 +20,8 @@ class PostResponseContinuityContext:
     user_role: str
     message: str
     response_text: str
+    session_id: str | None = None
+    request_id: str | None = None
     domain_id: str = ""
     organization_id: str | None = None
     channel: str = "web"

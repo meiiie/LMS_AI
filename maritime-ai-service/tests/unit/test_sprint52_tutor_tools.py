@@ -79,6 +79,28 @@ class TestInitTutorTools:
         state = mod._get_state()
         assert state.user_id == "user-123"
 
+    def test_resets_session_when_user_changes(self):
+        import app.engine.tools.tutor_tools as mod
+        mod._tutor_agent = MagicMock()
+        mod.init_tutor_tools(user_id="user-a")
+        mod._get_state().session_id = "lesson-a"
+
+        mod.init_tutor_tools(user_id="user-b")
+        state = mod._get_state()
+
+        assert state.user_id == "user-b"
+        assert state.session_id is None
+
+    def test_preserves_session_for_same_user(self):
+        import app.engine.tools.tutor_tools as mod
+        mod._tutor_agent = MagicMock()
+        mod.init_tutor_tools(user_id="user-a")
+        mod._get_state().session_id = "lesson-a"
+
+        mod.init_tutor_tools(user_id="user-a")
+
+        assert mod._get_state().session_id == "lesson-a"
+
     def test_import_error(self):
         import app.engine.tools.tutor_tools as mod
         with patch("app.engine.tutor.tutor_agent.TutorAgent", side_effect=ImportError("No module")):
@@ -103,6 +125,45 @@ class TestSetTutorUser:
         from app.engine.tools.tutor_tools import set_tutor_user, _get_state
         set_tutor_user("user-789")
         assert _get_state().user_id == "user-789"
+
+    def test_set_tutor_user_resets_previous_session(self):
+        from app.engine.tools.tutor_tools import set_tutor_user, _get_state
+
+        set_tutor_user("user-a")
+        _get_state().session_id = "lesson-a"
+        set_tutor_user("user-b")
+
+        assert _get_state().user_id == "user-b"
+        assert _get_state().session_id is None
+
+    def test_runtime_context_identity_isolates_session(self):
+        from app.engine.tools.runtime_context import (
+            build_tool_runtime_context,
+            tool_runtime_scope,
+        )
+        from app.engine.tools.tutor_tools import _get_state
+
+        ctx_a = build_tool_runtime_context(
+            user_id="user-a",
+            organization_id="org-a",
+            session_id="chat-a",
+        )
+        ctx_b = build_tool_runtime_context(
+            user_id="user-a",
+            organization_id="org-b",
+            session_id="chat-a",
+        )
+
+        with tool_runtime_scope(ctx_a):
+            _get_state().session_id = "lesson-a"
+            assert _get_state().session_id == "lesson-a"
+
+        with tool_runtime_scope(ctx_b):
+            assert _get_state().session_id is None
+            _get_state().session_id = "lesson-b"
+
+        with tool_runtime_scope(ctx_a):
+            assert _get_state().session_id is None
 
 
 class TestGetCurrentSessionId:

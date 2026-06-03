@@ -264,7 +264,16 @@ class TestPgGet:
     @pytest.mark.asyncio
     async def test_found(self):
         repo, session = _make_pg_repo()
-        mock_row = (str(uuid4()), {"level": "beginner"}, ["Rule 15"], ["Rule 7"], 5, 20, None)
+        mock_row = (
+            str(uuid4()),
+            {"level": "beginner"},
+            ["Rule 15"],
+            ["Rule 7"],
+            5,
+            20,
+            None,
+            "default",
+        )
         mock_result = MagicMock()
         mock_result.fetchone.return_value = mock_row
         session.execute.return_value = mock_result
@@ -304,7 +313,7 @@ class TestPgCreate:
     async def test_success(self):
         repo, session = _make_pg_repo()
         # Mock the get call after create
-        mock_row = ("user1", {"level": "beginner"}, [], [], 0, 0, None)
+        mock_row = ("user1", {"level": "beginner"}, [], [], 0, 0, None, "default")
         mock_result = MagicMock()
         mock_result.fetchone.return_value = mock_row
         session.execute.return_value = mock_result
@@ -372,7 +381,7 @@ class TestPgIncrementStats:
     async def test_success(self):
         repo, session = _make_pg_repo()
         # Mock get_or_create (returns profile dict or creates)
-        mock_row = ("user1", {}, [], [], 0, 0, None)
+        mock_row = ("user1", {}, [], [], 0, 0, None, "default")
         mock_result = MagicMock()
         mock_result.fetchone.return_value = mock_row
         session.execute.return_value = mock_result

@@ -11,6 +11,14 @@ import json
 from uuid import uuid4
 
 from app.engine.living_agent.models import EmotionalState, MoodType
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
+
+_EMOTION_STATE_MISSING_ORG_WARNING = "emotion_state_blocked_missing_org_context"
 
 
 def build_behavior_modifiers_impl(state: EmotionalState, hour: int) -> dict[str, str]:
@@ -110,20 +118,32 @@ async def save_state_to_db_impl(engine, logger_obj) -> None:
 
         from app.core.database import get_shared_session_factory
 
+        scope = resolve_memory_write_scope()
+        if not _scope_allows_emotion_state(scope):
+            _log_emotion_state_scope_blocked(logger_obj, "save_state_to_db", scope)
+            return
+
         state_json = json.dumps(engine.to_dict(), ensure_ascii=False)
         session_factory = get_shared_session_factory()
         with session_factory() as session:
             session.execute(
-                text("DELETE FROM wiii_emotional_snapshots WHERE trigger_event = 'persistent_state'"),
+                text(
+                    """
+                        DELETE FROM wiii_emotional_snapshots
+                        WHERE trigger_event = 'persistent_state'
+                        AND organization_id = :org_id
+                    """
+                ),
+                {"org_id": scope.org_id},
             )
             session.execute(
                 text(
                     """
                         INSERT INTO wiii_emotional_snapshots
                         (id, primary_mood, energy_level, social_battery, engagement,
-                         trigger_event, state_json, snapshot_at)
+                         trigger_event, state_json, snapshot_at, organization_id)
                         VALUES (:id, :mood, :energy, :social, :engagement,
-                                'persistent_state', :state_json, NOW())
+                                'persistent_state', :state_json, NOW(), :org_id)
                     """
                 ),
                 {
@@ -133,10 +153,15 @@ async def save_state_to_db_impl(engine, logger_obj) -> None:
                     "social": engine._state.social_battery,
                     "engagement": engine._state.engagement,
                     "state_json": state_json,
+                    "org_id": scope.org_id,
                 },
             )
             session.commit()
-        logger_obj.info("[EMOTION] State persisted to DB: mood=%s", engine._state.primary_mood.value)
+        logger_obj.info(
+            "[EMOTION] State persisted to DB: mood=%s org_hash=%s",
+            engine._state.primary_mood.value,
+            hash_memory_identifier(scope.org_id),
+        )
     except Exception as exc:
         logger_obj.warning("[EMOTION] Failed to persist state: %s", exc)
 
@@ -148,6 +173,11 @@ async def load_state_from_db_impl(engine, logger_obj) -> bool:
 
         from app.core.database import get_shared_session_factory
 
+        scope = resolve_memory_read_scope()
+        if not _scope_allows_emotion_state(scope):
+            _log_emotion_state_scope_blocked(logger_obj, "load_state_from_db", scope)
+            return False
+
         session_factory = get_shared_session_factory()
         with session_factory() as session:
             row = session.execute(
@@ -155,16 +185,22 @@ async def load_state_from_db_impl(engine, logger_obj) -> bool:
                     """
                         SELECT state_json FROM wiii_emotional_snapshots
                         WHERE trigger_event = 'persistent_state'
+                        AND organization_id = :org_id
                         ORDER BY snapshot_at DESC
                         LIMIT 1
                     """
                 ),
+                {"org_id": scope.org_id},
             ).fetchone()
 
             if row and row[0]:
                 data = json.loads(row[0]) if isinstance(row[0], str) else row[0]
                 engine.restore_from_dict(data)
-                logger_obj.info("[EMOTION] State loaded from DB: mood=%s", engine._state.primary_mood.value)
+                logger_obj.info(
+                    "[EMOTION] State loaded from DB: mood=%s org_hash=%s",
+                    engine._state.primary_mood.value,
+                    hash_memory_identifier(scope.org_id),
+                )
                 return True
 
         logger_obj.debug("[EMOTION] No saved state in DB, using defaults")
@@ -172,6 +208,23 @@ async def load_state_from_db_impl(engine, logger_obj) -> bool:
     except Exception as exc:
         logger_obj.warning("[EMOTION] Failed to load state from DB: %s", exc)
         return False
+
+
+def _scope_allows_emotion_state(scope: MemoryWriteScope) -> bool:
+    return bool(scope.write_allowed and scope.org_id)
+
+
+def _log_emotion_state_scope_blocked(logger_obj, operation: str, scope: MemoryWriteScope) -> None:
+    warnings = list(scope.warnings)
+    if "missing_org_context" in warnings:
+        warnings.append(_EMOTION_STATE_MISSING_ORG_WARNING)
+    logger_obj.warning(
+        "[EMOTION] %s blocked org_hash=%s org_scope=%s warnings=%s",
+        operation,
+        hash_memory_identifier(scope.org_id),
+        scope.state,
+        sorted(set(warnings)),
+    )
 
 
 def apply_circadian_modifier_impl(state: EmotionalState, hour: int, clamp_fn) -> None:

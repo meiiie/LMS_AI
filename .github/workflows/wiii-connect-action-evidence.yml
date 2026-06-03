@@ -1,0 +1,162 @@
+name: Wiii Connect Action Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/wiii-connect-action-evidence.yml"
+      - "docs/architecture/wiii-connect/**"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "docs/operations/WIII_TOOL_POLICY_SESSION_STANDARD.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/engine/multi_agent/external_app_action_runtime.py"
+      - "maritime-ai-service/app/engine/multi_agent/external_app_integration_lane.py"
+      - "maritime-ai-service/app/engine/tools/wiii_connect_tools.py"
+      - "maritime-ai-service/app/engine/wiii_connect/**"
+      - "maritime-ai-service/scripts/probe_live_wiii_connect_action_replay.py"
+      - "maritime-ai-service/tests/unit/test_external_app_action_runtime.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_wiii_connect_action_replay.py"
+      - "maritime-ai-service/tests/unit/test_wiii_connect_integration_worker.py"
+      - "maritime-ai-service/tests/unit/test_wiii_connect_tools.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/wiii-connect-action-evidence.yml"
+      - "docs/architecture/wiii-connect/**"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "docs/operations/WIII_TOOL_POLICY_SESSION_STANDARD.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/engine/multi_agent/external_app_action_runtime.py"
+      - "maritime-ai-service/app/engine/multi_agent/external_app_integration_lane.py"
+      - "maritime-ai-service/app/engine/tools/wiii_connect_tools.py"
+      - "maritime-ai-service/app/engine/wiii_connect/**"
+      - "maritime-ai-service/scripts/probe_live_wiii_connect_action_replay.py"
+      - "maritime-ai-service/tests/unit/test_external_app_action_runtime.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_wiii_connect_action_replay.py"
+      - "maritime-ai-service/tests/unit/test_wiii_connect_integration_worker.py"
+      - "maritime-ai-service/tests/unit/test_wiii_connect_tools.py"
+  schedule:
+    - cron: "55 4 * * *"
+  workflow_dispatch:
+    inputs:
+      run_wiii_connect_action_replay:
+        description: "Run the guarded Wiii Connect external-app action replay."
+        required: true
+        type: boolean
+        default: false
+      allow_production:
+        description: "Permit production settings.environment."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Wiii Connect Action Replay Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      GOOGLE_API_KEY: fake-key-for-unit-tests
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Wiii Connect replay probe unit tests
+        working-directory: maritime-ai-service
+        run: python -m pytest tests/unit/test_probe_live_wiii_connect_action_replay.py tests/unit/test_runtime_evidence_output.py tests/unit/test_external_app_action_runtime.py tests/unit/test_wiii_connect_integration_worker.py tests/unit/test_wiii_connect_tools.py -q --tb=short
+
+  live-wiii-connect-action-evidence:
+    name: Live Wiii Connect Action Replay Evidence
+    runs-on: ubuntu-latest
+    environment: wiii-runtime-evidence
+    timeout-minutes: 30
+    needs: contract
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && inputs.run_wiii_connect_action_replay == true) ||
+        (github.event_name == 'schedule' && vars.WIII_CONNECT_ACTION_EVIDENCE_ENABLED == '1')
+      }}
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      WIII_LIVE_WIII_CONNECT_ACTION_REPLAY: "1"
+      GOOGLE_API_KEY: fake-key-for-local-replay
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate Wiii Connect action replay evidence
+        working-directory: maritime-ai-service
+        env:
+          ALLOW_PRODUCTION_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_production || false }}
+        run: |
+          set -euo pipefail
+
+          args=()
+          if [[ "${ALLOW_PRODUCTION_INPUT}" == "true" ]]; then
+            args+=(--allow-production)
+          fi
+
+          python scripts/probe_live_wiii_connect_action_replay.py --allow-run "${args[@]}" \
+            --out wiii-connect-action-evidence.json
+
+      - name: Validate Wiii Connect action replay evidence
+        working-directory: maritime-ai-service
+        run: |
+          python ../tools/wiii_self_harness/validate_runtime_evidence_artifact.py \
+            wiii-connect-action-evidence.json \
+            --requirement-id wiii-connect-action-replay
+
+      - name: Upload Wiii Connect action replay evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: wiii-connect-action-evidence-${{ github.run_id }}
+          path: maritime-ai-service/wiii-connect-action-evidence.json
+          if-no-files-found: error
+          retention-days: 30

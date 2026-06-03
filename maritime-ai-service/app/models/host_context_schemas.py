@@ -6,7 +6,195 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+_DROP_CONTEXT_VALUE = object()
+_MAX_PUBLIC_CONTEXT_DEPTH = 8
+_MAX_PUBLIC_CONTEXT_LIST_ITEMS = 64
+_MAX_PUBLIC_CONTEXT_STRING_LENGTH = 4000
+
+_SENSITIVE_PUBLIC_CONTEXT_KEYS = frozenset(
+    {
+        "__proto__",
+        "access_token",
+        "ak_secret",
+        "api_key",
+        "apikey",
+        "approval_token",
+        "authorization",
+        "bearer",
+        "client_secret",
+        "connection_id",
+        "connection_ref",
+        "constructor",
+        "cookie",
+        "credential",
+        "external_account_ref",
+        "image_base64",
+        "page_id",
+        "password",
+        "private_key",
+        "preview_token",
+        "prototype",
+        "provider_payload",
+        "raw_provider",
+        "refresh_token",
+        "secret",
+        "token",
+        "vault_ref",
+    }
+)
+
+_CONTROL_FEEDBACK_DATA_KEYS = frozenset(
+    {
+        "approval_token",
+        "preview_kind",
+        "preview_token",
+    }
+)
+
+
+def _normalize_context_key(key: Any) -> str:
+    return str(key or "").strip().lower().replace("-", "_")
+
+
+def _is_sensitive_public_context_key(key: Any) -> bool:
+    return _normalize_context_key(key) in _SENSITIVE_PUBLIC_CONTEXT_KEYS
+
+
+def _sanitize_public_context_value(value: Any, depth: int = 0) -> Any:
+    """Return a model-facing copy of host-provided context.
+
+    This intentionally removes backend-owned/control identifiers and secrets at
+    the schema boundary while preserving ordinary page/action context.
+    """
+
+    if depth > _MAX_PUBLIC_CONTEXT_DEPTH:
+        return _DROP_CONTEXT_VALUE
+
+    if hasattr(value, "model_dump"):
+        value = value.model_dump()
+    elif hasattr(value, "dict"):
+        value = value.dict()
+
+    if isinstance(value, dict):
+        cleaned: dict[str, Any] = {}
+        for raw_key, raw_item in value.items():
+            key = str(raw_key)
+            normalized_key = _normalize_context_key(key)
+            if not key.strip() or _is_sensitive_public_context_key(key):
+                continue
+            if normalized_key == "required" and isinstance(raw_item, list):
+                required_items = [
+                    str(item)
+                    for item in raw_item[:_MAX_PUBLIC_CONTEXT_LIST_ITEMS]
+                    if str(item or "").strip()
+                    and not _is_sensitive_public_context_key(item)
+                ]
+                if required_items:
+                    cleaned[key] = required_items
+                continue
+            item = _sanitize_public_context_value(raw_item, depth + 1)
+            if item is not _DROP_CONTEXT_VALUE:
+                cleaned[key] = item
+        return cleaned
+
+    if isinstance(value, list):
+        cleaned_items = []
+        for raw_item in value[:_MAX_PUBLIC_CONTEXT_LIST_ITEMS]:
+            item = _sanitize_public_context_value(raw_item, depth + 1)
+            if item is not _DROP_CONTEXT_VALUE:
+                cleaned_items.append(item)
+        return cleaned_items
+
+    if isinstance(value, str):
+        return value[:_MAX_PUBLIC_CONTEXT_STRING_LENGTH]
+
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+
+    return str(value)[:_MAX_PUBLIC_CONTEXT_STRING_LENGTH]
+
+
+def _sanitize_public_context_field(value: Any) -> Any:
+    if value is None:
+        return None
+    sanitized = _sanitize_public_context_value(value)
+    return None if sanitized is _DROP_CONTEXT_VALUE else sanitized
+
+
+def _sanitize_host_action_feedback_for_prompt(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return _sanitize_public_context_field(value)
+
+    cleaned = _sanitize_public_context_field(value)
+    if not isinstance(cleaned, dict):
+        cleaned = {}
+
+    last_result = value.get("last_action_result")
+    if not isinstance(last_result, dict):
+        return cleaned or None
+
+    data = last_result.get("data")
+    if not isinstance(data, dict):
+        return cleaned or None
+
+    preview_token_present = bool(str(data.get("preview_token") or "").strip())
+    approval_token_present = bool(str(data.get("approval_token") or "").strip())
+    if not preview_token_present and not approval_token_present:
+        return cleaned or None
+
+    cleaned_last = cleaned.get("last_action_result")
+    if not isinstance(cleaned_last, dict):
+        cleaned_last = {}
+        cleaned["last_action_result"] = cleaned_last
+    cleaned_data = cleaned_last.get("data")
+    if not isinstance(cleaned_data, dict):
+        cleaned_data = {}
+        cleaned_last["data"] = cleaned_data
+    if preview_token_present:
+        cleaned_data["preview_available"] = True
+    if approval_token_present:
+        cleaned_data["approval_available"] = True
+    return cleaned
+
+
+def _extract_host_action_control_feedback(value: Any) -> dict[str, Any] | None:
+    """Keep only host-action continuation fields needed by backend tools."""
+
+    if not isinstance(value, dict):
+        return None
+    last_result = value.get("last_action_result")
+    if not isinstance(last_result, dict):
+        return None
+
+    data = last_result.get("data")
+    if not isinstance(data, dict):
+        data = {}
+
+    control_data: dict[str, Any] = {}
+    for key in _CONTROL_FEEDBACK_DATA_KEYS:
+        raw_value = data.get(key)
+        if raw_value is None:
+            continue
+        text = str(raw_value).strip()
+        if text:
+            control_data[key] = text[:_MAX_PUBLIC_CONTEXT_STRING_LENGTH]
+
+    action = str(last_result.get("action") or "").strip()
+    summary = str(last_result.get("summary") or "").strip()
+    control_result: dict[str, Any] = {}
+    if action:
+        control_result["action"] = action[:_MAX_PUBLIC_CONTEXT_STRING_LENGTH]
+    if "success" in last_result:
+        control_result["success"] = bool(last_result.get("success"))
+    if summary:
+        control_result["summary"] = summary[:_MAX_PUBLIC_CONTEXT_STRING_LENGTH]
+    if control_data:
+        control_result["data"] = control_data
+
+    return {"last_action_result": control_result} if control_result else None
 
 
 def utc_now() -> datetime:
@@ -65,6 +253,11 @@ class PageContext(BaseModel):
         default=None,
         description="Referenced entities on the page",
     )
+
+    @field_validator("selection", "editable_scope", "entity_refs", mode="before")
+    @classmethod
+    def sanitize_nested_page_context(cls, value: Any) -> Any:
+        return _sanitize_public_context_field(value)
 
 
 class StudentPageState(BaseModel):
@@ -236,6 +429,12 @@ class UserContext(BaseModel):
         default=None,
         description="Recent host action results so Wiii can continue preview/confirm/apply flows safely",
     )
+    host_action_control_feedback: Optional[dict] = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+        description="Backend-only host action continuation data; excluded from serialized context",
+    )
     visual_context: Optional[dict] = Field(
         default=None,
         description="Inline visual session context from chat client for follow-up visual patching",
@@ -271,6 +470,55 @@ class UserContext(BaseModel):
             ]
         }
     }
+
+    @model_validator(mode="before")
+    @classmethod
+    def seed_host_action_control_feedback(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        raw_feedback = values.get("host_action_feedback")
+        control_feedback = _extract_host_action_control_feedback(raw_feedback)
+        seeded = dict(values)
+        seeded.pop("host_action_control_feedback", None)
+        if control_feedback is None:
+            return seeded
+        seeded["host_action_control_feedback"] = control_feedback
+        return seeded
+
+    @field_validator(
+        "available_actions",
+        "host_context",
+        "host_capabilities",
+        "visual_context",
+        "widget_feedback",
+        "code_studio_context",
+        mode="before",
+    )
+    @classmethod
+    def sanitize_public_context_fields(cls, value: Any) -> Any:
+        return _sanitize_public_context_field(value)
+
+    @field_validator("host_action_feedback", mode="before")
+    @classmethod
+    def sanitize_host_action_feedback(cls, value: Any) -> Any:
+        return _sanitize_host_action_feedback_for_prompt(value)
+
+
+def sanitize_user_context_for_ingress(user_context: UserContext | dict[str, Any] | None) -> UserContext | None:
+    """Re-validate user_context before transport adapters hand it to runtime."""
+
+    if user_context is None:
+        return None
+    if isinstance(user_context, UserContext):
+        payload = user_context.model_dump(mode="python")
+        sanitized = UserContext.model_validate(payload)
+        control_feedback = user_context.host_action_control_feedback
+        if control_feedback is None:
+            return sanitized
+        return sanitized.model_copy(
+            update={"host_action_control_feedback": control_feedback}
+        )
+    return UserContext.model_validate(user_context)
 
 
 class ImageInput(BaseModel):

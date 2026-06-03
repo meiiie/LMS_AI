@@ -161,8 +161,13 @@ class TestSaveMessageNormalization:
         repo = _make_repo()
         mock_db = _mock_session_context(repo)
 
-        with patch("app.core.org_filter.get_effective_org_id", return_value="org-1"):
-            repo.save_message(uuid4(), "user", "hello", user_id="u1")
+        repo.save_message(
+            uuid4(),
+            "user",
+            "hello",
+            user_id="u1",
+            organization_id="org-1",
+        )
 
         params = mock_db.execute.call_args[0][1]
         assert params["org_id"] == "org-1"

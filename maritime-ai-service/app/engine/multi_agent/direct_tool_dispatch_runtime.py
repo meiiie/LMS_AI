@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.engine.multi_agent.tool_event_sanitizer import sanitize_tool_args_for_event
 from app.engine.multi_agent.tool_policy_session import (
     tool_policy_denial_message,
     tool_policy_session_from_state,
@@ -75,12 +76,13 @@ async def dispatch_direct_tool_call(
                 policy_decision.path,
                 policy_decision.reason,
             )
+            public_tool_args = sanitize_tool_args_for_event(tool_args)
             await push_event(
                 {
                     "type": "tool_call",
                     "content": {
                         "name": tool_name,
-                        "args": tool_args,
+                        "args": public_tool_args,
                         "id": tool_call_id,
                         "policy": {
                             "allowed": False,
@@ -95,7 +97,7 @@ async def dispatch_direct_tool_call(
                 {
                     "type": "call",
                     "name": tool_name,
-                    "args": tool_args,
+                    "args": public_tool_args,
                     "id": tool_call_id,
                     "policy": {
                         "allowed": False,
@@ -127,10 +129,11 @@ async def dispatch_direct_tool_call(
         tool_args = prefer_official_query_for_known_docs(tool_args, query)
         tool_call["args"] = tool_args
 
+    public_tool_args = sanitize_tool_args_for_event(tool_args)
     await push_event(
         {
             "type": "tool_call",
-            "content": {"name": tool_name, "args": tool_args, "id": tool_call_id},
+            "content": {"name": tool_name, "args": public_tool_args, "id": tool_call_id},
             "node": "direct",
         }
     )
@@ -138,7 +141,7 @@ async def dispatch_direct_tool_call(
         {
             "type": "call",
             "name": tool_name,
-            "args": tool_args,
+            "args": public_tool_args,
             "id": tool_call_id,
         }
     )

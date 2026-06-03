@@ -25,11 +25,18 @@ import logging
 from typing import List, Optional
 
 from app.engine.living_agent.models import IdentityInsight, InsightCategory
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 
 logger = logging.getLogger(__name__)
 
 # Maximum insights to keep (prevents unbounded growth)
 _MAX_INSIGHTS = 20
+_IDENTITY_MISSING_ORG_WARNING = "identity_core_blocked_missing_org_context"
 
 # Insight extraction prompt — asks local LLM to find self-knowledge from reflection
 _INSIGHT_PROMPT = """Minh la Wiii. Dua tren bai suy ngam duoi day, hay rut ra 2-4 nhan xet ve ban than minh.
@@ -78,7 +85,7 @@ class IdentityCore:
     def __init__(self) -> None:
         self._insights: List[IdentityInsight] = []
 
-    def get_identity_context(self) -> str:
+    def get_identity_context(self, organization_id: Optional[str] = None) -> str:
         """Compile ~80-token identity context for system prompt injection.
 
         HOT PATH — synchronous, no DB calls, reads from in-memory cache.
@@ -94,7 +101,12 @@ class IdentityCore:
         except Exception:
             return ""
 
-        validated = [i for i in self._insights if i.validated]
+        scope = self._resolve_identity_scope(organization_id, write=False)
+        if not self._scope_allows_identity(scope):
+            self._log_scope_blocked("get_identity_context", scope)
+            return ""
+
+        validated = [i for i in self._insights_for_scope(scope) if i.validated]
         if not validated:
             return ""
 
@@ -131,12 +143,18 @@ class IdentityCore:
             return []
 
         # Gather reflection data
-        reflection_text = await self._get_recent_reflection_text(organization_id)
+        scope = self._resolve_identity_scope(organization_id, write=True)
+        if not self._scope_allows_identity(scope):
+            self._log_scope_blocked("generate_self_insights", scope)
+            return []
+        org_id = scope.org_id
+
+        reflection_text = await self._get_recent_reflection_text(org_id)
         if not reflection_text:
             logger.debug("[IDENTITY] No reflection data available")
             return []
 
-        skills_summary = self._get_skills_summary()
+        skills_summary = self._get_skills_summary(org_id)
 
         # Generate insights via local LLM
         try:
@@ -181,11 +199,12 @@ class IdentityCore:
                 confidence=0.6 if is_valid else 0.2,
                 source="reflection",
                 validated=is_valid,
+                organization_id=org_id,
             )
             new_insights.append(insight)
 
         # Merge into existing insights (deduplicate by text similarity)
-        added = self._merge_insights(new_insights)
+        added = self._merge_insights(new_insights, organization_id=org_id)
 
         if added:
             logger.info(
@@ -196,13 +215,23 @@ class IdentityCore:
 
         return added
 
-    def get_all_insights(self) -> List[IdentityInsight]:
+    def get_all_insights(
+        self,
+        organization_id: Optional[str] = None,
+    ) -> List[IdentityInsight]:
         """Return all current identity insights."""
-        return list(self._insights)
+        scope = self._resolve_identity_scope(organization_id, write=False)
+        if not self._scope_allows_identity(scope):
+            self._log_scope_blocked("get_all_insights", scope)
+            return []
+        return list(self._insights_for_scope(scope))
 
-    def get_validated_insights(self) -> List[IdentityInsight]:
+    def get_validated_insights(
+        self,
+        organization_id: Optional[str] = None,
+    ) -> List[IdentityInsight]:
         """Return only Soul-Core-validated insights."""
-        return [i for i in self._insights if i.validated]
+        return [i for i in self.get_all_insights(organization_id) if i.validated]
 
     # =========================================================================
     # Data gathering helpers
@@ -223,12 +252,20 @@ class IdentityCore:
         except Exception:
             return ""
 
-    def _get_skills_summary(self) -> str:
+    def _get_skills_summary(self, org_id: Optional[str]) -> str:
         """Get compact skills summary from SkillBuilder."""
+        if not org_id:
+            return ""
         try:
             from app.engine.living_agent.skill_builder import get_skill_builder
+            from app.core.org_context import current_org_id
+
             builder = get_skill_builder()
-            skills = builder.get_all_skills()
+            token = current_org_id.set(org_id)
+            try:
+                skills = builder.get_all_skills()
+            finally:
+                current_org_id.reset(token)
             if not skills:
                 return ""
             return "; ".join(
@@ -253,15 +290,26 @@ class IdentityCore:
     def _merge_insights(
         self,
         new_insights: List[IdentityInsight],
+        organization_id: Optional[str] = None,
     ) -> List[IdentityInsight]:
         """Merge new insights, avoiding near-duplicates.
 
         Returns the actually-added insights.
         """
+        scope = self._resolve_identity_scope(organization_id, write=True)
+        if not self._scope_allows_identity(scope):
+            self._log_scope_blocked("merge_insights", scope)
+            return []
+        org_id = scope.org_id
+
         added: List[IdentityInsight] = []
-        existing_texts = {i.text.lower().strip() for i in self._insights}
+        existing_texts = {
+            i.text.lower().strip()
+            for i in self._insights_for_scope(scope)
+        }
 
         for insight in new_insights:
+            insight.organization_id = insight.organization_id or org_id
             normalized = insight.text.lower().strip()
             if normalized in existing_texts:
                 continue
@@ -274,11 +322,107 @@ class IdentityCore:
             added.append(insight)
 
         # Trim to max size — keep highest confidence
-        if len(self._insights) > _MAX_INSIGHTS:
-            self._insights.sort(key=lambda i: i.confidence, reverse=True)
-            self._insights = self._insights[:_MAX_INSIGHTS]
+        org_scoped = self._insights_for_scope(scope)
+        if len(org_scoped) > _MAX_INSIGHTS:
+            keep_ids = {
+                i.id
+                for i in sorted(
+                    org_scoped,
+                    key=lambda item: item.confidence,
+                    reverse=True,
+                )[:_MAX_INSIGHTS]
+            }
+            self._insights = [
+                i
+                for i in self._insights
+                if not self._same_org(i, scope) or i.id in keep_ids
+            ]
 
         return added
+
+    def _resolve_identity_scope(
+        self,
+        organization_id: Optional[str],
+        *,
+        write: bool,
+    ) -> MemoryWriteScope:
+        if isinstance(organization_id, str) and organization_id.strip():
+            return MemoryWriteScope(
+                org_id=organization_id.strip(),
+                state="explicit",
+                warnings=[],
+                write_allowed=True,
+            )
+        try:
+            from app.core.config import get_settings
+            from app.core.org_context import get_current_org_id
+
+            settings = get_settings()
+            default_org_id = getattr(settings, "default_organization_id", "default")
+            if not isinstance(default_org_id, str) or not default_org_id.strip():
+                default_org_id = "default"
+
+            if getattr(settings, "enable_multi_tenant", False) is not True:
+                return MemoryWriteScope(
+                    org_id=default_org_id,
+                    state="single_tenant_default",
+                    warnings=[],
+                    write_allowed=True,
+                )
+
+            current_org_id = get_current_org_id()
+            if isinstance(current_org_id, str) and current_org_id.strip():
+                return MemoryWriteScope(
+                    org_id=current_org_id.strip(),
+                    state="request_scoped",
+                    warnings=[],
+                    write_allowed=True,
+                )
+
+            environment = getattr(settings, "environment", "development")
+            if environment in {"production", "staging"}:
+                return MemoryWriteScope(
+                    org_id=None,
+                    state="blocked_missing_org_context",
+                    warnings=["missing_org_context"],
+                    write_allowed=False,
+                )
+
+            return MemoryWriteScope(
+                org_id=default_org_id,
+                state="defaulted",
+                warnings=["missing_org_context_defaulted"],
+                write_allowed=True,
+            )
+        except Exception:
+            pass
+        return resolve_memory_write_scope() if write else resolve_memory_read_scope()
+
+    def _scope_allows_identity(self, scope: MemoryWriteScope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _insights_for_scope(self, scope: MemoryWriteScope) -> List[IdentityInsight]:
+        return [insight for insight in self._insights if self._same_org(insight, scope)]
+
+    def _same_org(self, insight: IdentityInsight, scope: MemoryWriteScope) -> bool:
+        if insight.organization_id == scope.org_id:
+            return True
+        return (
+            scope.state == "single_tenant_default"
+            and insight.organization_id is None
+        )
+
+    def _log_scope_blocked(self, operation: str, scope: MemoryWriteScope) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_IDENTITY_MISSING_ORG_WARNING)
+        logger.warning(
+            "[IDENTITY] %s blocked org_hash=%s org_scope=%s warnings=%s",
+            operation,
+            hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
 
 # =============================================================================

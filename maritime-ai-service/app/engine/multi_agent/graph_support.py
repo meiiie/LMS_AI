@@ -140,12 +140,20 @@ def _get_domain_greetings(domain_id: str) -> dict:
     }
 
 
-async def _generate_session_summary_bg(thread_id: str, user_id: str) -> None:
+async def _generate_session_summary_bg(
+    thread_id: str,
+    user_id: str,
+    organization_id: str | None = None,
+) -> None:
     """Background: generate session summary for cross-session preamble."""
     try:
         from app.services.session_summarizer import get_session_summarizer
 
         summarizer = get_session_summarizer()
-        await summarizer.summarize_thread(thread_id, user_id)
+        await summarizer.summarize_thread(
+            thread_id,
+            user_id,
+            organization_id=organization_id,
+        )
     except Exception as exc:  # pragma: no cover - defensive logging only
         logger.debug("Background session summary failed: %s", exc)
