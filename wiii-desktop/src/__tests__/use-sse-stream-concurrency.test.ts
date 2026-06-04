@@ -10,7 +10,7 @@ import { useCharacterStore } from "@/stores/character-store";
 import { usePageContextStore } from "@/stores/page-context-store";
 import { useHostContextStore } from "@/stores/host-context-store";
 import { useModelStore } from "@/stores/model-store";
-import type { VisualPayload } from "@/api/types";
+import type { ToolExecutionBlockData, VisualPayload } from "@/api/types";
 import { sendMessageStream } from "@/api/chat";
 import {
   fetchWiiiConnectFacebookPages,
@@ -398,6 +398,67 @@ describe("useSSEStream concurrency", () => {
     expect(useChatStore.getState().streamingLifecycleEvents).toHaveLength(0);
     expect(useChatStore.getState().lastCompletedLifecycleEvents).toHaveLength(0);
     useChatStore.getState().clearStreaming();
+  });
+
+  it("preserves tool_call policy inside stored tool metadata", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    sendMessageStreamMock.mockImplementationOnce(async (_request, handlers) => {
+      handlers.onToolCall?.({
+        content: {
+          id: "tc-policy",
+          name: "tool_fetch_url",
+          args: { url: "https://example.com/weather" },
+          metadata: {
+            schema_version: "tool_result_metadata.v1",
+            status: "blocked",
+            result_kind: "policy",
+            reason_code: "not_allowed_by_path_policy",
+          },
+          policy: {
+            allowed: false,
+            path: "weather_lookup",
+            reason: "not_allowed_by_path_policy",
+          },
+        },
+        node: "direct",
+      });
+      handlers.onDone();
+      return {
+        lastEventId: null,
+        sawDone: true,
+        eventOrder: ["tool_call", "done"],
+      };
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Weather with blocked side tool");
+      await Promise.resolve();
+    });
+
+    const state = useChatStore.getState();
+    const streamingToolBlock = state.streamingBlocks.find(
+      (block) => block.type === "tool_execution" && block.id === "tc-policy",
+    ) as ToolExecutionBlockData | undefined;
+    const assistantToolBlock = state
+      .activeConversation()
+      ?.messages.flatMap((message) => message.blocks || [])
+      .find(
+        (block) => block.type === "tool_execution" && block.id === "tc-policy",
+      ) as ToolExecutionBlockData | undefined;
+    const toolBlock = streamingToolBlock || assistantToolBlock;
+
+    expect(toolBlock?.tool.metadata).toMatchObject({
+      status: "blocked",
+      result_kind: "policy",
+      reason_code: "not_allowed_by_path_policy",
+      policy: {
+        allowed: false,
+        path: "weather_lookup",
+        reason: "not_allowed_by_path_policy",
+      },
+    });
   });
 
   it("sends Wiii Connect Facebook snapshot even when host context is missing", async () => {

@@ -52,6 +52,7 @@ import type {
   MoodType,
   PreviewItemData,
   PreviewType,
+  ToolResultMetadata,
 } from "@/api/types";
 
 const MAX_SSE_RETRIES = 3;
@@ -371,6 +372,17 @@ function toDisplayMeta(
     stepId: data.step_id,
     stepState: data.step_state,
     presentation: data.presentation,
+  };
+}
+
+function toolMetadataFromContent(content: {
+  metadata?: ToolResultMetadata;
+  policy?: Record<string, unknown>;
+}): ToolResultMetadata | undefined {
+  if (!content.metadata && !content.policy) return undefined;
+  return {
+    ...(content.metadata || {}),
+    ...(content.policy ? { policy: content.policy } : {}),
   };
 }
 
@@ -1298,6 +1310,7 @@ export function useSSEStream() {
       onToolCall: (data) => {
         traceEvent("tool_call", { name: data.content.name, node: data.node });
         const store = useChatStore.getState();
+        const toolMetadata = toolMetadataFromContent(data.content);
         if (data.content.name === "tool_think") {
           const personaLabel = String(data.content.args?.persona_label || "").trim();
           if (personaLabel) {
@@ -1310,7 +1323,7 @@ export function useSSEStream() {
             args: data.content.args,
             result: rawThought || undefined,
             node: data.node,
-            metadata: data.content.metadata,
+            metadata: toolMetadata,
           };
           flushBothBuffers();
           store.appendToolCall(tc, toDisplayMeta(data));
@@ -1326,7 +1339,7 @@ export function useSSEStream() {
             args: data.content.args,
             result: rawMessage || undefined,
             node: data.node,
-            metadata: data.content.metadata,
+            metadata: toolMetadata,
           };
           flushBothBuffers();
           store.appendToolCall(tc, toDisplayMeta(data));
@@ -1348,7 +1361,7 @@ export function useSSEStream() {
           name: data.content.name,
           args: data.content.args,
           node: data.node,
-          metadata: data.content.metadata,
+          metadata: toolMetadata,
         };
         store.appendToolCall(tc, toDisplayMeta(data));
         store.appendPhaseToolCall(tc, data.step_id);
