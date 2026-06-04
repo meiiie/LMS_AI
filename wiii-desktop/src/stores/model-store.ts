@@ -49,7 +49,10 @@ interface ModelState {
   consumeProviderForRequest: () => RequestModelProvider;
   consumeSelectionForRequest: () => RequestModelSelection;
   fetchProviders: (options?: { force?: boolean; includeModels?: boolean }) => Promise<void>;
-  refreshIfStale: (maxAgeMs?: number) => Promise<void>;
+  refreshIfStale: (
+    maxAgeMs?: number,
+    options?: { includeModels?: boolean },
+  ) => Promise<void>;
 }
 
 function normalizeModelProvider(
@@ -58,7 +61,10 @@ function normalizeModelProvider(
   return value || "auto";
 }
 
-function mapProvider(provider: LlmStatusProvider): ProviderInfo {
+function mapProvider(
+  provider: LlmStatusProvider,
+  previous?: ProviderInfo,
+): ProviderInfo {
   return {
     id: provider.id,
     displayName: provider.display_name,
@@ -69,7 +75,7 @@ function mapProvider(provider: LlmStatusProvider): ProviderInfo {
     reasonCode: provider.reason_code ?? null,
     reasonLabel: provider.reason_label ?? null,
     selectedModel: provider.selected_model ?? null,
-    modelOptions: provider.model_options ?? [],
+    modelOptions: provider.model_options ?? previous?.modelOptions ?? [],
     strictPin: provider.strict_pin,
     verifiedAt: provider.verified_at ?? null,
   };
@@ -240,7 +246,12 @@ export const useModelStore = create<ModelState>((set, get) => ({
       const data = await client.get<LlmStatusResponse>(
         `/api/v1/llm/status${includeModels ? "?include_models=true" : ""}`,
       );
-      const providers = (data.providers || []).map(mapProvider);
+      const previousProvidersById = new Map(
+        get().providers.map((provider) => [provider.id, provider]),
+      );
+      const providers = (data.providers || []).map((provider) =>
+        mapProvider(provider, previousProvidersById.get(provider.id)),
+      );
       const activeProvider = get().activeProvider;
       const activeModel = get().activeModel;
       const nextTurnProvider = get().nextTurnProvider;
@@ -280,10 +291,13 @@ export const useModelStore = create<ModelState>((set, get) => ({
     }
   },
 
-  refreshIfStale: async (maxAgeMs = 30_000) => {
+  refreshIfStale: async (maxAgeMs = 30_000, options = {}) => {
     const lastFetchedAt = get().lastFetchedAt;
     if (!lastFetchedAt || Date.now() - lastFetchedAt > maxAgeMs) {
-      await get().fetchProviders({ force: true });
+      await get().fetchProviders({
+        force: true,
+        includeModels: options.includeModels ?? false,
+      });
     }
   },
 }));

@@ -130,6 +130,61 @@ describe("Model store", () => {
     expect(useSettingsStore.getState().settings.model_provider).toBe("nvidia");
   });
 
+  it("preserves discovered model options when a later status refresh omits catalog data", async () => {
+    useModelStore.setState({
+      providers: [
+        {
+          id: "nvidia",
+          displayName: "NVIDIA NIM",
+          available: true,
+          isPrimary: true,
+          isFallback: false,
+          state: "selectable",
+          reasonCode: null,
+          reasonLabel: null,
+          selectedModel: "qwen/qwen3-next-80b-a3b-instruct",
+          modelOptions: [
+            {
+              provider: "nvidia",
+              model_name: "nvidia/nemotron-3-ultra-550b-a55b",
+              display_name: "Nemotron 3 Ultra",
+              status: "available",
+              released_on: null,
+              is_default: false,
+            },
+          ],
+          strictPin: true,
+          verifiedAt: null,
+        },
+      ],
+    });
+    getMock.mockResolvedValueOnce({
+      providers: [
+        {
+          id: "nvidia",
+          display_name: "NVIDIA NIM",
+          available: true,
+          is_primary: true,
+          is_fallback: false,
+          state: "selectable",
+          reason_code: null,
+          reason_label: null,
+          selected_model: "qwen/qwen3-next-80b-a3b-instruct",
+          strict_pin: true,
+          verified_at: "2026-06-05T00:00:00Z",
+        },
+      ],
+    });
+
+    await useModelStore.getState().fetchProviders({ force: true });
+
+    expect(useModelStore.getState().providers[0]?.modelOptions).toEqual([
+      expect.objectContaining({
+        model_name: "nvidia/nemotron-3-ultra-550b-a55b",
+      }),
+    ]);
+  });
+
   it("supports one-shot provider override for the next request", () => {
     useModelStore.getState().setNextTurnProvider("zhipu");
 

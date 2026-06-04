@@ -119,12 +119,14 @@ describe("ModelSelector", () => {
     await waitFor(() => {
       expect(getMock).toHaveBeenCalledTimes(1);
     });
+    expect(getMock.mock.calls[0]?.[0]).toContain("include_models=true");
 
     fireEvent.click(screen.getByTestId("model-selector-trigger"));
 
     await waitFor(() => {
       expect(getMock).toHaveBeenCalledTimes(2);
     });
+    expect(getMock.mock.calls[1]?.[0]).toContain("include_models=true");
   });
 
   it("keeps the selector visible while provider catalog is empty", async () => {

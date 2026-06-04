@@ -57,7 +57,7 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
   useEffect(() => {
     if (!fetchedRef.current) {
       fetchedRef.current = true;
-      void fetchProviders();
+      void fetchProviders({ force: true, includeModels: true });
     }
   }, [fetchProviders]);
 
@@ -86,7 +86,7 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
   useEffect(() => {
     const refreshVisibleProviders = () => {
       if (document.visibilityState === "visible") {
-        void refreshIfStale(10_000);
+        void refreshIfStale(10_000, { includeModels: true });
       }
     };
     window.addEventListener("focus", refreshVisibleProviders);
