@@ -528,7 +528,19 @@ def classify_raw_tool_call_text_start(
         if "\n" not in rest and len(rest) < 96:
             return None
         tag = _normalize_tool_name(rest.splitlines()[0] if rest else "")
-        if tag.lower() in {"", "json", "xml", "tool_call", "function_call"}:
+        lowered_tag = tag.lower()
+        if lowered_tag in {"", "json"}:
+            allowed = _normalize_allowed_tool_names(allowed_tool_names)
+            body_preview = rest.split("\n", 1)[1] if "\n" in rest else ""
+            if _contains_allowed_json_tool_name_hint(
+                body_preview,
+                allowed_tool_names=allowed,
+            ):
+                return True
+            if "```" not in body_preview and len(body_preview) < 320:
+                return None
+            return False
+        if lowered_tag in {"xml", "tool_call", "function_call"}:
             return True
         allowed = _normalize_allowed_tool_names(allowed_tool_names)
         return _resolve_allowed_tool_name(tag, allowed_tool_names=allowed) is not None

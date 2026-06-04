@@ -160,6 +160,30 @@ def test_classify_raw_tool_call_text_start_waits_for_ambiguous_fence() -> None:
         )
         is True
     )
+    assert (
+        classify_raw_tool_call_text_start(
+            "```json\n{",
+            allowed_tool_names={"tool_web_search"},
+        )
+        is None
+    )
+
+
+def test_classify_raw_tool_call_text_start_gates_json_fences_by_tool_name() -> None:
+    assert (
+        classify_raw_tool_call_text_start(
+            '```json\n{"name":"web_search","arguments":{"query":"weather"}}',
+            allowed_tool_names={"tool_web_search"},
+        )
+        is True
+    )
+    assert (
+        classify_raw_tool_call_text_start(
+            '```json\n{"name":"Hải Phòng","temp":31}\n```',
+            allowed_tool_names={"tool_web_search"},
+        )
+        is False
+    )
 
 
 def test_classify_raw_tool_call_text_start_does_not_buffer_normal_code_block() -> None:
