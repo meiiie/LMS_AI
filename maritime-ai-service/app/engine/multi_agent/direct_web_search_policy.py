@@ -109,7 +109,33 @@ def _has_search_tool_result(tool_call_events: list[dict]) -> bool:
     return any(
         event.get("type") == "result"
         and str(event.get("name") or "").strip().lower() in search_tool_names
-        and str(event.get("result") or "").strip()
+        and (
+            str(event.get("result") or "").strip()
+            or _metadata_marks_no_source_search_result(event)
+        )
+        for event in tool_call_events or []
+    )
+
+
+def _metadata_marks_no_source_search_result(event: dict) -> bool:
+    metadata = event.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    status = str(metadata.get("status") or "").strip().lower()
+    reason = str(metadata.get("reason_code") or "").strip().lower()
+    result_kind = str(metadata.get("result_kind") or "").strip().lower()
+    return reason == "no_sources" or (
+        result_kind == "web_sources"
+        and metadata.get("source_count") == 0
+        and status in {"unavailable", "completed", "failed"}
+    )
+
+
+def _has_no_source_search_tool_result(tool_call_events: list[dict]) -> bool:
+    return any(
+        event.get("type") == "result"
+        and _is_search_tool_name(str(event.get("name") or ""))
+        and _metadata_marks_no_source_search_result(event)
         for event in tool_call_events or []
     )
 
@@ -339,6 +365,8 @@ def _should_return_search_template_after_tool_round(
         return False
     if not _looks_explicit_web_search_query(query):
         return False
+    if _has_no_source_search_tool_result(tool_call_events):
+        return True
     search_result_chars = sum(
         len(str(event.get("result") or ""))
         for event in tool_call_events or []

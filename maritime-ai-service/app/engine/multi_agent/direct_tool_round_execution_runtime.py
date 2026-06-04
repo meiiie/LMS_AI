@@ -9,6 +9,9 @@ from typing import Any, Awaitable, Callable
 from app.engine.multi_agent.direct_tool_event_metadata import (
     build_tool_result_event_metadata,
 )
+from app.engine.multi_agent.direct_tool_sources import (
+    extract_source_infos_from_tool_result,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.tool_event_sanitizer import sanitize_tool_args_for_event
 
@@ -229,6 +232,11 @@ async def execute_direct_tool_round(
             dispatch_result.tool_name.strip().lower() in _WEB_SEARCH_TOOL_NAMES
             and dispatch_result_text
             and dispatch_result_text != "Tool unavailable"
+            and extract_source_infos_from_tool_result(
+                dispatch_result.tool_name,
+                dispatch_result.result,
+                limit=1,
+            )
         ):
             executed_web_search_count += 1
         post_dispatch = await process_direct_tool_post_dispatch(
