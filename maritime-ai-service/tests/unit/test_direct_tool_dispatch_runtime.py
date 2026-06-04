@@ -48,6 +48,55 @@ def test_build_tool_result_event_metadata_classifies_weather_provider_gap():
     }
 
 
+def test_build_tool_result_event_metadata_preserves_weather_validation_failure():
+    metadata = build_tool_result_event_metadata(
+        "current_weather",
+        json.dumps(
+            {
+                "status": "validation_failed",
+                "missing_fields": "city",
+            }
+        ),
+    )
+
+    assert metadata == {
+        "schema_version": "tool_result_metadata.v1",
+        "status": "validation_failed",
+        "result_kind": "validation",
+        "reason_code": "schema_validation",
+        "missing_fields": ["city"],
+    }
+
+
+def test_build_tool_result_event_metadata_preserves_terminal_weather_statuses():
+    failed_metadata = build_tool_result_event_metadata(
+        "current_weather",
+        "Tool unavailable",
+    )
+    blocked_metadata = build_tool_result_event_metadata(
+        "current_weather",
+        "Sunny",
+        policy={"allowed": False, "reason": "not_allowed_by_path_policy"},
+    )
+
+    assert failed_metadata == {
+        "schema_version": "tool_result_metadata.v1",
+        "status": "failed",
+        "result_kind": "weather",
+        "reason_code": "tool_unavailable",
+    }
+    assert blocked_metadata == {
+        "schema_version": "tool_result_metadata.v1",
+        "status": "blocked",
+        "result_kind": "policy",
+        "policy": {
+            "allowed": False,
+            "reason": "not_allowed_by_path_policy",
+        },
+        "reason_code": "not_allowed_by_path_policy",
+    }
+
+
 def test_build_tool_result_event_metadata_classifies_search_no_sources():
     metadata = build_tool_result_event_metadata(
         "tool_web_search",

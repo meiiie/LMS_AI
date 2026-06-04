@@ -565,6 +565,64 @@ describe("ToolExecutionStrip", () => {
     ).toBeTruthy();
   });
 
+  it("suppresses raw internal details when metadata provides the summary", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-search-no-raw-detail",
+      status: "completed",
+      tool: {
+        id: "tool-search-no-raw-detail",
+        name: "tool_web_search",
+        args: {
+          query: "current weather",
+        },
+        result: "RAW_INTERNAL_SEARCH_DETAIL",
+        metadata: {
+          schema_version: "tool_result_metadata.v1",
+          status: "unavailable",
+          result_kind: "web_sources",
+          reason_code: "no_sources",
+          source_count: 0,
+          domains: [],
+        },
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+    fireEvent.click(screen.getByRole("button"));
+
+    expect(
+      screen.getByTestId("tool-execution-strip").textContent || "",
+    ).not.toContain("RAW_INTERNAL_SEARCH_DETAIL");
+  });
+
+  it("suppresses raw weather JSON details when structured status provides the summary", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-weather-no-raw-detail",
+      status: "completed",
+      tool: {
+        id: "tool-weather-no-raw-detail",
+        name: "current_weather",
+        args: {
+          city: "Hai Phong",
+        },
+        result: JSON.stringify({
+          status: "error",
+          reason_code: "no_data",
+          message: "RAW_INTERNAL_WEATHER_DETAIL",
+        }),
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+    fireEvent.click(screen.getByRole("button"));
+
+    expect(
+      screen.getByTestId("tool-execution-strip").textContent || "",
+    ).not.toContain("RAW_INTERNAL_WEATHER_DETAIL");
+  });
+
   it("marks pending tool calls as busy without inventing output", () => {
     const block: ToolExecutionBlockData = {
       type: "tool_execution",

@@ -83,6 +83,15 @@ def _parse_json_object(value: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
 def _is_search_no_source_result(result: Any) -> bool:
     if result is None:
         return True
@@ -230,14 +239,24 @@ def build_tool_result_event_metadata(
                 "result_kind": "validation",
             }
         )
-        if payload.get("missing_fields"):
-            metadata["missing_fields"] = list(payload.get("missing_fields") or [])
+        missing_fields = _string_list(payload.get("missing_fields"))
+        if missing_fields:
+            metadata["missing_fields"] = missing_fields
     elif str(result or "").strip() == "Tool unavailable":
         metadata.update({"status": "failed", "reason_code": "tool_unavailable"})
 
     if _is_weather_tool(tool_name):
-        metadata.update({"result_kind": "weather"})
-        metadata.update(_weather_status_metadata(result))
+        if metadata.get("status") in {
+            "blocked",
+            "failed",
+            "skipped",
+            "validation_failed",
+        }:
+            if metadata.get("result_kind") == "text":
+                metadata["result_kind"] = "weather"
+        else:
+            metadata.update({"result_kind": "weather"})
+            metadata.update(_weather_status_metadata(result))
 
     source_list = sources or []
     if source_list:

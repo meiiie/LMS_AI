@@ -643,8 +643,18 @@ function summarizeResult(
   }
 
   if (isWeatherTool(toolName)) {
-    const line = summarizeWeatherResult(result, metadata);
-    const technicalDetail = sanitizeTechnicalDetail(result) || undefined;
+    const weatherMetadataLine = summarizeWeatherMetadata(metadata);
+    const structuredLine = weatherMetadataLine
+      ? null
+      : parseStructuredWeatherStatus(result);
+    const line =
+      weatherMetadataLine ||
+      structuredLine ||
+      summarizeWeatherResult(result, metadata);
+    const technicalDetail =
+      weatherMetadataLine || structuredLine
+        ? undefined
+        : sanitizeTechnicalDetail(result) || undefined;
     return {
       line,
       technicalDetail:
@@ -664,7 +674,7 @@ function summarizeResult(
     typeof metadata?.source_count === "number" && metadata.source_count > 0;
   return {
     line: metadataLine || normalized,
-    technicalDetail: hasSourceMetadata
+    technicalDetail: hasSourceMetadata || metadataLine
       ? undefined
       : sanitizeTechnicalDetail(result) || undefined,
     detailLabel: "Chi tiết công cụ",
