@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
+import hmac
 from typing import Any
 
 _LOG_FINGERPRINT_KEY = b"wiii-log-fingerprint-v1"
@@ -12,11 +12,11 @@ def hash_memory_identifier(value: Any) -> str:
     """Return a stable hash for user/session/memory identifiers in logs."""
 
     text = str(value or "").strip()
-    digest = hashlib.blake2b(
+    digest = hmac.digest(
+        _LOG_FINGERPRINT_KEY,
         text.encode("utf-8"),
-        digest_size=8,
-        key=_LOG_FINGERPRINT_KEY,
-    ).hexdigest()
+        "sha256",
+    ).hex()[:16]
     return f"sha256:{digest}"
 
 

@@ -1190,7 +1190,10 @@ class TestUserAnalytics:
             ],  # top_active
         ]
 
-        with patch(_POOL_PATCH, async_pool_fn, create=True):
+        with (
+            patch(_POOL_PATCH, async_pool_fn, create=True),
+            patch("app.api.v1.admin_analytics.settings.enable_multi_tenant", True),
+        ):
             from app.api.v1.admin_analytics import analytics_users
             result = await analytics_users(
                 auth=_ADMIN_USER,

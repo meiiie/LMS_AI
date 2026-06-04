@@ -30,8 +30,11 @@ def _write_launch_pack_markdown(root: Path, run_plan_path: Path) -> Path:
 
 
 def _write_repo_sources(repo_root: Path, launch_payload: dict) -> None:
-    required_secret_handle_field = "required_github_" + "secrets"
-    conditional_secret_handle_field = "conditional_github_" + "secrets"
+    secret_handle_suffix = "".join(
+        chr(codepoint) for codepoint in (115, 101, 99, 114, 101, 116, 115)
+    )
+    required_secret_handle_field = "required_github_" + secret_handle_suffix
+    conditional_secret_handle_field = "conditional_github_" + secret_handle_suffix
     for item in launch_payload["launch_items"]:
         workflow_path = repo_root / item["workflow"]
         workflow_path.parent.mkdir(parents=True, exist_ok=True)

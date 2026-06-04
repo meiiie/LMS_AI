@@ -146,6 +146,36 @@ class GenerateCompletionAuditLaunchPackTests(unittest.TestCase):
             json.dumps(payload["preflight_setup_contract"], sort_keys=True),
         )
 
+    def test_launch_pack_defaults_setup_contract_when_preflight_omits_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_plan_path = _write_run_plan(Path(temp_dir))
+            run_plan_payload = json.loads(run_plan_path.read_text(encoding="utf-8"))
+            launch_items = []
+            for item in run_plan_payload["run_items"]:
+                item["preflight"]["setup_contract"] = {}
+                builder = launch_generator.LAUNCH_CONTRACT_BUILDERS[
+                    item["requirement_id"]
+                ]
+                launch_items.append(asdict(builder(item)))
+
+        self.assertTrue(launch_items)
+        for item in launch_items:
+            self.assertEqual(
+                "wiii.live_evidence_setup_contract.v1",
+                item["preflight_setup_contract"]["version"],
+            )
+            self.assertEqual(
+                item["requirement_id"],
+                item["preflight_setup_contract"]["requirement_id"],
+            )
+            self.assertTrue(item["preflight_setup_contract_bindings"])
+            rendered_contract = json.dumps(
+                item["preflight_setup_contract"],
+                sort_keys=True,
+            )
+            self.assertNotIn("TELEGRAM_BOT_TOKEN", rendered_contract)
+            self.assertNotIn("WIII_ACCEPTANCE_BEARER_TOKEN", rendered_contract)
+
     def test_generate_launch_pack_writes_command_templates_without_secret_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             run_plan_path = _write_run_plan(Path(temp_dir))

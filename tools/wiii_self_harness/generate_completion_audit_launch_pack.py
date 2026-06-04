@@ -35,6 +35,7 @@ LAUNCH_PACK_OUTPUT_PATH_PARENT_SYMLINK_ERROR = (
 LAUNCH_PACK_RUN_PLAN_VALIDATION_ERROR = (
     "completion audit run plan failed validation"
 )
+SETUP_CONTRACT_VERSION = "wiii.live_evidence_setup_contract.v1"
 
 
 @dataclass(frozen=True)
@@ -517,7 +518,12 @@ def _build_proactive_launch_item(item: dict[str, Any]) -> LaunchItem:
         "-D",
         "<preflight-dir>",
     ]
-    preflight_setup_contract = _dict_field(preflight.get("setup_contract"))
+    preflight_setup_contract_bindings = _proactive_setup_contract_bindings()
+    preflight_setup_contract = _setup_contract_from_preflight_or_bindings(
+        preflight,
+        requirement_id="autonomy-proactive-channel",
+        bindings=preflight_setup_contract_bindings,
+    )
     return LaunchItem(
         requirement_id=_string(item.get("requirement_id")),
         title=_string(item.get("title")),
@@ -555,9 +561,7 @@ def _build_proactive_launch_item(item: dict[str, Any]) -> LaunchItem:
         preflight_raw_payload_included=_boolean(preflight.get("raw_payload_included")),
         preflight_required_next=_string_list(preflight.get("required_next")),
         preflight_setup_contract=preflight_setup_contract,
-        preflight_setup_contract_bindings=(
-            _proactive_setup_contract_bindings() if preflight_setup_contract else {}
-        ),
+        preflight_setup_contract_bindings=preflight_setup_contract_bindings,
         required_operator_action_tokens=[
             _string(action.get("token"))
             for action in item.get("required_operator_actions", [])
@@ -751,7 +755,12 @@ def _build_composio_launch_item(item: dict[str, Any]) -> LaunchItem:
         "-D",
         "<preflight-dir>",
     ]
-    preflight_setup_contract = _dict_field(preflight.get("setup_contract"))
+    preflight_setup_contract_bindings = _composio_setup_contract_bindings()
+    preflight_setup_contract = _setup_contract_from_preflight_or_bindings(
+        preflight,
+        requirement_id="wiii-connect-composio-acceptance",
+        bindings=preflight_setup_contract_bindings,
+    )
     return LaunchItem(
         requirement_id=_string(item.get("requirement_id")),
         title=_string(item.get("title")),
@@ -789,9 +798,7 @@ def _build_composio_launch_item(item: dict[str, Any]) -> LaunchItem:
         preflight_raw_payload_included=_boolean(preflight.get("raw_payload_included")),
         preflight_required_next=_string_list(preflight.get("required_next")),
         preflight_setup_contract=preflight_setup_contract,
-        preflight_setup_contract_bindings=(
-            _composio_setup_contract_bindings() if preflight_setup_contract else {}
-        ),
+        preflight_setup_contract_bindings=preflight_setup_contract_bindings,
         required_operator_action_tokens=[
             _string(action.get("token"))
             for action in item.get("required_operator_actions", [])
@@ -868,7 +875,12 @@ def _build_lms_test_course_launch_item(item: dict[str, Any]) -> LaunchItem:
     artifact_token = _artifact_token(item)
     preflight_artifact_token = _diagnostic_artifact_token(item)
     preflight = _preflight(item)
-    preflight_setup_contract = _dict_field(preflight.get("setup_contract"))
+    preflight_setup_contract_bindings = _lms_setup_contract_bindings()
+    preflight_setup_contract = _setup_contract_from_preflight_or_bindings(
+        preflight,
+        requirement_id="lms-test-course-replay",
+        bindings=preflight_setup_contract_bindings,
+    )
     workflow_dispatch_argv = [
         "gh",
         "workflow",
@@ -994,9 +1006,7 @@ def _build_lms_test_course_launch_item(item: dict[str, Any]) -> LaunchItem:
         preflight_raw_payload_included=_boolean(preflight.get("raw_payload_included")),
         preflight_required_next=_string_list(preflight.get("required_next")),
         preflight_setup_contract=preflight_setup_contract,
-        preflight_setup_contract_bindings=(
-            _lms_setup_contract_bindings() if preflight_setup_contract else {}
-        ),
+        preflight_setup_contract_bindings=preflight_setup_contract_bindings,
         required_operator_action_tokens=[
             _string(action.get("token"))
             for action in item.get("required_operator_actions", [])
@@ -1070,6 +1080,38 @@ LAUNCH_CONTRACT_BUILDERS = {
     "lms-test-course-replay": _build_lms_test_course_launch_item,
     "wiii-connect-composio-acceptance": _build_composio_launch_item,
 }
+
+
+def _setup_contract_from_preflight_or_bindings(
+    preflight: dict[str, Any],
+    *,
+    requirement_id: str,
+    bindings: dict[str, dict[str, list[str]]],
+) -> dict[str, Any]:
+    contract = _dict_field(preflight.get("setup_contract"))
+    if contract:
+        return contract
+    return {
+        "version": SETUP_CONTRACT_VERSION,
+        "requirement_id": requirement_id,
+        "required_next": _string_list(preflight.get("required_next")),
+        "workflow_inputs_required": sorted(
+            _dict_field(bindings.get("workflow_inputs_required")).keys()
+        ),
+        "environment_flags_required": sorted(
+            _dict_field(bindings.get("environment_flags_required")).keys()
+        ),
+        "credential_slots_required": sorted(
+            _dict_field(bindings.get("credential_slots_required")).keys()
+        ),
+        "external_setup_required": sorted(
+            _dict_field(bindings.get("external_setup_required")).keys()
+        ),
+        "dispatch_ready": (
+            _string(preflight.get("status")) == "pass"
+            and not _string_list(preflight.get("required_next"))
+        ),
+    }
 
 
 def _proactive_setup_contract_bindings() -> dict[str, dict[str, list[str]]]:
@@ -1219,25 +1261,50 @@ def main(argv: list[str] | None = None) -> int:
             readiness_report_path=args.readiness_report,
         )
     except Exception as exc:  # noqa: BLE001
+        code = _error_code_from_exception(exc)
         if args.format == "json":
-            print(json.dumps(_json_error_payload(str(exc)), indent=2, sort_keys=True))
+            print(json.dumps(_json_error_payload(code), indent=2, sort_keys=True))
         else:
-            print(f"Wiii Completion Audit Launch Pack: FAIL\n- {exc}", file=sys.stderr)
+            print(f"Wiii Completion Audit Launch Pack: FAIL\n- {code}", file=sys.stderr)
         return 1
-    rendered = (
-        json.dumps(pack.to_dict(), indent=2, sort_keys=True)
-        if args.format == "json"
-        else format_markdown(pack)
-    )
     if args.out:
+        rendered = (
+            json.dumps(pack.to_dict(), indent=2, sort_keys=True)
+            if args.format == "json"
+            else format_markdown(pack)
+        )
         safe_write_report_text(args.out, rendered.rstrip("\n") + "\n")
     else:
-        print(rendered)
+        print(_format_stdout_summary(pack, args.format))
     return 0
 
 
-def _json_error_payload(error: str) -> dict[str, Any]:
-    code = _error_code(error)
+def _format_stdout_summary(pack: CompletionAuditLaunchPack, output_format: str) -> str:
+    if output_format == "json":
+        return json.dumps(
+            {
+                "schema_version": pack.schema_version,
+                "ok": pack.ok,
+                "launch_item_count": pack.launch_item_count,
+                "unsupported_run_item_count": pack.unsupported_run_item_count,
+                "full_report": "use --out to write the launch pack contract",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    return "\n".join(
+        [
+            "# Wiii Completion Audit Launch Pack",
+            "",
+            f"- Status: {'PASS' if pack.ok else 'FAIL'}",
+            f"- Launch items: {pack.launch_item_count}",
+            f"- Unsupported run items: {pack.unsupported_run_item_count}",
+            "- Full report: use --out to write the launch pack contract",
+        ]
+    )
+
+
+def _json_error_payload(code: str) -> dict[str, Any]:
     return {
         "schema_version": LAUNCH_PACK_SCHEMA_VERSION,
         "ok": False,
@@ -1245,6 +1312,13 @@ def _json_error_payload(error: str) -> dict[str, Any]:
         "error_codes": [code],
         "error_code_counts": {code: 1},
     }
+
+
+def _error_code_from_exception(exc: Exception) -> str:
+    message = ""
+    if exc.args and isinstance(exc.args[0], str):
+        message = exc.args[0]
+    return _error_code(message)
 
 
 def _error_codes(errors: list[str]) -> list[str]:

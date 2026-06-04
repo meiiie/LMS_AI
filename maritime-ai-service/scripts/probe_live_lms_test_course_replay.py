@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-import hashlib
+import hmac
 import io
 import json
 import os
@@ -87,11 +87,11 @@ def _hash(value: Any) -> str | None:
     text = str(value or "").strip()
     if not text:
         return None
-    digest = hashlib.blake2b(
+    digest = hmac.digest(
+        b"wiii-live-probe-fingerprint-v1",
         text.encode("utf-8"),
-        digest_size=8,
-        key=b"wiii-live-probe-fingerprint-v1",
-    ).hexdigest()
+        "sha256",
+    ).hex()[:16]
     return f"sha256:{digest}"
 
 
