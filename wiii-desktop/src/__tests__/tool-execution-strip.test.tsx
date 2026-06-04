@@ -398,6 +398,8 @@ describe("ToolExecutionStrip", () => {
 
     render(<ToolExecutionStrip block={block} />);
 
+    const strip = screen.getByTestId("tool-execution-strip");
+    expect(strip.getAttribute("data-state-tone")).toBe("warning");
     expect(screen.getByText("Cần kiểm tra")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Tra thời tiết/i }));
     expect(
@@ -431,6 +433,7 @@ describe("ToolExecutionStrip", () => {
 
     const strip = screen.getByTestId("tool-execution-strip");
     expect(strip.getAttribute("data-status")).toBe("skipped");
+    expect(strip.getAttribute("data-state-tone")).toBe("muted");
     expect(screen.getByText("Đã bỏ qua")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Tìm kiếm web/i }));
     expect(
@@ -470,6 +473,7 @@ describe("ToolExecutionStrip", () => {
 
     const strip = screen.getByTestId("tool-execution-strip");
     expect(strip.getAttribute("data-status")).toBe("blocked");
+    expect(strip.getAttribute("data-state-tone")).toBe("muted");
     expect(screen.getByText("Đã bỏ qua")).toBeTruthy();
     expect(screen.queryByText("Cần kiểm tra")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Đọc chi tiết URL/i }));
@@ -499,6 +503,7 @@ describe("ToolExecutionStrip", () => {
     const strip = screen.getByTestId("tool-execution-strip");
     const button = screen.getByRole("button", { name: /Tìm kiếm web/i });
     expect(strip.getAttribute("aria-busy")).toBe("true");
+    expect(strip.getAttribute("data-state-tone")).toBe("pending");
     expect(button).toHaveProperty("disabled", true);
     expect(screen.getByText("Đang gọi")).toBeTruthy();
     expect(screen.getByText("NVIDIA models API")).toBeTruthy();

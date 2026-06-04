@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import {
+  AlertCircle,
   CheckCircle2,
   ChevronDown,
+  CircleMinus,
   CloudSun,
   Clock3,
   ExternalLink,
@@ -25,6 +27,8 @@ import {
 interface ToolExecutionStripProps {
   block: ToolExecutionBlockData;
 }
+
+type ToolStateTone = "pending" | "success" | "muted" | "warning";
 
 // Strip filesystem absolute paths from inline text. Tightened to avoid
 // false positives on URL paths (`https://example.com/x`) and slash-formatted
@@ -459,6 +463,38 @@ function getToolStateLabel(
   return "Đã xong";
 }
 
+function getToolStateTone(
+  isPending: boolean,
+  metadata?: ToolResultMetadata,
+): ToolStateTone {
+  if (isPending) return "pending";
+  const status = getMetadataStatus(metadata);
+  if (status === "skipped" || isPolicyBlockedMetadata(metadata)) {
+    return "muted";
+  }
+  if (
+    status === "needs_input" ||
+    status === "blocked" ||
+    status === "failed" ||
+    status === "validation_failed" ||
+    status === "unavailable"
+  ) {
+    return "warning";
+  }
+  return "success";
+}
+
+function getToolStateIcon(
+  isPending: boolean,
+  metadata?: ToolResultMetadata,
+) {
+  const tone = getToolStateTone(isPending, metadata);
+  if (tone === "pending") return Clock3;
+  if (tone === "muted") return CircleMinus;
+  if (tone === "warning") return AlertCircle;
+  return CheckCircle2;
+}
+
 function getStringField(
   payload: Record<string, unknown>,
   keys: string[],
@@ -816,6 +852,8 @@ function GenericToolStrip({ block }: ToolExecutionStripProps) {
   const kindLabel = getToolKindLabel(toolName);
   const metadataStatus = getMetadataStatus(block.tool.metadata);
   const stateLabel = getToolStateLabel(isPending, block.tool.metadata);
+  const stateTone = getToolStateTone(isPending, block.tool.metadata);
+  const StateIcon = getToolStateIcon(isPending, block.tool.metadata);
   const resultLabel = getToolResultLabel(toolName);
   const argsLine = useMemo(
     () => summarizeArgs(toolName, block.tool.args),
@@ -865,6 +903,7 @@ function GenericToolStrip({ block }: ToolExecutionStripProps) {
     <div
       className={`tool-strip ${isPending ? "tool-strip--pending" : "tool-strip--complete"}`}
       data-status={isPending ? "pending" : metadataStatus || "complete"}
+      data-state-tone={stateTone}
       data-tool-kind={kindLabel.toLowerCase()}
       data-testid="tool-execution-strip"
       aria-busy={isPending || undefined}
@@ -893,8 +932,8 @@ function GenericToolStrip({ block }: ToolExecutionStripProps) {
             <span className="tool-strip__label">{label}</span>
           </span>
           <span className="tool-strip__header-meta">
-            <span className="tool-strip__state">
-              {isPending ? <Clock3 size={12} /> : <CheckCircle2 size={12} />}
+            <span className="tool-strip__state" data-state-tone={stateTone}>
+              <StateIcon size={12} />
               {stateLabel}
             </span>
             {canExpand && !isPending && (
