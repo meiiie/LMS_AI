@@ -7712,10 +7712,12 @@
             "hash_runtime_identifier(value)",
             "def _safe_oauth_detail(value: object, *secret_values: object) -> str:",
             "redact_runtime_secret_text(text, max_length=_MAX_OAUTH_DIAGNOSTIC_LENGTH)",
-            "safe_error = _safe_oauth_detail(",
+            "safe_error_ref = _oauth_ref(",
+            "_safe_oauth_detail(",
             "request.query_params.get(\"code\")",
-            "reason=safe_error",
-            "Auto-assigned user_ref=%s to org_ref=%s"
+            "reason=\"google_oauth_exchange_failed\"",
+            "OAuth token exchange failed error_ref=%s",
+            "Auto-assigned Google OAuth user to default organization"
           ]
         },
         {

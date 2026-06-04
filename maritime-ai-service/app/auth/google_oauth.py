@@ -134,18 +134,20 @@ async def google_callback(request: Request):
     try:
         token = await oauth.google.authorize_access_token(request)
     except Exception as e:
-        safe_error = _safe_oauth_detail(
-            e,
-            getattr(settings, "google_oauth_client_secret", ""),
-            request.query_params.get("code") if hasattr(request, "query_params") else None,
+        safe_error_ref = _oauth_ref(
+            _safe_oauth_detail(
+                e,
+                getattr(settings, "google_oauth_client_secret", ""),
+                request.query_params.get("code") if hasattr(request, "query_params") else None,
+            )
         )
-        logger.error("OAuth token exchange failed: %s", safe_error)
+        logger.error("OAuth token exchange failed error_ref=%s", safe_error_ref)
         # Sprint 176: Audit failed login
         try:
             from app.auth.auth_audit import log_auth_event
             await log_auth_event(
                 "login_failed", provider="google", result="failed",
-                reason=safe_error,
+                reason="google_oauth_exchange_failed",
                 ip_address=request.client.host if request.client else None,
                 user_agent=request.headers.get("user-agent"),
             )
@@ -179,11 +181,7 @@ async def google_callback(request: Request):
     if assigned_org_id:
         ensured = await ensure_user_org_membership(user["id"], assigned_org_id)
         if ensured:
-            logger.info(
-                "Auto-assigned user_ref=%s to org_ref=%s",
-                _oauth_ref(user["id"]),
-                _oauth_ref(assigned_org_id),
-            )
+            logger.info("Auto-assigned Google OAuth user to default organization")
 
     # Create token pair
     token_pair = await create_token_pair(

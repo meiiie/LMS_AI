@@ -270,6 +270,9 @@ class WiiiSelfHarnessTests(unittest.TestCase):
         self.assertIn("Report non-LMS completion audit readiness", workflow_text)
         self.assertIn("report_completion_audit_readiness.py", workflow_text)
         self.assertIn("--exclude-requirement-id lms-test-course-replay", workflow_text)
+        self.assertIn("READINESS_AS_OF=", workflow_text)
+        self.assertIn('--as-of "$READINESS_AS_OF" --format json', workflow_text)
+        self.assertIn('--as-of "$READINESS_AS_OF" --format markdown', workflow_text)
         self.assertIn(
             "artifacts/wiii-completion-audit-readiness-non-lms.json",
             workflow_text,

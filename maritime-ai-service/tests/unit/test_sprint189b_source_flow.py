@@ -664,7 +664,7 @@ class TestCorrectiveRAGResultField:
         r1 = CorrectiveRAGResult(answer="a", sources=[])
         r2 = CorrectiveRAGResult(answer="b", sources=[])
 
-        r1.evidence_images.append({"url": "http://img.png"})
+        r1.evidence_images.append({"url": "evidence-image-ref"})
         assert len(r1.evidence_images) == 1
         assert len(r2.evidence_images) == 0  # Not shared
 

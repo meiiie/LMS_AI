@@ -156,8 +156,9 @@ jobs:
 
       - name: Report non-LMS completion audit readiness
         run: |
-          python tools/wiii_self_harness/report_completion_audit_readiness.py artifacts/runtime-evidence-empty --self-harness-report-bundle artifacts/wiii-self-harness --exclude-requirement-id lms-test-course-replay --format json --out artifacts/wiii-completion-audit-readiness-non-lms.json
-          python tools/wiii_self_harness/report_completion_audit_readiness.py artifacts/runtime-evidence-empty --self-harness-report-bundle artifacts/wiii-self-harness --exclude-requirement-id lms-test-course-replay --format markdown --out artifacts/wiii-completion-audit-readiness-non-lms.md
+          READINESS_AS_OF="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python tools/wiii_self_harness/report_completion_audit_readiness.py artifacts/runtime-evidence-empty --self-harness-report-bundle artifacts/wiii-self-harness --exclude-requirement-id lms-test-course-replay --as-of "$READINESS_AS_OF" --format json --out artifacts/wiii-completion-audit-readiness-non-lms.json
+          python tools/wiii_self_harness/report_completion_audit_readiness.py artifacts/runtime-evidence-empty --self-harness-report-bundle artifacts/wiii-self-harness --exclude-requirement-id lms-test-course-replay --as-of "$READINESS_AS_OF" --format markdown --out artifacts/wiii-completion-audit-readiness-non-lms.md
 
       - name: Validate non-LMS completion audit readiness report
         run: python tools/wiii_self_harness/validate_completion_audit_readiness.py artifacts/wiii-completion-audit-readiness-non-lms.json --markdown-report artifacts/wiii-completion-audit-readiness-non-lms.md --self-harness-report-bundle artifacts/wiii-self-harness --json --out artifacts/wiii-completion-audit-readiness-validation-non-lms.json

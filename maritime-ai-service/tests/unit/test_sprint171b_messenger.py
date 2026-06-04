@@ -7,8 +7,10 @@ when it discovers something interesting during autonomous browsing.
 Updated for plugin architecture — tests use MessengerAdapter directly.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import parse_qs, urlparse
+
+import pytest
 
 
 # =============================================================================
@@ -66,8 +68,11 @@ class TestMessengerNotification:
             assert "CallMeBot" in result.detail
             mock_client.get.assert_called_once()
             call_url = mock_client.get.call_args[0][0]
-            assert "callmebot.com" in call_url
-            assert "test-api-key-123" in call_url
+            parsed_url = urlparse(call_url)
+            query = parse_qs(parsed_url.query)
+            assert parsed_url.scheme == "https"
+            assert parsed_url.netloc == "api.callmebot.com"
+            assert query["apikey"] == ["test-api-key-123"]
 
     @pytest.mark.asyncio
     async def test_messenger_fails_without_api_key(self):

@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -1231,14 +1232,23 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _json_error_payload(error: str) -> dict[str, Any]:
-    code = _error_code(error)
+    safe_error = _redact_error_text(error)
+    code = _error_code(safe_error)
     return {
         "schema_version": LAUNCH_PACK_SCHEMA_VERSION,
         "ok": False,
-        "errors": [error],
+        "errors": [safe_error],
         "error_codes": [code],
         "error_code_counts": {code: 1},
     }
+
+
+def _redact_error_text(error: str) -> str:
+    return re.sub(
+        r"(?i)(secret|token|password|api[_-]?key|credential)([=:]\s*)[^,\s;]+",
+        r"\1\2<redacted>",
+        str(error),
+    )
 
 
 def _error_codes(errors: list[str]) -> list[str]:

@@ -33,7 +33,7 @@ def _write_repo_sources(repo_root: Path, launch_payload: dict) -> None:
     for item in launch_payload["launch_items"]:
         workflow_path = repo_root / item["workflow"]
         workflow_path.parent.mkdir(parents=True, exist_ok=True)
-        workflow_tokens = [
+        workflow_required_values = [
             *item["required_github_inputs"],
             *item["required_github_vars"],
             *item["required_github_secrets"],
@@ -42,7 +42,7 @@ def _write_repo_sources(repo_root: Path, launch_payload: dict) -> None:
             *item["diagnostic_artifact_tokens"],
             item["expected_artifact"],
         ]
-        workflow_path.write_text("\n".join(workflow_tokens), encoding="utf-8")
+        workflow_path.write_text("\n".join(workflow_required_values), encoding="utf-8")
         probe_path = repo_root / item["probe"]
         probe_path.parent.mkdir(parents=True, exist_ok=True)
         probe_path.write_text("# probe placeholder\n", encoding="utf-8")

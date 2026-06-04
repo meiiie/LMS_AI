@@ -89,6 +89,16 @@ def _looks_sensitive_key(key: str) -> bool:
     return any(marker in key for marker in _SENSITIVE_KEY_MARKERS)
 
 
+def _is_safe_presence_flag(key: str, value: Any) -> bool:
+    """Preserve boolean presence flags while redacting the sensitive value itself."""
+
+    return isinstance(value, bool) and (
+        key.endswith("_present")
+        or key.endswith("_configured")
+        or key.endswith("_enabled")
+    )
+
+
 def _parse_json_string(value: str) -> Any:
     text = value.strip()
     if not text or text[0] not in "[{":
@@ -168,6 +178,9 @@ def sanitize_runtime_payload(value: Any, *, _depth: int = 0) -> Any:
                     pass
                 continue
             if _looks_sensitive_key(normalized_key):
+                if _is_safe_presence_flag(normalized_key, raw_item):
+                    cleaned[key] = raw_item
+                    continue
                 if raw_item not in (None, "", [], {}):
                     redacted_count += 1
                 continue

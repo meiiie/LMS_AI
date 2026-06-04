@@ -93,11 +93,22 @@ export function proactiveNotificationToastMessage(
 }
 
 function makeSessionId(): string {
+  const runtimeCrypto =
+    typeof globalThis !== "undefined" ? globalThis.crypto : undefined;
   const randomId =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    runtimeCrypto && typeof runtimeCrypto.randomUUID === "function"
+      ? runtimeCrypto.randomUUID()
+      : makeRandomHexId(runtimeCrypto);
   return `scheduled-${randomId}`;
+}
+
+function makeRandomHexId(runtimeCrypto: Crypto | undefined): string {
+  if (runtimeCrypto && typeof runtimeCrypto.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    runtimeCrypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  return `${Date.now().toString(36)}-no-crypto`;
 }
 
 function getScheduledNotificationSessionId(): string {
