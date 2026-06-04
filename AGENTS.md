@@ -4,7 +4,7 @@ Status: Active
 
 Owner: Project leadership
 
-Last updated: 2026-04-27
+Last updated: 2026-06-05
 
 Applies to: Codex, Claude Code, CodeRabbit, and other AI-assisted engineering agents working in this repository.
 
@@ -35,6 +35,19 @@ Legacy local agent folders such as `.claude/` and `.Codex/` are not canonical an
 - Preserve Vietnamese-first user-facing copy in UI, prompts, and error messages unless the surrounding product surface is intentionally English.
 - For frontend-visible changes, include screenshots or a clear reason why visual evidence is not applicable.
 - For backend, auth, memory, tenant isolation, migration, provider/runtime, MCP, or deployment changes, include explicit risk and rollback notes.
+
+## Agent and Tool UX Direction
+
+- Prefer Odysseus-style tool experiences: tool calls should feel like coherent timeline steps with explicit pending, completed, skipped, blocked, warning, and no-source states instead of raw internal output.
+- Fix tool behavior at the contract, routing, event, metadata, source-binding, and UI-rendering layers before changing prompts. Prompt changes are acceptable only after the runtime contract is sound.
+- Preserve natural user intent while normalizing tool arguments into stable backend contracts before dispatch, policy denial, skipped fanout events, SSE emission, and store persistence.
+- Keep source evidence attached to the exact tool call when identity is available, preserve citations across empty or partial source events, and avoid showing unsupported or unsafe source URLs.
+- For live data paths such as weather, web search, news, legal, maritime, and external app/MCP tools, verify that answers are grounded in tool evidence and do not silently use memory or stale assumptions.
+- Treat duplicate or policy-denied tool calls as first-class events with clear reasons; do not silently drop them or let them render as generic failures.
+- For tool UX, provider-routing, memory-sensitive, or multi-step agent work, build task-specific harnesses/evals rather than relying only on manual spot checks. Use fan-out-and-synthesize, adversarial verification, generate-and-filter, tournament, and loop-until-done patterns when the work is broad, flaky, subjective, or prone to goal drift.
+- Use lightweight harnesses for normal changes and reserve high-token multi-agent workflows for research, security analysis, code review, migrations/refactors, root-cause investigation, triage at scale, evals, memory/rule mining, or hard-to-reproduce regressions.
+- Quarantine untrusted external content from high-privilege actions: agents/tools that read web, user, or third-party data must not directly execute destructive or privileged actions without an explicit policy/approval boundary.
+- Mine repeated human corrections and review comments into durable rules, tests, or harness checks so future agents do not need the same correction again.
 
 ## Verification Commands
 
