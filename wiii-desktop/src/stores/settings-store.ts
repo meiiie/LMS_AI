@@ -20,6 +20,9 @@ import {
 } from "@/lib/constants";
 import {
   GOOGLE_DEFAULT_MODEL,
+  NVIDIA_BASE_URL,
+  NVIDIA_DEFAULT_MODEL,
+  NVIDIA_DEFAULT_MODEL_ADVANCED,
   OPENAI_DEFAULT_MODEL,
   OPENAI_DEFAULT_MODEL_ADVANCED,
   OLLAMA_DEFAULT_BASE_URL,
@@ -108,6 +111,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   openai_base_url: "",
   openai_model: OPENAI_DEFAULT_MODEL,
   openai_model_advanced: OPENAI_DEFAULT_MODEL_ADVANCED,
+  nvidia_base_url: NVIDIA_BASE_URL,
+  nvidia_model: NVIDIA_DEFAULT_MODEL,
+  nvidia_model_advanced: NVIDIA_DEFAULT_MODEL_ADVANCED,
   zhipu_base_url: ZHIPU_DEFAULT_BASE_URL,
   zhipu_model: ZHIPU_DEFAULT_MODEL,
   zhipu_model_advanced: ZHIPU_DEFAULT_MODEL_ADVANCED,

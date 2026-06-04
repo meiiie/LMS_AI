@@ -82,6 +82,8 @@ function resolveConfiguredModelForProvider(
       return settings.openai_model?.trim() || null;
     case "openrouter":
       return settings.openrouter_model?.trim() || null;
+    case "nvidia":
+      return settings.nvidia_model?.trim() || null;
     case "ollama":
       return settings.ollama_model?.trim() || null;
     default:

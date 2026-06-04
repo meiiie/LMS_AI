@@ -12,6 +12,7 @@ const PROVIDER_ICONS: Record<string, typeof Cpu> = {
   zhipu: Cpu,
   openai: Cpu,
   openrouter: Cpu,
+  nvidia: Cpu,
   ollama: Cpu,
 };
 
@@ -21,6 +22,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   zhipu: "Zhipu GLM",
   openai: "OpenAI",
   openrouter: "OpenRouter",
+  nvidia: "NVIDIA NIM",
   ollama: "Ollama",
 };
 

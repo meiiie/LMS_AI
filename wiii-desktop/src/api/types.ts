@@ -2187,6 +2187,9 @@ export interface AppSettings {
   openrouter_base_url?: string;
   openrouter_model?: string;
   openrouter_model_advanced?: string;
+  nvidia_base_url?: string;
+  nvidia_model?: string;
+  nvidia_model_advanced?: string;
   zhipu_base_url?: string;
   zhipu_model?: string;
   zhipu_model_advanced?: string;
@@ -2244,6 +2247,9 @@ export interface LlmRuntimeConfig {
   openrouter_base_url?: string | null;
   openrouter_model: string;
   openrouter_model_advanced: string;
+  nvidia_base_url?: string | null;
+  nvidia_model: string;
+  nvidia_model_advanced: string;
   zhipu_base_url?: string | null;
   zhipu_model: string;
   zhipu_model_advanced: string;
@@ -2262,6 +2268,7 @@ export interface LlmRuntimeConfig {
   google_api_key_configured: boolean;
   openai_api_key_configured: boolean;
   openrouter_api_key_configured: boolean;
+  nvidia_api_key_configured: boolean;
   zhipu_api_key_configured: boolean;
   ollama_api_key_configured: boolean;
   enable_llm_failover: boolean;
@@ -2595,6 +2602,8 @@ export interface LlmRuntimeUpdateBody {
   clear_openai_api_key?: boolean;
   openrouter_api_key?: string;
   clear_openrouter_api_key?: boolean;
+  nvidia_api_key?: string;
+  clear_nvidia_api_key?: boolean;
   zhipu_api_key?: string;
   clear_zhipu_api_key?: boolean;
   ollama_api_key?: string;
@@ -2605,6 +2614,9 @@ export interface LlmRuntimeUpdateBody {
   openrouter_base_url?: string;
   openrouter_model?: string;
   openrouter_model_advanced?: string;
+  nvidia_base_url?: string;
+  nvidia_model?: string;
+  nvidia_model_advanced?: string;
   zhipu_base_url?: string;
   zhipu_model?: string;
   zhipu_model_advanced?: string;

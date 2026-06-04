@@ -2,6 +2,9 @@ import {
   applyLlmProviderPreset,
   CURRENT_GOOGLE_CHAT_MODELS,
   GOOGLE_DEFAULT_MODEL,
+  NVIDIA_BASE_URL,
+  NVIDIA_DEFAULT_MODEL,
+  NVIDIA_DEFAULT_MODEL_ADVANCED,
   OPENAI_DEFAULT_MODEL,
   OPENAI_DEFAULT_MODEL_ADVANCED,
   ZHIPU_DEFAULT_BASE_URL,
@@ -37,5 +40,15 @@ describe("llm presets", () => {
     expect(updated.llm_provider).toBe("openai");
     expect(updated.openai_model).toBe(OPENAI_DEFAULT_MODEL);
     expect(updated.openai_model_advanced).toBe(OPENAI_DEFAULT_MODEL_ADVANCED);
+  });
+
+  it("applies NVIDIA as a first-class OpenAI-compatible provider", () => {
+    const updated = applyLlmProviderPreset({}, "nvidia");
+
+    expect(updated.llm_provider).toBe("nvidia");
+    expect(updated.nvidia_base_url).toBe(NVIDIA_BASE_URL);
+    expect(updated.nvidia_model).toBe(NVIDIA_DEFAULT_MODEL);
+    expect(updated.nvidia_model_advanced).toBe(NVIDIA_DEFAULT_MODEL_ADVANCED);
+    expect(updated.llm_failover_chain).toContain("nvidia");
   });
 });
