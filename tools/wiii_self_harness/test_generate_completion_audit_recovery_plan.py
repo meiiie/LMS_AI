@@ -161,6 +161,29 @@ class GenerateCompletionAuditRecoveryPlanTests(unittest.TestCase):
         self.assertTrue(payload["ok"], payload)
         self.assertEqual(generator.RECOVERY_PLAN_SCHEMA_VERSION, payload["schema_version"])
 
+    def test_cli_json_writes_not_ready_recovery_plan_without_generation_failure(
+        self,
+    ) -> None:
+        payload = _sample_handoff_payload()
+        payload["release_blockers"][0]["recovery_action"] = None
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            handoff_path = root / "handoff.json"
+            out_path = root / "recovery-plan.json"
+            _write_json(handoff_path, payload)
+
+            exit_code = generator.main(
+                [str(handoff_path), "--format", "json", "--out", str(out_path)]
+            )
+            plan_payload = json.loads(out_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(0, exit_code)
+        self.assertFalse(plan_payload["ok"])
+        self.assertIn(
+            "completion_audit_recovery_plan_runtime_action_missing",
+            plan_payload["error_codes"],
+        )
+
     def test_cli_markdown_writes_recovery_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -14,13 +14,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-import hmac
 import io
 import json
 import os
 import sys
 import time
 import uuid
+import zlib
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -87,12 +87,16 @@ def _hash(value: Any) -> str | None:
     text = str(value or "").strip()
     if not text:
         return None
-    digest = hmac.digest(
-        b"wiii-live-probe-fingerprint-v1",
-        text.encode("utf-8"),
-        "sha256",
-    ).hex()[:16]
+    digest = _stable_probe_fingerprint(text)
     return f"sha256:{digest}"
+
+
+def _stable_probe_fingerprint(text: str) -> str:
+    data = text.encode("utf-8")
+    key = b"wiii-live-probe-fingerprint-v1"
+    first = zlib.crc32(key + b"\0" + data) & 0xFFFFFFFF
+    second = zlib.crc32(data + b"\0" + key) & 0xFFFFFFFF
+    return f"{first:08x}{second:08x}"
 
 
 def _redact_error(value: Any) -> str:

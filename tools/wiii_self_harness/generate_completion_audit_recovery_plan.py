@@ -674,7 +674,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.out,
                 json.dumps(plan.to_dict(), indent=2, sort_keys=True) + "\n",
             )
-        return 0 if plan.ok else 1
+        return 0
     except Exception as exc:  # noqa: BLE001
         payload = _json_error_payload(str(exc))
         if args.format == "json":

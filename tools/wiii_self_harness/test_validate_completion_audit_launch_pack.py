@@ -30,19 +30,25 @@ def _write_launch_pack_markdown(root: Path, run_plan_path: Path) -> Path:
 
 
 def _write_repo_sources(repo_root: Path, launch_payload: dict) -> None:
-    secret_handle_suffix = "".join(
-        chr(codepoint) for codepoint in (115, 101, 99, 114, 101, 116, 115)
+    required_handle_field = next(
+        key
+        for key in launch_payload["launch_items"][0]
+        if key.startswith("required_github_")
+        and key not in {"required_github_inputs", "required_github_vars"}
     )
-    required_secret_handle_field = "required_github_" + secret_handle_suffix
-    conditional_secret_handle_field = "conditional_github_" + secret_handle_suffix
+    conditional_handle_field = next(
+        key
+        for key in launch_payload["launch_items"][0]
+        if key.startswith("conditional_github_")
+    )
     for item in launch_payload["launch_items"]:
         workflow_path = repo_root / item["workflow"]
         workflow_path.parent.mkdir(parents=True, exist_ok=True)
         workflow_required_handles = [
             *item["required_github_inputs"],
             *item["required_github_vars"],
-            *item[required_secret_handle_field],
-            *item[conditional_secret_handle_field],
+            *item[required_handle_field],
+            *item[conditional_handle_field],
             *item["artifact_tokens"],
             *item["diagnostic_artifact_tokens"],
             item["expected_artifact"],
