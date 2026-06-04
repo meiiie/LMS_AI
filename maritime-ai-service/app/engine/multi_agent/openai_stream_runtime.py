@@ -28,6 +28,7 @@ from app.engine.native_chat_runtime import (
     openai_response_to_assistant_message,
 )
 from app.engine.multi_agent.tool_call_text_parser import (
+    classify_raw_tool_call_text_start,
     extract_raw_tool_calls_from_text,
     tool_names_from_tools,
 )
@@ -568,10 +569,13 @@ async def _stream_openai_compatible_answer_with_route_impl(
                     probe_text = "".join(raw_tool_answer_chunks) + answer_delta
                     stripped_probe = probe_text.lstrip()
                     if raw_tool_answer_candidate is None:
-                        if not stripped_probe:
+                        raw_tool_answer_candidate = classify_raw_tool_call_text_start(
+                            stripped_probe,
+                            allowed_tool_names=allowed_raw_tool_names or None,
+                        )
+                        if raw_tool_answer_candidate is None:
                             raw_tool_answer_chunks.append(answer_delta)
                             continue
-                        raw_tool_answer_candidate = stripped_probe[0] in "{["
                     if raw_tool_answer_candidate:
                         raw_tool_answer_chunks.append(answer_delta)
                         continue
@@ -596,7 +600,7 @@ async def _stream_openai_compatible_answer_with_route_impl(
                 record_model_success(provider_name, model_name)
                 await _close_thinking_for_non_answer()
                 logger.info(
-                    "[%s] Converted raw JSON assistant text into %d structured tool call(s)",
+                    "[%s] Converted raw assistant text into %d structured tool call(s)",
                     node.upper(),
                     len(raw_tool_calls),
                 )
