@@ -83,19 +83,13 @@ function getNodeLabel(node?: string) {
   return NODE_LABELS[normalizeNode(node)] || node || "Đang suy luận";
 }
 
-// Wiii-voice fallback labels (Tier 2) — used when no persona_label received.
-// Wiii is a Living Agent (Soul AGI, Sprints 170-210) — her cute personality is
-// core identity, not cosmetic. Keep the aliveness.
-const WIII_FALLBACK_LABELS_LIVE = "Wiii đang suy nghĩ~ (˶˃ ᵕ ˂˶)";
-const WIII_FALLBACK_LABELS_DONE = [
-  "Wiii đã nghĩ xong~ (˶˃ ᵕ ˂˶)",
-  "Hmm Wiii suy nghĩ rồi nè~",
-  "Wiii đã xem xong ≽^•⩊•^≼",
-];
+const WIII_FALLBACK_LABEL_LIVE = "Wiii đang xử lý";
+const WIII_FALLBACK_LABEL_DONE = "Wiii đã xử lý xong";
 
-// Detect genuine Wiii persona labels (contain kaomoji, ~, Wiii, emoji patterns)
-const PERSONA_MARKER =
-  /[~≽˶╥⊙¬ᕙ•̀ᴗ•́و\u{1F600}-\u{1F64F}\u{2728}\u{1F31F}]|Wiii/u;
+// Reasoning/tool headers should stay operational. Cute persona labels belong in
+// the assistant answer, not in the tool timeline.
+const PLAYFUL_REASONING_LABEL_MARKER =
+  /[~≽˶╥⊙¬ᕙ•̀ᴗ•́و\u{1F600}-\u{1F64F}\u{2728}\u{1F31F}]|Wiii\s+(?:đang\s+suy|đã\s+nghĩ|da\s+nghi|suy\s+nghĩ)/iu;
 
 /**
  * Header label: ONLY Wiii persona labels from tool_think's persona_label field.
@@ -104,19 +98,15 @@ const PERSONA_MARKER =
  * Rule: If it doesn't SOUND like Wiii, it doesn't go on the header.
  */
 function getIntervalHeaderLabel(interval: ReasoningIntervalViewModel) {
-  // Tier 1: Only accept labels that are genuine persona labels from tool_think
   if (interval.label?.trim()) {
     const label = interval.label.trim();
-    if (PERSONA_MARKER.test(label)) {
+    if (!PLAYFUL_REASONING_LABEL_MARKER.test(label)) {
       return label;
     }
   }
 
-  // Tier 2: Wiii-voice fallback (ALWAYS cute, never technical)
-  if (interval.isLive) return WIII_FALLBACK_LABELS_LIVE;
-  return WIII_FALLBACK_LABELS_DONE[
-    Math.floor(Math.random() * WIII_FALLBACK_LABELS_DONE.length)
-  ];
+  if (interval.isLive) return WIII_FALLBACK_LABEL_LIVE;
+  return WIII_FALLBACK_LABEL_DONE;
 }
 
 /** Full summary for the expanded body preview. */

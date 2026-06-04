@@ -131,6 +131,26 @@ class TestConvertBusEvent:
         assert event.content["result"] == "found docs"
 
     @pytest.mark.asyncio
+    async def test_sources(self):
+        sources = [
+            {
+                "title": "Weather Hai Phong",
+                "content": "Cloudy and warm.",
+                "url": "https://weather.example/hai-phong",
+                "source_type": "web",
+            }
+        ]
+
+        event = await _convert_bus_event({
+            "type": "sources",
+            "content": sources,
+            "node": "direct",
+        })
+
+        assert event.type == StreamEventType.SOURCES
+        assert event.content == sources
+
+    @pytest.mark.asyncio
     async def test_visual(self):
         event = await _convert_bus_event({
             "type": "visual",

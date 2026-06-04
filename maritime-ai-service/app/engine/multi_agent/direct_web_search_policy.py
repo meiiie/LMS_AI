@@ -84,6 +84,24 @@ def _strip_vietnamese_discourse_prefix(text: str) -> str:
     return cleaned
 
 
+def _strip_vietnamese_polite_suffix(text: str) -> str:
+    """Remove request politeness that hurts search recall but carries no topic."""
+
+    cleaned = str(text or "").strip()
+    suffix_pattern = re.compile(
+        r"(?i)(?:"
+        r"\s+(?:cho|giúp|giup)\s+(?:mình|minh|tôi|toi|em|anh|chị|chi|mình\s+nhé|minh\s+nhe)"
+        r"|\s+(?:cho|giúp|giup)\s+(?:mình|minh)?"
+        r"|\s+(?:nhé|nhe|nha|ạ|a)\s*"
+        r")\s*[.!?]*$"
+    )
+    previous = None
+    while cleaned and previous != cleaned:
+        previous = cleaned
+        cleaned = suffix_pattern.sub("", cleaned).strip()
+    return cleaned
+
+
 def _looks_explicit_web_search_query(query: str) -> bool:
     folded = _fold_tool_round_text(query)
     if not folded:
@@ -116,6 +134,15 @@ def _is_search_tool_name(name: str) -> bool:
     }
 
 
+def _is_weather_lookup_query(query: str) -> bool:
+    try:
+        from app.engine.multi_agent.direct_intent import _needs_weather_lookup
+
+        return bool(_needs_weather_lookup(query))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _prefer_official_query_for_known_docs(args: Any, user_query: str) -> dict:
     normalized_args = dict(args or {}) if isinstance(args, dict) else {}
     current_query = str(normalized_args.get("query") or normalized_args.get("q") or "")
@@ -136,10 +163,9 @@ def _should_return_search_template_after_tool_round(
 ) -> bool:
     if not _has_search_tool_result(tool_call_events):
         return False
-    routing_meta = state.get("routing_metadata") if isinstance(state, dict) else {}
-    routing_intent = str((routing_meta or {}).get("intent") or "").strip().lower()
-    explicit_web = routing_intent == "web_search" or _looks_explicit_web_search_query(query)
-    if not explicit_web:
+    if _is_weather_lookup_query(query):
+        return False
+    if not _looks_explicit_web_search_query(query):
         return False
     search_result_chars = sum(
         len(str(event.get("result") or ""))
@@ -154,11 +180,8 @@ def _should_return_search_template_after_tool_round(
 
 
 def _is_explicit_web_search_turn(query: str, state: AgentState | None) -> bool:
-    routing_meta = state.get("routing_metadata") if isinstance(state, dict) else {}
-    routing_intent = str((routing_meta or {}).get("intent") or "").strip().lower()
     return (
         "web-search" in _force_skills_for_turn(state)
-        or routing_intent == "web_search"
         or _looks_explicit_web_search_query(query)
     )
 
@@ -169,6 +192,8 @@ def _should_use_search_template_for_empty_response(
     state: AgentState | None,
     tool_call_events: list[dict],
 ) -> bool:
+    if _is_weather_lookup_query(query):
+        return False
     return (
         _is_explicit_web_search_turn(query, state)
         and _has_search_tool_result(tool_call_events)
@@ -185,5 +210,6 @@ def _clean_forced_web_search_query(query: str) -> str:
         text,
         maxsplit=1,
     )[0].strip()
+    text = _strip_vietnamese_polite_suffix(text)
     text = text.strip(" .:-–—")
     return text or str(query or "").strip()

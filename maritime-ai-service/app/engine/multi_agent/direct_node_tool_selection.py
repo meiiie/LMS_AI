@@ -130,12 +130,6 @@ def select_direct_node_tools(
     # Phase F5 (2026-05-06): explicit @-mention tool binding is a user choice,
     # so required tools must survive recommender pruning and force tool choice.
     force_skills = _force_skills_from_state(state)
-    if routing_intent == "web_search":
-        force_skills.add("web-search")
-        merged_force_skills = sorted(force_skills)
-        state["force_skills"] = merged_force_skills
-        ctx["force_skills"] = merged_force_skills
-
     force_required_tools: list[str] = []
     if "wiii-pointy" in force_skills:
         pointy_required = ["tool_pointy_show", "tool_pointy_inventory"]
@@ -151,6 +145,19 @@ def select_direct_node_tools(
         force_tools = True
         logger_obj.info("[DIRECT] Force-bound via @-mention: required=%s", force_required_tools)
 
+    routing_required_tools: list[str] = []
+    if (
+        routing_intent == "web_search"
+        and "web-search" not in force_skills
+        and _turn_path_allows_tool_name(state, "tool_web_search")
+    ):
+        routing_required_tools.append("tool_web_search")
+        force_tools = True
+        logger_obj.info(
+            "[DIRECT] Required via routing intent: required=%s",
+            routing_required_tools,
+        )
+
     try:
         from app.engine.skills.skill_recommender import select_runtime_tools
 
@@ -162,6 +169,9 @@ def select_direct_node_tools(
         ):
             must_include_names.append(_DOC_PREVIEW_HOST_ACTION_TOOL)
         for tool_name in force_required_tools:
+            if tool_name not in must_include_names:
+                must_include_names.append(tool_name)
+        for tool_name in routing_required_tools:
             if tool_name not in must_include_names:
                 must_include_names.append(tool_name)
 

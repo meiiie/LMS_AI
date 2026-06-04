@@ -216,7 +216,7 @@ describe("ReasoningInterval", () => {
     );
 
     expect(screen.getAllByText("Minh dang gom lai vai moc dang tin roi moi dung phan nhin.").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Wiii da nghi xong~").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Wiii đã xử lý xong").length).toBeGreaterThan(0);
     expect(container.querySelector(".sr-only")).toBeNull();
     expect(container.querySelector(".reasoning-interval__thinking-body")?.hasAttribute("hidden")).toBe(true);
   });
@@ -252,7 +252,7 @@ describe("ReasoningInterval", () => {
       />,
     );
 
-    expect(screen.getAllByText("Wiii da nghi xong~").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Wiii đã xử lý xong").length).toBeGreaterThan(0);
     expect(
       screen.queryByText("Minh dang gom vai moc dang tin truoc khi chot cau tra loi."),
     ).toBeNull();

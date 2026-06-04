@@ -423,9 +423,10 @@ class TestForcedToolChoice:
             assert mock_llm.bind_tools.call_count == 2
             calls = mock_llm.bind_tools.call_args_list
             has_forced = any(
-                c.kwargs.get("tool_choice") == "any" for c in calls
+                c.kwargs.get("tool_choice") in {"any", "tool_current_datetime"}
+                for c in calls
             )
-            assert has_forced, "One bind_tools call should have tool_choice='any'"
+            assert has_forced, "One bind_tools call should force the datetime tool"
 
     @pytest.mark.asyncio
     async def test_follow_up_call_uses_auto_not_forced(self):

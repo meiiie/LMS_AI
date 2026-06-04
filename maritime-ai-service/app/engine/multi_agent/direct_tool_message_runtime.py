@@ -38,6 +38,22 @@ def build_user_instruction_message(
     return Message(role="user", content=content)
 
 
+def build_system_instruction_message(
+    content: str,
+    *,
+    native_tool_messages: bool,
+) -> Any:
+    """Create a system instruction message for runtime-only guardrails."""
+    if native_tool_messages:
+        from app.engine.native_chat_runtime import make_system_message
+
+        return make_system_message(content)
+
+    from app.engine.messages import Message
+
+    return Message(role="system", content=content)
+
+
 def build_assistant_message(
     content: str,
     *,

@@ -206,7 +206,28 @@ def test_turn_path_governor_web_search_force_beats_visual_drift():
     assert decision.path == "web_search"
     assert decision.force_tools is True
     assert decision.should_keep_tool_name("tool_web_search") is True
-    assert decision.should_keep_tool_name("tool_generate_visual") is True
+    assert decision.should_keep_tool_name("tool_fetch_url") is True
+    assert decision.should_keep_tool_name("tool_generate_visual") is False
+
+
+def test_turn_path_governor_treats_supervisor_web_intent_as_tool_signal():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(
+            normalized_query="topic that keyword detectors missed",
+            routing_intent="web_search",
+        )
+    )
+
+    assert decision.path == "web_search"
+    assert decision.force_tools is True
+    assert decision.should_keep_tool_name("tool_web_search") is True
+    assert decision.should_keep_tool_name("tool_fetch_url") is True
+    assert decision.should_keep_tool_name("tool_pointy_show") is False
 
 
 def test_turn_path_governor_code_execution_beats_visual_drift():
@@ -256,7 +277,7 @@ def test_collect_direct_tools_routes_code_studio_app_to_visual_lane():
     )
 
 
-def test_turn_path_governor_routes_weather_to_weather_tool_only():
+def test_turn_path_governor_routes_weather_to_weather_with_live_lookup_fallback():
     from app.engine.multi_agent.turn_path_governor import (
         TurnPathSignals,
         resolve_turn_path_decision,
@@ -276,7 +297,9 @@ def test_turn_path_governor_routes_weather_to_weather_tool_only():
     assert decision.force_tools is True
     assert decision.allow_all_tools is False
     assert decision.should_keep_tool_name("tool_current_weather") is True
-    assert decision.should_keep_tool_name("tool_web_search") is False
+    assert decision.should_keep_tool_name("tool_web_search") is True
+    assert decision.should_keep_tool_name("tool_fetch_url") is True
+    assert decision.should_keep_tool_name("tool_current_datetime") is True
     assert decision.should_keep_tool_name("tool_pointy_show") is False
 
 
@@ -573,6 +596,24 @@ def test_collect_direct_tools_keeps_explicit_web_search_path():
     assert "tool_current_weather" not in names
 
 
+def test_collect_direct_tools_honors_supervisor_web_search_intent():
+    from app.engine.multi_agent import tool_collection as module
+
+    state = {"context": {}, "routing_metadata": {"intent": "web_search"}}
+    tools, force_tools = module._collect_direct_tools(
+        "topic that local intent detectors missed",
+        user_role="student",
+        state=state,
+    )
+    names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
+
+    assert force_tools is True
+    assert state["_turn_path_decision"]["path"] == "web_search"
+    assert "tool_web_search" in names
+    assert "tool_fetch_url" in names
+    assert "tool_current_weather" not in names
+
+
 def test_collect_direct_tools_scopes_personal_fact_to_character_tools():
     from app.engine.multi_agent import tool_collection as module
 
@@ -591,8 +632,12 @@ def test_collect_direct_tools_scopes_personal_fact_to_character_tools():
     assert "tool_web_search" not in names
 
 
-def test_collect_direct_tools_routes_weather_followup_to_weather_tool():
+def test_collect_direct_tools_routes_weather_followup_to_weather_tool(monkeypatch):
+    from app.core.config import settings
     from app.engine.multi_agent import tool_collection as module
+
+    monkeypatch.setattr(settings, "living_agent_enable_weather", True)
+    monkeypatch.setattr(settings, "living_agent_weather_api_key", "test-weather-key")
 
     state = {"context": {}}
     tools, force_tools = module._collect_direct_tools(
@@ -604,7 +649,31 @@ def test_collect_direct_tools_routes_weather_followup_to_weather_tool():
 
     assert force_tools is True
     assert state["_turn_path_decision"]["path"] == "weather_lookup"
-    assert names == {"tool_current_weather"}
+    assert "tool_current_weather" in names
+    assert "tool_web_search" in names
+    assert "tool_fetch_url" in names
+    assert "tool_current_datetime" in names
+
+
+def test_collect_direct_tools_routes_weather_to_web_search_when_provider_missing(monkeypatch):
+    from app.core.config import settings
+    from app.engine.multi_agent import tool_collection as module
+
+    monkeypatch.setattr(settings, "living_agent_enable_weather", False)
+    monkeypatch.setattr(settings, "living_agent_weather_api_key", None)
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        "thời tiết Hải Phòng hôm nay thế nào",
+        user_role="student",
+        state=state,
+    )
+    names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
+
+    assert force_tools is True
+    assert state["_turn_path_decision"]["path"] == "web_search"
+    assert "tool_web_search" in names
+    assert "tool_current_weather" not in names
 
 
 @pytest.mark.parametrize(
@@ -616,8 +685,12 @@ def test_collect_direct_tools_routes_weather_followup_to_weather_tool():
         "troi co mua khong",
     ],
 )
-def test_collect_direct_tools_routes_weather_turns_to_weather_tool(query):
+def test_collect_direct_tools_routes_weather_turns_to_weather_tool(query, monkeypatch):
+    from app.core.config import settings
     from app.engine.multi_agent import tool_collection as module
+
+    monkeypatch.setattr(settings, "living_agent_enable_weather", True)
+    monkeypatch.setattr(settings, "living_agent_weather_api_key", "test-weather-key")
 
     state = {"context": {}}
     tools, force_tools = module._collect_direct_tools(
@@ -629,7 +702,9 @@ def test_collect_direct_tools_routes_weather_turns_to_weather_tool(query):
 
     assert force_tools is True
     assert state["_turn_path_decision"]["path"] == "weather_lookup"
-    assert names == {"tool_current_weather"}
+    assert "tool_current_weather" in names
+    assert "tool_web_search" in names
+    assert "tool_fetch_url" in names
 
 
 def test_collect_direct_tools_keeps_maritime_tool_on_maritime_path():
@@ -649,8 +724,12 @@ def test_collect_direct_tools_keeps_maritime_tool_on_maritime_path():
     assert "tool_current_weather" not in names
 
 
-def test_direct_required_tool_names_weather_prefers_weather_over_web():
+def test_direct_required_tool_names_weather_prefers_weather_over_web(monkeypatch):
+    from app.core.config import settings
     from app.engine.multi_agent.tool_collection import _direct_required_tool_names
+
+    monkeypatch.setattr(settings, "living_agent_enable_weather", True)
+    monkeypatch.setattr(settings, "living_agent_weather_api_key", "test-weather-key")
 
     required = _direct_required_tool_names(
         "ý là thời tiết nóng đó. Bạn biết nay bao độ không",
@@ -658,18 +737,44 @@ def test_direct_required_tool_names_weather_prefers_weather_over_web():
     )
 
     assert "tool_current_weather" in required
-    assert "tool_web_search" not in required
+    assert "tool_web_search" in required
+    assert "tool_fetch_url" in required
+    assert "tool_current_datetime" in required
 
 
-def test_direct_required_tool_names_temperature_question_prefers_weather_over_web():
+def test_direct_required_tool_names_temperature_question_prefers_weather_over_web(monkeypatch):
+    from app.core.config import settings
     from app.engine.multi_agent.tool_collection import _direct_required_tool_names
+
+    monkeypatch.setattr(settings, "living_agent_enable_weather", True)
+    monkeypatch.setattr(settings, "living_agent_weather_api_key", "test-weather-key")
 
     required = _direct_required_tool_names(
         "hom nay bao nhieu do",
         user_role="student",
     )
 
-    assert required == ["tool_current_weather"]
+    assert required == [
+        "tool_current_weather",
+        "tool_web_search",
+        "tool_fetch_url",
+        "tool_current_datetime",
+    ]
+
+
+def test_direct_required_tool_names_weather_falls_back_to_web_search(monkeypatch):
+    from app.core.config import settings
+    from app.engine.multi_agent.tool_collection import _direct_required_tool_names
+
+    monkeypatch.setattr(settings, "living_agent_enable_weather", False)
+    monkeypatch.setattr(settings, "living_agent_weather_api_key", None)
+
+    required = _direct_required_tool_names(
+        "hom nay bao nhieu do",
+        user_role="student",
+    )
+
+    assert required == ["tool_web_search"]
 
 
 def test_direct_required_tool_names_includes_wiii_connect_facebook_direct_apply():

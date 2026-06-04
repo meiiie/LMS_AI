@@ -1205,8 +1205,9 @@ export function useSSEStream() {
         tryStreamingDispatch(fullAnswerTextRef.current);
       },
       onSources: (data) => {
-        traceEvent("sources", { count: data.sources?.length || 0 });
-        useChatStore.getState().setStreamingSources(data.sources || []);
+        const sources = data.sources || data.content || [];
+        traceEvent("sources", { count: sources.length });
+        useChatStore.getState().setStreamingSources(sources);
       },
       onMetadata: (data) => {
         traceEvent("metadata", { session_id: data.session_id, model: data.model });

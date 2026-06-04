@@ -94,6 +94,13 @@ def _needs_weather_lookup(query: str) -> bool:
     return _load_attr("app.engine.multi_agent.direct_intent", "_needs_weather_lookup")(query)
 
 
+def _weather_provider_configured() -> bool:
+    return bool(
+        getattr(settings, "living_agent_enable_weather", False)
+        and str(getattr(settings, "living_agent_weather_api_key", "") or "").strip()
+    )
+
+
 def _needs_datetime(query: str) -> bool:
     return _load_attr("app.engine.multi_agent.direct_intent", "_needs_datetime")(query)
 
@@ -751,6 +758,8 @@ def _resolve_direct_turn_path_decision(
         or host_ui_navigation
         or _safe_intent_flag(_needs_pointy, query)
     )
+    needs_weather_lookup = _safe_intent_flag(_needs_weather_lookup, query)
+    weather_uses_web_fallback = needs_weather_lookup and not _weather_provider_configured()
     signals = TurnPathSignals(
         normalized_query=normalized_query,
         routing_intent=_routing_intent(state),
@@ -769,8 +778,10 @@ def _resolve_direct_turn_path_decision(
             query,
             state,
         ),
-        needs_weather_lookup=_safe_intent_flag(_needs_weather_lookup, query),
-        needs_web_search=_safe_intent_flag(_needs_web_search, query),
+        needs_weather_lookup=needs_weather_lookup and not weather_uses_web_fallback,
+        needs_web_search=(
+            _safe_intent_flag(_needs_web_search, query) or weather_uses_web_fallback
+        ),
         needs_datetime=_safe_intent_flag(_needs_datetime, query),
         needs_news_search=_safe_intent_flag(_needs_news_search, query),
         needs_legal_search=_safe_intent_flag(_needs_legal_search, query),
@@ -1605,7 +1616,17 @@ def _direct_required_tool_names(query: str, user_role: str = "student") -> list[
     visual_decision = resolve_visual_intent(query)
 
     if _needs_weather_lookup(query):
-        required.append("tool_current_weather")
+        if _weather_provider_configured():
+            required.extend(
+                [
+                    "tool_current_weather",
+                    "tool_web_search",
+                    "tool_fetch_url",
+                    "tool_current_datetime",
+                ]
+            )
+        else:
+            required.append("tool_web_search")
     if _needs_datetime(query):
         required.append("tool_current_datetime")
     if _needs_news_search(query):
