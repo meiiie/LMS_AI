@@ -49,6 +49,25 @@ def _is_search_tool(tool_name: str) -> bool:
     )
 
 
+_SEARCH_NO_SOURCE_PHRASES = (
+    "no results",
+    "no search results",
+    "no web results",
+    "no sources",
+    "zero results",
+    "0 results",
+    "khong co ket qua",
+    "khong co nguon",
+    "khong tim thay ket qua",
+    "khong tim thay nguon",
+    "khong tim duoc ket qua",
+    "khong tim duoc nguon",
+    "chua tim duoc ket qua",
+    "chua tim duoc nguon",
+    "chua lay duoc nguon",
+)
+
+
 def _parse_json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return dict(value)
@@ -62,6 +81,52 @@ def _parse_json_object(value: Any) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _is_search_no_source_result(result: Any) -> bool:
+    if result is None:
+        return True
+
+    if isinstance(result, (list, tuple, set)):
+        return len(result) == 0
+
+    if isinstance(result, dict):
+        for key in ("results", "items", "sources", "data"):
+            value = result.get(key)
+            if isinstance(value, list):
+                return len(value) == 0
+        if any(key in result for key in ("url", "href", "link")):
+            return False
+        folded_payload = _fold_text(
+            " ".join(
+                str(result.get(key) or "")
+                for key in (
+                    "status",
+                    "reason_code",
+                    "reason",
+                    "error",
+                    "message",
+                    "summary",
+                    "answer",
+                )
+            )
+        )
+        return any(phrase in folded_payload for phrase in _SEARCH_NO_SOURCE_PHRASES)
+
+    text = " ".join(str(result or "").split())
+    if not text:
+        return True
+
+    if text[0] in "[{":
+        try:
+            parsed = json.loads(text)
+        except Exception:  # noqa: BLE001
+            parsed = None
+        if isinstance(parsed, (dict, list)):
+            return _is_search_no_source_result(parsed)
+
+    folded = _fold_text(text)
+    return any(phrase in folded for phrase in _SEARCH_NO_SOURCE_PHRASES)
 
 
 def _source_domains(sources: list[dict[str, Any]]) -> list[str]:
@@ -181,6 +246,20 @@ def build_tool_result_event_metadata(
                 "result_kind": "web_sources" if _is_search_tool(tool_name) else "sources",
                 "source_count": len(source_list),
                 "domains": _source_domains(source_list)[:5],
+            }
+        )
+    elif (
+        _is_search_tool(tool_name)
+        and metadata.get("status") == "completed"
+        and _is_search_no_source_result(result)
+    ):
+        metadata.update(
+            {
+                "status": "unavailable",
+                "reason_code": "no_sources",
+                "result_kind": "web_sources",
+                "source_count": 0,
+                "domains": [],
             }
         )
     return metadata

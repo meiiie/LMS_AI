@@ -417,6 +417,14 @@ function summarizeToolMetadata(
   if (status === "blocked") return "Tool bị chặn bởi chính sách phiên.";
   if (status === "validation_failed") return "Đầu vào tool chưa đúng định dạng.";
   if (status === "needs_input") return "Cần thêm thông tin để chạy tool.";
+  if (
+    normalizeMetadataCode(metadata.result_kind) === "web_sources" &&
+    typeof metadata.source_count === "number" &&
+    metadata.source_count <= 0 &&
+    (status === "unavailable" || reason === "no_sources")
+  ) {
+    return "Chưa tìm được nguồn phù hợp.";
+  }
   if (status === "unavailable" || status === "failed") {
     return "Tool chưa trả về kết quả dùng được.";
   }

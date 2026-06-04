@@ -48,6 +48,23 @@ def test_build_tool_result_event_metadata_classifies_weather_provider_gap():
     }
 
 
+def test_build_tool_result_event_metadata_classifies_search_no_sources():
+    metadata = build_tool_result_event_metadata(
+        "tool_web_search",
+        "No web results found for this query.",
+        sources=[],
+    )
+
+    assert metadata == {
+        "schema_version": "tool_result_metadata.v1",
+        "status": "unavailable",
+        "result_kind": "web_sources",
+        "reason_code": "no_sources",
+        "source_count": 0,
+        "domains": [],
+    }
+
+
 @pytest.mark.asyncio
 async def test_dispatch_direct_tool_call_emits_stable_call_and_result_events():
     class FakeTool:

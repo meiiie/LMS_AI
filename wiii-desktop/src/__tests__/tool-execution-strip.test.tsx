@@ -318,6 +318,41 @@ describe("ToolExecutionStrip", () => {
     expect(stripText.indexOf(summary)).toBe(stripText.lastIndexOf(summary));
   });
 
+  it("renders no-source search metadata as a warning state", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-search-empty",
+      status: "completed",
+      tool: {
+        id: "tool-search-empty",
+        name: "tool_web_search",
+        args: {
+          query: "weather nowhere current",
+        },
+        result: "No web results found for this query.",
+        metadata: {
+          schema_version: "tool_result_metadata.v1",
+          status: "unavailable",
+          result_kind: "web_sources",
+          reason_code: "no_sources",
+          source_count: 0,
+          domains: [],
+        },
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+
+    const strip = screen.getByTestId("tool-execution-strip");
+    expect(strip.getAttribute("data-status")).toBe("unavailable");
+    expect(strip.getAttribute("data-state-tone")).toBe("warning");
+    expect(screen.getByText("Cần kiểm tra")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Tìm kiếm web/i }));
+
+    expect(screen.getByText("Chưa tìm được nguồn phù hợp.")).toBeTruthy();
+  });
+
   it("shows weather tool traces as location-aware status instead of a generic tool", () => {
     const block: ToolExecutionBlockData = {
       type: "tool_execution",
