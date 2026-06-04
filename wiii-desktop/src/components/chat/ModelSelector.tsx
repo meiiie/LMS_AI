@@ -1,9 +1,9 @@
 /**
  * Provider selector for per-request chat routing.
  */
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Fragment, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { AlertCircle, ChevronUp, Cpu, Sparkles, Check } from "lucide-react";
+import { AlertCircle, ChevronUp, Cpu, Sparkles, Check, RefreshCw, Search } from "lucide-react";
 import { useModelStore, type RequestModelProvider } from "@/stores/model-store";
 import type { ModelCatalogEntry } from "@/api/types";
 
@@ -42,6 +42,7 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
     refreshIfStale,
   } = useModelStore();
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const fetchedRef = useRef(false);
 
@@ -150,6 +151,24 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
       ];
     }),
   ];
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const filteredOptions = normalizedSearch
+    ? options.filter(({ id, label, selectedModel, model }) =>
+        [
+          id,
+          label,
+          selectedModel,
+          model?.model_name,
+          model?.display_name,
+          model?.provider,
+          model?.status,
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalizedSearch)),
+      )
+    : options;
+  const firstProviderIndex = filteredOptions.findIndex((option) => option.kind === "provider");
+  const firstModelIndex = filteredOptions.findIndex((option) => option.kind === "model");
 
   const handleSelect = (
     id: RequestModelProvider,
@@ -163,6 +182,10 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
       setActiveProvider(id);
     }
     setOpen(false);
+  };
+
+  const handleRefreshModels = () => {
+    void fetchProviders({ force: true, includeModels: true });
   };
 
   return (
@@ -200,8 +223,43 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
             aria-label="Danh sach provider"
             data-testid="model-selector-dropdown"
           >
+            <div className="sticky top-0 z-10 border-b border-border bg-surface p-2">
+              <div className="flex items-center gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <Search
+                    size={14}
+                    className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary"
+                  />
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Tìm model..."
+                    className="h-8 w-full rounded-lg border border-border bg-surface-secondary pl-8 pr-2 text-xs text-text outline-none transition-colors placeholder:text-text-tertiary focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRefreshModels}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border text-text-tertiary transition-colors hover:bg-surface-secondary hover:text-text"
+                  title="Làm mới danh sách model"
+                  aria-label="Làm mới danh sách model"
+                >
+                  <RefreshCw size={14} />
+                </button>
+              </div>
+              {activeModelLabel ? (
+                <div className="mt-2 truncate text-[11px] text-text-tertiary">
+                  Đang dùng <span className="text-text-secondary">{activeModelLabel}</span>
+                </div>
+              ) : null}
+            </div>
             <div className="py-1">
-              {options.map(({ kind, id, label, Icon, disabled, reasonLabel, selectedModel, model }) => {
+              {filteredOptions.length === 0 ? (
+                <div className="px-3 py-5 text-center text-xs text-text-tertiary">
+                  Không tìm thấy model phù hợp.
+                </div>
+              ) : null}
+              {filteredOptions.map(({ kind, id, label, Icon, disabled, reasonLabel, selectedModel, model }, index) => {
                 const isModel = kind === "model";
                 const isActive =
                   kind === "auto"
@@ -214,53 +272,70 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
                   Boolean(selectedModel)
                   && id !== "auto"
                   && (!isModel || selectedModel !== label);
+                const detailText = isModel
+                  ? `${PROVIDER_LABELS[id] || id}${model?.status ? ` · ${model.status}` : ""}`
+                  : showSelectedModel
+                    ? selectedModel
+                    : null;
+                const sectionLabel =
+                  index === firstProviderIndex
+                    ? "Nguồn chạy"
+                    : index === firstModelIndex
+                      ? "Models"
+                      : null;
                 return (
-                  <button
-                    key={optionKey}
-                    onClick={() => handleSelect(id, disabled, model)}
-                    disabled={disabled}
-                    role="option"
-                    aria-selected={isActive}
-                    aria-disabled={disabled}
-                    title={disabled ? reasonLabel ?? undefined : undefined}
-                    className={`flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors ${
-                      isActive
-                        ? "bg-[var(--accent-light)] text-[var(--accent)]"
-                        : disabled
-                          ? "cursor-not-allowed text-text-tertiary opacity-70"
-                          : "text-text hover:bg-surface-secondary"
-                    } ${isModel ? "pl-8 text-xs" : "text-sm"}`}
-                  >
-                    <Icon size={15} className="mt-0.5 shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate">{label}</span>
-                        {disabled && id !== "auto" ? (
-                          <AlertCircle size={13} className="text-amber-500" />
+                  <Fragment key={optionKey}>
+                    {sectionLabel ? (
+                      <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-text-tertiary">
+                        {sectionLabel}
+                      </div>
+                    ) : null}
+                    <button
+                      onClick={() => handleSelect(id, disabled, model)}
+                      disabled={disabled}
+                      role="option"
+                      aria-selected={isActive}
+                      aria-disabled={disabled}
+                      title={disabled ? reasonLabel ?? undefined : undefined}
+                      className={`flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors ${
+                        isActive
+                          ? "bg-[var(--accent-light)] text-[var(--accent)]"
+                          : disabled
+                            ? "cursor-not-allowed text-text-tertiary opacity-70"
+                            : "text-text hover:bg-surface-secondary"
+                      } ${isModel ? "pl-8 text-xs" : "text-sm"}`}
+                    >
+                      <Icon size={15} className="mt-0.5 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate">{label}</span>
+                          {disabled && id !== "auto" ? (
+                            <AlertCircle size={13} className="text-amber-500" />
+                          ) : null}
+                        </div>
+                        {detailText ? (
+                          <div className="truncate text-[11px] text-text-tertiary">
+                            {detailText}
+                          </div>
+                        ) : null}
+                        {disabled && reasonLabel ? (
+                          <div className="mt-0.5 text-[11px] text-text-tertiary">
+                            {reasonLabel}
+                          </div>
                         ) : null}
                       </div>
-                      {showSelectedModel ? (
-                        <div className="truncate text-[11px] text-text-tertiary">
-                          {selectedModel}
-                        </div>
+                      {id !== "auto" && !isModel && !isActive ? (
+                        <span
+                          className={`mt-1 h-2 w-2 rounded-full ${
+                            disabled ? "bg-gray-400" : "bg-green-500"
+                          }`}
+                          title={disabled ? "Disabled" : "Ready"}
+                        />
+                      ) : isActive ? (
+                        <Check size={14} className="ml-auto text-[var(--accent)]" aria-label="Selected" />
                       ) : null}
-                      {disabled && reasonLabel ? (
-                        <div className="mt-0.5 text-[11px] text-text-tertiary">
-                          {reasonLabel}
-                        </div>
-                      ) : null}
-                    </div>
-                    {id !== "auto" && !isModel && !isActive ? (
-                      <span
-                        className={`mt-1 h-2 w-2 rounded-full ${
-                          disabled ? "bg-gray-400" : "bg-green-500"
-                        }`}
-                        title={disabled ? "Tạm khoá" : "Sẵn sàng"}
-                      />
-                    ) : isActive ? (
-                      <Check size={14} className="ml-auto text-[var(--accent)]" aria-label="Đã chọn" />
-                    ) : null}
-                  </button>
+                    </button>
+                  </Fragment>
                 );
               })}
             </div>

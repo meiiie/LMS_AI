@@ -191,6 +191,12 @@ describe("ModelSelector", () => {
       expect(screen.getByText("Nemotron 3 Ultra")).not.toBeNull();
     });
 
+    fireEvent.change(screen.getByPlaceholderText("Tìm model..."), {
+      target: { value: "nemotron" },
+    });
+    expect(screen.queryByText("Qwen3 Next 80B")).toBeNull();
+    expect(screen.getByText("Nemotron 3 Ultra")).not.toBeNull();
+
     fireEvent.click(screen.getByText("Nemotron 3 Ultra"));
 
     expect(useModelStore.getState().activeProvider).toBe("nvidia");
