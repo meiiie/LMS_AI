@@ -248,10 +248,16 @@ export const useModelStore = create<ModelState>((set, get) => ({
       const nextTurnSelection = nextTurnProvider
         ? providers.find((item) => item.id === nextTurnProvider)
         : undefined;
+      const hasProviderCatalog = providers.length > 0;
       const shouldResetToAuto =
+        hasProviderCatalog
+        &&
         activeProvider !== "auto"
+        && !activeModel
         && (!activeSelection || activeSelection.state !== "selectable");
       const shouldClearNextTurn =
+        hasProviderCatalog
+        &&
         Boolean(nextTurnProvider)
         && nextTurnProvider !== "auto"
         && (!nextTurnSelection || nextTurnSelection.state !== "selectable");

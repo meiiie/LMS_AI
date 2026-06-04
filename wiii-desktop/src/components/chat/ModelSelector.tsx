@@ -4,7 +4,11 @@
 import { Fragment, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle, ChevronUp, Cpu, Sparkles, Check, RefreshCw, Search } from "lucide-react";
-import { useModelStore, type RequestModelProvider } from "@/stores/model-store";
+import {
+  useModelStore,
+  type ProviderInfo,
+  type RequestModelProvider,
+} from "@/stores/model-store";
 import { useChatStore } from "@/stores/chat-store";
 import type { ModelCatalogEntry } from "@/api/types";
 
@@ -121,12 +125,43 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
     return () => document.removeEventListener("keydown", handleKey);
   }, [open]);
 
-  const visibleProviders = useMemo(
-    () => providers.filter((provider) => provider.state !== "hidden"),
-    [providers],
-  );
+  const visibleProviders = useMemo(() => {
+    const visible = providers.filter((provider) => provider.state !== "hidden");
+    if (
+      activeProvider === "auto"
+      || visible.some((provider) => provider.id === activeProvider)
+    ) {
+      return visible;
+    }
 
-  if (visibleProviders.length === 0) return null;
+    const fallbackProvider: ProviderInfo = {
+      id: activeProvider,
+      displayName: PROVIDER_LABELS[activeProvider] || activeProvider,
+      available: true,
+      isPrimary: false,
+      isFallback: false,
+      state: "selectable",
+      reasonCode: null,
+      reasonLabel: "Đang dùng từ phiên chat. Bấm làm mới để tải danh sách model.",
+      selectedModel: activeModel,
+      modelOptions: activeModel
+        ? [
+            {
+              provider: activeProvider,
+              model_name: activeModel,
+              display_name: activeModel,
+              status: "selected",
+              released_on: null,
+              is_default: false,
+            },
+          ]
+        : [],
+      strictPin: false,
+      verifiedAt: null,
+    };
+    return [fallbackProvider, ...visible];
+  }, [activeModel, activeProvider, providers]);
+  const catalogUnavailable = providers.length === 0;
 
   const activeProviderInfo = visibleProviders.find((provider) => provider.id === activeProvider);
   const ActiveIcon = PROVIDER_ICONS[activeProvider] || Sparkles;
@@ -284,6 +319,11 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
                 </div>
               ) : null}
             </div>
+            {catalogUnavailable ? (
+              <div className="border-b border-border px-3 py-2 text-[11px] text-text-tertiary">
+                Chưa tải được danh sách model. Nút chọn vẫn giữ model hiện tại của phiên chat.
+              </div>
+            ) : null}
             <div className="py-1">
               {filteredOptions.length === 0 ? (
                 <div className="px-3 py-5 text-center text-xs text-text-tertiary">

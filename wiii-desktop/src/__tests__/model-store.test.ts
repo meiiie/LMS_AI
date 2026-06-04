@@ -86,6 +86,50 @@ describe("Model store", () => {
     expect(useSettingsStore.getState().settings.model_provider).toBe("auto");
   });
 
+  it("keeps the current selection when provider catalog is temporarily empty", async () => {
+    await useSettingsStore.getState().updateSettings({
+      model_provider: "nvidia",
+      nvidia_model: "nvidia/nemotron-3-ultra",
+    });
+    getMock.mockResolvedValueOnce({ providers: [] });
+
+    await useModelStore.getState().fetchProviders({ force: true });
+
+    expect(useModelStore.getState().activeProvider).toBe("nvidia");
+    expect(useModelStore.getState().activeModel).toBe("nvidia/nemotron-3-ultra");
+    expect(useSettingsStore.getState().settings.model_provider).toBe("nvidia");
+  });
+
+  it("does not reset a concrete model when live catalog omits its provider", async () => {
+    await useSettingsStore.getState().updateSettings({
+      model_provider: "nvidia",
+      nvidia_model: "nvidia/nemotron-3-ultra",
+    });
+    getMock.mockResolvedValueOnce({
+      providers: [
+        {
+          id: "zhipu",
+          display_name: "Zhipu GLM",
+          available: true,
+          is_primary: false,
+          is_fallback: true,
+          state: "selectable",
+          reason_code: null,
+          reason_label: null,
+          selected_model: "glm-5",
+          strict_pin: true,
+          verified_at: "2026-06-05T00:00:00Z",
+        },
+      ],
+    });
+
+    await useModelStore.getState().fetchProviders({ force: true });
+
+    expect(useModelStore.getState().activeProvider).toBe("nvidia");
+    expect(useModelStore.getState().activeModel).toBe("nvidia/nemotron-3-ultra");
+    expect(useSettingsStore.getState().settings.model_provider).toBe("nvidia");
+  });
+
   it("supports one-shot provider override for the next request", () => {
     useModelStore.getState().setNextTurnProvider("zhipu");
 

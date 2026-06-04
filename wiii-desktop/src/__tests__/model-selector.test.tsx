@@ -127,6 +127,30 @@ describe("ModelSelector", () => {
     });
   });
 
+  it("keeps the selector visible while provider catalog is empty", async () => {
+    getMock.mockResolvedValue({ providers: [] });
+    useSettingsStore.setState((state) => ({
+      settings: {
+        ...state.settings,
+        model_provider: "nvidia",
+        nvidia_model: "nvidia/nemotron-3-ultra",
+      },
+    }));
+    useModelStore.setState({
+      activeProvider: "nvidia",
+      activeModel: "nvidia/nemotron-3-ultra",
+      providers: [],
+    });
+
+    render(<ModelSelector />);
+
+    const trigger = screen.getByTestId("model-selector-trigger");
+    expect(trigger.textContent).toContain("nvidia/nemotron-3-ultra");
+
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("model-selector-dropdown")).not.toBeNull();
+  });
+
   it("shows discovered model options and selects a concrete NVIDIA model", async () => {
     getMock.mockImplementation((path: string) => {
       if (path.includes("include_models=true")) {
