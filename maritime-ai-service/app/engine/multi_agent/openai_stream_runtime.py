@@ -516,6 +516,31 @@ async def _stream_openai_compatible_answer_with_route_impl(
             await _emit_visible_answer_delta(pending_visible_tool_scan)
             pending_visible_tool_scan = ""
 
+    async def _flush_pending_visible_tool_scan_if_visible() -> None:
+        nonlocal pending_visible_tool_scan
+        if not pending_visible_tool_scan:
+            return
+        if (
+            classify_raw_tool_call_text_start(
+                pending_visible_tool_scan.lstrip(),
+                allowed_tool_names=allowed_raw_tool_names or None,
+            )
+            is not False
+        ):
+            return
+        await _flush_pending_visible_tool_scan()
+
+    async def _drain_answer_smoother() -> None:
+        if answer_smoother is None:
+            return
+        tail = answer_smoother.flush_remaining()
+        if tail:
+            await push_event({
+                "type": "answer_delta",
+                "content": tail,
+                "node": node,
+            })
+
     try:
         stream = await client.chat.completions.create(**request_kwargs)
         stream_iter = stream.__aiter__()
@@ -548,6 +573,8 @@ async def _stream_openai_compatible_answer_with_route_impl(
                 for tool_call_chunk in getattr(delta, "tool_calls", []) or []:
                     _accumulate_tool_call_chunk(tool_call_chunks, tool_call_chunk)
                 if tool_call_chunks:
+                    await _flush_pending_visible_tool_scan_if_visible()
+                    await _drain_answer_smoother()
                     await _close_thinking_for_non_answer()
                 reasoning_delta, answer_delta = extract_openai_delta_text(delta)
                 if answer_delta and str(node or "").strip().lower() != "code_studio_agent":
@@ -635,6 +662,7 @@ async def _stream_openai_compatible_answer_with_route_impl(
                     node.upper(),
                     len(raw_tool_calls),
                 )
+                await _drain_answer_smoother()
                 return make_assistant_message(
                     emitted_answer,
                     tool_calls=raw_tool_calls,
@@ -647,6 +675,7 @@ async def _stream_openai_compatible_answer_with_route_impl(
             from app.engine.llm_model_health import record_model_success
 
             record_model_success(provider_name, model_name)
+            await _drain_answer_smoother()
             await _close_thinking_for_non_answer()
             return make_assistant_message(
                 emitted_answer,
@@ -659,14 +688,7 @@ async def _stream_openai_compatible_answer_with_route_impl(
             # Phase 34: drain any answer fragment still in the smoother
             # so the tail token (final word, punctuation) doesn't get
             # silently dropped.
-            if answer_smoother is not None:
-                tail = answer_smoother.flush_remaining()
-                if tail:
-                    await push_event({
-                        "type": "answer_delta",
-                        "content": tail,
-                        "node": node,
-                    })
+            await _drain_answer_smoother()
             await _close_thinking_for_non_answer()
             return make_assistant_message(emitted_answer), True
         await _close_thinking_for_non_answer()
