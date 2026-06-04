@@ -270,6 +270,36 @@ async def test_bus_tool_events_preserve_metadata_through_stream_surface():
     assert result_event.content["metadata"]["source_count"] == 4
 
 
+@pytest.mark.asyncio
+async def test_bus_sources_preserve_tool_identity_through_stream_surface():
+    from app.engine.multi_agent.graph_stream_surface import _convert_bus_event_impl
+
+    source_event = await _convert_bus_event_impl(
+        {
+            "type": "sources",
+            "node": "direct",
+            "content": [
+                {
+                    "title": "Weather",
+                    "content": "Cloudy.",
+                    "url": "https://weather.example",
+                }
+            ],
+            "details": {
+                "tool_call_id": "tc_search",
+                "tool_name": "tool_web_search",
+            },
+        }
+    )
+
+    assert source_event.type == "sources"
+    assert source_event.node == "direct"
+    assert source_event.details == {
+        "tool_call_id": "tc_search",
+        "tool_name": "tool_web_search",
+    }
+
+
 # ============================================================================
 # StreamEvent serialization
 # ============================================================================

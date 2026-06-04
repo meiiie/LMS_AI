@@ -200,6 +200,23 @@ class TestEventGenerators:
         assert event.content == sources
 
     @pytest.mark.asyncio
+    async def test_create_sources_event_preserves_tool_identity(self):
+        sources = [{"title": "Doc1", "content": "..."}]
+        event = await create_sources_event(
+            sources,
+            node="direct",
+            tool_call_id="tc_search",
+            tool_name="tool_web_search",
+        )
+        assert event.type == StreamEventType.SOURCES
+        assert event.content == sources
+        assert event.node == "direct"
+        assert event.details == {
+            "tool_call_id": "tc_search",
+            "tool_name": "tool_web_search",
+        }
+
+    @pytest.mark.asyncio
     async def test_create_metadata_event(self):
         event = await create_metadata_event(
             reasoning_trace={"steps": []},

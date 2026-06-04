@@ -631,8 +631,16 @@ def serialize_stream_event(
         ], event_counter, False
 
     if event_type == "sources":
+        payload = {"sources": event.content}
+        if event.node:
+            payload["node"] = event.node
+        if event.details:
+            if event.details.get("tool_call_id"):
+                payload["tool_call_id"] = event.details["tool_call_id"]
+            if event.details.get("tool_name"):
+                payload["tool_name"] = event.details["tool_name"]
         data = _apply_presentation_metadata(
-            payload={"sources": event.content},
+            payload=payload,
             event_type=event_type,
             event_counter=event_counter,
             event=event,

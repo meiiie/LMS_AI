@@ -135,6 +135,10 @@ async def execute_forced_web_search_shortcut(
                 "type": "sources",
                 "content": sources,
                 "node": "direct",
+                "details": {
+                    "tool_call_id": tc_id,
+                    "tool_name": forced_search_tool_name,
+                },
             }
         )
     tool_call_events.append(

@@ -240,6 +240,10 @@ async def test_dispatch_direct_tool_call_emits_sources_for_web_search_results():
     assert events[1]["content"]["metadata"]["result_kind"] == "web_sources"
     assert events[1]["content"]["metadata"]["source_count"] == 1
     assert events[1]["content"]["metadata"]["domains"] == ["weather.example"]
+    assert events[2]["details"] == {
+        "tool_call_id": "call_sources",
+        "tool_name": "tool_web_search",
+    }
     assert events[2]["content"] == [
         {
             "title": "Weather Hải Phòng today",

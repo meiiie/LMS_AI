@@ -189,11 +189,25 @@ async def create_answer_event(content: str) -> StreamEvent:
     )
 
 
-async def create_sources_event(sources: List[Dict]) -> StreamEvent:
+async def create_sources_event(
+    sources: List[Dict],
+    *,
+    node: Optional[str] = None,
+    tool_call_id: Optional[str] = None,
+    tool_name: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+) -> StreamEvent:
     """Create a sources event with citations."""
+    event_details = dict(details or {})
+    if tool_call_id:
+        event_details["tool_call_id"] = str(tool_call_id)
+    if tool_name:
+        event_details["tool_name"] = str(tool_name)
     return StreamEvent(
         type=StreamEventType.SOURCES,
-        content=_sanitize_event_list(sources)
+        content=_sanitize_event_list(sources),
+        node=node,
+        details=_sanitize_event_dict(event_details) if event_details else None,
     )
 
 

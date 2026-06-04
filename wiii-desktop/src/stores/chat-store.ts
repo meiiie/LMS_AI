@@ -56,6 +56,11 @@ const MAX_CHAT_LIFECYCLE_RECORD_KEYS = 16;
 const MAX_CHAT_LIFECYCLE_ARRAY_ITEMS = 16;
 const MAX_CHAT_LIFECYCLE_STRING_CHARS = 240;
 
+interface SourceAttachmentHint {
+  toolCallId?: string;
+  toolName?: string;
+}
+
 /**
  * Sprint 218: Per-user conversation storage.
  * Each user gets their own store file: conversations_{userId}.json
@@ -110,6 +115,7 @@ function attachSourcesToLastAssistantDraft(
   state: ChatState,
   sources: SourceInfo[],
   conversationId: string | null,
+  hint?: SourceAttachmentHint,
 ): boolean {
   if (sources.length === 0 || !conversationId) return false;
   const recentlyCompleted =
@@ -127,7 +133,7 @@ function attachSourcesToLastAssistantDraft(
     if (message.role !== "assistant") continue;
     message.sources = mergeSourceInfos(message.sources || [], sources);
     if (message.blocks) {
-      attachSourcesToLastSearchToolBlockDraft(message.blocks, sources);
+      attachSourcesToSearchToolBlockDraft(message.blocks, sources, hint);
     }
     return true;
   }
@@ -276,7 +282,10 @@ interface ChatState {
   setStreamingThinking: (thinking: string) => void;
   setStreamingThinkingLabel: (label: string) => void;
   setStreamingStep: (step: string) => void;
-  setStreamingSources: (sources: SourceInfo[]) => void;
+  setStreamingSources: (
+    sources: SourceInfo[],
+    hint?: SourceAttachmentHint,
+  ) => void;
   addStreamingStep: (label: string, node?: string) => void;
   addChatLifecycleEvent: (event: SSEChatLifecycleEvent) => void;
   appendThinkingDelta: (
@@ -696,15 +705,35 @@ function isSourceBackedToolCall(tool: ToolCallInfo): boolean {
   );
 }
 
-function attachSourcesToLastSearchToolBlockDraft(
+function attachSourcesToSearchToolBlockDraft(
   blocks: ContentBlock[],
   sources: SourceInfo[],
+  hint?: SourceAttachmentHint,
 ): boolean {
   if (sources.length === 0) return false;
+  const targetToolCallId = String(hint?.toolCallId || "").trim();
+  if (targetToolCallId) {
+    const targetBlock = findToolExecutionBlockDraft(blocks, targetToolCallId);
+    if (targetBlock && isSourceBackedToolCall(targetBlock.tool)) {
+      targetBlock.tool.sources = mergeSourceInfos(
+        targetBlock.tool.sources || [],
+        sources,
+      );
+      return true;
+    }
+  }
+
+  const targetToolName = normalizeToolNameForSources(hint?.toolName || "");
   for (let i = blocks.length - 1; i >= 0; i -= 1) {
     const block = blocks[i];
     if (block.type !== "tool_execution") continue;
     if (!isSourceBackedToolCall(block.tool)) continue;
+    if (
+      targetToolName &&
+      normalizeToolNameForSources(block.tool.name) !== targetToolName
+    ) {
+      continue;
+    }
     block.tool.sources = mergeSourceInfos(block.tool.sources || [], sources);
     return true;
   }
@@ -1716,7 +1745,7 @@ export const useChatStore = create<ChatState>()(
       });
     },
 
-    setStreamingSources: (sources) => {
+    setStreamingSources: (sources, hint) => {
       let attachedToFinalMessage = false;
       set((state) => {
         if (state.isStreaming) {
@@ -1725,16 +1754,42 @@ export const useChatStore = create<ChatState>()(
               ? []
               : mergeSourceInfos(state.streamingSources, sources);
           if (sources.length > 0) {
-            const attachedToBlock = attachSourcesToLastSearchToolBlockDraft(
+            const attachedToBlock = attachSourcesToSearchToolBlockDraft(
               state.streamingBlocks,
               sources,
+              hint,
             );
             if (attachedToBlock) {
-              for (let i = state.streamingToolCalls.length - 1; i >= 0; i -= 1) {
-                const toolCall = state.streamingToolCalls[i];
-                if (!isSourceBackedToolCall(toolCall)) continue;
-                toolCall.sources = mergeSourceInfos(toolCall.sources || [], sources);
-                break;
+              const targetToolCallId = String(hint?.toolCallId || "").trim();
+              if (targetToolCallId) {
+                const toolCall = state.streamingToolCalls.find(
+                  (item) => item.id === targetToolCallId,
+                );
+                if (toolCall && isSourceBackedToolCall(toolCall)) {
+                  toolCall.sources = mergeSourceInfos(
+                    toolCall.sources || [],
+                    sources,
+                  );
+                }
+              } else {
+                const targetToolName = normalizeToolNameForSources(
+                  hint?.toolName || "",
+                );
+                for (let i = state.streamingToolCalls.length - 1; i >= 0; i -= 1) {
+                  const toolCall = state.streamingToolCalls[i];
+                  if (!isSourceBackedToolCall(toolCall)) continue;
+                  if (
+                    targetToolName &&
+                    normalizeToolNameForSources(toolCall.name) !== targetToolName
+                  ) {
+                    continue;
+                  }
+                  toolCall.sources = mergeSourceInfos(
+                    toolCall.sources || [],
+                    sources,
+                  );
+                  break;
+                }
               }
             }
           }
@@ -1745,6 +1800,7 @@ export const useChatStore = create<ChatState>()(
             state,
             sources,
             state.lastCompletedConversationId,
+            hint,
           );
         }
       });

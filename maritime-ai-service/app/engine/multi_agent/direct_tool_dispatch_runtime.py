@@ -234,6 +234,10 @@ async def dispatch_direct_tool_call(
                 "type": "sources",
                 "content": sources,
                 "node": "direct",
+                "details": {
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                },
             }
         )
     return DirectToolDispatchResult(

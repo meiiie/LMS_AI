@@ -1211,7 +1211,11 @@ export function useSSEStream() {
             ? data.content
             : [];
         traceEvent("sources", { count: sources.length });
-        useChatStore.getState().setStreamingSources(sources);
+        useChatStore.getState().setStreamingSources(sources, {
+          toolCallId:
+            typeof data.tool_call_id === "string" ? data.tool_call_id : "",
+          toolName: typeof data.tool_name === "string" ? data.tool_name : "",
+        });
       },
       onMetadata: (data) => {
         traceEvent("metadata", { session_id: data.session_id, model: data.model });

@@ -80,7 +80,24 @@ async def _convert_bus_event_impl(event: dict) -> StreamEvent:
         )
     if etype == "sources":
         sources = event.get("content", [])
-        return await create_sources_event(sources if isinstance(sources, list) else [])
+        details = event.get("details") if isinstance(event.get("details"), dict) else {}
+        return await create_sources_event(
+            sources if isinstance(sources, list) else [],
+            node=node,
+            tool_call_id=str(
+                details.get("tool_call_id")
+                or event.get("tool_call_id")
+                or ""
+            ).strip()
+            or None,
+            tool_name=str(
+                details.get("tool_name")
+                or event.get("tool_name")
+                or ""
+            ).strip()
+            or None,
+            details=details,
+        )
     if etype == "answer_delta":
         return await create_answer_event(event.get("content", ""))
     if etype == "thinking_start":

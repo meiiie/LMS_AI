@@ -733,6 +733,10 @@ async def test_execute_forced_web_search_shortcut_emits_events(monkeypatch):
         "thinking_end",
     ]
     assert emitted[2]["content"][0]["url"] == "https://example.test"
+    assert emitted[2]["details"] == {
+        "tool_call_id": "forced_web_search_0",
+        "tool_name": "tool_web_search",
+    }
     thinking_text = " ".join(
         str(event.get("content", ""))
         for event in emitted

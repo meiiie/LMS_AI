@@ -113,6 +113,34 @@ describe("SSE Parser", () => {
     });
   });
 
+  it("should parse sources event with tool identity", async () => {
+    const sources = [
+      {
+        title: "Weather",
+        content: "Cloudy.",
+        url: "https://weather.example",
+      },
+    ];
+
+    const stream = createStream([
+      `event: sources\ndata: ${JSON.stringify({
+        sources,
+        tool_call_id: "tc-search",
+        tool_name: "tool_web_search",
+      })}\n\n`,
+    ]);
+
+    const handlers = createHandlers();
+    await parseSSEStream(stream, handlers);
+
+    expect(handlers.calls.sources).toHaveLength(1);
+    expect(handlers.calls.sources[0]).toMatchObject({
+      sources,
+      tool_call_id: "tc-search",
+      tool_name: "tool_web_search",
+    });
+  });
+
   it("should parse metadata event", async () => {
     const stream = createStream([
       'event: metadata\ndata: {"processing_time":1.5,"streaming_version":"v3"}\n\n',

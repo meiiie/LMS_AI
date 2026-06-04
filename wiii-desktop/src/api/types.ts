@@ -358,6 +358,9 @@ export interface SSEAnswerEvent {
 export interface SSESourcesEvent {
   sources?: SourceInfo[];
   content?: SourceInfo[];
+  tool_call_id?: string;
+  tool_name?: string;
+  node?: string;
   display_role?: DisplayRole;
   sequence_id?: number;
   step_id?: string;

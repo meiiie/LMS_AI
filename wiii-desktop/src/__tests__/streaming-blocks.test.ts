@@ -314,6 +314,51 @@ describe("streaming blocks", () => {
     ]);
   });
 
+  it("attaches source events by tool call id when provided", () => {
+    const store = useChatStore.getState();
+    store.startStreaming();
+    store.appendToolCall({
+      id: "tc-search-first",
+      name: "tool_web_search",
+      args: { query: "first" },
+    });
+    store.updateToolCallResult("tc-search-first", "Tìm được nguồn", undefined, {
+      schema_version: "tool_result_metadata.v1",
+      status: "completed",
+      result_kind: "web_sources",
+      source_count: 1,
+    });
+    store.appendToolCall({
+      id: "tc-search-second",
+      name: "tool_web_search",
+      args: { query: "second" },
+    });
+    store.updateToolCallResult("tc-search-second", "Tìm được nguồn", undefined, {
+      schema_version: "tool_result_metadata.v1",
+      status: "completed",
+      result_kind: "web_sources",
+      source_count: 1,
+    });
+
+    store.setStreamingSources(
+      [
+        {
+          title: "First source",
+          content: "First.",
+          url: "https://first.example/source",
+          source_type: "web",
+        },
+      ],
+      { toolCallId: "tc-search-first", toolName: "tool_web_search" },
+    );
+
+    const blocks = getBlocks();
+    expect(toolAt(blocks, 0).tool.sources?.[0].title).toBe("First source");
+    expect(toolAt(blocks, 1).tool.sources).toBeUndefined();
+    expect(stateToolCalls()[0].sources?.[0].title).toBe("First source");
+    expect(stateToolCalls()[1].sources).toBeUndefined();
+  });
+
   it("places a late tool_execution block after an answer when no new thinking step exists", () => {
     const store = useChatStore.getState();
     store.startStreaming();
