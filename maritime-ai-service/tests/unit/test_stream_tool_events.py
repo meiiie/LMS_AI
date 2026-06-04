@@ -72,6 +72,23 @@ class TestCreateToolCallEvent:
         assert event.node == "rag_agent"
 
     @pytest.mark.asyncio
+    async def test_preserves_metadata_and_policy(self):
+        event = await create_tool_call_event(
+            tool_name="tool_web_search",
+            tool_args={"query": "weather"},
+            tool_call_id="c1",
+            node="direct",
+            metadata={
+                "schema_version": "tool_result_metadata.v1",
+                "status": "skipped",
+            },
+            policy={"allowed": False, "reason": "disabled"},
+        )
+
+        assert event.content["metadata"]["status"] == "skipped"
+        assert event.content["policy"]["allowed"] is False
+
+    @pytest.mark.asyncio
     async def test_to_dict(self):
         event = await create_tool_call_event(
             tool_name="calc",
@@ -154,6 +171,26 @@ class TestCreateToolResultEvent:
         assert event.node == "rag_agent"
 
     @pytest.mark.asyncio
+    async def test_preserves_metadata(self):
+        event = await create_tool_result_event(
+            tool_name="tool_web_search",
+            result_summary="Found sources",
+            tool_call_id="c1",
+            node="direct",
+            metadata={
+                "schema_version": "tool_result_metadata.v1",
+                "status": "completed",
+                "result_kind": "web_sources",
+                "source_count": 4,
+            },
+        )
+
+        assert event.content["metadata"]["status"] == "completed"
+        assert event.content["metadata"]["result_kind"] == "web_sources"
+        assert event.content["metadata"]["source_count"] == 4
+
+
+    @pytest.mark.asyncio
     async def test_to_dict(self):
         event = await create_tool_result_event(
             tool_name="calc",
@@ -187,6 +224,50 @@ class TestCreateToolResultEvent:
         assert "raw-result-token" not in payload
         assert "raw-bearer-token" not in payload
         assert "Bearer <redacted-secret>" in payload
+
+
+@pytest.mark.asyncio
+async def test_bus_tool_events_preserve_metadata_through_stream_surface():
+    from app.engine.multi_agent.graph_stream_surface import _convert_bus_event_impl
+
+    call_event = await _convert_bus_event_impl(
+        {
+            "type": "tool_call",
+            "node": "direct",
+            "content": {
+                "name": "tool_web_search",
+                "args": {"query": "weather"},
+                "id": "c1",
+                "metadata": {
+                    "schema_version": "tool_result_metadata.v1",
+                    "status": "skipped",
+                },
+                "policy": {"allowed": False, "reason": "disabled"},
+            },
+        }
+    )
+    result_event = await _convert_bus_event_impl(
+        {
+            "type": "tool_result",
+            "node": "direct",
+            "content": {
+                "name": "tool_web_search",
+                "result": "Found sources",
+                "id": "c1",
+                "metadata": {
+                    "schema_version": "tool_result_metadata.v1",
+                    "status": "completed",
+                    "result_kind": "web_sources",
+                    "source_count": 4,
+                },
+            },
+        }
+    )
+
+    assert call_event.content["metadata"]["status"] == "skipped"
+    assert call_event.content["policy"]["reason"] == "disabled"
+    assert result_event.content["metadata"]["status"] == "completed"
+    assert result_event.content["metadata"]["source_count"] == 4
 
 
 # ============================================================================

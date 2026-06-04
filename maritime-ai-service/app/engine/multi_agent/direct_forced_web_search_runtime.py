@@ -8,6 +8,9 @@ from typing import Any, Awaitable, Callable
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
 )
+from app.engine.multi_agent.direct_tool_event_metadata import (
+    build_tool_result_event_metadata,
+)
 from app.engine.multi_agent.direct_tool_sources import (
     extract_source_infos_from_tool_result,
 )
@@ -105,6 +108,12 @@ async def execute_forced_web_search_shortcut(
         log.warning("[DIRECT] Forced @web-search tool failed: %s", tool_error)
         result = "Tool unavailable"
 
+    sources = extract_source_infos_from_tool_result(forced_search_tool_name, result)
+    metadata = build_tool_result_event_metadata(
+        forced_search_tool_name,
+        result,
+        sources=sources,
+    )
     await push_event(
         {
             "type": "tool_result",
@@ -115,11 +124,11 @@ async def execute_forced_web_search_shortcut(
                     result,
                 ),
                 "id": tc_id,
+                "metadata": metadata,
             },
             "node": "direct",
         }
     )
-    sources = extract_source_infos_from_tool_result(forced_search_tool_name, result)
     if sources:
         await push_event(
             {
@@ -134,6 +143,7 @@ async def execute_forced_web_search_shortcut(
             "name": forced_search_tool_name,
             "result": sanitize_tool_result_for_event(result),
             "id": tc_id,
+            "metadata": metadata,
         }
     )
 

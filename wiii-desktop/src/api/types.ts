@@ -413,6 +413,8 @@ export interface SSEToolCallEvent {
     name: string;
     args: Record<string, unknown>;
     id: string;
+    metadata?: ToolResultMetadata;
+    policy?: Record<string, unknown>;
   };
   node?: string;
   step?: string;
@@ -428,6 +430,7 @@ export interface SSEToolResultEvent {
     name: string;
     result: string;
     id: string;
+    metadata?: ToolResultMetadata;
   };
   node?: string;
   step?: string;
@@ -436,6 +439,34 @@ export interface SSEToolResultEvent {
   step_id?: string;
   step_state?: StepState;
   presentation?: PresentationMode;
+}
+
+export interface ToolResultMetadata {
+  schema_version?: string;
+  status?:
+    | "completed"
+    | "skipped"
+    | "failed"
+    | "validation_failed"
+    | "blocked"
+    | "needs_input"
+    | "unavailable"
+    | string;
+  result_kind?:
+    | "text"
+    | "weather"
+    | "web_sources"
+    | "sources"
+    | "policy"
+    | "validation"
+    | string;
+  reason_code?: string;
+  source_count?: number;
+  domains?: string[];
+  skipped?: boolean;
+  policy?: Record<string, unknown>;
+  missing_fields?: string[];
+  [key: string]: unknown;
 }
 
 export interface SSEStatusEvent {
@@ -1314,6 +1345,7 @@ export interface ToolCallInfo {
   args?: Record<string, unknown>;
   result?: string;
   node?: string;
+  metadata?: ToolResultMetadata;
 }
 
 export type DisplayRole = "thinking" | "tool" | "action" | "answer" | "artifact";

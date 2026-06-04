@@ -275,6 +275,108 @@ def test_weather_lookup_limits_duplicate_web_search_fanout():
     )
 
 
+@pytest.mark.asyncio
+async def test_execute_direct_tool_round_emits_skipped_weather_fanout_events():
+    from app.engine.multi_agent.direct_tool_round_execution_runtime import (
+        _WEATHER_SEARCH_FANOUT_SKIP_RESULT,
+        execute_direct_tool_round,
+    )
+
+    events: list[dict] = []
+    tool_call_events: list[dict] = []
+    messages: list[object] = []
+    dispatch_calls: list[str] = []
+    llm_response = SimpleNamespace(
+        tool_calls=[
+            {
+                "id": "search_1",
+                "name": "tool_web_search",
+                "args": {"query": "thời tiết Hải Phòng hôm nay"},
+            },
+            {
+                "id": "search_2",
+                "name": "tool_web_search",
+                "args": {"query": "weather Hai Phong today"},
+            },
+        ]
+    )
+
+    async def push_event(event):
+        events.append(event)
+
+    async def dispatch_direct_tool_call(**kwargs):
+        dispatch_calls.append(kwargs["tool_call"]["id"])
+        return SimpleNamespace(
+            tool_call_id=kwargs["tool_call"]["id"],
+            tool_name="tool_web_search",
+            tool_args=kwargs["tool_call"]["args"],
+            result="URL: https://example.test/weather\nRealFeel 39C.",
+            matched=True,
+        )
+
+    async def process_direct_tool_post_dispatch(**_kwargs):
+        return SimpleNamespace(
+            active_visual_session_ids=[],
+            visual_emitted_any=False,
+        )
+
+    async def emit_visual_commit_events(**_kwargs):
+        return None
+
+    result = await execute_direct_tool_round(
+        llm_response=llm_response,
+        tool_round=0,
+        tools=[],
+        query="thời tiết Hải Phòng hôm nay",
+        state={"_turn_path_decision": {"path": "web_search"}},
+        messages=messages,
+        tool_call_events=tool_call_events,
+        push_event=push_event,
+        native_tool_messages=False,
+        visual_emitted_any=False,
+        runtime_context_base=None,
+        handoffs_enabled=False,
+        get_tool_by_name=lambda *_args, **_kwargs: None,
+        invoke_tool_with_runtime=lambda *_args, **_kwargs: None,
+        is_search_tool_name=lambda name: name == "tool_web_search",
+        prefer_official_query_for_known_docs=lambda args, _query: args,
+        summarize_tool_result_for_stream=lambda _name, value: f"summary:{value}",
+        maybe_emit_host_action_event=lambda **_kwargs: None,
+        maybe_emit_visual_event=lambda **_kwargs: None,
+        emit_visual_commit_events=emit_visual_commit_events,
+        build_direct_tool_reflection=lambda *_args, **_kwargs: "",
+        push_status_only_progress=lambda *_args, **_kwargs: None,
+        build_tool_result_message=lambda content, **_kwargs: SimpleNamespace(
+            content=content
+        ),
+        normalize_tool_call=lambda tool_call: tool_call,
+        infer_direct_reasoning_cue=lambda *_args, **_kwargs: "cue",
+        collect_active_visual_session_ids=lambda _state: [],
+        dispatch_direct_tool_call=dispatch_direct_tool_call,
+        process_direct_tool_post_dispatch=process_direct_tool_post_dispatch,
+        logger_obj=SimpleNamespace(
+            info=lambda *args, **kwargs: None,
+            warning=lambda *args, **kwargs: None,
+        ),
+    )
+
+    assert result.round_tool_names == ["tool_web_search", "tool_web_search"]
+    assert dispatch_calls == ["search_1"]
+    assert [event["type"] for event in events] == ["tool_call", "tool_result"]
+    assert events[0]["content"]["id"] == "search_2"
+    assert events[1]["content"]["id"] == "search_2"
+    assert events[1]["content"]["metadata"]["status"] == "skipped"
+    assert (
+        events[1]["content"]["metadata"]["reason_code"]
+        == "weather_search_fanout_limited"
+    )
+    assert tool_call_events[0]["type"] == "call"
+    assert tool_call_events[0]["metadata"]["status"] == "skipped"
+    assert tool_call_events[1]["type"] == "result"
+    assert tool_call_events[1]["result"] == _WEATHER_SEARCH_FANOUT_SKIP_RESULT
+    assert messages[-1].content == _WEATHER_SEARCH_FANOUT_SKIP_RESULT
+
+
 def test_build_direct_post_tool_search_template_response_for_forced_web(monkeypatch):
     from app.engine.multi_agent import direct_search_template_runtime as runtime
 

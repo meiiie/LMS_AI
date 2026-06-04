@@ -66,6 +66,8 @@ async def _convert_bus_event_impl(event: dict) -> StreamEvent:
             tool_args=tc.get("args", {}),
             tool_call_id=tc.get("id", ""),
             node=node,
+            metadata=tc.get("metadata") if isinstance(tc.get("metadata"), dict) else None,
+            policy=tc.get("policy") if isinstance(tc.get("policy"), dict) else None,
         )
     if etype == "tool_result":
         tc = event.get("content", {})
@@ -74,6 +76,7 @@ async def _convert_bus_event_impl(event: dict) -> StreamEvent:
             result_summary=tc.get("result", ""),
             tool_call_id=tc.get("id", ""),
             node=node,
+            metadata=tc.get("metadata") if isinstance(tc.get("metadata"), dict) else None,
         )
     if etype == "sources":
         sources = event.get("content", [])

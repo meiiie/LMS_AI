@@ -447,7 +447,7 @@ describe("SSE Parser", () => {
 
   it("should parse tool_result event", async () => {
     const stream = createStream([
-      'event: tool_result\ndata: {"content":{"name":"knowledge_search","result":"Found 8 documents","id":"tc-1"},"node":"rag_agent"}\n\n',
+      'event: tool_result\ndata: {"content":{"name":"knowledge_search","result":"Found 8 documents","id":"tc-1","metadata":{"schema_version":"tool_result_metadata.v1","status":"completed","result_kind":"web_sources","source_count":2}},"node":"rag_agent"}\n\n',
     ]);
 
     const handlers = createHandlers();
@@ -455,7 +455,17 @@ describe("SSE Parser", () => {
 
     expect(handlers.calls.tool_result).toHaveLength(1);
     expect(handlers.calls.tool_result[0]).toMatchObject({
-      content: { name: "knowledge_search", result: "Found 8 documents", id: "tc-1" },
+      content: {
+        name: "knowledge_search",
+        result: "Found 8 documents",
+        id: "tc-1",
+        metadata: {
+          schema_version: "tool_result_metadata.v1",
+          status: "completed",
+          result_kind: "web_sources",
+          source_count: 2,
+        },
+      },
     });
   });
 

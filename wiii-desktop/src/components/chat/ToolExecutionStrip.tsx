@@ -13,7 +13,7 @@ import {
   TerminalSquare,
   Wrench,
 } from "lucide-react";
-import type { ToolExecutionBlockData } from "@/api/types";
+import type { ToolExecutionBlockData, ToolResultMetadata } from "@/api/types";
 import { TOOL_LABELS } from "@/lib/reasoning-labels";
 import { VisualArtifactCard } from "./VisualArtifactCard";
 import { CodeStudioCard } from "./CodeStudioCard";
@@ -345,6 +345,108 @@ function stripVietnameseMarks(value: string): string {
     .toLowerCase();
 }
 
+function normalizeMetadataCode(value: unknown): string {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getMetadataStatus(metadata?: ToolResultMetadata): string {
+  return normalizeMetadataCode(metadata?.status);
+}
+
+function getMetadataReason(metadata?: ToolResultMetadata): string {
+  return normalizeMetadataCode(metadata?.reason_code);
+}
+
+function summarizeWeatherMetadata(
+  metadata?: ToolResultMetadata,
+): string | null {
+  const status = getMetadataStatus(metadata);
+  const reason = getMetadataReason(metadata);
+  if (status === "skipped" || metadata?.skipped) {
+    if (reason === "weather_search_fanout_limited") {
+      return "Đã có đủ nguồn thời tiết, bỏ qua lượt tìm kiếm trùng.";
+    }
+    return "Đã bỏ qua lượt tra cứu trùng.";
+  }
+  if (reason === "provider_unconfigured") {
+    return "Chưa có kết nối thời tiết trực tiếp.";
+  }
+  if (status === "needs_input" || reason === "missing_location") {
+    return "Cần thêm địa điểm để tra thời tiết.";
+  }
+  if (
+    status === "unavailable" ||
+    status === "failed" ||
+    reason === "no_data" ||
+    reason === "tool_unavailable"
+  ) {
+    return "Chưa lấy được thời tiết hiện tại.";
+  }
+  return null;
+}
+
+function summarizeToolMetadata(
+  toolName: string,
+  metadata?: ToolResultMetadata,
+): string | null {
+  if (!metadata) return null;
+  if (isWeatherTool(toolName)) return summarizeWeatherMetadata(metadata);
+
+  const status = getMetadataStatus(metadata);
+  const reason = getMetadataReason(metadata);
+  if (status === "skipped" || metadata.skipped) {
+    return reason === "weather_search_fanout_limited"
+      ? "Đã có đủ nguồn thời tiết, bỏ qua lượt tìm kiếm trùng."
+      : "Đã bỏ qua lượt gọi trùng.";
+  }
+  if (status === "blocked") return "Tool bị chặn bởi chính sách phiên.";
+  if (status === "validation_failed") return "Đầu vào tool chưa đúng định dạng.";
+  if (status === "needs_input") return "Cần thêm thông tin để chạy tool.";
+  if (status === "unavailable" || status === "failed") {
+    return "Tool chưa trả về kết quả dùng được.";
+  }
+  if (
+    typeof metadata.source_count === "number" &&
+    metadata.source_count > 0
+  ) {
+    const domains = Array.isArray(metadata.domains)
+      ? metadata.domains.filter(
+          (item): item is string => typeof item === "string",
+        )
+      : [];
+    const shownDomains = domains.slice(0, 3);
+    const hiddenCount = Math.max(
+      0,
+      Math.min(metadata.source_count, domains.length) - shownDomains.length,
+    );
+    const domainText =
+      shownDomains.length > 0
+        ? `: ${shownDomains.join(", ")}${hiddenCount > 0 ? ` +${hiddenCount}` : ""}`
+        : "";
+    return `Tìm được ${metadata.source_count} nguồn${domainText}`;
+  }
+  return null;
+}
+
+function getToolStateLabel(
+  isPending: boolean,
+  metadata?: ToolResultMetadata,
+): string {
+  if (isPending) return "Đang gọi";
+  const status = getMetadataStatus(metadata);
+  if (status === "skipped") return "Đã bỏ qua";
+  if (status === "needs_input") return "Cần thêm dữ liệu";
+  if (
+    status === "blocked" ||
+    status === "failed" ||
+    status === "validation_failed" ||
+    status === "unavailable"
+  ) {
+    return "Cần kiểm tra";
+  }
+  return "Đã xong";
+}
+
 function getStringField(
   payload: Record<string, unknown>,
   keys: string[],
@@ -407,7 +509,13 @@ function parseStructuredWeatherStatus(result: string): string | null {
   }
 }
 
-function summarizeWeatherResult(result: string): string {
+function summarizeWeatherResult(
+  result: string,
+  metadata?: ToolResultMetadata,
+): string {
+  const metadataLine = summarizeWeatherMetadata(metadata);
+  if (metadataLine) return metadataLine;
+
   const structured = parseStructuredWeatherStatus(result);
   if (structured) return structured;
 
@@ -442,8 +550,10 @@ function summarizeResult(
   toolName: string,
   result?: string,
   args?: Record<string, unknown>,
+  metadata?: ToolResultMetadata,
 ): { line: string; technicalDetail?: string; detailLabel?: string } {
-  if (!result) return { line: "" };
+  const metadataLine = summarizeToolMetadata(toolName, metadata);
+  if (!result) return { line: metadataLine || "" };
 
   if (
     toolName === "tool_generate_visual" ||
@@ -473,7 +583,7 @@ function summarizeResult(
   }
 
   if (isWeatherTool(toolName)) {
-    const line = summarizeWeatherResult(result);
+    const line = summarizeWeatherResult(result, metadata);
     const technicalDetail = sanitizeTechnicalDetail(result) || undefined;
     return {
       line,
@@ -490,9 +600,13 @@ function summarizeResult(
     sanitizeInlineText(result).replace(/[{}[\]"]/g, ""),
     180,
   );
+  const hasSourceMetadata =
+    typeof metadata?.source_count === "number" && metadata.source_count > 0;
   return {
-    line: normalized,
-    technicalDetail: sanitizeTechnicalDetail(result) || undefined,
+    line: metadataLine || normalized,
+    technicalDetail: hasSourceMetadata
+      ? undefined
+      : sanitizeTechnicalDetail(result) || undefined,
     detailLabel: "Chi tiết công cụ",
   };
 }
@@ -688,7 +802,8 @@ function GenericToolStrip({ block }: ToolExecutionStripProps) {
     TOOL_LABELS[toolName] || toolName.replace(/^tool_/, "").replace(/_/g, " ");
   const isPending = block.status === "pending";
   const kindLabel = getToolKindLabel(toolName);
-  const stateLabel = isPending ? "Đang gọi" : "Đã xong";
+  const metadataStatus = getMetadataStatus(block.tool.metadata);
+  const stateLabel = getToolStateLabel(isPending, block.tool.metadata);
   const resultLabel = getToolResultLabel(toolName);
   const argsLine = useMemo(
     () => summarizeArgs(toolName, block.tool.args),
@@ -703,8 +818,14 @@ function GenericToolStrip({ block }: ToolExecutionStripProps) {
     technicalDetail,
     detailLabel,
   } = useMemo(
-    () => summarizeResult(toolName, block.tool.result, block.tool.args),
-    [toolName, block.tool.result, block.tool.args],
+    () =>
+      summarizeResult(
+        toolName,
+        block.tool.result,
+        block.tool.args,
+        block.tool.metadata,
+      ),
+    [toolName, block.tool.result, block.tool.args, block.tool.metadata],
   );
   const resultLine =
     normalizeForCompare(rawResultLine) === normalizeForCompare(argsLine)
@@ -731,7 +852,7 @@ function GenericToolStrip({ block }: ToolExecutionStripProps) {
   return (
     <div
       className={`tool-strip ${isPending ? "tool-strip--pending" : "tool-strip--complete"}`}
-      data-status={isPending ? "pending" : "complete"}
+      data-status={isPending ? "pending" : metadataStatus || "complete"}
       data-tool-kind={kindLabel.toLowerCase()}
       data-testid="tool-execution-strip"
       aria-busy={isPending || undefined}
@@ -825,7 +946,12 @@ export function summarizeToolExecutionBlock(block: ToolExecutionBlockData) {
   const label =
     TOOL_LABELS[toolName] || toolName.replace(/^tool_/, "").replace(/_/g, " ");
   const argsLine = summarizeArgs(toolName, block.tool.args);
-  const summary = summarizeResult(toolName, block.tool.result, block.tool.args);
+  const summary = summarizeResult(
+    toolName,
+    block.tool.result,
+    block.tool.args,
+    block.tool.metadata,
+  );
   const resultLine =
     normalizeForCompare(summary.line) === normalizeForCompare(argsLine)
       ? ""

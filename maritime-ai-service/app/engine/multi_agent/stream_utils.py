@@ -285,15 +285,26 @@ async def create_tool_call_event(
     tool_args: Dict[str, Any],
     tool_call_id: str,
     node: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    policy: Optional[Dict[str, Any]] = None,
 ) -> StreamEvent:
     """Create a tool call event for agentic loop transparency."""
+    content: Dict[str, Any] = {
+        "name": tool_name,
+        "args": sanitize_tool_args_for_event(tool_args),
+        "id": tool_call_id,
+    }
+    if metadata:
+        safe_metadata = sanitize_runtime_payload(metadata)
+        if isinstance(safe_metadata, dict):
+            content["metadata"] = safe_metadata
+    if policy:
+        safe_policy = sanitize_runtime_payload(policy)
+        if isinstance(safe_policy, dict):
+            content["policy"] = safe_policy
     return StreamEvent(
         type=StreamEventType.TOOL_CALL,
-        content={
-            "name": tool_name,
-            "args": sanitize_tool_args_for_event(tool_args),
-            "id": tool_call_id,
-        },
+        content=content,
         node=node,
         step="tool_execution",
         subtype="tool_call",
@@ -316,15 +327,21 @@ async def create_tool_result_event(
     result_summary: str,
     tool_call_id: str,
     node: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> StreamEvent:
     """Create a tool result event for agentic loop transparency."""
+    content: Dict[str, Any] = {
+        "name": tool_name,
+        "result": _sanitize_tool_result_summary(result_summary),
+        "id": tool_call_id,
+    }
+    if metadata:
+        safe_metadata = sanitize_runtime_payload(metadata)
+        if isinstance(safe_metadata, dict):
+            content["metadata"] = safe_metadata
     return StreamEvent(
         type=StreamEventType.TOOL_RESULT,
-        content={
-            "name": tool_name,
-            "result": _sanitize_tool_result_summary(result_summary),
-            "id": tool_call_id,
-        },
+        content=content,
         node=node,
         step="tool_execution",
         subtype="tool_result",

@@ -6,7 +6,11 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+from app.engine.multi_agent.direct_tool_event_metadata import (
+    build_tool_result_event_metadata,
+)
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.tool_event_sanitizer import sanitize_tool_args_for_event
 
 
 PushEvent = Callable[[dict[str, Any]], Awaitable[None]]
@@ -132,10 +136,55 @@ async def execute_direct_tool_round(
         ):
             tool_call_id = str(tool_call.get("id") or f"tc_{tool_round}")
             tool_name = _tool_call_name(tool_call) or "tool_web_search"
+            tool_args = tool_call.get("args", {}) or {}
+            if not isinstance(tool_args, dict):
+                tool_args = {"value": tool_args}
+            public_tool_args = sanitize_tool_args_for_event(tool_args)
+            skip_metadata = build_tool_result_event_metadata(
+                tool_name,
+                _WEATHER_SEARCH_FANOUT_SKIP_RESULT,
+                skipped_reason="weather_search_fanout_limited",
+            )
             logger_obj.info(
                 "[DIRECT] Skipping duplicate weather web search tool=%s id=%s",
                 tool_name,
                 tool_call_id,
+            )
+            await push_event(
+                {
+                    "type": "tool_call",
+                    "content": {
+                        "name": tool_name,
+                        "args": public_tool_args,
+                        "id": tool_call_id,
+                        "metadata": skip_metadata,
+                    },
+                    "node": "direct",
+                }
+            )
+            tool_call_events.append(
+                {
+                    "type": "call",
+                    "name": tool_name,
+                    "args": public_tool_args,
+                    "id": tool_call_id,
+                    "metadata": skip_metadata,
+                }
+            )
+            await push_event(
+                {
+                    "type": "tool_result",
+                    "content": {
+                        "name": tool_name,
+                        "result": summarize_tool_result_for_stream(
+                            tool_name,
+                            _WEATHER_SEARCH_FANOUT_SKIP_RESULT,
+                        ),
+                        "id": tool_call_id,
+                        "metadata": skip_metadata,
+                    },
+                    "node": "direct",
+                }
             )
             tool_call_events.append(
                 {
@@ -147,6 +196,7 @@ async def execute_direct_tool_round(
                         "skipped": True,
                         "reason": "weather_search_fanout_limited",
                     },
+                    "metadata": skip_metadata,
                 }
             )
             messages.append(

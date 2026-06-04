@@ -9,10 +9,13 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.engine.multi_agent.tool_event_sanitizer import sanitize_tool_args_for_event
+from app.engine.multi_agent.direct_tool_event_metadata import (
+    build_tool_result_event_metadata,
+)
 from app.engine.multi_agent.direct_tool_sources import (
     extract_source_infos_from_tool_result,
 )
+from app.engine.multi_agent.tool_event_sanitizer import sanitize_tool_args_for_event
 from app.engine.multi_agent.tool_policy_session import (
     tool_policy_denial_message,
     tool_policy_session_from_state,
@@ -73,6 +76,16 @@ async def dispatch_direct_tool_call(
         policy_decision = policy_session.decision_for(tool_name.strip())
         if not policy_decision.allowed:
             result = tool_policy_denial_message(policy_decision)
+            policy_payload = {
+                "allowed": False,
+                "path": policy_decision.path,
+                "reason": policy_decision.reason,
+            }
+            metadata = build_tool_result_event_metadata(
+                tool_name,
+                result,
+                policy=policy_payload,
+            )
             logger_obj.warning(
                 "[DIRECT] Tool policy denied tool=%r path=%s reason=%s",
                 tool_name,
@@ -87,11 +100,7 @@ async def dispatch_direct_tool_call(
                         "name": tool_name,
                         "args": public_tool_args,
                         "id": tool_call_id,
-                        "policy": {
-                            "allowed": False,
-                            "path": policy_decision.path,
-                            "reason": policy_decision.reason,
-                        },
+                        "policy": policy_payload,
                     },
                     "node": "direct",
                 }
@@ -102,11 +111,7 @@ async def dispatch_direct_tool_call(
                     "name": tool_name,
                     "args": public_tool_args,
                     "id": tool_call_id,
-                    "policy": {
-                        "allowed": False,
-                        "path": policy_decision.path,
-                        "reason": policy_decision.reason,
-                    },
+                    "policy": policy_payload,
                 }
             )
             await push_event(
@@ -116,6 +121,7 @@ async def dispatch_direct_tool_call(
                         "name": tool_name,
                         "result": summarize_tool_result_for_stream(tool_name, result),
                         "id": tool_call_id,
+                        "metadata": metadata,
                     },
                     "node": "direct",
                 }
@@ -203,6 +209,13 @@ async def dispatch_direct_tool_call(
         logger_obj.warning("[DIRECT] Tool %s failed: %s", tool_name, tool_error)
         result = "Tool unavailable"
 
+    sources = extract_source_infos_from_tool_result(tool_name, result)
+    metadata = build_tool_result_event_metadata(
+        tool_name,
+        result,
+        sources=sources,
+        matched=bool(matched),
+    )
     await push_event(
         {
             "type": "tool_result",
@@ -210,11 +223,11 @@ async def dispatch_direct_tool_call(
                 "name": tool_name,
                 "result": summarize_tool_result_for_stream(tool_name, result),
                 "id": tool_call_id,
+                "metadata": metadata,
             },
             "node": "direct",
         }
     )
-    sources = extract_source_infos_from_tool_result(tool_name, result)
     if sources:
         await push_event(
             {

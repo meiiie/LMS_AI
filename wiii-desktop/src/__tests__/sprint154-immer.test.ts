@@ -136,9 +136,26 @@ describe("Sprint 154: Immer middleware — chat-store", () => {
     useChatStore.getState().startStreaming();
     useChatStore.getState().openThinkingBlock("Test");
     useChatStore.getState().appendToolCall({ id: "tc1", name: "test", args: {} });
-    useChatStore.getState().updateToolCallResult("tc1", "Result data");
+    useChatStore.getState().updateToolCallResult(
+      "tc1",
+      "Result data",
+      undefined,
+      {
+        schema_version: "tool_result_metadata.v1",
+        status: "unavailable",
+        reason_code: "provider_unconfigured",
+      },
+    );
     const state = useChatStore.getState();
     expect(state.streamingToolCalls[0].result).toBe("Result data");
+    expect(state.streamingToolCalls[0].metadata?.status).toBe("unavailable");
+    expect((state.streamingBlocks[0] as any).toolCalls[0].metadata.status).toBe(
+      "unavailable",
+    );
+    const toolBlock = state.streamingBlocks.find(
+      (block) => block.type === "tool_execution",
+    ) as any;
+    expect(toolBlock.tool.metadata.reason_code).toBe("provider_unconfigured");
   });
 
   it("links tool_create_visual_code tool blocks to the opened visual session", () => {

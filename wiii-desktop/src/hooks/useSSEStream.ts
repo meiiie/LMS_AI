@@ -1306,6 +1306,7 @@ export function useSSEStream() {
             args: data.content.args,
             result: rawThought || undefined,
             node: data.node,
+            metadata: data.content.metadata,
           };
           flushBothBuffers();
           store.appendToolCall(tc, toDisplayMeta(data));
@@ -1321,6 +1322,7 @@ export function useSSEStream() {
             args: data.content.args,
             result: rawMessage || undefined,
             node: data.node,
+            metadata: data.content.metadata,
           };
           flushBothBuffers();
           store.appendToolCall(tc, toDisplayMeta(data));
@@ -1342,6 +1344,7 @@ export function useSSEStream() {
           name: data.content.name,
           args: data.content.args,
           node: data.node,
+          metadata: data.content.metadata,
         };
         store.appendToolCall(tc, toDisplayMeta(data));
         store.appendPhaseToolCall(tc, data.step_id);
@@ -1354,8 +1357,17 @@ export function useSSEStream() {
           return;
         }
         const store = useChatStore.getState();
-        store.updateToolCallResult(data.content.id, data.content.result, toDisplayMeta(data));
-        store.updatePhaseToolCallResult(data.content.id, data.content.result);
+        store.updateToolCallResult(
+          data.content.id,
+          data.content.result,
+          toDisplayMeta(data),
+          data.content.metadata,
+        );
+        store.updatePhaseToolCallResult(
+          data.content.id,
+          data.content.result,
+          data.content.metadata,
+        );
       },
       onStatus: (data) => {
         traceEvent("status", { node: data.node, step: data.step });

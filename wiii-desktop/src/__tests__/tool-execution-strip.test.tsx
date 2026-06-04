@@ -280,6 +280,44 @@ describe("ToolExecutionStrip", () => {
     expect(strip.textContent || "").not.toContain('"snippet"');
   });
 
+  it("shows source-count metadata once for summarized search results", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-search-meta",
+      status: "completed",
+      tool: {
+        id: "tool-search-meta",
+        name: "tool_web_search",
+        args: {
+          query: "thời tiết Hải Phòng hiện tại",
+        },
+        result:
+          "Tìm được 5 nguồn: giaiphaphutam.com, nchmf.gov.vn, ventusky.com +2",
+        metadata: {
+          schema_version: "tool_result_metadata.v1",
+          status: "completed",
+          result_kind: "web_sources",
+          source_count: 5,
+          domains: [
+            "giaiphaphutam.com",
+            "nchmf.gov.vn",
+            "ventusky.com",
+            "accuweather.com",
+            "weather.com",
+          ],
+        },
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+    fireEvent.click(screen.getByRole("button", { name: /Tìm kiếm web/i }));
+
+    const stripText = screen.getByTestId("tool-execution-strip").textContent || "";
+    const summary = "Tìm được 5 nguồn: giaiphaphutam.com, nchmf.gov.vn, ventusky.com +2";
+    expect(stripText.includes(summary)).toBe(true);
+    expect(stripText.indexOf(summary)).toBe(stripText.lastIndexOf(summary));
+  });
+
   it("shows weather tool traces as location-aware status instead of a generic tool", () => {
     const block: ToolExecutionBlockData = {
       type: "tool_execution",
@@ -335,6 +373,71 @@ describe("ToolExecutionStrip", () => {
     fireEvent.click(screen.getByRole("button", { name: /Tra thời tiết/i }));
 
     expect(screen.getByText("Chưa lấy được thời tiết hiện tại.")).toBeTruthy();
+  });
+
+  it("uses weather metadata before generic result text", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-weather-meta",
+      status: "completed",
+      tool: {
+        id: "tool-weather-meta",
+        name: "current_weather",
+        args: {
+          city: "Hải Phòng",
+        },
+        result: "Provider returned a generic failure.",
+        metadata: {
+          schema_version: "tool_result_metadata.v1",
+          status: "unavailable",
+          result_kind: "weather",
+          reason_code: "provider_unconfigured",
+        },
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+
+    expect(screen.getByText("Cần kiểm tra")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Tra thời tiết/i }));
+    expect(
+      screen.getByText("Chưa có kết nối thời tiết trực tiếp."),
+    ).toBeTruthy();
+  });
+
+  it("renders skipped duplicate weather search from metadata", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-search-skip",
+      status: "completed",
+      tool: {
+        id: "tool-search-skip",
+        name: "tool_web_search",
+        args: {
+          query: "weather Hai Phong today",
+        },
+        result: "Additional search skipped.",
+        metadata: {
+          schema_version: "tool_result_metadata.v1",
+          status: "skipped",
+          result_kind: "text",
+          reason_code: "weather_search_fanout_limited",
+          skipped: true,
+        },
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+
+    const strip = screen.getByTestId("tool-execution-strip");
+    expect(strip.getAttribute("data-status")).toBe("skipped");
+    expect(screen.getByText("Đã bỏ qua")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Tìm kiếm web/i }));
+    expect(
+      screen.getByText(
+        "Đã có đủ nguồn thời tiết, bỏ qua lượt tìm kiếm trùng.",
+      ),
+    ).toBeTruthy();
   });
 
   it("marks pending tool calls as busy without inventing output", () => {

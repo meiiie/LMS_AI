@@ -20,6 +20,7 @@ import type {
   SourceInfo,
   ChatResponseMetadata,
   ToolCallInfo,
+  ToolResultMetadata,
   ContentBlock,
   DisplayPresentationMeta,
   StreamingStep,
@@ -294,6 +295,7 @@ interface ChatState {
     id: string,
     result: string,
     meta?: DisplayPresentationMeta,
+    metadata?: ToolResultMetadata,
   ) => void;
   setStreamingDomainNotice: (notice: string) => void;
   /** Sprint 147: Append bold action text between thinking blocks */
@@ -383,7 +385,11 @@ interface ChatState {
   closeActivePhase: (durationMs?: number) => void;
   appendPhaseStatus: (message: string, node?: string, stepId?: string) => void;
   appendPhaseToolCall: (tc: ToolCallInfo, stepId?: string) => void;
-  updatePhaseToolCallResult: (id: string, result: string) => void;
+  updatePhaseToolCallResult: (
+    id: string,
+    result: string,
+    metadata?: ToolResultMetadata,
+  ) => void;
   setPendingStreamMetadata: (metadata: ChatResponseMetadata) => void;
   finalizeStream: (metadata?: ChatResponseMetadata) => void;
   setStreamError: (error: string, metadata?: Record<string, unknown>) => void;
@@ -631,6 +637,12 @@ function mergeToolCallInfoDraft(
   if (incoming.node) {
     target.node = incoming.node;
   }
+  if (incoming.metadata) {
+    target.metadata = {
+      ...(target.metadata || {}),
+      ...incoming.metadata,
+    };
+  }
   return target;
 }
 
@@ -643,6 +655,7 @@ function upsertToolCallInfoDraft(
   const next = {
     ...incoming,
     args: incoming.args ? { ...incoming.args } : undefined,
+    metadata: incoming.metadata ? { ...incoming.metadata } : undefined,
   };
   toolCalls.push(next);
   return next;
@@ -2407,12 +2420,18 @@ export const useChatStore = create<ChatState>()(
       });
     },
 
-    updatePhaseToolCallResult: (id, result) => {
+    updatePhaseToolCallResult: (id, result, metadata) => {
       set((state) => {
         for (const phase of state.streamingPhases) {
           const tc = phase.toolCalls.find((t) => t.id === id);
           if (tc) {
             tc.result = result;
+            if (metadata) {
+              tc.metadata = {
+                ...(tc.metadata || {}),
+                ...metadata,
+              };
+            }
             break;
           }
         }
@@ -2488,6 +2507,9 @@ export const useChatStore = create<ChatState>()(
                 args: normalizedToolCall.args
                   ? { ...normalizedToolCall.args }
                   : undefined,
+                metadata: normalizedToolCall.metadata
+                  ? { ...normalizedToolCall.metadata }
+                  : undefined,
               },
               node: normalizedToolCall.node,
               status: normalizedToolCall.result ? "completed" : "pending",
@@ -2502,11 +2524,19 @@ export const useChatStore = create<ChatState>()(
       });
     },
 
-    updateToolCallResult: (id, result, meta) => {
+    updateToolCallResult: (id, result, meta, metadata) => {
       set((state) => {
         // Flat field - backward compat
         const flatTc = state.streamingToolCalls.find((tc) => tc.id === id);
-        if (flatTc) flatTc.result = result;
+        if (flatTc) {
+          flatTc.result = result;
+          if (metadata) {
+            flatTc.metadata = {
+              ...(flatTc.metadata || {}),
+              ...metadata,
+            };
+          }
+        }
 
         // Backward compat: find tool call in thinking blocks and update
         for (const block of state.streamingBlocks) {
@@ -2514,10 +2544,22 @@ export const useChatStore = create<ChatState>()(
             const tc = block.toolCalls.find((t) => t.id === id);
             if (tc) {
               tc.result = result;
+              if (metadata) {
+                tc.metadata = {
+                  ...(tc.metadata || {}),
+                  ...metadata,
+                };
+              }
             }
           }
           if (block.type === "tool_execution" && block.tool.id === id) {
             block.tool.result = result;
+            if (metadata) {
+              block.tool.metadata = {
+                ...(block.tool.metadata || {}),
+                ...metadata,
+              };
+            }
             block.status = "completed";
             applyDisplayMeta(block, meta);
           }

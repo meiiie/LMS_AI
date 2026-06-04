@@ -7,6 +7,9 @@ from app.engine.multi_agent.direct_tool_dispatch_runtime import (
     dispatch_direct_tool_call,
     normalize_tool_call,
 )
+from app.engine.multi_agent.direct_tool_event_metadata import (
+    build_tool_result_event_metadata,
+)
 
 
 def test_normalize_tool_call_preserves_dicts_and_provider_objects():
@@ -22,6 +25,26 @@ def test_normalize_tool_call_preserves_dicts_and_provider_objects():
         "id": "call_2",
         "name": "tool_other",
         "args": {"query": "xyz"},
+    }
+
+
+def test_build_tool_result_event_metadata_classifies_weather_provider_gap():
+    metadata = build_tool_result_event_metadata(
+        "current_weather",
+        json.dumps(
+            {
+                "status": "error",
+                "reason_code": "provider_unconfigured",
+                "message": "Weather provider is not configured.",
+            }
+        ),
+    )
+
+    assert metadata == {
+        "schema_version": "tool_result_metadata.v1",
+        "status": "unavailable",
+        "result_kind": "weather",
+        "reason_code": "provider_unconfigured",
     }
 
 
@@ -92,6 +115,11 @@ async def test_dispatch_direct_tool_call_emits_stable_call_and_result_events():
         "name": "tool_web_search",
         "result": {"answer": "ok"},
         "id": "call_1",
+        "metadata": {
+            "schema_version": "tool_result_metadata.v1",
+            "status": "completed",
+            "result_kind": "text",
+        },
     }
     assert captured_invocation["runtime_context_base"] == {"request_id": "req_1"}
     assert captured_invocation["tool_call_id"] == "call_1"
@@ -142,6 +170,10 @@ async def test_dispatch_direct_tool_call_emits_sources_for_web_search_results():
         "tool_result",
         "sources",
     ]
+    assert events[1]["content"]["metadata"]["status"] == "completed"
+    assert events[1]["content"]["metadata"]["result_kind"] == "web_sources"
+    assert events[1]["content"]["metadata"]["source_count"] == 1
+    assert events[1]["content"]["metadata"]["domains"] == ["weather.example"]
     assert events[2]["content"] == [
         {
             "title": "Weather Hải Phòng today",
@@ -191,6 +223,8 @@ async def test_dispatch_direct_tool_call_returns_structured_unknown_tool_error()
         }
     ]
     assert events[1]["content"]["result"] == result.result
+    assert events[1]["content"]["metadata"]["status"] == "failed"
+    assert events[1]["content"]["metadata"]["reason_code"] == "unknown_tool"
 
 
 @pytest.mark.asyncio
