@@ -21,11 +21,17 @@ def _write_launch_pack(root: Path) -> tuple[Path, Path]:
 
 def _write_launch_pack_markdown(root: Path, run_plan_path: Path) -> Path:
     markdown_path = root / "launch-pack.md"
-    pack = launch_generator.generate_completion_audit_launch_pack(run_plan_path)
-    markdown_path.write_text(
-        launch_generator.format_markdown(pack).rstrip("\n") + "\n",
-        encoding="utf-8",
+    exit_code = launch_generator.main(
+        [
+            str(run_plan_path),
+            "--format",
+            "markdown",
+            "--out",
+            str(markdown_path),
+        ]
     )
+    if exit_code != 0:
+        raise AssertionError("launch-pack markdown generation failed")
     return markdown_path
 
 
