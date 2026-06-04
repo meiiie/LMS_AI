@@ -454,7 +454,7 @@ class BaseSettingsFieldsMixin:
     # Semantic Memory Settings (v0.3 - Vector Embeddings)
     embedding_provider: str = Field(
         default="google",
-        description="Semantic embedding provider: google, openai, openrouter, ollama, zhipu, or auto",
+        description="Semantic embedding provider: google, openai, openrouter, nvidia, ollama, zhipu, or auto",
     )
     embedding_failover_chain: list[str] = Field(
         default_factory=lambda: ["google", "openai", "ollama", "openrouter"],

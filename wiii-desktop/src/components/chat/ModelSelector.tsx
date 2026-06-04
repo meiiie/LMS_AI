@@ -175,8 +175,10 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
     label: string;
     Icon: typeof Cpu;
     disabled?: boolean;
+    groupOnly?: boolean;
     reasonLabel?: string | null;
     selectedModel?: string | null;
+    isProviderDefaultModel?: boolean;
     model?: ModelCatalogEntry;
   }> = [
     { kind: "auto", id: "auto", label: PROVIDER_LABELS.auto, Icon: PROVIDER_ICONS.auto },
@@ -184,6 +186,8 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
       const providerId = provider.id as RequestModelProvider;
       const disabled = provider.state !== "selectable";
       const providerLabel = provider.displayName || PROVIDER_LABELS[provider.id] || provider.id;
+      const modelOptions = provider.modelOptions || [];
+      const hasModelOptions = modelOptions.length > 0;
       return [
         {
           kind: "provider" as const,
@@ -191,10 +195,11 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
           label: providerLabel,
           Icon: PROVIDER_ICONS[provider.id] || Cpu,
           disabled,
+          groupOnly: hasModelOptions,
           reasonLabel: provider.reasonLabel,
           selectedModel: provider.selectedModel,
         },
-        ...(provider.modelOptions || []).map((model) => ({
+        ...modelOptions.map((model) => ({
           kind: "model" as const,
           id: providerId,
           label: model.display_name || model.model_name,
@@ -202,6 +207,7 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
           disabled,
           reasonLabel: provider.reasonLabel,
           selectedModel: model.model_name,
+          isProviderDefaultModel: provider.selectedModel === model.model_name,
           model,
         })),
       ];
@@ -230,8 +236,9 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
     id: RequestModelProvider,
     disabled?: boolean,
     model?: ModelCatalogEntry,
+    groupOnly?: boolean,
   ) => {
-    if (disabled) return;
+    if (disabled || groupOnly) return;
     if (model) {
       setActiveModel(id, model.model_name);
       if (activeConversation?.id) {
@@ -330,14 +337,18 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
                   Không tìm thấy model phù hợp.
                 </div>
               ) : null}
-              {filteredOptions.map(({ kind, id, label, Icon, disabled, reasonLabel, selectedModel, model }, index) => {
+              {filteredOptions.map(({ kind, id, label, Icon, disabled, groupOnly, reasonLabel, selectedModel, isProviderDefaultModel, model }, index) => {
                 const isModel = kind === "model";
                 const isActive =
                   kind === "auto"
                     ? activeProvider === "auto"
                     : isModel
-                      ? id === activeProvider && activeModel === model?.model_name
-                      : id === activeProvider && !activeModel;
+                      ? id === activeProvider
+                        && (
+                          activeModel === model?.model_name
+                          || (!activeModel && Boolean(isProviderDefaultModel))
+                        )
+                      : id === activeProvider && !activeModel && !groupOnly;
                 const optionKey = isModel ? `${id}:${model?.model_name}` : id;
                 const showSelectedModel =
                   Boolean(selectedModel)
@@ -346,7 +357,7 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
                 const detailText = isModel
                   ? `${PROVIDER_LABELS[id] || id}${model?.status ? ` · ${model.status}` : ""}`
                   : showSelectedModel
-                    ? selectedModel
+                    ? `Mặc định: ${selectedModel}`
                     : null;
                 const sectionLabel =
                   index === firstProviderIndex
@@ -362,25 +373,33 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
                       </div>
                     ) : null}
                     <button
-                      onClick={() => handleSelect(id, disabled, model)}
-                      disabled={disabled}
+                      onClick={() => handleSelect(id, disabled, model, groupOnly)}
+                      disabled={disabled || groupOnly}
                       role="option"
                       aria-selected={isActive}
-                      aria-disabled={disabled}
-                      title={disabled ? reasonLabel ?? undefined : undefined}
+                      aria-disabled={disabled || groupOnly}
+                      title={
+                        disabled
+                          ? reasonLabel ?? undefined
+                          : groupOnly
+                            ? "Chọn một model cụ thể bên dưới"
+                            : undefined
+                      }
                       className={`flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors ${
                         isActive
                           ? "bg-[var(--accent-light)] text-[var(--accent)]"
                           : disabled
                             ? "cursor-not-allowed text-text-tertiary opacity-70"
-                            : "text-text hover:bg-surface-secondary"
+                            : groupOnly
+                              ? "cursor-default text-text-secondary"
+                              : "text-text hover:bg-surface-secondary"
                       } ${isModel ? "pl-8 text-xs" : "text-sm"}`}
                     >
                       <Icon size={15} className="mt-0.5 shrink-0" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="truncate">{label}</span>
-                          {disabled && id !== "auto" ? (
+                          {disabled && !groupOnly && id !== "auto" ? (
                             <AlertCircle size={13} className="text-amber-500" />
                           ) : null}
                         </div>

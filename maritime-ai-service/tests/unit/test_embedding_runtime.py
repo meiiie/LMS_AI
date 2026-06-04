@@ -12,6 +12,8 @@ class TestEmbeddingCatalogHelpers:
         assert get_embedding_provider("models/gemini-embedding-001") == "google"
         assert get_embedding_provider("text-embedding-3-small") == "openai"
         assert get_embedding_provider("embeddinggemma") == "ollama"
+        assert get_embedding_provider("nvidia/nv-embed-v1") == "nvidia"
+        assert get_embedding_provider("baai/bge-m3") == "nvidia"
 
     def test_zhipu_has_no_default_embedding_model_until_cataloged(self):
         from app.engine.model_catalog import get_default_embedding_model_for_provider
@@ -33,8 +35,10 @@ class TestEmbeddingCatalogHelpers:
 
         assert provider_can_serve_embedding_model("ollama", "embeddinggemma") is True
         assert provider_can_serve_embedding_model("openrouter", "text-embedding-3-small") is True
+        assert provider_can_serve_embedding_model("nvidia", "nvidia/nv-embed-v1") is True
         assert provider_can_serve_embedding_model("openai", "embeddinggemma") is False
         assert provider_can_serve_embedding_model("google", "text-embedding-3-small") is False
+        assert provider_can_serve_embedding_model("nvidia", "text-embedding-3-small") is False
 
 
 class TestOpenAICompatibleEmbeddings:
@@ -197,6 +201,57 @@ class TestSemanticEmbeddingBackend:
         assert runtime.is_available() is True
         assert runtime.provider == "openrouter"
         assert runtime.model_name == "text-embedding-3-small"
+
+    def test_nvidia_embedding_provider_builds_with_verified_contract(self):
+        from app.engine import embedding_runtime as mod
+
+        patched_settings = SimpleNamespace(
+            embedding_provider="nvidia",
+            embedding_failover_chain=["nvidia"],
+            embedding_model="nvidia/nv-embed-v1",
+            embedding_dimensions=None,
+            nvidia_api_key="nvapi-test-key",
+            nvidia_base_url="https://nvidia.example.test/v1",
+        )
+
+        with patch.object(mod, "settings", patched_settings):
+            runtime = mod.SemanticEmbeddingBackend()
+
+        assert runtime.is_available() is True
+        assert runtime.provider == "nvidia"
+        assert runtime.model_name == "nvidia/nv-embed-v1"
+        assert runtime.dimensions == 4096
+
+    def test_quota_error_quarantines_embedding_provider(self):
+        from app.engine import embedding_runtime as mod
+
+        backend = MagicMock()
+        backend.provider = "openai"
+        backend.model_name = "text-embedding-3-small"
+        backend.dimensions = 768
+        backend.embed_query.side_effect = RuntimeError(
+            "Error code: 429 - insufficient_quota"
+        )
+
+        patched_settings = SimpleNamespace(
+            embedding_provider="openai",
+            embedding_failover_chain=["openai"],
+            embedding_model="text-embedding-3-small",
+            embedding_dimensions=768,
+        )
+
+        with patch.object(mod, "settings", patched_settings), patch.object(
+            mod.SemanticEmbeddingBackend,
+            "_build_backend",
+            side_effect=lambda provider: backend if provider == "openai" else None,
+        ):
+            runtime = mod.SemanticEmbeddingBackend()
+            first = runtime.embed_query("hello")
+            second = runtime.embed_query("again")
+
+        assert first == []
+        assert second == []
+        assert backend.embed_query.call_count == 1
 
     def test_ollama_embedding_provider_fails_closed_when_model_not_installed(self):
         from app.engine import embedding_runtime as mod

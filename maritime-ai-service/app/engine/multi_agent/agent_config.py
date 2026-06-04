@@ -386,6 +386,16 @@ class AgentConfigRegistry:
         if not model_name:
             return None
 
+        logger.info(
+            "[NATIVE_MODEL] node=%s provider=%s model=%s tier=%s requested_provider=%s requested_model=%s",
+            node_id,
+            effective_provider,
+            model_name,
+            tier_key,
+            provider_override or "",
+            normalized_requested_model or "",
+        )
+
         return NativeChatModelHandle(
             _wiii_provider_name=effective_provider,
             _wiii_requested_provider=provider_override,

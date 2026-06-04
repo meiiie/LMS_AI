@@ -126,7 +126,7 @@ class Settings(BaseSettingsFieldsMixin, FeatureSettingsMixin, BaseSettings):
         lambda cls, v: validate_choice_value(
             "embedding_provider",
             v,
-            ["google", "openai", "openrouter", "ollama", "zhipu", "auto"],
+            ["google", "openai", "openrouter", "nvidia", "ollama", "zhipu", "auto"],
         )
     )
     validate_vision_provider = field_validator("vision_provider")(

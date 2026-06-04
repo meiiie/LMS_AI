@@ -39,6 +39,7 @@ SUPPORTED_EMBEDDING_PROVIDERS: tuple[str, ...] = (
     "google",
     "openai",
     "openrouter",
+    "nvidia",
     "ollama",
     "zhipu",
 )
@@ -46,6 +47,7 @@ _PROVIDER_DISPLAY_NAMES: dict[str, str] = {
     "google": "Gemini Embeddings",
     "openai": "OpenAI Embeddings",
     "openrouter": "OpenRouter Embeddings",
+    "nvidia": "NVIDIA NIM Embeddings",
     "ollama": "Ollama Embeddings",
     "zhipu": "Zhipu Embeddings",
 }
@@ -96,6 +98,8 @@ def _provider_is_configured(provider: str) -> bool:
         return bool(getattr(settings, "openai_api_key", None))
     if provider == "openrouter":
         return openrouter_embedding_credentials_available()
+    if provider == "nvidia":
+        return bool(getattr(settings, "nvidia_api_key", None))
     if provider == "ollama":
         return bool(getattr(settings, "ollama_base_url", None))
     if provider == "zhipu":
@@ -113,6 +117,8 @@ def _missing_config_reason(provider: str) -> tuple[EmbeddingDisabledReasonCode, 
         )
     if provider == "zhipu":
         return ("missing_api_key", "Chua cau hinh Zhipu API key cho embeddings.")
+    if provider == "nvidia":
+        return ("missing_api_key", "Chua cau hinh NVIDIA NIM API key cho embeddings.")
     if provider == "google":
         return ("missing_api_key", "Chua cau hinh Google API key cho embeddings.")
     return ("missing_api_key", "Chua cau hinh API key cho embedding provider nay.")

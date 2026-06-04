@@ -223,6 +223,10 @@ describe("ModelSelector", () => {
       expect(screen.getByText("Nemotron 3 Ultra")).not.toBeNull();
     });
 
+    fireEvent.click(screen.getByText("NVIDIA NIM"));
+    expect(useModelStore.getState().activeProvider).toBe("auto");
+    expect(useModelStore.getState().activeModel).toBeNull();
+
     fireEvent.change(screen.getByPlaceholderText("Tìm model..."), {
       target: { value: "nemotron" },
     });
