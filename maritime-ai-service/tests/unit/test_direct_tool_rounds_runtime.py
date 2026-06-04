@@ -210,6 +210,74 @@ def test_weather_web_search_does_not_return_raw_search_template_after_tool_round
     )
 
 
+def test_weather_web_search_query_contract_enriches_thin_location_args():
+    from app.engine.multi_agent.direct_web_search_policy import (
+        _enrich_current_weather_search_query,
+    )
+
+    assert (
+        _enrich_current_weather_search_query(
+            candidate_query="Hai Phong",
+            user_query="thoi tiet Hai Phong hom nay the nao",
+            today="2026-06-05",
+            default_city="Ho Chi Minh City",
+        )
+        == "thoi tiet Hai Phong hom nay 2026-06-05"
+    )
+
+
+def test_weather_web_search_query_contract_uses_default_city_for_generic_turn():
+    from app.engine.multi_agent.direct_web_search_policy import (
+        _enrich_current_weather_search_query,
+    )
+
+    assert (
+        _enrich_current_weather_search_query(
+            candidate_query="",
+            user_query="ua thoi tiet hom nay the nao",
+            today="2026-06-05",
+            default_city="Ho Chi Minh City",
+        )
+        == "thoi tiet Ho Chi Minh City hom nay 2026-06-05"
+    )
+    assert (
+        _enrich_current_weather_search_query(
+            candidate_query="",
+            user_query="thoi tiet hom nay bao nhieu do",
+            today="2026-06-05",
+            default_city="Ho Chi Minh City",
+        )
+        == "thoi tiet Ho Chi Minh City hom nay 2026-06-05"
+    )
+
+
+def test_weather_web_search_query_contract_preserves_existing_date():
+    from app.engine.multi_agent.direct_web_search_policy import (
+        _enrich_current_weather_search_query,
+    )
+
+    assert (
+        _enrich_current_weather_search_query(
+            candidate_query="Ha Noi weather today 2026-06-01",
+            user_query="weather now",
+            today="2026-06-05",
+            default_city="Ho Chi Minh City",
+        )
+        == "Ha Noi weather today 2026-06-01"
+    )
+
+
+def test_prefer_official_query_rewrites_weather_search_args(monkeypatch):
+    from app.engine.multi_agent import direct_web_search_policy as policy
+
+    monkeypatch.setattr(policy, "_today_vietnam", lambda: "2026-06-05")
+
+    assert policy._prefer_official_query_for_known_docs(
+        {"q": "Hai Phong"},
+        "thoi tiet Hai Phong hom nay the nao",
+    ) == {"query": "thoi tiet Hai Phong hom nay 2026-06-05"}
+
+
 def test_clean_forced_web_search_query_strips_vietnamese_discourse_marker():
     from app.engine.multi_agent.direct_web_search_policy import (
         _clean_forced_web_search_query,

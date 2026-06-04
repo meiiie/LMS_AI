@@ -127,6 +127,55 @@ async def test_dispatch_direct_tool_call_emits_stable_call_and_result_events():
 
 
 @pytest.mark.asyncio
+async def test_dispatch_direct_tool_call_enriches_weather_web_search_args(monkeypatch):
+    from app.engine.multi_agent import direct_web_search_policy as policy
+
+    monkeypatch.setattr(policy, "_today_vietnam", lambda: "2026-06-05")
+
+    class FakeTool:
+        name = "tool_web_search"
+
+    events: list[dict] = []
+    tool_call_events: list[dict] = []
+    captured_invocation: dict[str, object] = {}
+    tool_call = {
+        "id": "call_weather",
+        "name": "tool_web_search",
+        "args": {"query": "Hai Phong"},
+    }
+
+    async def push_event(event):
+        events.append(event)
+
+    async def invoke_tool_with_runtime(tool, args, **kwargs):
+        captured_invocation.update({"tool": tool, "args": args, **kwargs})
+        return "weather source"
+
+    result = await dispatch_direct_tool_call(
+        tool_call=tool_call,
+        tool_round=0,
+        tools=[FakeTool()],
+        query="thoi tiet Hai Phong hom nay the nao",
+        push_event=push_event,
+        tool_call_events=tool_call_events,
+        get_tool_by_name=lambda tools, name: tools[0] if name == "tool_web_search" else None,
+        invoke_tool_with_runtime=invoke_tool_with_runtime,
+        runtime_context_base=None,
+        is_search_tool_name=lambda name: name == "tool_web_search",
+        prefer_official_query_for_known_docs=policy._prefer_official_query_for_known_docs,
+        summarize_tool_result_for_stream=lambda _name, value: value,
+        logger_obj=SimpleNamespace(warning=lambda *args, **kwargs: None),
+    )
+
+    expected_args = {"query": "thoi tiet Hai Phong hom nay 2026-06-05"}
+    assert result.tool_args == expected_args
+    assert tool_call["args"] == expected_args
+    assert captured_invocation["args"] == expected_args
+    assert events[0]["content"]["args"] == expected_args
+    assert tool_call_events[0]["args"] == expected_args
+
+
+@pytest.mark.asyncio
 async def test_dispatch_direct_tool_call_emits_sources_for_web_search_results():
     class FakeTool:
         name = "tool_web_search"
