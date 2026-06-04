@@ -80,6 +80,7 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
         && containerRef.current
         && !containerRef.current.contains(e.target as Node)
       ) {
+        setSearchQuery("");
         setOpen(false);
       }
     },
@@ -181,6 +182,7 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
     } else {
       setActiveProvider(id);
     }
+    setSearchQuery("");
     setOpen(false);
   };
 
@@ -191,7 +193,10 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
   return (
     <div ref={containerRef} className="relative">
       <button
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          setSearchQuery("");
+          setOpen((value) => !value);
+        }}
         className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-text-secondary transition-colors hover:bg-surface-tertiary hover:text-text"
         aria-label="Chọn model AI"
         aria-expanded={open}

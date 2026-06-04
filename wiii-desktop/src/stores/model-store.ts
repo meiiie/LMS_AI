@@ -96,6 +96,28 @@ function resolveConfiguredModelForProvider(
   }
 }
 
+function modelSettingPatchForProvider(
+  provider: RequestModelProvider,
+  model: string,
+): Partial<AppSettings> {
+  switch (provider) {
+    case "google":
+      return { google_model: model };
+    case "zhipu":
+      return { zhipu_model: model };
+    case "openai":
+      return { openai_model: model };
+    case "openrouter":
+      return { openrouter_model: model };
+    case "nvidia":
+      return { nvidia_model: model };
+    case "ollama":
+      return { ollama_model: model };
+    default:
+      return {};
+  }
+}
+
 export function resolveSelectedModelForProvider(
   provider: RequestModelProvider,
   providers: ProviderInfo[],
@@ -116,7 +138,10 @@ export const useModelStore = create<ModelState>((set, get) => ({
   activeProvider: normalizeModelProvider(
     useSettingsStore.getState().settings.model_provider,
   ),
-  activeModel: null,
+  activeModel: resolveConfiguredModelForProvider(
+    normalizeModelProvider(useSettingsStore.getState().settings.model_provider),
+    useSettingsStore.getState().settings,
+  ),
   nextTurnProvider: null,
   providers: [],
   isLoading: false,
@@ -132,8 +157,9 @@ export const useModelStore = create<ModelState>((set, get) => ({
   },
 
   setActiveModel: (id, model) => {
+    const normalizedModel = model.trim();
     const provider = get().providers.find((item) => item.id === id);
-    if (id === "auto" || !model.trim()) {
+    if (id === "auto" || !normalizedModel) {
       get().setActiveProvider(id);
       return;
     }
@@ -142,10 +168,13 @@ export const useModelStore = create<ModelState>((set, get) => ({
     }
     set({
       activeProvider: id,
-      activeModel: model.trim(),
+      activeModel: normalizedModel,
       nextTurnProvider: null,
     });
-    void useSettingsStore.getState().updateSettings({ model_provider: id });
+    void useSettingsStore.getState().updateSettings({
+      model_provider: id,
+      ...modelSettingPatchForProvider(id, normalizedModel),
+    });
   },
 
   setNextTurnProvider: (id) => {
@@ -233,6 +262,9 @@ export const useModelStore = create<ModelState>((set, get) => ({
 useSettingsStore.subscribe((state) => {
   const nextProvider = normalizeModelProvider(state.settings.model_provider);
   if (useModelStore.getState().activeProvider !== nextProvider) {
-    useModelStore.setState({ activeProvider: nextProvider, activeModel: null });
+    useModelStore.setState({
+      activeProvider: nextProvider,
+      activeModel: resolveConfiguredModelForProvider(nextProvider, state.settings),
+    });
   }
 });

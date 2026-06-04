@@ -165,6 +165,22 @@ describe("Model store", () => {
       provider: "nvidia",
       model: "nvidia/nemotron-3-ultra",
     });
+    expect(useSettingsStore.getState().settings.model_provider).toBe("nvidia");
+    expect(useSettingsStore.getState().settings.nvidia_model).toBe("nvidia/nemotron-3-ultra");
+  });
+
+  it("hydrates the persisted concrete model for the active provider", async () => {
+    await useSettingsStore.getState().updateSettings({
+      model_provider: "nvidia",
+      nvidia_model: "nvidia/nemotron-3-ultra",
+    });
+
+    expect(useModelStore.getState().activeProvider).toBe("nvidia");
+    expect(useModelStore.getState().activeModel).toBe("nvidia/nemotron-3-ultra");
+    expect(useModelStore.getState().consumeSelectionForRequest()).toEqual({
+      provider: "nvidia",
+      model: "nvidia/nemotron-3-ultra",
+    });
   });
 
   it("clears pending one-shot override when user pins a session provider", () => {

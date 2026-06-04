@@ -123,6 +123,7 @@ beforeEach(() => {
   vi.mocked(fetchWiiiConnectFacebookPages).mockReset();
   useModelStore.setState({
     activeProvider: "auto",
+    activeModel: null,
     nextTurnProvider: null,
     providers: [],
     isLoading: false,
@@ -264,6 +265,48 @@ describe("useSSEStream concurrency", () => {
     expect(sendMessageStreamMock.mock.calls[0]?.[0]).toMatchObject({
       provider: "openrouter",
       model: "qwen/qwen3.6-plus:free",
+    });
+  });
+
+  it("sends a concrete user-selected model override with the stream request", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    useModelStore.setState({
+      activeProvider: "nvidia",
+      activeModel: "nvidia/nemotron-3-ultra-550b-a55b",
+      nextTurnProvider: null,
+      providers: [
+        {
+          id: "nvidia",
+          displayName: "NVIDIA NIM",
+          available: true,
+          isPrimary: false,
+          isFallback: true,
+          state: "selectable",
+          reasonCode: null,
+          reasonLabel: null,
+          selectedModel: "qwen/qwen3-next-80b-a3b-instruct",
+          modelOptions: [],
+          strictPin: true,
+          verifiedAt: "2026-06-05T00:00:00Z",
+        },
+      ],
+    });
+    sendMessageStreamMock.mockResolvedValueOnce({
+      lastEventId: null,
+      sawDone: true,
+      eventOrder: ["done"],
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Xin chào bằng Nemotron");
+    });
+
+    expect(sendMessageStreamMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageStreamMock.mock.calls[0]?.[0]).toMatchObject({
+      provider: "nvidia",
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
     });
   });
 
