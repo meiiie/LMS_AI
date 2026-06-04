@@ -133,15 +133,8 @@ async def google_callback(request: Request):
 
     try:
         token = await oauth.google.authorize_access_token(request)
-    except Exception as e:
-        safe_error_ref = _oauth_ref(
-            _safe_oauth_detail(
-                e,
-                getattr(settings, "google_oauth_client_secret", ""),
-                request.query_params.get("code") if hasattr(request, "query_params") else None,
-            )
-        )
-        logger.error("OAuth token exchange failed error_ref=%s", safe_error_ref)
+    except Exception:
+        logger.error("OAuth token exchange failed")
         # Sprint 176: Audit failed login
         try:
             from app.auth.auth_audit import log_auth_event

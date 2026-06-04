@@ -44,6 +44,10 @@ async def test_reflector_persists_deterministic_fallback_when_local_llm_empty():
     saved: list[object] = []
     llm = type("EmptyLLM", (), {"generate": AsyncMock(return_value="")})()
 
+    def save_reflection(entry):
+        saved.append(entry)
+        return True
+
     with (
         patch("app.engine.living_agent.local_llm.get_local_llm", return_value=llm),
         patch.object(reflector, "_has_reflected_today", new=AsyncMock(return_value=False)),
@@ -51,7 +55,7 @@ async def test_reflector_persists_deterministic_fallback_when_local_llm_empty():
         patch.object(reflector, "_get_emotion_summary", new=AsyncMock(return_value="")),
         patch.object(reflector, "_get_browsing_summary", new=AsyncMock(return_value="")),
         patch.object(reflector, "_get_skills_summary", new=AsyncMock(return_value="")),
-        patch.object(reflector, "_save_reflection", new=AsyncMock(side_effect=lambda entry: saved.append(entry))),
+        patch.object(reflector, "_save_reflection", new=AsyncMock(side_effect=save_reflection)),
     ):
         entry = await reflector.reflect(organization_id="org-fallback")
 

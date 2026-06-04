@@ -266,12 +266,12 @@ class TestGoogleCallbackWebRedirect:
         assert exc_info.value.status_code == 400
         assert raw_code not in caplog.text
         assert raw_secret not in caplog.text
-        assert "<redacted-secret>" in caplog.text
+        assert "OAuth token exchange failed" in caplog.text
         audit_log.assert_awaited_once()
         reason = audit_log.await_args.kwargs["reason"]
         assert raw_code not in reason
         assert raw_secret not in reason
-        assert "<redacted-secret>" in reason
+        assert reason == "google_oauth_exchange_failed"
 
     @pytest.mark.asyncio
     async def test_callback_web_redirect_returns_html_with_hash(self):

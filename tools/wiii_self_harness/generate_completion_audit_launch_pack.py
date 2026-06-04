@@ -8,7 +8,6 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
-import re
 import sys
 from typing import Any
 
@@ -518,6 +517,7 @@ def _build_proactive_launch_item(item: dict[str, Any]) -> LaunchItem:
         "-D",
         "<preflight-dir>",
     ]
+    preflight_setup_contract = _dict_field(preflight.get("setup_contract"))
     return LaunchItem(
         requirement_id=_string(item.get("requirement_id")),
         title=_string(item.get("title")),
@@ -554,8 +554,10 @@ def _build_proactive_launch_item(item: dict[str, Any]) -> LaunchItem:
         ),
         preflight_raw_payload_included=_boolean(preflight.get("raw_payload_included")),
         preflight_required_next=_string_list(preflight.get("required_next")),
-        preflight_setup_contract=_dict_field(preflight.get("setup_contract")),
-        preflight_setup_contract_bindings=_proactive_setup_contract_bindings(),
+        preflight_setup_contract=preflight_setup_contract,
+        preflight_setup_contract_bindings=(
+            _proactive_setup_contract_bindings() if preflight_setup_contract else {}
+        ),
         required_operator_action_tokens=[
             _string(action.get("token"))
             for action in item.get("required_operator_actions", [])
@@ -749,6 +751,7 @@ def _build_composio_launch_item(item: dict[str, Any]) -> LaunchItem:
         "-D",
         "<preflight-dir>",
     ]
+    preflight_setup_contract = _dict_field(preflight.get("setup_contract"))
     return LaunchItem(
         requirement_id=_string(item.get("requirement_id")),
         title=_string(item.get("title")),
@@ -785,8 +788,10 @@ def _build_composio_launch_item(item: dict[str, Any]) -> LaunchItem:
         ),
         preflight_raw_payload_included=_boolean(preflight.get("raw_payload_included")),
         preflight_required_next=_string_list(preflight.get("required_next")),
-        preflight_setup_contract=_dict_field(preflight.get("setup_contract")),
-        preflight_setup_contract_bindings=_composio_setup_contract_bindings(),
+        preflight_setup_contract=preflight_setup_contract,
+        preflight_setup_contract_bindings=(
+            _composio_setup_contract_bindings() if preflight_setup_contract else {}
+        ),
         required_operator_action_tokens=[
             _string(action.get("token"))
             for action in item.get("required_operator_actions", [])
@@ -1232,23 +1237,14 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _json_error_payload(error: str) -> dict[str, Any]:
-    safe_error = _redact_error_text(error)
-    code = _error_code(safe_error)
+    code = _error_code(error)
     return {
         "schema_version": LAUNCH_PACK_SCHEMA_VERSION,
         "ok": False,
-        "errors": [safe_error],
+        "errors": [f"launch pack generation failed: {code}"],
         "error_codes": [code],
         "error_code_counts": {code: 1},
     }
-
-
-def _redact_error_text(error: str) -> str:
-    return re.sub(
-        r"(?i)(secret|token|password|api[_-]?key|credential)([=:]\s*)[^,\s;]+",
-        r"\1\2<redacted>",
-        str(error),
-    )
 
 
 def _error_codes(errors: list[str]) -> list[str]:

@@ -187,17 +187,28 @@ class TestCharacterStatePerUser:
             id=uuid4(), label="self_notes",
             content="x" * 800, char_limit=1000,
         )
+        org_id = "org-test"
+        user_a_key = manager._cache_key(user_id="user-A", organization_id=org_id)
+        user_b_key = manager._cache_key(user_id="user-B", organization_id=org_id)
         manager._cache = {
-            "user-A": {"self_notes": block},
-            "user-B": {},
+            user_a_key: {"self_notes": block},
+            user_b_key: {},
         }
         manager._cache_timestamp = {
-            "user-A": 1e18,
-            "user-B": 1e18,
+            user_a_key: 1e18,
+            user_b_key: 1e18,
         }
 
-        assert manager.needs_consolidation("self_notes", user_id="user-A")
-        assert not manager.needs_consolidation("self_notes", user_id="user-B")
+        assert manager.needs_consolidation(
+            "self_notes",
+            user_id="user-A",
+            organization_id=org_id,
+        )
+        assert not manager.needs_consolidation(
+            "self_notes",
+            user_id="user-B",
+            organization_id=org_id,
+        )
 
 
 # =============================================================================

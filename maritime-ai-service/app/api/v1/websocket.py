@@ -96,6 +96,38 @@ def _extract_ws_access_token(auth_msg: dict[str, Any]) -> str:
     return token
 
 
+def _value_error_detail(error: ValueError) -> str:
+    """Return controlled ValueError text without stringifying arbitrary errors."""
+    if len(error.args) == 1 and isinstance(error.args[0], str):
+        return error.args[0]
+    return ""
+
+
+def _public_ws_auth_close_reason(error: ValueError) -> str:
+    detail = _value_error_detail(error)
+    if detail in {
+        "Invalid API key",
+        "API key required in production",
+        "Invalid or expired access token",
+        "JWT organization context required for WebSocket",
+        "WebSocket organization context mismatch",
+    }:
+        return detail
+    return "Authentication failed"
+
+
+def _public_ws_org_close_reason(error: ValueError) -> str:
+    detail = _value_error_detail(error)
+    if detail in {
+        "Organization context required for WebSocket",
+        "WebSocket organization context mismatch",
+        "WebSocket organization must be established during auth",
+        "WebSocket message organization mismatch",
+    }:
+        return detail
+    return "Organization context rejected"
+
+
 def _resolve_ws_auth_identity(
     auth_msg: dict[str, Any],
     *,
@@ -314,9 +346,9 @@ async def websocket_chat(
             auth_msg,
             strict_org_mode=strict_org_mode,
         )
-    except ValueError as e:
-        logger.warning("[WS] Auth rejected: %s", e)
-        await websocket.close(code=4001, reason=str(e))
+    except ValueError as exc:
+        logger.warning("[WS] Auth rejected: %s", exc)
+        await websocket.close(code=4001, reason=_public_ws_auth_close_reason(exc))
         return
 
     ws_user_id = ws_identity["user_id"]
@@ -333,9 +365,9 @@ async def websocket_chat(
             organization_id,
             strict=strict_org_mode,
         )
-    except ValueError as e:
-        logger.warning("[WS] Organization context rejected: %s", e)
-        await websocket.close(code=4003, reason=str(e))
+    except ValueError as exc:
+        logger.warning("[WS] Organization context rejected: %s", exc)
+        await websocket.close(code=4003, reason=_public_ws_org_close_reason(exc))
         return
 
     manager._connections[session_id] = websocket
@@ -367,9 +399,12 @@ async def websocket_chat(
                     query_org_id=organization_id,
                     strict=strict_org_mode,
                 )
-            except ValueError as e:
-                logger.warning("[WS] Message organization context rejected: %s", e)
-                await websocket.close(code=4003, reason=str(e))
+            except ValueError as exc:
+                logger.warning("[WS] Message organization context rejected: %s", exc)
+                await websocket.close(
+                    code=4003,
+                    reason=_public_ws_org_close_reason(exc),
+                )
                 manager.disconnect(session_id)
                 return
 

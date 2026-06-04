@@ -184,6 +184,54 @@ def test_turn_path_governor_keeps_visual_app_ahead_of_domain_search():
     assert decision.should_keep_tool_name("tool_search_maritime") is False
 
 
+def test_turn_path_governor_web_search_force_beats_visual_drift():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(
+            normalized_query="research ui-tars desktop pipeline and ux steps",
+            force_skills=frozenset({"web-search"}),
+            web_search_forced=True,
+            needs_web_search=True,
+            visual_force_tool=True,
+            visual_mode="template",
+            visual_presentation_intent="chart_runtime",
+            visual_required_tool_names=("tool_generate_visual",),
+        )
+    )
+
+    assert decision.path == "web_search"
+    assert decision.force_tools is True
+    assert decision.should_keep_tool_name("tool_web_search") is True
+    assert decision.should_keep_tool_name("tool_generate_visual") is True
+
+
+def test_turn_path_governor_code_execution_beats_visual_drift():
+    from app.engine.multi_agent.turn_path_governor import (
+        TurnPathSignals,
+        resolve_turn_path_decision,
+    )
+
+    decision = resolve_turn_path_decision(
+        TurnPathSignals(
+            normalized_query="chay python de ve bieu do demo",
+            prefers_code_execution_lane=True,
+            needs_analysis_tool=True,
+            visual_force_tool=True,
+            visual_mode="template",
+            visual_presentation_intent="chart_runtime",
+            visual_required_tool_names=("tool_generate_visual",),
+        )
+    )
+
+    assert decision.path == "code_execution"
+    assert decision.bind_tools is False
+    assert decision.should_keep_tool_name("tool_generate_visual") is False
+
+
 def test_collect_direct_tools_routes_code_studio_app_to_visual_lane():
     from app.engine.multi_agent import tool_collection as module
 

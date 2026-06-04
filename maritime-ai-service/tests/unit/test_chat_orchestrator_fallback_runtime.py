@@ -66,7 +66,13 @@ class TestPersistChatMessageImpl:
             immediate=True,
         )
 
-        chat_history.save_message.assert_called_once_with("s1", "assistant", "hello", "u1")
+        chat_history.save_message.assert_called_once_with(
+            "s1",
+            "assistant",
+            "hello",
+            "u1",
+            organization_id=None,
+        )
         background_save.assert_not_called()
 
     def test_uses_background_save_when_available(self):
@@ -90,6 +96,7 @@ class TestPersistChatMessageImpl:
             "assistant",
             "hello",
             "u1",
+            organization_id=None,
         )
 
 

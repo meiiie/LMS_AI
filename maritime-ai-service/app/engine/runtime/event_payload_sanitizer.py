@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 
+_RUNTIME_IDENTIFIER_FINGERPRINT_KEY = b"wiii-runtime-identifier-fingerprint-v1"
 _MAX_SANITIZED_DEPTH = 8
 _MAX_SANITIZED_ITEMS = 64
 _MAX_SANITIZED_STRING = 4000
@@ -81,7 +82,11 @@ def hash_runtime_identifier(value: Any) -> str | None:
     text = str(value or "").strip()
     if not text:
         return None
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.blake2b(
+        text.encode("utf-8"),
+        digest_size=8,
+        key=_RUNTIME_IDENTIFIER_FINGERPRINT_KEY,
+    ).hexdigest()
     return f"sha256:{digest}"
 
 

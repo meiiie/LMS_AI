@@ -147,7 +147,8 @@ def _hash_admin_identifier(value) -> str | None:
         from app.engine.semantic_memory.privacy import hash_memory_identifier
 
         return hash_memory_identifier(value)
-    except Exception:
+    except Exception as exc:
+        logger.debug("Admin identifier hashing unavailable: %s", exc)
         return None
 
 

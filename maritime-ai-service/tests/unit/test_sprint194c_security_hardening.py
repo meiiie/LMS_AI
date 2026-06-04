@@ -427,11 +427,13 @@ class TestWebSocketFirstMessageAuth:
             "api_key": "correct-key",
             "user_id": "attacker",
             "role": "admin",  # Attempted privilege escalation
+            "organization_id": "org-test",
         })
 
         mock_settings = MagicMock()
         mock_settings.api_key = "correct-key"
         mock_settings.environment = "production"
+        mock_settings.enable_multi_tenant = True
 
         _set_ws_receive_sequence(ws, auth_msg, WebSocketDisconnect())
         with patch(_SETTINGS_PATCH, mock_settings):

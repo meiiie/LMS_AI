@@ -1183,6 +1183,7 @@ class TestConfigSecurity:
         with pytest.raises(ValueError, match="session_secret_key"):
             Settings(
                 environment="production",
+                enable_dev_login=False,
                 enable_google_oauth=True,
                 google_oauth_client_id="test-id",
                 google_oauth_client_secret="real-google-client-secret-for-session-test",

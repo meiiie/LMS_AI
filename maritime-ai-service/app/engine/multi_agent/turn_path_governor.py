@@ -243,7 +243,16 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             allow_agent_handoff=False,
         )
 
-    if signals.visual_force_tool:
+    if signals.prefers_code_execution_lane and not signals.web_search_forced:
+        return TurnPathDecision(
+            path="code_execution",
+            reason="code_or_analysis_belongs_to_code_studio",
+            bind_tools=False,
+            allow_all_tools=False,
+            allow_agent_handoff=False,
+        )
+
+    if signals.visual_force_tool and not signals.web_search_forced:
         allowed_tool_names = frozenset(signals.visual_required_tool_names)
         strict_visual_lane = (
             signals.visual_presentation_intent
@@ -328,15 +337,6 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             reason="character_memory_tool_request",
             allow_all_tools=False,
             allowed_tool_names=CHARACTER_MEMORY_TOOL_NAMES,
-            allow_agent_handoff=False,
-        )
-
-    if signals.prefers_code_execution_lane:
-        return TurnPathDecision(
-            path="code_execution",
-            reason="code_or_analysis_belongs_to_code_studio",
-            bind_tools=False,
-            allow_all_tools=False,
             allow_agent_handoff=False,
         )
 

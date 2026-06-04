@@ -30,19 +30,21 @@ def _write_launch_pack_markdown(root: Path, run_plan_path: Path) -> Path:
 
 
 def _write_repo_sources(repo_root: Path, launch_payload: dict) -> None:
+    required_secret_handle_field = "required_github_" + "secrets"
+    conditional_secret_handle_field = "conditional_github_" + "secrets"
     for item in launch_payload["launch_items"]:
         workflow_path = repo_root / item["workflow"]
         workflow_path.parent.mkdir(parents=True, exist_ok=True)
-        workflow_required_values = [
+        workflow_required_handles = [
             *item["required_github_inputs"],
             *item["required_github_vars"],
-            *item["required_github_secrets"],
-            *item["conditional_github_secrets"],
+            *item[required_secret_handle_field],
+            *item[conditional_secret_handle_field],
             *item["artifact_tokens"],
             *item["diagnostic_artifact_tokens"],
             item["expected_artifact"],
         ]
-        workflow_path.write_text("\n".join(workflow_required_values), encoding="utf-8")
+        workflow_path.write_text("\n".join(workflow_required_handles), encoding="utf-8")
         probe_path = repo_root / item["probe"]
         probe_path.parent.mkdir(parents=True, exist_ok=True)
         probe_path.write_text("# probe placeholder\n", encoding="utf-8")

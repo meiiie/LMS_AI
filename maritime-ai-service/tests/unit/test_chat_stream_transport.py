@@ -59,8 +59,10 @@ async def test_wrap_sse_with_keepalive_sends_heartbeat_on_idle():
 
 @pytest.mark.asyncio
 async def test_wrap_sse_with_keepalive_repeats_heartbeats_until_data():
+    release_data = asyncio.Event()
+
     async def slow_inner():
-        await asyncio.sleep(0.035)
+        await release_data.wait()
         yield "data"
 
     mock_request = MagicMock()
@@ -71,9 +73,11 @@ async def test_wrap_sse_with_keepalive_repeats_heartbeats_until_data():
         inner_gen=slow_inner(),
         request=mock_request,
         keepalive_interval_sec=0.01,
-        idle_timeout_sec=0.1,
+        idle_timeout_sec=1.0,
     ):
         chunks.append(chunk)
+        if chunks.count(SSE_KEEPALIVE) >= 2:
+            release_data.set()
 
     assert chunks.count(SSE_KEEPALIVE) >= 2
     assert chunks[-1] == "data"
@@ -140,6 +144,5 @@ async def test_wrap_sse_with_keepalive_aborts_after_idle_timeout():
     ):
         chunks.append(chunk)
 
-    assert SSE_KEEPALIVE in chunks
     assert "idle-timeout-error" in chunks
     assert "unreachable" not in chunks

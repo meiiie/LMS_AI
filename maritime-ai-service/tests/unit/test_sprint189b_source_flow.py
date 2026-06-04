@@ -218,7 +218,7 @@ class TestSourceFieldCompleteness:
         sources = [{
             "title": "T",
             "content": "C",
-            "image_url": "http://img",
+            "image_url": "https://example.test/img",
             "page_number": 1,
             "document_id": "d1",
             "content_type": "text",
@@ -261,14 +261,14 @@ class TestEvidenceImagesCollection:
         from app.engine.agentic_rag.corrective_rag import CorrectiveRAGResult
 
         images = [
-            {"url": "http://img1.png", "page_number": 1, "document_id": "d1"},
-            {"url": "http://img2.png", "page_number": 2, "document_id": "d1"},
+            {"url": "https://example.test/img1.png", "page_number": 1, "document_id": "d1"},
+            {"url": "https://example.test/img2.png", "page_number": 2, "document_id": "d1"},
         ]
         result = CorrectiveRAGResult(
             answer="test", sources=[], evidence_images=images
         )
         assert len(result.evidence_images) == 2
-        assert result.evidence_images[0]["url"] == "http://img1.png"
+        assert result.evidence_images[0]["url"] == "https://example.test/img1.png"
 
     @pytest.mark.asyncio
     async def test_sync_process_collects_evidence_images(self):
@@ -314,7 +314,7 @@ class TestEvidenceImagesCollection:
         crag._cache_enabled = False
 
         fake_images = [
-            FakeEvidenceImage(url="http://img1.png", page_number=1, document_id="d1"),
+            FakeEvidenceImage(url="https://example.test/img1.png", page_number=1, document_id="d1"),
         ]
 
         with patch(
@@ -352,7 +352,7 @@ class TestEvidenceImagesCollection:
 
             # Verify evidence_images collected
             assert len(result.evidence_images) == 1
-            assert result.evidence_images[0]["url"] == "http://img1.png"
+            assert result.evidence_images[0]["url"] == "https://example.test/img1.png"
             mock_collect.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -386,7 +386,7 @@ class TestEvidenceImagesCollection:
         mock_conn.fetch = AsyncMock(return_value=[
             {
                 "node_id": "n1",
-                "image_url": "http://img1.png",
+                "image_url": "https://example.test/img1.png",
                 "page_number": 1,
                 "document_id": "d1",
             }
@@ -470,7 +470,7 @@ class TestEvidenceImagesPropagation:
             answer="test",
             sources=[],
             evidence_images=[
-                {"url": "http://img.png", "page_number": 1, "document_id": "d1"}
+                {"url": "https://example.test/img.png", "page_number": 1, "document_id": "d1"}
             ],
         )
 
@@ -481,7 +481,7 @@ class TestEvidenceImagesPropagation:
         state["evidence_images"] = getattr(result, "evidence_images", [])
 
         assert len(state["evidence_images"]) == 1
-        assert state["evidence_images"][0]["url"] == "http://img.png"
+        assert state["evidence_images"][0]["url"] == "https://example.test/img.png"
 
     def test_rag_node_empty_evidence_images_when_missing(self):
         """getattr fallback should give empty list for old results."""
@@ -498,7 +498,7 @@ class TestEvidenceImagesPropagation:
         """create_metadata_event should include evidence_images via kwargs."""
         from app.engine.multi_agent.stream_utils import create_metadata_event
 
-        ev_images = [{"url": "http://img.png", "page_number": 1, "document_id": "d1"}]
+        ev_images = [{"url": "https://example.test/img.png", "page_number": 1, "document_id": "d1"}]
 
         event = await create_metadata_event(
             processing_time=1.5,
@@ -528,7 +528,7 @@ class TestEvidenceImagesPropagation:
             "processing_time": 1.5,
             "confidence": 0.85,
             "streaming_version": "v3",
-            "evidence_images": [{"url": "http://img.png", "page_number": 1}],
+            "evidence_images": [{"url": "https://example.test/img.png", "page_number": 1}],
         }
         metadata["streaming_version"] = "v3-graph"  # chat_stream override
 
@@ -594,7 +594,7 @@ class TestCRAGStreamingSourceFields:
         """All 7 fields should be present in sources_data."""
         documents = [{
             "content": "C", "title": "T",
-            "page_number": 1, "image_url": "http://x",
+            "page_number": 1, "image_url": "https://example.test/x",
             "document_id": "d", "bounding_boxes": [{"x": 0}],
             "content_type": "text",
         }]
@@ -672,7 +672,7 @@ class TestCorrectiveRAGResultField:
         """Streaming path CorrectiveRAGResult should accept evidence_images."""
         from app.engine.agentic_rag.corrective_rag import CorrectiveRAGResult
 
-        images = [{"url": "http://x.png", "page_number": 3, "document_id": "d2"}]
+        images = [{"url": "https://example.test/x.png", "page_number": 3, "document_id": "d2"}]
         result = CorrectiveRAGResult(
             answer="streaming answer",
             sources=[{"title": "T"}],
@@ -730,7 +730,7 @@ class TestStreamEventsIntegration:
             "confidence": 0.8,
             "streaming_version": "v3",
             "evidence_images": [
-                {"url": "http://img.png", "page_number": 1, "document_id": "d1"}
+                {"url": "https://example.test/img.png", "page_number": 1, "document_id": "d1"}
             ],
         }
 
@@ -739,8 +739,9 @@ class TestStreamEventsIntegration:
 
         import json
         payload = json.dumps(metadata, ensure_ascii=False)
+        decoded = json.loads(payload)
         assert "evidence_images" in payload
-        assert "http://img.png" in payload
+        assert decoded["evidence_images"][0]["url"] == "https://example.test/img.png"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -811,7 +812,7 @@ class TestSyncPathEvidenceImages:
         result = {
             "final_response": "answer",
             "sources": [],
-            "evidence_images": [{"url": "http://img.png", "page_number": 1}],
+            "evidence_images": [{"url": "https://example.test/img.png", "page_number": 1}],
         }
 
         sync_return = {
@@ -910,14 +911,14 @@ class TestSubagentResultEvidenceImages:
         """SubagentResult should accept evidence_images."""
         from app.engine.multi_agent.subagents.result import SubagentResult
 
-        images = [{"url": "http://img.png", "page_number": 1, "document_id": "d1"}]
+        images = [{"url": "https://example.test/img.png", "page_number": 1, "document_id": "d1"}]
         result = SubagentResult(
             output="test",
             sources=[{"title": "T"}],
             evidence_images=images,
         )
         assert len(result.evidence_images) == 1
-        assert result.evidence_images[0]["url"] == "http://img.png"
+        assert result.evidence_images[0]["url"] == "https://example.test/img.png"
 
     def test_subagent_result_backward_compat(self):
         """SubagentResult without evidence_images should still work."""
@@ -937,7 +938,7 @@ class TestSubagentResultEvidenceImages:
 
         result = RAGSubagentResult(
             output="rag output",
-            evidence_images=[{"url": "http://x.png", "page_number": 2}],
+            evidence_images=[{"url": "https://example.test/x.png", "page_number": 2}],
         )
         assert len(result.evidence_images) == 1
 
@@ -956,11 +957,11 @@ class TestAggregatorEvidenceImages:
 
         r1 = SubagentResult(
             sources=[{"title": "S1"}],
-            evidence_images=[{"url": "http://a.png", "page_number": 1}],
+            evidence_images=[{"url": "https://example.test/a.png", "page_number": 1}],
         )
         r2 = SubagentResult(
             sources=[{"title": "S2"}],
-            evidence_images=[{"url": "http://b.png", "page_number": 2}],
+            evidence_images=[{"url": "https://example.test/b.png", "page_number": 2}],
         )
 
         reports = [FakeReport(r1), FakeReport(r2)]
@@ -983,8 +984,8 @@ class TestAggregatorEvidenceImages:
 
         assert len(state["sources"]) == 2
         assert len(state["evidence_images"]) == 2
-        assert state["evidence_images"][0]["url"] == "http://a.png"
-        assert state["evidence_images"][1]["url"] == "http://b.png"
+        assert state["evidence_images"][0]["url"] == "https://example.test/a.png"
+        assert state["evidence_images"][1]["url"] == "https://example.test/b.png"
 
     def test_aggregator_empty_evidence_images(self):
         """Aggregator should handle reports with no evidence_images."""
@@ -1047,7 +1048,7 @@ class TestRagSubagentCreation:
         """SubagentResult(..., evidence_images=[...]) should work."""
         from app.engine.multi_agent.subagents.result import SubagentResult, SubagentStatus
 
-        imgs = [{"url": "http://img.png", "page_number": 1, "document_id": "d1"}]
+        imgs = [{"url": "https://example.test/img.png", "page_number": 1, "document_id": "d1"}]
         result = SubagentResult(
             status=SubagentStatus.SUCCESS,
             output="RAG output",
@@ -1423,7 +1424,7 @@ class TestStreamingMetadataThinkingContent:
     async def test_metadata_event_includes_evidence_images(self):
         """Metadata event should include evidence_images via kwargs."""
         from app.engine.multi_agent.stream_utils import create_metadata_event
-        imgs = [{"url": "http://img.com/1.png", "page_number": 5}]
+        imgs = [{"url": "https://example.test/img/1.png", "page_number": 5}]
         event = await create_metadata_event(
             processing_time=2.0,
             evidence_images=imgs,

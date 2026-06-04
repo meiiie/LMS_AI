@@ -27,6 +27,12 @@ def _make_settings(**overrides):
         "environment": "development",
         "api_key": "test-key",
         "google_api_key": "test-google-key",
+        "llm_provider": "zhipu",
+        "rag_quality_mode": "balanced",
+        "gemini_thinking_level": "medium",
+        "embedding_dimensions": 768,
+        "cache_max_response_entries": 10000,
+        "rag_max_iterations": 2,
     }
     defaults.update(overrides)
     return Settings(**defaults)
