@@ -47,6 +47,10 @@ _LIVE_LOOKUP_TOOL_NAMES = {
     "web_search",
     "tool_search_news",
     "search_news",
+    "tool_search_legal",
+    "search_legal",
+    "tool_search_maritime",
+    "search_maritime",
     "tool_fetch_url",
     "fetch_url",
     "tool_current_datetime",
@@ -58,7 +62,7 @@ _LIVE_LOOKUP_TOOL_NAMES = {
 
 def _has_live_lookup_tool(tool_names: list[str]) -> bool:
     return any(
-        str(name or "").strip() in _LIVE_LOOKUP_TOOL_NAMES
+        str(name or "").strip().lower() in _LIVE_LOOKUP_TOOL_NAMES
         for name in tool_names
     )
 

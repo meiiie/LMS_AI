@@ -86,25 +86,11 @@ function getNodeLabel(node?: string) {
 const WIII_FALLBACK_LABEL_LIVE = "Wiii đang xử lý";
 const WIII_FALLBACK_LABEL_DONE = "Wiii đã xử lý xong";
 
-// Reasoning/tool headers should stay operational. Cute persona labels belong in
-// the assistant answer, not in the tool timeline.
-const PLAYFUL_REASONING_LABEL_MARKER =
-  /[~≽˶╥⊙¬ᕙ•̀ᴗ•́و\u{1F600}-\u{1F64F}\u{2728}\u{1F31F}]|Wiii\s+(?:đang\s+suy|đã\s+nghĩ|da\s+nghi|suy\s+nghĩ)/iu;
-
 /**
- * Header label: ONLY Wiii persona labels from tool_think's persona_label field.
- * Everything else (phase names, node names, technical text) → fallback.
- *
- * Rule: If it doesn't SOUND like Wiii, it doesn't go on the header.
+ * Header labels stay operational. Persona text and internal phase labels belong
+ * in the expanded body or the final answer, not in the timeline chrome.
  */
 function getIntervalHeaderLabel(interval: ReasoningIntervalViewModel) {
-  if (interval.label?.trim()) {
-    const label = interval.label.trim();
-    if (!PLAYFUL_REASONING_LABEL_MARKER.test(label)) {
-      return label;
-    }
-  }
-
   if (interval.isLive) return WIII_FALLBACK_LABEL_LIVE;
   return WIII_FALLBACK_LABEL_DONE;
 }

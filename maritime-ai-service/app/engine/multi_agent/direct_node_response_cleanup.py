@@ -30,6 +30,10 @@ _LIVE_LOOKUP_TOOL_NAMES = {
     "web_search",
     "tool_search_news",
     "search_news",
+    "tool_search_legal",
+    "search_legal",
+    "tool_search_maritime",
+    "search_maritime",
     "tool_fetch_url",
     "fetch_url",
     "tool_current_datetime",
@@ -52,7 +56,7 @@ _LIVE_LOOKUP_KAOMOJI_RE = re.compile(
 
 def _has_live_lookup_event(tool_call_events: list[dict[str, Any]]) -> bool:
     return any(
-        str(event.get("name") or "").strip() in _LIVE_LOOKUP_TOOL_NAMES
+        str(event.get("name") or "").strip().lower() in _LIVE_LOOKUP_TOOL_NAMES
         for event in tool_call_events or []
         if event.get("type") in {"call", "result"}
     )
@@ -72,10 +76,6 @@ def _query_allows_personal_context(query: str) -> bool:
             "cam xuc",
             "ve toi",
             "ve minh",
-            "cang bien",
-            "cang thong minh",
-            "hang hai",
-            "truong",
             "cong viec cua toi",
             "cong viec cua minh",
         )
@@ -114,10 +114,6 @@ def strip_live_lookup_inferred_personal_context(
         "ban dang lo",
         "minh lo",
         "toi lo",
-        "quan tam den cang",
-        "cang thong minh",
-        "cang bien",
-        "truong dai hoc hang hai",
         "chuan bi gi do",
         "bong",
         "bong ao",

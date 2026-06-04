@@ -1621,7 +1621,6 @@ def _direct_required_tool_names(query: str, user_role: str = "student") -> list[
                 [
                     "tool_current_weather",
                     "tool_web_search",
-                    "tool_fetch_url",
                     "tool_current_datetime",
                 ]
             )

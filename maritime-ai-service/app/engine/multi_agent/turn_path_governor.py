@@ -62,6 +62,11 @@ LIVE_LOOKUP_READ_TOOL_NAMES: frozenset[str] = frozenset(
         "tool_fetch_url",
     }
 )
+# Weather turns should not fetch arbitrary URLs; keep URL reads on the explicit
+# web/url lane until fetch_url has stronger SSRF guardrails.
+WEATHER_LIVE_LOOKUP_TOOL_NAMES: frozenset[str] = WEATHER_TOOL_NAMES | (
+    LIVE_LOOKUP_READ_TOOL_NAMES - frozenset({"tool_fetch_url"})
+)
 WEB_SEARCH_TOOL_NAMES: frozenset[str] = LIVE_LOOKUP_READ_TOOL_NAMES | frozenset(
     {
         "tool_search_news",
@@ -289,7 +294,7 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             reason="weather_current_conditions_request",
             force_tools=True,
             allow_all_tools=False,
-            allowed_tool_names=WEATHER_TOOL_NAMES | LIVE_LOOKUP_READ_TOOL_NAMES,
+            allowed_tool_names=WEATHER_LIVE_LOOKUP_TOOL_NAMES,
             forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
             allow_agent_handoff=False,
         )

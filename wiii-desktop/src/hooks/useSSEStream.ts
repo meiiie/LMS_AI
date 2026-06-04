@@ -1205,7 +1205,11 @@ export function useSSEStream() {
         tryStreamingDispatch(fullAnswerTextRef.current);
       },
       onSources: (data) => {
-        const sources = data.sources || data.content || [];
+        const sources = Array.isArray(data.sources)
+          ? data.sources
+          : Array.isArray(data.content)
+            ? data.content
+            : [];
         traceEvent("sources", { count: sources.length });
         useChatStore.getState().setStreamingSources(sources);
       },

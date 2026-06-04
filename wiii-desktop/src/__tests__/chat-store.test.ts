@@ -19,6 +19,8 @@ beforeEach(() => {
     streamingBlocks: [],
     streamingStartTime: null,
     streamingSteps: [],
+    streamCompletedAt: null,
+    lastCompletedConversationId: null,
   });
 });
 
@@ -330,6 +332,49 @@ describe("Chat Store — Streaming", () => {
       },
     ]);
     expect(useChatStore.getState().streamingSources).toEqual([]);
+  });
+
+  it("attaches late source events to the finalized conversation after switching chats", () => {
+    const store = useChatStore.getState();
+    const firstId = store.createConversation("maritime");
+    store.addUserMessage("weather");
+    store.startStreaming();
+    store.appendStreamingContent("Weather answer.");
+
+    useChatStore.getState().finalizeStream({
+      processing_time: 2.4,
+      model: "qwen",
+      agent_type: "direct",
+      request_id: "req-weather",
+    } as any);
+
+    const secondId = useChatStore.getState().createConversation("maritime");
+    expect(useChatStore.getState().activeConversationId).toBe(secondId);
+
+    useChatStore.getState().setStreamingSources([
+      {
+        title: "Hai Phong forecast",
+        content: "Rain.",
+        url: "https://weather.example/hai-phong",
+        source_type: "web",
+      },
+    ]);
+
+    const state = useChatStore.getState();
+    const first = state.conversations.find((item) => item.id === firstId);
+    const second = state.conversations.find((item) => item.id === secondId);
+
+    expect(first?.messages[1].sources).toEqual([
+      {
+        title: "Hai Phong forecast",
+        content: "Rain.",
+        url: "https://weather.example/hai-phong",
+        source_type: "web",
+      },
+    ]);
+    expect(
+      second?.messages.some((message) => Boolean(message.sources?.length)),
+    ).toBe(false);
   });
 
   it("should finalize stream into an assistant message", () => {

@@ -10,6 +10,7 @@ import type { SourceInfo } from "@/api/types";
 import { useUIStore } from "@/stores/ui-store";
 
 const MAX_VISIBLE = 3;
+const SAFE_URL_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
 
 interface SourceCitationProps {
   sources: SourceInfo[];
@@ -21,10 +22,8 @@ export function SourceCitation({ sources }: SourceCitationProps) {
 
   if (!sources || sources.length === 0) return null;
 
-  const hasWebSources = sources.some(
-    (source) => source.url || source.source_type === "web",
-  );
-  if (hasWebSources) {
+  const allWebSources = sources.every(isWebSource);
+  if (allWebSources) {
     return <WebSourceCitation sources={sources} />;
   }
 
@@ -44,22 +43,45 @@ export function SourceCitation({ sources }: SourceCitationProps) {
         Nguồn tham khảo
       </div>
       <div className="source-citation__list">
-        {visibleSources.map((source, i) => (
-          <button
-            key={i}
-            onClick={() => handleClick(i)}
-            className="source-citation__item"
-            title={source.title}
-          >
-            <span className="source-citation__index">[{i + 1}]</span>
-            <span className="source-citation__title">{source.title}</span>
-            {source.page_number && (
-              <span className="source-citation__page">
-                tr. {source.page_number}
-              </span>
-            )}
-          </button>
-        ))}
+        {visibleSources.map((source, i) => {
+          const safeUrl = safeSourceUrl(source.url);
+          const body = (
+            <>
+              <span className="source-citation__index">[{i + 1}]</span>
+              <span className="source-citation__title">{source.title}</span>
+              {source.page_number && (
+                <span className="source-citation__page">
+                  tr. {source.page_number}
+                </span>
+              )}
+              {safeUrl && <ExternalLink size={12} aria-hidden="true" />}
+            </>
+          );
+          if (safeUrl) {
+            return (
+              <a
+                key={`${safeUrl}-${i}`}
+                href={safeUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="source-citation__item"
+                title={source.title}
+              >
+                {body}
+              </a>
+            );
+          }
+          return (
+            <button
+              key={i}
+              onClick={() => handleClick(i)}
+              className="source-citation__item"
+              title={source.title}
+            >
+              {body}
+            </button>
+          );
+        })}
       </div>
       {!showAll && hiddenCount > 0 && (
         <button
@@ -87,7 +109,7 @@ function WebSourceCitation({ sources }: SourceCitationProps) {
   const [expanded, setExpanded] = useState(false);
   const visibleSources = expanded ? sources : sources.slice(0, 3);
   const domains = sources
-    .map((source) => domainLabel(source.url || ""))
+    .map((source) => domainLabel(safeSourceUrl(source.url)))
     .filter(Boolean)
     .slice(0, 3);
 
@@ -118,17 +140,10 @@ function WebSourceCitation({ sources }: SourceCitationProps) {
       {expanded && (
         <div className="web-source-citation__list">
           {visibleSources.map((source, index) => {
-            const url = source.url || "";
+            const url = safeSourceUrl(source.url);
             const domain = domainLabel(url);
-            return (
-              <a
-                key={`${url || source.title}-${index}`}
-                href={url || undefined}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="web-source-citation__item"
-                aria-disabled={!url}
-              >
+            const body = (
+              <>
                 <span className="web-source-citation__index">
                   {index + 1}
                 </span>
@@ -141,6 +156,27 @@ function WebSourceCitation({ sources }: SourceCitationProps) {
                   </span>
                 </span>
                 {url && <ExternalLink size={12} />}
+              </>
+            );
+            if (!url) {
+              return (
+                <div
+                  key={`${source.title}-${index}`}
+                  className="web-source-citation__item"
+                >
+                  {body}
+                </div>
+              );
+            }
+            return (
+              <a
+                key={`${url || source.title}-${index}`}
+                href={url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="web-source-citation__item"
+              >
+                {body}
               </a>
             );
           })}
@@ -148,6 +184,20 @@ function WebSourceCitation({ sources }: SourceCitationProps) {
       )}
     </div>
   );
+}
+
+function isWebSource(source: SourceInfo): boolean {
+  return source.source_type === "web" || Boolean(safeSourceUrl(source.url));
+}
+
+function safeSourceUrl(url: string | undefined): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    return SAFE_URL_PROTOCOLS.has(parsed.protocol) ? parsed.href : "";
+  } catch {
+    return "";
+  }
 }
 
 function domainLabel(url: string): string {

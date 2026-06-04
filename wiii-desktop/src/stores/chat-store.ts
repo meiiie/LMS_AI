@@ -108,15 +108,16 @@ function mergeSourceInfos(
 function attachSourcesToLastAssistantDraft(
   state: ChatState,
   sources: SourceInfo[],
+  conversationId: string | null,
 ): boolean {
-  if (sources.length === 0 || !state.activeConversationId) return false;
+  if (sources.length === 0 || !conversationId) return false;
   const recentlyCompleted =
     typeof state.streamCompletedAt === "number" &&
     Date.now() - state.streamCompletedAt < 60_000;
   if (!recentlyCompleted) return false;
 
   const conversation = state.conversations.find(
-    (item) => item.id === state.activeConversationId,
+    (item) => item.id === conversationId,
   );
   if (!conversation) return false;
 
@@ -243,6 +244,7 @@ interface ChatState {
   // Sprint 145: Transient avatar state fields
   streamError: string;
   streamCompletedAt: number | null;
+  lastCompletedConversationId: string | null;
 
   // Computed
   activeConversation: () => Conversation | undefined;
@@ -1327,6 +1329,7 @@ export const useChatStore = create<ChatState>()(
     _activeSubagentGroupId: null,
     streamError: "",
     streamCompletedAt: null,
+    lastCompletedConversationId: null,
 
     loadConversations: async () => {
       try {
@@ -1531,6 +1534,7 @@ export const useChatStore = create<ChatState>()(
         state.streamingStartTime = Date.now();
         state.streamError = "";
         state.streamCompletedAt = null;
+        state.lastCompletedConversationId = null;
         state.lastCompletedLifecycleEvents = [];
       });
     },
@@ -1673,6 +1677,7 @@ export const useChatStore = create<ChatState>()(
           attachedToFinalMessage = attachSourcesToLastAssistantDraft(
             state,
             sources,
+            state.lastCompletedConversationId,
           );
         }
       });
@@ -2677,6 +2682,7 @@ export const useChatStore = create<ChatState>()(
         resetStreamingDraft(state);
         state.streamError = "";
         state.streamCompletedAt = Date.now();
+        state.lastCompletedConversationId = activeConversationId;
         state.lastCompletedLifecycleEvents = lifecycleSnapshot;
 
         const conv = state.conversations.find(
@@ -2722,6 +2728,7 @@ export const useChatStore = create<ChatState>()(
         resetStreamingDraft(state);
         state.streamError = error;
         state.streamCompletedAt = null;
+        state.lastCompletedConversationId = null;
         state.lastCompletedLifecycleEvents = lifecycleSnapshot;
 
         const conv = state.conversations.find(
@@ -2755,6 +2762,7 @@ export const useChatStore = create<ChatState>()(
         resetStreamingDraft(state);
         state.streamError = "";
         state.streamCompletedAt = null;
+        state.lastCompletedConversationId = null;
         state.lastCompletedLifecycleEvents = [];
       });
     },
@@ -2870,6 +2878,7 @@ export const useChatStore = create<ChatState>()(
         state.isLoaded = true;
         state.visualSessions = {};
         resetStreamingDraft(state);
+        state.lastCompletedConversationId = null;
         state.lastCompletedLifecycleEvents = [];
       });
     },
@@ -2890,6 +2899,7 @@ export const useChatStore = create<ChatState>()(
           state.isLoaded = true;
           state.visualSessions = {};
           resetStreamingDraft(state);
+          state.lastCompletedConversationId = null;
           state.lastCompletedLifecycleEvents = [];
         });
       } catch (err) {
@@ -2903,6 +2913,7 @@ export const useChatStore = create<ChatState>()(
           state.isLoaded = true;
           state.visualSessions = {};
           resetStreamingDraft(state);
+          state.lastCompletedConversationId = null;
           state.lastCompletedLifecycleEvents = [];
         });
       }

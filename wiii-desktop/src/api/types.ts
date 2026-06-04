@@ -356,7 +356,7 @@ export interface SSEAnswerEvent {
 }
 
 export interface SSESourcesEvent {
-  sources: SourceInfo[];
+  sources?: SourceInfo[];
   content?: SourceInfo[];
   display_role?: DisplayRole;
   sequence_id?: number;

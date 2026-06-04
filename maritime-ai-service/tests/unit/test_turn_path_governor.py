@@ -298,7 +298,7 @@ def test_turn_path_governor_routes_weather_to_weather_with_live_lookup_fallback(
     assert decision.allow_all_tools is False
     assert decision.should_keep_tool_name("tool_current_weather") is True
     assert decision.should_keep_tool_name("tool_web_search") is True
-    assert decision.should_keep_tool_name("tool_fetch_url") is True
+    assert decision.should_keep_tool_name("tool_fetch_url") is False
     assert decision.should_keep_tool_name("tool_current_datetime") is True
     assert decision.should_keep_tool_name("tool_pointy_show") is False
 
@@ -651,7 +651,7 @@ def test_collect_direct_tools_routes_weather_followup_to_weather_tool(monkeypatc
     assert state["_turn_path_decision"]["path"] == "weather_lookup"
     assert "tool_current_weather" in names
     assert "tool_web_search" in names
-    assert "tool_fetch_url" in names
+    assert "tool_fetch_url" not in names
     assert "tool_current_datetime" in names
 
 
@@ -704,7 +704,7 @@ def test_collect_direct_tools_routes_weather_turns_to_weather_tool(query, monkey
     assert state["_turn_path_decision"]["path"] == "weather_lookup"
     assert "tool_current_weather" in names
     assert "tool_web_search" in names
-    assert "tool_fetch_url" in names
+    assert "tool_fetch_url" not in names
 
 
 def test_collect_direct_tools_keeps_maritime_tool_on_maritime_path():
@@ -738,7 +738,7 @@ def test_direct_required_tool_names_weather_prefers_weather_over_web(monkeypatch
 
     assert "tool_current_weather" in required
     assert "tool_web_search" in required
-    assert "tool_fetch_url" in required
+    assert "tool_fetch_url" not in required
     assert "tool_current_datetime" in required
 
 
@@ -757,7 +757,6 @@ def test_direct_required_tool_names_temperature_question_prefers_weather_over_we
     assert required == [
         "tool_current_weather",
         "tool_web_search",
-        "tool_fetch_url",
         "tool_current_datetime",
     ]
 

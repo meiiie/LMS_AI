@@ -47,9 +47,15 @@ def test_build_direct_final_synthesis_instruction_blocks_live_lookup_memory_blee
     assert "cam xuc" in instruction
     assert "hang hai" in instruction
     assert "ui da co the nguon" in instruction
-    guard = build_direct_live_lookup_system_guard(["tool_web_search"])
-    assert "Do not use stored memory" in guard
-    assert "interested in ports" in guard
+    for tool_name in [
+        "tool_web_search",
+        "TOOL_SEARCH_LEGAL",
+        "search_maritime",
+        "tool_search_news",
+    ]:
+        guard = build_direct_live_lookup_system_guard([tool_name])
+        assert "Do not use stored memory" in guard
+        assert "interested in ports" in guard
     assert build_direct_live_lookup_system_guard(["tool_generate_visual"]) == ""
 
 

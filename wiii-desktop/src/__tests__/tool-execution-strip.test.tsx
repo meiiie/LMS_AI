@@ -312,6 +312,31 @@ describe("ToolExecutionStrip", () => {
     ).toBeTruthy();
   });
 
+  it("uses structured weather status before falling back to text matching", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-weather-json",
+      status: "completed",
+      tool: {
+        id: "tool-weather-json",
+        name: "current_weather",
+        args: {
+          city: "Hải Phòng",
+        },
+        result: JSON.stringify({
+          status: "error",
+          reason_code: "no_data",
+          message: "Provider returned an empty response.",
+        }),
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+    fireEvent.click(screen.getByRole("button", { name: /Tra thời tiết/i }));
+
+    expect(screen.getByText("Chưa lấy được thời tiết hiện tại.")).toBeTruthy();
+  });
+
   it("marks pending tool calls as busy without inventing output", () => {
     const block: ToolExecutionBlockData = {
       type: "tool_execution",

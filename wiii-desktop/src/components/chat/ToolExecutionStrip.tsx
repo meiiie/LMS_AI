@@ -345,7 +345,72 @@ function stripVietnameseMarks(value: string): string {
     .toLowerCase();
 }
 
+function getStringField(
+  payload: Record<string, unknown>,
+  keys: string[],
+): string {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function parseStructuredWeatherStatus(result: string): string | null {
+  const trimmed = result.trim();
+  if (!trimmed.startsWith("{")) return null;
+
+  try {
+    const payload = JSON.parse(trimmed) as unknown;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return null;
+    }
+
+    const fields = payload as Record<string, unknown>;
+    const status = stripVietnameseMarks(getStringField(fields, ["status"]));
+    const reason = stripVietnameseMarks(
+      getStringField(fields, ["reason_code", "reason", "error_code"]),
+    );
+    const code = `${status} ${reason}`;
+
+    if (
+      code.includes("provider_unconfigured") ||
+      code.includes("not_configured") ||
+      code.includes("missing_api_key")
+    ) {
+      return "Chưa có kết nối thời tiết trực tiếp.";
+    }
+    if (
+      code.includes("missing_location") ||
+      code.includes("needs_location") ||
+      code.includes("location_required")
+    ) {
+      return "Cần thêm địa điểm để tra thời tiết.";
+    }
+    if (
+      code.includes("no_data") ||
+      code.includes("unavailable") ||
+      code.includes("error")
+    ) {
+      return "Chưa lấy được thời tiết hiện tại.";
+    }
+
+    const summary = getStringField(fields, [
+      "summary",
+      "message",
+      "description",
+      "condition",
+    ]);
+    return summary ? clampNaturalText(sanitizeInlineText(summary), 180) : null;
+  } catch {
+    return null;
+  }
+}
+
 function summarizeWeatherResult(result: string): string {
+  const structured = parseStructuredWeatherStatus(result);
+  if (structured) return structured;
+
   const sanitized = sanitizeInlineText(result);
   const folded = stripVietnameseMarks(sanitized);
   if (

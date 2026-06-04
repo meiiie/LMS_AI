@@ -128,6 +128,8 @@ describe("ReasoningInterval", () => {
       },
     });
     expect(document.querySelector(".code-studio-card")).toBeNull();
+    expect(screen.getByText("Wiii đang xử lý")).toBeTruthy();
+    expect(screen.queryByText("Code Studio")).toBeNull();
     expect(screen.getByText("Minh dang khau lai app tuong tac nay cho that muot.")).toBeTruthy();
     expect(screen.queryByText("Pendulum App")).toBeNull();
   });

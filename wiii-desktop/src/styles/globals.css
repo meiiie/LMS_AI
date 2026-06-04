@@ -2989,7 +2989,6 @@ html.dark .shiki span {
   color: color-mix(in srgb, var(--text) 78%, var(--text-tertiary));
   font-size: 0.76rem;
   line-height: 1.55;
-  word-break: break-word;
   max-width: 74ch;
 }
 
