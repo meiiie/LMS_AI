@@ -149,8 +149,8 @@ def test_select_direct_node_tools_forces_web_search_and_must_include(monkeypatch
 
     assert result.tools == tools
     assert result.force_tools is True
-    assert state["force_skills"] == ["web-search"]
-    assert ctx["force_skills"] == ["web-search"]
+    assert "force_skills" not in state
+    assert "force_skills" not in ctx
     assert "tool_web_search" in captured["must_include"]
     assert captured["user_role"] == "teacher"
 

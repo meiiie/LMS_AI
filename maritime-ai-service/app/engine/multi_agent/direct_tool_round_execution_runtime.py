@@ -18,6 +18,13 @@ ProcessDirectToolPostDispatch = Callable[..., Awaitable[Any]]
 EmitVisualCommitEvents = Callable[..., Awaitable[None]]
 
 
+_WEB_SEARCH_TOOL_NAMES = {"tool_web_search", "web_search"}
+_WEATHER_SEARCH_FANOUT_SKIP_RESULT = (
+    "Additional weather web search was not executed because the previous "
+    "source-backed web search already contains enough live weather evidence."
+)
+
+
 @dataclass(frozen=True)
 class DirectToolRoundExecution:
     """State emitted by one direct tool round."""
@@ -25,6 +32,46 @@ class DirectToolRoundExecution:
     round_tool_names: list[str]
     round_cue: str
     visual_emitted_any: bool
+
+
+def _tool_call_name(tool_call: dict[str, Any]) -> str:
+    return str(tool_call.get("name", "") or "").strip()
+
+
+def _turn_path_name(state: AgentState) -> str:
+    if not isinstance(state, dict):
+        return ""
+    decision = state.get("_turn_path_decision")
+    if not isinstance(decision, dict):
+        return ""
+    return str(decision.get("path") or "").strip().lower()
+
+
+def _is_weather_lookup_turn(query: str, state: AgentState) -> bool:
+    try:
+        from app.engine.multi_agent.direct_intent import _needs_weather_lookup
+
+        if not _needs_weather_lookup(query):
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+
+    path = _turn_path_name(state)
+    return path in {"weather_lookup", "web_search"}
+
+
+def _should_skip_weather_search_fanout(
+    *,
+    tool_call: dict[str, Any],
+    query: str,
+    state: AgentState,
+    executed_web_search_count: int,
+) -> bool:
+    if not _is_weather_lookup_turn(query, state):
+        return False
+    if _tool_call_name(tool_call).lower() not in _WEB_SEARCH_TOOL_NAMES:
+        return False
+    return executed_web_search_count >= 1
 
 
 async def execute_direct_tool_round(
@@ -75,7 +122,42 @@ async def execute_direct_tool_round(
     active_visual_session_ids = collect_active_visual_session_ids(state)
 
     next_visual_emitted_any = visual_emitted_any
+    executed_web_search_count = 0
     for tool_call in normalized_tool_calls:
+        if _should_skip_weather_search_fanout(
+            tool_call=tool_call,
+            query=query,
+            state=state,
+            executed_web_search_count=executed_web_search_count,
+        ):
+            tool_call_id = str(tool_call.get("id") or f"tc_{tool_round}")
+            tool_name = _tool_call_name(tool_call) or "tool_web_search"
+            logger_obj.info(
+                "[DIRECT] Skipping duplicate weather web search tool=%s id=%s",
+                tool_name,
+                tool_call_id,
+            )
+            tool_call_events.append(
+                {
+                    "type": "result",
+                    "name": tool_name,
+                    "result": _WEATHER_SEARCH_FANOUT_SKIP_RESULT,
+                    "id": tool_call_id,
+                    "policy": {
+                        "skipped": True,
+                        "reason": "weather_search_fanout_limited",
+                    },
+                }
+            )
+            messages.append(
+                build_tool_result_message(
+                    _WEATHER_SEARCH_FANOUT_SKIP_RESULT,
+                    tool_call_id=tool_call_id,
+                    native_tool_messages=native_tool_messages,
+                )
+            )
+            continue
+
         dispatch_result = await dispatch_direct_tool_call(
             tool_call=tool_call,
             tool_round=tool_round,
@@ -92,6 +174,13 @@ async def execute_direct_tool_round(
             summarize_tool_result_for_stream=summarize_tool_result_for_stream,
             logger_obj=logger_obj,
         )
+        dispatch_result_text = str(dispatch_result.result or "").strip()
+        if (
+            dispatch_result.tool_name.strip().lower() in _WEB_SEARCH_TOOL_NAMES
+            and dispatch_result_text
+            and dispatch_result_text != "Tool unavailable"
+        ):
+            executed_web_search_count += 1
         post_dispatch = await process_direct_tool_post_dispatch(
             tool_name=dispatch_result.tool_name,
             tool_args=dispatch_result.tool_args or {},

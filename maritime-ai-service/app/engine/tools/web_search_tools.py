@@ -150,6 +150,29 @@ def _is_finance_query(query: str) -> bool:
     return any(kw in q for kw in _FINANCE_KEYWORDS)
 
 
+def _fold_search_text(value: str) -> str:
+    import unicodedata
+
+    normalized = unicodedata.normalize("NFKD", str(value or "").lower())
+    stripped = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return " ".join(stripped.replace("đ", "d").split())
+
+
+def _is_weather_search_query(query: str) -> bool:
+    folded = _fold_search_text(query)
+    return any(
+        marker in folded
+        for marker in (
+            "thoi tiet",
+            "nhiet do",
+            "du bao thoi tiet",
+            "weather",
+            "forecast",
+            "temperature",
+        )
+    )
+
+
 # =============================================================================
 # Circuit breaker helpers
 # =============================================================================
@@ -774,12 +797,9 @@ def _searxng_search_sync(
     try:
         from app.core.config import settings
         # Default to internal docker network address; override via env if external.
-        base_url = (
-            getattr(settings, "searxng_url", None)
-            or "http://searxng:8080"
-        )
+        configured_url = getattr(settings, "searxng_url", None)
     except Exception:  # noqa: BLE001
-        base_url = "http://searxng:8080"
+        configured_url = None
 
     try:
         import httpx
@@ -793,31 +813,67 @@ def _searxng_search_sync(
         }
         if time_range:
             params["time_range"] = time_range  # day | week | month | year
-        resp = httpx.get(
-            f"{base_url.rstrip('/')}/search",
-            params=params,
-            timeout=8.0,
-            follow_redirects=True,
-        )
-        if resp.status_code != 200:
-            logger.debug("[SEARXNG] HTTP %d for: %s", resp.status_code, query[:60])
-            return []
-        data = resp.json() or {}
-        results = data.get("results") or []
-        return [
-            {
-                "title": str(r.get("title", ""))[:200],
-                "body": r.get("content") or r.get("description", ""),
-                "href": r.get("url", ""),
-                "date": r.get("publishedDate", ""),
-                "source": r.get("engine", "searxng"),
-            }
-            for r in results[:max_results]
-            if r.get("url")
-        ]
+        for index, base_url in enumerate(_searxng_base_url_candidates(configured_url)):
+            try:
+                resp = httpx.get(
+                    f"{base_url.rstrip('/')}/search",
+                    params=params,
+                    timeout=8.0 if index == 0 else 3.0,
+                    follow_redirects=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[SEARXNG] %s failed: %s", base_url, exc)
+                continue
+            if resp.status_code != 200:
+                logger.debug(
+                    "[SEARXNG] HTTP %d via %s for: %s",
+                    resp.status_code,
+                    base_url,
+                    query[:60],
+                )
+                continue
+            data = resp.json() or {}
+            results = data.get("results") or []
+            normalized = [
+                {
+                    "title": str(r.get("title", ""))[:200],
+                    "body": r.get("content") or r.get("description", ""),
+                    "href": r.get("url", ""),
+                    "date": r.get("publishedDate", ""),
+                    "source": r.get("engine", "searxng"),
+                }
+                for r in results[:max_results]
+                if r.get("url")
+            ]
+            if normalized:
+                logger.info(
+                    "[SEARXNG] %s returned %d results for: %s",
+                    base_url,
+                    len(normalized),
+                    query[:60],
+                )
+                return normalized
+        return []
     except Exception as exc:  # noqa: BLE001
         logger.debug("[SEARXNG] failed: %s", exc)
         return []
+
+
+def _searxng_base_url_candidates(configured_url: str | None) -> list[str]:
+    base_url = (configured_url or "http://searxng:8080").strip().rstrip("/")
+    candidates = [base_url]
+    if base_url == "http://searxng:8080":
+        candidates.extend(
+            [
+                "http://host.docker.internal:8080",
+                "http://127.0.0.1:8080",
+            ]
+        )
+    deduped: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in deduped:
+            deduped.append(candidate)
+    return deduped
 
 
 _FINANCE_QUERY_TO_EN: tuple[tuple[str, str], ...] = (
@@ -1503,7 +1559,7 @@ def tool_web_search(query: str) -> str:
         # If the user explicitly asks for an official source and search already
         # found that host, keep the official result set instead of spending
         # 10-20s merging generic news wrappers above it.
-        if not _requests_official_source(query):
+        if not _requests_official_source(query) and not _is_weather_search_query(query):
             results = _merge_news_into_search(results, query)
         results = _augment_top_result_with_deep_fetch(results[:5], query)
         return _format_results(results, "WEB_SEARCH")

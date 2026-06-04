@@ -55,6 +55,25 @@ CHARACTER_MEMORY_TOOL_NAMES: frozenset[str] = frozenset(
         "tool_character_log_experience",
     }
 )
+LIVE_LOOKUP_READ_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "tool_current_datetime",
+        "tool_web_search",
+        "tool_fetch_url",
+    }
+)
+# Weather turns should not fetch arbitrary URLs; keep URL reads on the explicit
+# web/url lane until fetch_url has stronger SSRF guardrails.
+WEATHER_LIVE_LOOKUP_TOOL_NAMES: frozenset[str] = WEATHER_TOOL_NAMES | (
+    LIVE_LOOKUP_READ_TOOL_NAMES - frozenset({"tool_fetch_url"})
+)
+WEB_SEARCH_TOOL_NAMES: frozenset[str] = LIVE_LOOKUP_READ_TOOL_NAMES | frozenset(
+    {
+        "tool_search_news",
+        "tool_search_legal",
+        "tool_search_maritime",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,7 +294,7 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             reason="weather_current_conditions_request",
             force_tools=True,
             allow_all_tools=False,
-            allowed_tool_names=WEATHER_TOOL_NAMES,
+            allowed_tool_names=WEATHER_LIVE_LOOKUP_TOOL_NAMES,
             forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
             allow_agent_handoff=False,
         )
@@ -285,16 +304,26 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             path="maritime_search",
             reason="maritime_domain_lookup",
             force_tools=True,
+            allow_all_tools=False,
+            allowed_tool_names=WEB_SEARCH_TOOL_NAMES,
             allow_rag_delegation=True,
             forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
             allow_agent_handoff=False,
         )
 
-    if signals.web_search_forced or signals.needs_web_search or signals.needs_news_search or signals.needs_legal_search:
+    if (
+        signals.web_search_forced
+        or signals.routing_intent == "web_search"
+        or signals.needs_web_search
+        or signals.needs_news_search
+        or signals.needs_legal_search
+    ):
         return TurnPathDecision(
             path="web_search",
             reason="explicit_or_detected_web_search",
             force_tools=True,
+            allow_all_tools=False,
+            allowed_tool_names=WEB_SEARCH_TOOL_NAMES,
             forbidden_tool_prefixes=POINTY_TOOL_PREFIXES
             if signals.suppress_pointy_for_output
             else (),
@@ -306,6 +335,8 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             path="datetime_lookup",
             reason="datetime_request",
             force_tools=True,
+            allow_all_tools=False,
+            allowed_tool_names=frozenset({"tool_current_datetime"}),
             forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
             allow_agent_handoff=False,
         )
@@ -491,6 +522,7 @@ def _has_tool_or_output_signal(signals: TurnPathSignals) -> bool:
     return any(
         (
             signals.web_search_forced,
+            signals.routing_intent == "web_search",
             signals.pointy_forced,
             signals.host_ui_navigation,
             signals.looks_document_preview,

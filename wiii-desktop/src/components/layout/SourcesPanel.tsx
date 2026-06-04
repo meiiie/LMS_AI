@@ -36,6 +36,13 @@ function inferSourceType(source: SourceInfo): {
       bg: "var(--accent)",
     };
   }
+  if (source.url || source.source_type === "web") {
+    return {
+      label: "WEB",
+      color: "var(--accent-blue, #2563eb)",
+      bg: "var(--accent-blue, #2563eb)",
+    };
+  }
   return {
     label: "VĂN BẢN",
     color: "var(--accent-green, #16a34a)",
@@ -159,6 +166,17 @@ export function SourcesPanel() {
                       <div className="text-sm text-text">
                         <MarkdownRenderer content={selected.content} />
                       </div>
+                      {selected.url && (
+                        <a
+                          href={selected.url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-[var(--accent)] hover:underline"
+                        >
+                          Mở nguồn web
+                          <ExternalLink size={12} />
+                        </a>
+                      )}
                     </div>
                   </div>
                 </motion.div>

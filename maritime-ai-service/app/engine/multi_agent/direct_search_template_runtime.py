@@ -14,6 +14,7 @@ from app.engine.multi_agent.direct_tool_message_runtime import (
 from app.engine.multi_agent.direct_web_search_policy import (
     _force_skills_for_turn,
     _has_search_tool_result,
+    _is_weather_lookup_query,
     _should_return_search_template_after_tool_round,
 )
 
@@ -29,6 +30,8 @@ def build_direct_post_tool_search_template_response(
 ) -> Any | None:
     """Return a source-backed search template when another LLM round is wasteful."""
     log = logger_obj or logging.getLogger(__name__)
+    if _is_weather_lookup_query(query):
+        return None
     forced_web_search = "web-search" in _force_skills_for_turn(
         state
     ) and _has_search_tool_result(tool_call_events)

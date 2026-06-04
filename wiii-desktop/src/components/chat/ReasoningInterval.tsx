@@ -83,40 +83,16 @@ function getNodeLabel(node?: string) {
   return NODE_LABELS[normalizeNode(node)] || node || "Đang suy luận";
 }
 
-// Wiii-voice fallback labels (Tier 2) — used when no persona_label received.
-// Wiii is a Living Agent (Soul AGI, Sprints 170-210) — her cute personality is
-// core identity, not cosmetic. Keep the aliveness.
-const WIII_FALLBACK_LABELS_LIVE = "Wiii đang suy nghĩ~ (˶˃ ᵕ ˂˶)";
-const WIII_FALLBACK_LABELS_DONE = [
-  "Wiii đã nghĩ xong~ (˶˃ ᵕ ˂˶)",
-  "Hmm Wiii suy nghĩ rồi nè~",
-  "Wiii đã xem xong ≽^•⩊•^≼",
-];
-
-// Detect genuine Wiii persona labels (contain kaomoji, ~, Wiii, emoji patterns)
-const PERSONA_MARKER =
-  /[~≽˶╥⊙¬ᕙ•̀ᴗ•́و\u{1F600}-\u{1F64F}\u{2728}\u{1F31F}]|Wiii/u;
+const WIII_FALLBACK_LABEL_LIVE = "Wiii đang xử lý";
+const WIII_FALLBACK_LABEL_DONE = "Wiii đã xử lý xong";
 
 /**
- * Header label: ONLY Wiii persona labels from tool_think's persona_label field.
- * Everything else (phase names, node names, technical text) → fallback.
- *
- * Rule: If it doesn't SOUND like Wiii, it doesn't go on the header.
+ * Header labels stay operational. Persona text and internal phase labels belong
+ * in the expanded body or the final answer, not in the timeline chrome.
  */
 function getIntervalHeaderLabel(interval: ReasoningIntervalViewModel) {
-  // Tier 1: Only accept labels that are genuine persona labels from tool_think
-  if (interval.label?.trim()) {
-    const label = interval.label.trim();
-    if (PERSONA_MARKER.test(label)) {
-      return label;
-    }
-  }
-
-  // Tier 2: Wiii-voice fallback (ALWAYS cute, never technical)
-  if (interval.isLive) return WIII_FALLBACK_LABELS_LIVE;
-  return WIII_FALLBACK_LABELS_DONE[
-    Math.floor(Math.random() * WIII_FALLBACK_LABELS_DONE.length)
-  ];
+  if (interval.isLive) return WIII_FALLBACK_LABEL_LIVE;
+  return WIII_FALLBACK_LABEL_DONE;
 }
 
 /** Full summary for the expanded body preview. */

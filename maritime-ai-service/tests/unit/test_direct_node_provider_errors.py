@@ -1003,7 +1003,7 @@ async def test_direct_response_node_emergency_searches_when_provider_busy_before
 
 
 @pytest.mark.asyncio
-async def test_direct_response_node_force_binds_web_search_intent_without_keyword_heuristic():
+async def test_direct_response_node_forces_web_search_intent_without_mutating_force_skills():
     class FakeSearchTool:
         name = "tool_web_search"
 
@@ -1068,7 +1068,7 @@ async def test_direct_response_node_force_binds_web_search_intent_without_keywor
             **kwargs,
         )
 
-    assert "web-search" in captured["state_force_skills"]
+    assert captured["state_force_skills"] == []
     assert captured["forced_tool_choice"] == "any"
     assert result["final_response"] == "Source-backed web answer"
     assert result["tool_call_events"][0]["name"] == "tool_web_search"

@@ -99,6 +99,60 @@ async def test_dispatch_direct_tool_call_emits_stable_call_and_result_events():
 
 
 @pytest.mark.asyncio
+async def test_dispatch_direct_tool_call_emits_sources_for_web_search_results():
+    class FakeTool:
+        name = "tool_web_search"
+
+    events: list[dict] = []
+    tool_call_events: list[dict] = []
+
+    async def push_event(event):
+        events.append(event)
+
+    async def invoke_tool_with_runtime(_tool, _args, **_kwargs):
+        return (
+            "**Weather Hải Phòng today**\n"
+            "Cloudy and warm.\n"
+            "URL: https://weather.example/hai-phong"
+        )
+
+    result = await dispatch_direct_tool_call(
+        tool_call={
+            "id": "call_sources",
+            "name": "tool_web_search",
+            "args": {"query": "thời tiết Hải Phòng hôm nay"},
+        },
+        tool_round=0,
+        tools=[FakeTool()],
+        query="thời tiết Hải Phòng hôm nay",
+        push_event=push_event,
+        tool_call_events=tool_call_events,
+        get_tool_by_name=lambda tools, name: tools[0] if name == "tool_web_search" else None,
+        invoke_tool_with_runtime=invoke_tool_with_runtime,
+        runtime_context_base=None,
+        is_search_tool_name=lambda name: name == "tool_web_search",
+        prefer_official_query_for_known_docs=lambda args, _query: args,
+        summarize_tool_result_for_stream=lambda _name, value: "Tìm được 1 nguồn",
+        logger_obj=SimpleNamespace(warning=lambda *args, **kwargs: None),
+    )
+
+    assert result.matched is True
+    assert [event["type"] for event in events] == [
+        "tool_call",
+        "tool_result",
+        "sources",
+    ]
+    assert events[2]["content"] == [
+        {
+            "title": "Weather Hải Phòng today",
+            "content": "Cloudy and warm.",
+            "url": "https://weather.example/hai-phong",
+            "source_type": "web",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_direct_tool_call_returns_structured_unknown_tool_error():
     events: list[dict] = []
     tool_call_events: list[dict] = []

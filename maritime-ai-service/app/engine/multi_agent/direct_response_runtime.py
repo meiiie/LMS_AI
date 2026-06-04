@@ -35,7 +35,36 @@ def _flatten_message_content(value) -> str:
     return str(value or "").strip()
 
 
+def _message_role(message) -> str:
+    if isinstance(message, dict):
+        role = message.get("role") or message.get("type") or ""
+    else:
+        role = (
+            getattr(message, "role", None)
+            or getattr(message, "type", None)
+            or message.__class__.__name__
+        )
+    normalized = str(role or "").strip().lower()
+    if normalized in {"human", "humanmessage"}:
+        return "user"
+    if normalized in {"ai", "aimessage", "assistant"}:
+        return "assistant"
+    if normalized in {"tool", "toolmessage"}:
+        return "tool"
+    return normalized
+
+
 def _extract_last_query(messages: list) -> str:
+    for message in reversed(messages or []):
+        if _message_role(message) != "user":
+            continue
+        if isinstance(message, dict):
+            content = _flatten_message_content(message.get("content", ""))
+        else:
+            content = _flatten_message_content(getattr(message, "content", ""))
+        if content:
+            return content
+
     for message in reversed(messages or []):
         if isinstance(message, dict):
             content = _flatten_message_content(message.get("content", ""))

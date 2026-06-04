@@ -1,6 +1,27 @@
 from app.engine.multi_agent.direct_node_turn_start import start_direct_node_turn
 
 
+def test_routing_web_search_intent_is_not_user_explicit_web_search():
+    from app.engine.multi_agent.direct_node_operational_fast_paths import (
+        _is_explicit_web_search_turn_for_direct,
+    )
+
+    assert (
+        _is_explicit_web_search_turn_for_direct(
+            "hom nay co gi hot",
+            {"routing_metadata": {"intent": "web_search"}},
+        )
+        is False
+    )
+    assert (
+        _is_explicit_web_search_turn_for_direct(
+            "tim tren web hom nay co gi hot",
+            {"routing_metadata": {"intent": "web_search"}},
+        )
+        is True
+    )
+
+
 def test_start_direct_node_turn_resolves_greeting_when_natural_conversation_disabled():
     state = {"domain_id": "maritime"}
     result = start_direct_node_turn(

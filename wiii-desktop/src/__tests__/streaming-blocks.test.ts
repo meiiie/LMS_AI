@@ -39,6 +39,10 @@ function getBlocks(): ContentBlock[] {
   return useChatStore.getState().streamingBlocks;
 }
 
+function stateToolCalls() {
+  return useChatStore.getState().streamingToolCalls;
+}
+
 function thinkingAt(blocks: ContentBlock[], index: number): ThinkingBlockData {
   const block = blocks[index];
   expect(block.type).toBe("thinking");
@@ -218,6 +222,52 @@ describe("streaming blocks", () => {
     expect(blocks).toHaveLength(1);
     expect(blocks[0].type).toBe("tool_execution");
     expect(toolAt(blocks, 0).tool.id).toBe("tc-orphan");
+  });
+
+  it("deduplicates replayed tool calls by id", () => {
+    const store = useChatStore.getState();
+    store.startStreaming();
+    store.setStreamingThinking("Need a search.");
+    store.appendToolCall({
+      id: "tc-replay",
+      name: "tool_web_search",
+      args: { query: "first query" },
+    });
+    store.appendToolCall({
+      id: "tc-replay",
+      name: "tool_web_search",
+      args: { query: "replayed query" },
+    });
+
+    const blocks = getBlocks();
+    expect(stateToolCalls()).toHaveLength(1);
+    expect(
+      blocks.filter((block) => block.type === "tool_execution"),
+    ).toHaveLength(1);
+    expect(toolAt(blocks, 1).tool.args?.query).toBe("replayed query");
+    expect(thinkingAt(blocks, 0).toolCalls).toHaveLength(1);
+  });
+
+  it("keeps completed tool calls completed when a duplicate call is replayed", () => {
+    const store = useChatStore.getState();
+    store.startStreaming();
+    store.appendToolCall({
+      id: "tc-complete-replay",
+      name: "tool_web_search",
+      args: { query: "weather" },
+    });
+    store.updateToolCallResult("tc-complete-replay", "Found sources");
+    store.appendToolCall({
+      id: "tc-complete-replay",
+      name: "tool_web_search",
+      args: { query: "weather" },
+    });
+
+    const blocks = getBlocks();
+    expect(stateToolCalls()).toHaveLength(1);
+    expect(blocks).toHaveLength(1);
+    expect(toolAt(blocks, 0).status).toBe("completed");
+    expect(toolAt(blocks, 0).tool.result).toBe("Found sources");
   });
 
   it("places a late tool_execution block after an answer when no new thinking step exists", () => {

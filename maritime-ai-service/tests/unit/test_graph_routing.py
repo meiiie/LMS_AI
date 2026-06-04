@@ -1745,7 +1745,7 @@ class TestVisibleProgressCopy:
             "giá dầu hôm nay https://example.com Brent 98.74 WTI 95.92",
         )
 
-        assert result == "Đã kéo thêm vài nguồn để kiểm chéo."
+        assert result == "Tìm được 1 nguồn: example.com"
 
 
 class TestProviderFlowIntegrity:

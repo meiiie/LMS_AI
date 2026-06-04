@@ -240,4 +240,125 @@ describe("ToolExecutionStrip", () => {
       screen.getByText("Đã chèn minh họa ngay trong câu trả lời"),
     ).toBeTruthy();
   });
+
+  it("shows a professional web-search trace while keeping results collapsed", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-search-1",
+      status: "completed",
+      tool: {
+        id: "tool-search-1",
+        name: "tool_web_search",
+        args: {
+          query: "thời tiết Hải Phòng hôm nay",
+        },
+        result: JSON.stringify([
+          {
+            title: "Dự báo thời tiết Hải Phòng",
+            url: "https://weather.gov.vn/hai-phong",
+            snippet: "Thông tin dự báo trong ngày.",
+          },
+        ]),
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+
+    const strip = screen.getByTestId("tool-execution-strip");
+    expect(strip.getAttribute("data-tool-kind")).toBe("search");
+    expect(screen.getByText("Tìm kiếm web")).toBeTruthy();
+    expect(screen.getByText("Đã xong")).toBeTruthy();
+    expect(screen.getByText("Truy vấn")).toBeTruthy();
+    expect(screen.getByText("thời tiết Hải Phòng hôm nay")).toBeTruthy();
+    expect(screen.queryByText("Dự báo thời tiết Hải Phòng")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Tìm kiếm web/i }));
+
+    expect(screen.getByText("Nguồn tìm được")).toBeTruthy();
+    expect(screen.getByText("Dự báo thời tiết Hải Phòng")).toBeTruthy();
+    expect(screen.getByText("weather.gov.vn")).toBeTruthy();
+    expect(strip.textContent || "").not.toContain('"snippet"');
+  });
+
+  it("shows weather tool traces as location-aware status instead of a generic tool", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-weather-1",
+      status: "completed",
+      tool: {
+        id: "tool-weather-1",
+        name: "current_weather",
+        args: {
+          city: "Hải Phòng",
+        },
+        result: "Chưa có kết nối thời tiết trực tiếp.",
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+
+    const strip = screen.getByTestId("tool-execution-strip");
+    expect(strip.getAttribute("data-tool-kind")).toBe("weather");
+    expect(screen.getByText("Tra thời tiết")).toBeTruthy();
+    expect(screen.getByText("Địa điểm")).toBeTruthy();
+    expect(screen.getByText("Hải Phòng")).toBeTruthy();
+    expect(screen.queryByText("Tình trạng")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Tra thời tiết/i }));
+
+    expect(screen.getByText("Tình trạng")).toBeTruthy();
+    expect(
+      screen.getByText("Chưa có kết nối thời tiết trực tiếp."),
+    ).toBeTruthy();
+  });
+
+  it("uses structured weather status before falling back to text matching", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-weather-json",
+      status: "completed",
+      tool: {
+        id: "tool-weather-json",
+        name: "current_weather",
+        args: {
+          city: "Hải Phòng",
+        },
+        result: JSON.stringify({
+          status: "error",
+          reason_code: "no_data",
+          message: "Provider returned an empty response.",
+        }),
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+    fireEvent.click(screen.getByRole("button", { name: /Tra thời tiết/i }));
+
+    expect(screen.getByText("Chưa lấy được thời tiết hiện tại.")).toBeTruthy();
+  });
+
+  it("marks pending tool calls as busy without inventing output", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-search-pending",
+      status: "pending",
+      tool: {
+        id: "tool-search-pending",
+        name: "tool_web_search",
+        args: {
+          query: "NVIDIA models API",
+        },
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+
+    const strip = screen.getByTestId("tool-execution-strip");
+    const button = screen.getByRole("button", { name: /Tìm kiếm web/i });
+    expect(strip.getAttribute("aria-busy")).toBe("true");
+    expect(button).toHaveProperty("disabled", true);
+    expect(screen.getByText("Đang gọi")).toBeTruthy();
+    expect(screen.getByText("NVIDIA models API")).toBeTruthy();
+    expect(screen.queryByText("Nguồn tìm được")).toBeNull();
+  });
 });

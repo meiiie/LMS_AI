@@ -11,12 +11,16 @@ from app.engine.context.host_action_result_bridge import (
     parse_host_action_request_result,
 )
 from app.engine.multi_agent.direct_reasoning import _DIRECT_HOST_ACTION_PREFIX
+from app.engine.multi_agent.direct_tool_sources import (
+    extract_source_infos_from_tool_result,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.runtime.event_payload_sanitizer import sanitize_runtime_payload
 from typing import Any, Optional
 import asyncio
 import json
 import logging
+import unicodedata
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -27,6 +31,58 @@ def _log_visual_telemetry(event_name: str, **fields: object) -> None:
         logger.info("[VISUAL_TELEMETRY] %s %s", event_name, json.dumps(fields, ensure_ascii=False, sort_keys=True))
     else:
         logger.info("[VISUAL_TELEMETRY] %s", event_name)
+
+
+def _fold_for_stream_compare(value: str) -> str:
+    normalized = value.replace("đ", "d").replace("Đ", "D")
+    return (
+        unicodedata.normalize("NFD", normalized)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .lower()
+    )
+
+
+def _is_weather_tool_for_stream(tool_name: str) -> bool:
+    normalized = str(tool_name or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return (
+        normalized in {"tool_current_weather", "current_weather"}
+        or "current_weather" in normalized
+        or normalized.endswith("_weather")
+    )
+
+
+def _truncate_stream_summary(value: str, limit: int = 180) -> str:
+    if len(value) <= limit:
+        return value
+    sliced = value[:limit]
+    last_space = sliced.rfind(" ")
+    if last_space > 80:
+        sliced = sliced[:last_space]
+    return f"{sliced.strip()}..."
+
+
+def _summarize_weather_result_for_stream(result: object) -> str:
+    compact = " ".join(str(result or "").split())
+    if not compact:
+        return "Chưa có dữ liệu thời tiết từ tool."
+
+    folded = _fold_for_stream_compare(compact)
+    if "chua co ket noi thoi tiet truc tiep" in folded:
+        return "Chưa có kết nối thời tiết trực tiếp."
+    if (
+        "ban muon xem nhiet do" in folded
+        or "thanh pho nao" in folded
+        or "can them dia diem" in folded
+    ):
+        return "Cần thêm địa điểm để tra thời tiết."
+    if (
+        "chua lay duoc thoi tiet" in folded
+        or "khong co du lieu thoi tiet" in folded
+    ):
+        return "Chưa lấy được thời tiết hiện tại."
+
+    return _truncate_stream_summary(compact)
 
 
 def _summarize_tool_result_for_stream(tool_name: str, result: object) -> str:
@@ -53,28 +109,28 @@ def _summarize_tool_result_for_stream(tool_name: str, result: object) -> str:
     except Exception:
         pass
     lowered_tool = str(tool_name or "").strip().lower()
+    if _is_weather_tool_for_stream(lowered_tool):
+        return _summarize_weather_result_for_stream(result)
     if any(token in lowered_tool for token in ("web_search", "search_news", "search_legal", "search_maritime")):
-        # Phase 35 — show actual source count + top domain (Perplexity/Claude pattern).
-        # Format from _format_results: "**Title** ... URL: https://domain.com/...",
-        # separated by "---". Count "URL:" markers for source count, extract domains.
-        import re as _re
         result_str = str(result or "")
-        urls = _re.findall(r"URL:\s*(https?://[^\s\n]+)", result_str)
+        sources = extract_source_infos_from_tool_result(lowered_tool, result)
         domains: list[str] = []
-        seen_domains: set[str] = set()
-        for u in urls:
+        for source in sources:
+            url = str(source.get("url") or "")
+            if not url:
+                continue
             try:
                 from urllib.parse import urlparse
-                d = urlparse(u).netloc.replace("www.", "")
-                if d and d not in seen_domains:
-                    domains.append(d)
-                    seen_domains.add(d)
+
+                domain = urlparse(url).netloc.replace("www.", "")
             except Exception:  # noqa: BLE001
                 continue
-        if urls:
+            if domain and domain not in domains:
+                domains.append(domain)
+        if sources:
             top = ", ".join(domains[:3])
             extra = f" +{len(domains) - 3}" if len(domains) > 3 else ""
-            return f"Tìm được {len(urls)} nguồn: {top}{extra}"
+            return f"Tìm được {len(sources)} nguồn: {top}{extra}"
         # No URLs detected → check for "Không tìm thấy" or empty
         if "không tìm thấy" in result_str.lower():
             return "Chưa tìm được kết quả phù hợp — sẽ thử cách khác."

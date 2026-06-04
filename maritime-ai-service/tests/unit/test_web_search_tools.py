@@ -142,6 +142,41 @@ class TestWebSearchTool:
 
         assert ranked[0]["title"] == "Introducing GPT-5.5 - OpenAI"
 
+    def test_searxng_default_candidates_include_local_docker_host(self):
+        from app.engine.tools import web_search_tools as ws
+
+        assert ws._searxng_base_url_candidates(None) == [
+            "http://searxng:8080",
+            "http://host.docker.internal:8080",
+            "http://127.0.0.1:8080",
+        ]
+
+    def test_searxng_explicit_url_does_not_add_local_fallbacks(self):
+        from app.engine.tools import web_search_tools as ws
+
+        assert ws._searxng_base_url_candidates("http://search.internal:8888/") == [
+            "http://search.internal:8888",
+        ]
+
+    def test_weather_search_keeps_organic_results_without_news_merge(self):
+        from app.engine.tools import web_search_tools as ws
+
+        weather_results = [
+            {
+                "title": "Thời tiết Hải Phòng hôm nay - AccuWeather",
+                "body": "Hải Phòng hiện nhiều mây, nhiệt độ 30°C.",
+                "href": "https://www.accuweather.com/vi/vn/haiphong/353511/weather-forecast/353511",
+            }
+        ]
+
+        with patch.object(ws, "_searxng_search_sync", return_value=weather_results), patch.object(
+            ws, "_merge_news_into_search", side_effect=AssertionError("weather search should not merge news")
+        ):
+            result = ws.tool_web_search.invoke({"query": "thời tiết Hải Phòng hôm nay"})
+
+        assert "AccuWeather" in result
+        assert "30°C" in result
+
 
 class TestWebSearchRegistration:
     """Test tool registration."""

@@ -30,6 +30,35 @@ def test_build_direct_final_synthesis_instruction_is_mode_aware_for_market_turn(
     assert "opec+" in instruction or "ton kho" in instruction
 
 
+def test_build_direct_final_synthesis_instruction_blocks_live_lookup_memory_bleed():
+    from app.engine.multi_agent.direct_final_synthesis_runtime import (
+        build_direct_live_lookup_system_guard,
+        build_direct_final_synthesis_instruction as _build_direct_final_synthesis_instruction,
+    )
+
+    instruction = _build_direct_final_synthesis_instruction(
+        "thoi tiet Hai Phong hom nay",
+        {},
+        ["tool_web_search", "tool_current_datetime", "tool_fetch_url"],
+    ).lower()
+
+    assert "chi tra loi tu bang chung cong cu" in instruction
+    assert "khong chen ky uc" in instruction
+    assert "cam xuc" in instruction
+    assert "hang hai" in instruction
+    assert "ui da co the nguon" in instruction
+    for tool_name in [
+        "tool_web_search",
+        "TOOL_SEARCH_LEGAL",
+        "search_maritime",
+        "tool_search_news",
+    ]:
+        guard = build_direct_live_lookup_system_guard([tool_name])
+        assert "Do not use stored memory" in guard
+        assert "interested in ports" in guard
+    assert build_direct_live_lookup_system_guard(["tool_generate_visual"]) == ""
+
+
 def test_explicit_web_search_returns_template_after_fetch_evidence():
     from app.engine.multi_agent.direct_web_search_policy import (
         _prefer_official_query_for_known_docs,
@@ -108,6 +137,79 @@ def test_explicit_web_search_returns_template_after_fetch_evidence():
     ) is False
 
 
+def test_auto_routed_web_search_does_not_use_explicit_search_template():
+    from app.engine.multi_agent.direct_web_search_policy import (
+        _should_return_search_template_after_tool_round,
+        _should_use_search_template_for_empty_response,
+    )
+
+    events = [
+        {
+            "type": "result",
+            "name": "tool_web_search",
+            "result": ("URL: https://example.test/news\nCurrent event evidence.\n") * 80,
+            "id": "search_1",
+        },
+    ]
+
+    assert (
+        _should_return_search_template_after_tool_round(
+            query="hom nay co gi hot",
+            state={"routing_metadata": {"intent": "web_search"}},
+            tool_call_events=events,
+            tool_round=1,
+        )
+        is False
+    )
+    assert (
+        _should_use_search_template_for_empty_response(
+            query="hom nay co gi hot",
+            state={"routing_metadata": {"intent": "web_search"}},
+            tool_call_events=events,
+        )
+        is False
+    )
+
+
+def test_weather_web_search_does_not_return_raw_search_template_after_tool_round():
+    from app.engine.multi_agent.direct_web_search_policy import (
+        _should_return_search_template_after_tool_round,
+        _should_use_search_template_for_empty_response,
+    )
+
+    events = [
+        {
+            "type": "result",
+            "name": "tool_web_search",
+            "result": (
+                "**AccuWeather Hai Phong**\n"
+                "RealFeel 39C, humidity 64%, cloudy.\n"
+                "URL: https://example.test/weather\n"
+            )
+            * 80,
+            "id": "search_1",
+        },
+    ]
+
+    assert (
+        _should_return_search_template_after_tool_round(
+            query="thời tiết Hải Phòng hôm nay cho mình nhé",
+            state={"routing_metadata": {"intent": "web_search"}},
+            tool_call_events=events,
+            tool_round=0,
+        )
+        is False
+    )
+    assert (
+        _should_use_search_template_for_empty_response(
+            query="thời tiết Hải Phòng hôm nay cho mình nhé",
+            state={"routing_metadata": {"intent": "web_search"}},
+            tool_call_events=events,
+        )
+        is False
+    )
+
+
 def test_clean_forced_web_search_query_strips_vietnamese_discourse_marker():
     from app.engine.multi_agent.direct_web_search_policy import (
         _clean_forced_web_search_query,
@@ -121,6 +223,58 @@ def test_clean_forced_web_search_query_strips_vietnamese_discourse_marker():
     assert not cleaned.lower().startswith("ý là")
 
 
+def test_clean_forced_web_search_query_strips_polite_search_suffix():
+    from app.engine.multi_agent.direct_web_search_policy import (
+        _clean_forced_web_search_query,
+    )
+
+    assert (
+        _clean_forced_web_search_query("thời tiết Hải Phòng hôm nay cho mình")
+        == "thời tiết Hải Phòng hôm nay"
+    )
+    assert (
+        _clean_forced_web_search_query("@web-search giá vàng hôm nay giúp mình nhé")
+        == "giá vàng hôm nay"
+    )
+
+
+def test_weather_lookup_limits_duplicate_web_search_fanout():
+    from app.engine.multi_agent.direct_tool_round_execution_runtime import (
+        _should_skip_weather_search_fanout,
+    )
+
+    state = {"_turn_path_decision": {"path": "web_search"}}
+    query = "thời tiết Hải Phòng hôm nay"
+
+    assert (
+        _should_skip_weather_search_fanout(
+            tool_call={"name": "tool_web_search"},
+            query=query,
+            state=state,
+            executed_web_search_count=0,
+        )
+        is False
+    )
+    assert (
+        _should_skip_weather_search_fanout(
+            tool_call={"name": "tool_web_search"},
+            query=query,
+            state=state,
+            executed_web_search_count=1,
+        )
+        is True
+    )
+    assert (
+        _should_skip_weather_search_fanout(
+            tool_call={"name": "tool_current_datetime"},
+            query=query,
+            state=state,
+            executed_web_search_count=1,
+        )
+        is False
+    )
+
+
 def test_build_direct_post_tool_search_template_response_for_forced_web(monkeypatch):
     from app.engine.multi_agent import direct_search_template_runtime as runtime
 
@@ -130,9 +284,15 @@ def test_build_direct_post_tool_search_template_response_for_forced_web(monkeypa
         lambda **_kwargs: "Tổng hợp từ web có nguồn.",
     )
 
+    monkeypatch.setattr(
+        runtime,
+        "_force_skills_for_turn",
+        lambda _state: {"web-search"},
+    )
+
     response = runtime.build_direct_post_tool_search_template_response(
         query="giá dầu hôm nay",
-        state={"force_skills": ["web-search"]},
+        state={"routing_metadata": {"intent": "web_search"}},
         tool_call_events=[
             {
                 "type": "result",
@@ -146,6 +306,34 @@ def test_build_direct_post_tool_search_template_response_for_forced_web(monkeypa
 
     assert response is not None
     assert response.content == "Tổng hợp từ web có nguồn."
+
+
+def test_build_direct_post_tool_search_template_response_skips_weather_even_when_forced(
+    monkeypatch,
+):
+    from app.engine.multi_agent import direct_search_template_runtime as runtime
+
+    monkeypatch.setattr(
+        runtime,
+        "build_search_template_fallback",
+        lambda **_kwargs: "Không nên trả template cho weather tự nhiên.",
+    )
+
+    response = runtime.build_direct_post_tool_search_template_response(
+        query="thời tiết Hải Phòng hôm nay cho mình nhé",
+        state={"force_skills": ["web-search"]},
+        tool_call_events=[
+            {
+                "type": "result",
+                "name": "tool_web_search",
+                "result": "URL: https://example.test/weather\nRealFeel 39C.",
+            }
+        ],
+        tool_round=0,
+        native_tool_messages=False,
+    )
+
+    assert response is None
 
 
 def test_build_direct_post_tool_search_template_response_for_explicit_round(
@@ -252,10 +440,12 @@ async def test_execute_forced_web_search_shortcut_emits_events(monkeypatch):
     assert [event["type"] for event in emitted] == [
         "tool_call",
         "tool_result",
+        "sources",
         "thinking_start",
         "thinking_delta",
         "thinking_end",
     ]
+    assert emitted[2]["content"][0]["url"] == "https://example.test"
     thinking_text = " ".join(
         str(event.get("content", ""))
         for event in emitted
@@ -277,6 +467,36 @@ async def test_execute_forced_web_search_shortcut_emits_events(monkeypatch):
     assert invoke_call["tool_call_id"] == "forced_web_search_0"
     assert invoke_call["prefer_async"] is False
     assert invoke_call["run_sync_in_thread"] is True
+
+
+@pytest.mark.asyncio
+async def test_execute_forced_web_search_shortcut_skips_natural_weather_auto_route():
+    from app.engine.multi_agent import direct_forced_web_search_runtime as runtime
+
+    emitted: list[dict] = []
+
+    async def push_event(event):
+        emitted.append(event)
+
+    async def invoke_tool_with_runtime(*_args, **_kwargs):
+        raise AssertionError("Natural weather routing should use the planner loop")
+
+    response = await runtime.execute_forced_web_search_shortcut(
+        query="thời tiết Hải Phòng hôm nay cho mình nhé",
+        state={"routing_metadata": {"intent": "web_search"}},
+        tools=[object()],
+        messages=[],
+        tool_call_events=[],
+        push_event=push_event,
+        native_tool_messages=False,
+        runtime_context_base={},
+        get_tool_by_name=lambda _tools, _name: object(),
+        invoke_tool_with_runtime=invoke_tool_with_runtime,
+        summarize_tool_result_for_stream=lambda _name, result: result,
+    )
+
+    assert response is None
+    assert emitted == []
 
 
 @pytest.mark.asyncio
@@ -428,7 +648,9 @@ async def test_run_direct_final_synthesis_uses_no_tool_binding_and_moderate_time
 
     assert result.llm_response is final_response
     assert result.resolved_provider == "qwen"
-    assert len(result.messages) == 1
+    assert len(result.messages) == 2
+    assert result.messages[0].role == "system"
+    assert "Do not use stored memory" in result.messages[0].content
     assert "Khong goi them cong cu" in result.messages[-1].content
     assert calls[0]["llm"] is llm_base
     assert "tools" not in calls[0]["kwargs"]

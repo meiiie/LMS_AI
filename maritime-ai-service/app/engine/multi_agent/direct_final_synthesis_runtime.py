@@ -14,6 +14,7 @@ from app.engine.multi_agent.direct_reasoning import (
     _infer_direct_thinking_mode,
 )
 from app.engine.multi_agent.direct_tool_message_runtime import (
+    build_system_instruction_message,
     build_user_instruction_message,
 )
 from app.engine.multi_agent.state import AgentState
@@ -41,6 +42,52 @@ def extract_direct_visible_text(content: Any) -> str:
         return str(content or "").strip()
 
 
+_LIVE_LOOKUP_TOOL_NAMES = {
+    "tool_web_search",
+    "web_search",
+    "tool_search_news",
+    "search_news",
+    "tool_search_legal",
+    "search_legal",
+    "tool_search_maritime",
+    "search_maritime",
+    "tool_fetch_url",
+    "fetch_url",
+    "tool_current_datetime",
+    "current_datetime",
+    "tool_current_weather",
+    "current_weather",
+}
+
+
+def _has_live_lookup_tool(tool_names: list[str]) -> bool:
+    return any(
+        str(name or "").strip().lower() in _LIVE_LOOKUP_TOOL_NAMES
+        for name in tool_names
+    )
+
+
+def build_direct_live_lookup_system_guard(tool_names: list[str]) -> str:
+    """Return a system-level guard for evidence-only live lookup synthesis."""
+    if not _has_live_lookup_tool(tool_names):
+        return ""
+    return (
+        "SYSTEM live lookup guard: answer only from tool evidence collected in "
+        "this turn. Do not use stored memory, inferred emotions, relationship "
+        "history, occupation, maritime/campus context, or user background unless "
+        "the user explicitly asked for that context in the current message. "
+        "Do not say the user is sad, worried, interested in ports, or preparing "
+        "for something unless the current user message says so. Do not inject "
+        "Wiii lore, Bong, pet stories, bedtime advice, kaomoji, or decorative "
+        "playful asides into factual lookup answers unless explicitly requested. "
+        "Do not ask personal follow-up questions about where the user is, what "
+        "they are doing, whether they are studying late, or whether they are at "
+        "home. "
+        "Keep the answer concise, natural, and professional; the UI already "
+        "renders source links."
+    )
+
+
 def build_direct_final_synthesis_instruction(
     query: str,
     state: AgentState,
@@ -56,6 +103,18 @@ def build_direct_final_synthesis_instruction(
         "Hay tong hop ngay thanh cau tra loi cuoi cung bang tieng Viet, "
         "dua tren cac ket qua cong cu da co."
     )
+    if _has_live_lookup_tool(tool_names):
+        base += (
+            " Voi luot tra cuu web/thoi gian/thoi tiet, chi tra loi tu bang chung "
+            "cong cu trong luot nay; khong chen ky uc, cam xuc, moi quan he, "
+            "nghe nghiep, hang hai, truong lop, hay suy dien ve nguoi dung neu "
+            "user khong hoi truc tiep. Khong chen lore Wiii, Bong, chuyen thu "
+            "cung, loi khuyen di ngu, kaomoji, hay aside vui dua vao cau tra "
+            "cuu su kien. Khong hoi nguoc chuyen ca nhan nhu user dang o dau, "
+            "dang lam gi, co hoc khuya hay dang o nha khong. Uu tien 1-2 doan "
+            "gon, tu nhien, chuyen nghiep; khong "
+            "can lap lai danh sach link vi UI da co the nguon."
+        )
 
     if thinking_mode == "analytical_market":
         return (
@@ -120,6 +179,14 @@ async def run_direct_final_synthesis(
         if event.get("type") == "call"
     ]
     synthesis_messages = list(messages)
+    live_lookup_guard = build_direct_live_lookup_system_guard(synthesis_tool_names)
+    if live_lookup_guard:
+        synthesis_messages.append(
+            build_system_instruction_message(
+                live_lookup_guard,
+                native_tool_messages=native_tool_messages,
+            )
+        )
     synthesis_messages.append(
         build_user_instruction_message(
             build_direct_final_synthesis_instruction(

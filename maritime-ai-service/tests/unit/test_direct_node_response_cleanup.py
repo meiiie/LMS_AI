@@ -6,6 +6,7 @@ from typing import Any
 from app.engine.multi_agent.direct_node_response_cleanup import (
     apply_source_backed_empty_response_fallback,
     clean_direct_node_llm_response,
+    strip_live_lookup_inferred_personal_context,
 )
 
 
@@ -64,6 +65,140 @@ def test_clean_direct_node_llm_response_compacts_identity_after_sanitize() -> No
     )
 
     assert result.response == "identity::Wiii clean"
+
+
+def test_strip_live_lookup_inferred_personal_context_removes_memory_bleed() -> None:
+    events = [{"type": "result", "name": "tool_web_search"}]
+
+    cleaned = strip_live_lookup_inferred_personal_context(
+        (
+            "Hai Phong hom nay nang nong 37C. "
+            "Minh biet cau dang buon, nen dung ra ngoai lau nha. "
+            "Co gi can minh goi y cach chong nong khong?"
+        ),
+        query="thoi tiet Hai Phong hom nay",
+        tool_call_events=events,
+    )
+
+    assert "37C" in cleaned
+    assert "dang buon" not in cleaned
+    assert "goi y" not in cleaned
+
+
+def test_strip_live_lookup_inferred_personal_context_removes_story_bleed_and_replay() -> None:
+    events = [{"type": "result", "name": "tool_web_search"}]
+
+    cleaned = strip_live_lookup_inferred_personal_context(
+        (
+            "Minh vua tra ne: thoi tiet Hai Phong 29C.\n\n"
+            "Minh vua tra ne: thoi tiet Hai Phong 29C. Do am 81%, co kha nang mua. "
+            "Cau nho mang ao mua neu ra ngoai. "
+            "Bong ao cua minh cung dang cuon tron trong chan ne."
+        ),
+        query="thoi tiet Hai Phong hom nay",
+        tool_call_events=events,
+    )
+
+    assert cleaned.count("Minh vua tra ne") == 1
+    assert "Do am 81%" in cleaned
+    assert "mang ao mua" in cleaned
+    assert "Bong" not in cleaned
+    assert "cuon tron" not in cleaned
+
+
+def test_strip_live_lookup_inferred_personal_context_removes_bong_bedtime_aside() -> None:
+    events = [{"type": "result", "name": "tool_web_search"}]
+
+    cleaned = strip_live_lookup_inferred_personal_context(
+        (
+            "Minh vua tra xong thoi tiet Hai Phong: nhiet do cao nhat 37C, "
+            "do am 84%, co mua dong rai rac. "
+            "Neu di ra ngoai, nho mang ao mua va tranh cay cao khi co sam set. "
+            "Dung thuc khuya qua, minh ke chuyen meo Bong bi uot vi quen mang o."
+        ),
+        query="thoi tiet Hai Phong hom nay",
+        tool_call_events=events,
+    )
+
+    assert "37C" in cleaned
+    assert "mang ao mua" in cleaned
+    assert "Bong" not in cleaned
+    assert "thuc khuya" not in cleaned
+    assert "ke chuyen" not in cleaned
+
+
+def test_strip_live_lookup_inferred_personal_context_removes_unsolicited_creation_followup() -> None:
+    events = [{"type": "result", "name": "tool_web_search"}]
+
+    cleaned = strip_live_lookup_inferred_personal_context(
+        (
+            "Hai Phong luc 22h nhiet do 30C, nhieu may, do am 85%. "
+            "Ngay mai co mua rao va dong, nen mang o neu ra ngoai. "
+            "Minh co the tao bieu do de nhin luon."
+        ),
+        query="thoi tiet Hai Phong hom nay",
+        tool_call_events=events,
+    )
+
+    assert "30C" in cleaned
+    assert "mang o" in cleaned
+    assert "tao bieu do" not in cleaned
+
+
+def test_strip_live_lookup_inferred_personal_context_removes_study_late_inference() -> None:
+    events = [{"type": "result", "name": "tool_web_search"}]
+
+    cleaned = strip_live_lookup_inferred_personal_context(
+        (
+            "Hai Phong hien 29C, nhieu may, do am 82%, kha nang mua 75%. "
+            "Du bao den 23h van am u va am uot. "
+            "Cau dang hoc khuya ma troi nhu the nay thi de buon ngu va met lam."
+        ),
+        query="thoi tiet Hai Phong hom nay",
+        tool_call_events=events,
+    )
+
+    assert "29C" in cleaned
+    assert "am uot" in cleaned
+    assert "hoc khuya" not in cleaned
+    assert "buon ngu" not in cleaned
+
+
+def test_strip_live_lookup_inferred_personal_context_removes_whereabouts_followup() -> None:
+    events = [{"type": "result", "name": "tool_web_search"}]
+
+    cleaned = strip_live_lookup_inferred_personal_context(
+        (
+            "Hai Phong luc 22h la 29C, troi quang, do am 80%. "
+            "Tu 23h co mua rao nhe keo dai den sang mai. "
+            "Cau dang o nha hay di dau khuya vay? "
+            "Neu ra ngoai, nho mang ao mua nho nha. Dung de uot, minh lo lam. "
+            "Con neu dang hoc bai thi nghi som mot chut."
+        ),
+        query="thoi tiet Hai Phong hom nay",
+        tool_call_events=events,
+    )
+
+    assert "29C" in cleaned
+    assert "mua rao" in cleaned
+    assert "dang o nha" not in cleaned
+    assert "di dau" not in cleaned
+    assert "minh lo" not in cleaned
+    assert "hoc bai" not in cleaned
+
+
+def test_strip_live_lookup_inferred_personal_context_keeps_requested_context() -> None:
+    events = [{"type": "result", "name": "tool_web_search"}]
+    response = "Minh biet cau dang buon, nen minh se noi ngan: troi nong 37C."
+
+    assert (
+        strip_live_lookup_inferred_personal_context(
+            response,
+            query="minh dang buon, thoi tiet Hai Phong hom nay the nao",
+            tool_call_events=events,
+        )
+        == response
+    )
 
 
 def test_apply_source_backed_empty_response_fallback_uses_tool_events() -> None:

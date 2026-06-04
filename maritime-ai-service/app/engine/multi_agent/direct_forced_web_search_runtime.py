@@ -8,6 +8,9 @@ from typing import Any, Awaitable, Callable
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
 )
+from app.engine.multi_agent.direct_tool_sources import (
+    extract_source_infos_from_tool_result,
+)
 from app.engine.multi_agent.direct_tool_message_runtime import (
     build_assistant_message,
 )
@@ -116,6 +119,15 @@ async def execute_forced_web_search_shortcut(
             "node": "direct",
         }
     )
+    sources = extract_source_infos_from_tool_result(forced_search_tool_name, result)
+    if sources:
+        await push_event(
+            {
+                "type": "sources",
+                "content": sources,
+                "node": "direct",
+            }
+        )
     tool_call_events.append(
         {
             "type": "result",

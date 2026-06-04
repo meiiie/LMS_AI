@@ -119,3 +119,40 @@ def test_extract_direct_response_impl_derives_analytical_thinking_from_answer_fo
     assert thinking.startswith("Hien tai gia dau dang giang co giua ba luc chinh")
     assert "bao cao eia" in thinking.lower()
     assert tools_used == [{"name": "tool_web_search"}]
+
+
+def test_extract_direct_response_impl_uses_user_query_not_trailing_tool_result_for_thinking():
+    llm_response = SimpleNamespace(
+        content=(
+            "Thoi tiet Hai Phong hom nay nhieu may, co mua rao rai rac vao chieu toi va do am cao. "
+            "Nhiet do dao dong quanh 27 den 35 do C, nen cam giac ngoai troi kha oi va am. "
+            "Neu phai di chuyen gan khu vuc cang bien, nen theo doi them canh bao mua dong ngan han."
+        ),
+        response_metadata={},
+        additional_kwargs={},
+    )
+
+    response, thinking, tools_used = extract_direct_response_impl(
+        llm_response,
+        messages=[
+            {"role": "user", "content": "thoi tiet Hai Phong hom nay cho minh nhe"},
+            SimpleNamespace(
+                type="ai",
+                content="",
+                tool_calls=[{"name": "tool_web_search"}],
+            ),
+            {
+                "role": "tool",
+                "content": (
+                    "Additional weather web search was not executed because the previous "
+                    "source-backed web search already contains enough live weather evidence."
+                ),
+            },
+        ],
+    )
+
+    assert response.startswith("Thoi tiet Hai Phong hom nay")
+    assert "file/schema" not in thinking.lower()
+    assert "source-backed" not in thinking.lower()
+    assert thinking.startswith("Thoi tiet Hai Phong hom nay")
+    assert tools_used == [{"name": "tool_web_search"}]

@@ -22,6 +22,7 @@ from app.engine.multi_agent.stream_utils import (
     create_emotion_event,
     create_pointy_action_event,
     create_preview_event,
+    create_sources_event,
     create_status_event,
     create_thinking_delta_event,
     create_thinking_end_event,
@@ -74,6 +75,9 @@ async def _convert_bus_event_impl(event: dict) -> StreamEvent:
             tool_call_id=tc.get("id", ""),
             node=node,
         )
+    if etype == "sources":
+        sources = event.get("content", [])
+        return await create_sources_event(sources if isinstance(sources, list) else [])
     if etype == "answer_delta":
         return await create_answer_event(event.get("content", ""))
     if etype == "thinking_start":

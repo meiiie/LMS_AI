@@ -195,6 +195,8 @@ class SourceInfo(BaseModel):
     """Source citation info for LMS response"""
     title: str = Field(..., description="Tiêu đề nguồn tài liệu")
     content: str = Field(..., description="Nội dung trích dẫn")
+    url: Optional[str] = Field(default=None, description="Public URL for web sources")
+    source_type: Optional[str] = Field(default=None, description="Source type, e.g. web or document")
     image_url: Optional[str] = Field(default=None, description="URL ảnh trang tài liệu (CHỈ THỊ 26)")
     page_number: Optional[int] = Field(default=None, description="Page number in PDF (Feature: source-highlight-citation)")
     document_id: Optional[str] = Field(default=None, description="Document ID for PDF reference (Feature: source-highlight-citation)")

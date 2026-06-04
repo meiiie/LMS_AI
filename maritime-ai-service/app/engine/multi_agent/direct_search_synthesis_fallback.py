@@ -304,9 +304,8 @@ def _format_outro(hit_count: int) -> str:
             "hơn nhé."
         )
     return (
-        "\n\n_Lưu ý: AI synthesizer tạm chậm — mình tổng hợp trực tiếp từ "
-        "kết quả tra cứu để bạn không phải chờ. Bấm vào tên nguồn để đọc "
-        "chi tiết._"
+        "\n\n_Nguồn: tổng hợp trực tiếp từ kết quả tra cứu web. "
+        "Bấm vào tên nguồn để mở chi tiết._"
     )
 
 

@@ -80,6 +80,56 @@ function normalizeThinkingSnapshot(value: string | undefined): string {
   return (value || "").replace(/\s+/g, " ").trim();
 }
 
+function sourceDedupKey(source: SourceInfo): string {
+  const url = String(source.url || "").trim().toLowerCase();
+  if (url) return `url:${url}`;
+  return [
+    "text",
+    String(source.title || "").trim().toLowerCase(),
+    String(source.content || "").slice(0, 160).trim().toLowerCase(),
+  ].join(":");
+}
+
+function mergeSourceInfos(
+  existing: SourceInfo[],
+  incoming: SourceInfo[],
+): SourceInfo[] {
+  const merged: SourceInfo[] = [];
+  const seen = new Set<string>();
+  for (const source of [...existing, ...incoming]) {
+    const key = sourceDedupKey(source);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(source);
+  }
+  return merged;
+}
+
+function attachSourcesToLastAssistantDraft(
+  state: ChatState,
+  sources: SourceInfo[],
+  conversationId: string | null,
+): boolean {
+  if (sources.length === 0 || !conversationId) return false;
+  const recentlyCompleted =
+    typeof state.streamCompletedAt === "number" &&
+    Date.now() - state.streamCompletedAt < 60_000;
+  if (!recentlyCompleted) return false;
+
+  const conversation = state.conversations.find(
+    (item) => item.id === conversationId,
+  );
+  if (!conversation) return false;
+
+  for (let i = conversation.messages.length - 1; i >= 0; i -= 1) {
+    const message = conversation.messages[i];
+    if (message.role !== "assistant") continue;
+    message.sources = mergeSourceInfos(message.sources || [], sources);
+    return true;
+  }
+  return false;
+}
+
 function getLastNarrativeLine(value: string | undefined): string {
   const segments = (value || "")
     .split("\n")
@@ -194,6 +244,7 @@ interface ChatState {
   // Sprint 145: Transient avatar state fields
   streamError: string;
   streamCompletedAt: number | null;
+  lastCompletedConversationId: string | null;
 
   // Computed
   activeConversation: () => Conversation | undefined;
@@ -561,6 +612,50 @@ function findLastThinkingBlock(
     if (!stepId && !node) return block;
   }
   return undefined;
+}
+
+function mergeToolCallInfoDraft(
+  target: ToolCallInfo,
+  incoming: ToolCallInfo,
+): ToolCallInfo {
+  target.name = incoming.name || target.name;
+  if (incoming.args) {
+    target.args = {
+      ...(target.args || {}),
+      ...incoming.args,
+    };
+  }
+  if (incoming.result !== undefined) {
+    target.result = incoming.result;
+  }
+  if (incoming.node) {
+    target.node = incoming.node;
+  }
+  return target;
+}
+
+function upsertToolCallInfoDraft(
+  toolCalls: ToolCallInfo[],
+  incoming: ToolCallInfo,
+): ToolCallInfo {
+  const existing = toolCalls.find((tc) => tc.id === incoming.id);
+  if (existing) return mergeToolCallInfoDraft(existing, incoming);
+  const next = {
+    ...incoming,
+    args: incoming.args ? { ...incoming.args } : undefined,
+  };
+  toolCalls.push(next);
+  return next;
+}
+
+function findToolExecutionBlockDraft(
+  blocks: ContentBlock[],
+  toolCallId: string,
+): ToolExecutionBlockData | undefined {
+  return blocks.find(
+    (block): block is ToolExecutionBlockData =>
+      block.type === "tool_execution" && block.tool.id === toolCallId,
+  );
 }
 
 function findActiveThinkingPhaseIndex(
@@ -1234,6 +1329,7 @@ export const useChatStore = create<ChatState>()(
     _activeSubagentGroupId: null,
     streamError: "",
     streamCompletedAt: null,
+    lastCompletedConversationId: null,
 
     loadConversations: async () => {
       try {
@@ -1438,6 +1534,7 @@ export const useChatStore = create<ChatState>()(
         state.streamingStartTime = Date.now();
         state.streamError = "";
         state.streamCompletedAt = null;
+        state.lastCompletedConversationId = null;
         state.lastCompletedLifecycleEvents = [];
       });
     },
@@ -1567,9 +1664,26 @@ export const useChatStore = create<ChatState>()(
     },
 
     setStreamingSources: (sources) => {
+      let attachedToFinalMessage = false;
       set((state) => {
-        state.streamingSources = sources;
+        if (state.isStreaming) {
+          state.streamingSources =
+            sources.length === 0
+              ? []
+              : mergeSourceInfos(state.streamingSources, sources);
+          return;
+        }
+        if (sources.length > 0) {
+          attachedToFinalMessage = attachSourcesToLastAssistantDraft(
+            state,
+            sources,
+            state.lastCompletedConversationId,
+          );
+        }
       });
+      if (attachedToFinalMessage) {
+        persistConversationsImmediate(get().conversations);
+      }
     },
 
     addStreamingStep: (label, node) => {
@@ -2288,7 +2402,7 @@ export const useChatStore = create<ChatState>()(
           tc.node,
         );
         if (idx >= 0) {
-          state.streamingPhases[idx].toolCalls.push(tc);
+          upsertToolCallInfoDraft(state.streamingPhases[idx].toolCalls, tc);
         }
       });
     },
@@ -2320,27 +2434,63 @@ export const useChatStore = create<ChatState>()(
 
     appendToolCall: (tc, meta) => {
       set((state) => {
-        // Flat field - backward compat
-        state.streamingToolCalls.push(tc);
+        // Flat field - backward compat. Treat tool_call as idempotent because
+        // some provider streams can replay the same native call chunk by id.
+        const normalizedToolCall = upsertToolCallInfoDraft(
+          state.streamingToolCalls,
+          tc,
+        );
 
         // Keep tool call mirrored on current thinking block for backward compat
+        let mirroredOnThinkingBlock = false;
+        for (const block of state.streamingBlocks) {
+          if (block.type !== "thinking") continue;
+          const existing = block.toolCalls.find(
+            (toolCall) => toolCall.id === normalizedToolCall.id,
+          );
+          if (existing) {
+            mergeToolCallInfoDraft(existing, normalizedToolCall);
+            mirroredOnThinkingBlock = true;
+          }
+        }
+
         const openBlock = findLastOpenThinkingBlock(
           state.streamingBlocks,
           meta?.stepId,
-          tc.node,
+          normalizedToolCall.node,
         );
-        if (openBlock) {
-          openBlock.toolCalls.push(tc);
+        if (openBlock && !mirroredOnThinkingBlock) {
+          upsertToolCallInfoDraft(openBlock.toolCalls, normalizedToolCall);
+        }
+
+        const existingToolBlock = findToolExecutionBlockDraft(
+          state.streamingBlocks,
+          normalizedToolCall.id,
+        );
+        if (existingToolBlock) {
+          mergeToolCallInfoDraft(existingToolBlock.tool, normalizedToolCall);
+          existingToolBlock.node =
+            normalizedToolCall.node || existingToolBlock.node;
+          existingToolBlock.status = existingToolBlock.tool.result
+            ? "completed"
+            : "pending";
+          applyDisplayMeta(existingToolBlock, meta);
+          return;
         }
 
         state.streamingBlocks.push(
           applyDisplayMeta(
             {
               type: "tool_execution",
-              id: tc.id,
-              tool: { ...tc },
-              node: tc.node,
-              status: tc.result ? "completed" : "pending",
+              id: normalizedToolCall.id,
+              tool: {
+                ...normalizedToolCall,
+                args: normalizedToolCall.args
+                  ? { ...normalizedToolCall.args }
+                  : undefined,
+              },
+              node: normalizedToolCall.node,
+              status: normalizedToolCall.result ? "completed" : "pending",
             } as ToolExecutionBlockData,
             {
               displayRole: "tool",
@@ -2532,6 +2682,7 @@ export const useChatStore = create<ChatState>()(
         resetStreamingDraft(state);
         state.streamError = "";
         state.streamCompletedAt = Date.now();
+        state.lastCompletedConversationId = activeConversationId;
         state.lastCompletedLifecycleEvents = lifecycleSnapshot;
 
         const conv = state.conversations.find(
@@ -2577,6 +2728,7 @@ export const useChatStore = create<ChatState>()(
         resetStreamingDraft(state);
         state.streamError = error;
         state.streamCompletedAt = null;
+        state.lastCompletedConversationId = null;
         state.lastCompletedLifecycleEvents = lifecycleSnapshot;
 
         const conv = state.conversations.find(
@@ -2610,6 +2762,7 @@ export const useChatStore = create<ChatState>()(
         resetStreamingDraft(state);
         state.streamError = "";
         state.streamCompletedAt = null;
+        state.lastCompletedConversationId = null;
         state.lastCompletedLifecycleEvents = [];
       });
     },
@@ -2725,6 +2878,7 @@ export const useChatStore = create<ChatState>()(
         state.isLoaded = true;
         state.visualSessions = {};
         resetStreamingDraft(state);
+        state.lastCompletedConversationId = null;
         state.lastCompletedLifecycleEvents = [];
       });
     },
@@ -2745,6 +2899,7 @@ export const useChatStore = create<ChatState>()(
           state.isLoaded = true;
           state.visualSessions = {};
           resetStreamingDraft(state);
+          state.lastCompletedConversationId = null;
           state.lastCompletedLifecycleEvents = [];
         });
       } catch (err) {
@@ -2758,6 +2913,7 @@ export const useChatStore = create<ChatState>()(
           state.isLoaded = true;
           state.visualSessions = {};
           resetStreamingDraft(state);
+          state.lastCompletedConversationId = null;
           state.lastCompletedLifecycleEvents = [];
         });
       }

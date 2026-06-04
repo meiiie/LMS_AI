@@ -5,6 +5,9 @@ from __future__ import annotations
 import re
 
 from app.engine.multi_agent.direct_intent import _normalize_for_intent
+from app.engine.multi_agent.direct_web_search_policy import (
+    _looks_explicit_web_search_query,
+)
 from app.engine.multi_agent.direct_reasoning import _is_codebase_analysis_query
 from app.engine.multi_agent.direct_session_memory_runtime import (
     _with_requested_response_marker,
@@ -43,12 +46,14 @@ def _strip_dsml_residue(text: str) -> str:
 
 def _is_explicit_web_search_turn_for_direct(query: str, state: AgentState | None = None) -> bool:
     folded = _fold_direct_text(query)
-    if "@web-search" in folded or "@web_search" in folded or "search the web" in folded:
+    if (
+        "@web-search" in folded
+        or "@web_search" in folded
+        or "search the web" in folded
+        or _looks_explicit_web_search_query(query)
+    ):
         return True
     if isinstance(state, dict):
-        routing = state.get("routing_metadata") if isinstance(state.get("routing_metadata"), dict) else {}
-        if str(routing.get("intent") or "").strip().lower() == "web_search":
-            return True
         if "web-search" in _force_skills_from_state(state):
             return True
     return False

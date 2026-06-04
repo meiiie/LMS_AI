@@ -10,6 +10,9 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.engine.multi_agent.tool_event_sanitizer import sanitize_tool_args_for_event
+from app.engine.multi_agent.direct_tool_sources import (
+    extract_source_infos_from_tool_result,
+)
 from app.engine.multi_agent.tool_policy_session import (
     tool_policy_denial_message,
     tool_policy_session_from_state,
@@ -211,6 +214,15 @@ async def dispatch_direct_tool_call(
             "node": "direct",
         }
     )
+    sources = extract_source_infos_from_tool_result(tool_name, result)
+    if sources:
+        await push_event(
+            {
+                "type": "sources",
+                "content": sources,
+                "node": "direct",
+            }
+        )
     return DirectToolDispatchResult(
         tool_call_id=tool_call_id,
         tool_name=tool_name,

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 
-def test_tool_policy_session_records_visible_weather_tool_only():
+def test_tool_policy_session_records_visible_weather_with_live_lookup():
     from app.engine.multi_agent.tool_policy_session import (
         build_tool_policy_session,
         filter_tools_for_policy_session,
@@ -51,14 +51,19 @@ def test_tool_policy_session_records_visible_weather_tool_only():
     )
     final_session = tool_policy_session_from_state(state)
 
-    assert [tool.name for tool in filtered] == ["tool_current_weather"]
+    assert [tool.name for tool in filtered] == [
+        "tool_current_weather",
+        "tool_web_search",
+    ]
     assert final_session is not None
     assert final_session.path == "weather_lookup"
-    assert final_session.visible_tool_names == frozenset({"tool_current_weather"})
+    assert final_session.visible_tool_names == frozenset(
+        {"tool_current_weather", "tool_web_search"}
+    )
     assert final_session.tool_capabilities is not None
     assert final_session.tool_capabilities["tool_current_weather"]["group"] == "weather"
     assert final_session.decision_for("tool_current_weather").allowed is True
-    assert final_session.decision_for("tool_web_search").allowed is False
+    assert final_session.decision_for("tool_web_search").allowed is True
 
 
 def test_tool_policy_session_denies_lms_authoring_without_connection():

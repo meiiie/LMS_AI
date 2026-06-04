@@ -156,6 +156,8 @@ export interface ChatRequest {
 export interface SourceInfo {
   title: string;
   content: string;
+  url?: string;
+  source_type?: string;
   image_url?: string;
   page_number?: number;
   document_id?: string;
@@ -354,7 +356,8 @@ export interface SSEAnswerEvent {
 }
 
 export interface SSESourcesEvent {
-  sources: SourceInfo[];
+  sources?: SourceInfo[];
+  content?: SourceInfo[];
   display_role?: DisplayRole;
   sequence_id?: number;
   step_id?: string;
