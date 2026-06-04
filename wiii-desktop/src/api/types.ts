@@ -1346,6 +1346,7 @@ export interface ToolCallInfo {
   result?: string;
   node?: string;
   metadata?: ToolResultMetadata;
+  sources?: SourceInfo[];
 }
 
 export type DisplayRole = "thinking" | "tool" | "action" | "answer" | "artifact";

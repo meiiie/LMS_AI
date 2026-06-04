@@ -126,6 +126,9 @@ function attachSourcesToLastAssistantDraft(
     const message = conversation.messages[i];
     if (message.role !== "assistant") continue;
     message.sources = mergeSourceInfos(message.sources || [], sources);
+    if (message.blocks) {
+      attachSourcesToLastSearchToolBlockDraft(message.blocks, sources);
+    }
     return true;
   }
   return false;
@@ -643,6 +646,9 @@ function mergeToolCallInfoDraft(
       ...incoming.metadata,
     };
   }
+  if (incoming.sources?.length) {
+    target.sources = mergeSourceInfos(target.sources || [], incoming.sources);
+  }
   return target;
 }
 
@@ -656,6 +662,7 @@ function upsertToolCallInfoDraft(
     ...incoming,
     args: incoming.args ? { ...incoming.args } : undefined,
     metadata: incoming.metadata ? { ...incoming.metadata } : undefined,
+    sources: incoming.sources ? [...incoming.sources] : undefined,
   };
   toolCalls.push(next);
   return next;
@@ -669,6 +676,39 @@ function findToolExecutionBlockDraft(
     (block): block is ToolExecutionBlockData =>
       block.type === "tool_execution" && block.tool.id === toolCallId,
   );
+}
+
+function normalizeToolNameForSources(name: string): string {
+  return String(name || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function isSourceBackedToolCall(tool: ToolCallInfo): boolean {
+  const name = normalizeToolNameForSources(tool.name);
+  const resultKind = String(tool.metadata?.result_kind || "").trim().toLowerCase();
+  return (
+    resultKind === "web_sources" ||
+    name.includes("web_search") ||
+    name.includes("search_news") ||
+    name.includes("search_legal") ||
+    name.includes("search_maritime") ||
+    name.includes("search_products") ||
+    name.includes("search_shopping")
+  );
+}
+
+function attachSourcesToLastSearchToolBlockDraft(
+  blocks: ContentBlock[],
+  sources: SourceInfo[],
+): boolean {
+  if (sources.length === 0) return false;
+  for (let i = blocks.length - 1; i >= 0; i -= 1) {
+    const block = blocks[i];
+    if (block.type !== "tool_execution") continue;
+    if (!isSourceBackedToolCall(block.tool)) continue;
+    block.tool.sources = mergeSourceInfos(block.tool.sources || [], sources);
+    return true;
+  }
+  return false;
 }
 
 function findActiveThinkingPhaseIndex(
@@ -1684,6 +1724,20 @@ export const useChatStore = create<ChatState>()(
             sources.length === 0
               ? []
               : mergeSourceInfos(state.streamingSources, sources);
+          if (sources.length > 0) {
+            const attachedToBlock = attachSourcesToLastSearchToolBlockDraft(
+              state.streamingBlocks,
+              sources,
+            );
+            if (attachedToBlock) {
+              for (let i = state.streamingToolCalls.length - 1; i >= 0; i -= 1) {
+                const toolCall = state.streamingToolCalls[i];
+                if (!isSourceBackedToolCall(toolCall)) continue;
+                toolCall.sources = mergeSourceInfos(toolCall.sources || [], sources);
+                break;
+              }
+            }
+          }
           return;
         }
         if (sources.length > 0) {

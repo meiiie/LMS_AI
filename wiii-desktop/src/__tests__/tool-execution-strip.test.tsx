@@ -318,6 +318,52 @@ describe("ToolExecutionStrip", () => {
     expect(stripText.indexOf(summary)).toBe(stripText.lastIndexOf(summary));
   });
 
+  it("renders structured source events inside summarized search tools", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-search-sources",
+      status: "completed",
+      tool: {
+        id: "tool-search-sources",
+        name: "tool_web_search",
+        args: {
+          query: "thời tiết Hải Phòng hiện tại",
+        },
+        result: "Tìm được 2 nguồn: weather.example, meteo.example",
+        sources: [
+          {
+            title: "Hai Phong forecast",
+            content: "Cloudy and warm.",
+            url: "https://weather.example/hai-phong",
+            source_type: "web",
+          },
+          {
+            title: "Meteo forecast",
+            content: "Rain chance.",
+            url: "https://meteo.example/hai-phong",
+            source_type: "web",
+          },
+        ],
+        metadata: {
+          schema_version: "tool_result_metadata.v1",
+          status: "completed",
+          result_kind: "web_sources",
+          source_count: 2,
+          domains: ["weather.example", "meteo.example"],
+        },
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+    fireEvent.click(screen.getByRole("button", { name: /Tìm kiếm web/i }));
+
+    expect(screen.getByText("Nguồn tìm được")).toBeTruthy();
+    expect(screen.getByText("Hai Phong forecast")).toBeTruthy();
+    expect(screen.getByText("weather.example")).toBeTruthy();
+    expect(screen.getByText("Meteo forecast")).toBeTruthy();
+    expect(screen.queryByText(/Tìm được 2 nguồn:/)).toBeNull();
+  });
+
   it("renders no-source search metadata as a warning state", () => {
     const block: ToolExecutionBlockData = {
       type: "tool_execution",

@@ -15,7 +15,11 @@ import {
   TerminalSquare,
   Wrench,
 } from "lucide-react";
-import type { ToolExecutionBlockData, ToolResultMetadata } from "@/api/types";
+import type {
+  SourceInfo,
+  ToolExecutionBlockData,
+  ToolResultMetadata,
+} from "@/api/types";
 import { TOOL_LABELS } from "@/lib/reasoning-labels";
 import { VisualArtifactCard } from "./VisualArtifactCard";
 import { CodeStudioCard } from "./CodeStudioCard";
@@ -751,6 +755,25 @@ function parseSearchResults(result?: string): SearchResultItem[] {
   return items;
 }
 
+function sourceInfoToSearchItems(sources?: SourceInfo[]): SearchResultItem[] {
+  if (!sources?.length) return [];
+  const items: SearchResultItem[] = [];
+  const seenUrls = new Set<string>();
+  for (const source of sources) {
+    const url = typeof source.url === "string" ? source.url.trim() : "";
+    if (!url || seenUrls.has(url)) continue;
+    seenUrls.add(url);
+    items.push({
+      title: source.title || extractDomain(url),
+      url,
+      domain: extractDomain(url),
+      snippet: source.content || undefined,
+    });
+    if (items.length >= 5) break;
+  }
+  return items;
+}
+
 function SearchResultWidget({ items }: { items: SearchResultItem[] }) {
   if (items.length === 0) return null;
   return (
@@ -895,8 +918,19 @@ function GenericToolStrip({ block }: ToolExecutionStripProps) {
   const isSearchTool =
     SEARCH_TOOL_NAMES.has(toolName) || toolName.includes("search");
   const searchItems = useMemo(
-    () => (isSearchTool ? parseSearchResults(block.tool.result) : []),
-    [isSearchTool, block.tool.result],
+    () => {
+      if (!isSearchTool) return [];
+      const sourceItems = sourceInfoToSearchItems(block.tool.sources);
+      const sourceUrls = new Set(sourceItems.map((item) => item.url));
+      return sourceItems
+        .concat(
+          parseSearchResults(block.tool.result).filter(
+            (item) => !sourceUrls.has(item.url),
+          ),
+        )
+        .slice(0, 5);
+    },
+    [isSearchTool, block.tool.result, block.tool.sources],
   );
   const shouldShowTechnicalDetail = Boolean(
     technicalDetail && searchItems.length === 0,

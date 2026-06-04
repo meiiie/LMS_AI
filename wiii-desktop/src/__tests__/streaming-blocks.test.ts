@@ -270,6 +270,50 @@ describe("streaming blocks", () => {
     expect(toolAt(blocks, 0).tool.result).toBe("Found sources");
   });
 
+  it("attaches source events to the latest source-backed tool block", () => {
+    const store = useChatStore.getState();
+    store.startStreaming();
+    store.appendToolCall({
+      id: "tc-search-sources",
+      name: "tool_web_search",
+      args: { query: "weather" },
+    });
+    store.updateToolCallResult("tc-search-sources", "Tìm được 2 nguồn", {
+      displayRole: "tool",
+    }, {
+      schema_version: "tool_result_metadata.v1",
+      status: "completed",
+      result_kind: "web_sources",
+      source_count: 2,
+    });
+    store.setStreamingSources([
+      {
+        title: "Forecast",
+        content: "Cloudy.",
+        url: "https://weather.example/hai-phong",
+        source_type: "web",
+      },
+    ]);
+
+    const blocks = getBlocks();
+    expect(toolAt(blocks, 0).tool.sources).toEqual([
+      {
+        title: "Forecast",
+        content: "Cloudy.",
+        url: "https://weather.example/hai-phong",
+        source_type: "web",
+      },
+    ]);
+    expect(stateToolCalls()[0].sources).toEqual([
+      {
+        title: "Forecast",
+        content: "Cloudy.",
+        url: "https://weather.example/hai-phong",
+        source_type: "web",
+      },
+    ]);
+  });
+
   it("places a late tool_execution block after an answer when no new thinking step exists", () => {
     const store = useChatStore.getState();
     store.startStreaming();
