@@ -468,7 +468,15 @@ def classify_raw_tool_call_text_start(
     if text[0] == "{":
         return True
     if text[0] == "[":
-        return True
+        upper = text.upper()
+        if "[TOOL_CALL]".startswith(upper):
+            return None
+        if upper.startswith("[TOOL_CALL]"):
+            return True
+        stripped_array = text[1:].lstrip()
+        if not stripped_array:
+            return None
+        return stripped_array.startswith("{")
     if text.startswith("`"):
         if not "```".startswith(text[:3]) and not text.startswith("```"):
             return False

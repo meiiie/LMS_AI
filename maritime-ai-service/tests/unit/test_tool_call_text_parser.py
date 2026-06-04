@@ -140,3 +140,38 @@ def test_classify_raw_tool_call_text_start_handles_xml_markers() -> None:
         classify_raw_tool_call_text_start("<p>Hello", allowed_tool_names={"tool_web_search"})
         is False
     )
+
+
+def test_classify_raw_tool_call_text_start_handles_bracket_prefixes_precisely() -> None:
+    assert (
+        classify_raw_tool_call_text_start("[", allowed_tool_names={"tool_web_search"})
+        is None
+    )
+    assert (
+        classify_raw_tool_call_text_start(
+            "[TOOL_",
+            allowed_tool_names={"tool_web_search"},
+        )
+        is None
+    )
+    assert (
+        classify_raw_tool_call_text_start(
+            '[TOOL_CALL] {"tool": "web_search", "query": "weather"}',
+            allowed_tool_names={"tool_web_search"},
+        )
+        is True
+    )
+    assert (
+        classify_raw_tool_call_text_start(
+            '[{"name": "tool_web_search", "arguments": {"query": "weather"}}]',
+            allowed_tool_names={"tool_web_search"},
+        )
+        is True
+    )
+    assert (
+        classify_raw_tool_call_text_start(
+            "[Image #1] Đây là ảnh bạn gửi.",
+            allowed_tool_names={"tool_web_search"},
+        )
+        is False
+    )
