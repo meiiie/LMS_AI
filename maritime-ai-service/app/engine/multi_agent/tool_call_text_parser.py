@@ -498,6 +498,73 @@ def classify_raw_tool_call_text_start(
     return False
 
 
+def find_raw_tool_call_marker_index(
+    value: Any,
+    *,
+    allowed_tool_names: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> int | None:
+    """Return the start index of an explicit raw tool-call marker in mixed prose.
+
+    This is intentionally narrower than full extraction: it only detects
+    executable markers that can appear after a short natural-language preamble,
+    so examples like ``[Image #1]`` or ordinary code fences keep streaming.
+    """
+
+    if not isinstance(value, str) or not value:
+        return None
+    allowed = _normalize_allowed_tool_names(allowed_tool_names)
+
+    candidates: list[int] = []
+
+    tool_call_marker = re.search(r"\[TOOL_CALL\]", value, re.IGNORECASE)
+    if tool_call_marker:
+        candidates.append(tool_call_marker.start())
+
+    for match in re.finditer(r"```([A-Za-z0-9_.:-]*)?", value):
+        tag = _normalize_tool_name(match.group(1) or "")
+        lowered_tag = tag.lower()
+        if _resolve_allowed_tool_name(tag, allowed_tool_names=allowed):
+            candidates.append(match.start())
+            continue
+        if lowered_tag in {"tool_call", "function_call"}:
+            candidates.append(match.start())
+            continue
+        if lowered_tag == "xml":
+            body_preview = value[match.end(): match.end() + 240]
+            if re.search(
+                r"<(?:[\w]+:)?(?:tool_call|function_call)\b|<invoke\s+name=|<tool_code\b",
+                body_preview,
+                re.IGNORECASE,
+            ):
+                candidates.append(match.start())
+
+    xml_marker = re.search(
+        r"<(?:[\w]+:)?(?:tool_call|function_call)\b|<tool_code\b",
+        value,
+        re.IGNORECASE,
+    )
+    if xml_marker:
+        candidates.append(xml_marker.start())
+
+    for invoke in re.finditer(
+        r"<invoke\s+name=[\"']([^\"']+)",
+        value,
+        re.IGNORECASE,
+    ):
+        if _resolve_allowed_tool_name(invoke.group(1), allowed_tool_names=allowed):
+            candidates.append(invoke.start())
+
+    dsml_marker = re.search(
+        rf"<\s*{_DSML_PIPES}\s*DSML\s*{_DSML_PIPES}\s*(?:tool_calls|invoke)\b",
+        value,
+        re.IGNORECASE,
+    )
+    if dsml_marker:
+        candidates.append(dsml_marker.start())
+
+    return min(candidates) if candidates else None
+
+
 def extract_raw_tool_calls_from_text(
     value: Any,
     *,

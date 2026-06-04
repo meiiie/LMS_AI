@@ -1,6 +1,7 @@
 from app.engine.multi_agent.tool_call_text_parser import (
     classify_raw_tool_call_text_start,
     extract_raw_tool_calls_from_text,
+    find_raw_tool_call_marker_index,
 )
 
 
@@ -174,4 +175,25 @@ def test_classify_raw_tool_call_text_start_handles_bracket_prefixes_precisely() 
             allowed_tool_names={"tool_web_search"},
         )
         is False
+    )
+
+
+def test_find_raw_tool_call_marker_index_detects_tool_after_preamble() -> None:
+    text = "Để mình tra cứu ngay.\n```web_search\nweather Hai Phong today\n```"
+
+    marker_index = find_raw_tool_call_marker_index(
+        text,
+        allowed_tool_names={"tool_web_search"},
+    )
+
+    assert marker_index == text.index("```web_search")
+
+
+def test_find_raw_tool_call_marker_index_ignores_normal_visible_markers() -> None:
+    assert (
+        find_raw_tool_call_marker_index(
+            "[Image #1] Đây là ảnh bạn gửi.\n```python\nprint('hello')\n```",
+            allowed_tool_names={"tool_web_search"},
+        )
+        is None
     )

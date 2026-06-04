@@ -30,11 +30,14 @@ from app.engine.native_chat_runtime import (
 from app.engine.multi_agent.tool_call_text_parser import (
     classify_raw_tool_call_text_start,
     extract_raw_tool_calls_from_text,
+    find_raw_tool_call_marker_index,
     tool_names_from_tools,
 )
 from app.engine.reasoning import sanitize_visible_reasoning_text
 
 logger = logging.getLogger(__name__)
+
+_RAW_TOOL_MARKER_SCAN_TAIL_CHARS = 160
 
 
 def _derive_code_stream_session_id_impl(
@@ -444,6 +447,7 @@ async def _stream_openai_compatible_answer_with_route_impl(
     tool_call_chunks: dict[int, dict[str, str]] = {}
     raw_tool_answer_candidate: bool | None = None
     raw_tool_answer_chunks: list[str] = []
+    pending_visible_tool_scan = ""
 
     # Phase 34 (#207): boundary-aware token batching. When the
     # ``enable_stream_smoother`` flag is on, we route every answer_delta
@@ -505,6 +509,12 @@ async def _stream_openai_compatible_answer_with_route_impl(
                 "node": node,
             })
         emitted_answer += answer_text
+
+    async def _flush_pending_visible_tool_scan() -> None:
+        nonlocal pending_visible_tool_scan
+        if pending_visible_tool_scan:
+            await _emit_visible_answer_delta(pending_visible_tool_scan)
+            pending_visible_tool_scan = ""
 
     try:
         stream = await client.chat.completions.create(**request_kwargs)
@@ -582,6 +592,27 @@ async def _stream_openai_compatible_answer_with_route_impl(
                     if raw_tool_answer_chunks:
                         answer_delta = "".join(raw_tool_answer_chunks) + answer_delta
                         raw_tool_answer_chunks.clear()
+                if allowed_raw_tool_names and not raw_tool_answer_chunks:
+                    scan_text = pending_visible_tool_scan + answer_delta
+                    marker_index = find_raw_tool_call_marker_index(
+                        scan_text,
+                        allowed_tool_names=allowed_raw_tool_names,
+                    )
+                    if marker_index is not None:
+                        visible_prefix = scan_text[:marker_index]
+                        if visible_prefix:
+                            await _emit_visible_answer_delta(visible_prefix)
+                        raw_tool_answer_candidate = True
+                        raw_tool_answer_chunks.append(scan_text[marker_index:])
+                        pending_visible_tool_scan = ""
+                        continue
+                    if len(scan_text) <= _RAW_TOOL_MARKER_SCAN_TAIL_CHARS:
+                        pending_visible_tool_scan = scan_text
+                        continue
+                    answer_delta = scan_text[:-_RAW_TOOL_MARKER_SCAN_TAIL_CHARS]
+                    pending_visible_tool_scan = scan_text[
+                        -_RAW_TOOL_MARKER_SCAN_TAIL_CHARS:
+                    ]
                 # Phase 34: route through StreamSmoother when enabled.
                 # Smoother yields 0+ flushed strings per chunk based on
                 # punctuation / length / time-watchdog boundaries, so
@@ -604,9 +635,13 @@ async def _stream_openai_compatible_answer_with_route_impl(
                     node.upper(),
                     len(raw_tool_calls),
                 )
-                return make_assistant_message("", tool_calls=raw_tool_calls), False
+                return make_assistant_message(
+                    emitted_answer,
+                    tool_calls=raw_tool_calls,
+                ), bool(emitted_answer)
             await _emit_visible_answer_delta(raw_tool_text)
             raw_tool_answer_chunks.clear()
+        await _flush_pending_visible_tool_scan()
         tool_calls = _finalize_tool_call_chunks(tool_call_chunks)
         if tool_calls:
             from app.engine.llm_model_health import record_model_success

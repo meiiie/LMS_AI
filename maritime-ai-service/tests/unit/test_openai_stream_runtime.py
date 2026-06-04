@@ -344,6 +344,96 @@ async def test_native_direct_stream_buffers_raw_json_tool_call_text():
 
 
 @pytest.mark.asyncio
+async def test_native_direct_stream_recovers_tool_call_after_natural_preamble():
+    events = []
+
+    async def _push_event(event):
+        events.append(event)
+
+    class _FakeStream:
+        def __aiter__(self):
+            async def _gen():
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                content="Để mình tra cứu thời tiết Hải Phòng cho.\n",
+                            )
+                        )
+                    ]
+                )
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                content="```web_search\nweather Hai Phong today\n```",
+                            )
+                        )
+                    ]
+                )
+
+            return _gen()
+
+    class _FakeChatCompletions:
+        async def create(self, **_kwargs):
+            return _FakeStream()
+
+    class _FakeChat:
+        completions = _FakeChatCompletions()
+
+    class _FakeClient:
+        chat = _FakeChat()
+
+    route = SimpleNamespace(
+        provider="nvidia",
+        llm=SimpleNamespace(
+            _wiii_tier_key="light",
+            _wiii_model_name="deepseek-ai/deepseek-v4-flash",
+            _wiii_bound_tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "tool_web_search",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+        ),
+    )
+
+    response, streamed = await _stream_openai_compatible_answer_with_route_impl(
+        route,
+        messages=[{"role": "user", "content": "Thời tiết Hải Phòng hôm nay thế nào?"}],
+        push_event=_push_event,
+        node="direct",
+        thinking_stop_signal=None,
+        supports_native_answer_streaming=lambda provider: provider == "nvidia",
+        create_openai_compatible_stream_client=lambda _provider: _FakeClient(),
+        resolve_openai_stream_model_name=lambda *_args: "deepseek-ai/deepseek-v4-flash",
+        langchain_message_to_openai_payload=lambda message: message,
+        extract_openai_delta_text=lambda delta: ("", str(getattr(delta, "content", "") or "")),
+    )
+
+    assert streamed is True
+    assert response.content == "Để mình tra cứu thời tiết Hải Phòng cho.\n"
+    assert response.tool_calls == [
+        {
+            "id": "raw_fenced_tool_call_0",
+            "name": "tool_web_search",
+            "args": {"query": "weather Hai Phong today"},
+        }
+    ]
+    assert events == [
+        {
+            "type": "answer_delta",
+            "content": "Để mình tra cứu thời tiết Hải Phòng cho.\n",
+            "node": "direct",
+        }
+    ]
+    assert "```" not in "".join(str(event.get("content") or "") for event in events)
+
+
+@pytest.mark.asyncio
 async def test_native_direct_stream_timeout_marks_model_degraded():
     from app.engine.llm_model_health import is_model_degraded, reset_model_health_state
 
