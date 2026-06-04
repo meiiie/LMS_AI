@@ -229,6 +229,7 @@ describe("useSSEStream concurrency", () => {
     const sendMessageStreamMock = vi.mocked(sendMessageStream);
     useModelStore.setState({
       activeProvider: "openrouter",
+      activeModel: null,
       nextTurnProvider: null,
       providers: [
         {
@@ -241,6 +242,7 @@ describe("useSSEStream concurrency", () => {
           reasonCode: null,
           reasonLabel: null,
           selectedModel: "qwen/qwen3.6-plus:free",
+          modelOptions: [],
           strictPin: true,
           verifiedAt: "2026-04-04T00:00:00Z",
         },

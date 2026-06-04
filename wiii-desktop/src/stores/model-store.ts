@@ -6,6 +6,7 @@ import type {
   AppSettings,
   LlmStatusProvider,
   LlmStatusResponse,
+  ModelCatalogEntry,
   ProviderDisabledReasonCode,
   ProviderSelectabilityState,
 } from "@/api/types";
@@ -28,22 +29,25 @@ export interface ProviderInfo {
   reasonCode?: ProviderDisabledReasonCode | null;
   reasonLabel?: string | null;
   selectedModel?: string | null;
+  modelOptions: ModelCatalogEntry[];
   strictPin: boolean;
   verifiedAt?: string | null;
 }
 
 interface ModelState {
   activeProvider: RequestModelProvider;
+  activeModel: string | null;
   nextTurnProvider: RequestModelProvider | null;
   providers: ProviderInfo[];
   isLoading: boolean;
   lastFetchedAt: number | null;
 
   setActiveProvider: (id: RequestModelProvider) => void;
+  setActiveModel: (provider: RequestModelProvider, model: string) => void;
   setNextTurnProvider: (id: RequestModelProvider | null) => void;
   consumeProviderForRequest: () => RequestModelProvider;
   consumeSelectionForRequest: () => RequestModelSelection;
-  fetchProviders: (options?: { force?: boolean }) => Promise<void>;
+  fetchProviders: (options?: { force?: boolean; includeModels?: boolean }) => Promise<void>;
   refreshIfStale: (maxAgeMs?: number) => Promise<void>;
 }
 
@@ -64,6 +68,7 @@ function mapProvider(provider: LlmStatusProvider): ProviderInfo {
     reasonCode: provider.reason_code ?? null,
     reasonLabel: provider.reason_label ?? null,
     selectedModel: provider.selected_model ?? null,
+    modelOptions: provider.model_options ?? [],
     strictPin: provider.strict_pin,
     verifiedAt: provider.verified_at ?? null,
   };
@@ -111,6 +116,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
   activeProvider: normalizeModelProvider(
     useSettingsStore.getState().settings.model_provider,
   ),
+  activeModel: null,
   nextTurnProvider: null,
   providers: [],
   isLoading: false,
@@ -121,7 +127,24 @@ export const useModelStore = create<ModelState>((set, get) => ({
     if (id !== "auto" && provider && provider.state !== "selectable") {
       return;
     }
-    set({ activeProvider: id, nextTurnProvider: null });
+    set({ activeProvider: id, activeModel: null, nextTurnProvider: null });
+    void useSettingsStore.getState().updateSettings({ model_provider: id });
+  },
+
+  setActiveModel: (id, model) => {
+    const provider = get().providers.find((item) => item.id === id);
+    if (id === "auto" || !model.trim()) {
+      get().setActiveProvider(id);
+      return;
+    }
+    if (provider && provider.state !== "selectable") {
+      return;
+    }
+    set({
+      activeProvider: id,
+      activeModel: model.trim(),
+      nextTurnProvider: null,
+    });
     void useSettingsStore.getState().updateSettings({ model_provider: id });
   },
 
@@ -146,22 +169,28 @@ export const useModelStore = create<ModelState>((set, get) => ({
     }
     return {
       provider,
-      model: resolveSelectedModelForProvider(
-        provider,
-        get().providers,
-        useSettingsStore.getState().settings,
-      ),
+      model:
+        provider === get().activeProvider && get().activeModel
+          ? get().activeModel
+          : resolveSelectedModelForProvider(
+              provider,
+              get().providers,
+              useSettingsStore.getState().settings,
+            ),
     };
   },
 
-  fetchProviders: async ({ force = false } = {}) => {
+  fetchProviders: async ({ force = false, includeModels = false } = {}) => {
     if (!force && get().isLoading) return;
     set({ isLoading: true });
     try {
       const client = getClient();
-      const data = await client.get<LlmStatusResponse>("/api/v1/llm/status");
+      const data = await client.get<LlmStatusResponse>(
+        `/api/v1/llm/status${includeModels ? "?include_models=true" : ""}`,
+      );
       const providers = (data.providers || []).map(mapProvider);
       const activeProvider = get().activeProvider;
+      const activeModel = get().activeModel;
       const nextTurnProvider = get().nextTurnProvider;
       const activeSelection = providers.find((item) => item.id === activeProvider);
       const nextTurnSelection = nextTurnProvider
@@ -180,6 +209,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
         isLoading: false,
         lastFetchedAt: Date.now(),
         activeProvider: shouldResetToAuto ? "auto" : activeProvider,
+        activeModel: shouldResetToAuto ? null : activeModel,
         nextTurnProvider: shouldClearNextTurn ? null : nextTurnProvider,
       });
 
@@ -203,6 +233,6 @@ export const useModelStore = create<ModelState>((set, get) => ({
 useSettingsStore.subscribe((state) => {
   const nextProvider = normalizeModelProvider(state.settings.model_provider);
   if (useModelStore.getState().activeProvider !== nextProvider) {
-    useModelStore.setState({ activeProvider: nextProvider });
+    useModelStore.setState({ activeProvider: nextProvider, activeModel: null });
   }
 });

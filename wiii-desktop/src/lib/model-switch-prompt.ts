@@ -10,6 +10,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   zhipu: "Zhipu GLM",
   openai: "OpenAI",
   openrouter: "OpenRouter",
+  nvidia: "NVIDIA NIM",
   ollama: "Ollama",
 };
 

@@ -2674,6 +2674,7 @@ export interface LlmStatusProvider {
   reason_code?: ProviderDisabledReasonCode | null;
   reason_label?: string | null;
   selected_model?: string | null;
+  model_options?: ModelCatalogEntry[];
   strict_pin: boolean;
   verified_at?: string | null;
 }

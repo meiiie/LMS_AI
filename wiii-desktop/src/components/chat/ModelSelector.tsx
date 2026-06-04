@@ -5,6 +5,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle, ChevronUp, Cpu, Sparkles, Check } from "lucide-react";
 import { useModelStore, type RequestModelProvider } from "@/stores/model-store";
+import type { ModelCatalogEntry } from "@/api/types";
 
 const PROVIDER_ICONS: Record<string, typeof Cpu> = {
   auto: Sparkles,
@@ -33,7 +34,9 @@ interface ModelSelectorProps {
 export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
   const {
     activeProvider,
+    activeModel,
     setActiveProvider,
+    setActiveModel,
     providers,
     fetchProviders,
     refreshIfStale,
@@ -51,7 +54,7 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
 
   useEffect(() => {
     if (open) {
-      void fetchProviders({ force: true });
+      void fetchProviders({ force: true, includeModels: true });
     }
   }, [open, fetchProviders]);
 
@@ -107,29 +110,58 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
   const ActiveIcon = PROVIDER_ICONS[activeProvider] || Sparkles;
   const activeLabel =
     activeProviderInfo?.displayName || PROVIDER_LABELS[activeProvider] || activeProvider;
+  const activeModelLabel = activeModel || activeProviderInfo?.selectedModel || null;
 
   const options: Array<{
+    kind: "auto" | "provider" | "model";
     id: RequestModelProvider;
     label: string;
     Icon: typeof Cpu;
     disabled?: boolean;
     reasonLabel?: string | null;
     selectedModel?: string | null;
+    model?: ModelCatalogEntry;
   }> = [
-    { id: "auto", label: PROVIDER_LABELS.auto, Icon: PROVIDER_ICONS.auto },
-    ...visibleProviders.map((provider) => ({
-      id: provider.id as RequestModelProvider,
-      label: provider.displayName || PROVIDER_LABELS[provider.id] || provider.id,
-      Icon: PROVIDER_ICONS[provider.id] || Cpu,
-      disabled: provider.state !== "selectable",
-      reasonLabel: provider.reasonLabel,
-      selectedModel: provider.selectedModel,
-    })),
+    { kind: "auto", id: "auto", label: PROVIDER_LABELS.auto, Icon: PROVIDER_ICONS.auto },
+    ...visibleProviders.flatMap((provider) => {
+      const providerId = provider.id as RequestModelProvider;
+      const disabled = provider.state !== "selectable";
+      const providerLabel = provider.displayName || PROVIDER_LABELS[provider.id] || provider.id;
+      return [
+        {
+          kind: "provider" as const,
+          id: providerId,
+          label: providerLabel,
+          Icon: PROVIDER_ICONS[provider.id] || Cpu,
+          disabled,
+          reasonLabel: provider.reasonLabel,
+          selectedModel: provider.selectedModel,
+        },
+        ...(provider.modelOptions || []).map((model) => ({
+          kind: "model" as const,
+          id: providerId,
+          label: model.display_name || model.model_name,
+          Icon: PROVIDER_ICONS[provider.id] || Cpu,
+          disabled,
+          reasonLabel: provider.reasonLabel,
+          selectedModel: model.model_name,
+          model,
+        })),
+      ];
+    }),
   ];
 
-  const handleSelect = (id: RequestModelProvider, disabled?: boolean) => {
+  const handleSelect = (
+    id: RequestModelProvider,
+    disabled?: boolean,
+    model?: ModelCatalogEntry,
+  ) => {
     if (disabled) return;
-    setActiveProvider(id);
+    if (model) {
+      setActiveModel(id, model.model_name);
+    } else {
+      setActiveProvider(id);
+    }
     setOpen(false);
   };
 
@@ -145,7 +177,7 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
         data-wiii-synonyms="chọn model,đổi model,chọn model ai,model ai,ai model,đổi llm,provider ai"
       >
         <ActiveIcon size={13} />
-        <span>{activeLabel}</span>
+        <span className="max-w-[180px] truncate">{activeModelLabel || activeLabel}</span>
         <motion.span
           animate={{ rotate: open ? 0 : 180 }}
           transition={{ type: "spring", stiffness: 300, damping: 20 }}
@@ -162,41 +194,52 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 4 }}
             transition={{ duration: 0.15, ease: "easeOut" }}
-            className="absolute bottom-full left-0 mb-1 min-w-[240px] rounded-xl border border-border bg-surface shadow-lg"
+            className="absolute bottom-full left-0 mb-1 max-h-[420px] min-w-[300px] overflow-y-auto rounded-xl border border-border bg-surface shadow-lg"
             style={{ zIndex: 50 }}
             role="listbox"
             aria-label="Danh sach provider"
             data-testid="model-selector-dropdown"
           >
             <div className="py-1">
-              {options.map(({ id, label, Icon, disabled, reasonLabel, selectedModel }) => {
-                const isActive = id === activeProvider;
+              {options.map(({ kind, id, label, Icon, disabled, reasonLabel, selectedModel, model }) => {
+                const isModel = kind === "model";
+                const isActive =
+                  kind === "auto"
+                    ? activeProvider === "auto"
+                    : isModel
+                      ? id === activeProvider && activeModel === model?.model_name
+                      : id === activeProvider && !activeModel;
+                const optionKey = isModel ? `${id}:${model?.model_name}` : id;
+                const showSelectedModel =
+                  Boolean(selectedModel)
+                  && id !== "auto"
+                  && (!isModel || selectedModel !== label);
                 return (
                   <button
-                    key={id}
-                    onClick={() => handleSelect(id, disabled)}
+                    key={optionKey}
+                    onClick={() => handleSelect(id, disabled, model)}
                     disabled={disabled}
                     role="option"
                     aria-selected={isActive}
                     aria-disabled={disabled}
                     title={disabled ? reasonLabel ?? undefined : undefined}
-                    className={`flex w-full items-start gap-2.5 px-3 py-2 text-left text-sm transition-colors ${
+                    className={`flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors ${
                       isActive
                         ? "bg-[var(--accent-light)] text-[var(--accent)]"
                         : disabled
                           ? "cursor-not-allowed text-text-tertiary opacity-70"
                           : "text-text hover:bg-surface-secondary"
-                    }`}
+                    } ${isModel ? "pl-8 text-xs" : "text-sm"}`}
                   >
                     <Icon size={15} className="mt-0.5 shrink-0" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span>{label}</span>
+                        <span className="truncate">{label}</span>
                         {disabled && id !== "auto" ? (
                           <AlertCircle size={13} className="text-amber-500" />
                         ) : null}
                       </div>
-                      {selectedModel && id !== "auto" ? (
+                      {showSelectedModel ? (
                         <div className="truncate text-[11px] text-text-tertiary">
                           {selectedModel}
                         </div>
@@ -207,7 +250,7 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
                         </div>
                       ) : null}
                     </div>
-                    {id !== "auto" ? (
+                    {id !== "auto" && !isModel && !isActive ? (
                       <span
                         className={`mt-1 h-2 w-2 rounded-full ${
                           disabled ? "bg-gray-400" : "bg-green-500"

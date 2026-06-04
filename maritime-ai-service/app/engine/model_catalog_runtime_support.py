@@ -85,8 +85,14 @@ def normalize_openai_compatible_base_url(
 def looks_like_chat_model(model_name: str) -> bool:
     lowered = model_name.lower()
     blocked_fragments = (
+        "bge-",
+        "clip",
+        "embed",
         "embedding",
         "moderation",
+        "retriever",
+        "rerank",
+        "parse",
         "audio",
         "speech",
         "transcribe",

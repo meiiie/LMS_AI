@@ -323,6 +323,9 @@ class TestGetFullCatalog:
                 {"id": "qwen/qwen3-next-80b-a3b-instruct"},
                 {"id": "nvidia/nemotron-3-ultra"},
                 {"id": "nvidia/embedding-model"},
+                {"id": "baai/bge-m3"},
+                {"id": "nvidia/nv-embed-v1"},
+                {"id": "nvidia/nemoretriever-parse"},
             ]
         }
         mock_response.raise_for_status = MagicMock()
@@ -340,6 +343,9 @@ class TestGetFullCatalog:
 
         assert "nvidia/nemotron-3-ultra" in catalog["providers"]["nvidia"]
         assert "nvidia/embedding-model" not in catalog["providers"]["nvidia"]
+        assert "baai/bge-m3" not in catalog["providers"]["nvidia"]
+        assert "nvidia/nv-embed-v1" not in catalog["providers"]["nvidia"]
+        assert "nvidia/nemoretriever-parse" not in catalog["providers"]["nvidia"]
         assert catalog["provider_metadata"]["nvidia"]["runtime_discovery_enabled"] is True
         assert catalog["provider_metadata"]["nvidia"]["runtime_discovery_succeeded"] is True
         assert catalog["provider_metadata"]["nvidia"]["catalog_source"] == "mixed"

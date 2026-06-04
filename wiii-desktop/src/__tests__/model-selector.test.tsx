@@ -78,6 +78,7 @@ describe("ModelSelector", () => {
     });
     useModelStore.setState({
       activeProvider: "auto",
+      activeModel: null,
       providers: [],
       isLoading: false,
       lastFetchedAt: null,
@@ -117,6 +118,86 @@ describe("ModelSelector", () => {
 
     await waitFor(() => {
       expect(getMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("shows discovered model options and selects a concrete NVIDIA model", async () => {
+    getMock.mockImplementation((path: string) => {
+      if (path.includes("include_models=true")) {
+        return Promise.resolve({
+          providers: [
+            {
+              id: "nvidia",
+              display_name: "NVIDIA NIM",
+              available: true,
+              is_primary: true,
+              is_fallback: false,
+              state: "selectable",
+              reason_code: null,
+              reason_label: null,
+              selected_model: "qwen/qwen3-next-80b-a3b-instruct",
+              model_options: [
+                {
+                  provider: "nvidia",
+                  model_name: "qwen/qwen3-next-80b-a3b-instruct",
+                  display_name: "Qwen3 Next 80B",
+                  status: "available",
+                  released_on: null,
+                  is_default: true,
+                },
+                {
+                  provider: "nvidia",
+                  model_name: "nvidia/nemotron-3-ultra",
+                  display_name: "Nemotron 3 Ultra",
+                  status: "available",
+                  released_on: null,
+                  is_default: false,
+                },
+              ],
+              strict_pin: true,
+              verified_at: "2026-03-23T00:00:00Z",
+            },
+          ],
+        });
+      }
+      return Promise.resolve({
+        providers: [
+          {
+            id: "nvidia",
+            display_name: "NVIDIA NIM",
+            available: true,
+            is_primary: true,
+            is_fallback: false,
+            state: "selectable",
+            reason_code: null,
+            reason_label: null,
+            selected_model: "qwen/qwen3-next-80b-a3b-instruct",
+            strict_pin: true,
+            verified_at: "2026-03-23T00:00:00Z",
+          },
+        ],
+      });
+    });
+
+    render(<ModelSelector />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("model-selector-trigger")).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByTestId("model-selector-trigger"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Nemotron 3 Ultra")).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByText("Nemotron 3 Ultra"));
+
+    expect(useModelStore.getState().activeProvider).toBe("nvidia");
+    expect(useModelStore.getState().activeModel).toBe("nvidia/nemotron-3-ultra");
+    expect(useModelStore.getState().consumeSelectionForRequest()).toEqual({
+      provider: "nvidia",
+      model: "nvidia/nemotron-3-ultra",
     });
   });
 });

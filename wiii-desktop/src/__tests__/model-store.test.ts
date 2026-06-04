@@ -36,6 +36,7 @@ describe("Model store", () => {
     });
     useModelStore.setState({
       activeProvider: "auto",
+      activeModel: null,
       nextTurnProvider: null,
       providers: [],
       isLoading: false,
@@ -114,6 +115,7 @@ describe("Model store", () => {
           reasonCode: null,
           reasonLabel: null,
           selectedModel: "qwen/qwen3.6-plus:free",
+          modelOptions: [],
           strictPin: true,
           verifiedAt: null,
         },
@@ -126,8 +128,48 @@ describe("Model store", () => {
     });
   });
 
+  it("uses a user-selected model override for an explicit provider request", () => {
+    useModelStore.setState({
+      activeProvider: "auto",
+      activeModel: null,
+      providers: [
+        {
+          id: "nvidia",
+          displayName: "NVIDIA NIM",
+          available: true,
+          isPrimary: false,
+          isFallback: true,
+          state: "selectable",
+          reasonCode: null,
+          reasonLabel: null,
+          selectedModel: "qwen/qwen3-next-80b-a3b-instruct",
+          modelOptions: [
+            {
+              provider: "nvidia",
+              model_name: "nvidia/nemotron-3-ultra",
+              display_name: "Nemotron 3 Ultra",
+              status: "available",
+              released_on: null,
+              is_default: false,
+            },
+          ],
+          strictPin: true,
+          verifiedAt: null,
+        },
+      ],
+    });
+
+    useModelStore.getState().setActiveModel("nvidia", "nvidia/nemotron-3-ultra");
+
+    expect(useModelStore.getState().consumeSelectionForRequest()).toEqual({
+      provider: "nvidia",
+      model: "nvidia/nemotron-3-ultra",
+    });
+  });
+
   it("clears pending one-shot override when user pins a session provider", () => {
     useModelStore.setState({
+      activeModel: null,
       providers: [
         {
           id: "zhipu",
@@ -139,6 +181,7 @@ describe("Model store", () => {
           reasonCode: null,
           reasonLabel: null,
           selectedModel: "glm-5",
+          modelOptions: [],
           strictPin: false,
           verifiedAt: null,
         },
