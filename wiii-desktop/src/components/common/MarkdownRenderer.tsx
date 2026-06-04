@@ -1,16 +1,13 @@
 import { lazy, Suspense, useDeferredValue, useMemo } from "react";
 import { stripWiiiInternalMarkup } from "@/lib/internal-markup";
 import { normalizeAssistantMarkdown } from "@/lib/assistant-markdown";
+import { MarkdownLiteSegment } from "./MarkdownLiteSegment";
 import { splitWidgetBlocks } from "./widget-segments";
 
 const InlineHtmlWidget = lazy(() => import("./InlineHtmlWidget"));
 const RichMarkdownSegment = lazy(async () => {
   const mod = await import("./RichMarkdownSegment");
   return { default: mod.RichMarkdownSegment };
-});
-const MarkdownLiteSegment = lazy(async () => {
-  const mod = await import("./MarkdownLiteSegment");
-  return { default: mod.MarkdownLiteSegment };
 });
 const MathMarkdownSegment = lazy(async () => {
   const mod = await import("./MathMarkdownSegment");
