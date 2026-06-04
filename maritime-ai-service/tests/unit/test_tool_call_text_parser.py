@@ -236,10 +236,34 @@ def test_find_raw_tool_call_marker_index_detects_tool_after_preamble() -> None:
     assert marker_index == text.index("```web_search")
 
 
+def test_find_raw_tool_call_marker_index_detects_json_fenced_tool_after_preamble() -> None:
+    text = (
+        "Để mình tra cứu ngay.\n"
+        '```json\n{"name":"web_search","arguments":{"query":"weather Hai Phong"}}\n```'
+    )
+
+    marker_index = find_raw_tool_call_marker_index(
+        text,
+        allowed_tool_names={"tool_web_search"},
+    )
+
+    assert marker_index == text.index("```json")
+
+
 def test_find_raw_tool_call_marker_index_ignores_normal_visible_markers() -> None:
     assert (
         find_raw_tool_call_marker_index(
             "[Image #1] Đây là ảnh bạn gửi.\n```python\nprint('hello')\n```",
+            allowed_tool_names={"tool_web_search"},
+        )
+        is None
+    )
+
+
+def test_find_raw_tool_call_marker_index_ignores_json_without_allowed_tool() -> None:
+    assert (
+        find_raw_tool_call_marker_index(
+            'Ví dụ dữ liệu:\n```json\n{"name":"Hải Phòng","temp":31}\n```',
             allowed_tool_names={"tool_web_search"},
         )
         is None

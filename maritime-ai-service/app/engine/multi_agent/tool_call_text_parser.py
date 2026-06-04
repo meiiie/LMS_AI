@@ -140,6 +140,32 @@ def _resolve_allowed_tool_name(
     return None
 
 
+def _allowed_tool_name_hints(allowed_tool_names: set[str] | None) -> set[str]:
+    hints = set(allowed_tool_names or [])
+    for alias, canonical in _TOOL_NAME_ALIASES.items():
+        if allowed_tool_names is None or canonical in allowed_tool_names:
+            hints.add(alias)
+    return {name for name in hints if name}
+
+
+def _contains_allowed_json_tool_name_hint(
+    value: str,
+    *,
+    allowed_tool_names: set[str] | None,
+) -> bool:
+    hints = _allowed_tool_name_hints(allowed_tool_names)
+    if not hints:
+        return False
+    for name in hints:
+        if re.search(
+            rf"[\"'](?:name|tool|tool_name)[\"']\s*:\s*[\"']{re.escape(name)}[\"']",
+            value,
+            re.IGNORECASE,
+        ):
+            return True
+    return False
+
+
 def _single_text_arg_name(tool_name: str) -> str | None:
     lowered = tool_name.lower()
     if lowered in {
@@ -544,6 +570,14 @@ def find_raw_tool_call_marker_index(
             continue
         if lowered_tag in {"tool_call", "function_call"}:
             candidates.append(match.start())
+            continue
+        if lowered_tag == "json":
+            body_preview = value[match.end(): match.end() + 320]
+            if _contains_allowed_json_tool_name_hint(
+                body_preview,
+                allowed_tool_names=allowed,
+            ):
+                candidates.append(match.start())
             continue
         if lowered_tag == "xml":
             body_preview = value[match.end(): match.end() + 240]
