@@ -13,6 +13,10 @@ from app.services.notifications.base import (
     NotificationChannelAdapter,
     NotificationResult,
 )
+from app.services.notifications.privacy import (
+    notification_recipient_ref,
+    sanitize_notification_detail,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +38,14 @@ class WebSocketAdapter(NotificationChannelAdapter):
         message: str,
         metadata: Optional[dict] = None,
     ) -> NotificationResult:
+        recipient_ref = notification_recipient_ref(user_id)
         try:
             from app.api.v1.websocket import manager
 
             if not manager.is_user_online(user_id):
                 logger.info(
-                    "[NOTIFY] User %s offline, WS queued", user_id,
+                    "[NOTIFY] recipient_ref=%s offline, WS queued",
+                    recipient_ref,
                 )
                 return NotificationResult(
                     delivered=False,
@@ -47,11 +53,27 @@ class WebSocketAdapter(NotificationChannelAdapter):
                     detail="User offline",
                 )
 
-            sent = await manager.send_to_user(user_id, message)
-            logger.info(
-                "[NOTIFY] WS sent to user %s (%d sessions)",
-                user_id, sent,
+            organization_id = ""
+            if isinstance(metadata, dict):
+                raw_org_id = metadata.get("organization_id") or metadata.get("org_id")
+                if isinstance(raw_org_id, str):
+                    organization_id = raw_org_id.strip()
+
+            sent = await manager.send_to_user(
+                user_id,
+                message,
+                organization_id=organization_id,
             )
+            logger.info(
+                "[NOTIFY] WS sent recipient_ref=%s (%d sessions)",
+                recipient_ref, sent,
+            )
+            if sent <= 0:
+                return NotificationResult(
+                    delivered=False,
+                    channel="websocket",
+                    detail="No matching WebSocket sessions",
+                )
             return NotificationResult(
                 delivered=True,
                 channel="websocket",
@@ -59,9 +81,14 @@ class WebSocketAdapter(NotificationChannelAdapter):
             )
 
         except Exception as e:
-            logger.error("[NOTIFY] WS notification failed for user %s: %s", user_id, e)
+            safe_detail = sanitize_notification_detail(e, user_id, message)
+            logger.error(
+                "[NOTIFY] WS notification failed recipient_ref=%s: %s",
+                recipient_ref,
+                safe_detail,
+            )
             return NotificationResult(
                 delivered=False,
                 channel="websocket",
-                detail=str(e),
+                detail=safe_detail,
             )

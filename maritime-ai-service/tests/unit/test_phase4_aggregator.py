@@ -13,7 +13,7 @@ Tests cover:
 - Graph integration: routing map, nodes added/not, route_decision handles parallel
 """
 
-import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -129,6 +129,25 @@ class TestSubagentReport:
 # =========================================================================
 # AggregatorDecision Model
 # =========================================================================
+
+
+def test_to_aggregator_summary_redacts_secret_text():
+    from app.engine.multi_agent.subagents.report import (
+        ReportVerdict,
+        SubagentReport,
+    )
+
+    report = SubagentReport(
+        agent_name="rag",
+        verdict=ReportVerdict.CONFIDENT,
+        relevance_score=0.9,
+        summary="found token Bearer raw-report-token-123",
+    )
+
+    summary = report.to_aggregator_summary()
+
+    assert "<redacted-secret>" in summary
+    assert "raw-report-token-123" not in summary
 
 
 class TestAggregatorDecision:
@@ -254,6 +273,74 @@ class TestBuildReport:
 # =========================================================================
 # Deterministic Decision
 # =========================================================================
+
+
+def test_build_report_sanitizes_parent_facing_result_payloads():
+    from app.engine.multi_agent.subagents.report import build_report
+    from app.engine.multi_agent.subagents.result import SubagentResult
+
+    result = SubagentResult(
+        output="Useful answer Bearer raw-output-token-123",
+        confidence=0.85,
+        data={
+            "provider_payload": {"id": "raw-provider"},
+            "safe_id": "doc-1",
+        },
+        sources=[
+            {
+                "id": "doc-1",
+                "title": "Source Bearer raw-source-token-123",
+                "content": "raw document text",
+                "content_snippet": "raw snippet",
+                "access_token": "raw-access-token",
+            }
+        ],
+        tools_used=[
+            {
+                "name": "tool_search",
+                "args": {"access_token": "raw-tool-token"},
+                "result": {"provider_payload": "raw-provider"},
+            }
+        ],
+        evidence_images=[
+            {
+                "url": "https://example.test/page.png",
+                "image_base64": "raw-image-bytes",
+            }
+        ],
+        thinking="raw private chain of thought",
+        error_message="client_secret=raw-client-secret-inline",
+    )
+
+    report = build_report("rag", "retrieval", result)
+
+    assert "<redacted-secret>" in report.summary
+    assert "<redacted-secret>" in report.result.output
+    assert report.result.data == {
+        "present": True,
+        "key_count": 1,
+        "keys": ["safe_id"],
+    }
+    assert report.result.sources == [
+        {"id": "doc-1", "title": "Source Bearer <redacted-secret>"}
+    ]
+    assert report.result.tools_used == [{"name": "tool_search"}]
+    assert report.result.evidence_images == [
+        {"url": "https://example.test/page.png"}
+    ]
+    assert report.result.thinking is None
+    assert report.result.error_message == "<redacted-secret>"
+    serialized = str(report.model_dump())
+    assert "raw-output-token-123" not in serialized
+    assert "raw-source-token-123" not in serialized
+    assert "raw document text" not in serialized
+    assert "raw snippet" not in serialized
+    assert "raw-access-token" not in serialized
+    assert "raw-tool-token" not in serialized
+    assert "raw-provider" not in serialized
+    assert "raw-image-bytes" not in serialized
+    assert "raw private chain" not in serialized
+    assert "raw-client-secret-inline" not in serialized
 
 
 class TestDeterministicDecision:
@@ -683,6 +770,64 @@ class TestAggregatorNode:
         assert "Xin lỗi" in result.get("final_response", "")
 
     @pytest.mark.asyncio
+    async def test_aggregator_sanitizes_legacy_report_payloads(self):
+        from app.engine.multi_agent.subagents.aggregator import aggregator_node
+        from app.engine.multi_agent.subagents.report import (
+            ReportVerdict,
+            SubagentReport,
+        )
+        from app.engine.multi_agent.subagents.result import SubagentResult
+
+        raw_report = SubagentReport(
+            agent_name="rag",
+            verdict=ReportVerdict.CONFIDENT,
+            relevance_score=0.9,
+            summary="summary Bearer raw-summary-token-123",
+            can_stand_alone=True,
+            result=SubagentResult(
+                output="answer Bearer raw-output-token-123",
+                confidence=0.9,
+                sources=[
+                    {
+                        "id": "doc-1",
+                        "content": "raw document text",
+                        "access_token": "raw-source-token",
+                    }
+                ],
+                tools_used=[
+                    {
+                        "name": "tool_search",
+                        "args": {"api_key": "raw-tool-key"},
+                    }
+                ],
+                evidence_images=[
+                    {
+                        "url": "https://example.test/page.png",
+                        "image_base64": "raw-image-bytes",
+                    }
+                ],
+            ),
+        ).model_dump()
+
+        state = {"query": "query", "subagent_reports": [raw_report]}
+        result = await aggregator_node(state)
+
+        assert result["_aggregator_action"] == "use_best"
+        serialized = str(result)
+        assert "<redacted-secret>" in serialized
+        assert "raw-summary-token-123" not in serialized
+        assert "raw-output-token-123" not in serialized
+        assert "raw document text" not in serialized
+        assert "raw-source-token" not in serialized
+        assert "raw-tool-key" not in serialized
+        assert "raw-image-bytes" not in serialized
+        assert result["sources"] == [{"id": "doc-1"}]
+        assert result["tools_used"] == [{"name": "tool_search"}]
+        assert result["evidence_images"] == [
+            {"url": "https://example.test/page.png"}
+        ]
+
+    @pytest.mark.asyncio
     async def test_event_bus_status(self):
         from app.engine.multi_agent.subagents.aggregator import aggregator_node
         from app.engine.multi_agent.subagents.report import ReportVerdict
@@ -697,7 +842,7 @@ class TestAggregatorNode:
         }
 
         with patch("app.engine.multi_agent.graph_streaming._get_event_queue", return_value=mock_queue):
-            result = await aggregator_node(state)
+            await aggregator_node(state)
 
         # Sprint 164: aggregator now emits 2 status events (progress + decision)
         assert mock_queue.put_nowait.call_count == 2
@@ -712,6 +857,51 @@ class TestAggregatorNode:
         assert "details" in event2
         assert "aggregation" in event2["details"]
         assert event2["details"]["aggregation"]["strategy"] == "use_best"
+
+    @pytest.mark.asyncio
+    async def test_aggregator_decision_event_and_state_redact_secret_reasoning(self):
+        from app.engine.multi_agent.subagents.aggregator import aggregator_node
+        from app.engine.multi_agent.subagents.report import (
+            AggregatorDecision,
+            ReportVerdict,
+        )
+
+        mock_queue = MagicMock()
+        state = {
+            "query": "test",
+            "_event_bus_id": "test_bus",
+            "subagent_reports": [
+                self._report_dict("rag", ReportVerdict.CONFIDENT, 0.9, "RAG"),
+                self._report_dict("tutor", ReportVerdict.CONFIDENT, 0.85, "Tutor"),
+            ],
+        }
+        decision = AggregatorDecision(
+            action="synthesize",
+            primary_agent="rag",
+            secondary_agents=["tutor"],
+            reasoning="Bearer raw-aggregator-decision-token-12345678",
+            confidence=0.9,
+        )
+
+        with (
+            patch("app.engine.multi_agent.graph_streaming._get_event_queue", return_value=mock_queue),
+            patch(
+                "app.engine.multi_agent.subagents.aggregator._llm_decision",
+                new=AsyncMock(return_value=decision),
+            ),
+        ):
+            result = await aggregator_node(state)
+
+        events = [
+            call_args[0][0]
+            for call_args in mock_queue.put_nowait.call_args_list
+        ]
+        serialized_events = str(events)
+        serialized_state = str(result)
+        assert result["_aggregator_reasoning"] == "Bearer <redacted-secret>"
+        assert "<redacted-secret>" in serialized_events
+        assert "raw-aggregator-decision-token-12345678" not in serialized_events
+        assert "raw-aggregator-decision-token-12345678" not in serialized_state
 
 
 # =========================================================================
@@ -768,6 +958,60 @@ def _mock_graph_imports():
 class TestParallelDispatchNode:
     """parallel_dispatch_node: fan-out to multiple subagents."""
 
+    def test_project_state_for_subagent_bounds_parent_context(self):
+        from app.engine.multi_agent.subagents.handoff_context import (
+            project_state_for_subagent,
+        )
+
+        projected = project_state_for_subagent(
+            {
+                "query": "Điều 15",
+                "context": {
+                    "domain": "maritime",
+                    "host_action_feedback": {"approval_token": "raw-approval"},
+                    "access_token": "raw-context-token",
+                },
+                "user_id": "user-1",
+                "_event_bus_id": "bus-1",
+                "_trace_id": "trace-1",
+                "_parallel_targets": ["rag", "tutor"],
+                "next_agent": "parallel_dispatch",
+                "_host_action_control_feedback": {
+                    "last_action_result": {"approval_token": "raw-approval"}
+                },
+                "_tool_policy_session": {"visible_tool_names": ["secret_tool"]},
+                "tool_call_events": [
+                    {
+                        "name": "tool",
+                        "args": {"api_key": "raw-tool-key"},
+                    }
+                ],
+                "host_action_feedback": {"approval_token": "raw-approval"},
+                "provider_payload": {"id": "raw-provider"},
+                "notes": "Bearer raw-bearer-token-123",
+            }
+        )
+
+        assert projected["query"] == "Điều 15"
+        assert projected["context"] == {"domain": "maritime"}
+        assert projected["user_id"] == "user-1"
+        assert projected["_event_bus_id"] == "bus-1"
+        assert projected["_trace_id"] == "trace-1"
+        serialized = str(projected)
+        assert "_parallel_targets" not in projected
+        assert "next_agent" not in projected
+        assert "_host_action_control_feedback" not in projected
+        assert "_tool_policy_session" not in projected
+        assert "tool_call_events" not in projected
+        assert "host_action_feedback" not in projected
+        assert "provider_payload" not in projected
+        assert "raw-approval" not in serialized
+        assert "raw-context-token" not in serialized
+        assert "raw-tool-key" not in serialized
+        assert "raw-provider" not in serialized
+        assert "raw-bearer-token-123" not in serialized
+        assert "<redacted-secret>" in serialized
+
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("_mock_graph_imports")
     async def test_dispatch_rag_and_tutor(self):
@@ -800,6 +1044,85 @@ class TestParallelDispatchNode:
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("_mock_graph_imports")
+    async def test_dispatch_passes_bounded_state_to_child_adapters(self):
+        import app.engine.multi_agent.graph as graph_mod
+        from app.engine.multi_agent.subagents.result import SubagentResult
+
+        observed_states = []
+
+        async def adapter(child_state, **_kwargs):
+            observed_states.append(child_state)
+            return SubagentResult(output="ok", confidence=0.8)
+
+        state = {
+            "query": "Test query",
+            "_parallel_targets": ["rag"],
+            "_event_bus_id": "bus-1",
+            "_host_action_control_feedback": {
+                "last_action_result": {"approval_token": "raw-approval"}
+            },
+            "tool_call_events": [
+                {"args": {"access_token": "raw-access-token"}}
+            ],
+        }
+
+        original_adapters = graph_mod._SUBAGENT_ADAPTERS.copy()
+        graph_mod._SUBAGENT_ADAPTERS["rag"] = adapter
+        try:
+            result = await graph_mod.parallel_dispatch_node(state)
+        finally:
+            graph_mod._SUBAGENT_ADAPTERS.update(original_adapters)
+
+        assert result.get("subagent_reports")
+        assert len(observed_states) == 1
+        child_state = observed_states[0]
+        assert child_state["query"] == "Test query"
+        assert child_state["_event_bus_id"] == "bus-1"
+        assert "_parallel_targets" not in child_state
+        assert "_host_action_control_feedback" not in child_state
+        assert "tool_call_events" not in child_state
+        assert "raw-approval" not in str(child_state)
+        assert "raw-access-token" not in str(child_state)
+
+    def test_emit_subagent_event_sanitizes_capture_and_bus_payloads(self):
+        from app.engine.multi_agent.subagent_dispatch import (
+            _emit_subagent_event_impl,
+        )
+
+        captured = []
+        queued = []
+
+        class Queue:
+            def put_nowait(self, event):
+                queued.append(event)
+
+        state = {"_event_bus_id": "bus-1"}
+        with patch(
+            "app.engine.multi_agent.graph_event_bus._get_event_queue",
+            return_value=Queue(),
+        ):
+            _emit_subagent_event_impl(
+                state,
+                {
+                    "type": "thinking_delta",
+                    "content": "Bearer raw-event-token-12345678",
+                    "node": "rag",
+                    "details": {"access_token": "raw-access-token"},
+                },
+                capture_public_thinking_event=lambda _state, event: captured.append(
+                    event
+                ),
+            )
+
+        assert len(captured) == 1
+        assert len(queued) == 1
+        serialized = str({"captured": captured, "queued": queued})
+        assert "<redacted-secret>" in serialized
+        assert "raw-event-token-12345678" not in serialized
+        assert "raw-access-token" not in serialized
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_mock_graph_imports")
     async def test_empty_targets(self):
         from app.engine.multi_agent.graph import parallel_dispatch_node
 
@@ -815,6 +1138,100 @@ class TestParallelDispatchNode:
         state = {"query": "Test", "_parallel_targets": ["unknown_agent"]}
         result = await parallel_dispatch_node(state)
         assert result.get("subagent_reports") == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_mock_graph_imports")
+    async def test_mixed_unknown_target_preserves_report_provenance(self):
+        import app.engine.multi_agent.graph as graph_mod
+        from app.engine.multi_agent.subagents.result import SubagentResult
+
+        mock_rag = AsyncMock(return_value=SubagentResult(output="RAG", confidence=0.8))
+
+        state = {
+            "query": "Test",
+            "_parallel_targets": ["unknown_agent", "rag"],
+        }
+
+        original_adapters = graph_mod._SUBAGENT_ADAPTERS.copy()
+        graph_mod._SUBAGENT_ADAPTERS["rag"] = mock_rag
+        try:
+            result = await graph_mod.parallel_dispatch_node(state)
+        finally:
+            graph_mod._SUBAGENT_ADAPTERS.update(original_adapters)
+
+        reports = result.get("subagent_reports", [])
+        assert len(reports) == 1
+        assert reports[0]["agent_name"] == "rag"
+        assert reports[0]["agent_type"] == "retrieval"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_mock_graph_imports")
+    async def test_unknown_target_logging_redacts_secret_text(self, caplog):
+        import app.engine.multi_agent.graph as graph_mod
+        from app.engine.multi_agent.subagents.result import SubagentResult
+
+        mock_rag = AsyncMock(return_value=SubagentResult(output="RAG", confidence=0.8))
+        caplog.set_level(logging.WARNING)
+
+        state = {
+            "query": "Test",
+            "_parallel_targets": ["Bearer raw-target-token-12345678", "rag"],
+        }
+
+        original_adapters = graph_mod._SUBAGENT_ADAPTERS.copy()
+        graph_mod._SUBAGENT_ADAPTERS["rag"] = mock_rag
+        try:
+            result = await graph_mod.parallel_dispatch_node(state)
+        finally:
+            graph_mod._SUBAGENT_ADAPTERS.update(original_adapters)
+
+        assert result.get("subagent_reports", [])[0]["agent_name"] == "rag"
+        assert "<redacted-secret>" in caplog.text
+        assert "raw-target-token-12345678" not in caplog.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_mock_graph_imports")
+    async def test_string_target_runs_as_single_target(self):
+        import app.engine.multi_agent.graph as graph_mod
+        from app.engine.multi_agent.subagents.result import SubagentResult
+
+        mock_rag = AsyncMock(return_value=SubagentResult(output="RAG", confidence=0.8))
+
+        state = {"query": "Test", "_parallel_targets": "rag"}
+
+        original_adapters = graph_mod._SUBAGENT_ADAPTERS.copy()
+        graph_mod._SUBAGENT_ADAPTERS["rag"] = mock_rag
+        try:
+            result = await graph_mod.parallel_dispatch_node(state)
+        finally:
+            graph_mod._SUBAGENT_ADAPTERS.update(original_adapters)
+
+        reports = result.get("subagent_reports", [])
+        assert len(reports) == 1
+        assert reports[0]["agent_name"] == "rag"
+        assert mock_rag.await_count == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_mock_graph_imports")
+    async def test_duplicate_targets_are_deduplicated(self):
+        import app.engine.multi_agent.graph as graph_mod
+        from app.engine.multi_agent.subagents.result import SubagentResult
+
+        mock_rag = AsyncMock(return_value=SubagentResult(output="RAG", confidence=0.8))
+
+        state = {"query": "Test", "_parallel_targets": ["rag", "rag"]}
+
+        original_adapters = graph_mod._SUBAGENT_ADAPTERS.copy()
+        graph_mod._SUBAGENT_ADAPTERS["rag"] = mock_rag
+        try:
+            result = await graph_mod.parallel_dispatch_node(state)
+        finally:
+            graph_mod._SUBAGENT_ADAPTERS.update(original_adapters)
+
+        reports = result.get("subagent_reports", [])
+        assert len(reports) == 1
+        assert reports[0]["agent_name"] == "rag"
+        assert mock_rag.await_count == 1
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("_mock_graph_imports")

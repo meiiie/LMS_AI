@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import ValidationError
+
+from app.engine.multi_agent.tool_event_sanitizer import sanitize_tool_args_for_event
 from app.engine.multi_agent.tool_policy_session import (
     tool_policy_denial_message,
     tool_policy_session_from_state,
@@ -72,12 +76,13 @@ async def dispatch_direct_tool_call(
                 policy_decision.path,
                 policy_decision.reason,
             )
+            public_tool_args = sanitize_tool_args_for_event(tool_args)
             await push_event(
                 {
                     "type": "tool_call",
                     "content": {
                         "name": tool_name,
-                        "args": tool_args,
+                        "args": public_tool_args,
                         "id": tool_call_id,
                         "policy": {
                             "allowed": False,
@@ -92,7 +97,7 @@ async def dispatch_direct_tool_call(
                 {
                     "type": "call",
                     "name": tool_name,
-                    "args": tool_args,
+                    "args": public_tool_args,
                     "id": tool_call_id,
                     "policy": {
                         "allowed": False,
@@ -124,10 +129,11 @@ async def dispatch_direct_tool_call(
         tool_args = prefer_official_query_for_known_docs(tool_args, query)
         tool_call["args"] = tool_args
 
+    public_tool_args = sanitize_tool_args_for_event(tool_args)
     await push_event(
         {
             "type": "tool_call",
-            "content": {"name": tool_name, "args": tool_args, "id": tool_call_id},
+            "content": {"name": tool_name, "args": public_tool_args, "id": tool_call_id},
             "node": "direct",
         }
     )
@@ -135,7 +141,7 @@ async def dispatch_direct_tool_call(
         {
             "type": "call",
             "name": tool_name,
-            "args": tool_args,
+            "args": public_tool_args,
             "id": tool_call_id,
         }
     )
@@ -162,6 +168,34 @@ async def dispatch_direct_tool_call(
                 f"Lỗi: không tìm thấy tool `{tool_name}` trong registry. "
                 "Hãy gọi đúng tên tool có sẵn."
             )
+    except ValidationError as tool_error:
+        logger_obj.warning(
+            "[DIRECT] Tool %s rejected invalid input: %s",
+            tool_name,
+            tool_error,
+        )
+        public_errors = [
+            {
+                "field": ".".join(str(part) for part in error.get("loc", ())),
+                "type": str(error.get("type") or "validation_error"),
+            }
+            for error in tool_error.errors()
+        ]
+        missing_fields = [
+            error["field"]
+            for error in public_errors
+            if error["type"].startswith("missing") and error["field"]
+        ]
+        result = json.dumps(
+            {
+                "status": "validation_failed",
+                "tool": tool_name,
+                "message": "Tool input failed schema validation.",
+                "missing_fields": missing_fields,
+                "errors": public_errors,
+            },
+            ensure_ascii=False,
+        )
     except Exception as tool_error:  # noqa: BLE001
         logger_obj.warning("[DIRECT] Tool %s failed: %s", tool_name, tool_error)
         result = "Tool unavailable"

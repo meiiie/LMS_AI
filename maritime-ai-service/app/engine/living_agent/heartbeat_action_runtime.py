@@ -7,7 +7,9 @@ HeartbeatScheduler method surface for tests and patching.
 
 from __future__ import annotations
 
+import json
 import random
+from datetime import datetime, timezone
 from typing import Any
 
 from app.engine.living_agent.models import HeartbeatAction, LifeEvent, LifeEventType
@@ -263,13 +265,38 @@ async def self_answer_quiz_impl(questions) -> list[str]:
     return answers
 
 
+def _format_discovery_notification_message(items: list[Any], topic: str) -> str:
+    lines = [f"Wiii t\u00ecm th\u1ea5y {len(items)} n\u1ed9i dung th\u00fa v\u1ecb v\u1ec1 {topic}:"]
+    for item in items[:3]:
+        title = item.title[:100] if getattr(item, "title", "") else "Kh\u00f4ng c\u00f3 ti\u00eau \u0111\u1ec1"
+        url = getattr(item, "url", "") or ""
+        relevance_score = getattr(item, "relevance_score", 0)
+        score = f" ({relevance_score:.0%})" if relevance_score else ""
+        lines.append(f"- {title}{score}")
+        if url:
+            lines.append(f"  {url}")
+    return "\n".join(lines)
+
+
 async def notify_discovery_impl(items: list[Any], topic: str, logger_obj) -> None:
     """Send notification about interesting discoveries via configured channel."""
     try:
         from app.core.config import settings
+        from app.engine.semantic_memory.write_audit import resolve_memory_write_scope
 
         channel = settings.living_agent_notification_channel
         if channel == "websocket" and not settings.enable_websocket:
+            return
+        scope = resolve_memory_write_scope()
+        if not scope.write_allowed or not scope.org_id:
+            warnings = [*scope.warnings]
+            if "missing_org_context" in warnings:
+                warnings.append("heartbeat_runtime_blocked_missing_org_context")
+            logger_obj.warning(
+                "[HEARTBEAT] Discovery notification blocked org_scope=%s warnings=%s",
+                scope.state,
+                sorted(set(warnings)),
+            )
             return
 
         lines = [f"Wiii tìm thấy {len(items)} nội dung thú vị về {topic}:"]
@@ -280,15 +307,31 @@ async def notify_discovery_impl(items: list[Any], topic: str, logger_obj) -> Non
             lines.append(f"• {title}{score}")
             if url:
                 lines.append(f"  {url}")
-        message = "\n".join(lines)
+        message = _format_discovery_notification_message(items, topic)
+        payload = json.dumps(
+            {
+                "type": "proactive_message",
+                "trigger": "heartbeat_discovery",
+                "content": message,
+                "topic": topic,
+                "item_count": len(items),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            ensure_ascii=False,
+        )
 
         from app.services.notification_dispatcher import get_notification_dispatcher
 
         dispatcher = get_notification_dispatcher()
         result = await dispatcher.notify_user(
             user_id="wiii_owner",
-            message=message,
+            message=payload if channel == "websocket" else message,
             channel=channel,
+            metadata={
+                "organization_id": scope.org_id,
+                "notification_type": "proactive_message",
+                "trigger": "heartbeat_discovery",
+            },
         )
 
         if result.get("delivered"):

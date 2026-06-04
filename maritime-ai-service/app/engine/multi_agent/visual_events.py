@@ -7,8 +7,12 @@ code studio event emission, and visual commit lifecycle.
 from __future__ import annotations
 
 from app.core.config import settings
+from app.engine.context.host_action_result_bridge import (
+    parse_host_action_request_result,
+)
 from app.engine.multi_agent.direct_reasoning import _DIRECT_HOST_ACTION_PREFIX
 from app.engine.multi_agent.state import AgentState
+from app.engine.runtime.event_payload_sanitizer import sanitize_runtime_payload
 from typing import Any, Optional
 import asyncio
 import json
@@ -109,23 +113,13 @@ def _summarize_tool_result_for_stream(tool_name: str, result: object) -> str:
 
 def _parse_host_action_result(tool_name: str, result: object) -> dict[str, Any] | None:
     """Parse a generated host action tool result."""
-    if not str(tool_name).startswith(_DIRECT_HOST_ACTION_PREFIX):
+    parsed = parse_host_action_request_result(tool_name, result)
+    if parsed is None:
         return None
-    try:
-        parsed = json.loads(str(result or "{}"))
-    except Exception:
-        return None
-    if parsed.get("status") != "action_requested":
-        return None
-    request_id = str(parsed.get("request_id") or "").strip()
-    action_name = str(parsed.get("action") or "").strip()
-    if not request_id or not action_name:
-        return None
-    params = parsed.get("params")
     return {
-        "request_id": request_id,
-        "action": action_name,
-        "params": params if isinstance(params, dict) else {},
+        "request_id": parsed.request_id,
+        "action": parsed.action,
+        "params": parsed.params,
     }
 
 
@@ -141,13 +135,17 @@ async def _maybe_emit_host_action_event(
     parsed = _parse_host_action_result(tool_name, result)
     if not parsed:
         return False
+    safe_params = sanitize_runtime_payload(parsed["params"])
+    if not isinstance(safe_params, dict):
+        safe_params = {}
+    safe_params.pop("redacted_secret_count", None)
 
     await push_event({
         "type": "host_action",
         "content": {
             "id": parsed["request_id"],
             "action": parsed["action"],
-            "params": parsed["params"],
+            "params": safe_params,
         },
         "node": node,
     })
@@ -155,7 +153,7 @@ async def _maybe_emit_host_action_event(
         "type": "host_action",
         "id": parsed["request_id"],
         "action": parsed["action"],
-        "params": parsed["params"],
+        "params": safe_params,
         "node": node,
     })
     return True
@@ -427,4 +425,3 @@ async def _emit_visual_commit_events(
             visual_session_id=visual_session_id,
             node=node,
         )
-

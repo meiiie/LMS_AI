@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.tool_event_sanitizer import (
+    sanitize_tool_args_for_event,
+    sanitize_tool_result_for_event,
+)
 from app.engine.reasoning import record_thinking_snapshot
 
 
@@ -106,12 +110,13 @@ async def execute_document_host_action_shortcut(
 ) -> str:
     """Execute a preview host action and return the user-visible response."""
 
+    public_args = sanitize_tool_args_for_event(args)
     await push_event(
         {
             "type": "tool_call",
             "content": {
                 "name": shortcut.tool_name,
-                "args": args,
+                "args": public_args,
                 "id": shortcut.tool_call_id,
             },
             "node": "direct",
@@ -121,7 +126,7 @@ async def execute_document_host_action_shortcut(
         {
             "type": "call",
             "name": shortcut.tool_name,
-            "args": args,
+            "args": public_args,
             "id": shortcut.tool_call_id,
         }
     )
@@ -163,7 +168,7 @@ async def execute_document_host_action_shortcut(
         {
             "type": "result",
             "name": shortcut.tool_name,
-            "result": str(result),
+            "result": sanitize_tool_result_for_event(result),
             "id": shortcut.tool_call_id,
         }
     )

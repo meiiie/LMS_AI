@@ -13,6 +13,17 @@ import logging
 from typing import List, Optional
 
 from app.engine.embedding_runtime import EmbeddingBackendProtocol
+from app.engine.semantic_memory.privacy import (
+    hash_memory_identifier,
+    memory_log_reference,
+)
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    append_semantic_memory_write_audit_event,
+    build_semantic_memory_write_audit,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 from app.models.semantic_memory import (
     Insight,
     InsightCategory,
@@ -100,6 +111,36 @@ class InsightProvider:
 
         **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 5.1, 5.2, 5.3, 5.4**
         """
+        audit_scope = resolve_memory_write_scope()
+        stored_insights: List[Insight] = []
+        if not audit_scope.write_allowed:
+            audit_payload = build_semantic_memory_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                message=message,
+                response="",
+                scope=audit_scope,
+                write_kind="insight_extraction",
+                message_saved=False,
+                response_saved=False,
+                extract_facts=False,
+                stored_fact_count=0,
+                stored_insight_count=0,
+                status="blocked",
+                warnings=["insight_write_blocked_missing_org_context"],
+            )
+            await append_semantic_memory_write_audit_event(
+                session_id=session_id,
+                org_id=audit_scope.org_id,
+                payload=audit_payload,
+            )
+            logger.warning(
+                "Semantic memory insight write blocked for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                audit_scope.state,
+            )
+            return []
+
         try:
             # Lazy init insight components
             if self._insight_extractor is None:
@@ -141,7 +182,6 @@ class InsightProvider:
             existing_insights = await self._get_user_insights(user_id)
 
             # Step 3: Validate and process each insight
-            stored_insights = []
             for insight in insights:
                 if self._insight_validator:
                     result = self._insight_validator.validate(insight, existing_insights)
@@ -151,31 +191,95 @@ class InsightProvider:
                         continue
 
                     if result.action == "merge":
-                        await self._merge_insight(insight, result.target_insight)
+                        success = await self._merge_insight(
+                            insight, result.target_insight
+                        )
+                        if not success:
+                            continue
                         stored_insights.append(insight)
 
                     elif result.action == "update":
-                        await self._update_insight_with_evolution(insight, result.target_insight)
+                        success = await self._update_insight_with_evolution(
+                            insight, result.target_insight
+                        )
+                        if not success:
+                            continue
                         stored_insights.append(insight)
 
                     elif result.action == "store":
-                        await self._store_insight(insight, session_id)
+                        success = await self._store_insight(
+                            insight,
+                            session_id,
+                            emit_write_audit=False,
+                        )
+                        if not success:
+                            continue
                         stored_insights.append(insight)
                         existing_insights.append(insight)
                 else:
                     # No validator, just store
-                    await self._store_insight(insight, session_id)
+                    success = await self._store_insight(
+                        insight,
+                        session_id,
+                        emit_write_audit=False,
+                    )
+                    if not success:
+                        continue
                     stored_insights.append(insight)
 
             # Step 4: Check consolidation threshold
             if self._memory_consolidator:
                 await self._check_and_consolidate(user_id)
 
-            logger.info("Stored %d insights for user %s", len(stored_insights), user_id)
+            logger.info(
+                "Stored %d insights for user_hash=%s",
+                len(stored_insights),
+                hash_memory_identifier(user_id),
+            )
+            audit_payload = build_semantic_memory_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                message=message,
+                response="",
+                scope=audit_scope,
+                write_kind="insight_extraction",
+                message_saved=False,
+                response_saved=False,
+                extract_facts=False,
+                stored_fact_count=0,
+                stored_insight_count=len(stored_insights),
+                status="saved" if stored_insights else "degraded",
+                warnings=[] if stored_insights else ["insight_write_empty"],
+            )
+            await append_semantic_memory_write_audit_event(
+                session_id=session_id,
+                org_id=audit_scope.org_id,
+                payload=audit_payload,
+            )
             return stored_insights
 
         except Exception as e:
             logger.error("Failed to extract and store insights: %s", e)
+            audit_payload = build_semantic_memory_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                message=message,
+                response="",
+                scope=audit_scope,
+                write_kind="insight_extraction",
+                message_saved=False,
+                response_saved=False,
+                extract_facts=False,
+                stored_fact_count=0,
+                stored_insight_count=len(stored_insights),
+                status="failed",
+                warnings=["insight_write_failed"],
+            )
+            await append_semantic_memory_write_audit_event(
+                session_id=session_id,
+                org_id=audit_scope.org_id,
+                payload=audit_payload,
+            )
             return []
 
     async def _get_user_insights(self, user_id: str) -> List[Insight]:
@@ -187,6 +291,15 @@ class InsightProvider:
         with zero-vector, which caused NaN in pgvector cosine distance
         (zero vector <=> any vector = NaN, so WHERE clause rejected all rows).
         """
+        read_scope = resolve_memory_read_scope()
+        if not read_scope.write_allowed:
+            logger.warning(
+                "Insight provider read blocked for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                read_scope.state,
+            )
+            return []
+
         try:
             # Use dedicated get_user_insights() from InsightRepositoryMixin
             # which queries by memory_type without cosine similarity
@@ -220,8 +333,32 @@ class InsightProvider:
             logger.error("Failed to get user insights: %s", e)
             return []
 
-    async def _store_insight(self, insight: Insight, session_id: Optional[str] = None) -> bool:
+    async def _store_insight(
+        self,
+        insight: Insight,
+        session_id: Optional[str] = None,
+        emit_write_audit: bool = True,
+    ) -> bool:
         """Store a new insight."""
+        audit_scope = resolve_memory_write_scope()
+        if not audit_scope.write_allowed:
+            await self._append_insight_write_audit(
+                user_id=insight.user_id,
+                session_id=session_id,
+                source_message=insight.content,
+                scope=audit_scope,
+                stored_insight_count=0,
+                status="blocked",
+                warnings=["insight_store_blocked_missing_org_context"],
+                emit_write_audit=emit_write_audit,
+            )
+            logger.warning(
+                "Semantic memory insight store blocked for user_hash=%s: %s",
+                hash_memory_identifier(insight.user_id),
+                audit_scope.state,
+            )
+            return False
+
         try:
             # Sprint 27: Use async embedding to avoid blocking event loop
             embeddings = await self._embeddings.aembed_documents([insight.content])
@@ -237,12 +374,68 @@ class InsightProvider:
                 session_id=session_id,
             )
 
-            self._repository.save_memory(memory)
-            return True
+            saved_memory = self._repository.save_memory(memory)
+            stored = saved_memory is not None
+            await self._append_insight_write_audit(
+                user_id=insight.user_id,
+                session_id=session_id,
+                source_message=insight.content,
+                scope=audit_scope,
+                stored_insight_count=1 if stored else 0,
+                status="saved" if stored else "degraded",
+                warnings=[] if stored else ["insight_store_not_persisted"],
+                emit_write_audit=emit_write_audit,
+            )
+            return stored
 
         except Exception as e:
             logger.error("Failed to store insight: %s", e)
+            await self._append_insight_write_audit(
+                user_id=insight.user_id,
+                session_id=session_id,
+                source_message=insight.content,
+                scope=audit_scope,
+                stored_insight_count=0,
+                status="failed",
+                warnings=["insight_store_failed"],
+                emit_write_audit=emit_write_audit,
+            )
             return False
+
+    async def _append_insight_write_audit(
+        self,
+        *,
+        user_id: str,
+        session_id: Optional[str],
+        source_message: Optional[str],
+        scope: MemoryWriteScope,
+        stored_insight_count: int,
+        status: str,
+        warnings: Optional[list[str]] = None,
+        emit_write_audit: bool = True,
+    ) -> bool:
+        if not emit_write_audit:
+            return False
+        audit_payload = build_semantic_memory_write_audit(
+            user_id=user_id,
+            session_id=session_id,
+            message=source_message or "",
+            response="",
+            scope=scope,
+            write_kind="insight_store",
+            message_saved=False,
+            response_saved=False,
+            extract_facts=False,
+            stored_fact_count=0,
+            stored_insight_count=stored_insight_count,
+            status=status,
+            warnings=warnings,
+        )
+        return await append_semantic_memory_write_audit_event(
+            session_id=session_id,
+            org_id=scope.org_id,
+            payload=audit_payload,
+        )
 
     async def _merge_insight(self, new_insight: Insight, existing_insight: Insight) -> bool:
         """
@@ -255,7 +448,9 @@ class InsightProvider:
             new_confidence = (existing_insight.confidence + new_insight.confidence) / 2
 
             evolution_notes = existing_insight.evolution_notes.copy() if existing_insight.evolution_notes else []
-            evolution_notes.append(f"Merged with similar insight: {new_insight.content[:50]}...")
+            evolution_notes.append(
+                f"Merged with similar insight: content_ref={memory_log_reference(new_insight.content)}"
+            )
 
             # SOTA FIX: Use correct API for metadata-only update
             return self._repository.update_metadata_only(
@@ -280,7 +475,9 @@ class InsightProvider:
             embedding = embeddings[0]
 
             evolution_notes = existing_insight.evolution_notes.copy() if existing_insight.evolution_notes else []
-            evolution_notes.append(f"Updated from: {existing_insight.content[:50]}...")
+            evolution_notes.append(
+                f"Updated from: content_ref={memory_log_reference(existing_insight.content)}"
+            )
 
             return self._repository.update_fact(
                 fact_id=existing_insight.id,
@@ -350,8 +547,10 @@ class InsightProvider:
                 return False
 
             logger.info(
-                "[CONSOLIDATION] Triggering for user %s: %d insights >= %d",
-                user_id, current_count, self.CONSOLIDATION_THRESHOLD
+                "[CONSOLIDATION] Triggering for user_hash=%s: %d insights >= %d",
+                hash_memory_identifier(user_id),
+                current_count,
+                self.CONSOLIDATION_THRESHOLD,
             )
 
             # Fetch all current insights
@@ -382,13 +581,19 @@ class InsightProvider:
                     stored += 1
 
             logger.info(
-                "[CONSOLIDATION] Complete for user %s: %d -> %d insights",
-                user_id, result.original_count, stored
+                "[CONSOLIDATION] Complete for user_hash=%s: %d -> %d insights",
+                hash_memory_identifier(user_id),
+                result.original_count,
+                stored,
             )
             return True
 
         except Exception as e:
-            logger.error("[CONSOLIDATION] Error for user %s: %s", user_id, e)
+            logger.error(
+                "[CONSOLIDATION] Error for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                e,
+            )
             return False
 
     async def _fifo_eviction(self, user_id: str) -> int:
@@ -411,7 +616,11 @@ class InsightProvider:
             excess = current_count - self.MAX_INSIGHTS
             deleted = self._repository.delete_oldest_insights(user_id, excess)
 
-            logger.info("FIFO eviction for user %s: deleted %d insights", user_id, deleted)
+            logger.info(
+                "FIFO eviction for user_hash=%s: deleted %d insights",
+                hash_memory_identifier(user_id),
+                deleted,
+            )
             return deleted
 
         except Exception as e:

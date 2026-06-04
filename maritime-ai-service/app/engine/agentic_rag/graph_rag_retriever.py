@@ -47,6 +47,16 @@ class GraphRAGContext:
     mode: str = "none"  # "neo4j" | "postgres" | "none"
 
 
+def _current_graph_org_id() -> Optional[str]:
+    try:
+        from app.core.org_context import get_current_org_id
+
+        org_id = get_current_org_id()
+        return org_id.strip() if isinstance(org_id, str) and org_id.strip() else None
+    except Exception:
+        return None
+
+
 async def _extract_query_entities(query: str) -> List[EntityInfo]:
     """Extract entities from user query using KG Builder Agent.
 
@@ -89,6 +99,7 @@ async def _extract_query_entities(query: str) -> List[EntityInfo]:
 async def _get_neo4j_context(
     query_entities: List[EntityInfo],
     document_ids: List[str],
+    organization_id: Optional[str] = None,
 ) -> GraphRAGContext:
     """Get entity context from Neo4j graph.
 
@@ -113,11 +124,15 @@ async def _get_neo4j_context(
 
         all_regulations = set()
         all_entities = list(query_entities)
+        effective_org_id = organization_id or _current_graph_org_id()
 
         # Get related entities for query entities (multi-hop)
         for entity in query_entities[:5]:  # Limit to avoid too many queries
             try:
-                relations = await neo4j.get_entity_relations(entity.entity_id)
+                relations = await neo4j.get_entity_relations(
+                    entity.entity_id,
+                    organization_id=effective_org_id,
+                )
                 for rel in relations:
                     target_name = rel.get("target_name", "")
                     target_type = rel.get("target_type", "")
@@ -137,7 +152,10 @@ async def _get_neo4j_context(
         # Get document-level entities
         for doc_id in document_ids[:3]:
             try:
-                doc_entities = await neo4j.get_document_entities(doc_id)
+                doc_entities = await neo4j.get_document_entities(
+                    doc_id,
+                    organization_id=effective_org_id,
+                )
                 for de in doc_entities:
                     if de.get("type") == "ARTICLE":
                         all_regulations.add(de.get("name", ""))
@@ -202,6 +220,29 @@ async def _get_postgres_context(
             try:
                 import asyncpg
                 from app.core.config import get_settings
+                from app.repositories.knowledge_search_org_scope import (
+                    log_knowledge_search_scope_blocked,
+                    resolve_knowledge_search_org_scope,
+                )
+
+                scope = resolve_knowledge_search_org_scope()
+                if not scope.write_allowed or not scope.org_id:
+                    log_knowledge_search_scope_blocked(
+                        logger,
+                        "graph_rag_postgres_context",
+                        scope,
+                    )
+                    regulations = [
+                        e.name for e in query_entities
+                        if e.entity_type in ("ARTICLE", "REGULATION") and e.name
+                    ]
+                    return GraphRAGContext(
+                        entities=query_entities,
+                        related_regulations=regulations,
+                        entity_context_text=_format_postgres_entity_context(query_entities),
+                        additional_docs=[],
+                        mode="postgres",
+                    )
 
                 settings = get_settings()
                 conn = await asyncpg.connect(settings.asyncpg_url)
@@ -215,11 +256,13 @@ async def _get_postgres_context(
                                image_url, content_type
                         FROM knowledge_embeddings
                         WHERE to_tsvector('simple', content) @@ plainto_tsquery('simple', $1)
+                        AND (organization_id = $2 OR organization_id IS NULL)
                         ORDER BY ts_rank(to_tsvector('simple', content),
                                         plainto_tsquery('simple', $1)) DESC
                         LIMIT 5
                         """,
                         search_terms,
+                        scope.org_id,
                     )
 
                     # Filter out already-retrieved documents
@@ -268,9 +311,25 @@ async def _get_postgres_context(
         return GraphRAGContext(mode="postgres")
 
 
+def _format_postgres_entity_context(query_entities: List[EntityInfo]) -> str:
+    context_parts = []
+    entity_names_display = [e.name_vi or e.name for e in query_entities if e.name]
+    if entity_names_display:
+        context_parts.append(f"Thá»±c thá»ƒ trong cÃ¢u há»i: {', '.join(entity_names_display[:8])}")
+
+    regulations = [
+        e.name for e in query_entities
+        if e.entity_type in ("ARTICLE", "REGULATION") and e.name
+    ]
+    if regulations:
+        context_parts.append(f"Quy táº¯c liÃªn quan: {', '.join(regulations[:5])}")
+    return ". ".join(context_parts)
+
+
 async def enrich_with_graph_context(
     documents: List[Dict[str, Any]],
     query: str,
+    organization_id: Optional[str] = None,
 ) -> GraphRAGContext:
     """Enrich retrieved documents with knowledge graph context.
 
@@ -308,7 +367,11 @@ async def enrich_with_graph_context(
     settings = get_settings()
 
     if getattr(settings, "enable_neo4j", False):
-        context = await _get_neo4j_context(query_entities, document_ids)
+        context = await _get_neo4j_context(
+            query_entities,
+            document_ids,
+            organization_id=organization_id,
+        )
         if context.mode == "neo4j":
             context.total_time_ms = (time.time() - start) * 1000
             logger.info(

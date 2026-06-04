@@ -10,6 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from .argument_key_policy import (
+    WIII_CONNECT_ARGUMENT_KEY_POLICY_VERSION,
+    hidden_model_argument_key_count,
+    model_visible_argument_keys,
+    safe_public_argument_key,
+)
 from .adapter_v1 import ActionMutation, ProviderKind, ScopeName
 
 
@@ -48,7 +54,26 @@ class WiiiConnectCuratedAction:
             "requires_preview": self.requires_preview,
             "requires_approval": self.requires_approval,
             "required_scopes": list(self.required_scopes),
-            "argument_keys": [_safe_public_key(key) for key in self.argument_keys],
+            "argument_policy_version": WIII_CONNECT_ARGUMENT_KEY_POLICY_VERSION,
+            "argument_keys": list(
+                model_visible_argument_keys(
+                    provider_slug=self.provider_slug,
+                    action_slug=self.slug,
+                    argument_keys=self.argument_keys,
+                )
+            ),
+            "model_argument_keys": list(
+                model_visible_argument_keys(
+                    provider_slug=self.provider_slug,
+                    action_slug=self.slug,
+                    argument_keys=self.argument_keys,
+                )
+            ),
+            "hidden_argument_count": hidden_model_argument_key_count(
+                provider_slug=self.provider_slug,
+                action_slug=self.slug,
+                argument_keys=self.argument_keys,
+            ),
             "description": self.description,
             "source": self.source,
             "warnings": list(self.warnings),
@@ -70,6 +95,58 @@ _CURATED_ACTIONS: tuple[WiiiConnectCuratedAction, ...] = (
             "only after a real Gmail auth-config and live tool schema are verified."
         ),
         warnings=("disabled_until_live_gmail_schema_verified",),
+    ),
+    WiiiConnectCuratedAction(
+        slug="FACEBOOK_LIST_MANAGED_PAGES",
+        provider_slug="facebook",
+        provider_kind="composio",
+        label="List managed Facebook Pages",
+        mutation="read",
+        enabled=False,
+        required_scopes=("read",),
+        argument_keys=("fields", "limit", "after", "before", "user_id"),
+        description=(
+            "Read-only Facebook Page selector. It may expose Page ids and "
+            "names to the authenticated user, but must not expose Page access "
+            "tokens returned by Facebook/Composio."
+        ),
+        warnings=("runtime_enabled_requires_live_facebook_schema_verification",),
+    ),
+    WiiiConnectCuratedAction(
+        slug="FACEBOOK_CREATE_POST",
+        provider_slug="facebook",
+        provider_kind="composio",
+        label="Create Facebook Page post",
+        mutation="apply",
+        enabled=False,
+        requires_preview=True,
+        requires_approval=True,
+        required_scopes=("apply",),
+        argument_keys=("page_id", "message", "link", "published", "scheduled_publish_time"),
+        description=(
+            "Creates a text/link post on a Facebook Page. Wiii may call this "
+            "only after a preview, explicit user approval, selected account, "
+            "scope grant, schema verification, and audit append."
+        ),
+        warnings=("external_mutation_requires_preview_and_approval",),
+    ),
+    WiiiConnectCuratedAction(
+        slug="FACEBOOK_CREATE_PHOTO_POST",
+        provider_slug="facebook",
+        provider_kind="composio",
+        label="Create Facebook Page photo post",
+        mutation="apply",
+        enabled=False,
+        requires_preview=True,
+        requires_approval=True,
+        required_scopes=("apply",),
+        argument_keys=("page_id", "message", "photo", "media", "url", "published"),
+        description=(
+            "Creates a photo post on a Facebook Page. User-uploaded images "
+            "must stay behind Wiii preview/apply and use controlled Composio "
+            "file staging, never arbitrary local paths from the model."
+        ),
+        warnings=("external_mutation_requires_preview_and_approval",),
     ),
 )
 
@@ -134,8 +211,9 @@ def configured_action_slugs_for_provider(
     provider_slug: str,
     *,
     enabled_slugs: Iterable[str],
+    mutations: Iterable[ActionMutation] | None = ("read",),
 ) -> tuple[str, ...]:
-    """Return disabled catalog candidates explicitly enabled by deployment config."""
+    """Return catalog candidates explicitly enabled by deployment config."""
 
     allowed = {
         _normalize_action_slug(slug)
@@ -144,10 +222,12 @@ def configured_action_slugs_for_provider(
     }
     if not allowed:
         return ()
+    allowed_mutations = set(mutations or ())
     return tuple(
         action.slug
         for action in list_wiii_connect_curated_actions(provider_slug=provider_slug)
-        if action.slug in allowed and action.mutation == "read"
+        if action.slug in allowed
+        and (not allowed_mutations or action.mutation in allowed_mutations)
     )
 
 
@@ -192,15 +272,19 @@ def action_catalog_public_metadata(
 ) -> dict[str, Any]:
     """Return the public action catalog projection."""
 
-    actions = list_wiii_connect_curated_actions(
-        provider_slug=provider_slug,
-        include_disabled=include_disabled,
-    )
     enabled = {
         _normalize_action_slug(slug)
         for slug in (enabled_slugs or ())
         if _normalize_action_slug(slug)
     }
+    actions = list_wiii_connect_curated_actions(
+        provider_slug=provider_slug,
+        include_disabled=True,
+    )
+    if not include_disabled:
+        actions = tuple(
+            action for action in actions if action.enabled or action.slug in enabled
+        )
     return {
         "version": WIII_CONNECT_ACTION_CATALOG_VERSION,
         "provider_slug": _normalize_provider_slug(provider_slug) or None,
@@ -213,9 +297,6 @@ def action_catalog_public_metadata(
             for action in actions
         ],
     }
-
-
-_SENSITIVE_KEY_MARKERS = ("token", "secret", "password", "credential", "key", "code")
 
 
 def _normalize_provider_slug(value: Any) -> str:
@@ -241,12 +322,7 @@ def _public_metadata_with_runtime_enabled(
 
 
 def _safe_public_key(value: str) -> str:
-    normalized = str(value or "").strip().lower()
-    if not normalized:
-        return "empty"
-    if any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS):
-        return "redacted_sensitive_field"
-    return normalized[:80]
+    return safe_public_argument_key(value)
 
 
 __all__ = [

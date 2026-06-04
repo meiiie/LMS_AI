@@ -206,3 +206,38 @@ class TestGetUserInsights:
 
         assert exc_info.value.status_code == 500
         assert "DB error" not in exc_info.value.detail  # No internal leak
+
+    @pytest.mark.asyncio
+    async def test_blocks_missing_org_context_before_read(
+        self,
+        monkeypatch,
+    ):
+        from app.api.v1.insights import get_user_insights
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from fastapi import HTTPException
+
+        mock_repo = MagicMock()
+        repo_factory = MagicMock(return_value=mock_repo)
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        token = current_org_id.set(None)
+        try:
+            with patch(
+                "app.api.v1.insights.SemanticMemoryRepository",
+                repo_factory,
+            ):
+                with pytest.raises(HTTPException) as exc_info:
+                    await get_user_insights(
+                        request=_make_request(),
+                        user_id="user-private-123",
+                        auth=_make_auth("user-private-123"),
+                    )
+        finally:
+            current_org_id.reset(token)
+
+        assert exc_info.value.status_code == 403
+        assert "Organization context required for memory access" in exc_info.value.detail
+        repo_factory.assert_not_called()
+        mock_repo.get_user_insights.assert_not_called()

@@ -1,4 +1,4 @@
-import { Eye, FilePenLine, ClipboardCheck, Rocket } from "lucide-react";
+import { Eye, FilePenLine, ClipboardCheck, Rocket, Send } from "lucide-react";
 import type { PreviewItemData } from "@/api/types";
 
 interface Props {
@@ -14,6 +14,8 @@ function resolveIcon(kind?: string) {
       return ClipboardCheck;
     case "quiz_publish":
       return Rocket;
+    case "facebook_post":
+      return Send;
     default:
       return Eye;
   }
@@ -27,6 +29,8 @@ function resolveBadge(kind?: string) {
       return "quiz commit";
     case "quiz_publish":
       return "quiz publish";
+    case "facebook_post":
+      return "facebook";
     default:
       return "preview";
   }

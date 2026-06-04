@@ -17,15 +17,42 @@ Design:
     - Feature-gated: living_agent_enable_proactive_messaging
 """
 
+import json
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional
 
 from app.engine.living_agent.models import ProactiveMessage
+from app.engine.runtime.runtime_metrics import inc_counter, record_latency_ms
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 
 logger = logging.getLogger(__name__)
 
 _VN_OFFSET = timedelta(hours=7)
+_PROACTIVE_MISSING_ORG_WARNING = "proactive_message_blocked_missing_org_context"
+
+
+def _emit_can_send_metric(*, status: str, reason: str) -> None:
+    inc_counter(
+        "runtime.living_agent.proactive.can_send",
+        labels={"status": status, "reason": reason},
+    )
+
+
+def _emit_send_metric(*, status: str, started: float) -> None:
+    labels = {"status": status}
+    inc_counter("runtime.living_agent.proactive.sends", labels=labels)
+    record_latency_ms(
+        "runtime.living_agent.proactive.send_duration_ms",
+        (time.monotonic() - started) * 1000.0,
+        labels=labels,
+    )
 
 
 class ProactiveMessenger:
@@ -43,7 +70,12 @@ class ProactiveMessenger:
         self._last_sent: Dict[str, datetime] = {}
         self._daily_reset_date: str = ""
 
-    async def can_send(self, user_id: str) -> bool:
+    async def can_send(
+        self,
+        user_id: str,
+        *,
+        scope: MemoryWriteScope | None = None,
+    ) -> bool:
         """Check if we can send a proactive message to this user.
 
         Checks:
@@ -56,6 +88,7 @@ class ProactiveMessenger:
         from app.core.config import settings
 
         if not settings.living_agent_enable_proactive_messaging:
+            _emit_can_send_metric(status="blocked", reason="feature_disabled")
             return False
 
         # Quiet hours check
@@ -67,25 +100,38 @@ class ProactiveMessenger:
         if quiet_start > quiet_end:
             # Wraps midnight (e.g. 23-05)
             if hour >= quiet_start or hour < quiet_end:
+                _emit_can_send_metric(status="blocked", reason="quiet_hours")
                 return False
         elif quiet_start <= hour < quiet_end:
+            _emit_can_send_metric(status="blocked", reason="quiet_hours")
+            return False
+
+        scope = scope or resolve_memory_read_scope()
+        if not self._scope_allows_proactive(scope):
+            self._log_scope_blocked("can_send", user_id, scope)
+            _emit_can_send_metric(status="blocked", reason="missing_org_context")
             return False
 
         # Daily limit check
         self._reset_daily_if_needed()
-        count = self._daily_counts.get(user_id, 0)
+        counter_key = self._counter_key(user_id, scope)
+        count = self._daily_counts.get(counter_key, 0)
         if count >= settings.living_agent_max_proactive_per_day:
+            _emit_can_send_metric(status="blocked", reason="daily_limit")
             return False
 
         # Cooloff check (min 4 hours between proactive messages)
-        last = self._last_sent.get(user_id)
+        last = self._last_sent.get(counter_key)
         if last and (datetime.now(timezone.utc) - last).total_seconds() < 4 * 3600:
+            _emit_can_send_metric(status="blocked", reason="cooloff")
             return False
 
         # Opt-out check
-        if await self._is_opted_out(user_id):
+        if await self._is_opted_out(user_id, scope=scope):
+            _emit_can_send_metric(status="blocked", reason="opted_out")
             return False
 
+        _emit_can_send_metric(status="allowed", reason="allowed")
         return True
 
     async def send(
@@ -101,18 +147,38 @@ class ProactiveMessenger:
         Returns:
             True if message was delivered successfully.
         """
-        if not await self.can_send(user_id):
-            logger.debug("[PROACTIVE] Blocked for user %s (limits/opt-out)", user_id)
+        started = time.monotonic()
+        scope = resolve_memory_write_scope()
+        if not self._scope_allows_proactive(scope):
+            self._log_scope_blocked("send", user_id, scope)
+            _emit_send_metric(status="blocked_missing_org_context", started=started)
+            return False
+
+        if not await self.can_send(user_id, scope=scope):
+            logger.debug(
+                "[PROACTIVE] Blocked for user_hash=%s (limits/opt-out, org_scope=%s)",
+                hash_memory_identifier(user_id),
+                scope.state,
+            )
+            _emit_send_metric(status="blocked_guardrail", started=started)
             return False
 
         # Deliver
-        success = await self._deliver(user_id, channel, content)
+        success = await self._deliver(
+            user_id,
+            channel,
+            content,
+            trigger=trigger,
+            organization_id=scope.org_id,
+        )
         if not success:
+            _emit_send_metric(status="delivery_failed", started=started)
             return False
 
         # Track
-        self._daily_counts[user_id] = self._daily_counts.get(user_id, 0) + 1
-        self._last_sent[user_id] = datetime.now(timezone.utc)
+        counter_key = self._counter_key(user_id, scope)
+        self._daily_counts[counter_key] = self._daily_counts.get(counter_key, 0) + 1
+        self._last_sent[counter_key] = datetime.now(timezone.utc)
 
         # Persist
         msg = ProactiveMessage(
@@ -123,17 +189,28 @@ class ProactiveMessenger:
             priority=priority,
             delivered=True,
             delivered_at=datetime.now(timezone.utc),
+            organization_id=scope.org_id,
         )
-        await self._save_message(msg)
+        await self._save_message(msg, scope=scope)
 
         logger.info(
-            "[PROACTIVE] Sent to %s via %s (trigger=%s, daily=%d)",
-            user_id, channel, trigger, self._daily_counts[user_id],
+            "[PROACTIVE] Sent to user_hash=%s via %s (trigger=%s, daily=%d, org_scope=%s)",
+            hash_memory_identifier(user_id),
+            channel,
+            trigger,
+            self._daily_counts[counter_key],
+            scope.state,
         )
+        _emit_send_metric(status="delivered", started=started)
         return True
 
     async def opt_out(self, user_id: str) -> None:
         """Opt user out of proactive messages."""
+        scope = resolve_memory_write_scope()
+        if not self._scope_allows_proactive(scope):
+            self._log_scope_blocked("opt_out", user_id, scope)
+            return
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -142,19 +219,30 @@ class ProactiveMessenger:
             with session_factory() as session:
                 session.execute(
                     text("""
-                        INSERT INTO wiii_proactive_preferences (user_id, opted_out, updated_at)
-                        VALUES (:uid, true, NOW())
-                        ON CONFLICT (user_id) DO UPDATE SET opted_out = true, updated_at = NOW()
+                        INSERT INTO wiii_proactive_preferences
+                            (organization_id, user_id, opted_out, updated_at)
+                        VALUES (:org_id, :uid, true, NOW())
+                        ON CONFLICT (organization_id, user_id)
+                        DO UPDATE SET opted_out = true, updated_at = NOW()
                     """),
-                    {"uid": user_id},
+                    {"org_id": scope.org_id, "uid": user_id},
                 )
                 session.commit()
-            logger.info("[PROACTIVE] User %s opted out", user_id)
+            logger.info(
+                "[PROACTIVE] User opted out user_hash=%s org_hash=%s",
+                hash_memory_identifier(user_id),
+                hash_memory_identifier(scope.org_id),
+            )
         except Exception as e:
             logger.warning("[PROACTIVE] Failed to opt out: %s", e)
 
     async def opt_in(self, user_id: str) -> None:
         """Opt user back in to proactive messages."""
+        scope = resolve_memory_write_scope()
+        if not self._scope_allows_proactive(scope):
+            self._log_scope_blocked("opt_in", user_id, scope)
+            return
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -163,11 +251,13 @@ class ProactiveMessenger:
             with session_factory() as session:
                 session.execute(
                     text("""
-                        INSERT INTO wiii_proactive_preferences (user_id, opted_out, updated_at)
-                        VALUES (:uid, false, NOW())
-                        ON CONFLICT (user_id) DO UPDATE SET opted_out = false, updated_at = NOW()
+                        INSERT INTO wiii_proactive_preferences
+                            (organization_id, user_id, opted_out, updated_at)
+                        VALUES (:org_id, :uid, false, NOW())
+                        ON CONFLICT (organization_id, user_id)
+                        DO UPDATE SET opted_out = false, updated_at = NOW()
                     """),
-                    {"uid": user_id},
+                    {"org_id": scope.org_id, "uid": user_id},
                 )
                 session.commit()
         except Exception as e:
@@ -182,34 +272,90 @@ class ProactiveMessenger:
     # Internal helpers
     # =========================================================================
 
-    async def _deliver(self, user_id: str, channel: str, content: str) -> bool:
+    async def _deliver(
+        self,
+        user_id: str,
+        channel: str,
+        content: str,
+        *,
+        trigger: str = "general",
+        organization_id: str | None = None,
+    ) -> bool:
         """Deliver message via channel_sender (Sprint 188: DRY shared sender).
 
         Also emits PROACTIVE_MESSAGE life event on success.
         """
         try:
+            if channel in {"websocket", "telegram"}:
+                from app.services.notification_dispatcher import (
+                    get_notification_dispatcher,
+                )
+
+                message = content
+                if channel == "websocket":
+                    message = json.dumps(
+                        {
+                            "type": "proactive_message",
+                            "content": content,
+                            "trigger": trigger,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                        ensure_ascii=False,
+                    )
+
+                result = await get_notification_dispatcher().notify_user(
+                    user_id=user_id,
+                    message=message,
+                    channel=channel,
+                    metadata={
+                        "organization_id": organization_id,
+                        "notification_type": "proactive_message",
+                        "trigger": trigger,
+                    },
+                )
+                delivered = bool(result.get("delivered"))
+                if delivered:
+                    self._record_delivery_life_event(channel)
+                return delivered
+
             from app.engine.living_agent.channel_sender import send_to_channel
 
             result = await send_to_channel(channel, user_id, content)
             if result.success:
-                # Emit life event for emotion engine
-                try:
-                    from app.engine.living_agent.emotion_engine import get_emotion_engine
-                    from app.engine.living_agent.models import LifeEvent, LifeEventType
-                    get_emotion_engine().process_event(LifeEvent(
-                        event_type=LifeEventType.USER_CONVERSATION,
-                        description=f"Proactive message sent via {channel}",
-                        importance=0.3,
-                    ))
-                except Exception:
-                    pass
+                self._record_delivery_life_event(channel)
             return result.success
         except Exception as e:
             logger.warning("[PROACTIVE] Delivery failed: %s", e)
             return False
 
-    async def _is_opted_out(self, user_id: str) -> bool:
+    def _record_delivery_life_event(self, channel: str) -> None:
+        """Emit a low-importance life event after a successful proactive send."""
+        try:
+            from app.engine.living_agent.emotion_engine import get_emotion_engine
+            from app.engine.living_agent.models import LifeEvent, LifeEventType
+
+            get_emotion_engine().process_event(
+                LifeEvent(
+                    event_type=LifeEventType.USER_CONVERSATION,
+                    description=f"Proactive message sent via {channel}",
+                    importance=0.3,
+                )
+            )
+        except Exception:
+            pass
+
+    async def _is_opted_out(
+        self,
+        user_id: str,
+        *,
+        scope: MemoryWriteScope | None = None,
+    ) -> bool:
         """Check if user has opted out of proactive messages."""
+        scope = scope or resolve_memory_read_scope()
+        if not self._scope_allows_proactive(scope):
+            self._log_scope_blocked("opt_out_read", user_id, scope)
+            return True
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -217,15 +363,35 @@ class ProactiveMessenger:
             session_factory = get_shared_session_factory()
             with session_factory() as session:
                 row = session.execute(
-                    text("SELECT opted_out FROM wiii_proactive_preferences WHERE user_id = :uid"),
-                    {"uid": user_id},
+                    text("""
+                        SELECT opted_out
+                        FROM wiii_proactive_preferences
+                        WHERE user_id = :uid
+                          AND organization_id = :org_id
+                    """),
+                    {"uid": user_id, "org_id": scope.org_id},
                 ).fetchone()
                 return bool(row and row[0])
-        except Exception:
-            return False  # Assume opted-in if DB fails
+        except Exception as e:
+            logger.warning(
+                "[PROACTIVE] Opt-out lookup failed for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                e,
+            )
+            return True
 
-    async def _save_message(self, msg: ProactiveMessage) -> None:
+    async def _save_message(
+        self,
+        msg: ProactiveMessage,
+        *,
+        scope: MemoryWriteScope | None = None,
+    ) -> None:
         """Save proactive message record."""
+        scope = scope or resolve_memory_write_scope()
+        if not self._scope_allows_proactive(scope):
+            self._log_scope_blocked("save_message", msg.user_id, scope)
+            return
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -235,13 +401,14 @@ class ProactiveMessenger:
                 session.execute(
                     text("""
                         INSERT INTO wiii_proactive_messages
-                        (id, user_id, channel, content, trigger, priority,
+                        (id, organization_id, user_id, channel, content, trigger, priority,
                          delivered, delivered_at, created_at)
-                        VALUES (:id, :uid, :channel, :content, :trigger, :priority,
+                        VALUES (:id, :org_id, :uid, :channel, :content, :trigger, :priority,
                                 :delivered, :delivered_at, NOW())
                     """),
                     {
                         "id": str(msg.id),
+                        "org_id": scope.org_id,
                         "uid": msg.user_id,
                         "channel": msg.channel,
                         "content": msg.content[:2000],
@@ -254,6 +421,32 @@ class ProactiveMessenger:
                 session.commit()
         except Exception as e:
             logger.warning("[PROACTIVE] Failed to save message: %s", e)
+
+    def _counter_key(self, user_id: str, scope: MemoryWriteScope | None) -> str:
+        """Scope in-memory anti-spam counters when a request org is proven."""
+        if scope and scope.state == "request_scoped" and scope.org_id:
+            return f"{scope.org_id}:{user_id}"
+        return user_id
+
+    def _scope_allows_proactive(self, scope: MemoryWriteScope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _log_scope_blocked(
+        self,
+        operation: str,
+        user_id: str,
+        scope: MemoryWriteScope,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_PROACTIVE_MISSING_ORG_WARNING)
+        logger.warning(
+            "[PROACTIVE] %s blocked user_hash=%s org_scope=%s warnings=%s",
+            operation,
+            hash_memory_identifier(user_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
     def _reset_daily_if_needed(self) -> None:
         """Reset daily counters at midnight UTC+7."""

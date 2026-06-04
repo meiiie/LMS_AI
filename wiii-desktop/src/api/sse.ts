@@ -14,6 +14,7 @@ import type {
   SSEAnswerEvent,
   SSESourcesEvent,
   SSEMetadataEvent,
+  SSEDoneEvent,
   SSEErrorEvent,
   SSEToolCallEvent,
   SSEToolResultEvent,
@@ -43,7 +44,7 @@ export interface SSEEventHandler {
   onAnswer: (data: SSEAnswerEvent) => void;
   onSources: (data: SSESourcesEvent) => void;
   onMetadata: (data: SSEMetadataEvent) => void;
-  onDone: () => void;
+  onDone: (data?: SSEDoneEvent) => void;
   onError: (data: SSEErrorEvent) => void;
   onToolCall: (data: SSEToolCallEvent) => void;
   onToolResult: (data: SSEToolResultEvent) => void;
@@ -244,7 +245,9 @@ function dispatchEvent(
       handlers.onMetadata(data as SSEMetadataEvent);
       break;
     case "done":
-      handlers.onDone();
+      handlers.onDone(
+        data && typeof data === "object" ? data as SSEDoneEvent : undefined,
+      );
       break;
     case "error":
       handlers.onError(data as SSEErrorEvent);

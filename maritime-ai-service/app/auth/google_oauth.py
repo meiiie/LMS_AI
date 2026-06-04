@@ -15,12 +15,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
+from app.auth.organization_context import (
+    ensure_user_org_membership,
+    resolve_default_login_organization_id,
+)
 from app.auth.token_service import create_token_pair, refresh_access_token, revoke_user_tokens
 from app.auth.user_service import find_or_create_by_google
 from app.core.config import settings
 from app.core.security import AuthenticatedUser, require_auth
+from app.engine.runtime.event_payload_sanitizer import (
+    hash_runtime_identifier,
+    redact_runtime_secret_text,
+)
 
 logger = logging.getLogger(__name__)
+_MAX_OAUTH_DIAGNOSTIC_LENGTH = 500
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -44,6 +53,19 @@ def _get_redirect_uri(request: Request, desktop_port: Optional[int] = None) -> s
     if desktop_port:
         return f"{base}{prefix}/auth/google/callback/desktop?port={desktop_port}"
     return f"{base}{prefix}/auth/google/callback"
+
+
+def _oauth_ref(value: object) -> str:
+    return hash_runtime_identifier(value) or "sha256:empty"
+
+
+def _safe_oauth_detail(value: object, *secret_values: object) -> str:
+    text = str(value or "")
+    for secret_value in secret_values:
+        secret = str(secret_value or "")
+        if secret:
+            text = text.replace(secret, "<redacted-secret>")
+    return redact_runtime_secret_text(text, max_length=_MAX_OAUTH_DIAGNOSTIC_LENGTH)
 
 
 # ---------------------------------------------------------------------------
@@ -111,14 +133,14 @@ async def google_callback(request: Request):
 
     try:
         token = await oauth.google.authorize_access_token(request)
-    except Exception as e:
-        logger.error("OAuth token exchange failed: %s", e)
+    except Exception:
+        logger.error("OAuth token exchange failed")
         # Sprint 176: Audit failed login
         try:
             from app.auth.auth_audit import log_auth_event
             await log_auth_event(
                 "login_failed", provider="google", result="failed",
-                reason=str(e),
+                reason="google_oauth_exchange_failed",
                 ip_address=request.client.host if request.client else None,
                 user_agent=request.headers.get("user-agent"),
             )
@@ -148,21 +170,11 @@ async def google_callback(request: Request):
         email_verified=bool(email_verified),
     )
 
-    # Sprint 193: Auto-assign new user to default organization
-    if settings.enable_multi_tenant and settings.default_organization_id:
-        try:
-            from app.core.database import get_asyncpg_pool
-            pool = await get_asyncpg_pool(create=True)
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    """INSERT INTO user_organizations (user_id, organization_id, role, joined_at)
-                       VALUES ($1, $2, 'member', NOW())
-                       ON CONFLICT (user_id, organization_id) DO NOTHING""",
-                    user["id"], settings.default_organization_id,
-                )
-                logger.info("Auto-assigned user %s to org %s", user["id"], settings.default_organization_id)
-        except Exception as e:
-            logger.warning("Failed to auto-assign user %s to default org: %s", user["id"], e)
+    assigned_org_id = resolve_default_login_organization_id(settings)
+    if assigned_org_id:
+        ensured = await ensure_user_org_membership(user["id"], assigned_org_id)
+        if ensured:
+            logger.info("Auto-assigned Google OAuth user to default organization")
 
     # Create token pair
     token_pair = await create_token_pair(
@@ -171,6 +183,8 @@ async def google_callback(request: Request):
         name=user.get("name"),
         role=user.get("role", "student"),
         platform_role=user.get("platform_role"),
+        role_source="platform",
+        active_organization_id=assigned_org_id,
         auth_method="google",
     )
 
@@ -185,10 +199,8 @@ async def google_callback(request: Request):
     except Exception:
         pass
 
-    # Sprint 193b: Determine organization_id for frontend
-    assigned_org_id = settings.default_organization_id if (
-        settings.enable_multi_tenant and settings.default_organization_id
-    ) else ""
+    # Sprint 193b: organization_id for frontend mirrors the token claim.
+    assigned_org_id = assigned_org_id or ""
 
     # Build common token params (reused by desktop + web redirect flows)
     token_params = urlencode({

@@ -17,8 +17,7 @@ Covers:
 
 import json
 import time
-import threading
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -569,7 +568,7 @@ class TestTikTokResearchAdapter:
 
     def test_token_caching(self, mock_settings_tiktok_native):
         """Token is cached and reused on subsequent calls."""
-        from app.engine.search_platforms.adapters.tiktok_research import _get_access_token, _token_cache
+        from app.engine.search_platforms.adapters.tiktok_research import _get_access_token
         import app.engine.search_platforms.adapters.tiktok_research as tt_mod
 
         tt_mod._token_cache = {"access_token": None, "expires_at": 0.0}
@@ -585,6 +584,33 @@ class TestTikTokResearchAdapter:
         assert token1 == "clt.cached"
         assert token2 == "clt.cached"
         assert mock_post.call_count == 1  # Only one HTTP call (cached)
+
+    def test_token_cache_is_bound_to_credentials(self):
+        """Cached token is not reused after client credentials change."""
+        from app.engine.search_platforms.adapters.tiktok_research import _get_access_token
+        import app.engine.search_platforms.adapters.tiktok_research as tt_mod
+
+        tt_mod._token_cache = {"cache_key": None, "access_token": None, "expires_at": 0.0}
+
+        first_resp = MagicMock()
+        first_resp.json.return_value = {"access_token": "clt.first", "expires_in": 7200}
+        first_resp.raise_for_status = MagicMock()
+        second_resp = MagicMock()
+        second_resp.json.return_value = {"access_token": "clt.second", "expires_in": 7200}
+        second_resp.raise_for_status = MagicMock()
+
+        with patch("httpx.post", side_effect=[first_resp, second_resp]) as mock_post:
+            first = _get_access_token("key-a", "secret-a")
+            second = _get_access_token("key-b", "secret-b")
+
+        assert first == "clt.first"
+        assert second == "clt.second"
+        assert mock_post.call_count == 2
+        assert mock_post.call_args_list[0].kwargs["data"]["client_secret"] == "secret-a"
+        assert mock_post.call_args_list[1].kwargs["data"]["client_secret"] == "secret-b"
+        assert tt_mod._token_cache["access_token"] == "clt.second"
+        assert "secret-b" not in str(tt_mod._token_cache["cache_key"])
+        assert "key-b" not in str(tt_mod._token_cache["cache_key"])
 
 
 

@@ -21,7 +21,7 @@ from app.engine.multi_agent.agent_runtime_profiles import (
     resolve_agent_runtime_profile_group,
     sanitize_agent_runtime_profiles,
 )
-from app.engine.model_catalog import NVIDIA_DEEPSEEK_FLASH_MODEL
+from app.engine.model_catalog import NVIDIA_DEFAULT_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ _DEFAULT_CONFIGS: Dict[str, AgentNodeConfig] = {
     "direct_chatter": AgentNodeConfig(
         "direct_chatter",
         provider="nvidia",
-        model=NVIDIA_DEEPSEEK_FLASH_MODEL,
+        model=NVIDIA_DEFAULT_MODEL,
         tier="light",
         temperature=0.7,
     ),

@@ -134,6 +134,84 @@ class AgentType(str, Enum):
     COLLEAGUE = "colleague_agent"            # Sprint 215
 
 
+_TURN_PATH_PREFLIGHT_DIRECT_PATHS = frozenset(
+    {
+        "weather_lookup",
+        "external_connection_status",
+        "external_app_action",
+    }
+)
+
+
+def _user_role_for_turn_path_preflight(state: AgentState) -> str:
+    context = state.get("context") if isinstance(state.get("context"), dict) else {}
+    role = str(context.get("user_role") or state.get("role") or "student").strip()
+    return role or "student"
+
+
+def _intent_for_turn_path_preflight(path: str) -> str:
+    if path == "weather_lookup":
+        return "weather_lookup"
+    if path == "external_connection_status":
+        return "external_connection_status"
+    if path == "external_app_action":
+        return "external_app_action"
+    return "direct"
+
+
+def _apply_turn_path_governor_preflight(
+    state: AgentState,
+    query: str,
+) -> str | None:
+    """Let typed path governance short-circuit obvious direct tool lanes.
+
+    OpenHuman routes integration work by choosing the toolkit boundary before
+    exposing tools. This preflight gives Wiii the same control-plane behavior
+    for deterministic direct lanes, while leaving ambiguous learning/RAG turns
+    to the existing supervisor.
+    """
+
+    try:
+        from app.engine.multi_agent.tool_collection import (
+            ensure_direct_turn_policy_metadata,
+        )
+
+        decision = ensure_direct_turn_policy_metadata(
+            query=query,
+            state=state,
+            user_role=_user_role_for_turn_path_preflight(state),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[SUPERVISOR] Turn-path preflight skipped: %s", exc)
+        return None
+
+    path = str(getattr(decision, "path", "") or "").strip()
+    if path not in _TURN_PATH_PREFLIGHT_DIRECT_PATHS:
+        return None
+
+    agent = AgentType.DIRECT.value
+    intent = _intent_for_turn_path_preflight(path)
+    method = "turn_path_governor_preflight"
+    reason = str(getattr(decision, "reason", "") or "typed_turn_path")
+    state["routing_metadata"] = {
+        "intent": intent,
+        "confidence": 1.0,
+        "reasoning": _finalize_routing_reasoning(
+            raw_reasoning=f"typed turn path selected {path}: {reason}",
+            method=method,
+            chosen_agent=agent,
+            intent=intent,
+            query=query,
+        ),
+        "llm_reasoning": "",
+        "method": method,
+        "final_agent": agent,
+        "turn_path": path,
+        "turn_path_reason": reason,
+    }
+    return agent
+
+
 # =============================================================================
 # Sprint 71: SOTA Routing Prompt with CoT and Few-Shot Examples
 # =============================================================================
@@ -291,6 +369,9 @@ class SupervisorAgent:
             return agent
 
         _apply_routing_hint(state, query)
+        turn_path_agent = _apply_turn_path_governor_preflight(state, query)
+        if turn_path_agent:
+            return turn_path_agent
 
         normalized_query = _normalize_router_text(query)
         if _looks_source_backed_domain_lookup_turn(normalized_query):
@@ -508,6 +589,8 @@ class SupervisorAgent:
             direct_agent_name=AgentType.DIRECT.value,
             memory_agent_name=AgentType.MEMORY.value,
             rag_agent_name=AgentType.RAG.value,
+            code_studio_agent_name=AgentType.CODE_STUDIO.value,
+            needs_code_studio_fn=_needs_code_studio,
         )
 
     def _validate_domain_routing(self, query: str, chosen_agent: str,

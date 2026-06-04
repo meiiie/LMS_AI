@@ -12,9 +12,18 @@ import { useHostContextStore } from "@/stores/host-context-store";
 import { useModelStore } from "@/stores/model-store";
 import type { VisualPayload } from "@/api/types";
 import { sendMessageStream } from "@/api/chat";
+import {
+  fetchWiiiConnectFacebookPages,
+  fetchWiiiConnectProviderConnections,
+} from "@/api/wiii-connect";
 
 vi.mock("@/api/chat", () => ({
   sendMessageStream: vi.fn(),
+}));
+
+vi.mock("@/api/wiii-connect", () => ({
+  fetchWiiiConnectProviderConnections: vi.fn(),
+  fetchWiiiConnectFacebookPages: vi.fn(),
 }));
 
 vi.mock("@/api/client", () => ({
@@ -110,6 +119,8 @@ beforeEach(() => {
   useCharacterStore.getState().reset();
   usePageContextStore.getState().clear();
   useHostContextStore.getState().clear();
+  vi.mocked(fetchWiiiConnectProviderConnections).mockReset();
+  vi.mocked(fetchWiiiConnectFacebookPages).mockReset();
   useModelStore.setState({
     activeProvider: "auto",
     nextTurnProvider: null,
@@ -387,5 +398,200 @@ describe("useSSEStream concurrency", () => {
     expect(useChatStore.getState().streamingLifecycleEvents).toHaveLength(0);
     expect(useChatStore.getState().lastCompletedLifecycleEvents).toHaveLength(0);
     useChatStore.getState().clearStreaming();
+  });
+
+  it("sends Wiii Connect Facebook snapshot even when host context is missing", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    vi.mocked(fetchWiiiConnectProviderConnections).mockResolvedValueOnce({
+      version: "wiii_connect_connection_list.v1",
+      provider_slug: "facebook",
+      status: "ready",
+      connections: [
+        {
+          provider_slug: "facebook",
+          connection_ref: "conn-1",
+          connection_id: "conn-1",
+          state: "connected",
+          active: true,
+        },
+      ],
+      connection_count: 1,
+    } as any);
+    vi.mocked(fetchWiiiConnectFacebookPages).mockResolvedValueOnce({
+      version: "wiii_connect_facebook_pages.v1",
+      provider_slug: "facebook",
+      status: "ready",
+      connection_ref: "conn-1",
+      pages: [{ page_id: "page-1", name: "Wiii" }],
+      page_count: 1,
+    } as any);
+    sendMessageStreamMock.mockResolvedValueOnce({
+      lastEventId: null,
+      sawDone: true,
+      eventOrder: ["done"],
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Wiii có kết nối được Facebook không?");
+    });
+
+    const request = sendMessageStreamMock.mock.calls[0]?.[0] as any;
+    const hostContext = request.user_context?.host_context;
+    expect(hostContext?.host_type).toBe("wiii-desktop");
+    expect(hostContext?.page?.metadata?.wiii_connect).toMatchObject({
+      provider_slug: "facebook",
+      provider_label: "Facebook",
+      status: "connected",
+      active_connection_count: 1,
+      page_count: 1,
+      page_names: ["Wiii"],
+      available_actions: [
+        "wiii_connect.facebook_post.direct_apply",
+        "wiii_connect.facebook_post.preview",
+        "wiii_connect.facebook_post.apply",
+      ],
+    });
+  });
+
+  it("sends pending Facebook connection state without probing pages", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    vi.mocked(fetchWiiiConnectProviderConnections).mockResolvedValueOnce({
+      version: "wiii_connect_connection_list.v1",
+      provider_slug: "facebook",
+      status: "ready",
+      connections: [
+        {
+          provider_slug: "facebook",
+          connection_ref: "conn-waiting",
+          connection_id: "conn-waiting",
+          state: "waiting",
+          active: false,
+          reason: "provider_connection_list",
+        },
+      ],
+      connection_count: 1,
+    } as any);
+    sendMessageStreamMock.mockResolvedValueOnce({
+      lastEventId: null,
+      sawDone: true,
+      eventOrder: ["done"],
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Wiii connected Facebook?");
+    });
+
+    expect(fetchWiiiConnectFacebookPages).not.toHaveBeenCalled();
+    const request = sendMessageStreamMock.mock.calls[0]?.[0] as any;
+    expect(request.user_context?.host_context?.page?.metadata?.wiii_connect).toMatchObject({
+      provider_slug: "facebook",
+      status: "not_connected",
+      connection_count: 1,
+      active_connection_count: 0,
+      connection_state: "waiting",
+      connection_active: false,
+      blocked_reason: "provider_connection_list",
+    });
+  });
+
+  it("sanitizes host context and action feedback before sending chat request", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    useHostContextStore.getState().updateContext({
+      host_type: "lms",
+      page: {
+        type: "lesson",
+        title: "COLREGs",
+        metadata: {
+          safe: "visible metadata",
+          connection_ref: "conn-secret",
+          connection_id: "conn-secret-id",
+          page_id: "page-secret",
+          access_token: "access-secret",
+          wiii_connect: {
+            provider_slug: "facebook",
+            status: "connected",
+            connection_ref: "conn-secret",
+            page_id: "page-secret",
+          },
+        },
+      },
+      selection: {
+        text: "visible selection",
+        approval_token: "approval-secret",
+      },
+      available_actions: [
+        {
+          action: "safe.action",
+          label: "Safe action",
+          input_schema: {
+            properties: {
+              message: { type: "string" },
+              connection_ref: { type: "string" },
+              image_base64: { type: "string" },
+            },
+          },
+        },
+      ],
+    });
+    useHostContextStore.setState({
+      lastActionResult: {
+        request_id: "req-secret",
+        action: "wiii_connect.facebook_post.preview",
+        params: {
+          message: "visible message",
+          connection_ref: "conn-secret",
+          page_id: "page-secret",
+        },
+        success: true,
+        summary: "Visible summary.",
+        data: {
+          preview_kind: "facebook_post",
+          message: "visible message",
+          approval_token: "approval-secret",
+          facebook_post_body: {
+            connection_ref: "conn-secret",
+            page_id: "page-secret",
+            message: "visible message",
+          },
+        },
+        timestamp: "2026-05-29T00:00:00.000Z",
+      },
+      recentActionResults: [],
+    });
+    sendMessageStreamMock.mockResolvedValueOnce({
+      lastEventId: null,
+      sawDone: true,
+      eventOrder: ["done"],
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Summarize the current page");
+    });
+
+    const request = sendMessageStreamMock.mock.calls[0]?.[0] as any;
+    const userContext = request.user_context;
+    const serialized = JSON.stringify(userContext);
+    expect(userContext?.host_context?.page?.metadata?.safe).toBe("visible metadata");
+    expect(userContext?.page_context?.safe).toBe("visible metadata");
+    expect(serialized).toContain("visible selection");
+    expect(serialized).toContain("Visible summary.");
+    expect(serialized).toContain("visible message");
+    expect(serialized).not.toContain("conn-secret");
+    expect(serialized).not.toContain("conn-secret-id");
+    expect(serialized).not.toContain("page-secret");
+    expect(serialized).not.toContain("access-secret");
+    expect(serialized).not.toContain("approval-secret");
+    expect(serialized).not.toContain("connection_ref");
+    expect(serialized).not.toContain("connection_id");
+    expect(serialized).not.toContain("page_id");
+    expect(serialized).not.toContain("access_token");
+    expect(serialized).not.toContain("approval_token");
+    expect(serialized).not.toContain("image_base64");
   });
 });

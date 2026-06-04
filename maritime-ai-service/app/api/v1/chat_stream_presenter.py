@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from app.engine.runtime.event_payload_sanitizer import sanitize_runtime_payload
+
 try:
     from app.engine.llm_providers.wiii_chat_model import _ViSpaceInjector
 except ModuleNotFoundError as exc:
@@ -300,11 +302,14 @@ def _apply_presentation_metadata(
 
 def format_sse(event: str, data: dict, event_id: int | None = None) -> str:
     """Format data as a Server-Sent Event with optional event id."""
+    safe_data = sanitize_runtime_payload(data)
+    if not isinstance(safe_data, dict):
+        safe_data = {}
     parts = []
     if event_id is not None:
         parts.append(f"id: {event_id}")
     parts.append(f"event: {event}")
-    parts.append(f"data: {json.dumps(data, ensure_ascii=False)}")
+    parts.append(f"data: {json.dumps(safe_data, ensure_ascii=False)}")
     parts.append("")
     parts.append("")
     return "\n".join(parts)

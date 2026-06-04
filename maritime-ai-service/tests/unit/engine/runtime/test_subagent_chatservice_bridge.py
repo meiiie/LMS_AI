@@ -69,6 +69,34 @@ def test_format_description_with_context_hints():
 
 # ── source / tool-call coercion ──
 
+def test_format_description_sanitizes_and_bounds_context_hints():
+    from app.engine.runtime.subagent_chatservice_bridge import _format_description
+    from app.engine.runtime.subagent_runner import SubagentTask
+
+    out = _format_description(
+        SubagentTask(
+            description="safe summary",
+            parent_session_id="p1",
+            context_hints={
+                "focus": (
+                    "navigation Bearer raw-bearer-token-123 "
+                    "api_key=raw-api-key-inline"
+                ),
+                "access_token": "raw-access-token",
+                "document_context": "A" * 900,
+            },
+        )
+    )
+
+    assert "safe summary" in out
+    assert "<redacted-secret>" in out
+    assert "raw-bearer-token-123" not in out
+    assert "raw-api-key-inline" not in out
+    assert "raw-access-token" not in out
+    assert "access_token" not in out
+    assert "A" * 600 not in out
+
+
 def test_coerce_sources_handles_pydantic_and_dict():
     from app.engine.runtime.subagent_chatservice_bridge import _coerce_sources
 
@@ -78,6 +106,38 @@ def test_coerce_sources_handles_pydantic_and_dict():
     response = SimpleNamespace(sources=[pydantic_like, plain_dict, bad_value])
     out = _coerce_sources(response)
     assert out == [{"id": "p1"}, {"id": "p2"}]
+
+
+def test_coerce_sources_returns_safe_citation_metadata_only():
+    from app.engine.runtime.subagent_chatservice_bridge import _coerce_sources
+
+    response = SimpleNamespace(
+        sources=[
+            {
+                "id": "doc-1",
+                "page": 5,
+                "title": "COLREG Bearer raw-source-token-123",
+                "content": "raw document text must stay in child log only",
+                "content_snippet": "raw snippet",
+                "access_token": "raw-access-token",
+                "provider_payload": {"id": "raw-provider"},
+                "bounding_boxes": [{"x": i} for i in range(20)],
+            }
+        ]
+    )
+
+    out = _coerce_sources(response)
+
+    assert out[0]["id"] == "doc-1"
+    assert out[0]["page"] == 5
+    assert "<redacted-secret>" in out[0]["title"]
+    assert len(out[0]["bounding_boxes"]) == 8
+    serialized = str(out)
+    assert "content" not in serialized
+    assert "raw document text" not in serialized
+    assert "raw snippet" not in serialized
+    assert "raw-access-token" not in serialized
+    assert "raw-provider" not in serialized
 
 
 def test_coerce_sources_no_sources_attribute():

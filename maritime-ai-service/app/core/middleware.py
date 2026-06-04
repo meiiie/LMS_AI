@@ -17,6 +17,7 @@ import re
 import uuid
 from pathlib import Path
 
+from fastapi import HTTPException
 import structlog
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -85,6 +86,70 @@ def _find_embed_asset_replacement(path: str, roots: list[Path] | None = None) ->
         existing = [candidate for candidate in matches if candidate.is_file()]
         candidates.extend(existing)
     return candidates[0] if len(candidates) == 1 else None
+
+
+def _normalize_optional_org_id(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _is_strict_middleware_org_mode(settings_obj: object) -> bool:
+    env = getattr(settings_obj, "environment", "development")
+    return (
+        getattr(settings_obj, "enable_multi_tenant", False) is True
+        and isinstance(env, str)
+        and env in ("production", "staging")
+    )
+
+
+def _extract_bearer_token(request: Request) -> str | None:
+    authorization = request.headers.get("authorization", "")
+    if not isinstance(authorization, str):
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return token.strip() or None
+
+
+def _validate_header_org_against_bearer_token(
+    request: Request,
+    org_id: str | None,
+    settings_obj: object,
+) -> JSONResponse | None:
+    org_id = _normalize_optional_org_id(org_id)
+    if not org_id or not _is_strict_middleware_org_mode(settings_obj):
+        return None
+
+    bearer_token = _extract_bearer_token(request)
+    if not bearer_token:
+        return None
+
+    try:
+        from app.core.security import verify_jwt_token
+
+        token_payload = verify_jwt_token(bearer_token)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    token_org_id = _normalize_optional_org_id(token_payload.active_organization_id)
+    if token_org_id and token_org_id == org_id:
+        return None
+
+    if token_org_id:
+        detail = "Active organization does not match authenticated organization."
+    else:
+        detail = (
+            "Authenticated token does not carry an active organization; "
+            "X-Organization-ID cannot establish tenant context."
+        )
+
+    return JSONResponse(
+        status_code=403,
+        content={"detail": detail},
+    )
 
 
 class EmbedCSPMiddleware(BaseHTTPMiddleware):
@@ -176,6 +241,14 @@ class OrgContextMiddleware(BaseHTTPMiddleware):
         if not org_id and settings.subdomain_base_domain:
             host = request.headers.get("host", "")
             org_id = extract_org_from_subdomain(host, settings.subdomain_base_domain)
+
+        org_rejection = _validate_header_org_against_bearer_token(
+            request,
+            org_id,
+            settings,
+        )
+        if org_rejection is not None:
+            return org_rejection
 
         token_org = None
         token_domains = None

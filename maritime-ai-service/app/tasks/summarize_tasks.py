@@ -13,7 +13,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-async def summarize_thread_background(thread_id: str, user_id: str) -> dict:
+async def summarize_thread_background(
+    thread_id: str,
+    user_id: str,
+    organization_id: str | None = None,
+) -> dict:
     """
     Background task to summarize a specific thread.
 
@@ -25,6 +29,7 @@ async def summarize_thread_background(thread_id: str, user_id: str) -> dict:
     Args:
         thread_id: Composite thread ID
         user_id: User ID
+        organization_id: Organization ID for multi-tenant isolation
 
     Returns:
         Dict with summarization result
@@ -36,6 +41,7 @@ async def summarize_thread_background(thread_id: str, user_id: str) -> dict:
         summary = await summarizer.summarize_thread(
             thread_id=thread_id,
             user_id=user_id,
+            organization_id=organization_id,
         )
 
         return {

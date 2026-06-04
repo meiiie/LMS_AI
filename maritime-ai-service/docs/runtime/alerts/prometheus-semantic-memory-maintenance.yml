@@ -1,0 +1,42 @@
+# Prometheus alert rules for post-turn semantic memory maintenance.
+#
+# Source metrics:
+# - runtime.semantic_memory.maintenance.enqueue
+# - runtime.semantic_memory.maintenance.runs
+# GET /metrics serializes them as:
+# - runtime_semantic_memory_maintenance_enqueue
+# - runtime_semantic_memory_maintenance_runs
+# Labels: enqueue has status/reason; runs has executor/status.
+groups:
+  - name: wiii-semantic-memory-maintenance
+    interval: 30s
+    rules:
+      - alert: WiiiSemanticMemoryMaintenanceError
+        expr: |
+          sum by (executor) (
+            increase(runtime_semantic_memory_maintenance_runs{status="error"}[15m])
+          ) > 0
+        for: 5m
+        labels:
+          service: wiii-ai
+          component: semantic-memory-maintenance
+          severity: p3_ticket
+        annotations:
+          summary: "Semantic memory maintenance error on {{ $labels.executor }}"
+          description: "Post-turn semantic memory maintenance failed. Chat can continue, but memory pruning/summarization continuity may be incomplete."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/semantic-memory-maintenance.md"
+
+      - alert: WiiiSemanticMemoryMaintenanceBrokerUnavailable
+        expr: |
+          sum (
+            increase(runtime_semantic_memory_maintenance_enqueue{status="skipped",reason="broker_unavailable"}[30m])
+          ) > 20
+        for: 10m
+        labels:
+          service: wiii-ai
+          component: semantic-memory-maintenance
+          severity: p3_ticket
+        annotations:
+          summary: "Semantic memory maintenance broker unavailable"
+          description: "Taskiq enqueue was unavailable repeatedly. Wiii should fall back locally, but heavy memory work may move closer to the web process."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/semantic-memory-maintenance.md"

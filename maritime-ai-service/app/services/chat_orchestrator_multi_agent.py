@@ -9,6 +9,8 @@ async def resolve_request_scope_impl(
     request,
     *,
     default_organization_id: str | None,
+    enable_multi_tenant: bool,
+    environment: str,
     get_current_org_id_fn,
     get_current_org_allowed_domains_fn,
     get_domain_router_fn,
@@ -17,8 +19,17 @@ async def resolve_request_scope_impl(
     organization_id = (
         getattr(request, "organization_id", None)
         or get_current_org_id_fn()
-        or default_organization_id
     )
+    if not organization_id and default_organization_id:
+        if enable_multi_tenant and environment in ("production", "staging"):
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=403,
+                detail="Organization context required for chat request scope",
+            )
+        organization_id = default_organization_id
+
     domain_router = get_domain_router_fn()
     org_allowed_domains = get_current_org_allowed_domains_fn()
     domain_id = await domain_router.resolve(
@@ -57,6 +68,18 @@ async def build_multi_agent_context_impl(
         "semantic_context": context.semantic_context,
         "langchain_messages": context.langchain_messages,
         "history_list": context.history_list or [],
+        "history_retrieval_summary": getattr(
+            context,
+            "history_retrieval_summary",
+            {},
+        )
+        or {},
+        "context_budget_summary": getattr(
+            context,
+            "context_budget_summary",
+            {},
+        )
+        or {},
         "user_facts": user_facts,
         "pronoun_style": (
             getattr(context, "pronoun_style", None)
@@ -91,6 +114,11 @@ async def build_multi_agent_context_impl(
         "host_context": getattr(context, "host_context", None),
         "host_capabilities": getattr(context, "host_capabilities", None),
         "host_action_feedback": getattr(context, "host_action_feedback", None),
+        "_host_action_control_feedback": getattr(
+            context,
+            "host_action_control_feedback",
+            None,
+        ),
         "visual_context": getattr(context, "visual_context", None),
         "widget_feedback": getattr(context, "widget_feedback", None),
         "code_studio_context": getattr(context, "code_studio_context", None),

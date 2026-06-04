@@ -264,6 +264,31 @@ export interface ModelSwitchPrompt {
   allow_session_switch: boolean;
 }
 
+export interface RuntimeFlowTrace {
+  version?: string;
+  turn_path_decision?: Record<string, unknown>;
+  tool_policy_session?: Record<string, unknown>;
+  external_app_action_plan?: Record<string, unknown>;
+  external_app_integration_lane?: Record<string, unknown>;
+  external_action_trace?: Record<string, unknown>;
+  final_answer?: Record<string, unknown>;
+}
+
+export interface RuntimeFlowLedger {
+  schema_version?: string;
+  request?: Record<string, unknown>;
+  context?: Record<string, unknown>;
+  route?: Record<string, unknown>;
+  runtime?: Record<string, unknown>;
+  tools?: Record<string, unknown>;
+  scheduled_tasks?: Record<string, unknown>;
+  external_app?: Record<string, unknown>;
+  stream?: Record<string, unknown>;
+  host_actions?: Record<string, unknown>;
+  finalization?: Record<string, unknown>;
+  final_answer?: Record<string, unknown>;
+}
+
 export interface ChatResponseMetadata {
   processing_time: number;
   provider?: string;
@@ -287,6 +312,8 @@ export interface ChatResponseMetadata {
   query_type?: string;
   suggested_questions?: string[];
   data?: Record<string, unknown>;
+  runtime_flow_trace?: RuntimeFlowTrace;
+  runtime_flow_ledger?: RuntimeFlowLedger;
   /** Allow runtime-extended fields from server */
   [key: string]: unknown;
 }
@@ -355,6 +382,13 @@ export interface SSEMetadataEvent {
   step_id?: string;
   step_state?: StepState;
   presentation?: PresentationMode;
+  [key: string]: unknown;
+}
+
+export interface SSEDoneEvent {
+  status?: string;
+  processing_time?: number;
+  runtime_flow_ledger?: RuntimeFlowLedger;
   [key: string]: unknown;
 }
 
@@ -429,6 +463,7 @@ export interface WiiiConnectRuntimeConnection {
   last_checked_at?: string | null;
   reason?: string;
   warnings?: string[];
+  connection_lifecycle?: WiiiConnectConnectionLifecycleDecision | null;
   [key: string]: unknown;
 }
 
@@ -443,13 +478,343 @@ export interface WiiiConnectRuntimePathCapability {
   [key: string]: unknown;
 }
 
+export interface WiiiConnectRuntimePathReadiness {
+  path: string;
+  status: "ready" | "guarded" | "blocked" | string;
+  reason: string;
+  required_connection_slugs?: string[];
+  missing_connection_slugs?: string[];
+  agent_ready_connection_slugs?: string[];
+  allowed_tool_groups?: string[];
+  suppressed_tool_groups?: string[];
+  mutation_policy?: string;
+  delegation_policy?: string;
+  [key: string]: unknown;
+}
+
+export interface WiiiConnectCapabilitySummary {
+  active_connection_slugs?: string[];
+  agent_ready_connection_slugs?: string[];
+  connected_provider_slugs?: string[];
+  agent_ready_provider_slugs?: string[];
+  connected_scope_names?: string[];
+  suppressed_tool_groups?: string[];
+  path_readiness?: WiiiConnectRuntimePathReadiness[];
+}
+
 export interface WiiiConnectRuntimeSnapshot {
   version: string;
   generated_at?: string;
   surface?: string;
   connections?: WiiiConnectRuntimeConnection[];
   path_capabilities?: WiiiConnectRuntimePathCapability[];
+  capability_summary?: WiiiConnectCapabilitySummary;
   warnings?: string[];
+}
+
+export interface WiiiConnectDoctorPathDiagnostic {
+  path: string;
+  status: "ready" | "guarded" | "blocked" | string;
+  reason: string;
+  required_connection_slugs?: string[];
+  missing_connection_slugs?: string[];
+  blocked_connection_reasons?: string[];
+  mutation_policy?: string;
+  delegation_policy?: string;
+  agent_ready_connection_slugs?: string[];
+}
+
+export interface WiiiConnectDoctorProviderStage {
+  key: string;
+  status: "ready" | "pending" | "blocked" | string;
+  reason: string;
+  required_next?: string[];
+}
+
+export interface WiiiConnectDoctorProviderDiagnostic {
+  provider_slug: string;
+  label: string;
+  provider_kind: string;
+  status: "ready" | "guarded" | "blocked" | string;
+  reason: string;
+  connection_status: string;
+  active?: boolean;
+  agent_ready?: boolean;
+  connection_count?: number;
+  active_connection_count?: number;
+  action_count?: number;
+  scope_count?: number;
+  required_next?: string[];
+  stages?: WiiiConnectDoctorProviderStage[];
+  connection_lifecycle?: WiiiConnectConnectionLifecycleDecision | null;
+}
+
+export interface WiiiConnectDoctorReport {
+  version: string;
+  generated_at?: string;
+  surface?: string;
+  status: "ready" | "degraded" | "blocked" | string;
+  summary?: Record<string, number>;
+  path_diagnostics?: WiiiConnectDoctorPathDiagnostic[];
+  provider_diagnostics?: WiiiConnectDoctorProviderDiagnostic[];
+  top_blockers?: string[];
+  warnings?: string[];
+}
+
+export interface RuntimeFlowDoctorAlert {
+  code: string;
+  severity?: "critical" | "error" | "warning" | string;
+  count?: number;
+  threshold?: string;
+}
+
+export interface RuntimeFlowDoctorTrendBucket {
+  bucket_start: string;
+  turn_count: number;
+  alert_counts?: Record<string, number>;
+  status_counts?: Record<string, number>;
+}
+
+export interface RuntimeFlowDoctorSubagentSummary {
+  turn_count?: number;
+  report_count?: number;
+  state_projected_key_count?: number;
+  state_dropped_key_count?: number;
+  source_count?: number;
+  tool_count?: number;
+  thinking_dropped_count?: number;
+  raw_content_flag_count?: number;
+  warning_count?: number;
+  warnings?: Record<string, number>;
+  identifier_strategy?: string;
+}
+
+export interface RuntimeLifecycleHookRegistration {
+  point?: string;
+  owner?: string;
+  name?: string;
+  registered?: boolean;
+}
+
+export interface RuntimeLifecycleRegistrationSummary {
+  version?: string;
+  registration_count?: number;
+  owner_counts?: Record<string, number>;
+  point_counts?: Record<string, number>;
+  default_runtime_hooks?: {
+    owner?: string;
+    required_count?: number;
+    registered_count?: number;
+    installed?: boolean;
+    hooks?: RuntimeLifecycleHookRegistration[];
+  };
+  privacy?: {
+    raw_content_included?: boolean;
+    identifier_strategy?: string;
+  };
+}
+
+export interface RuntimePostTurnLifecycleMetricsBlock {
+  event_count?: number;
+  status_counts?: Record<string, number>;
+  reason_counts?: Record<string, number>;
+  transport_counts?: Record<string, number>;
+  semantic_memory_policy_counts?: Record<string, number>;
+  group_counts?: Record<string, number>;
+}
+
+export interface RuntimePostTurnLifecycleMetricsReport {
+  version?: string;
+  post_turn?: RuntimePostTurnLifecycleMetricsBlock;
+  background_tasks?: RuntimePostTurnLifecycleMetricsBlock;
+  source?: {
+    metrics_backend?: string;
+    window?: string;
+    org_scoped?: boolean;
+    counter_names?: Record<string, string>;
+  };
+  privacy?: {
+    raw_content_included?: boolean;
+    identifier_strategy?: string;
+  };
+}
+
+export interface RuntimePostTurnLifecycleLedgerReport {
+  version?: string;
+  event_count?: number;
+  missing_count?: number;
+  status_counts?: Record<string, number>;
+  reason_counts?: Record<string, number>;
+  semantic_memory_policy_counts?: Record<string, number>;
+  background_tasks_scheduled_count?: number;
+  background_tasks_skipped_count?: number;
+  raw_content_flag_count?: number;
+  background_schedule?: RuntimePostTurnLifecycleMetricsBlock & {
+    task_count?: number;
+  };
+  source?: {
+    ledger_path?: string;
+    window?: string;
+  };
+  privacy?: {
+    raw_content_included?: boolean;
+    identifier_strategy?: string;
+  };
+}
+
+export interface RuntimeFlowDoctorReport {
+  version: string;
+  generated_at?: string;
+  status: "ready" | "degraded" | "blocked" | string;
+  alerts?: RuntimeFlowDoctorAlert[];
+  summary?: Record<string, number>;
+  request_correlation?: Record<string, number | string>;
+  subagents?: RuntimeFlowDoctorSubagentSummary;
+  routes?: Record<string, number>;
+  finalization_statuses?: Record<string, number>;
+  stream_events?: Record<string, number>;
+  suppressed_tools?: Record<string, number>;
+  observed_tools?: Record<string, number>;
+  context_warnings?: Record<string, number>;
+  privacy?: {
+    raw_content_included?: boolean;
+    identifier_strategy?: string;
+  };
+  alert_trend?: {
+    bucket_strategy?: string;
+    identifier_strategy?: string;
+    buckets?: RuntimeFlowDoctorTrendBucket[];
+  };
+  source?: {
+    session_event_count?: number;
+    runtime_flow_ledger_event_count?: number;
+    limit?: number;
+    org_scoped?: boolean;
+    window?: string;
+    since_seq?: number | null;
+  };
+  runtime_config?: Record<string, string | number | boolean>;
+  lifecycle_registrations?: RuntimeLifecycleRegistrationSummary;
+  post_turn_lifecycle?: RuntimePostTurnLifecycleMetricsReport;
+  post_turn_lifecycle_ledger?: RuntimePostTurnLifecycleLedgerReport;
+}
+
+export interface RuntimeFlowDoctorHistoryBucket {
+  bucket_start: string;
+  status: "ready" | "degraded" | "blocked" | string;
+  alerts?: RuntimeFlowDoctorAlert[];
+  summary?: Record<string, number>;
+  request_correlation?: Record<string, number | string>;
+  subagents?: RuntimeFlowDoctorSubagentSummary;
+  routes?: Record<string, number>;
+  finalization_statuses?: Record<string, number>;
+  post_turn_lifecycle_ledger?: RuntimePostTurnLifecycleLedgerReport;
+  context_warnings?: Record<string, number>;
+  source?: {
+    session_event_count?: number;
+    runtime_flow_ledger_event_count?: number;
+  };
+}
+
+export interface RuntimeFlowDoctorHistoryReport {
+  version: string;
+  generated_at?: string;
+  bucket_strategy?: string;
+  identifier_strategy?: string;
+  buckets?: RuntimeFlowDoctorHistoryBucket[];
+  source?: {
+    session_event_count?: number;
+    runtime_flow_ledger_event_count?: number;
+    bucket_count?: number;
+    bucket_limit?: number;
+    limit?: number;
+    org_scoped?: boolean;
+    window?: string;
+  };
+  privacy?: {
+    raw_content_included?: boolean;
+    identifier_strategy?: string;
+  };
+  runtime_config?: Record<string, string | number | boolean>;
+  lifecycle_registrations?: RuntimeLifecycleRegistrationSummary;
+  post_turn_lifecycle?: RuntimePostTurnLifecycleMetricsReport;
+  post_turn_lifecycle_ledger?: RuntimePostTurnLifecycleLedgerReport;
+}
+
+export interface RuntimeFlowSessionEventPruneReport {
+  schema: string;
+  status: "dry_run" | "pruned" | string;
+  matched_count: number;
+  deleted_count: number;
+  retention_days: number;
+  cutoff: string;
+  dry_run: boolean;
+  org_scoped: boolean;
+  event_type_filter_applied: boolean;
+  privacy?: {
+    raw_content_included?: boolean;
+    identifier_strategy?: string;
+  };
+  runtime_config?: Record<string, string | number | boolean>;
+}
+
+export interface SemanticMemoryWriteDoctorReport {
+  version: string;
+  generated_at?: string;
+  status: "ready" | "degraded" | "blocked" | string;
+  summary?: Record<string, number>;
+  write_kinds?: Record<string, number>;
+  write_statuses?: Record<string, number>;
+  organization_contexts?: Record<string, number>;
+  warnings?: Record<string, number>;
+  source?: {
+    session_event_count?: number;
+    semantic_memory_write_event_count?: number;
+    limit?: number;
+    org_scoped?: boolean;
+    window?: string;
+  };
+  privacy?: {
+    raw_content_included?: boolean;
+    identifier_strategy?: string;
+  };
+  runtime_config?: Record<string, string | number | boolean>;
+}
+
+export interface SemanticMemoryWriteDoctorHistoryBucket {
+  bucket_start: string;
+  status: "ready" | "degraded" | "blocked" | string;
+  summary?: Record<string, number>;
+  write_kinds?: Record<string, number>;
+  write_statuses?: Record<string, number>;
+  organization_contexts?: Record<string, number>;
+  warnings?: Record<string, number>;
+  source?: {
+    session_event_count?: number;
+    semantic_memory_write_event_count?: number;
+  };
+}
+
+export interface SemanticMemoryWriteDoctorHistoryReport {
+  version: string;
+  generated_at?: string;
+  bucket_strategy?: string;
+  identifier_strategy?: string;
+  buckets?: SemanticMemoryWriteDoctorHistoryBucket[];
+  source?: {
+    session_event_count?: number;
+    semantic_memory_write_event_count?: number;
+    bucket_count?: number;
+    bucket_limit?: number;
+    limit?: number;
+    org_scoped?: boolean;
+    window?: string;
+  };
+  privacy?: {
+    raw_content_included?: boolean;
+    identifier_strategy?: string;
+  };
+  runtime_config?: Record<string, string | number | boolean>;
 }
 
 export interface WiiiConnectProviderRegistryEntry {
@@ -556,6 +921,27 @@ export interface WiiiConnectAuthorizationUrlDecision {
   audit_event?: WiiiConnectSessionAuditEvent | null;
 }
 
+export interface WiiiConnectConnectionLifecycleDecision {
+  version: string;
+  provider_slug: string;
+  status:
+    | "disconnected"
+    | "authorizing"
+    | "waiting"
+    | "connected"
+    | "expired"
+    | "error"
+    | "disconnecting"
+    | string;
+  reason: string;
+  active?: boolean;
+  connection_present?: boolean;
+  agent_ready?: boolean;
+  ready_to_connect?: boolean;
+  ready_to_execute_action?: boolean;
+  required_next?: string[];
+}
+
 export interface WiiiConnectProviderConnectionRecord {
   version: string;
   connection_ref: string;
@@ -571,6 +957,7 @@ export interface WiiiConnectProviderConnectionRecord {
   last_checked_at?: string | null;
   reason?: string;
   warnings?: string[];
+  connection_lifecycle?: WiiiConnectConnectionLifecycleDecision | null;
 }
 
 export interface WiiiConnectProviderConnectionListResponse {
@@ -581,8 +968,137 @@ export interface WiiiConnectProviderConnectionListResponse {
   provider_kind: string;
   connection_count: number;
   connections: WiiiConnectProviderConnectionRecord[];
+  connection_lifecycle?: WiiiConnectConnectionLifecycleDecision | null;
   provider?: Record<string, unknown> | null;
   storage?: Record<string, unknown> | null;
+}
+
+export interface WiiiConnectEffectiveActionStage {
+  key: string;
+  status: "ready" | "pending" | "blocked" | string;
+  reason: string;
+  required_next?: string[];
+}
+
+export interface WiiiConnectEffectiveActionRecord {
+  version: string;
+  slug: string;
+  provider_slug: string;
+  label: string;
+  mutation: string;
+  path: string;
+  status: "ready" | "guarded" | "blocked" | string;
+  reason: string;
+  runtime_enabled: boolean;
+  visible_to_agent: boolean;
+  executable_now: boolean;
+  requires_preview?: boolean;
+  requires_approval?: boolean;
+  required_scopes?: string[];
+  argument_policy_version?: string;
+  argument_keys?: string[];
+  model_argument_keys?: string[];
+  hidden_argument_count?: number;
+  stages?: WiiiConnectEffectiveActionStage[];
+  gateway?: Record<string, unknown> | null;
+  warnings?: string[];
+}
+
+export interface WiiiConnectEffectiveActionInventoryResponse {
+  version: string;
+  provider_slug: string;
+  provider_kind: string;
+  status: "ready" | "guarded" | "blocked" | string;
+  reason: string;
+  connection_ref_present?: boolean;
+  connection_present?: boolean;
+  connection_active?: boolean;
+  selected_connection_required?: boolean;
+  catalog_action_count: number;
+  runtime_enabled_action_count: number;
+  visible_action_count: number;
+  executable_action_count: number;
+  actions: WiiiConnectEffectiveActionRecord[];
+  storage?: Record<string, unknown> | null;
+}
+
+export interface WiiiConnectProviderScopeGrantResponse {
+  version: string;
+  status: "blocked" | "ready" | string;
+  reason: string;
+  provider_slug: string;
+  provider_kind: string;
+  connection?: WiiiConnectProviderConnectionRecord | null;
+  storage?: Record<string, unknown> | null;
+}
+
+export interface WiiiConnectFacebookPageOption {
+  page_id: string;
+  name: string;
+  category?: string;
+  link?: string;
+}
+
+export interface WiiiConnectFacebookPagesResponse {
+  version: string;
+  status: "blocked" | "ready" | string;
+  reason: string;
+  provider_slug: string;
+  action_slug?: string;
+  page_count: number;
+  pages: WiiiConnectFacebookPageOption[];
+  gateway?: Record<string, unknown> | null;
+}
+
+export interface WiiiConnectOperationApprovalLedger {
+  version?: string;
+  status?: "pending" | "consumed" | "blocked" | "unavailable" | "expired" | string;
+  reason?: string;
+  provider_slug?: string;
+  action_slug?: string;
+  preview_evidence_id_present?: boolean;
+  request_fingerprint_present?: boolean;
+  persistent?: boolean;
+  consumed?: boolean;
+  blocked?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface WiiiConnectFacebookPostPreviewResponse {
+  version: string;
+  status: "blocked" | "ready" | string;
+  reason: string;
+  provider_slug: string;
+  action_slug?: string;
+  preview_evidence_id?: string;
+  approval_token?: string;
+  preview?: {
+    page_id: string;
+    message: string;
+    image_present: boolean;
+    image_media_type?: string;
+    image_filename?: string;
+    image_url_present?: boolean;
+  };
+  gateway?: Record<string, unknown> | null;
+  approval_ledger?: WiiiConnectOperationApprovalLedger | null;
+  storage?: Record<string, unknown> | null;
+}
+
+export interface WiiiConnectFacebookPostApplyResponse {
+  version: string;
+  status: "blocked" | "ready" | "succeeded" | "failed" | string;
+  reason: string;
+  provider_slug: string;
+  action_slug?: string;
+  token?: Record<string, unknown> | null;
+  gateway?: Record<string, unknown> | null;
+  schema?: Record<string, unknown> | null;
+  upload?: Record<string, unknown> | null;
+  execution?: Record<string, unknown> | null;
+  approval_ledger?: WiiiConnectOperationApprovalLedger | null;
+  storage?: Record<string, unknown> | null;
+  missing_argument_keys?: string[];
 }
 
 export interface WiiiConnectActivationGate {
@@ -605,6 +1121,7 @@ export interface WiiiConnectActivationReadinessConnection {
   last_checked_at_present?: boolean;
   reason?: string;
   warnings?: string[];
+  connection_lifecycle?: WiiiConnectConnectionLifecycleDecision | null;
 }
 
 export interface WiiiConnectActivationReadinessResponse {
@@ -613,6 +1130,7 @@ export interface WiiiConnectActivationReadinessResponse {
   provider_slug: string;
   provider_kind: string;
   ready_to_connect: boolean;
+  ready_to_execute_action?: boolean;
   ready_to_execute_readonly: boolean;
   gates: WiiiConnectActivationGate[];
   provider?: Record<string, unknown> | null;
@@ -622,6 +1140,7 @@ export interface WiiiConnectActivationReadinessResponse {
   storage?: Record<string, unknown> | null;
   action?: Record<string, unknown> | null;
   connection?: WiiiConnectActivationReadinessConnection | null;
+  connection_lifecycle?: WiiiConnectConnectionLifecycleDecision | null;
   execution_gateway?: Record<string, unknown> | null;
 }
 
@@ -1442,9 +1961,31 @@ export interface MemoryItem {
   created_at: string;
 }
 
+export interface MemoryHealthSummary {
+  total: number;
+  type_counts: Record<string, number>;
+  latest_created_at: string | null;
+  scope_state: string;
+  org_scoped: boolean;
+  controls: {
+    can_delete_one: boolean;
+    can_clear_all: boolean;
+  };
+  provenance: {
+    source_kinds: Record<string, number>;
+    raw_content_included: boolean;
+    identifier_strategy: string;
+  };
+  privacy: {
+    raw_content_included: boolean;
+    identifier_strategy: string;
+  };
+}
+
 export interface MemoryListResponse {
   data: MemoryItem[];
   total: number;
+  summary?: MemoryHealthSummary;
 }
 
 export interface DeleteMemoryResponse {

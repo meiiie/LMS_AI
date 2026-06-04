@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -14,11 +15,15 @@ from app.api.v1.admin import (
     router as admin_router,
 )
 from app.api.v1.chat import router as chat_router
-from app.api.v1.chat_stream import router as chat_stream_router
+from app.api.v1.chat_stream import (
+    _stream_request_headers_with_request_id,
+    router as chat_stream_router,
+)
 from app.api.v1.llm_status import router as llm_status_router
 from app.core.exceptions import ProviderUnavailableError
 from app.core.rate_limit import limiter, rate_limit_exceeded_handler
 from app.core.security import AuthenticatedUser, require_auth
+from app.engine.runtime.session_event_log import InMemorySessionEventLog
 from app.models.schemas import AgentType, InternalChatResponse
 from app.services.llm_selectability_service import ProviderSelectability
 
@@ -187,6 +192,18 @@ def _runtime_response() -> LlmRuntimeConfigResponse:
         runtime_policy_updated_at="2026-03-23T12:00:00+00:00",
         warnings=[],
     )
+
+
+def test_stream_request_headers_prefer_middleware_request_id():
+    request = SimpleNamespace(
+        headers={"x-request-id": "caller-header"},
+        state=SimpleNamespace(request_id="middleware-trace-id"),
+    )
+
+    headers = _stream_request_headers_with_request_id(request)
+
+    assert headers["X-Request-ID"] == "middleware-trace-id"
+    assert headers["x-request-id"] == "caller-header"
 
 
 @pytest.fixture
@@ -483,6 +500,73 @@ async def test_chat_stream_v3_smoke_success_transport(smoke_app):
     assert '"failover":{"switched":false' in body
     assert '"final_provider":"nvidia"' in body
     assert "event: done" in body
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_v3_native_dispatch_persists_runtime_flow_ledger(
+    smoke_app,
+    monkeypatch,
+):
+    smoke_app.dependency_overrides[require_auth] = _student_auth
+    log = InMemorySessionEventLog()
+    ledger = {
+        "schema_version": "wiii.runtime_flow_ledger.v1",
+        "route": {"lane": "casual_chat"},
+        "stream": {"done_seen": True, "event_counts": {"done": 1}},
+    }
+
+    monkeypatch.setattr(
+        "app.core.config.settings.enable_native_stream_dispatch",
+        True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.engine.runtime.native_stream_dispatch.get_session_event_log",
+        lambda: log,
+    )
+
+    async def _fake_stream(*args, **kwargs):
+        yield 'event: answer\ndata: {"content":"Chao ban"}\n\n'
+        yield (
+            "event: done\n"
+            f"data: {json.dumps({'runtime_flow_ledger': ledger})}\n\n"
+        )
+
+    with patch(
+        "app.api.v1.chat_stream.generate_stream_v3_events",
+        side_effect=_fake_stream,
+    ):
+        async with httpx.AsyncClient(
+            transport=_transport(smoke_app),
+            base_url="http://testserver",
+        ) as client:
+            async with client.stream(
+                "POST",
+                "/api/v1/chat/stream/v3",
+                json={
+                    "user_id": "student-123",
+                    "session_id": "session-native-ledger",
+                    "message": "Xin chao",
+                    "role": "student",
+                    "provider": "auto",
+                },
+            ) as response:
+                body = ""
+                async for chunk in response.aiter_text():
+                    body += chunk
+
+    assert response.status_code == 200
+    assert "event: done" in body
+    events = await log.get_events(session_id="session-native-ledger")
+    assert [event.event_type for event in events] == [
+        "user_message",
+        "assistant_message",
+        "runtime_flow_ledger",
+    ]
+    assert (
+        events[2].payload["runtime_flow_ledger"]["route"]["lane"]
+        == "casual_chat"
+    )
 
 
 @pytest.mark.asyncio

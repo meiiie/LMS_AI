@@ -58,6 +58,7 @@ class SessionSummarizer:
         thread_id: str,
         user_id: str,
         messages: Optional[list[dict]] = None,
+        organization_id: Optional[str] = None,
     ) -> Optional[str]:
         """
         Generate a 2-3 sentence summary of a conversation thread.
@@ -69,6 +70,7 @@ class SessionSummarizer:
             thread_id: Composite thread ID
             user_id: User ID for ownership verification
             messages: Optional list of message dicts [{role, content}]
+            organization_id: Organization ID for multi-tenant isolation
 
         Returns:
             Summary string, or None on failure
@@ -95,7 +97,12 @@ class SessionSummarizer:
             summary = response.content.strip() if hasattr(response, 'content') else str(response).strip()
 
             # Save summary to thread_views
-            self._save_summary(thread_id, user_id, summary)
+            self._save_summary(
+                thread_id,
+                user_id,
+                summary,
+                organization_id=organization_id,
+            )
 
             logger.info("[SESSION_SUMMARY] Generated for %s: %d chars", thread_id, len(summary))
             return summary
@@ -108,6 +115,7 @@ class SessionSummarizer:
         self,
         user_id: str,
         limit: int = 15,
+        organization_id: Optional[str] = None,
     ) -> str:
         """
         Get formatted summaries of recent conversations for context injection.
@@ -117,6 +125,7 @@ class SessionSummarizer:
         Args:
             user_id: User ID
             limit: Max number of recent summaries
+            organization_id: Organization ID for multi-tenant isolation
 
         Returns:
             Formatted string of recent session summaries, or empty string
@@ -125,7 +134,11 @@ class SessionSummarizer:
             from app.repositories.thread_repository import get_thread_repository
             repo = get_thread_repository()
 
-            threads = repo.get_threads_with_summaries(user_id=user_id, limit=limit)
+            threads = repo.get_threads_with_summaries(
+                user_id=user_id,
+                limit=limit,
+                organization_id=organization_id,
+            )
             if not threads:
                 return ""
 
@@ -147,7 +160,13 @@ class SessionSummarizer:
             logger.warning("Failed to get recent summaries: %s", e)
             return ""
 
-    def _save_summary(self, thread_id: str, user_id: str, summary: str) -> None:
+    def _save_summary(
+        self,
+        thread_id: str,
+        user_id: str,
+        summary: str,
+        organization_id: Optional[str] = None,
+    ) -> None:
         """Save summary to thread_views.extra_data."""
         try:
             from app.repositories.thread_repository import get_thread_repository
@@ -156,6 +175,7 @@ class SessionSummarizer:
                 thread_id=thread_id,
                 user_id=user_id,
                 extra_data={"summary": summary},
+                organization_id=organization_id,
             )
         except Exception as e:
             logger.debug("Failed to save summary: %s", e)

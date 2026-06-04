@@ -116,27 +116,51 @@ def test_audit_ledger_sanitizes_sensitive_metadata_recursively():
     )
 
     ledger = WiiiConnectInMemoryAuditLedger()
-    ledger.append(
-        build_audit_ledger_record(
-            event_kind="vault",
-            provider_slug="facebook",
-            status="blocked",
-            reason="provider_disabled",
-            metadata={
-                "account_id": "page_1",
-                "access_token": "secret-value",
-                "nested": {"client_secret": "secret-value", "safe": "ok"},
-            },
-        ),
+    record = build_audit_ledger_record(
+        event_kind="vault",
+        provider_slug="facebook",
+        status="blocked",
+        reason="provider failed Bearer raw-reason-token-123",
+        metadata={
+            "account_id": "page_1",
+            "access_token": "secret-value",
+            "connection_ref": "wcn_facebook_private",
+            "page_id": "123456",
+            "argument_keys": ["query", "access_token", "page_id"],
+            "error": (
+                "provider rejected Authorization: Bearer raw-bearer-token-123 "
+                "api_key=raw-api-key-inline"
+            ),
+            "nested": {"client_secret": "secret-value", "safe": "ok"},
+        },
     )
+    ledger.append(record)
 
     metadata = ledger.recent_public_metadata()
     serialized = json.dumps(metadata, sort_keys=True)
+    record_serialized = json.dumps(record.metadata, sort_keys=True)
 
     assert metadata[0]["version"] == "wiii_connect_audit_ledger.v1"
+    assert "<redacted-secret>" in metadata[0]["reason"]
     assert metadata[0]["metadata"]["account_id"] == "page_1"
     assert metadata[0]["metadata"]["nested"]["safe"] == "ok"
+    assert metadata[0]["metadata"]["argument_keys"] == [
+        "query",
+        "redacted_sensitive_field",
+        "backend_owned_field",
+    ]
+    assert "<redacted-secret>" in metadata[0]["metadata"]["error"]
     assert "redacted_sensitive_field" in serialized
     assert "access_token" not in serialized
     assert "client_secret" not in serialized
+    assert "connection_ref" not in serialized
+    assert "wcn_facebook_private" not in serialized
+    assert "page_id" not in serialized
+    assert "123456" not in serialized
+    assert "raw-bearer-token-123" not in serialized
+    assert "raw-api-key-inline" not in serialized
+    assert "raw-reason-token-123" not in serialized
     assert "secret-value" not in serialized
+    assert "secret-value" not in record_serialized
+    assert "wcn_facebook_private" not in record_serialized
+    assert "raw-bearer-token-123" not in record_serialized

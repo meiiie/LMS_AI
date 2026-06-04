@@ -23,8 +23,15 @@ from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from app.engine.living_agent.models import ActionType, AutonomyLevel
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 
 logger = logging.getLogger(__name__)
+_AUTONOMY_MISSING_ORG_WARNING = "autonomy_manager_blocked_missing_org_context"
 
 # Actions allowed at each trust level without approval
 _LEVEL_PERMISSIONS: Dict[AutonomyLevel, set] = {
@@ -139,6 +146,11 @@ class AutonomyManager:
         if not settings.living_agent_enable_autonomy_graduation:
             return False
 
+        scope = self._resolve_autonomy_scope(None, write=True)
+        if not self._scope_allows_autonomy(scope):
+            self._log_scope_blocked("check_graduation", scope)
+            return False
+
         current = self.current_level.value
 
         if current >= AutonomyLevel.FULL_TRUST.value:
@@ -149,7 +161,7 @@ class AutonomyManager:
             return False
 
         # Check criteria
-        stats = await self._load_stats()
+        stats = await self._load_stats(scope=scope)
 
         min_days = rules.get("min_days_active", 0) or rules.get("min_days_at_level", 0)
         days_active = stats.get("days_active", 0)
@@ -168,15 +180,24 @@ class AutonomyManager:
             "[AUTONOMY] Graduation criteria met: level %d → %d (pending approval)",
             current, current + 1,
         )
-        await self._propose_graduation(current, current + 1, stats)
+        await self._propose_graduation(current, current + 1, stats, scope=scope)
         return True
 
-    async def approve_graduation(self, to_level: int) -> bool:
+    async def approve_graduation(
+        self,
+        to_level: int,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """Approve a pending graduation (called from API).
 
         Note: This doesn't directly modify config. It stores the approved level
         and the heartbeat will respect it.
         """
+        scope = self._resolve_autonomy_scope(organization_id, write=True)
+        if not self._scope_allows_autonomy(scope):
+            self._log_scope_blocked("approve_graduation", scope)
+            return False
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -185,11 +206,13 @@ class AutonomyManager:
             with session_factory() as session:
                 session.execute(
                     text("""
-                        INSERT INTO wiii_autonomy_state (key, value, updated_at)
-                        VALUES ('current_level', :level, NOW())
-                        ON CONFLICT (key) DO UPDATE SET value = :level, updated_at = NOW()
+                        INSERT INTO wiii_autonomy_state
+                        (organization_id, key, value, updated_at)
+                        VALUES (:org_id, 'current_level', :level, NOW())
+                        ON CONFLICT (organization_id, key)
+                        DO UPDATE SET value = :level, updated_at = NOW()
                     """),
-                    {"level": str(to_level)},
+                    {"org_id": scope.org_id, "level": str(to_level)},
                 )
                 session.commit()
 
@@ -226,8 +249,18 @@ class AutonomyManager:
     # Internal helpers
     # =========================================================================
 
-    async def _load_stats(self) -> Dict:
+    async def _load_stats(
+        self,
+        organization_id: Optional[str] = None,
+        *,
+        scope: MemoryWriteScope | None = None,
+    ) -> Dict:
         """Load autonomy statistics from database."""
+        scope = scope or self._resolve_autonomy_scope(organization_id, write=False)
+        if not self._scope_allows_autonomy(scope):
+            self._log_scope_blocked("load_stats", scope)
+            return self._stats
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -241,7 +274,9 @@ class AutonomyManager:
                                MIN(created_at) as first_cycle,
                                COUNT(*) FILTER (WHERE error IS NOT NULL) as errors
                         FROM wiii_heartbeat_audit
+                        WHERE organization_id = :org_id
                     """),
+                    {"org_id": scope.org_id},
                 ).fetchone()
 
                 if row:
@@ -257,8 +292,21 @@ class AutonomyManager:
             logger.warning("[AUTONOMY] Failed to load stats: %s", e)
         return self._stats
 
-    async def _propose_graduation(self, from_level: int, to_level: int, stats: Dict) -> None:
+    async def _propose_graduation(
+        self,
+        from_level: int,
+        to_level: int,
+        stats: Dict,
+        organization_id: Optional[str] = None,
+        *,
+        scope: MemoryWriteScope | None = None,
+    ) -> None:
         """Create a pending graduation proposal for human review."""
+        scope = scope or self._resolve_autonomy_scope(organization_id, write=True)
+        if not self._scope_allows_autonomy(scope):
+            self._log_scope_blocked("propose_graduation", scope)
+            return
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -268,20 +316,59 @@ class AutonomyManager:
             with session_factory() as session:
                 session.execute(
                     text("""
-                        INSERT INTO wiii_autonomy_state (key, value, updated_at)
-                        VALUES ('pending_graduation', :data, NOW())
-                        ON CONFLICT (key) DO UPDATE SET value = :data, updated_at = NOW()
+                        INSERT INTO wiii_autonomy_state
+                        (organization_id, key, value, updated_at)
+                        VALUES (:org_id, 'pending_graduation', :data, NOW())
+                        ON CONFLICT (organization_id, key)
+                        DO UPDATE SET value = :data, updated_at = NOW()
                     """),
-                    {"data": json.dumps({
-                        "from_level": from_level,
-                        "to_level": to_level,
-                        "stats": stats,
-                        "proposed_at": datetime.now(timezone.utc).isoformat(),
-                    }, ensure_ascii=False)},
+                    {
+                        "org_id": scope.org_id,
+                        "data": json.dumps({
+                            "from_level": from_level,
+                            "to_level": to_level,
+                            "stats": stats,
+                            "proposed_at": datetime.now(timezone.utc).isoformat(),
+                        }, ensure_ascii=False),
+                    },
                 )
                 session.commit()
         except Exception as e:
             logger.warning("[AUTONOMY] Failed to propose graduation: %s", e)
+
+    def _resolve_autonomy_scope(
+        self,
+        organization_id: Optional[str],
+        *,
+        write: bool,
+    ) -> MemoryWriteScope:
+        if isinstance(organization_id, str) and organization_id.strip():
+            return MemoryWriteScope(
+                org_id=organization_id.strip(),
+                state="explicit",
+                warnings=[],
+                write_allowed=True,
+            )
+        return resolve_memory_write_scope() if write else resolve_memory_read_scope()
+
+    def _scope_allows_autonomy(self, scope: MemoryWriteScope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _log_scope_blocked(
+        self,
+        operation: str,
+        scope: MemoryWriteScope,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_AUTONOMY_MISSING_ORG_WARNING)
+        logger.warning(
+            "[AUTONOMY] %s blocked org_hash=%s org_scope=%s warnings=%s",
+            operation,
+            hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
 
 # =============================================================================

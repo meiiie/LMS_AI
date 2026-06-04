@@ -246,12 +246,19 @@ def _safe_identity_context() -> str:
         return ""
 
 
-def _safe_character_state(user_id: str) -> str:
+def _safe_character_state(user_id: str, organization_id: Optional[str]) -> str:
     try:
         from app.engine.character.character_state import get_character_state_manager
 
         manager = get_character_state_manager()
-        return _clip(manager.compile_living_state(user_id=user_id) or "", 240)
+        return _clip(
+            manager.compile_living_state(
+                user_id=user_id,
+                organization_id=organization_id,
+            )
+            or "",
+            240,
+        )
     except Exception:
         return ""
 
@@ -359,7 +366,7 @@ def compile_living_context_block(
         current_state.append(mood_hint)
 
     narrative_state: List[str] = []
-    living_state = _safe_character_state(user_id)
+    living_state = _safe_character_state(user_id, organization_id)
     if living_state:
         narrative_state.append(living_state)
     narrative_context = _safe_narrative_context(organization_id)

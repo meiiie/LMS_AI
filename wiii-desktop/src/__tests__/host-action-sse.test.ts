@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildHostActionPreviewItem } from "@/hooks/useSSEStream";
+import {
+  buildHostActionPreviewItem,
+  buildHostActionResultRequest,
+} from "@/hooks/useSSEStream";
 import { useHostContextStore } from "@/stores/host-context-store";
 import type { HostContext } from "@/stores/host-context-store";
 
@@ -134,5 +137,72 @@ describe("Host Action SSE + PostMessage Integration (Sprint 222b)", () => {
     expect(item?.metadata?.preview_token).toBe("lesson-preview-123");
     expect(item?.metadata?.approval_token).toBe("approval-from-lms-dialog");
     expect(item?.metadata?.apply_action).toBe("authoring.apply_lesson_patch");
+  });
+
+  it("builds a Facebook post preview item from Wiii Connect host action data", () => {
+    const hostContext = {
+      host_type: "wiii desktop",
+      page: { type: "chat", title: "Wiii" },
+    } satisfies HostContext;
+
+    const item = buildHostActionPreviewItem(
+      "wiii_connect.facebook_post.preview",
+      "req-facebook-1",
+      {},
+      {
+        preview_evidence_id: "fb-preview-123",
+        approval_token: "approval-token",
+        preview_kind: "facebook_post",
+        apply_action: "wiii_connect.facebook_post.apply",
+        summary: "Preview Facebook đã sẵn sàng.",
+        page_id: "page-1",
+        page_label: "Wiii Page",
+        message: "Bài đăng thử từ Wiii.",
+        image_present: true,
+        facebook_post_body: {
+          connection_ref: "wiii-facebook-abc",
+          page_id: "page-1",
+          message: "Bài đăng thử từ Wiii.",
+        },
+      },
+      hostContext,
+    );
+
+    expect(item?.title).toBe("Xem trước bài đăng Facebook: Wiii Page");
+    expect(item?.metadata?.preview_token).toBe("fb-preview-123");
+    expect(item?.metadata?.preview_evidence_id).toBe("fb-preview-123");
+    expect(item?.metadata?.apply_action).toBe("wiii_connect.facebook_post.apply");
+    expect(item?.metadata?.facebook_post_body).toMatchObject({
+      page_id: "page-1",
+      message: "Bài đăng thử từ Wiii.",
+    });
+  });
+
+  it("builds sanitized host action result submissions", () => {
+    const request = buildHostActionResultRequest(
+      "wiii_connect.facebook_post.direct_apply",
+      "req-facebook-result-1",
+      {
+        success: true,
+        data: {
+          summary: "Published.",
+          provider_post_id: "post-1",
+          approval_token: "secret-approval",
+          nested: {
+            image_base64: "secret-image",
+          },
+        },
+      },
+    );
+
+    expect(request).toMatchObject({
+      action: "wiii_connect.facebook_post.direct_apply",
+      request_id: "req-facebook-result-1",
+      success: true,
+      summary: "Published.",
+    });
+    expect(request.data?.provider_post_id).toBe("post-1");
+    expect(request.data?.approval_token).toBe("[redacted]");
+    expect((request.data?.nested as Record<string, unknown>).image_base64).toBe("[redacted]");
   });
 });

@@ -30,6 +30,19 @@ vi.mock("@/lib/constants", async (importOriginal) => {
   return { ...actual, PERSONAL_ORG_ID: "personal" };
 });
 
+describe("Memory status summary", () => {
+  it("renders aggregate memory health fields in the Memory tab source", async () => {
+    const src = await import("@/components/settings/SettingsPage?raw");
+    const code = src.default as string;
+
+    expect(code).toContain("memorySummary");
+    expect(code).toContain("latestMemoryLabel");
+    expect(code).toContain("scopeLabel");
+    expect(code).toContain("Tổng");
+    expect(code).toContain("Phạm vi");
+  });
+});
+
 // Reset stores before each test
 beforeEach(() => {
   useSettingsStore.setState({

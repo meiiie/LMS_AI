@@ -1,0 +1,219 @@
+name: Provider Runtime Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/provider-runtime-evidence.yml"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/engine/runtime/**"
+      - "maritime-ai-service/app/engine/llm_pool.py"
+      - "maritime-ai-service/app/engine/messages.py"
+      - "maritime-ai-service/scripts/probe_live_provider_runtime.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_provider_runtime.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/provider-runtime-evidence.yml"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/engine/runtime/**"
+      - "maritime-ai-service/app/engine/llm_pool.py"
+      - "maritime-ai-service/app/engine/messages.py"
+      - "maritime-ai-service/scripts/probe_live_provider_runtime.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_provider_runtime.py"
+  schedule:
+    - cron: "45 3 * * *"
+  workflow_dispatch:
+    inputs:
+      allow_live_call:
+        description: "Actually call the configured provider."
+        required: true
+        type: boolean
+        default: false
+      provider:
+        description: "Provider route to test."
+        required: true
+        type: choice
+        default: auto
+        options:
+          - auto
+          - google
+          - vertex
+          - openai
+          - openrouter
+          - nvidia
+          - ollama
+          - zhipu
+      include_stream_ledger:
+        description: "Also verify /chat/stream/v3 terminal runtime_flow_ledger."
+        required: true
+        type: boolean
+        default: false
+      allow_stream_write:
+        description: "Permit stream ledger probe to persist chat/memory state."
+        required: true
+        type: boolean
+        default: false
+      allow_failover:
+        description: "Allow LLMPool provider failover."
+        required: true
+        type: boolean
+        default: false
+      allow_production:
+        description: "Permit production settings.environment."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Provider Probe Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      GOOGLE_API_KEY: fake-key-for-unit-tests
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run provider probe unit tests
+        working-directory: maritime-ai-service
+        run: python -m pytest tests/unit/test_probe_live_provider_runtime.py tests/unit/test_runtime_evidence_output.py -q --tb=short
+
+  live-provider-evidence:
+    name: Live Provider Runtime Evidence
+    runs-on: ubuntu-latest
+    environment: wiii-runtime-evidence
+    timeout-minutes: 30
+    needs: contract
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && inputs.allow_live_call == true) ||
+        (github.event_name == 'schedule' && vars.WIII_PROVIDER_RUNTIME_EVIDENCE_ENABLED == '1')
+      }}
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      WIII_LIVE_PROVIDER_RUNTIME_PROBE: "1"
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+      VERTEX_API_KEY: ${{ secrets.VERTEX_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate provider runtime evidence
+        working-directory: maritime-ai-service
+        env:
+          PROVIDER_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.provider || 'auto' }}
+          INCLUDE_STREAM_LEDGER: ${{ github.event_name == 'workflow_dispatch' && inputs.include_stream_ledger || false }}
+          ALLOW_STREAM_WRITE: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_stream_write || false }}
+          ALLOW_FAILOVER: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_failover || false }}
+          ALLOW_PRODUCTION_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_production || false }}
+        run: |
+          set -euo pipefail
+
+          args=(--provider "${PROVIDER_INPUT:-auto}")
+          if [[ "${ALLOW_PRODUCTION_INPUT}" == "true" ]]; then
+            args+=(--allow-production)
+          fi
+          if [[ "${ALLOW_FAILOVER}" == "true" ]]; then
+            args+=(--allow-failover)
+          fi
+          if [[ "${INCLUDE_STREAM_LEDGER}" == "true" ]]; then
+            args+=(--include-stream-ledger)
+          fi
+          if [[ "${ALLOW_STREAM_WRITE}" == "true" ]]; then
+            args+=(--allow-stream-write)
+          fi
+
+          preflight_status=0
+          python scripts/probe_live_provider_runtime.py --preflight-only \
+            --allow-call "${args[@]}" --out provider-runtime-preflight.json \
+            || preflight_status=$?
+          cat provider-runtime-preflight.json
+          python ../tools/wiii_self_harness/validate_runtime_evidence_preflight.py \
+            provider-runtime-preflight.json \
+            --requirement-id provider-runtime-tool-loop
+          if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            {
+              echo "### Provider runtime preflight"
+              echo '```json'
+              cat provider-runtime-preflight.json
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          if [[ "${preflight_status}" -ne 0 ]]; then
+            exit "${preflight_status}"
+          fi
+
+          python scripts/probe_live_provider_runtime.py --allow-call "${args[@]}" \
+            --out provider-runtime-evidence.json
+
+      - name: Validate evidence payload
+        working-directory: maritime-ai-service
+        run: |
+          python ../tools/wiii_self_harness/validate_runtime_evidence_artifact.py \
+            provider-runtime-evidence.json \
+            --requirement-id provider-runtime-tool-loop
+
+      - name: Upload provider evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: provider-runtime-evidence-${{ github.run_id }}
+          path: maritime-ai-service/provider-runtime-evidence.json
+          if-no-files-found: error
+          retention-days: 30

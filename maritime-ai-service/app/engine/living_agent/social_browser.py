@@ -25,6 +25,7 @@ Sprint 173 changes:
 """
 
 import asyncio
+import json
 import logging
 import random
 import re
@@ -32,8 +33,18 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from app.engine.living_agent.models import BrowsingItem
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    append_semantic_memory_write_audit_event,
+    build_semantic_memory_write_audit,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 
 logger = logging.getLogger(__name__)
+
+_AUTONOMOUS_USER_ID = "__wiii__"
 
 # Topic → search queries mapping
 _TOPIC_QUERIES = {
@@ -100,6 +111,23 @@ class SocialBrowser:
         self._current_topic: str = "general"
         self._smart_topics_enabled: bool = False
         self._recent_topics: list = []  # Sprint 188: Track recent topics for rotation
+
+    @staticmethod
+    def _log_scope_blocked(
+        *,
+        operation: str,
+        scope: MemoryWriteScope,
+        item_id: str | None = None,
+    ) -> None:
+        extra = ""
+        if item_id:
+            extra = f" item_hash={hash_memory_identifier(item_id)}"
+        logger.warning(
+            "[BROWSER] %s blocked scope=%s%s",
+            operation,
+            scope.state,
+            extra,
+        )
 
     async def browse_feed(
         self,
@@ -230,6 +258,11 @@ class SocialBrowser:
 
     async def _get_topic_from_memories(self) -> Optional[str]:
         """Sprint 188: Query semantic_memories for user interest patterns."""
+        scope = resolve_memory_read_scope()
+        if not scope.write_allowed or not scope.org_id:
+            self._log_scope_blocked(operation="topic_memory_read", scope=scope)
+            return None
+
         try:
             from app.core.database import get_shared_session_factory
             from sqlalchemy import text
@@ -240,9 +273,11 @@ class SocialBrowser:
                     text("""
                         SELECT content FROM semantic_memories
                         WHERE memory_type = 'fact'
+                          AND organization_id = :org_id
                         ORDER BY importance DESC, updated_at DESC
                         LIMIT 5
                     """),
+                    {"org_id": scope.org_id},
                 ).fetchall()
 
             if not rows:
@@ -573,12 +608,29 @@ class SocialBrowser:
 
         return items
 
-    async def _extract_and_save_insights(self, items: List[BrowsingItem]) -> int:
+    async def _extract_and_save_insights(
+        self,
+        items: List[BrowsingItem],
+        *,
+        session_id: str | None = None,
+    ) -> int:
         """Save high-relevance browsing items as insights in semantic_memories.
 
         Sprint 210: Fixes 989 pages browsed, 0 insights saved.
         """
         from uuid import uuid4
+
+        scope = resolve_memory_write_scope()
+        if not scope.write_allowed or not scope.org_id:
+            self._log_scope_blocked(operation="insight_write", scope=scope)
+            await self._append_browsing_insight_audit(
+                session_id=session_id,
+                scope=scope,
+                status="blocked",
+                stored_count=0,
+                warnings=["social_browsing_insight_blocked_missing_org_context"],
+            )
+            return 0
 
         saved = 0
         for item in items:
@@ -587,32 +639,100 @@ class SocialBrowser:
                     from sqlalchemy import text
                     from app.core.database import get_shared_session_factory
 
+                    if item.organization_id and item.organization_id != scope.org_id:
+                        self._log_scope_blocked(
+                            operation="insight_write_org_mismatch",
+                            scope=scope,
+                            item_id=str(item.id),
+                        )
+                        continue
+
                     content = f"[Discovery] {item.title}: {item.summary[:300]}"
                     session_factory = get_shared_session_factory()
                     with session_factory() as session:
                         session.execute(
                             text("""
                                 INSERT INTO semantic_memories
-                                (id, user_id, content, memory_type, importance, metadata, created_at)
-                                VALUES (:id, '__wiii__', :content, 'insight', :importance, '{}', NOW())
+                                (id, user_id, content, memory_type, importance,
+                                 metadata, organization_id, created_at, updated_at)
+                                VALUES (:id, :user_id, :content, 'insight', :importance,
+                                        :metadata::jsonb, :org_id, NOW(), NOW())
                             """),
                             {
                                 "id": str(uuid4()),
+                                "user_id": _AUTONOMOUS_USER_ID,
                                 "content": content[:2000],
                                 "importance": item.relevance_score,
+                                "metadata": json.dumps(
+                                    {
+                                        "source": "social_browser",
+                                        "platform": item.platform,
+                                        "url_hash": hash_memory_identifier(item.url),
+                                        "browsing_item_id_hash": hash_memory_identifier(item.id),
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                                "org_id": scope.org_id,
                             },
                         )
                         session.commit()
 
                     # Mark as insight in browsing log
-                    self._mark_as_insight(str(item.id))
+                    self._mark_as_insight(str(item.id), org_id=scope.org_id)
                     saved += 1
                 except Exception as e:
                     logger.debug("[BROWSER] Failed to save insight for item: %s", e)
+        await self._append_browsing_insight_audit(
+            session_id=session_id,
+            scope=scope,
+            status="saved" if saved else "skipped",
+            stored_count=saved,
+        )
         return saved
 
-    def _mark_as_insight(self, item_id: str) -> None:
+    async def _append_browsing_insight_audit(
+        self,
+        *,
+        session_id: str | None,
+        scope: MemoryWriteScope,
+        status: str,
+        stored_count: int,
+        warnings: list[str] | None = None,
+    ) -> None:
+        payload = build_semantic_memory_write_audit(
+            user_id=_AUTONOMOUS_USER_ID,
+            session_id=session_id,
+            message="",
+            response="",
+            scope=scope,
+            write_kind="social_browsing_insight",
+            message_saved=False,
+            response_saved=False,
+            extract_facts=False,
+            stored_fact_count=0,
+            stored_insight_count=stored_count,
+            status=status,
+            warnings=warnings,
+        )
+        await append_semantic_memory_write_audit_event(
+            session_id=session_id,
+            org_id=scope.org_id,
+            payload=payload,
+        )
+
+    def _mark_as_insight(self, item_id: str, *, org_id: str | None = None) -> None:
         """Mark a browsing log entry as saved_as_insight=true."""
+        if not org_id:
+            scope = resolve_memory_write_scope()
+            if not scope.write_allowed or not scope.org_id:
+                self._log_scope_blocked(
+                    operation="browsing_log_mark_insight",
+                    scope=scope,
+                    item_id=item_id,
+                )
+                return
+            org_id = scope.org_id
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -620,8 +740,13 @@ class SocialBrowser:
             session_factory = get_shared_session_factory()
             with session_factory() as session:
                 session.execute(
-                    text("UPDATE wiii_browsing_log SET saved_as_insight = true WHERE id = :id"),
-                    {"id": item_id},
+                    text("""
+                        UPDATE wiii_browsing_log
+                        SET saved_as_insight = true
+                        WHERE id = :id
+                          AND organization_id = :org_id
+                    """),
+                    {"id": item_id, "org_id": org_id},
                 )
                 session.commit()
         except Exception as e:
@@ -632,13 +757,22 @@ class SocialBrowser:
         from sqlalchemy import text
         from app.core.database import get_shared_session_factory
 
-        try:
-            from app.core.org_filter import get_effective_org_id
-            default_org_id = get_effective_org_id()
+        scope = resolve_memory_write_scope()
+        if not scope.write_allowed or not scope.org_id:
+            self._log_scope_blocked(operation="browsing_log_write", scope=scope)
+            return
 
+        try:
             session_factory = get_shared_session_factory()
             with session_factory() as session:
                 for item in items:
+                    if item.organization_id and item.organization_id != scope.org_id:
+                        self._log_scope_blocked(
+                            operation="browsing_log_write_org_mismatch",
+                            scope=scope,
+                            item_id=str(item.id),
+                        )
+                        continue
                     session.execute(
                         text("""
                             INSERT INTO wiii_browsing_log
@@ -655,7 +789,7 @@ class SocialBrowser:
                             "summary": item.summary[:2000],
                             "score": item.relevance_score,
                             "reaction": item.emotional_reaction,
-                            "org_id": item.organization_id or default_org_id,
+                            "org_id": scope.org_id,
                         },
                     )
                 session.commit()

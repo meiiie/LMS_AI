@@ -31,8 +31,31 @@ interface HostActionAuditResponse {
   request_id: string;
 }
 
+export interface HostActionResultRequest {
+  action: string;
+  request_id: string;
+  success: boolean;
+  summary?: string;
+  error?: string;
+  data?: Record<string, unknown>;
+}
+
+interface HostActionResultResponse {
+  status: "accepted" | "ignored";
+  action: string;
+  request_id: string;
+  matched: boolean;
+  reason?: string;
+}
+
 export async function submitHostActionAudit(
   body: HostActionAuditRequest,
 ): Promise<HostActionAuditResponse> {
   return getClient().post<HostActionAuditResponse>("/api/v1/host-actions/audit", body);
+}
+
+export async function submitHostActionResult(
+  body: HostActionResultRequest,
+): Promise<HostActionResultResponse> {
+  return getClient().post<HostActionResultResponse>("/api/v1/host-actions/result", body);
 }

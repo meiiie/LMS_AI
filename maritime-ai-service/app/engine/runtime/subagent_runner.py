@@ -29,12 +29,17 @@ when the flag flips on in production.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Literal, Optional
 
+from app.engine.runtime.event_payload_sanitizer import (
+    redact_runtime_secret_text,
+    sanitize_runtime_payload,
+)
 from app.engine.runtime.runtime_metrics import inc_counter, record_latency_ms
 from app.engine.runtime.session_event_log import (
     SessionEventLog,
@@ -45,6 +50,64 @@ logger = logging.getLogger(__name__)
 
 
 SubagentStatus = Literal["success", "max_steps_exceeded", "error", "disabled"]
+
+
+def _text_provenance(value: object) -> dict:
+    text = str(value or "").strip()
+    metadata: dict = {
+        "present": bool(text),
+        "char_count": len(text),
+    }
+    if text:
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        metadata["hash"] = f"sha256:{digest}"
+    return metadata
+
+
+def _safe_metadata_keys(value: object) -> list[str]:
+    safe_metadata = sanitize_runtime_payload(value)
+    if not isinstance(safe_metadata, dict):
+        return []
+    return sorted(
+        str(key)
+        for key in safe_metadata.keys()
+        if str(key) != "redacted_secret_count"
+    )
+
+
+def _task_event_metadata(task: "SubagentTask") -> dict:
+    return {
+        "version": "wiii.subagent_task_provenance.v1",
+        "description": _text_provenance(task.description),
+        "context_hint_count": (
+            len(task.context_hints) if isinstance(task.context_hints, dict) else 0
+        ),
+        "metadata_keys": _safe_metadata_keys(task.metadata),
+        "max_steps": task.max_steps,
+    }
+
+
+def _result_event_metadata(result: "SubagentResult") -> dict:
+    return {
+        "version": "wiii.subagent_result_provenance.v1",
+        "status": result.status,
+        "summary": _text_provenance(result.summary),
+        "source_count": len(result.sources) if isinstance(result.sources, list) else 0,
+        "tool_calls_made": result.tool_calls_made,
+        "duration_ms": result.duration_ms,
+        "error": _text_provenance(result.error),
+    }
+
+
+def _error_event_metadata(exc: Exception, *, duration_ms: int) -> dict:
+    error_text = redact_runtime_secret_text(f"{type(exc).__name__}: {exc}")
+    return {
+        "version": "wiii.subagent_result_provenance.v1",
+        "status": "error",
+        "duration_ms": duration_ms,
+        "error_type": type(exc).__name__,
+        "error": _text_provenance(error_text),
+    }
 
 
 @dataclass
@@ -154,8 +217,7 @@ class SubagentRunner:
             event_type="subagent_started",
             payload={
                 "child_session_id": child_session_id,
-                "description": task.description,
-                "metadata": task.metadata,
+                "task": _task_event_metadata(task),
             },
             org_id=task.parent_org_id,
         )
@@ -170,9 +232,10 @@ class SubagentRunner:
                 event_type="subagent_completed",
                 payload={
                     "child_session_id": child_session_id,
-                    "status": "error",
-                    "duration_ms": duration_ms,
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "result": _error_event_metadata(
+                        exc,
+                        duration_ms=duration_ms,
+                    ),
                 },
                 org_id=task.parent_org_id,
             )
@@ -188,7 +251,7 @@ class SubagentRunner:
             logger.exception("[SubagentRunner] runner raised: %s", exc)
             return SubagentResult(
                 status="error",
-                error=f"{type(exc).__name__}: {exc}",
+                error=redact_runtime_secret_text(f"{type(exc).__name__}: {exc}"),
                 child_session_id=child_session_id,
                 duration_ms=duration_ms,
             )
@@ -211,11 +274,7 @@ class SubagentRunner:
             event_type="subagent_completed",
             payload={
                 "child_session_id": child_session_id,
-                "status": result.status,
-                "summary": result.summary,
-                "tool_calls_made": result.tool_calls_made,
-                "duration_ms": result.duration_ms,
-                "error": result.error,
+                "result": _result_event_metadata(result),
             },
             org_id=task.parent_org_id,
         )

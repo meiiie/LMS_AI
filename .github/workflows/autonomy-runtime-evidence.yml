@@ -1,0 +1,392 @@
+name: Autonomy Runtime Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/autonomy-runtime-evidence.yml"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/engine/living_agent/**"
+      - "maritime-ai-service/app/services/scheduled_task_executor.py"
+      - "maritime-ai-service/app/services/notification_dispatcher.py"
+      - "maritime-ai-service/app/services/notifications/**"
+      - "maritime-ai-service/app/repositories/scheduler_repository.py"
+      - "maritime-ai-service/scripts/probe_live_heartbeat_cycle.py"
+      - "maritime-ai-service/scripts/probe_live_scheduled_task_replay.py"
+      - "maritime-ai-service/scripts/probe_live_proactive_channel.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_heartbeat_cycle.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_scheduled_task_replay.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_proactive_channel.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/autonomy-runtime-evidence.yml"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/engine/living_agent/**"
+      - "maritime-ai-service/app/services/scheduled_task_executor.py"
+      - "maritime-ai-service/app/services/notification_dispatcher.py"
+      - "maritime-ai-service/app/services/notifications/**"
+      - "maritime-ai-service/app/repositories/scheduler_repository.py"
+      - "maritime-ai-service/scripts/probe_live_heartbeat_cycle.py"
+      - "maritime-ai-service/scripts/probe_live_scheduled_task_replay.py"
+      - "maritime-ai-service/scripts/probe_live_proactive_channel.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_heartbeat_cycle.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_scheduled_task_replay.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_proactive_channel.py"
+  schedule:
+    - cron: "10 4 * * *"
+  workflow_dispatch:
+    inputs:
+      run_scheduler_replay:
+        description: "Write one scheduled task and replay it through delivery."
+        required: true
+        type: boolean
+        default: false
+      run_heartbeat_cycle:
+        description: "Run one controlled living-agent heartbeat cycle."
+        required: true
+        type: boolean
+        default: false
+      include_heartbeat_proactive_websocket:
+        description: "Also verify heartbeat proactive WebSocket delivery."
+        required: true
+        type: boolean
+        default: false
+      run_proactive_channel:
+        description: "Send one approved proactive channel message."
+        required: true
+        type: boolean
+        default: false
+      proactive_channel:
+        description: "Outbound channel to test."
+        required: true
+        type: choice
+        default: telegram
+        options:
+          - telegram
+          - messenger
+          - zalo
+      proactive_recipient_id:
+        description: "Approved test recipient id for manual proactive channel runs."
+        required: false
+        type: string
+        default: ""
+      allow_production:
+        description: "Permit production settings.environment."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Autonomy Probe Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      GOOGLE_API_KEY: fake-key-for-unit-tests
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run autonomy probe unit tests
+        working-directory: maritime-ai-service
+        run: |
+          python -m pytest \
+            tests/unit/test_probe_live_heartbeat_cycle.py \
+            tests/unit/test_probe_live_scheduled_task_replay.py \
+            tests/unit/test_probe_live_proactive_channel.py \
+            tests/unit/test_runtime_evidence_output.py \
+            -q --tb=short
+
+  live-scheduler-evidence:
+    name: Live Scheduled Task Replay Evidence
+    runs-on: ubuntu-latest
+    environment: wiii-runtime-evidence
+    timeout-minutes: 45
+    needs: contract
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && inputs.run_scheduler_replay == true) ||
+        (github.event_name == 'schedule' && vars.WIII_AUTONOMY_RUNTIME_EVIDENCE_ENABLED == '1')
+      }}
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      WIII_LIVE_SCHEDULER_REPLAY: "1"
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      POSTGRES_URL_SYNC: ${{ secrets.POSTGRES_URL_SYNC }}
+      API_KEY: ${{ secrets.API_KEY }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate scheduler replay evidence
+        working-directory: maritime-ai-service
+        env:
+          ALLOW_PRODUCTION_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_production || false }}
+        run: |
+          set -euo pipefail
+
+          args=(--organization-id autonomy-runtime-evidence)
+          if [[ "${ALLOW_PRODUCTION_INPUT}" == "true" ]]; then
+            args+=(--allow-production)
+          fi
+
+          python scripts/probe_live_scheduled_task_replay.py --allow-write "${args[@]}" \
+            --out autonomy-scheduler-evidence.json
+
+      - name: Validate scheduler evidence
+        working-directory: maritime-ai-service
+        run: |
+          python ../tools/wiii_self_harness/validate_runtime_evidence_artifact.py \
+            autonomy-scheduler-evidence.json \
+            --requirement-id autonomy-scheduler-replay
+
+      - name: Upload scheduler evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: autonomy-scheduler-evidence-${{ github.run_id }}
+          path: maritime-ai-service/autonomy-scheduler-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+  live-heartbeat-evidence:
+    name: Live Heartbeat Cycle Evidence
+    runs-on: ubuntu-latest
+    environment: wiii-runtime-evidence
+    timeout-minutes: 45
+    needs: contract
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && inputs.run_heartbeat_cycle == true) ||
+        (github.event_name == 'schedule' && vars.WIII_AUTONOMY_RUNTIME_EVIDENCE_ENABLED == '1')
+      }}
+
+    env:
+      ENVIRONMENT: development
+      ENABLE_MULTI_TENANT: "true"
+      PYTHONIOENCODING: utf-8
+      WIII_LIVE_HEARTBEAT_CYCLE_PROBE: "1"
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      POSTGRES_URL_SYNC: ${{ secrets.POSTGRES_URL_SYNC }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate heartbeat evidence
+        working-directory: maritime-ai-service
+        env:
+          INCLUDE_PROACTIVE_WEBSOCKET: ${{ github.event_name == 'workflow_dispatch' && inputs.include_heartbeat_proactive_websocket || false }}
+          ALLOW_PRODUCTION_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_production || false }}
+        run: |
+          set -euo pipefail
+
+          args=(--organization-id autonomy-runtime-evidence)
+          if [[ "${ALLOW_PRODUCTION_INPUT}" == "true" ]]; then
+            args+=(--allow-production)
+          fi
+          if [[ "${INCLUDE_PROACTIVE_WEBSOCKET}" == "true" ]]; then
+            args+=(--include-proactive-websocket)
+          fi
+
+          python scripts/probe_live_heartbeat_cycle.py --allow-write "${args[@]}" \
+            --out autonomy-heartbeat-evidence.json
+
+      - name: Validate heartbeat evidence
+        working-directory: maritime-ai-service
+        run: |
+          python ../tools/wiii_self_harness/validate_runtime_evidence_artifact.py \
+            autonomy-heartbeat-evidence.json \
+            --requirement-id autonomy-heartbeat-cycle
+
+      - name: Upload heartbeat evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: autonomy-heartbeat-evidence-${{ github.run_id }}
+          path: maritime-ai-service/autonomy-heartbeat-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+  live-proactive-channel-evidence:
+    name: Live Proactive Channel Evidence
+    runs-on: ubuntu-latest
+    environment: wiii-runtime-evidence
+    timeout-minutes: 30
+    needs: contract
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && inputs.run_proactive_channel == true) ||
+        (github.event_name == 'schedule' && vars.WIII_PROACTIVE_CHANNEL_EVIDENCE_ENABLED == '1')
+      }}
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      WIII_LIVE_PROACTIVE_CHANNEL_PROBE: "1"
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      POSTGRES_URL_SYNC: ${{ secrets.POSTGRES_URL_SYNC }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
+      ZALO_OA_ACCESS_TOKEN: ${{ secrets.ZALO_OA_ACCESS_TOKEN }}
+      ENABLE_TELEGRAM: ${{ vars.ENABLE_TELEGRAM || 'false' }}
+      ENABLE_ZALO: ${{ vars.ENABLE_ZALO || 'false' }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate proactive channel evidence
+        working-directory: maritime-ai-service
+        env:
+          CHANNEL_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.proactive_channel || vars.WIII_PROACTIVE_CHANNEL_EVIDENCE_CHANNEL || 'telegram' }}
+          RECIPIENT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.proactive_recipient_id || secrets.WIII_PROACTIVE_PROBE_RECIPIENT_ID }}
+          ALLOW_PRODUCTION_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_production || false }}
+        run: |
+          set -euo pipefail
+
+          args=(--channel "${CHANNEL_INPUT:-telegram}" --recipient-id "${RECIPIENT_INPUT}" --organization-id autonomy-runtime-evidence)
+          if [[ "${ALLOW_PRODUCTION_INPUT}" == "true" ]]; then
+            args+=(--allow-production)
+          fi
+
+          preflight_status=0
+          python scripts/probe_live_proactive_channel.py --preflight-only \
+            --allow-send "${args[@]}" --out autonomy-proactive-channel-preflight.json \
+            || preflight_status=$?
+          preflight_validation_status=0
+          python ../tools/wiii_self_harness/validate_runtime_evidence_preflight.py \
+            autonomy-proactive-channel-preflight.json \
+            --requirement-id autonomy-proactive-channel \
+            || preflight_validation_status=$?
+          if [[ "${preflight_validation_status}" -ne 0 ]]; then
+            rm -f autonomy-proactive-channel-preflight.json
+            exit "${preflight_validation_status}"
+          fi
+          cat autonomy-proactive-channel-preflight.json
+          if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            {
+              echo "### Proactive channel preflight"
+              echo '```json'
+              cat autonomy-proactive-channel-preflight.json
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          if [[ "${preflight_status}" -ne 0 ]]; then
+            echo "Proactive channel preflight blocked live send; writing failed evidence artifact."
+            python scripts/probe_live_proactive_channel.py --failure-from-preflight \
+              --failure-preflight-json autonomy-proactive-channel-preflight.json \
+              --allow-send "${args[@]}" \
+              --out autonomy-proactive-channel-evidence.json || true
+            exit "${preflight_status}"
+          fi
+
+          python scripts/probe_live_proactive_channel.py --allow-send "${args[@]}" \
+            --out autonomy-proactive-channel-evidence.json
+
+      - name: Upload proactive channel preflight
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: autonomy-proactive-channel-preflight-${{ github.run_id }}
+          path: maritime-ai-service/autonomy-proactive-channel-preflight.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Validate proactive channel evidence
+        working-directory: maritime-ai-service
+        run: |
+          python ../tools/wiii_self_harness/validate_runtime_evidence_artifact.py \
+            autonomy-proactive-channel-evidence.json \
+            --requirement-id autonomy-proactive-channel
+
+      - name: Upload proactive channel evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: autonomy-proactive-channel-evidence-${{ github.run_id }}
+          path: maritime-ai-service/autonomy-proactive-channel-evidence.json
+          if-no-files-found: error
+          retention-days: 30

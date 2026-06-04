@@ -99,11 +99,20 @@ async def test_success_records_started_and_completed_on_parent_log(log, monkeypa
         "subagent_completed",
     ]
     started_payload = parent_events[0].payload
-    assert started_payload["description"] == "What is COLREGs Rule 13?"
     assert started_payload["child_session_id"].startswith("p1::sub::")
+    assert started_payload["task"]["version"] == "wiii.subagent_task_provenance.v1"
+    assert started_payload["task"]["description"]["present"] is True
+    assert started_payload["task"]["description"]["char_count"] == len(
+        "What is COLREGs Rule 13?"
+    )
+    assert started_payload["task"]["description"]["hash"].startswith("sha256:")
+    assert "What is COLREGs Rule 13?" not in str(started_payload)
     completed_payload = parent_events[1].payload
-    assert completed_payload["status"] == "success"
-    assert completed_payload["summary"] == "answered"
+    assert completed_payload["result"]["status"] == "success"
+    assert completed_payload["result"]["summary"]["present"] is True
+    assert completed_payload["result"]["summary"]["char_count"] == len("answered")
+    assert completed_payload["result"]["tool_calls_made"] == 2
+    assert "answered" not in str(completed_payload)
 
 
 async def test_parent_log_does_not_contain_childs_working_events(log, monkeypatch):
@@ -134,6 +143,47 @@ async def test_parent_log_does_not_contain_childs_working_events(log, monkeypatc
     child_events = await log.get_events(session_id=result.child_session_id)
     child_types = [e.event_type for e in child_events]
     assert child_types == ["user_message", "assistant_message"]
+
+
+async def test_parent_log_records_subagent_provenance_without_raw_task_or_result(
+    log,
+    monkeypatch,
+):
+    _enable_isolation(monkeypatch)
+
+    async def runner(task: SubagentTask, child_id: str) -> SubagentResult:
+        return SubagentResult(
+            status="success",
+            summary="child answer includes Bearer raw-result-token-123",
+            child_session_id=child_id,
+        )
+
+    runner_obj = SubagentRunner(runner_callable=runner, event_log=log)
+    await runner_obj.run(
+        SubagentTask(
+            description=(
+                "read uploaded document Bearer raw-task-token-123 "
+                "api_key=raw-api-key-inline"
+            ),
+            parent_session_id="p1",
+            context_hints={"access_token": "raw-access-token", "safe": "ok"},
+            metadata={"route": "analysis", "notes": "raw private note"},
+        )
+    )
+
+    parent_events = await log.get_events(session_id="p1")
+    serialized = str([event.payload for event in parent_events])
+    assert "raw-task-token-123" not in serialized
+    assert "raw-api-key-inline" not in serialized
+    assert "raw-result-token-123" not in serialized
+    assert "raw-access-token" not in serialized
+    assert "raw private note" not in serialized
+    started_task = parent_events[0].payload["task"]
+    assert started_task["context_hint_count"] == 2
+    assert started_task["metadata_keys"] == ["notes", "route"]
+    completed_result = parent_events[1].payload["result"]
+    assert completed_result["summary"]["present"] is True
+    assert completed_result["summary"]["hash"].startswith("sha256:")
 
 
 async def test_org_id_propagated_to_both_events(log, monkeypatch):
@@ -189,8 +239,10 @@ async def test_runner_exception_records_completion_with_error(log, monkeypatch):
         "subagent_started",
         "subagent_completed",
     ]
-    assert parent_events[1].payload["status"] == "error"
-    assert "provider down" in parent_events[1].payload["error"]
+    assert parent_events[1].payload["result"]["status"] == "error"
+    assert parent_events[1].payload["result"]["error_type"] == "RuntimeError"
+    assert parent_events[1].payload["result"]["error"]["present"] is True
+    assert "provider down" not in str(parent_events[1].payload)
 
 
 # ── child session id derivation ──

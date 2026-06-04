@@ -1,0 +1,46 @@
+# Prometheus alert rules for proactive outbound messaging.
+#
+# Source metrics:
+# - runtime.living_agent.proactive.can_send
+# - runtime.living_agent.proactive.sends
+# GET /metrics serializes them as:
+# - runtime_living_agent_proactive_can_send
+# - runtime_living_agent_proactive_sends
+# Labels: can_send has status/reason; sends has status.
+groups:
+  - name: wiii-proactive-messenger
+    interval: 30s
+    rules:
+      - alert: WiiiProactiveMessengerMissingOrgContext
+        expr: |
+          sum (
+            increase(runtime_living_agent_proactive_sends{status="blocked_missing_org_context"}[30m])
+          )
+          +
+          sum (
+            increase(runtime_living_agent_proactive_can_send{reason="missing_org_context"}[30m])
+          ) > 0
+        for: 5m
+        labels:
+          service: wiii-ai
+          component: proactive-messenger
+          severity: p3_ticket
+        annotations:
+          summary: "Proactive messaging blocked by missing org context"
+          description: "Autonomous outreach failed closed before delivery because tenant scope was missing."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/proactive-messenger.md"
+
+      - alert: WiiiProactiveMessengerDeliveryFailed
+        expr: |
+          sum (
+            increase(runtime_living_agent_proactive_sends{status="delivery_failed"}[30m])
+          ) > 0
+        for: 5m
+        labels:
+          service: wiii-ai
+          component: proactive-messenger
+          severity: p3_ticket
+        annotations:
+          summary: "Proactive message delivery failed"
+          description: "A proactive message passed guardrails but the outbound channel did not deliver it."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/proactive-messenger.md"

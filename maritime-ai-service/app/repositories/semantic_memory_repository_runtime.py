@@ -13,6 +13,10 @@ from uuid import UUID
 
 from sqlalchemy import text
 
+from app.engine.semantic_memory.privacy import (
+    hash_memory_identifier,
+    memory_log_reference,
+)
 from app.models.semantic_memory import (
     MemoryType,
     SemanticMemory,
@@ -31,6 +35,10 @@ from app.services.embedding_space_guard import (
 from app.services.embedding_space_registry_service import get_embedding_write_spaces
 
 logger = logging.getLogger(__name__)
+_SEMANTIC_MEMORY_REPOSITORY_MISSING_ORG_WARNING = (
+    "semantic_memory_repository_blocked_missing_org_context"
+)
+_SEMANTIC_MEMORY_ORG_FILTER = " AND organization_id = :org_id"
 
 
 class SemanticMemoryRepositoryRuntimeMixin:
@@ -44,11 +52,41 @@ class SemanticMemoryRepositoryRuntimeMixin:
     - self.TABLE_NAME
     """
 
-    def _get_org_scope(self) -> tuple[Optional[str], str]:
-        from app.core.org_filter import get_effective_org_id, org_where_clause
+    def _resolve_semantic_memory_org_scope(self, *, write: bool = False):
+        from app.engine.semantic_memory.write_audit import (
+            resolve_memory_read_scope,
+            resolve_memory_write_scope,
+        )
 
-        effective_org_id = get_effective_org_id()
-        return effective_org_id, org_where_clause(effective_org_id)
+        scope = resolve_memory_write_scope() if write else resolve_memory_read_scope()
+        if not self._scope_allows_semantic_memory(scope):
+            return scope, None
+        return scope, _SEMANTIC_MEMORY_ORG_FILTER
+
+    def _scope_allows_semantic_memory(self, scope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _log_semantic_memory_scope_blocked(
+        self,
+        operation: str,
+        scope,
+        *,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_SEMANTIC_MEMORY_REPOSITORY_MISSING_ORG_WARNING)
+        logger.warning(
+            "[MEMORY_REPO] %s blocked user_hash=%s session_hash=%s org_hash=%s "
+            "org_scope=%s warnings=%s",
+            operation,
+            hash_memory_identifier(user_id),
+            hash_memory_identifier(session_id),
+            hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
     @staticmethod
     def _has_embedding(embedding: Optional[List[float]]) -> bool:
@@ -206,12 +244,18 @@ class SemanticMemoryRepositoryRuntimeMixin:
     ) -> Optional[SemanticMemory]:
         """Save a new semantic memory to the database."""
         self._ensure_initialized()
+        scope, org_filter = self._resolve_semantic_memory_org_scope(write=True)
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "save_memory",
+                scope,
+                user_id=memory.user_id,
+                session_id=memory.session_id,
+            )
+            return None
 
         try:
             with self._session_factory() as session:
-                from app.core.org_filter import get_effective_org_id
-
-                effective_org_id = get_effective_org_id()
                 inline_embedding, metadata_json, write_spaces = self._resolve_inline_embedding(
                     memory=memory,
                 )
@@ -220,7 +264,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     memory=memory,
                     inline_embedding=inline_embedding,
                     metadata_json=metadata_json,
-                    effective_org_id=effective_org_id,
+                    effective_org_id=scope.org_id,
                 )
 
                 result = session.execute(query, params)
@@ -236,7 +280,11 @@ class SemanticMemoryRepositoryRuntimeMixin:
                 session.commit()
 
                 if row:
-                    logger.debug("Saved memory %s for user %s", row.id, memory.user_id)
+                    logger.debug(
+                        "Saved memory %s for user_hash=%s",
+                        row.id,
+                        hash_memory_identifier(memory.user_id),
+                    )
                     return SemanticMemory(
                         id=row.id,
                         user_id=row.user_id,
@@ -262,7 +310,14 @@ class SemanticMemoryRepositoryRuntimeMixin:
     ) -> Optional[SemanticMemory]:
         """Get a specific memory by ID."""
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_semantic_memory_org_scope()
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "get_by_id",
+                scope,
+                user_id=user_id,
+            )
+            return None
 
         try:
             with self._session_factory() as session:
@@ -281,8 +336,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     "memory_id": str(memory_id),
                     "user_id": user_id,
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 row = session.execute(query, params).fetchone()
                 if row:
@@ -311,7 +365,15 @@ class SemanticMemoryRepositoryRuntimeMixin:
     ) -> int:
         """Delete message memories for a specific session."""
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_semantic_memory_org_scope(write=True)
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "delete_by_session",
+                scope,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            return 0
 
         try:
             with self._session_factory() as session:
@@ -331,8 +393,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     "session_id": session_id,
                     "memory_type": MemoryType.MESSAGE.value,
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 deleted = len(session.execute(query, params).fetchall())
                 session.commit()
@@ -350,7 +411,14 @@ class SemanticMemoryRepositoryRuntimeMixin:
     ) -> int:
         """Count memories for a user."""
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_semantic_memory_org_scope()
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "count_user_memories",
+                scope,
+                user_id=user_id,
+            )
+            return 0
 
         try:
             with self._session_factory() as session:
@@ -361,8 +429,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     type_filter = "AND memory_type = :memory_type"
                     params["memory_type"] = memory_type.value
 
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 query = text(
                     f"""
@@ -400,7 +467,14 @@ class SemanticMemoryRepositoryRuntimeMixin:
     def update_last_accessed(self, memory_id: UUID, user_id: Optional[str] = None) -> bool:
         """Update last_accessed timestamp and increment metadata.access_count."""
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_semantic_memory_org_scope(write=True)
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "update_last_accessed",
+                scope,
+                user_id=user_id,
+            )
+            return False
 
         try:
             with self._session_factory() as session:
@@ -437,8 +511,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     )
                     params = {"memory_id": str(memory_id)}
 
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 row = session.execute(query, params).fetchone()
                 session.commit()
@@ -459,7 +532,15 @@ class SemanticMemoryRepositoryRuntimeMixin:
         from app.models.semantic_memory import SemanticMemorySearchResult
 
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_semantic_memory_org_scope()
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "get_memories_by_type",
+                scope,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            return []
 
         try:
             with self._session_factory() as session:
@@ -474,8 +555,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     session_filter = "AND session_id = :session_id"
                     params["session_id"] = session_id
 
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 query = text(
                     f"""
@@ -522,7 +602,14 @@ class SemanticMemoryRepositoryRuntimeMixin:
     ) -> int:
         """Delete memories matching a keyword in content for a user."""
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_semantic_memory_org_scope(write=True)
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "delete_memories_by_keyword",
+                scope,
+                user_id=user_id,
+            )
+            return 0
 
         try:
             with self._session_factory() as session:
@@ -540,17 +627,16 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     "user_id": user_id,
                     "keyword_pattern": f"%{keyword}%",
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 deleted_count = len(session.execute(query, params).fetchall())
                 session.commit()
                 if deleted_count > 0:
                     logger.info(
-                        "Deleted %d memories matching '%s' for user %s",
+                        "Deleted %d memories matching keyword_ref=%s for user_hash=%s",
                         deleted_count,
-                        keyword,
-                        user_id,
+                        memory_log_reference(keyword),
+                        hash_memory_identifier(user_id),
                     )
                 return deleted_count
 
@@ -561,7 +647,14 @@ class SemanticMemoryRepositoryRuntimeMixin:
     def delete_all_user_memories(self, user_id: str) -> int:
         """Delete all memories for a user."""
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_semantic_memory_org_scope(write=True)
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "delete_all_user_memories",
+                scope,
+                user_id=user_id,
+            )
+            return 0
 
         try:
             with self._session_factory() as session:
@@ -575,16 +668,23 @@ class SemanticMemoryRepositoryRuntimeMixin:
                 )
 
                 params = {"user_id": user_id}
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 deleted_count = len(session.execute(query, params).fetchall())
                 session.commit()
-                logger.info("Deleted ALL %d memories for user %s", deleted_count, user_id)
+                logger.info(
+                    "Deleted ALL %d memories for user_hash=%s",
+                    deleted_count,
+                    hash_memory_identifier(user_id),
+                )
                 return deleted_count
 
         except Exception as exc:
-            logger.error("Failed to delete all memories for user %s: %s", user_id, exc)
+            logger.error(
+                "Failed to delete all memories for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                exc,
+            )
             return 0
 
     def delete_oldest_insights(
@@ -597,7 +697,14 @@ class SemanticMemoryRepositoryRuntimeMixin:
         if count <= 0:
             return 0
 
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_semantic_memory_org_scope(write=True)
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "delete_oldest_insights",
+                scope,
+                user_id=user_id,
+            )
+            return 0
 
         try:
             with self._session_factory() as session:
@@ -621,16 +728,15 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     "memory_type": MemoryType.INSIGHT.value,
                     "count": count,
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 deleted_count = len(session.execute(query, params).fetchall())
                 session.commit()
                 if deleted_count > 0:
                     logger.info(
-                        "Deleted %d oldest insights for user %s (FIFO eviction)",
+                        "Deleted %d oldest insights for user_hash=%s (FIFO eviction)",
                         deleted_count,
-                        user_id,
+                        hash_memory_identifier(user_id),
                     )
                 return deleted_count
 
@@ -641,7 +747,14 @@ class SemanticMemoryRepositoryRuntimeMixin:
     def delete_memory(self, user_id: str, memory_id: str) -> bool:
         """Delete a specific memory by ID."""
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_semantic_memory_org_scope(write=True)
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "delete_memory",
+                scope,
+                user_id=user_id,
+            )
+            return False
 
         try:
             with self._session_factory() as session:
@@ -658,8 +771,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     "memory_id": str(memory_id),
                     "user_id": user_id,
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 row = session.execute(query, params).fetchone()
                 session.commit()
@@ -672,7 +784,14 @@ class SemanticMemoryRepositoryRuntimeMixin:
     def upsert_running_summary(self, session_id: str, summary: str) -> bool:
         """Upsert a running summary for a session."""
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_semantic_memory_org_scope(write=True)
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "upsert_running_summary",
+                scope,
+                session_id=session_id,
+            )
+            return False
 
         try:
             with self._session_factory() as session:
@@ -692,8 +811,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     "session_id": session_id,
                     "memory_type": MemoryType.RUNNING_SUMMARY.value,
                 }
-                if effective_org_id is not None:
-                    update_params["org_id"] = effective_org_id
+                update_params["org_id"] = scope.org_id
 
                 row = session.execute(update_query, update_params).fetchone()
                 if row:
@@ -721,7 +839,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
                         "importance": 0.9,
                         "metadata": metadata,
                         "session_id": session_id,
-                        "org_id": effective_org_id,
+                        "org_id": scope.org_id,
                     },
                 )
                 session.commit()
@@ -734,7 +852,14 @@ class SemanticMemoryRepositoryRuntimeMixin:
     def get_running_summary(self, session_id: str) -> Optional[str]:
         """Load the most recent running summary for a session."""
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_semantic_memory_org_scope()
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "get_running_summary",
+                scope,
+                session_id=session_id,
+            )
+            return None
 
         try:
             with self._session_factory() as session:
@@ -754,8 +879,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     "session_id": session_id,
                     "memory_type": MemoryType.RUNNING_SUMMARY.value,
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 row = session.execute(query, params).fetchone()
                 return row.content if row else None
@@ -767,7 +891,14 @@ class SemanticMemoryRepositoryRuntimeMixin:
     def delete_running_summary(self, session_id: str) -> bool:
         """Delete the running summary record for a session."""
         self._ensure_initialized()
-        effective_org_id, org_filter = self._get_org_scope()
+        scope, org_filter = self._resolve_semantic_memory_org_scope(write=True)
+        if org_filter is None:
+            self._log_semantic_memory_scope_blocked(
+                "delete_running_summary",
+                scope,
+                session_id=session_id,
+            )
+            return False
 
         try:
             with self._session_factory() as session:
@@ -785,8 +916,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     "session_id": session_id,
                     "memory_type": MemoryType.RUNNING_SUMMARY.value,
                 }
-                if effective_org_id is not None:
-                    params["org_id"] = effective_org_id
+                params["org_id"] = scope.org_id
 
                 result = session.execute(query, params)
                 session.commit()

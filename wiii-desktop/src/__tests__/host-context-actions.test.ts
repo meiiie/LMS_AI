@@ -1,9 +1,23 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import {
+  applyWiiiConnectFacebookPost,
+  fetchWiiiConnectFacebookPages,
+  fetchWiiiConnectProviderConnections,
+  previewWiiiConnectFacebookPost,
+} from "@/api/wiii-connect";
 import { useHostContextStore } from "@/stores/host-context-store";
+
+vi.mock("@/api/wiii-connect", () => ({
+  applyWiiiConnectFacebookPost: vi.fn(),
+  fetchWiiiConnectFacebookPages: vi.fn(),
+  fetchWiiiConnectProviderConnections: vi.fn(),
+  previewWiiiConnectFacebookPost: vi.fn(),
+}));
 
 describe("Host Context Store — Action Support (Sprint 222b)", () => {
   beforeEach(() => {
     useHostContextStore.getState().clear();
+    vi.clearAllMocks();
     vi.useFakeTimers();
   });
 
@@ -107,5 +121,104 @@ describe("Host Context Store — Action Support (Sprint 222b)", () => {
     expect(feedback?.last_action_result?.action).toBe("authoring.preview_lesson_patch");
     expect(feedback?.last_action_result?.data?.preview_token).toBe("lesson-preview-123");
     expect(feedback?.recent_action_results?.length).toBe(1);
+  });
+
+  it("direct Facebook action previews then applies through Wiii Connect", async () => {
+    vi.useRealTimers();
+    vi.mocked(fetchWiiiConnectProviderConnections).mockResolvedValueOnce({
+      version: "wiii_connect_connection_list.v1",
+      provider_slug: "facebook",
+      status: "ready",
+      connection_count: 1,
+      connections: [
+        {
+          provider_slug: "facebook",
+          connection_ref: "conn-facebook-1",
+          connection_id: "conn-facebook-1",
+          state: "connected",
+          active: true,
+        },
+      ],
+    } as any);
+    vi.mocked(fetchWiiiConnectFacebookPages).mockResolvedValueOnce({
+      version: "wiii_connect_facebook_pages.v1",
+      status: "ready",
+      reason: "ready",
+      provider_slug: "facebook",
+      page_count: 1,
+      pages: [{ page_id: "page-1", name: "Wiii" }],
+    } as any);
+    vi.mocked(previewWiiiConnectFacebookPost).mockResolvedValueOnce({
+      version: "wiii_connect_facebook_post_preview.v1",
+      status: "ready",
+      reason: "ready",
+      provider_slug: "facebook",
+      preview_evidence_id: "fb-preview-1",
+      approval_token: "fb-approval-1",
+    });
+    vi.mocked(applyWiiiConnectFacebookPost).mockResolvedValueOnce({
+      version: "wiii_connect_facebook_post_apply.v1",
+      status: "succeeded",
+      reason: "succeeded",
+      provider_slug: "facebook",
+    });
+
+    const result = await useHostContextStore.getState().requestAction(
+      "wiii_connect.facebook_post.direct_apply",
+      { provider_slug: "facebook", message: "Bài đăng thử từ Wiii." },
+      "req-facebook-direct-1",
+    );
+
+    expect(result.success).toBe(true);
+    expect(previewWiiiConnectFacebookPost).toHaveBeenCalledWith("facebook", {
+      connection_ref: "conn-facebook-1",
+      page_id: "page-1",
+      message: "Bài đăng thử từ Wiii.",
+    });
+    expect(applyWiiiConnectFacebookPost).toHaveBeenCalledWith("facebook", {
+      connection_ref: "conn-facebook-1",
+      page_id: "page-1",
+      message: "Bài đăng thử từ Wiii.",
+      approval_token: "fb-approval-1",
+      preview_evidence_id: "fb-preview-1",
+    });
+    expect(result.data?.summary).toBe("Đã đăng bài lên Facebook: Wiii.");
+    expect(useHostContextStore.getState().lastActionResult?.action).toBe(
+      "wiii_connect.facebook_post.direct_apply",
+    );
+  });
+
+  it("direct Facebook action fails closed when post message is missing", async () => {
+    vi.useRealTimers();
+    vi.mocked(fetchWiiiConnectProviderConnections).mockResolvedValueOnce({
+      version: "wiii_connect_connection_list.v1",
+      provider_slug: "facebook",
+      status: "ready",
+      connection_count: 1,
+      connections: [
+        {
+          provider_slug: "facebook",
+          connection_ref: "conn-facebook-1",
+          connection_id: "conn-facebook-1",
+          state: "connected",
+          active: true,
+        },
+      ],
+    } as any);
+
+    const result = await useHostContextStore.getState().requestAction(
+      "wiii_connect.facebook_post.direct_apply",
+      { provider_slug: "facebook" },
+      "req-facebook-direct-missing-message",
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("facebook_post_message_missing");
+    expect(fetchWiiiConnectFacebookPages).not.toHaveBeenCalled();
+    expect(previewWiiiConnectFacebookPost).not.toHaveBeenCalled();
+    expect(applyWiiiConnectFacebookPost).not.toHaveBeenCalled();
+    expect(useHostContextStore.getState().lastActionResult?.summary).toContain(
+      "facebook_post_message_missing",
+    );
   });
 });

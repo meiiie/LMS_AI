@@ -131,6 +131,21 @@ class TestGetBriefContext:
         assert "maritime_navigation" in result
 
     @patch("app.core.config.get_settings")
+    def test_brief_context_passes_org_to_skill_builder(self, mock_gs):
+        """Brief skill highlights use the caller's org scope."""
+        mock_gs.return_value = _mock_settings(enable_living_agent=True, enable_narrative_context=True)
+        mock_engine = MagicMock()
+        mock_engine.state = _mock_emotional_state()
+        mock_builder = MagicMock()
+        mock_builder.get_all_skills.return_value = []
+
+        with patch("app.engine.living_agent.emotion_engine.get_emotion_engine", return_value=mock_engine), \
+             patch("app.engine.living_agent.skill_builder.get_skill_builder", return_value=mock_builder):
+            get_brief_context(organization_id="org-A")
+
+        mock_builder.get_all_skills.assert_called_once_with(organization_id="org-A")
+
+    @patch("app.core.config.get_settings")
     def test_starts_with_section_header(self, mock_gs):
         """Brief context starts with '--- CUỘC SỐNG CỦA WIII ---'."""
         mock_gs.return_value = _mock_settings(enable_living_agent=True, enable_narrative_context=True)
@@ -245,6 +260,20 @@ class TestCompileAutobiography:
 
         assert "narrative_text" in result
         assert "Wiii" in result["narrative_text"]
+
+    @pytest.mark.asyncio
+    @patch("app.core.config.get_settings")
+    async def test_compile_passes_org_to_skill_builder(self, mock_gs):
+        """Autobiography skill section uses the requested org scope."""
+        mock_gs.return_value = _mock_settings(enable_living_agent=True)
+        mock_builder = MagicMock()
+        mock_builder.get_all_skills.return_value = []
+
+        with patch("app.engine.living_agent.skill_builder.get_skill_builder", return_value=mock_builder):
+            result = await compile_autobiography(organization_id="org-A")
+
+        assert "skills" in result
+        mock_builder.get_all_skills.assert_called_once_with(organization_id="org-A")
 
     @pytest.mark.asyncio
     @patch("app.core.config.get_settings")

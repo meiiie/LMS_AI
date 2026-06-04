@@ -638,6 +638,10 @@ def migrate_embedding_space_rows(
             detail="Target model dang cung vector-space hien tai; khong can migration full-space.",
             recommended_next_steps=("Giu nguyen policy hoac switch model trong cung space neu can.",),
         )
+    if not dry_run and not acknowledge_maintenance_window:
+        raise RuntimeError(
+            "Maintenance window acknowledgement is required before applying embedding-space migration."
+        )
     if not plan.target_backend_constructible:
         raise RuntimeError("Target backend chua san sang; khong the chay embedding-space migration.")
 
@@ -811,6 +815,10 @@ def promote_embedding_space_shadow(
     if not plan.transition_allowed:
         raise RuntimeError(
             "Target embedding space chua san sang de promote. Hay chay plan/apply shadow truoc."
+        )
+    if not acknowledge_maintenance_window:
+        raise RuntimeError(
+            "Maintenance window acknowledgement is required before promoting embedding-space shadow."
         )
 
     target_contract = build_embedding_space_contract(target_model, target_dimensions)

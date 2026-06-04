@@ -6,6 +6,7 @@ from typing import Any
 
 from app.core.constants import MAX_CONTENT_SNIPPET_LENGTH
 from app.engine.llm_runtime_metadata import resolve_runtime_llm_metadata
+from app.engine.multi_agent.runtime_flow_ledger import sanitize_runtime_flow_trace
 from app.engine.multi_agent.runtime_contracts import WiiiRunContext, WiiiTurnRequest
 from app.models.schemas import ChatRequest, Source
 
@@ -45,7 +46,11 @@ async def prepare_turn_impl(
     session_id = session.session_id
 
     if session.state.is_first_message and background_save:
-        maybe_summarize_previous_session_fn(background_save, user_id)
+        maybe_summarize_previous_session_fn(
+            background_save,
+            user_id,
+            request_scope.organization_id,
+        )
     if session.state.is_first_message and session.state.pronoun_style is None:
         load_pronoun_style_from_facts_fn(session, user_id)
 
@@ -66,6 +71,7 @@ async def prepare_turn_impl(
         role="user",
         content=message,
         user_id=user_id,
+        organization_id=request_scope.organization_id,
         background_save=background_save,
         immediate=persist_user_message_immediately,
     )
@@ -73,13 +79,17 @@ async def prepare_turn_impl(
         session_id=session_id,
         role="user",
         content=message,
+        organization_id=request_scope.organization_id,
     )
 
     context = await input_processor.build_context(
         request=request,
         session_id=session_id,
         user_name=session.user_name,
-        recent_history_fallback=session_manager.get_recent_messages(session_id),
+        recent_history_fallback=session_manager.get_recent_messages(
+            session_id,
+            organization_id=request_scope.organization_id,
+        ),
     )
     context.organization_id = request_scope.organization_id
 
@@ -103,7 +113,11 @@ async def prepare_turn_impl(
     if not session.user_name:
         extracted_name = input_processor.extract_user_name(message)
         if extracted_name:
-            session_manager.update_user_name(session_id, extracted_name)
+            session_manager.update_user_name(
+                session_id,
+                extracted_name,
+                organization_id=request_scope.organization_id,
+            )
             context.user_name = extracted_name
 
     effective_pronoun = detect_pronoun_style_fn(message)
@@ -231,6 +245,12 @@ async def process_with_multi_agent_impl(
             "provider": execution_input.provider,
         }
     )
+    runtime_flow_trace = result.get("runtime_flow_trace")
+    runtime_flow_trace = (
+        sanitize_runtime_flow_trace(runtime_flow_trace)
+        if runtime_flow_trace
+        else None
+    )
 
     return processing_result_cls(
         message=response_text,
@@ -248,5 +268,6 @@ async def process_with_multi_agent_impl(
             "thinking_lifecycle": result.get("thinking_lifecycle"),
             "domain_notice": result.get("domain_notice"),
             "routing_metadata": result.get("routing_metadata"),
+            "runtime_flow_trace": runtime_flow_trace,
         },
     )

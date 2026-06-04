@@ -11,7 +11,8 @@ Tests cover:
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+import logging
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -49,6 +50,7 @@ class TestSubagentResult:
         assert r.data == {}
         assert r.sources == []
         assert r.tools_used == []
+        assert r.boundary == {}
         assert r.thinking is None
         assert r.error_message is None
         assert r.duration_ms == 0
@@ -382,12 +384,14 @@ class TestExecuteSubagent:
     @pytest.mark.asyncio
     async def test_wraps_dict_result(self):
         async def dict_func(state):
-            return {"key": "value"}
+            return {"key": "value", "access_token": "raw-access-token"}
 
         config = SubagentConfig(name="test")
         result = await execute_subagent(dict_func, config, {})
         assert result.status == SubagentStatus.SUCCESS
         assert result.data["key"] == "value"
+        assert "access_token" not in result.data
+        assert "raw-access-token" not in str(result)
 
     @pytest.mark.asyncio
     async def test_wraps_string_result(self):
@@ -423,6 +427,22 @@ class TestExecuteSubagent:
         assert result.error_message == "Subagent processing error"
 
     @pytest.mark.asyncio
+    async def test_error_logging_redacts_secret_subagent_name(self, caplog):
+        async def bad_func(state):
+            raise ValueError("boom")
+
+        caplog.set_level(logging.ERROR)
+        config = SubagentConfig(
+            name="Bearer raw-config-name-token-12345678",
+            max_retries=0,
+        )
+        result = await execute_subagent(bad_func, config, {})
+
+        assert result.status == SubagentStatus.ERROR
+        assert "<redacted-secret>" in caplog.text
+        assert "raw-config-name-token-12345678" not in caplog.text
+
+    @pytest.mark.asyncio
     async def test_retry_on_error(self):
         call_count = 0
 
@@ -455,12 +475,15 @@ class TestExecuteSubagent:
             raise ValueError("boom")
 
         config = SubagentConfig(
-            name="strict",
+            name="Bearer raw-strict-name-token-12345678",
             max_retries=0,
             fallback_behavior=FallbackBehavior.RAISE_ERROR,
         )
-        with pytest.raises(RuntimeError, match="strict"):
+        with pytest.raises(RuntimeError) as exc_info:
             await execute_subagent(bad_func, config, {})
+        message = str(exc_info.value)
+        assert "<redacted-secret>" in message
+        assert "raw-strict-name-token-12345678" not in message
 
     @pytest.mark.asyncio
     async def test_passes_kwargs(self):
@@ -470,6 +493,270 @@ class TestExecuteSubagent:
         config = SubagentConfig(name="kw")
         result = await execute_subagent(kw_func, config, {}, extra="hello")
         assert result.output == "hello"
+
+    @pytest.mark.asyncio
+    async def test_projects_kwargs_before_child_call(self):
+        observed_kwargs = []
+
+        async def kw_func(state, **kwargs):
+            observed_kwargs.append(kwargs)
+            return SubagentResult(output="ok")
+
+        config = SubagentConfig(name="kw-boundary")
+        result = await execute_subagent(
+            kw_func,
+            config,
+            {},
+            extra="hello",
+            access_token="raw-access-token",
+            _host_action_control_feedback={
+                "last_action_result": {"approval_token": "raw-approval"}
+            },
+            context={
+                "domain": "maritime",
+                "provider_payload": {"id": "raw-provider"},
+            },
+            notes="Bearer raw-kwargs-token-12345678",
+        )
+
+        assert result.output == "ok"
+        assert observed_kwargs == [
+            {
+                "extra": "hello",
+                "context": {"domain": "maritime"},
+                "notes": "Bearer <redacted-secret>",
+            }
+        ]
+        serialized = str(observed_kwargs)
+        assert "access_token" not in serialized
+        assert "raw-access-token" not in serialized
+        assert "_host_action_control_feedback" not in serialized
+        assert "raw-approval" not in serialized
+        assert "provider_payload" not in serialized
+        assert "raw-provider" not in serialized
+        assert "raw-kwargs-token-12345678" not in serialized
+
+    @pytest.mark.asyncio
+    async def test_sanitizes_subagent_result_before_returning_to_parent(self):
+        async def child_func(state):
+            return SubagentResult(
+                status=SubagentStatus.SUCCESS,
+                confidence=0.8,
+                output="Answer Bearer raw-output-token-12345678",
+                data={
+                    "safe_id": "doc-1",
+                    "provider_payload": {"id": "raw-provider"},
+                },
+                sources=[
+                    {
+                        "id": "doc-1",
+                        "title": "Source Bearer raw-source-token-12345678",
+                        "content": "raw document text",
+                        "access_token": "raw-source-token",
+                    }
+                ],
+                tools_used=[
+                    {
+                        "name": "tool_search",
+                        "args": {"api_key": "raw-tool-key"},
+                        "result": {"provider_payload": "raw-provider"},
+                    }
+                ],
+                evidence_images=[
+                    {
+                        "url": "https://example.test/page.png",
+                        "image_base64": "raw-image-bytes",
+                    }
+                ],
+                thinking="raw private chain of thought",
+                error_message="client_secret=raw-client-secret-inline",
+            )
+
+        result = await execute_subagent(
+            child_func,
+            SubagentConfig(name="bounded"),
+            {},
+        )
+
+        assert result.output == "Answer Bearer <redacted-secret>"
+        assert result.data == {"safe_id": "doc-1"}
+        assert result.sources == [
+            {"id": "doc-1", "title": "Source Bearer <redacted-secret>"}
+        ]
+        assert result.tools_used == [{"name": "tool_search"}]
+        assert result.evidence_images == [{"url": "https://example.test/page.png"}]
+        assert result.boundary["schema_version"] == "wiii.subagent_execution_boundary.v1"
+        assert (
+            result.boundary["handoff"]["schema_version"]
+            == "wiii.subagent_handoff_boundary.v1"
+        )
+        assert (
+            result.boundary["result"]["schema_version"]
+            == "wiii.subagent_result_boundary.v1"
+        )
+        assert result.boundary["result"]["status"] == "success"
+        assert result.boundary["result"]["source_count"] == 1
+        assert result.boundary["result"]["tool_count"] == 1
+        assert result.boundary["result"]["evidence_image_count"] == 1
+        assert result.boundary["result"]["thinking_dropped"] is True
+        assert result.boundary["raw_content_included"] is False
+        assert result.thinking is None
+        assert result.error_message == "<redacted-secret>"
+        serialized = str(result)
+        assert "raw-output-token-12345678" not in serialized
+        assert "raw-source-token-12345678" not in serialized
+        assert "raw document text" not in serialized
+        assert "raw-source-token" not in serialized
+        assert "raw-tool-key" not in serialized
+        assert "raw-provider" not in serialized
+        assert "raw-image-bytes" not in serialized
+        assert "raw private chain" not in serialized
+        assert "raw-client-secret-inline" not in serialized
+
+    @pytest.mark.asyncio
+    async def test_sanitizes_result_subclass_without_losing_subclass_fields(self):
+        async def rag_func(state):
+            return RAGSubagentResult(
+                status=SubagentStatus.SUCCESS,
+                confidence=0.75,
+                output="ok",
+                documents=[
+                    {
+                        "id": "doc-1",
+                        "title": "Doc title",
+                        "content": "raw doc content",
+                        "access_token": "raw-document-token",
+                    }
+                ],
+                retrieval_confidence=0.7,
+                correction_rounds=2,
+                thinking="raw private chain",
+            )
+
+        result = await execute_subagent(
+            rag_func,
+            SubagentConfig(name="rag"),
+            {},
+        )
+
+        assert isinstance(result, RAGSubagentResult)
+        assert result.retrieval_confidence == 0.7
+        assert result.correction_rounds == 2
+        assert result.documents == [{"id": "doc-1", "title": "Doc title"}]
+        assert result.thinking is None
+        serialized = str(result)
+        assert "raw doc content" not in serialized
+        assert "raw-document-token" not in serialized
+        assert "raw private chain" not in serialized
+
+    @pytest.mark.asyncio
+    async def test_projects_parent_state_before_child_call(self):
+        observed_states = []
+
+        async def child_func(state):
+            observed_states.append(state)
+            return SubagentResult(status=SubagentStatus.SUCCESS, output="ok")
+
+        config = SubagentConfig(name="bounded")
+        result = await execute_subagent(
+            child_func,
+            config,
+            {
+                "query": "Điều 15",
+                "_event_bus_id": "bus-1",
+                "_trace_id": "trace-1",
+                "_parallel_targets": ["rag"],
+                "next_agent": "parallel_dispatch",
+                "_host_action_control_feedback": {
+                    "last_action_result": {"approval_token": "raw-approval"}
+                },
+                "_tool_policy_session": {"visible_tool_names": ["secret_tool"]},
+                "tool_call_events": [
+                    {"args": {"access_token": "raw-access-token"}}
+                ],
+                "provider_payload": {"id": "raw-provider"},
+                "notes": "Bearer raw-bearer-token-123",
+            },
+        )
+
+        assert result.status == SubagentStatus.SUCCESS
+        assert len(observed_states) == 1
+        child_state = observed_states[0]
+        assert child_state["query"] == "Điều 15"
+        assert child_state["_event_bus_id"] == "bus-1"
+        assert child_state["_trace_id"] == "trace-1"
+        handoff_boundary = result.boundary["handoff"]
+        assert handoff_boundary["schema_version"] == "wiii.subagent_handoff_boundary.v1"
+        assert handoff_boundary["state"]["original_key_count"] == 10
+        assert handoff_boundary["state"]["projected_key_count"] == 4
+        assert handoff_boundary["state"]["dropped_key_count"] == 6
+        assert "state_top_level_keys_dropped" in handoff_boundary["warning_codes"]
+        assert handoff_boundary["raw_content_included"] is False
+        serialized = str(child_state)
+        assert "_parallel_targets" not in child_state
+        assert "next_agent" not in child_state
+        assert "_host_action_control_feedback" not in child_state
+        assert "_tool_policy_session" not in child_state
+        assert "tool_call_events" not in child_state
+        assert "provider_payload" not in child_state
+        assert "raw-approval" not in serialized
+        assert "raw-access-token" not in serialized
+        assert "raw-provider" not in serialized
+        assert "raw-bearer-token-123" not in serialized
+        assert "<redacted-secret>" in serialized
+
+
+# =========================================================================
+# Handoff context projection
+# =========================================================================
+
+
+class TestSubagentHandoffContext:
+    """Public projection helpers for subagent handoff boundaries."""
+
+    def test_project_kwargs_for_subagent_filters_control_and_secrets(self):
+        from app.engine.multi_agent.subagents import (
+            build_subagent_handoff_boundary_summary,
+            project_kwargs_for_subagent,
+        )
+
+        kwargs = {
+            "extra": "hello",
+            "access_token": "raw-access-token",
+            "_internal": "hidden",
+            "context": {
+                "domain": "maritime",
+                "provider_payload": {"id": "raw-provider"},
+            },
+            "notes": "Bearer raw-kwargs-token-12345678",
+        }
+        projected = project_kwargs_for_subagent(kwargs)
+
+        assert projected == {
+            "extra": "hello",
+            "context": {"domain": "maritime"},
+            "notes": "Bearer <redacted-secret>",
+        }
+        serialized = str(projected)
+        assert "access_token" not in serialized
+        assert "raw-access-token" not in serialized
+        assert "_internal" not in serialized
+        assert "provider_payload" not in serialized
+        assert "raw-provider" not in serialized
+        assert "raw-kwargs-token-12345678" not in serialized
+
+        summary = build_subagent_handoff_boundary_summary(
+            parent_state={"query": "hello", "_tool_policy_session": {"x": 1}},
+            child_state={"query": "hello"},
+            parent_kwargs=kwargs,
+            child_kwargs=projected,
+        )
+        assert summary["schema_version"] == "wiii.subagent_handoff_boundary.v1"
+        assert summary["state"]["dropped_key_count"] == 1
+        assert summary["kwargs"]["dropped_key_count"] == 2
+        assert summary["kwargs"]["redacted_secret_count"] == 1
+        assert "kwargs_secret_text_redacted" in summary["warning_codes"]
+        assert summary["raw_content_included"] is False
 
 
 # =========================================================================
@@ -511,6 +798,37 @@ class TestExecuteParallelSubagents:
         assert results[0].status == SubagentStatus.SUCCESS
         assert results[1].status == SubagentStatus.ERROR
         assert results[2].status == SubagentStatus.SUCCESS
+
+    @pytest.mark.asyncio
+    async def test_parallel_unexpected_exception_does_not_expose_error_text(
+        self,
+        monkeypatch,
+    ):
+        from app.engine.multi_agent.subagents import executor as executor_module
+
+        async def raising_execute_subagent(*_args, **_kwargs):
+            raise RuntimeError("access_token=raw-exception-token")
+
+        async def child(state):
+            return SubagentResult(output="unused")
+
+        monkeypatch.setattr(
+            executor_module,
+            "execute_subagent",
+            raising_execute_subagent,
+        )
+
+        results = await execute_parallel_subagents(
+            [(child, SubagentConfig(name="leaky", max_retries=0), {}, {})],
+            max_concurrent=1,
+        )
+
+        assert len(results) == 1
+        assert results[0].status == SubagentStatus.ERROR
+        assert results[0].error_message == "Subagent execution error"
+        serialized = str(results[0])
+        assert "raw-exception-token" not in serialized
+        assert "access_token" not in serialized
 
     @pytest.mark.asyncio
     async def test_parallel_concurrency_limit(self):

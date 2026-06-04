@@ -16,6 +16,10 @@ from typing import List, Optional
 import asyncpg
 
 from app.core.config import settings
+from app.repositories.knowledge_search_org_scope import (
+    log_knowledge_search_scope_blocked,
+    resolve_knowledge_search_org_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +282,15 @@ class SparseSearchRepository:
         if not self.is_available():
             logger.warning("PostgreSQL sparse search not available")
             return []
+
+        scope = resolve_knowledge_search_org_scope(org_id)
+        if not scope.write_allowed or not scope.org_id:
+            log_knowledge_search_scope_blocked(
+                logger,
+                "sparse_search",
+                scope,
+            )
+            return []
         
         try:
             # Build tsquery from natural language query
@@ -322,7 +335,7 @@ class SparseSearchRepository:
 
                 # Sprint 160: Org-scoped filtering (NULL-aware for shared KB)
                 from app.core.org_filter import org_where_positional
-                sql += org_where_positional(org_id, params, allow_null=True)
+                sql += org_where_positional(scope.org_id, params, allow_null=True)
                 param_idx = len(params) + 1
 
                 sql += f"""

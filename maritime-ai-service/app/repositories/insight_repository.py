@@ -20,6 +20,7 @@ from app.models.semantic_memory import (
 )
 
 logger = logging.getLogger(__name__)
+_INSIGHT_REPOSITORY_MISSING_ORG_WARNING = "insight_repository_blocked_missing_org_context"
 
 
 class InsightRepositoryMixin:
@@ -53,10 +54,10 @@ class InsightRepositoryMixin:
         """
         self._ensure_initialized()
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope = self._resolve_insight_scope(write=False)
+        if not self._scope_allows_insights(scope):
+            self._log_insight_scope_blocked("get_user_insights", scope, user_id=user_id)
+            return []
 
         try:
             with self._session_factory() as session:
@@ -64,9 +65,8 @@ class InsightRepositoryMixin:
                     "user_id": user_id,
                     "memory_type": MemoryType.INSIGHT.value if hasattr(MemoryType, 'INSIGHT') else 'insight',
                     "limit": limit,
+                    "org_id": scope.org_id,
                 }
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
 
                 query = text(f"""
                     SELECT
@@ -81,7 +81,7 @@ class InsightRepositoryMixin:
                     FROM {self.TABLE_NAME}
                     WHERE user_id = :user_id
                       AND memory_type = :memory_type
-                      {org_filter}
+                      AND organization_id = :org_id
                     ORDER BY created_at DESC
                     LIMIT :limit
                 """)
@@ -103,7 +103,12 @@ class InsightRepositoryMixin:
                         updated_at=row.updated_at
                     ))
 
-                logger.debug("Retrieved %d insights for user %s", len(insights), user_id)
+                logger.debug(
+                    "Retrieved %d insights for user_hash=%s org_hash=%s",
+                    len(insights),
+                    _hash_memory_identifier(user_id),
+                    _hash_memory_identifier(scope.org_id),
+                )
                 return insights
 
         except Exception as e:
@@ -124,25 +129,24 @@ class InsightRepositoryMixin:
         """
         self._ensure_initialized()
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope = self._resolve_insight_scope(write=True)
+        if not self._scope_allows_insights(scope):
+            self._log_insight_scope_blocked("delete_user_insights", scope, user_id=user_id)
+            return 0
 
         try:
             with self._session_factory() as session:
                 params: dict = {
                     "user_id": user_id,
                     "memory_type": MemoryType.INSIGHT.value if hasattr(MemoryType, 'INSIGHT') else 'insight',
+                    "org_id": scope.org_id,
                 }
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
 
                 query = text(f"""
                     DELETE FROM {self.TABLE_NAME}
                     WHERE user_id = :user_id
                       AND memory_type = :memory_type
-                      {org_filter}
+                      AND organization_id = :org_id
                     RETURNING id
                 """)
 
@@ -151,7 +155,12 @@ class InsightRepositoryMixin:
                 deleted = len(result.fetchall())
                 session.commit()
 
-                logger.info("Deleted %d insights for user %s", deleted, user_id)
+                logger.info(
+                    "Deleted %d insights for user_hash=%s org_hash=%s",
+                    deleted,
+                    _hash_memory_identifier(user_id),
+                    _hash_memory_identifier(scope.org_id),
+                )
                 return deleted
 
         except Exception as e:
@@ -177,10 +186,10 @@ class InsightRepositoryMixin:
         """
         self._ensure_initialized()
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope = self._resolve_insight_scope(write=False)
+        if not self._scope_allows_insights(scope):
+            self._log_insight_scope_blocked("get_insights_by_category", scope, user_id=user_id)
+            return []
 
         try:
             with self._session_factory() as session:
@@ -188,9 +197,8 @@ class InsightRepositoryMixin:
                     "user_id": user_id,
                     "category": category,
                     "limit": limit,
+                    "org_id": scope.org_id,
                 }
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
 
                 query = text(f"""
                     SELECT
@@ -205,7 +213,7 @@ class InsightRepositoryMixin:
                     FROM {self.TABLE_NAME}
                     WHERE user_id = :user_id
                       AND metadata->>'insight_category' = :category
-                      {org_filter}
+                      AND organization_id = :org_id
                     ORDER BY last_accessed DESC NULLS LAST, created_at DESC
                     LIMIT :limit
                 """)
@@ -231,3 +239,39 @@ class InsightRepositoryMixin:
         except Exception as e:
             logger.error("Failed to get insights by category: %s", e)
             return []
+
+    def _resolve_insight_scope(self, *, write: bool):
+        from app.engine.semantic_memory.write_audit import (
+            resolve_memory_read_scope,
+            resolve_memory_write_scope,
+        )
+
+        return resolve_memory_write_scope() if write else resolve_memory_read_scope()
+
+    def _scope_allows_insights(self, scope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _log_insight_scope_blocked(
+        self,
+        operation: str,
+        scope,
+        *,
+        user_id: str,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_INSIGHT_REPOSITORY_MISSING_ORG_WARNING)
+        logger.warning(
+            "[INSIGHTS] %s blocked user_hash=%s org_hash=%s org_scope=%s warnings=%s",
+            operation,
+            _hash_memory_identifier(user_id),
+            _hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
+
+
+def _hash_memory_identifier(value) -> str | None:
+    from app.engine.semantic_memory.privacy import hash_memory_identifier
+
+    return hash_memory_identifier(value)

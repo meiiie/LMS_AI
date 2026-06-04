@@ -12,6 +12,7 @@ Locks the contract:
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import AsyncGenerator
 
@@ -21,6 +22,7 @@ from app.engine.runtime import runtime_metrics as rm
 from app.engine.runtime.lifecycle import HookPoint, get_lifecycle
 from app.engine.runtime.native_stream_dispatch import (
     _extract_answer_token,
+    _extract_runtime_flow_ledger,
     native_stream_dispatch,
 )
 from app.engine.runtime.session_event_log import InMemorySessionEventLog
@@ -53,6 +55,25 @@ async def _make_sse_generator(chunks: list[str]) -> AsyncGenerator[str, None]:
         yield chunk
 
 
+class FailingAssistantAppendLog(InMemorySessionEventLog):
+    async def append(
+        self,
+        *,
+        session_id: str,
+        event_type: str,
+        payload: dict,
+        org_id: str | None = None,
+    ):
+        if event_type == "assistant_message":
+            raise RuntimeError("session event log unavailable")
+        return await super().append(
+            session_id=session_id,
+            event_type=event_type,
+            payload=payload,
+            org_id=org_id,
+        )
+
+
 # ── _extract_answer_token ──
 
 def test_extract_answer_token_parses_answer_event():
@@ -81,6 +102,26 @@ def test_extract_answer_token_handles_empty_content():
 def test_extract_answer_token_returns_none_for_non_string():
     assert _extract_answer_token(None) is None  # type: ignore[arg-type]
     assert _extract_answer_token(12345) is None  # type: ignore[arg-type]
+
+
+def test_extract_runtime_flow_ledger_parses_terminal_sse_event():
+    ledger = {"schema_version": "wiii.runtime_flow_ledger.v1"}
+    chunk = (
+        "event: done\n"
+        f"data: {json.dumps({'runtime_flow_ledger': ledger})}\n\n"
+    )
+
+    assert _extract_runtime_flow_ledger(chunk) == ledger
+
+
+def test_extract_runtime_flow_ledger_ignores_non_terminal_events():
+    ledger = {"schema_version": "wiii.runtime_flow_ledger.v1"}
+    chunk = (
+        "event: answer\n"
+        f"data: {json.dumps({'runtime_flow_ledger': ledger})}\n\n"
+    )
+
+    assert _extract_runtime_flow_ledger(chunk) is None
 
 
 # ── pass-through ──
@@ -158,6 +199,36 @@ async def test_org_id_propagated_to_both_events():
     assert events_other == []
 
 
+async def test_runtime_flow_ledger_event_recorded_when_present():
+    log = InMemorySessionEventLog()
+    ledger = {
+        "schema_version": "wiii.runtime_flow_ledger.v1",
+        "route": {"lane": "casual_chat"},
+        "stream": {"done_seen": True, "event_counts": {"done": 1}},
+    }
+    chunks = [
+        'event: answer\ndata: {"content": "ok"}\n\n',
+        "event: done\n"
+        f"data: {json.dumps({'runtime_flow_ledger': ledger})}\n\n",
+    ]
+    wrapped = native_stream_dispatch(
+        _make_request(), _make_sse_generator(chunks), event_log=log
+    )
+    received = [chunk async for chunk in wrapped]
+
+    assert received == chunks
+    events = await log.get_events(session_id="stream-1")
+    assert [event.event_type for event in events] == [
+        "user_message",
+        "assistant_message",
+        "runtime_flow_ledger",
+    ]
+    ledger_event = events[2].payload
+    assert ledger_event["runtime_flow_ledger"]["route"]["lane"] == "casual_chat"
+    assert ledger_event["status"] == "success"
+    assert ledger_event["transport"] == "stream/v3"
+
+
 # ── error path ──
 
 async def test_inner_generator_raise_records_error_assistant_event():
@@ -186,6 +257,129 @@ async def test_inner_generator_raise_records_error_assistant_event():
     assert assistant["text"] == "partial"
 
 
+async def test_runtime_flow_ledger_alerts_forward_to_metrics():
+    log = InMemorySessionEventLog()
+    ledger = {
+        "schema_version": "wiii.runtime_flow_ledger.v1",
+        "request": {"request_id": ""},
+        "route": {"lane": "external_app_action"},
+        "context": {
+            "context_provenance": {
+                "warnings": [],
+                "privacy": {"raw_content_included": False},
+            }
+        },
+        "tools": {"observed": [], "suppressed": []},
+        "stream": {
+            "done_seen": True,
+            "metadata_seen": True,
+            "event_counts": {"done": 1},
+        },
+        "finalization": {"status": "saved"},
+    }
+    chunks = [
+        'event: answer\ndata: {"content": "ok"}\n\n',
+        "event: done\n"
+        f"data: {json.dumps({'runtime_flow_ledger': ledger})}\n\n",
+    ]
+    wrapped = native_stream_dispatch(
+        _make_request(),
+        _make_sse_generator(chunks),
+        event_log=log,
+    )
+    async for _ in wrapped:
+        pass
+
+    snap = rm.snapshot()
+    event_labels = (
+        ("doctor_status", "degraded"),
+        ("status", "success"),
+        ("transport", "stream/v3"),
+    )
+    alert_labels = (
+        ("code", "missing_request_id"),
+        ("severity", "warning"),
+        ("status", "success"),
+        ("transport", "stream/v3"),
+    )
+    assert snap["counters"]["runtime.runtime_flow_ledger.events"][event_labels] == 1
+    assert snap["counters"]["runtime.runtime_flow_ledger.alerts"][alert_labels] == 1
+    ledger_append_labels = (
+        ("stage", "runtime_flow_ledger_append"),
+        ("status", "success"),
+        ("stream_status", "success"),
+        ("transport", "stream/v3"),
+    )
+    assert (
+        snap["counters"]["runtime.native_stream_dispatch.finalization"][
+            ledger_append_labels
+        ]
+        == 1
+    )
+
+
+async def test_runtime_flow_ledger_event_recorded_on_error_when_seen():
+    log = InMemorySessionEventLog()
+    ledger = {
+        "schema_version": "wiii.runtime_flow_ledger.v1",
+        "route": {"lane": "provider_stream_interrupted"},
+        "stream": {"metadata_seen": True, "done_seen": False},
+    }
+
+    async def bad_gen() -> AsyncGenerator[str, None]:
+        yield (
+            "event: metadata\n"
+            f"data: {json.dumps({'runtime_flow_ledger': ledger})}\n\n"
+        )
+        raise RuntimeError("provider hung up")
+
+    wrapped = native_stream_dispatch(_make_request(), bad_gen(), event_log=log)
+    with pytest.raises(RuntimeError, match="provider hung up"):
+        async for _ in wrapped:
+            pass
+
+    events = await log.get_events(session_id="stream-1")
+    assert [event.event_type for event in events] == [
+        "user_message",
+        "assistant_message",
+        "runtime_flow_ledger",
+    ]
+    ledger_event = events[2].payload
+    assert ledger_event["status"] == "error"
+    assert (
+        ledger_event["runtime_flow_ledger"]["route"]["lane"]
+        == "provider_stream_interrupted"
+    )
+
+
+async def test_inner_generator_error_redacts_secret_text_before_reraise():
+    log = InMemorySessionEventLog()
+
+    async def bad_gen() -> AsyncGenerator[str, None]:
+        yield 'event: answer\ndata: {"content": "partial"}\n\n'
+        raise RuntimeError(
+            "provider failed Bearer raw-bearer-token-123 "
+            "api_key=raw-api-key-inline"
+        )
+
+    wrapped = native_stream_dispatch(_make_request(), bad_gen(), event_log=log)
+    with pytest.raises(RuntimeError) as exc_info:
+        async for _ in wrapped:
+            pass
+
+    raised = str(exc_info.value)
+    assert "<redacted-secret>" in raised
+    assert "raw-bearer-token-123" not in raised
+    assert "raw-api-key-inline" not in raised
+    assert "api_key" not in raised
+    events = await log.get_events(session_id="stream-1")
+    assistant = events[1].payload
+    serialized = str(assistant)
+    assert "<redacted-secret>" in assistant["error"]
+    assert "raw-bearer-token-123" not in serialized
+    assert "raw-api-key-inline" not in serialized
+
+
 # ── metrics ──
 
 async def test_success_run_records_metrics():
@@ -208,6 +402,18 @@ async def test_success_run_records_metrics():
     ][(("status", "success"),)]
     assert len(durations) == 1
     assert durations[0] >= 0
+    finalization_labels = (
+        ("stage", "assistant_message_append"),
+        ("status", "success"),
+        ("stream_status", "success"),
+        ("transport", "stream/v3"),
+    )
+    assert (
+        snap["counters"]["runtime.native_stream_dispatch.finalization"][
+            finalization_labels
+        ]
+        == 1
+    )
 
 
 async def test_error_run_records_error_metric():
@@ -226,6 +432,37 @@ async def test_error_run_records_error_metric():
     assert (
         snap["counters"]["runtime.native_stream_dispatch.runs"][
             (("status", "error"),)
+        ]
+        == 1
+    )
+
+
+async def test_finalization_append_failure_records_metric_without_breaking_stream():
+    log = FailingAssistantAppendLog()
+    chunks = ['event: answer\ndata: {"content": "ok"}\n\n']
+    wrapped = native_stream_dispatch(
+        _make_request(), _make_sse_generator(chunks), event_log=log
+    )
+
+    received = [chunk async for chunk in wrapped]
+
+    assert received == chunks
+    snap = rm.snapshot()
+    finalization_labels = (
+        ("stage", "assistant_message_append"),
+        ("status", "error"),
+        ("stream_status", "success"),
+        ("transport", "stream/v3"),
+    )
+    assert (
+        snap["counters"]["runtime.native_stream_dispatch.finalization"][
+            finalization_labels
+        ]
+        == 1
+    )
+    assert (
+        snap["counters"]["runtime.native_stream_dispatch.runs"][
+            (("status", "success"),)
         ]
         == 1
     )

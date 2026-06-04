@@ -362,13 +362,25 @@ class TestP4ActiveMemoryPruning:
         assert pruned == 0
 
     @pytest.mark.asyncio
-    async def test_prune_called_before_extraction(self):
-        """extract_and_store_facts() should call prune before extracting."""
+    async def test_prune_runs_as_background_memory_maintenance(self):
+        """Memory pruning should stay out of extraction hot path."""
         import inspect
         from app.engine.semantic_memory.extraction import FactExtractor
-        source = inspect.getsource(FactExtractor.extract_and_store_facts)
-        # Verify pruning import and call exist before extract_user_facts
-        prune_idx = source.find("prune_stale_memories")
-        extract_idx = source.find("self.extract_user_facts")
-        assert prune_idx != -1, "prune_stale_memories not found in extract_and_store_facts"
-        assert prune_idx < extract_idx, "Pruning should happen BEFORE extraction"
+        from app.services.background_tasks import BackgroundTaskRunner
+        from app.services.post_turn_lifecycle import schedule_post_turn_background_tasks
+        from app.tasks.semantic_memory_tasks import run_semantic_memory_maintenance
+
+        extraction_source = inspect.getsource(FactExtractor.extract_and_store_facts)
+        runner_source = inspect.getsource(
+            BackgroundTaskRunner._run_semantic_memory_maintenance,
+        )
+        task_source = inspect.getsource(run_semantic_memory_maintenance)
+        schedule_source = inspect.getsource(BackgroundTaskRunner.schedule_all)
+        lifecycle_source = inspect.getsource(schedule_post_turn_background_tasks)
+
+        assert "prune_stale_memories" not in extraction_source
+        assert "run_semantic_memory_maintenance" in runner_source
+        assert "prune_stale_memories" in task_source
+        assert "schedule_post_turn_background_tasks" in schedule_source
+        assert "_enqueue_or_run_semantic_memory_maintenance" in lifecycle_source
+        assert "semantic_memory_maintenance" in lifecycle_source

@@ -242,6 +242,35 @@ async def test_snapshot_captures_state_and_metadata():
     assert snap.last_transition_at >= snap.started_at
 
 
+async def test_snapshot_sanitizes_metadata_and_error():
+    sm = RunStateMachine(
+        metadata={
+            "org_id": "org-A",
+            "user_id": "raw-user-id",
+            "access_token": "raw-access-token",
+        }
+    )
+    await sm.transition_to(
+        RunState.FAILED,
+        error=(
+            "provider failed Bearer raw-bearer-token-123 "
+            "token=raw-token-inline"
+        ),
+    )
+
+    snap = sm.snapshot()
+
+    assert snap.metadata["org_id"] == "org-A"
+    assert snap.metadata["user_id_hash"].startswith("sha256:")
+    assert "<redacted-secret>" in snap.error
+    serialized = str(snap)
+    assert "raw-user-id" not in serialized
+    assert "raw-access-token" not in serialized
+    assert "raw-bearer-token-123" not in serialized
+    assert "raw-token-inline" not in serialized
+    assert "access_token" not in serialized
+
+
 async def test_snapshot_is_independent_of_machine():
     sm = RunStateMachine()
     await sm.transition_to(RunState.DISPATCHING)

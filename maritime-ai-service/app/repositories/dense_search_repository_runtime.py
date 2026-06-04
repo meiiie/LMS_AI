@@ -14,6 +14,10 @@ from app.services.embedding_shadow_vector_service import (
 )
 from app.services.embedding_space_guard import get_active_embedding_space_contract
 from app.services.embedding_space_registry_service import get_embedding_write_spaces
+from app.repositories.knowledge_search_org_scope import (
+    log_knowledge_search_scope_blocked,
+    resolve_knowledge_search_org_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +30,12 @@ def _has_valid_embedding(embedding: List[float]) -> bool:
     return bool(embedding)
 
 
-def _resolve_effective_org_id(organization_id: Optional[str]) -> Optional[str]:
-    from app.core.org_filter import get_effective_org_id
-
-    return get_effective_org_id() or organization_id
+def _resolve_effective_org_id(
+    organization_id: Optional[str],
+    *,
+    write: bool = False,
+):
+    return resolve_knowledge_search_org_scope(organization_id, write=write)
 
 
 def _derive_storage_uuid(node_id: str) -> str:
@@ -173,9 +179,19 @@ async def store_embedding_impl(repo, *, node_id: str, embedding: List[float], or
         logger.error("Invalid embedding payload for node %s", node_id)
         return False
 
+    scope = _resolve_effective_org_id(organization_id, write=True)
+    if not scope.write_allowed or not scope.org_id:
+        log_knowledge_search_scope_blocked(
+            logger,
+            "store_embedding",
+            scope,
+            node_id=node_id,
+        )
+        return False
+
     try:
         pool = await repo._get_pool()
-        eff_org_id = _resolve_effective_org_id(organization_id)
+        eff_org_id = scope.org_id
         write_spaces = get_embedding_write_spaces("knowledge_embeddings")
         source_contract = get_active_embedding_space_contract()
 
@@ -281,9 +297,19 @@ async def upsert_embedding_impl(
         logger.error("Invalid embedding payload for node %s", node_id)
         return False
 
+    scope = _resolve_effective_org_id(organization_id, write=True)
+    if not scope.write_allowed or not scope.org_id:
+        log_knowledge_search_scope_blocked(
+            logger,
+            "upsert_embedding",
+            scope,
+            node_id=node_id,
+        )
+        return False
+
     try:
         pool = await repo._get_pool()
-        eff_org_id = _resolve_effective_org_id(organization_id)
+        eff_org_id = scope.org_id
         write_spaces = get_embedding_write_spaces("knowledge_embeddings")
 
         async with pool.acquire() as conn:
@@ -386,6 +412,16 @@ async def store_document_chunk_impl(
         logger.error("Invalid embedding payload for node %s", node_id)
         return False
 
+    scope = _resolve_effective_org_id(organization_id, write=True)
+    if not scope.write_allowed or not scope.org_id:
+        log_knowledge_search_scope_blocked(
+            logger,
+            "store_document_chunk",
+            scope,
+            node_id=node_id,
+        )
+        return False
+
     try:
         pool = await repo._get_pool()
         bounding_boxes_json = (
@@ -393,7 +429,7 @@ async def store_document_chunk_impl(
             if bounding_boxes
             else None
         )
-        eff_org_id = _resolve_effective_org_id(organization_id)
+        eff_org_id = scope.org_id
         write_spaces = get_embedding_write_spaces("knowledge_embeddings")
 
         async with pool.acquire() as conn:
@@ -539,11 +575,21 @@ async def delete_embedding_impl(repo, *, node_id: str, organization_id: Optional
         logger.warning("Dense search not available for deletion")
         return False
 
+    scope = _resolve_effective_org_id(organization_id, write=True)
+    if not scope.write_allowed or not scope.org_id:
+        log_knowledge_search_scope_blocked(
+            logger,
+            "delete_embedding",
+            scope,
+            node_id=node_id,
+        )
+        return False
+
     try:
         pool = await repo._get_pool()
         from app.core.org_filter import org_where_positional
 
-        eff_org_id = _resolve_effective_org_id(organization_id)
+        eff_org_id = scope.org_id
         async with pool.acquire() as conn:
             key_column, key_value = await _resolve_storage_identity(repo, conn, node_id)
             query = f"DELETE FROM knowledge_embeddings WHERE {key_column} = $1"
@@ -562,11 +608,21 @@ async def get_embedding_impl(repo, *, node_id: str, organization_id: Optional[st
     if not repo._available:
         return None
 
+    scope = _resolve_effective_org_id(organization_id)
+    if not scope.write_allowed or not scope.org_id:
+        log_knowledge_search_scope_blocked(
+            logger,
+            "get_embedding",
+            scope,
+            node_id=node_id,
+        )
+        return None
+
     try:
         pool = await repo._get_pool()
         from app.core.org_filter import org_where_positional
 
-        eff_org_id = _resolve_effective_org_id(organization_id)
+        eff_org_id = scope.org_id
         active_space = get_embedding_write_spaces("knowledge_embeddings")[0] if get_embedding_write_spaces("knowledge_embeddings") else None
         async with pool.acquire() as conn:
             key_column, key_value = await _resolve_storage_identity(repo, conn, node_id)
@@ -603,11 +659,20 @@ async def count_embeddings_impl(repo, *, organization_id: Optional[str]) -> int:
     if not repo._available:
         return 0
 
+    scope = _resolve_effective_org_id(organization_id)
+    if not scope.write_allowed or not scope.org_id:
+        log_knowledge_search_scope_blocked(
+            logger,
+            "count_embeddings",
+            scope,
+        )
+        return 0
+
     try:
         pool = await repo._get_pool()
         from app.core.org_filter import org_where_positional
 
-        eff_org_id = _resolve_effective_org_id(organization_id)
+        eff_org_id = scope.org_id
         async with pool.acquire() as conn:
             query = "SELECT COUNT(*) as count FROM knowledge_embeddings WHERE 1=1"
             params = []

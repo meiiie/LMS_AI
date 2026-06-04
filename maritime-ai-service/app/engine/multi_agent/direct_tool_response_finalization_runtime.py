@@ -19,6 +19,10 @@ from app.engine.multi_agent.direct_web_search_policy import (
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
 )
+from app.engine.multi_agent.external_app_action_runtime import (
+    external_app_action_final_answer as _external_app_action_final_answer,
+    facebook_direct_apply_final_answer as _facebook_direct_apply_final_answer,
+)
 
 
 @dataclass(slots=True)
@@ -28,6 +32,37 @@ class DirectToolResponseFinalization:
     llm_response: Any
     messages: list[Any]
     resolved_provider: str | None
+
+def facebook_direct_apply_final_answer(
+    tool_call_events: list[dict[str, Any]],
+) -> str:
+    """Build a stable answer for host-action publish requests.
+
+    The backend now prefers a core-owned Wiii Connect execution path and keeps
+    the older host-action result envelope as a compatible fallback. Do not ask
+    the model to reinterpret this intermediate JSON; it can contradict the
+    audited connector state.
+    """
+
+    return _facebook_direct_apply_final_answer(tool_call_events)
+
+
+def _record_final_answer_trace(
+    state: dict[str, Any] | None,
+    *,
+    source: str,
+    reason: str,
+    status: str = "resolved",
+) -> None:
+    if not isinstance(state, dict):
+        return
+    state["_final_answer_trace"] = {
+        "version": "final_answer_trace.v1",
+        "source": source,
+        "reason": reason,
+        "status": status,
+        "answer_present": True,
+    }
 
 
 async def finalize_direct_tool_response(
@@ -67,6 +102,22 @@ async def finalize_direct_tool_response(
     visible_response_text = extract_direct_visible_text(
         getattr(next_response, "content", "")
     )
+
+    external_action_answer = _external_app_action_final_answer(
+        tool_call_events,
+    )
+    if external_action_answer:
+        _record_final_answer_trace(
+            state,
+            source="wiii_connect_action_result",
+            reason="external_app_action_payload",
+        )
+        next_response = build_assistant_message(
+            external_action_answer,
+            native_tool_messages=native_tool_messages,
+        )
+        visible_response_text = external_action_answer
+        remaining_tool_calls = False
 
     if (
         tool_call_events

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 
@@ -52,6 +53,7 @@ class _FakeRepo:
         self.conn = _FakeConn()
 
     async def _get_pool(self):
+        self.get_pool_calls = getattr(self, "get_pool_calls", 0) + 1
         return _FakePool(self.conn)
 
     async def _has_column(self, conn, table: str, column: str) -> bool:
@@ -219,3 +221,45 @@ async def test_store_document_chunk_dual_writes_shadow_vectors(monkeypatch):
 
     assert ok is True
     assert any("INSERT INTO knowledge_embedding_vectors" in call[0] for call in repo.conn.calls)
+
+
+@pytest.mark.asyncio
+async def test_store_document_chunk_blocks_missing_org_context_before_db(
+    monkeypatch,
+    caplog,
+):
+    from app.core.config import settings
+    from app.core.org_context import current_org_id
+
+    repo = _FakeRepo(has_node_id=True)
+    monkeypatch.setattr(settings, "enable_multi_tenant", True)
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "default_organization_id", "default")
+    caplog.set_level(logging.WARNING)
+
+    token = current_org_id.set(None)
+    try:
+        ok = await store_document_chunk_impl(
+            repo,
+            node_id="PRIVATE-NODE",
+            content="PRIVATE CONTENT",
+            embedding=[0.1] * 768,
+            document_id="PRIVATE-DOC",
+            page_number=1,
+            chunk_index=0,
+            content_type="text",
+            confidence_score=0.9,
+            image_url="",
+            metadata={"domain_id": "maritime"},
+            organization_id=None,
+            bounding_boxes=None,
+        )
+    finally:
+        current_org_id.reset(token)
+
+    assert ok is False
+    assert getattr(repo, "get_pool_calls", 0) == 0
+    assert repo.conn.calls == []
+    assert "knowledge_search_blocked_missing_org_context" in caplog.text
+    assert "PRIVATE-NODE" not in caplog.text
+    assert "PRIVATE CONTENT" not in caplog.text

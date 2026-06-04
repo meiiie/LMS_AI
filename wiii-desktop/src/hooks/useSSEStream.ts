@@ -6,9 +6,15 @@ import { useCallback, useEffect, useRef } from "react";
 import { sendMessageStream } from "@/api/chat";
 import { ApiHttpError, initClient } from "@/api/client";
 import {
+  fetchWiiiConnectFacebookPages,
+  fetchWiiiConnectProviderConnections,
+} from "@/api/wiii-connect";
+import {
   submitHostActionAudit,
+  submitHostActionResult,
   type HostActionAuditEventType,
   type HostActionAuditRequest,
+  type HostActionResultRequest,
 } from "@/api/host-actions";
 import { useChatStore } from "@/stores/chat-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -17,7 +23,7 @@ import { useOrgStore } from "@/stores/org-store";
 import { useContextStore } from "@/stores/context-store";
 import { useCharacterStore } from "@/stores/character-store";
 import { usePageContextStore } from "@/stores/page-context-store";
-import { useHostContextStore } from "@/stores/host-context-store";
+import { useHostContextStore, type ActionResult } from "@/stores/host-context-store";
 import { useCodeStudioStore } from "@/stores/code-studio-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useToastStore } from "@/stores/toast-store";
@@ -57,11 +63,148 @@ const STREAM_RESTART_ABORT_REASON = "stream_restart";
 const USER_CANCEL_ABORT_REASON = "user_cancel";
 const TRACE_SSE = import.meta.env.DEV;
 
+type HostContextForRequest = NonNullable<
+  ReturnType<typeof useHostContextStore.getState>["currentContext"]
+>;
+
 // Sprint 147: Track think tool IDs to skip their results
 const _thinkToolIds = new Set<string>();
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeIntentText(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function looksWiiiConnectFacebookContextTurn(text: string): boolean {
+  const normalized = normalizeIntentText(text);
+  if (!/\b(facebook|fb|meta)\b/.test(normalized)) {
+    return false;
+  }
+  return [
+    "ket noi",
+    "connect",
+    "connected",
+    "dang bai",
+    "dang len",
+    "post",
+    "publish",
+    "bai viet",
+    "facebook",
+  ].some((marker) => normalized.includes(marker));
+}
+
+async function buildWiiiConnectFacebookContextSnapshot(
+  text: string,
+): Promise<Record<string, unknown> | null> {
+  if (!looksWiiiConnectFacebookContextTurn(text)) {
+    return null;
+  }
+
+  try {
+    const connections = await fetchWiiiConnectProviderConnections("facebook", {
+      probeDatabase: true,
+    });
+    const connectionItems = connections.connections || [];
+    const activeConnections = connectionItems.filter(
+      (item) => item.active || item.state === "connected",
+    );
+    const firstConnection = activeConnections[0] || connectionItems[0];
+    const connectionRef =
+      firstConnection?.connection_ref || firstConnection?.connection_id || "";
+    const snapshot: Record<string, unknown> = {
+      provider_slug: "facebook",
+      provider_label: "Facebook",
+      status: activeConnections.length > 0 ? "connected" : "not_connected",
+      connection_count: connectionItems.length,
+      active_connection_count: activeConnections.length,
+    };
+    if (firstConnection) {
+      snapshot.connection_ref_present = Boolean(connectionRef);
+      snapshot.connection_state = firstConnection.state || "";
+      snapshot.connection_active = Boolean(firstConnection.active);
+      snapshot.blocked_reason = firstConnection.reason || firstConnection.state || "";
+    }
+
+    if (connectionRef && activeConnections.length > 0) {
+      const pages = await fetchWiiiConnectFacebookPages("facebook", connectionRef);
+      snapshot.page_status = pages.status;
+      snapshot.blocked_reason = pages.status === "ready" ? "" : pages.reason || "";
+      snapshot.page_count = pages.page_count;
+      snapshot.page_names = (pages.pages || [])
+        .map((page) => page.name)
+        .filter((name) => Boolean(name))
+        .slice(0, 5);
+      if (pages.status === "ready" && pages.page_count > 0) {
+        snapshot.available_actions = [
+          "wiii_connect.facebook_post.direct_apply",
+          "wiii_connect.facebook_post.preview",
+          "wiii_connect.facebook_post.apply",
+        ];
+      }
+    }
+
+    return snapshot;
+  } catch (error) {
+    console.warn(
+      "[SSE] Wiii Connect Facebook context snapshot failed:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return {
+      provider_slug: "facebook",
+      provider_label: "Facebook",
+      status: "unavailable",
+    };
+  }
+}
+
+function withWiiiConnectSnapshot(
+  context: HostContextForRequest | null,
+  snapshot: Record<string, unknown> | null,
+): HostContextForRequest | null {
+  if (!snapshot) {
+    return context;
+  }
+  if (!context) {
+    const hostname =
+      typeof window !== "undefined" ? window.location.hostname : "localhost";
+    const isEmbedded =
+      typeof window !== "undefined" ? window.parent !== window : false;
+    return {
+      host_type: "wiii-desktop",
+      host_name: "Wiii Desktop",
+      resource_uri: "wiii://chat/current",
+      page: {
+        type: "chat",
+        title: "Wiii Chat",
+        url: typeof window !== "undefined" ? window.location.href : undefined,
+        metadata: {
+          hostname,
+          is_embedded: isEmbedded,
+          wiii_connect: snapshot,
+        },
+      },
+      workflow_stage: "conversation",
+    };
+  }
+  return {
+    ...context,
+    page: {
+      ...context.page,
+      metadata: {
+        ...(context.page.metadata || {}),
+        wiii_connect: snapshot,
+      },
+    },
+  };
 }
 
 async function waitForPointyLayoutCommit(): Promise<void> {
@@ -254,12 +397,17 @@ export function buildHostActionPreviewItem(
   data: Record<string, unknown>,
   hostContext: ReturnType<typeof useHostContextStore.getState>["currentContext"],
 ): PreviewItemData | null {
-  const previewToken = typeof data.preview_token === "string" ? data.preview_token.trim() : "";
+  const previewKind = typeof data.preview_kind === "string" ? data.preview_kind : "";
+  const previewToken =
+    typeof data.preview_token === "string" && data.preview_token.trim()
+      ? data.preview_token.trim()
+      : previewKind === "facebook_post" && typeof data.preview_evidence_id === "string"
+        ? data.preview_evidence_id.trim()
+        : "";
   if (!previewToken) return null;
   const approvalToken =
     typeof data.approval_token === "string" ? data.approval_token.trim() : "";
 
-  const previewKind = typeof data.preview_kind === "string" ? data.preview_kind : "";
   const summary = typeof data.summary === "string" ? data.summary.trim() : "Preview is ready.";
   const sourceReferences = normalizeSourceReferences(
     data.source_references ?? data.sourceReferences,
@@ -279,9 +427,11 @@ export function buildHostActionPreviewItem(
   const targetLabel =
     (typeof data.lesson_title === "string" && data.lesson_title.trim())
     || (typeof data.quiz_title === "string" && data.quiz_title.trim())
+    || (typeof data.page_label === "string" && data.page_label.trim())
     || (typeof params.title === "string" && params.title.trim())
     || (typeof data.lesson_id === "string" && data.lesson_id.trim())
     || (typeof data.quiz_id === "string" && data.quiz_id.trim())
+    || (typeof data.page_id === "string" && data.page_id.trim())
     || "Host preview";
 
   const title =
@@ -292,11 +442,15 @@ export function buildHostActionPreviewItem(
         : previewKind === "quiz_publish"
           ? `Xem trước phát hành bài kiểm tra: ${targetLabel}`
           : `Xem trước thao tác LMS: ${targetLabel}`;
+  const displayTitle =
+    previewKind === "facebook_post"
+      ? `Xem trước bài đăng Facebook: ${targetLabel}`
+      : title;
 
   return {
     preview_id: `host-action-${requestId}`,
     preview_type: "host_action",
-    title,
+    title: displayTitle,
     snippet: summary,
     metadata: {
       action,
@@ -304,9 +458,20 @@ export function buildHostActionPreviewItem(
       summary,
       preview_kind: previewKind || undefined,
       preview_token: previewToken,
+      preview_evidence_id:
+        typeof data.preview_evidence_id === "string" ? data.preview_evidence_id : undefined,
       approval_token: approvalToken || undefined,
       apply_action: typeof data.apply_action === "string" ? data.apply_action : undefined,
       target_label: targetLabel,
+      page_id: typeof data.page_id === "string" ? data.page_id : undefined,
+      page_label: typeof data.page_label === "string" ? data.page_label : undefined,
+      message: typeof data.message === "string" ? data.message : undefined,
+      image_present:
+        typeof data.image_present === "boolean" ? data.image_present : undefined,
+      facebook_post_body:
+        data.facebook_post_body && typeof data.facebook_post_body === "object"
+          ? data.facebook_post_body
+          : undefined,
       lesson_id: typeof data.lesson_id === "string" ? data.lesson_id : undefined,
       lesson_title: typeof data.lesson_title === "string" ? data.lesson_title : undefined,
       quiz_id: typeof data.quiz_id === "string" ? data.quiz_id : undefined,
@@ -422,6 +587,50 @@ function buildHostActionAuditRequest(
       source_references:
         sourceReferences.length > 0 ? sourceReferences : undefined,
     },
+  };
+}
+
+const HOST_ACTION_RESULT_REDACT_KEYS = new Set([
+  "access_token",
+  "refresh_token",
+  "client_secret",
+  "api_key",
+  "authorization",
+  "approval_token",
+  "image_base64",
+]);
+
+function sanitizeHostActionResultValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeHostActionResultValue(item));
+  }
+  if (value && typeof value === "object") {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      sanitized[key] = HOST_ACTION_RESULT_REDACT_KEYS.has(key.toLowerCase())
+        ? "[redacted]"
+        : sanitizeHostActionResultValue(item);
+    }
+    return sanitized;
+  }
+  return value;
+}
+
+export function buildHostActionResultRequest(
+  action: string,
+  requestId: string,
+  result: ActionResult,
+): HostActionResultRequest {
+  const rawData = result.data || {};
+  const data = sanitizeHostActionResultValue(rawData) as Record<string, unknown>;
+  const dataSummary = typeof data.summary === "string" ? data.summary.trim() : "";
+  return {
+    action,
+    request_id: requestId,
+    success: result.success,
+    summary: dataSummary || (result.success ? "Host action completed." : result.error),
+    error: result.error,
+    data,
   };
 }
 
@@ -653,15 +862,22 @@ export function useSSEStream() {
     const store = useChatStore.getState();
     if (!store.isStreaming) return;
 
-    if (metadata) {
-      store.setPendingStreamMetadata(metadata);
+    const effectiveMetadata = metadata
+      ? ({
+          ...(store.pendingStreamMetadata || {}),
+          ...metadata,
+        } as ChatResponseMetadata)
+      : undefined;
+
+    if (effectiveMetadata) {
+      store.setPendingStreamMetadata(effectiveMetadata);
     }
 
     if (hasStreamingOutput()) {
       if (TRACE_SSE) {
         console.debug("[SSE] finalize", { reason, eventOrder: [...eventOrderRef.current] });
       }
-      store.finalizeStream();
+      store.finalizeStream(effectiveMetadata);
       void useModelStore.getState().fetchProviders({ force: true });
       return;
     }
@@ -790,9 +1006,12 @@ export function useSSEStream() {
 
     // Add user message (Sprint 179 images + per-turn document chips)
     chatStore.addUserMessage(content, images, documents);
+    useHostContextStore.getState().setLocalActionImages(images);
 
     // Initialize the HTTP client with current settings
     initClient(settings.server_url, authHeaders);
+    const wiiiConnectContextSnapshot =
+      await buildWiiiConnectFacebookContextSnapshot(content);
 
       // Start streaming
       chatStore.startStreaming();
@@ -1011,7 +1230,7 @@ export function useSSEStream() {
         });
         useChatStore.getState().addChatLifecycleEvent(data);
       },
-      onDone: () => {
+      onDone: (data) => {
         traceEvent("done");
         // Some backend paths (notably source-backed web synthesis) emit the
         // final answer as a compact chunk right before `done`. Drain before
@@ -1042,7 +1261,10 @@ export function useSSEStream() {
           tryStreamingDispatch(fullText);
         }
         queueMicrotask(() => {
-          finalizeFromTransport("done");
+          finalizeFromTransport(
+            "done",
+            data as Partial<ChatResponseMetadata> as ChatResponseMetadata,
+          );
           const activeConv = useChatStore.getState().activeConversation();
           const sid = activeConv?.session_id || activeConv?.id || "";
           if (sid) {
@@ -1441,6 +1663,11 @@ export function useSSEStream() {
           useHostContextStore.getState().requestAction(action, params || {}, id)
             .then((result) => {
               console.log(`[SSE] Host action ${id} resolved:`, result);
+              void submitHostActionResult(
+                buildHostActionResultRequest(action, id, result),
+              ).catch((err) => {
+                console.warn(`[SSE] Host action result ${id} failed:`, err instanceof Error ? err.message : String(err));
+              });
               const hostStore = useHostContextStore.getState();
               const previewItem = buildHostActionPreviewItem(
                 action,
@@ -1453,6 +1680,18 @@ export function useSSEStream() {
                 flushBothBuffers();
                 useChatStore.getState().addPreviewItem(previewItem, data.node || "host_action", toDisplayMeta(data));
                 useUIStore.getState().openPreview(previewItem.preview_id);
+              } else if (action === "wiii_connect.facebook_post.direct_apply") {
+                const summary =
+                  typeof result.data?.summary === "string" && result.data.summary.trim().length > 0
+                    ? result.data.summary.trim()
+                    : result.success
+                      ? "Đã đăng bài lên Facebook."
+                      : (result.error || "Facebook chưa đăng.");
+                useToastStore.getState().addToast(
+                  result.success ? "success" : "error",
+                  summary,
+                  5000,
+                );
               }
               const auditRequest = buildHostActionAuditRequest(
                 action,
@@ -1468,7 +1707,20 @@ export function useSSEStream() {
               }
             })
             .catch((err) => {
-              console.warn(`[SSE] Host action ${id} failed:`, err.message);
+              const message = err instanceof Error ? err.message : String(err);
+              console.warn(`[SSE] Host action ${id} failed:`, message);
+              void submitHostActionResult(
+                buildHostActionResultRequest(action, id, {
+                  success: false,
+                  error: message,
+                  data: { summary: message },
+                }),
+              ).catch((submitError) => {
+                console.warn(
+                  `[SSE] Host action failed-result ${id} failed:`,
+                  submitError instanceof Error ? submitError.message : String(submitError),
+                );
+              });
             });
         }
       },
@@ -1537,11 +1789,14 @@ export function useSSEStream() {
     const buildUserContext = () => {
       const authState = useAuthStore.getState();
       const authMode = authState.authMode;
-      const currentHostCtx = useHostContextStore.getState().getContextForRequest();
+      const currentHostCtx = withWiiiConnectSnapshot(
+        useHostContextStore.getState().getContextForRequest(),
+        wiiiConnectContextSnapshot,
+      );
       const visualContext = useChatStore.getState().getActiveVisualContext();
       const widgetFeedback = useChatStore.getState().getActiveWidgetFeedbackContext();
       const codeStudioContext = useCodeStudioStore.getState().getActiveSessionContext();
-      const hostCapabilities = useHostContextStore.getState().capabilities;
+      const hostCapabilities = useHostContextStore.getState().getCapabilitiesForRequest();
       const hostActionFeedback = useHostContextStore.getState().getActionFeedbackForRequest();
       const displayName = _resolveRequestDisplayName(
         authMode,

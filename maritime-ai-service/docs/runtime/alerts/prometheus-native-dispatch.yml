@@ -1,0 +1,24 @@
+# Prometheus alert rules for non-stream native dispatch finalization.
+#
+# Source metric: app code emits runtime.native_dispatch.finalization and
+# GET /metrics serializes it as runtime_native_dispatch_finalization.
+# Labels on the source counter: stage, status, run_status, transport.
+# Current stage values: assistant_message_append, tool_result_append.
+groups:
+  - name: wiii-native-dispatch
+    interval: 30s
+    rules:
+      - alert: WiiiNativeDispatchFinalizationFailure
+        expr: |
+          sum by (stage, run_status, transport) (
+            increase(runtime_native_dispatch_finalization{status="error"}[10m])
+          ) > 0
+        for: 2m
+        labels:
+          service: wiii-ai
+          component: native-dispatch
+          severity: p2_page
+        annotations:
+          summary: "Native dispatch finalization failure: {{ $labels.stage }}"
+          description: "A non-stream chat run reached finalization but failed to append durable evidence for {{ $labels.stage }} after run_status={{ $labels.run_status }}."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/native-dispatch-finalization.md"

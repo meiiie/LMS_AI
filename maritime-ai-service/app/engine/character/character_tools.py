@@ -17,6 +17,7 @@ the user-facing response. The AI decides when to use them based on context.
 
 import contextvars
 import logging
+from dataclasses import dataclass
 from typing import Optional
 
 from app.engine.tools.native_tool import tool
@@ -29,21 +30,128 @@ from app.engine.character.models import (
 
 logger = logging.getLogger(__name__)
 
-# Sprint 124: ContextVar for per-request user isolation
-# Same pattern as memory_tools._memory_tool_state
+
+@dataclass
+class CharacterToolState:
+    """Per-request identity for living-character tools."""
+
+    user_id: str = "__global__"
+    organization_id: Optional[str] = None
+    identity_key: Optional[str] = None
+
+
+# Sprint 124: ContextVar for per-request user isolation.
+# Kept for compatibility with callers/tests that inspect the legacy user var.
 _character_user_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     '_character_user_id', default=None
 )
+_character_tool_state: contextvars.ContextVar[Optional[CharacterToolState]] = contextvars.ContextVar(
+    '_character_tool_state', default=None
+)
+
+
+def _tool_identity(
+    user_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+) -> tuple[str, str, Optional[str], bool]:
+    """Resolve character tool identity from explicit, runtime, or org context."""
+    legacy_user_id = _character_user_id.get(None)
+    runtime_user_id = None
+    runtime_org_id = ""
+    runtime_session_id = ""
+    explicit_org_id = str(organization_id or "").strip()
+    identity_available = bool(user_id or legacy_user_id or explicit_org_id)
+
+    try:
+        from app.engine.tools.runtime_context import get_current_tool_runtime_context
+
+        runtime = get_current_tool_runtime_context()
+        if runtime:
+            runtime_user_id = runtime.user_id
+            runtime_org_id = str(runtime.organization_id or "").strip()
+            runtime_session_id = str(runtime.session_id or "").strip()
+            identity_available = identity_available or bool(
+                runtime_user_id or runtime_org_id or runtime_session_id
+            )
+    except Exception:
+        pass
+
+    if not runtime_org_id:
+        try:
+            from app.core.org_context import get_current_org_id
+
+            runtime_org_id = str(get_current_org_id() or "").strip()
+            identity_available = identity_available or bool(runtime_org_id)
+        except Exception:
+            pass
+
+    resolved_user_id = (
+        str(user_id or runtime_user_id or legacy_user_id or "__global__").strip()
+        or "__global__"
+    )
+    resolved_org_id = explicit_org_id or runtime_org_id or None
+    identity_key = (
+        f"user={resolved_user_id}|org={resolved_org_id or ''}|"
+        f"session={runtime_session_id}"
+    )
+    return identity_key, resolved_user_id, resolved_org_id, identity_available
+
+
+def _new_state(
+    user_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+) -> CharacterToolState:
+    identity_key, resolved_user_id, resolved_org_id, _ = _tool_identity(
+        user_id,
+        organization_id,
+    )
+    return CharacterToolState(
+        user_id=resolved_user_id,
+        organization_id=resolved_org_id,
+        identity_key=identity_key,
+    )
+
+
+def _get_state(
+    user_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+) -> CharacterToolState:
+    """Get or create identity-scoped living-character tool state."""
+    identity_key, resolved_user_id, resolved_org_id, identity_available = (
+        _tool_identity(user_id, organization_id)
+    )
+    state = _character_tool_state.get(None)
+    if state is None:
+        state = _new_state(user_id, organization_id)
+        _character_tool_state.set(state)
+    elif identity_available and state.identity_key != identity_key:
+        state = _new_state(user_id, organization_id)
+        _character_tool_state.set(state)
+    elif not identity_available and state.user_id != "__global__":
+        state = _new_state(user_id, organization_id)
+        _character_tool_state.set(state)
+    elif state.identity_key is None:
+        state.identity_key = identity_key
+        state.user_id = resolved_user_id
+        state.organization_id = resolved_org_id
+    return state
+
+
+def _organization_kwargs(state: CharacterToolState) -> dict[str, str]:
+    if state.organization_id:
+        return {"organization_id": state.organization_id}
+    return {}
 
 
 def set_character_user(user_id: str) -> None:
     """Set current user for character tools (per-request)."""
     _character_user_id.set(user_id)
+    _get_state(user_id)
 
 
 def _get_user_id() -> str:
     """Get current user_id from ContextVar, defaulting to '__global__'."""
-    return _character_user_id.get(None) or "__global__"
+    return _get_state().user_id
 
 
 @tool(description="""Ghi chu vao bo nho song cua Wiii.
@@ -68,10 +176,16 @@ def tool_character_note(note: str, block: str = "self_notes") -> str:
         if block not in valid_labels:
             return f"Block không hợp lệ. Các block: {', '.join(valid_labels)}"
 
-        user_id = _get_user_id()
+        state = _get_state()
+        user_id = state.user_id
         manager = get_character_state_manager()
         formatted_note = f"\n- {note.strip()}"
-        result = manager.update_block(label=block, append=formatted_note, user_id=user_id)
+        result = manager.update_block(
+            label=block,
+            append=formatted_note,
+            user_id=user_id,
+            **_organization_kwargs(state),
+        )
         if result:
             remaining = result.remaining_chars()
             logger.info(
@@ -105,9 +219,15 @@ def tool_character_replace(block: str, new_content: str) -> str:
         if block not in valid_labels:
             return f"Block không hợp lệ. Các block: {', '.join(valid_labels)}"
 
-        user_id = _get_user_id()
+        state = _get_state()
+        user_id = state.user_id
         manager = get_character_state_manager()
-        result = manager.update_block(label=block, content=new_content, user_id=user_id)
+        result = manager.update_block(
+            label=block,
+            content=new_content,
+            user_id=user_id,
+            **_organization_kwargs(state),
+        )
         if result:
             logger.info(
                 "Character block '%s' replaced for user '%s' (version: %d)",
@@ -150,16 +270,19 @@ def tool_character_log_experience(
         if experience_type not in valid_types:
             return f"Type không hợp lệ. Các type: {', '.join(valid_types)}"
 
-        # Sprint 124: Fall back to ContextVar user_id if not explicitly provided
-        effective_user_id = user_id or _get_user_id()
+        state = _get_state(user_id)
+        effective_user_id = state.user_id
 
         repo = get_character_repository()
-        result = repo.log_experience(CharacterExperienceCreate(
-            experience_type=experience_type,
-            content=content.strip(),
-            importance=min(max(importance, 0.0), 1.0),
-            user_id=effective_user_id if effective_user_id != "__global__" else None,
-        ))
+        result = repo.log_experience(
+            CharacterExperienceCreate(
+                experience_type=experience_type,
+                content=content.strip(),
+                importance=min(max(importance, 0.0), 1.0),
+                user_id=effective_user_id if effective_user_id != "__global__" else None,
+            ),
+            **_organization_kwargs(state),
+        )
         if result:
             logger.info("Experience logged: [%s] %s", experience_type, content[:50])
             return f"Đã ghi nhận trải nghiệm [{experience_type}]."
@@ -188,9 +311,14 @@ def tool_character_read(block: str = "self_notes") -> str:
         if block not in valid_labels:
             return f"Block không hợp lệ. Các block: {', '.join(valid_labels)}"
 
-        user_id = _get_user_id()
+        state = _get_state()
+        user_id = state.user_id
         manager = get_character_state_manager()
-        character_block = manager.get_block(block, user_id=user_id)
+        character_block = manager.get_block(
+            block,
+            user_id=user_id,
+            **_organization_kwargs(state),
+        )
         if character_block and character_block.content.strip():
             return character_block.content
         return "(Chưa có ghi chú nào trong block này)"

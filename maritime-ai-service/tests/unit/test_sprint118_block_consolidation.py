@@ -41,6 +41,14 @@ def _get_manager():
     return CharacterStateManager()
 
 
+def _seed_cache(manager, blocks, timestamp=1e18):
+    """Seed manager cache using the runtime cache key."""
+    cache_key = manager._cache_key()
+    manager._cache = {cache_key: blocks}
+    manager._cache_timestamp = {cache_key: timestamp}
+    return cache_key
+
+
 # =============================================================================
 # needs_consolidation Tests
 # =============================================================================
@@ -52,8 +60,7 @@ class TestNeedsConsolidation:
     def test_empty_block_does_not_need_consolidation(self):
         manager = _get_manager()
         block = _make_block(content="", char_limit=1000)
-        manager._cache = {"__global__": {"self_notes": block}}
-        manager._cache_timestamp = {"__global__": 1e18}  # far future = fresh cache
+        _seed_cache(manager, {"self_notes": block})  # far future = fresh cache
 
         assert not manager.needs_consolidation("self_notes")
 
@@ -61,8 +68,7 @@ class TestNeedsConsolidation:
         manager = _get_manager()
         content = "x" * 500  # 50% of 1000
         block = _make_block(content=content, char_limit=1000)
-        manager._cache = {"__global__": {"self_notes": block}}
-        manager._cache_timestamp = {"__global__": 1e18}
+        _seed_cache(manager, {"self_notes": block})
 
         assert not manager.needs_consolidation("self_notes")
 
@@ -70,8 +76,7 @@ class TestNeedsConsolidation:
         manager = _get_manager()
         content = "x" * 790  # 79% of 1000
         block = _make_block(content=content, char_limit=1000)
-        manager._cache = {"__global__": {"self_notes": block}}
-        manager._cache_timestamp = {"__global__": 1e18}
+        _seed_cache(manager, {"self_notes": block})
 
         assert not manager.needs_consolidation("self_notes")
 
@@ -79,8 +84,7 @@ class TestNeedsConsolidation:
         manager = _get_manager()
         content = "x" * 800  # 80% of 1000
         block = _make_block(content=content, char_limit=1000)
-        manager._cache = {"__global__": {"self_notes": block}}
-        manager._cache_timestamp = {"__global__": 1e18}
+        _seed_cache(manager, {"self_notes": block})
 
         assert manager.needs_consolidation("self_notes")
 
@@ -88,23 +92,20 @@ class TestNeedsConsolidation:
         manager = _get_manager()
         content = "x" * 1000  # 100% of 1000
         block = _make_block(content=content, char_limit=1000)
-        manager._cache = {"__global__": {"self_notes": block}}
-        manager._cache_timestamp = {"__global__": 1e18}
+        _seed_cache(manager, {"self_notes": block})
 
         assert manager.needs_consolidation("self_notes")
 
     def test_nonexistent_block_does_not_need(self):
         manager = _get_manager()
-        manager._cache = {"__global__": {}}
-        manager._cache_timestamp = {"__global__": 1e18}
+        _seed_cache(manager, {})
 
         assert not manager.needs_consolidation("nonexistent")
 
     def test_zero_char_limit_does_not_need(self):
         manager = _get_manager()
         block = _make_block(content="stuff", char_limit=0)
-        manager._cache = {"__global__": {"self_notes": block}}
-        manager._cache_timestamp = {"__global__": 1e18}
+        _seed_cache(manager, {"self_notes": block})
 
         assert not manager.needs_consolidation("self_notes")
 
@@ -210,11 +211,10 @@ class TestConsolidateFullBlocks:
             content="",
             char_limit=1000,
         )
-        manager._cache = {"__global__": {
+        _seed_cache(manager, {
             "learned_lessons": full_block,
             "self_notes": empty_block,
-        }}
-        manager._cache_timestamp = {"__global__": 1e18}
+        })
 
         mock_llm = MagicMock()
         mock_response = MagicMock()
@@ -244,8 +244,7 @@ class TestConsolidateFullBlocks:
             content="- Short note",
             char_limit=1000,  # Way under threshold
         )
-        manager._cache = {"__global__": {"self_notes": small_block}}
-        manager._cache_timestamp = {"__global__": 1e18}
+        _seed_cache(manager, {"self_notes": small_block})
 
         with patch(_LLM_PATCH) as mock_get_llm:
             count = await manager.consolidate_full_blocks()
@@ -259,11 +258,10 @@ class TestConsolidateFullBlocks:
         manager = _get_manager()
         block1 = _make_block(label="learned_lessons", content="x" * 90, char_limit=100)
         block2 = _make_block(label="self_notes", content="y" * 90, char_limit=100)
-        manager._cache = {"__global__": {
+        _seed_cache(manager, {
             "learned_lessons": block1,
             "self_notes": block2,
-        }}
-        manager._cache_timestamp = {"__global__": 1e18}
+        })
 
         call_count = 0
 
@@ -294,8 +292,7 @@ class TestConsolidateFullBlocks:
     @pytest.mark.asyncio
     async def test_no_blocks_returns_zero(self):
         manager = _get_manager()
-        manager._cache = {"__global__": {}}
-        manager._cache_timestamp = {"__global__": 1e18}
+        _seed_cache(manager, {})
 
         count = await manager.consolidate_full_blocks()
         assert count == 0
@@ -403,8 +400,7 @@ class TestConsolidationEdgeCases:
             content="   \n  \n   ",
             char_limit=10,  # Would be >80% if counted
         )
-        manager._cache = {"__global__": {"self_notes": block}}
-        manager._cache_timestamp = {"__global__": 1e18}
+        _seed_cache(manager, {"self_notes": block})
 
         with patch(_LLM_PATCH) as mock_get_llm:
             count = await manager.consolidate_full_blocks()

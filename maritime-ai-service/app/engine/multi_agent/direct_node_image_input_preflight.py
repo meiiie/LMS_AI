@@ -16,6 +16,9 @@ from app.engine.multi_agent.direct_node_thinking_snapshot import (
     record_direct_node_thinking_snapshot,
 )
 from app.engine.multi_agent.direct_node_uploaded_context import _build_image_input_answer
+from app.engine.multi_agent.wiii_connect_intent import (
+    looks_wiii_connect_facebook_post_request_for_state,
+)
 
 
 async def execute_direct_node_image_input_preflight(
@@ -30,6 +33,8 @@ async def execute_direct_node_image_input_preflight(
     if ctx.get("image_input_error") and request.has_uploaded_document_context:
         ctx["images"] = []
     if request.response_present:
+        return None
+    if looks_wiii_connect_facebook_post_request_for_state(request.query, state):
         return None
 
     if ctx.get("image_input_error") and not request.has_uploaded_document_context:

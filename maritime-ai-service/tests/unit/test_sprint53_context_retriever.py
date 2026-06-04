@@ -193,6 +193,36 @@ class TestRetrieveContext:
         result = await retriever.retrieve_context("user1", "Query")
         assert result.total_tokens == 100  # 400 chars / 4
 
+    @pytest.mark.asyncio
+    async def test_blocks_missing_org_context_before_embedding_or_repo(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        retriever = _make_retriever()
+        retriever._embeddings.aembed_query = AsyncMock(return_value=[0.1] * 768)
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            result = await retriever.retrieve_context(
+                "user-private-123",
+                "PRIVATE QUERY",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result.relevant_memories == []
+        assert result.user_facts == []
+        assert result.total_tokens == 0
+        retriever._embeddings.aembed_query.assert_not_awaited()
+        retriever._repository.search_similar.assert_not_called()
+        retriever._repository.get_user_facts.assert_not_called()
+
 
 # ============================================================================
 # retrieve_insights_prioritized
@@ -209,6 +239,31 @@ class TestRetrieveInsightsPrioritized:
 
         result = await retriever.retrieve_insights_prioritized("user1", "Query")
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_blocks_missing_org_context_before_repo(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        retriever = _make_retriever()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            result = await retriever.retrieve_insights_prioritized(
+                "user-private-123",
+                "PRIVATE QUERY",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        retriever._repository.get_user_insights.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_priority_ordering(self):

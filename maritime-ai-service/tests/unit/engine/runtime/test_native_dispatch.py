@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.engine.runtime import runtime_metrics as rm
+from app.engine.runtime.lifecycle import get_lifecycle
 from app.engine.runtime.native_dispatch import (
     _serialise_tool_calls,
     native_chat_dispatch,
@@ -28,13 +29,34 @@ from app.engine.runtime.session_event_log import InMemorySessionEventLog
 @pytest.fixture(autouse=True)
 def reset_metrics():
     rm._reset_for_tests()
+    get_lifecycle().reset()
     yield
     rm._reset_for_tests()
+    get_lifecycle().reset()
 
 
 @pytest.fixture
 def log() -> InMemorySessionEventLog:
     return InMemorySessionEventLog()
+
+
+class FailingAssistantAppendLog(InMemorySessionEventLog):
+    async def append(
+        self,
+        *,
+        session_id: str,
+        event_type: str,
+        payload: dict,
+        org_id: str | None = None,
+    ):
+        if event_type == "assistant_message":
+            raise RuntimeError("session event log unavailable")
+        return await super().append(
+            session_id=session_id,
+            event_type=event_type,
+            payload=payload,
+            org_id=org_id,
+        )
 
 
 def _make_request(
@@ -89,6 +111,35 @@ def test_serialise_tool_calls_handles_non_dict_entries():
     assert out == [{"raw": "raw-string"}]
 
 
+def test_serialise_tool_calls_sanitizes_secret_args_and_json_results():
+    out = _serialise_tool_calls(
+        {
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "name": "host_action",
+                    "args": {
+                        "message": "hello",
+                        "access_token": "raw-access-token",
+                    },
+                    "result": (
+                        '{"status":"ok","approval_token":"raw-approval-token",'
+                        '"data":{"safe_id":"post-1","provider_payload":{"id":"raw"}}}'
+                    ),
+                }
+            ]
+        }
+    )
+
+    assert out[0]["args"]["message"] == "hello"
+    assert out[0]["result"]["status"] == "ok"
+    assert out[0]["result"]["data"]["safe_id"] == "post-1"
+    serialized = str(out)
+    assert "raw-access-token" not in serialized
+    assert "raw-approval-token" not in serialized
+    assert "provider_payload" not in serialized
+
+
 def test_serialise_tool_calls_returns_empty_for_no_metadata():
     assert _serialise_tool_calls(None) == []
     assert _serialise_tool_calls({}) == []
@@ -112,7 +163,7 @@ async def test_native_dispatch_logs_user_then_assistant_event(log):
     assert [e.event_type for e in events] == ["user_message", "assistant_message"]
     user_payload = events[0].payload
     assert user_payload["text"] == "Chào Wiii"
-    assert user_payload["user_id"] == "user-1"
+    assert user_payload["user_id_hash"].startswith("sha256:")
     assert user_payload["role"] == "student"
     assert user_payload["domain_id"] == "maritime"
     assistant_payload = events[1].payload
@@ -201,6 +252,30 @@ async def test_native_dispatch_emits_assistant_error_on_inner_exception(log):
     assert assistant["text"] == ""
 
 
+async def test_native_dispatch_redacts_secret_text_in_error_event(log):
+    fake_service = SimpleNamespace(
+        process_message=AsyncMock(
+            side_effect=RuntimeError(
+                "provider failed Bearer raw-bearer-token-123 "
+                "access_token=raw-access-token-inline"
+            )
+        )
+    )
+    with patch(
+        "app.services.chat_service.get_chat_service", return_value=fake_service
+    ):
+        with pytest.raises(RuntimeError):
+            await native_chat_dispatch(_make_request(), event_log=log)
+
+    events = await log.get_events(session_id="sess-1")
+    assistant = events[1].payload
+    serialized = str(assistant)
+    assert "<redacted-secret>" in assistant["error"]
+    assert "raw-bearer-token-123" not in serialized
+    assert "raw-access-token-inline" not in serialized
+    assert "access_token" not in serialized
+
+
 # ── metrics ──
 
 async def test_native_dispatch_records_success_metric(log):
@@ -224,6 +299,18 @@ async def test_native_dispatch_records_success_metric(log):
     ]
     assert len(durations) == 1
     assert durations[0] >= 0
+    finalization_labels = (
+        ("run_status", "success"),
+        ("stage", "assistant_message_append"),
+        ("status", "success"),
+        ("transport", "chat"),
+    )
+    assert (
+        snap["counters"]["runtime.native_dispatch.finalization"][
+            finalization_labels
+        ]
+        == 1
+    )
 
 
 async def test_native_dispatch_records_error_metric(log):
@@ -243,6 +330,64 @@ async def test_native_dispatch_records_error_metric(log):
         ]
         == 1
     )
+    finalization_labels = (
+        ("run_status", "error"),
+        ("stage", "assistant_message_append"),
+        ("status", "success"),
+        ("transport", "chat"),
+    )
+    assert (
+        snap["counters"]["runtime.native_dispatch.finalization"][
+            finalization_labels
+        ]
+        == 1
+    )
+
+
+async def test_native_dispatch_records_tool_result_finalization_metric(log):
+    fake_service = SimpleNamespace(
+        process_message=AsyncMock(
+            return_value=_make_response(
+                metadata={"tool_calls": [{"id": "c1", "name": "x", "result": "y"}]}
+            )
+        )
+    )
+    with patch(
+        "app.services.chat_service.get_chat_service", return_value=fake_service
+    ):
+        await native_chat_dispatch(_make_request(), event_log=log)
+
+    snap = rm.snapshot()
+    labels = (
+        ("run_status", "success"),
+        ("stage", "tool_result_append"),
+        ("status", "success"),
+        ("transport", "chat"),
+    )
+    assert snap["counters"]["runtime.native_dispatch.finalization"][labels] == 1
+
+
+async def test_native_dispatch_finalization_append_failure_records_metric():
+    fake_service = SimpleNamespace(
+        process_message=AsyncMock(return_value=_make_response("done"))
+    )
+    with patch(
+        "app.services.chat_service.get_chat_service", return_value=fake_service
+    ):
+        with pytest.raises(RuntimeError, match="session event log unavailable"):
+            await native_chat_dispatch(
+                _make_request(),
+                event_log=FailingAssistantAppendLog(),
+            )
+
+    snap = rm.snapshot()
+    labels = (
+        ("run_status", "success"),
+        ("stage", "assistant_message_append"),
+        ("status", "error"),
+        ("transport", "chat"),
+    )
+    assert snap["counters"]["runtime.native_dispatch.finalization"][labels] == 1
 
 
 # ── session_id fallback ──

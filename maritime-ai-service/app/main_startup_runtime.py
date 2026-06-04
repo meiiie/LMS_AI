@@ -41,6 +41,49 @@ def _init_observability(logger_: logging.Logger) -> None:
         configure_langsmith(settings)
 
 
+def _register_runtime_lifecycle_hooks(logger_: logging.Logger) -> None:
+    registration_count = 0
+    try:
+        register_default_lifecycle_hooks = _load_attr(
+            "app.engine.runtime.lifecycle",
+            "register_default_lifecycle_hooks",
+        )
+
+        registrations = register_default_lifecycle_hooks()
+        registration_count += len(registrations)
+        logger_.info(
+            "[OK] Runtime lifecycle hooks registered: %d",
+            len(registrations),
+        )
+    except Exception as exc:  # pragma: no cover - startup log
+        logger_.warning(
+            "[WARN] Runtime lifecycle hook registration failed: %s "
+            "(service will continue)",
+            exc,
+        )
+    try:
+        register_semantic_memory_lifecycle_hooks = _load_attr(
+            "app.engine.semantic_memory.lifecycle_hooks",
+            "register_semantic_memory_lifecycle_hooks",
+        )
+
+        registrations = register_semantic_memory_lifecycle_hooks()
+        registration_count += len(registrations)
+        logger_.info(
+            "[OK] Semantic memory lifecycle hooks registered: %d",
+            len(registrations),
+        )
+    except Exception as exc:  # pragma: no cover - startup log
+        logger_.warning(
+            "[WARN] Semantic memory lifecycle hook registration failed: %s "
+            "(service will continue)",
+            exc,
+        )
+
+    if registration_count:
+        logger_.info("[OK] Lifecycle hooks ready: %d", registration_count)
+
+
 def _validate_postgresql(logger_: logging.Logger) -> None:
     try:
         get_chat_history_repository = _load_attr(
@@ -560,6 +603,7 @@ async def startup_application(logger_: logging.Logger) -> AppRuntimeResources:
     resources = AppRuntimeResources()
     _log_startup_banner(logger_)
     _init_observability(logger_)
+    _register_runtime_lifecycle_hooks(logger_)
     _validate_postgresql(logger_)
     resources.neo4j_repo = _validate_neo4j(logger_)
     _validate_pgvector(logger_)

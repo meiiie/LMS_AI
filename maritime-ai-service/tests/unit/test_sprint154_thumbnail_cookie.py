@@ -13,10 +13,9 @@ Tests for:
 - Regression safety
 """
 
-import asyncio
 import json
 from contextvars import copy_context
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -531,13 +530,31 @@ class TestContextVarLifecycle:
         """After resetting the token, cookie returns to default."""
         from app.engine.search_platforms.facebook_context import (
             current_facebook_cookie,
-            set_facebook_cookie,
             get_facebook_cookie,
         )
         token = current_facebook_cookie.set("temp=1")
         assert get_facebook_cookie() == "temp=1"
         current_facebook_cookie.reset(token)
         assert get_facebook_cookie() == ""
+
+    def test_cookie_scope_restores_after_exception(self):
+        """facebook_cookie_scope restores the previous cookie on exit."""
+        from app.engine.search_platforms.facebook_context import (
+            facebook_cookie_scope,
+            get_facebook_cookie,
+            reset_facebook_cookie,
+            set_facebook_cookie,
+        )
+
+        token = set_facebook_cookie("outer=1")
+        try:
+            with pytest.raises(RuntimeError):
+                with facebook_cookie_scope("inner=2"):
+                    assert get_facebook_cookie() == "inner=2"
+                    raise RuntimeError("boom")
+            assert get_facebook_cookie() == "outer=1"
+        finally:
+            reset_facebook_cookie(token)
 
     def test_no_leakage_across_copied_context(self):
         """Changes in a copied context do not leak to the original."""
@@ -730,8 +747,6 @@ class TestPlaywrightWorker:
 
     def test_submit_to_pw_worker_calls_fn_with_browser(self):
         """_submit_to_pw_worker passes a browser object to the submitted fn."""
-        import app.engine.search_platforms.adapters.browser_base as bb
-
         received_browser = []
 
         def fake_fn(browser):

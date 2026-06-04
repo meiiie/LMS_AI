@@ -154,6 +154,29 @@ class TestGetUserInsights:
         result = await provider._get_user_insights("user-1")
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_blocks_missing_org_context_before_repo(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        mock_repo = MagicMock()
+        provider = _make_provider(repo=mock_repo)
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            result = await provider._get_user_insights("user-private-123")
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        mock_repo.get_user_insights.assert_not_called()
+
 
 # =============================================================================
 # _store_insight
@@ -188,6 +211,61 @@ class TestStoreInsight:
         provider = _make_provider(repo=mock_repo, embeddings=mock_embeddings)
         result = await provider._store_insight(_make_insight())
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_blocks_direct_store_without_org_context_when_multi_tenant(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.runtime.session_event_log import InMemorySessionEventLog
+
+        log = InMemorySessionEventLog()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        monkeypatch.setattr(
+            "app.engine.runtime.session_event_log.get_session_event_log",
+            lambda: log,
+        )
+        mock_repo = MagicMock()
+        mock_embeddings = MagicMock()
+        mock_embeddings.aembed_documents = AsyncMock(return_value=[[0.1] * 768])
+        provider = _make_provider(repo=mock_repo, embeddings=mock_embeddings)
+        insight = _make_insight(
+            user_id="user-private-123",
+            content="PRIVATE INSIGHT access_token=raw-insight-token-12345",
+        )
+
+        token = current_org_id.set(None)
+        try:
+            result = await provider._store_insight(
+                insight,
+                session_id="session-private-123",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result is False
+        mock_embeddings.aembed_documents.assert_not_awaited()
+        mock_repo.save_memory.assert_not_called()
+        events = await log.get_events(session_id="session-private-123")
+        assert len(events) == 1
+        payload = events[0].payload
+        assert payload["write"]["kind"] == "insight_store"
+        assert payload["write"]["status"] == "blocked"
+        assert payload["write"]["stored_insight_count"] == 0
+        assert payload["scope"]["write_allowed"] is False
+        assert (
+            payload["scope"]["organization_context"]
+            == "blocked_missing_org_context"
+        )
+        serialized = str(payload)
+        assert "PRIVATE INSIGHT" not in serialized
+        assert "raw-insight-token" not in serialized
+        assert "user-private-123" not in serialized
+        assert "session-private-123" not in serialized
 
 
 # =============================================================================
@@ -228,6 +306,8 @@ class TestMergeInsight:
         notes = call_kwargs["metadata"]["evolution_notes"]
         assert len(notes) == 1
         assert "Merged" in notes[0]
+        assert "content_ref=sha256:" in notes[0]
+        assert "Updated insight text" not in notes[0]
 
     @pytest.mark.asyncio
     async def test_returns_false_on_error(self):
@@ -263,7 +343,7 @@ class TestUpdateInsightWithEvolution:
         mock_repo.update_fact.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_evolution_note_includes_old_content(self):
+    async def test_evolution_note_uses_old_content_reference(self):
         mock_repo = MagicMock()
         mock_repo.update_fact.return_value = True
         mock_embeddings = MagicMock()
@@ -276,7 +356,8 @@ class TestUpdateInsightWithEvolution:
         await provider._update_insight_with_evolution(new, existing)
         call_kwargs = mock_repo.update_fact.call_args[1]
         notes = call_kwargs["metadata"]["evolution_notes"]
-        assert "Visual learner" in notes[0]
+        assert "Updated from: content_ref=sha256:" in notes[0]
+        assert "Visual learner" not in notes[0]
 
 
 # =============================================================================
@@ -429,6 +510,119 @@ class TestExtractAndStoreInsights:
 
         result = await provider.extract_and_store_insights("user-1", "I learn visually")
         assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_only_returns_successfully_written_insights(self):
+        mock_embeddings = MagicMock()
+        mock_embeddings.aembed_documents = AsyncMock(return_value=[[0.1] * 768])
+        mock_repo = MagicMock()
+        mock_repo.get_user_insights.return_value = []
+        mock_repo.save_memory.side_effect = RuntimeError("db down")
+
+        provider = _make_provider(repo=mock_repo, embeddings=mock_embeddings)
+
+        insight = _make_insight()
+        mock_extractor = MagicMock()
+        mock_extractor.extract_insights = AsyncMock(return_value=[insight])
+        provider._insight_extractor = mock_extractor
+        provider._insight_validator = False
+        provider._memory_consolidator = False
+
+        result = await provider.extract_and_store_insights("user-1", "I learn visually")
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_appends_privacy_safe_insight_write_audit(self, monkeypatch):
+        from app.engine.runtime.session_event_log import InMemorySessionEventLog
+
+        log = InMemorySessionEventLog()
+        monkeypatch.setattr(
+            "app.engine.runtime.session_event_log.get_session_event_log",
+            lambda: log,
+        )
+        mock_embeddings = MagicMock()
+        mock_embeddings.aembed_documents = AsyncMock(return_value=[[0.1] * 768])
+        mock_repo = MagicMock()
+        mock_repo.get_user_insights.return_value = []
+        mock_repo.save_memory.return_value = MagicMock()
+
+        provider = _make_provider(repo=mock_repo, embeddings=mock_embeddings)
+
+        insight = _make_insight(content="PRIVATE INSIGHT CONTENT")
+        mock_extractor = MagicMock()
+        mock_extractor.extract_insights = AsyncMock(return_value=[insight])
+        provider._insight_extractor = mock_extractor
+        provider._insight_validator = False
+        provider._memory_consolidator = False
+
+        result = await provider.extract_and_store_insights(
+            "user-private-123",
+            "PRIVATE USER MESSAGE access_token=raw-insight-token-12345",
+            session_id="session-private-123",
+        )
+
+        assert len(result) == 1
+        events = await log.get_events(session_id="session-private-123")
+        assert [event.event_type for event in events] == [
+            "semantic_memory_write"
+        ]
+        payload = events[0].payload
+        assert payload["write"]["kind"] == "insight_extraction"
+        assert payload["write"]["stored_insight_count"] == 1
+        assert payload["write"]["stored_fact_count"] == 0
+        serialized = str(payload)
+        assert "user-private-123" not in serialized
+        assert "session-private-123" not in serialized
+        assert "PRIVATE USER MESSAGE" not in serialized
+        assert "raw-insight-token" not in serialized
+        assert "PRIVATE INSIGHT CONTENT" not in serialized
+
+    @pytest.mark.asyncio
+    async def test_blocks_insight_write_without_org_context_when_multi_tenant(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.runtime.session_event_log import InMemorySessionEventLog
+
+        log = InMemorySessionEventLog()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        monkeypatch.setattr(
+            "app.engine.runtime.session_event_log.get_session_event_log",
+            lambda: log,
+        )
+        token = current_org_id.set(None)
+        try:
+            mock_repo = MagicMock()
+            mock_embeddings = MagicMock()
+            provider = _make_provider(repo=mock_repo, embeddings=mock_embeddings)
+
+            result = await provider.extract_and_store_insights(
+                "user-private-123",
+                "PRIVATE USER MESSAGE",
+                session_id="session-private-123",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        mock_repo.save_memory.assert_not_called()
+        mock_embeddings.aembed_documents.assert_not_called()
+        events = await log.get_events(session_id="session-private-123")
+        assert len(events) == 1
+        payload = events[0].payload
+        assert payload["write"]["kind"] == "insight_extraction"
+        assert payload["write"]["status"] == "blocked"
+        assert payload["scope"]["write_allowed"] is False
+        assert (
+            payload["scope"]["organization_context"]
+            == "blocked_missing_org_context"
+        )
+        assert "PRIVATE USER MESSAGE" not in str(payload)
 
     @pytest.mark.asyncio
     async def test_returns_empty_on_error(self):

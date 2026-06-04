@@ -16,11 +16,28 @@ from pydantic import BaseModel
 from app.api.deps import RequireAuth
 from app.core.rate_limit import limiter
 from app.core.security import is_platform_admin
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import resolve_memory_read_scope
 from app.repositories.semantic_memory_repository import SemanticMemoryRepository
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/insights", tags=["insights"])
+
+
+def _require_memory_read_scope(user_id: str) -> None:
+    scope = resolve_memory_read_scope()
+    if scope.write_allowed:
+        return
+    logger.warning(
+        "Insight read blocked for user_hash=%s: %s",
+        hash_memory_identifier(user_id),
+        scope.state,
+    )
+    raise HTTPException(
+        status_code=403,
+        detail="Organization context required for memory access",
+    )
 
 
 # ========== Response Models ==========
@@ -84,6 +101,7 @@ async def get_user_insights(
             status_code=403,
             detail="You can only access your own insights"
         )
+    _require_memory_read_scope(user_id)
     try:
         repository = SemanticMemoryRepository()
         

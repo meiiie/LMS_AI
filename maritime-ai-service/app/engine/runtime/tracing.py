@@ -41,9 +41,34 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import Any, Generator, Optional, Protocol
 
+from app.engine.runtime.event_payload_sanitizer import (
+    redact_runtime_secret_text,
+    sanitize_runtime_payload,
+)
 from app.engine.runtime.runtime_metrics import record_latency_ms
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_trace_attributes(
+    attributes: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Return attributes safe for span processors and external telemetry."""
+
+    safe_attributes = sanitize_runtime_payload(attributes or {})
+    return dict(safe_attributes) if isinstance(safe_attributes, dict) else {}
+
+
+def _merge_trace_attributes(
+    target: dict[str, Any],
+    safe_attributes: dict[str, Any],
+) -> None:
+    redacted_count = safe_attributes.pop("redacted_secret_count", 0)
+    if redacted_count:
+        target["redacted_secret_count"] = (
+            int(target.get("redacted_secret_count") or 0) + int(redacted_count)
+        )
+    target.update(safe_attributes)
 
 
 # ── data ──
@@ -76,12 +101,15 @@ class Span:
         return (self.ended_at_ns - self.started_at_ns) / 1_000_000.0
 
     def set_attribute(self, key: str, value: Any) -> None:
-        self.attributes[key] = value
+        key_text = str(key)
+        safe_attributes = sanitize_trace_attributes({key_text: value})
+        self.attributes.pop(key_text, None)
+        _merge_trace_attributes(self.attributes, safe_attributes)
 
     def set_status(self, status: str, error: Optional[str] = None) -> None:
         self.status = status
         if error:
-            self.error = error
+            self.error = redact_runtime_secret_text(error)
 
     def end(self) -> None:
         if self.ended_at_ns is None:
@@ -204,12 +232,15 @@ class Tracer:
             trace_id=trace_id,
             span_id=_new_span_id(),
             parent_span_id=parent.span_id if parent else None,
-            attributes=dict(attributes or {}),
+            attributes=sanitize_trace_attributes(attributes),
         )
         return span
 
     def end_span(self, span: Span) -> None:
         span.end()
+        span.attributes = sanitize_trace_attributes(span.attributes)
+        if span.error:
+            span.error = redact_runtime_secret_text(span.error)
         for processor in list(self._processors):
             try:
                 processor.on_end(span)
@@ -290,6 +321,7 @@ __all__ = [
     "LoggingProcessor",
     "MetricsForwarder",
     "Tracer",
+    "sanitize_trace_attributes",
     "get_tracer",
     "span",
     "current_span",

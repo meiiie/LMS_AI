@@ -81,7 +81,11 @@ def _rebind_document_preview_host_action_tool(
                 event_bus_id=state.get("_event_bus_id") or state.get("session_id") or "",
                 approval_context={
                     "query": query,
-                    "host_action_feedback": (ctx.get("host_action_feedback") or {}),
+                    "host_action_feedback": (
+                        state.get("_host_action_control_feedback")
+                        or ctx.get("host_action_feedback")
+                        or {}
+                    ),
                 },
             )
         except Exception as exc:

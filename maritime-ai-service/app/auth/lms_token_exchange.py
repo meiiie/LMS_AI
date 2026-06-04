@@ -16,8 +16,26 @@ from typing import Optional
 
 from app.core.config import settings
 from app.core.security import map_host_role_to_legacy_role, normalize_host_role
+from app.engine.runtime.event_payload_sanitizer import (
+    hash_runtime_identifier,
+    redact_runtime_secret_text,
+)
 
 logger = logging.getLogger(__name__)
+_MAX_LMS_TOKEN_DIAGNOSTIC_LENGTH = 500
+
+
+def _lms_token_ref(value: object) -> str:
+    return hash_runtime_identifier(value) or "sha256:empty"
+
+
+def _safe_lms_token_detail(value: object, *secret_values: object) -> str:
+    text = str(value or "")
+    for secret_value in secret_values:
+        secret = str(secret_value or "")
+        if secret:
+            text = text.replace(secret, "<redacted-secret>")
+    return redact_runtime_secret_text(text, max_length=_MAX_LMS_TOKEN_DIAGNOSTIC_LENGTH)
 
 # ---------------------------------------------------------------------------
 # Role mapping: LMS roles → Wiii roles
@@ -321,10 +339,11 @@ async def exchange_lms_token(
         )
     except Exception as exc:
         logger.warning(
-            "Could not refresh connector grant for user %s / connector %s: %s",
-            user["id"],
-            connector_id,
-            exc,
+            "Could not refresh connector grant user_ref=%s connector_ref=%s org_ref=%s: %s",
+            _lms_token_ref(user["id"]),
+            _lms_token_ref(connector_id),
+            _lms_token_ref(resolved_org),
+            _safe_lms_token_detail(exc, user["id"], connector_id, resolved_org),
         )
 
     return {
@@ -362,6 +381,7 @@ async def _ensure_org_membership(user_id: str, organization_id: str) -> None:
             )
     except Exception:
         logger.warning(
-            "Could not ensure org membership for user %s in org %s",
-            user_id, organization_id,
+            "Could not ensure org membership user_ref=%s org_ref=%s",
+            _lms_token_ref(user_id),
+            _lms_token_ref(organization_id),
         )

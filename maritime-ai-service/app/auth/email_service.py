@@ -7,8 +7,13 @@ import logging
 
 from app.core.config import settings
 from app.core.secret_validation import is_missing_or_placeholder_secret
+from app.engine.runtime.event_payload_sanitizer import (
+    hash_runtime_identifier,
+    redact_runtime_secret_text,
+)
 
 logger = logging.getLogger(__name__)
+_MAX_EMAIL_DIAGNOSTIC_LENGTH = 500
 
 try:
     import resend
@@ -49,6 +54,19 @@ def _is_resend_configured() -> bool:
     return not is_missing_or_placeholder_secret(key)
 
 
+def _email_ref(value: object) -> str:
+    return hash_runtime_identifier(value) or "sha256:empty"
+
+
+def _safe_email_detail(value: object, *secret_values: object) -> str:
+    text = str(value or "")
+    for secret_value in secret_values:
+        secret = str(secret_value or "")
+        if secret:
+            text = text.replace(secret, "<redacted-secret>")
+    return redact_runtime_secret_text(text, max_length=_MAX_EMAIL_DIAGNOSTIC_LENGTH)
+
+
 async def send_magic_link_email(to_email: str, verify_url: str) -> bool:
     """Send magic link email via Resend.
 
@@ -70,8 +88,9 @@ async def send_magic_link_email(to_email: str, verify_url: str) -> bool:
         # Development-only fallback for missing package or common placeholder
         # secrets such as "your-", "placeholder", "example", and "dummy".
         logger.warning(
-            "[DEV MAGIC LINK] Resend not configured. Open this URL to finish login for %s:\n  %s",
-            to_email, verify_url,
+            "[DEV MAGIC LINK] Resend not configured for email_ref=%s; "
+            "dev verify URL is returned by the request endpoint.",
+            _email_ref(to_email),
         )
         return True
 
@@ -84,8 +103,18 @@ async def send_magic_link_email(to_email: str, verify_url: str) -> bool:
             "subject": "Đăng nhập Wiii",
             "html": html,
         })
-        logger.info("Magic link email sent to %s", to_email)
+        logger.info("Magic link email sent email_ref=%s", _email_ref(to_email))
         return True
     except Exception as e:
-        logger.error("Failed to send magic link email to %s: %s", to_email, e)
+        logger.error(
+            "Failed to send magic link email email_ref=%s: %s",
+            _email_ref(to_email),
+            _safe_email_detail(
+                e,
+                to_email,
+                verify_url,
+                getattr(settings, "resend_api_key", ""),
+                getattr(settings, "magic_link_from_email", ""),
+            ),
+        )
         return False

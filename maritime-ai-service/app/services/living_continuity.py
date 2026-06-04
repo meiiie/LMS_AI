@@ -17,6 +17,12 @@ from __future__ import annotations
 import json
 import logging
 
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    append_semantic_memory_write_audit_event,
+    build_semantic_memory_write_audit,
+    resolve_memory_write_scope,
+)
 from app.services.living_continuity_contracts import (
     PostResponseContinuityContext,
 )
@@ -47,6 +53,7 @@ async def _analyze_and_process_sentiment(
     message: str,
     response_text: str,
     organization_id: str | None = None,
+    session_id: str | None = None,
 ) -> None:
     """Fire-and-forget sentiment analysis for emotion and episodic memory."""
     try:
@@ -65,7 +72,7 @@ async def _analyze_and_process_sentiment(
         result = await analyzer.analyze(message, response_text, user_id)
 
         engine = get_emotion_engine()
-        tier = get_relationship_tier(user_id, user_role)
+        tier = get_relationship_tier(user_id, user_role, organization_id=organization_id)
         event_type = getattr(
             LifeEventType,
             result.life_event_type,
@@ -107,12 +114,45 @@ async def _analyze_and_process_sentiment(
             or result.importance >= 0.5
         )
         if store_episode:
+            org_token = None
             try:
                 from uuid import uuid4
 
                 from sqlalchemy import text
 
                 from app.core.database import get_shared_session_factory
+                from app.core.org_context import current_org_id
+
+                if organization_id:
+                    org_token = current_org_id.set(organization_id)
+
+                write_scope = resolve_memory_write_scope()
+                if not write_scope.write_allowed:
+                    audit = build_semantic_memory_write_audit(
+                        user_id=user_id,
+                        session_id=session_id,
+                        message=message,
+                        response=response_text,
+                        scope=write_scope,
+                        write_kind="living_episode",
+                        message_saved=False,
+                        response_saved=False,
+                        extract_facts=False,
+                        stored_fact_count=0,
+                        status="blocked",
+                        warnings=["living_episode_blocked_missing_org_context"],
+                    )
+                    await append_semantic_memory_write_audit_event(
+                        session_id=session_id,
+                        org_id=write_scope.org_id,
+                        payload=audit,
+                    )
+                    logger.warning(
+                        "[SENTIMENT] Episodic memory blocked for user_hash=%s: %s",
+                        hash_memory_identifier(user_id),
+                        write_scope.state,
+                    )
+                    return
 
                 episode = (
                     result.episode_summary
@@ -130,6 +170,8 @@ async def _analyze_and_process_sentiment(
                                 memory_type,
                                 importance,
                                 metadata,
+                                session_id,
+                                organization_id,
                                 created_at
                             )
                             VALUES (
@@ -139,6 +181,8 @@ async def _analyze_and_process_sentiment(
                                 'episode',
                                 :importance,
                                 :metadata,
+                                :session_id,
+                                :organization_id,
                                 NOW()
                             )
                         """
@@ -148,21 +192,68 @@ async def _analyze_and_process_sentiment(
                             "user_id": user_id,
                             "content": episode[:2000],
                             "importance": result.importance,
+                            "session_id": session_id,
+                            "organization_id": write_scope.org_id,
                             "metadata": json.dumps(
                                 {
-                                    "organization_id": organization_id or "",
+                                    "organization_id": write_scope.org_id or "",
                                     "sentiment": result.user_sentiment,
+                                    "source": "living_continuity",
                                 },
                                 ensure_ascii=False,
                             ),
                         },
                     )
                     db_session.commit()
+                audit = build_semantic_memory_write_audit(
+                    user_id=user_id,
+                    session_id=session_id,
+                    message=message,
+                    response=response_text,
+                    scope=write_scope,
+                    write_kind="living_episode",
+                    message_saved=True,
+                    response_saved=False,
+                    extract_facts=False,
+                    stored_fact_count=0,
+                    status="saved",
+                )
+                await append_semantic_memory_write_audit_event(
+                    session_id=session_id,
+                    org_id=write_scope.org_id,
+                    payload=audit,
+                )
             except Exception as episode_error:
+                try:
+                    write_scope = resolve_memory_write_scope()
+                    audit = build_semantic_memory_write_audit(
+                        user_id=user_id,
+                        session_id=session_id,
+                        message=message,
+                        response=response_text,
+                        scope=write_scope,
+                        write_kind="living_episode",
+                        message_saved=False,
+                        response_saved=False,
+                        extract_facts=False,
+                        stored_fact_count=0,
+                        status="failed",
+                        warnings=["living_episode_store_failed"],
+                    )
+                    await append_semantic_memory_write_audit_event(
+                        session_id=session_id,
+                        org_id=write_scope.org_id,
+                        payload=audit,
+                    )
+                except Exception:
+                    pass
                 logger.debug(
                     "[SENTIMENT] Episodic memory storage failed: %s",
                     episode_error,
                 )
+            finally:
+                if org_token is not None:
+                    current_org_id.reset(org_token)
     except Exception as exc:
         logger.debug("[SENTIMENT] Background analysis failed: %s", exc)
 

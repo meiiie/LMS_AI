@@ -17,6 +17,10 @@ from app.services.notifications.base import (
     NotificationChannelAdapter,
     NotificationResult,
 )
+from app.services.notifications.privacy import (
+    notification_recipient_ref,
+    sanitize_notification_detail,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +46,12 @@ class MessengerAdapter(NotificationChannelAdapter):
         message: str,
         metadata: Optional[dict] = None,
     ) -> NotificationResult:
+        recipient_ref = notification_recipient_ref(user_id)
+        api_key = ""
         try:
             from app.core.config import settings
 
-            api_key = settings.living_agent_callmebot_api_key
+            api_key = settings.living_agent_callmebot_api_key or ""
             if not api_key:
                 return NotificationResult(
                     delivered=False,
@@ -73,7 +79,11 @@ class MessengerAdapter(NotificationChannelAdapter):
                 response = await client.get(url)
 
             if response.status_code == 200:
-                logger.info("[NOTIFY] Messenger notification sent via CallMeBot")
+                logger.info(
+                    "[NOTIFY] Messenger notification sent via CallMeBot "
+                    "recipient_ref=%s",
+                    recipient_ref,
+                )
                 return NotificationResult(
                     delivered=True,
                     channel="messenger",
@@ -84,16 +94,32 @@ class MessengerAdapter(NotificationChannelAdapter):
                     f"CallMeBot API error: {response.status_code}"
                     f" — {response.text[:200]}"
                 )
-                logger.warning("[NOTIFY] %s", detail)
+                provider_detail = sanitize_notification_detail(
+                    detail,
+                    api_key,
+                    user_id,
+                    text,
+                )
+                detail = f"CallMeBot API error: {response.status_code}"
+                logger.warning(
+                    "[NOTIFY] %s provider_detail=%s",
+                    detail,
+                    provider_detail,
+                )
                 return NotificationResult(
                     delivered=False, channel="messenger",
                     detail=detail,
                 )
 
         except Exception as e:
-            logger.error("[NOTIFY] Messenger notification failed: %s", e)
+            safe_detail = sanitize_notification_detail(e, api_key, user_id, message)
+            logger.error(
+                "[NOTIFY] Messenger notification failed recipient_ref=%s: %s",
+                recipient_ref,
+                safe_detail,
+            )
             return NotificationResult(
                 delivered=False,
                 channel="messenger",
-                detail=str(e),
+                detail=safe_detail,
             )

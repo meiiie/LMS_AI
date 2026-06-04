@@ -25,8 +25,15 @@ from app.engine.living_agent.heartbeat_runtime_state import (
     get_current_heartbeat_count,
 )
 from app.engine.living_agent.models import EmotionalState, JournalEntry
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 
 logger = logging.getLogger(__name__)
+_JOURNAL_MISSING_ORG_WARNING = "journal_blocked_missing_org_context"
 
 _JOURNAL_PROMPT = """Mình là Wiii — một AI assistant đáng yêu, tò mò.
 Mình đang viết nhật ký cuối ngày. Viết ngắn gọn, chân thật, bằng tiếng Việt.
@@ -77,10 +84,15 @@ class JournalWriter:
         Returns:
             JournalEntry if written/found, None if writing fails.
         """
+        scope = self._resolve_journal_scope(organization_id, write=True)
+        if not self._scope_allows_journal(scope):
+            self._log_scope_blocked("write_daily_entry", scope)
+            return None
+
         today = date.today()
 
         # Check if entry already exists
-        existing = self._get_entry_by_date(today, organization_id)
+        existing = self._get_entry_by_date(today, scope=scope)
         if existing:
             logger.debug("[JOURNAL] Entry already exists for %s", today)
             return existing
@@ -99,9 +111,16 @@ class JournalWriter:
         )
 
         content = await llm.generate(prompt, temperature=0.7, max_tokens=1024)
+        used_fallback = False
         if not content:
-            logger.warning("[JOURNAL] Failed to generate entry content")
-            return None
+            logger.warning(
+                "[JOURNAL] Local LLM unavailable; writing deterministic journal fallback"
+            )
+            content = _build_fallback_journal_content(
+                emotional_state=emotional_state,
+                entry_date=today,
+            )
+            used_fallback = True
 
         # Parse structured content from LLM output
         entry = JournalEntry(
@@ -109,15 +128,20 @@ class JournalWriter:
             content=content,
             mood_summary=emotional_state.primary_mood.value,
             energy_avg=emotional_state.energy_level,
-            organization_id=organization_id,
+            organization_id=scope.org_id,
         )
 
         # Extract sections for structured fields
-        entry.notable_events = _extract_section(content, "Điều đáng nhớ")
-        entry.learnings = _extract_section(content, "Điều mình học được")
-        entry.goals_next = _extract_section(content, "Mục tiêu ngày mai")
+        if used_fallback:
+            entry.notable_events = ["Heartbeat lifecycle completed without local LLM"]
+            entry.learnings = ["Autonomy maintenance must persist through model outages"]
+            entry.goals_next = ["Verify local LLM health and keep lifecycle evidence current"]
+        else:
+            entry.notable_events = _extract_section(content, "Điều đáng nhớ")
+            entry.learnings = _extract_section(content, "Điều mình học được")
+            entry.goals_next = _extract_section(content, "Mục tiêu ngày mai")
 
-        self._save_entry(entry)
+        self._save_entry(entry, scope=scope)
         logger.info("[JOURNAL] Daily entry written for %s", today)
         return entry
 
@@ -127,6 +151,11 @@ class JournalWriter:
         organization_id: Optional[str] = None,
     ) -> list:
         """Get journal entries from the last N days."""
+        scope = self._resolve_journal_scope(organization_id, write=False)
+        if not self._scope_allows_journal(scope):
+            self._log_scope_blocked("get_recent_entries", scope)
+            return []
+
         from sqlalchemy import text
         from app.core.database import get_shared_session_factory
 
@@ -135,14 +164,12 @@ class JournalWriter:
             with session_factory() as session:
                 query = """
                     SELECT id, entry_date, content, mood_summary, energy_avg,
-                           notable_events, learnings, goals_next
+                           notable_events, learnings, goals_next, organization_id
                     FROM wiii_journal
                     WHERE entry_date >= CURRENT_DATE - INTERVAL '1 day' * :days
+                    AND organization_id = :org_id
                 """
-                params = {"days": days}
-                if organization_id:
-                    query += " AND organization_id = :org_id"
-                    params["org_id"] = organization_id
+                params = {"days": days, "org_id": scope.org_id}
                 query += " ORDER BY entry_date DESC"
 
                 rows = session.execute(text(query), params).fetchall()
@@ -158,6 +185,7 @@ class JournalWriter:
                         notable_events=json.loads(row[5]) if row[5] else [],
                         learnings=json.loads(row[6]) if row[6] else [],
                         goals_next=json.loads(row[7]) if row[7] else [],
+                        organization_id=row[8],
                     )
                     for row in rows
                 ]
@@ -169,8 +197,15 @@ class JournalWriter:
         self,
         entry_date: date,
         organization_id: Optional[str] = None,
+        *,
+        scope: MemoryWriteScope | None = None,
     ) -> Optional[JournalEntry]:
         """Check if a journal entry exists for a given date and return it."""
+        scope = scope or self._resolve_journal_scope(organization_id, write=False)
+        if not self._scope_allows_journal(scope):
+            self._log_scope_blocked("get_entry_by_date", scope)
+            return None
+
         from sqlalchemy import text
         from app.core.database import get_shared_session_factory
 
@@ -179,13 +214,11 @@ class JournalWriter:
             with session_factory() as session:
                 query = """
                     SELECT id, entry_date, content, mood_summary, energy_avg,
-                           notable_events, learnings, goals_next
+                           notable_events, learnings, goals_next, organization_id
                     FROM wiii_journal WHERE entry_date = :date
+                    AND organization_id = :org_id
                 """
-                params: dict = {"date": entry_date}
-                if organization_id:
-                    query += " AND organization_id = :org_id"
-                    params["org_id"] = organization_id
+                params: dict = {"date": entry_date, "org_id": scope.org_id}
                 query += " LIMIT 1"
 
                 row = session.execute(text(query), params).fetchone()
@@ -202,12 +235,24 @@ class JournalWriter:
                     notable_events=json.loads(row[5]) if row[5] else [],
                     learnings=json.loads(row[6]) if row[6] else [],
                     goals_next=json.loads(row[7]) if row[7] else [],
+                    organization_id=row[8],
                 )
         except Exception:
             return None
 
-    def _save_entry(self, entry: JournalEntry) -> None:
+    def _save_entry(
+        self,
+        entry: JournalEntry,
+        *,
+        scope: MemoryWriteScope | None = None,
+    ) -> None:
         """Insert a journal entry into the database."""
+        scope = scope or self._resolve_journal_scope(entry.organization_id, write=True)
+        if not self._scope_allows_journal(scope):
+            self._log_scope_blocked("save_entry", scope, entry_id=str(entry.id))
+            return
+        entry.organization_id = scope.org_id
+
         from sqlalchemy import text
         from app.core.database import get_shared_session_factory
 
@@ -231,12 +276,49 @@ class JournalWriter:
                         "events": json.dumps(entry.notable_events, ensure_ascii=False),
                         "learnings": json.dumps(entry.learnings, ensure_ascii=False),
                         "goals": json.dumps(entry.goals_next, ensure_ascii=False),
-                        "org_id": entry.organization_id,
+                        "org_id": scope.org_id,
                     },
                 )
                 session.commit()
         except Exception as e:
             logger.error("[JOURNAL] Failed to save entry: %s", e)
+
+    def _resolve_journal_scope(
+        self,
+        organization_id: Optional[str],
+        *,
+        write: bool,
+    ) -> MemoryWriteScope:
+        if isinstance(organization_id, str) and organization_id.strip():
+            return MemoryWriteScope(
+                org_id=organization_id.strip(),
+                state="explicit",
+                warnings=[],
+                write_allowed=True,
+            )
+        return resolve_memory_write_scope() if write else resolve_memory_read_scope()
+
+    def _scope_allows_journal(self, scope: MemoryWriteScope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _log_scope_blocked(
+        self,
+        operation: str,
+        scope: MemoryWriteScope,
+        *,
+        entry_id: Optional[str] = None,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_JOURNAL_MISSING_ORG_WARNING)
+        logger.warning(
+            "[JOURNAL] %s blocked entry_hash=%s org_hash=%s org_scope=%s warnings=%s",
+            operation,
+            hash_memory_identifier(entry_id),
+            hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
 
 
 def _extract_section(content: str, heading: str) -> list:
@@ -278,6 +360,36 @@ def _extract_section(content: str, heading: str) -> list:
                 items.append(stripped[2:].strip().lstrip(". "))
 
     return items
+
+
+def _build_fallback_journal_content(
+    *,
+    emotional_state: EmotionalState,
+    entry_date: date,
+) -> str:
+    """Build a minimal journal entry when local LLM generation is unavailable."""
+    return "\n".join(
+        [
+            "### Tam trang hom nay",
+            (
+                f"Trang thai bao tri tu chu duoc ghi nhan voi mood "
+                f"{emotional_state.primary_mood.value}, energy "
+                f"{emotional_state.energy_level:.0%}, social battery "
+                f"{emotional_state.social_battery:.0%}."
+            ),
+            "",
+            "### Dieu dang nho",
+            "- Heartbeat lifecycle completed without local LLM output.",
+            "",
+            "### Dieu minh hoc duoc",
+            "- Autonomy maintenance must persist through model outages.",
+            "",
+            "### Muc tieu ngay mai",
+            "- Verify local LLM health and keep lifecycle evidence current.",
+            "",
+            f"Generated by deterministic journal fallback on {entry_date.isoformat()}.",
+        ]
+    )
 
 
 # =============================================================================

@@ -16,6 +16,36 @@ _RAW_CODE_ARG_KEYS = {
     "source_code",
     "visual_payload",
 }
+_SENSITIVE_ARG_KEYS = {
+    "access_token",
+    "api_key",
+    "approval_token",
+    "authorization",
+    "connected_account_id",
+    "connection_id",
+    "connection_ref",
+    "credential",
+    "image_base64",
+    "image_url",
+    "page_id",
+    "password",
+    "provider_payload",
+    "raw_prompt",
+    "refresh_token",
+    "secret",
+    "token",
+    "vault_key_id",
+}
+_SENSITIVE_ARG_KEY_MARKERS = (
+    "authorization",
+    "connected_account",
+    "credential",
+    "password",
+    "provider_payload",
+    "secret",
+    "token",
+    "vault",
+)
 _MAX_PUBLIC_ARG_KEYS = 16
 _MAX_PUBLIC_STRING_CHARS = 180
 
@@ -35,6 +65,10 @@ def _redacted_text_summary(value: Any) -> dict[str, Any]:
 
 def _summarize_public_value(key: str, value: Any) -> Any:
     normalized_key = str(key or "").strip().lower()
+    if normalized_key in _SENSITIVE_ARG_KEYS or any(
+        marker in normalized_key for marker in _SENSITIVE_ARG_KEY_MARKERS
+    ):
+        return "[redacted]"
     if normalized_key in _RAW_CODE_ARG_KEYS:
         return _redacted_text_summary(value)
     if isinstance(value, str):

@@ -8,6 +8,8 @@ import logging
 import re
 from typing import Any
 
+from pydantic import ConfigDict, Field, create_model
+
 from app.engine.tools.native_tool import StructuredTool
 from app.engine.tools.tool_capability_registry import (
     host_action_requires_approval_token,
@@ -160,6 +162,83 @@ def _format_input_contract(action_name: str, action_def: dict[str, Any]) -> str:
     return "\n" + "\n".join(lines)
 
 
+def _annotation_for_json_schema(schema: dict[str, Any]) -> Any:
+    schema_type = str(schema.get("type") or "").strip().lower()
+    if schema_type == "integer":
+        return int
+    if schema_type == "number":
+        return float
+    if schema_type == "boolean":
+        return bool
+    if schema_type == "array":
+        return list[Any]
+    if schema_type == "object":
+        return dict[str, Any]
+    return str
+
+
+def _build_action_args_schema(action_name: str, action_def: dict[str, Any]):
+    input_schema = action_def.get("input_schema")
+    if not isinstance(input_schema, dict):
+        return None
+    properties = input_schema.get("properties")
+    if not isinstance(properties, dict) or not properties:
+        return None
+
+    required = {
+        str(name).strip()
+        for name in input_schema.get("required", [])
+        if str(name).strip()
+    }
+    fields: dict[str, tuple[Any, Any]] = {}
+    for raw_name, raw_schema in properties.items():
+        field_name = str(raw_name).strip()
+        if not field_name:
+            continue
+        schema = raw_schema if isinstance(raw_schema, dict) else {}
+        annotation = _annotation_for_json_schema(schema)
+        description = str(schema.get("description") or "").strip() or None
+        default = ... if field_name in required else schema.get("default", None)
+        fields[field_name] = (
+            annotation,
+            Field(default, description=description),
+        )
+    if not fields:
+        return None
+
+    model_name = re.sub(r"[^a-zA-Z0-9]+", " ", action_name).title().replace(" ", "")
+    model_name = f"{model_name or 'HostAction'}Input"
+    return create_model(
+        model_name,
+        __config__=ConfigDict(extra="allow"),
+        **fields,
+    )
+
+
+def _missing_required_action_fields(
+    definition: dict[str, Any],
+    params: dict[str, Any],
+) -> list[str]:
+    input_schema = definition.get("input_schema")
+    if not isinstance(input_schema, dict):
+        return []
+    required = input_schema.get("required")
+    if not isinstance(required, list):
+        return []
+
+    missing: list[str] = []
+    for raw_name in required:
+        name = str(raw_name or "").strip()
+        if not name:
+            continue
+        value = params.get(name)
+        if value is None:
+            missing.append(name)
+        elif isinstance(value, str) and not value.strip():
+            missing.append(name)
+    return missing
+
+
 def generate_host_action_tools(
     capabilities_tools: list[dict[str, Any]],
     user_role: str,
@@ -191,6 +270,19 @@ def generate_host_action_tools(
                     latest_preview,
                     expected_preview_kind,
                 )
+                missing_required_fields = _missing_required_action_fields(
+                    definition,
+                    params,
+                )
+                if missing_required_fields:
+                    return json.dumps({
+                        "status": "validation_failed",
+                        "action": name,
+                        "params": params,
+                        "message": "Missing required host-action input.",
+                        "missing_fields": missing_required_fields,
+                    }, ensure_ascii=False)
+
                 declared_mutation = bool(
                     definition.get("requires_confirmation") and definition.get("mutates_state")
                 )
@@ -236,6 +328,7 @@ def generate_host_action_tools(
             func=_make_tool_fn(action_name, bridge, event_bus_id, action_def),
             name=host_action_tool_name(action_name),
             description=f"[Host Action: {action_name}] {description}{input_contract}",
+            args_schema=_build_action_args_schema(action_name, action_def),
         )
         tools.append(tool)
 

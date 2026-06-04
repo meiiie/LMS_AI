@@ -88,7 +88,7 @@ Authoritative request contract:
 │   └────────┬────────┘                                            │
 │            ▼                                                      │
 │   ┌─────────────────┐                                            │
-│   │ STAGE 6: POST-  │  BackgroundTaskRunner.schedule_all()       │
+│   │ STAGE 6: POST-  │  post_turn_lifecycle scheduling           │
 │   │   RESPONSE      │  + living_continuity.schedule_post_...     │
 │   │   Scheduling    │  → Background + continuity hooks           │
 │   └────────┬────────┘                                            │

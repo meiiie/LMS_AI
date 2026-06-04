@@ -382,10 +382,13 @@ class TestLLMRoutingWithValidation:
             "domain_config": _maritime_config(),
         }
 
-        with patch(
-            "app.engine.multi_agent.supervisor.StructuredInvokeService.ainvoke",
-            new_callable=AsyncMock,
-            return_value=mock_decision,
+        with (
+            patch("app.engine.multi_agent.supervisor.settings.enable_conservative_fast_routing", False),
+            patch(
+                "app.engine.multi_agent.supervisor.StructuredInvokeService.ainvoke",
+                new_callable=AsyncMock,
+                return_value=mock_decision,
+            ),
         ):
             result = await supervisor.route(state)
 
@@ -411,10 +414,13 @@ class TestLLMRoutingWithValidation:
             "domain_config": _maritime_config(),
         }
 
-        with patch(
-            "app.engine.multi_agent.supervisor.StructuredInvokeService.ainvoke",
-            new_callable=AsyncMock,
-            return_value=mock_decision,
+        with (
+            patch("app.engine.multi_agent.supervisor.settings.enable_conservative_fast_routing", False),
+            patch(
+                "app.engine.multi_agent.supervisor.StructuredInvokeService.ainvoke",
+                new_callable=AsyncMock,
+                return_value=mock_decision,
+            ),
         ):
             result = await supervisor.route(state)
 
@@ -441,10 +447,13 @@ class TestLLMRoutingWithValidation:
             "domain_config": _maritime_config(),
         }
 
-        with patch(
-            "app.engine.multi_agent.supervisor.StructuredInvokeService.ainvoke",
-            new_callable=AsyncMock,
-            return_value=mock_decision,
+        with (
+            patch("app.engine.multi_agent.supervisor.settings.enable_conservative_fast_routing", False),
+            patch(
+                "app.engine.multi_agent.supervisor.StructuredInvokeService.ainvoke",
+                new_callable=AsyncMock,
+                return_value=mock_decision,
+            ),
         ):
             result = await supervisor.route(state)
 

@@ -36,6 +36,66 @@ def test_emit_blocked_sse_events_emits_answer_metadata_done():
     assert "event: done" in chunks[2]
 
 
+def test_format_sse_sanitizes_direct_wire_payload():
+    presenter = _load_chat_stream_presenter()
+
+    chunk = presenter.format_sse(
+        "metadata",
+        {
+            "content": "Bearer raw-format-token-12345678",
+            "access_token": "raw-access-token",
+            "provider_payload": {"id": "raw-provider"},
+            "nested": {"url": "https://example.com?token=raw-url-token"},
+            "safe": "ok",
+        },
+        event_id=9,
+    )
+
+    data_line = next(line for line in chunk.split("\n") if line.startswith("data: "))
+    payload = json.loads(data_line[6:])
+    serialized = json.dumps(payload, ensure_ascii=False)
+
+    assert payload["safe"] == "ok"
+    assert payload["content"] == "Bearer <redacted-secret>"
+    assert "access_token" not in payload
+    assert "provider_payload" not in payload
+    assert "raw-format-token" not in serialized
+    assert "raw-access-token" not in serialized
+    assert "raw-provider" not in serialized
+    assert "raw-url-token" not in serialized
+
+
+def test_emit_blocked_sse_events_sanitizes_metadata_at_wire_boundary():
+    from types import SimpleNamespace
+
+    presenter = _load_chat_stream_presenter()
+
+    blocked_response = SimpleNamespace(
+        message="Blocked access_token=raw-blocked-answer-token",
+        metadata={
+            "blocked": True,
+            "access_token": "raw-blocked-metadata-token",
+            "provider_payload": {"id": "raw-provider"},
+        },
+    )
+
+    chunks, _ = presenter.emit_blocked_sse_events(
+        blocked_response=blocked_response,
+        session_id="session-1",
+        processing_time=0.25,
+        event_counter=0,
+        extra_metadata={"reason": "token=raw-extra-token"},
+    )
+
+    serialized = "\n".join(chunks)
+
+    assert "Blocked <redacted-secret>" in serialized
+    assert "raw-blocked-answer-token" not in serialized
+    assert "raw-blocked-metadata-token" not in serialized
+    assert "raw-provider" not in serialized
+    assert "raw-extra-token" not in serialized
+
+
 def test_serialize_stream_event_metadata_adds_streaming_version():
     from types import SimpleNamespace
 

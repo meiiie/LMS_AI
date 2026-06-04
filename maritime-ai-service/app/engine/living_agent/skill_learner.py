@@ -36,6 +36,7 @@ from app.engine.living_agent.skill_singleton_registry import (
     get_or_create_registered_skill_learner,
     register_skill_learner_factory,
 )
+from app.engine.semantic_memory.privacy import hash_memory_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -180,13 +181,18 @@ class SkillLearner:
             # Check for advancement
             if skill.can_advance():
                 skill.advance()
-                logger.info("[SKILL_LEARNER] Advanced: %s → %s", skill_name, skill.status.value)
+                logger.info(
+                    "[SKILL_LEARNER] Advanced skill_hash=%s -> %s",
+                    hash_memory_identifier(skill_name),
+                    skill.status.value,
+                )
 
             builder._update_skill(skill)
             self._update_skill_metadata(skill, builder)
             logger.debug(
-                "[SKILL_LEARNER] Learned from '%s' (confidence=%.2f)",
-                material.title[:50], skill.confidence,
+                "[SKILL_LEARNER] Learned from material_hash=%s (confidence=%.2f)",
+                hash_memory_identifier(material.title),
+                skill.confidence,
             )
             return True
 
@@ -310,8 +316,12 @@ class SkillLearner:
         self._update_skill_metadata(skill, builder)
 
         logger.info(
-            "[SKILL_LEARNER] Quiz: %s — %d/%d correct (%.0f%%), confidence=%.2f",
-            skill_name, correct, total, score * 100, skill.confidence,
+            "[SKILL_LEARNER] Quiz skill_hash=%s - %d/%d correct (%.0f%%), confidence=%.2f",
+            hash_memory_identifier(skill_name),
+            correct,
+            total,
+            score * 100,
+            skill.confidence,
         )
         return result
 
@@ -472,26 +482,9 @@ class SkillLearner:
 
     @staticmethod
     def _update_skill_metadata(skill: WiiiSkill, builder) -> None:
-        """Persist skill metadata changes to DB."""
+        """Persist skill metadata changes through SkillBuilder's org guard."""
         try:
-            from sqlalchemy import text
-            from app.core.database import get_shared_session_factory
-
-            session_factory = get_shared_session_factory()
-            with session_factory() as session:
-                session.execute(
-                    text("""
-                        UPDATE wiii_skills SET
-                            metadata = :meta,
-                            updated_at = NOW()
-                        WHERE id = :id
-                    """),
-                    {
-                        "id": str(skill.id),
-                        "meta": json.dumps(skill.metadata, ensure_ascii=False),
-                    },
-                )
-                session.commit()
+            builder.update_skill_metadata(skill)
         except Exception as e:
             logger.warning("[SKILL_LEARNER] Failed to update metadata: %s", e)
 

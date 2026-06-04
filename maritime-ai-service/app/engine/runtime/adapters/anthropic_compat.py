@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app.engine.messages import Message, ToolCall
+from app.engine.runtime.adapters.message_summary import summarize_provider_messages
 from app.engine.runtime.turn_request import TurnRequest
 
 _VALID_ROLES = {"user", "assistant"}
@@ -173,7 +174,7 @@ def anthropic_messages_to_turn_request(
 
     metadata: dict[str, Any] = {
         "anthropic_model": body.get("model"),
-        "original_messages": raw_messages,
+        "original_messages_summary": summarize_provider_messages(raw_messages),
     }
     for opt_key in ("temperature", "top_p", "max_tokens", "tool_choice"):
         if opt_key in body:

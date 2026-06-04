@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.admin_security import check_admin_module as _check_admin_module
 from app.api.deps import RequireAdmin
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,45 @@ async def _get_pool():
     return await get_asyncpg_pool()
 
 
+def _normalize_org_id(value: object) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _resolve_admin_analytics_org(
+    auth: RequireAdmin,
+    requested_org_id: Optional[str],
+) -> Optional[str]:
+    """Resolve the active organization boundary for analytics queries."""
+
+    requested = _normalize_org_id(requested_org_id)
+    if not settings.enable_multi_tenant:
+        return requested
+
+    active_org_id = _normalize_org_id(getattr(auth, "organization_id", None))
+    if not active_org_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Active organization is required for admin analytics.",
+        )
+    if requested and requested != active_org_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Requested organization does not match active organization.",
+        )
+    return active_org_id
+
+
+def _analytics_scope_metadata(org_id: Optional[str]) -> dict[str, object]:
+    return {
+        "org_scoped": org_id is not None,
+        "org_filter_applied": org_id is not None,
+        "identifier_strategy": "active_org_id_not_echoed",
+    }
+
+
 # =============================================================================
 # GET /admin/analytics/overview
 # =============================================================================
@@ -60,6 +100,7 @@ async def analytics_overview(
     org_id: Optional[str] = Query(None),
 ):
     """Overview analytics: daily active users, chat volume, error rate."""
+    effective_org_id = _resolve_admin_analytics_org(auth, org_id)
     pool = await _get_pool()
     from_boundary = _parse_timestamptz_boundary(from_date)
     to_boundary = _parse_timestamptz_boundary(to_date, end_of_day=True)
@@ -82,9 +123,9 @@ async def analytics_overview(
         idx += 1
 
     org_cond = ""
-    if org_id:
+    if effective_org_id:
         org_cond = f" AND organization_id = ${idx}"
-        params.append(org_id)
+        params.append(effective_org_id)
         idx += 1
 
     where = "WHERE " + " AND ".join(conditions_base)
@@ -161,6 +202,7 @@ async def analytics_overview(
             }
             for r in error_rows
         ],
+        "scope": _analytics_scope_metadata(effective_org_id),
     }
 
 
@@ -178,6 +220,7 @@ async def analytics_llm_usage(
     group_by: str = Query("day", description="day, model, or org"),
 ):
     """LLM usage analytics: tokens, cost, breakdown."""
+    effective_org_id = _resolve_admin_analytics_org(auth, org_id)
     pool = await _get_pool()
     from_boundary = _parse_timestamptz_boundary(from_date)
     to_boundary = _parse_timestamptz_boundary(to_date, end_of_day=True)
@@ -194,9 +237,9 @@ async def analytics_llm_usage(
         conditions.append(f"created_at <= ${idx}::timestamptz")
         params.append(to_boundary)
         idx += 1
-    if org_id:
+    if effective_org_id:
         conditions.append(f"organization_id = ${idx}")
-        params.append(org_id)
+        params.append(effective_org_id)
         idx += 1
     if model:
         conditions.append(f"model = ${idx}")
@@ -298,6 +341,7 @@ async def analytics_llm_usage(
         "breakdown": breakdown,
         "top_models": top_models,
         "top_users": top_users,
+        "scope": _analytics_scope_metadata(effective_org_id),
     }
 
 
@@ -313,6 +357,7 @@ async def analytics_users(
     org_id: Optional[str] = Query(None),
 ):
     """User analytics: growth, engagement, account-type distribution."""
+    effective_org_id = _resolve_admin_analytics_org(auth, org_id)
     pool = await _get_pool()
     from_boundary = _parse_timestamptz_boundary(from_date)
     to_boundary = _parse_timestamptz_boundary(to_date, end_of_day=True)
@@ -338,16 +383,16 @@ async def analytics_users(
     org_cond = ""
     org_membership_cond = ""
     org_params = list(date_params)
-    if org_id:
+    if effective_org_id:
         org_cond = f" AND organization_id = ${idx}"
         org_membership_cond = f" AND uo.organization_id = ${idx}"
-        org_params.append(org_id)
+        org_params.append(effective_org_id)
         idx += 1
 
     async with pool.acquire() as conn:
         total_users = 0
         new_users = 0
-        if org_id:
+        if effective_org_id:
             total_users = await conn.fetchval(
                 """
                 SELECT COUNT(DISTINCT u.id)
@@ -355,7 +400,7 @@ async def analytics_users(
                 JOIN user_organizations uo ON uo.user_id = u.id
                 WHERE uo.organization_id = $1
                 """,
-                org_id,
+                effective_org_id,
             ) or 0
             new_users = await conn.fetchval(
                 f"""
@@ -389,7 +434,7 @@ async def analytics_users(
         # User growth curve
         growth = []
         try:
-            if org_id:
+            if effective_org_id:
                 growth_rows = await conn.fetch(
                     f"""
                     SELECT DATE(u.created_at) AS date, COUNT(DISTINCT u.id) AS new_users
@@ -419,7 +464,7 @@ async def analytics_users(
         # Compatibility role distribution
         legacy_role_dist = {}
         try:
-            if org_id:
+            if effective_org_id:
                 role_rows = await conn.fetch(
                     f"""
                     SELECT u.role, COUNT(DISTINCT u.id) AS count
@@ -428,7 +473,7 @@ async def analytics_users(
                     WHERE uo.organization_id = $1
                     GROUP BY u.role
                     """,
-                    org_id,
+                    effective_org_id,
                 )
             else:
                 role_rows = await conn.fetch(
@@ -441,7 +486,7 @@ async def analytics_users(
         # Canonical Wiii account type distribution
         platform_role_dist = {}
         try:
-            if org_id:
+            if effective_org_id:
                 platform_rows = await conn.fetch(
                     f"""
                     SELECT
@@ -458,7 +503,7 @@ async def analytics_users(
                     WHERE uo.organization_id = $1
                     GROUP BY platform_role
                     """,
-                    org_id,
+                    effective_org_id,
                 )
             else:
                 platform_rows = await conn.fetch(
@@ -493,7 +538,7 @@ async def analytics_users(
 
         # Wiii org membership roles only make sense within a specific org scope.
         organization_role_dist = {}
-        if org_id:
+        if effective_org_id:
             try:
                 membership_rows = await conn.fetch(
                     """
@@ -502,7 +547,7 @@ async def analytics_users(
                     WHERE organization_id = $1
                     GROUP BY role
                     """,
-                    org_id,
+                    effective_org_id,
                 )
                 organization_role_dist = {
                     r["role"]: r["count"] for r in membership_rows
@@ -541,4 +586,5 @@ async def analytics_users(
         "platform_role_distribution": platform_role_dist,
         "organization_role_distribution": organization_role_dist,
         "top_active_users": top_active,
+        "scope": _analytics_scope_metadata(effective_org_id),
     }

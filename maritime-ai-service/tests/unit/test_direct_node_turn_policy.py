@@ -52,6 +52,27 @@ def test_resolve_direct_node_turn_policy_short_social_chatter():
     assert result.direct_provider_override == "qwen"
 
 
+def test_resolve_direct_node_turn_policy_forced_path_overrides_chatter():
+    state = {
+        "context": {"response_language": "vi"},
+        "routing_metadata": {"intent": "social", "method": "always_on_social_fast_path"},
+        "_turn_path_decision": {
+            "path": "weather_lookup",
+            "bind_tools": True,
+            "force_tools": True,
+        },
+    }
+
+    result = resolve_direct_node_turn_policy(
+        **_base_policy_kwargs(query="nay thoi tiet nong nhi", state=state)
+    )
+
+    assert result.is_short_house_chatter is False
+    assert result.tools_context_override is None
+    assert result.role_name == "direct_agent"
+    assert result.use_house_voice_direct is False
+
+
 def test_resolve_direct_node_turn_policy_social_followup_keeps_recent_history():
     state = {
         "context": {"response_language": "vi"},

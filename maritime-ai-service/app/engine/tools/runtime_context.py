@@ -7,6 +7,13 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Any, Iterator, Optional
 
+from app.engine.runtime.event_payload_sanitizer import sanitize_runtime_payload
+
+
+def _safe_metadata(value: Any) -> dict[str, Any]:
+    safe_value = sanitize_runtime_payload(value or {})
+    return safe_value if isinstance(safe_value, dict) else {}
+
 
 @dataclass(slots=True)
 class ToolRuntimeContext:
@@ -33,12 +40,12 @@ class ToolRuntimeContext:
     ) -> "ToolRuntimeContext":
         """Clone the current context for a specific tool call."""
         merged_metadata = dict(self.metadata or {})
-        merged_metadata.update(metadata or {})
+        merged_metadata.update(_safe_metadata(metadata))
         return replace(
             self,
             tool_name=tool_name,
             tool_call_id=tool_call_id,
-            metadata=merged_metadata,
+            metadata=_safe_metadata(merged_metadata),
         )
 
 
@@ -86,7 +93,7 @@ def build_tool_runtime_context(
         user_role=user_role,
         node=node,
         source=source,
-        metadata=dict(metadata or {}),
+        metadata=_safe_metadata(metadata),
     )
 
 
@@ -161,7 +168,7 @@ def build_sandbox_execution_context(
         session_id=runtime.session_id if runtime else None,
         request_id=runtime.request_id if runtime else None,
         approval_scope=approval_scope,
-        metadata=merged_metadata,
+        metadata=_safe_metadata(merged_metadata),
     )
 
 
@@ -194,7 +201,7 @@ def build_runtime_correlation_metadata(
         metadata["tool_call_id"] = runtime.tool_call_id
     for key, value in (runtime.metadata or {}).items():
         metadata.setdefault(key, value)
-    return metadata
+    return _safe_metadata(metadata)
 
 
 def _merge_runtime_event_metadata(
@@ -220,7 +227,7 @@ def _merge_runtime_event_metadata(
         merged_metadata.setdefault(key, value)
 
     if merged_metadata:
-        content["metadata"] = merged_metadata
+        content["metadata"] = _safe_metadata(merged_metadata)
 
 
 def filter_tools_for_role(tools: list, user_role: str) -> list:

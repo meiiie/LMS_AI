@@ -170,6 +170,7 @@ class CharacterReflectionEngine:
         last_user_message: str,
         last_response: str,
         user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Run a reflection cycle.
 
@@ -194,9 +195,14 @@ class CharacterReflectionEngine:
             state_manager = get_character_state_manager()
             repo = get_character_repository()
 
-            blocks = state_manager.get_blocks(user_id=effective_user_id)
+            blocks = state_manager.get_blocks(
+                user_id=effective_user_id,
+                organization_id=organization_id,
+            )
             recent_experiences = repo.get_recent_experiences(
-                limit=10, user_id=effective_user_id,
+                limit=10,
+                user_id=effective_user_id,
+                organization_id=organization_id,
             )
 
             # 2. Build prompt
@@ -225,6 +231,7 @@ class CharacterReflectionEngine:
                     state_manager=state_manager,
                     updates=reflection["updates"],
                     user_id=effective_user_id,
+                    organization_id=organization_id,
                 )
                 reflection["applied_count"] = applied
             else:
@@ -233,12 +240,15 @@ class CharacterReflectionEngine:
             # 6. Log reflection experience
             from app.engine.character.models import CharacterExperienceCreate
             summary = reflection.get("reflection_summary", "Suy ngẫm định kỳ")
-            repo.log_experience(CharacterExperienceCreate(
-                experience_type=ExperienceType.SELF_REFLECTION.value,
-                content=summary[:500],
-                importance=0.6,
-                user_id=effective_user_id,
-            ))
+            repo.log_experience(
+                CharacterExperienceCreate(
+                    experience_type=ExperienceType.SELF_REFLECTION.value,
+                    content=summary[:500],
+                    importance=0.6,
+                    user_id=effective_user_id,
+                ),
+                organization_id=organization_id,
+            )
 
             # 7. Reset counter for this user
             self.reset_counter(user_id=effective_user_id)
@@ -250,6 +260,7 @@ class CharacterReflectionEngine:
                     max_age_days=_cfg.character_experience_retention_days,
                     keep_min=_cfg.character_experience_keep_min,
                     user_id=effective_user_id,
+                    organization_id=organization_id,
                 )
             except Exception as cleanup_err:
                 logger.debug("[REFLECTION] Experience cleanup skipped: %s", cleanup_err)
@@ -381,6 +392,7 @@ class CharacterReflectionEngine:
         state_manager: Any,
         updates: List[Dict[str, Any]],
         user_id: str = "__global__",
+        organization_id: Optional[str] = None,
     ) -> int:
         """Apply validated updates to character blocks.
 
@@ -398,11 +410,17 @@ class CharacterReflectionEngine:
                 if action == "append":
                     formatted = f"\n- {content.strip()}"
                     result = state_manager.update_block(
-                        label=block, append=formatted, user_id=user_id,
+                        label=block,
+                        append=formatted,
+                        user_id=user_id,
+                        organization_id=organization_id,
                     )
                 elif action == "replace":
                     result = state_manager.update_block(
-                        label=block, content=content, user_id=user_id,
+                        label=block,
+                        content=content,
+                        user_id=user_id,
+                        organization_id=organization_id,
                     )
                 else:
                     continue
@@ -445,6 +463,7 @@ async def trigger_character_reflection(
     user_id: str,
     message: str,
     response: str,
+    organization_id: Optional[str] = None,
 ) -> None:
     """Background task entry point for character reflection.
 
@@ -478,6 +497,7 @@ async def trigger_character_reflection(
             last_user_message=message,
             last_response=response,
             user_id=user_id,
+            organization_id=organization_id,
         )
 
     except Exception as e:

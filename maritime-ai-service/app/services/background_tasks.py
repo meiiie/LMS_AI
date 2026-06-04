@@ -9,10 +9,77 @@ Centralizes all background task logic for chat processing.
 """
 
 import logging
-from typing import Callable, Optional
+import re
+from dataclasses import dataclass
+from typing import Any, Callable, Optional
 from uuid import UUID
 
+from app.engine.runtime.runtime_metrics import inc_counter
+
 logger = logging.getLogger(__name__)
+BACKGROUND_TASK_SCHEDULE_SUMMARY_VERSION = "wiii.background_task_schedule.v1"
+_SAFE_LABEL_RE = re.compile(r"[^a-z0-9._:/-]+")
+
+
+def _safe_label(value: Any, *, fallback: str = "unknown") -> str:
+    label = str(value or "").strip().casefold()
+    label = _SAFE_LABEL_RE.sub("_", label).strip("_")
+    return (label or fallback)[:96]
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundTaskGroupSchedule:
+    group: str
+    status: str
+    reason: str
+
+    def to_summary(self) -> dict[str, str]:
+        return {
+            "group": self.group,
+            "status": self.status,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundTaskScheduleSummary:
+    task_count: int
+    groups: tuple[BackgroundTaskGroupSchedule, ...]
+
+    def to_summary(self) -> dict[str, Any]:
+        return {
+            "schema_version": BACKGROUND_TASK_SCHEDULE_SUMMARY_VERSION,
+            "task_count": max(int(self.task_count or 0), 0),
+            "groups": [group.to_summary() for group in self.groups],
+            "privacy": {
+                "raw_content_included": False,
+                "identifier_strategy": "status_only",
+            },
+        }
+
+
+def _schedule_group(
+    groups: list[BackgroundTaskGroupSchedule],
+    *,
+    group: str,
+    status: str,
+    reason: str,
+) -> None:
+    groups.append(
+        BackgroundTaskGroupSchedule(
+            group=group,
+            status=status,
+            reason=reason,
+        )
+    )
+    inc_counter(
+        "runtime.background_tasks.scheduling",
+        labels={
+            "group": _safe_label(group),
+            "status": _safe_label(status),
+            "reason": _safe_label(reason),
+        },
+    )
 
 
 class BackgroundTaskRunner:
@@ -21,6 +88,7 @@ class BackgroundTaskRunner:
 
     Responsibilities:
     - Store semantic memory interactions
+    - Cold-path semantic memory maintenance
     - Memory summarization
     - Update learning profile stats
 
@@ -62,7 +130,7 @@ class BackgroundTaskRunner:
         response: str,
         skip_fact_extraction: bool = False,
         org_id: str = "",
-    ) -> None:
+    ) -> BackgroundTaskScheduleSummary:
         """
         Schedule all background tasks after response is sent.
 
@@ -81,19 +149,64 @@ class BackgroundTaskRunner:
         # NOTE: Message saving (user + assistant) is handled by ChatOrchestrator
         # directly — do NOT duplicate here. See Sprint 83 audit fix (H7).
 
-        # Task 1: Store semantic memory interaction
-        if self._semantic_memory and self._semantic_memory.is_available():
-            background_save(
-                self._store_semantic_interaction,
-                user_id, message, response, str(session_id),
-                skip_fact_extraction, org_id,
+        from app.services.post_turn_lifecycle import (
+            PostTurnLifecycleContext,
+            schedule_post_turn_background_tasks,
+        )
+
+        return schedule_post_turn_background_tasks(
+            PostTurnLifecycleContext(
+                background_save=background_save,
+                background_runner=self,
+                user_id=user_id,
+                session_id=session_id,
+                message=message,
+                response_text=response,
+                organization_id=org_id,
+                transport_type="unknown",
+                skip_fact_extraction=skip_fact_extraction,
+                ephemeral_direct_turn=False,
             )
-        
+        )
+
+    def schedule_non_semantic_tasks(
+        self,
+        background_save: Callable,
+        user_id: str,
+        session_id: UUID,
+        message: str,
+        response: str,
+        org_id: str = "",
+    ) -> BackgroundTaskScheduleSummary:
+        """
+        Schedule post-turn tasks that do not own semantic-memory writes.
+
+        Raw semantic interaction writes and maintenance scheduling are owned by
+        app.services.post_turn_lifecycle so sync/stream finalization has one
+        explicit raw-input boundary.
+        """
+        task_count = 0
+        groups: list[BackgroundTaskGroupSchedule] = []
+
         # Task 2: Summarize memory if needed
         if self._memory_summarizer:
             background_save(
                 self._summarize_memory,
                 str(session_id), message, response
+            )
+            task_count += 1
+            _schedule_group(
+                groups,
+                group="memory_summarizer",
+                status="scheduled",
+                reason="dependency_available",
+            )
+        else:
+            _schedule_group(
+                groups,
+                group="memory_summarizer",
+                status="skipped",
+                reason="missing_dependency",
             )
         
         # Task 3: Update learning profile stats
@@ -102,6 +215,20 @@ class BackgroundTaskRunner:
                 self._update_profile_stats,
                 user_id
             )
+            task_count += 1
+            _schedule_group(
+                groups,
+                group="profile_stats",
+                status="scheduled",
+                reason="dependency_available",
+            )
+        else:
+            _schedule_group(
+                groups,
+                group="profile_stats",
+                status="skipped",
+                reason="missing_or_unavailable_dependency",
+            )
 
         # Task 4: Character reflection (Sprint 94)
         try:
@@ -109,11 +236,35 @@ class BackgroundTaskRunner:
             if settings.enable_character_reflection:
                 background_save(
                     self._trigger_reflection,
-                    user_id, message, response
+                    user_id, message, response, org_id
+                )
+                task_count += 1
+                _schedule_group(
+                    groups,
+                    group="character_reflection",
+                    status="scheduled",
+                    reason="enabled",
+                )
+            else:
+                _schedule_group(
+                    groups,
+                    group="character_reflection",
+                    status="skipped",
+                    reason="disabled",
                 )
         except Exception:
+            _schedule_group(
+                groups,
+                group="character_reflection",
+                status="skipped",
+                reason="config_unavailable",
+            )
             pass  # Config not available — skip silently
-    
+        return BackgroundTaskScheduleSummary(
+            task_count=task_count,
+            groups=tuple(groups),
+        )
+
     def save_message(
         self,
         background_save: Callable,
@@ -122,7 +273,8 @@ class BackgroundTaskRunner:
         content: str,
         user_id: Optional[str] = None,
         is_blocked: bool = False,
-        block_reason: Optional[str] = None
+        block_reason: Optional[str] = None,
+        organization_id: Optional[str] = None,
     ) -> None:
         """
         Save a single message to chat history (background).
@@ -135,6 +287,7 @@ class BackgroundTaskRunner:
             user_id: Optional user ID for blocked message logging
             is_blocked: Whether message was blocked
             block_reason: Reason for blocking
+            organization_id: Organization boundary for the write
         """
         if self._chat_history and self._chat_history.is_available():
             if is_blocked:
@@ -144,12 +297,14 @@ class BackgroundTaskRunner:
                     content=content,
                     user_id=user_id,
                     is_blocked=True,
-                    block_reason=block_reason
+                    block_reason=block_reason,
+                    organization_id=organization_id,
                 )
             else:
                 background_save(
                     self._chat_history.save_message,
-                    session_id, role, content, user_id
+                    session_id, role, content, user_id,
+                    organization_id=organization_id,
                 )
     
     # =========================================================================
@@ -171,7 +326,7 @@ class BackgroundTaskRunner:
         Args:
             skip_fact_extraction: When True, skips both fact and insight
                 extraction (memory agent already did it). Only stores the
-                raw interaction and checks summarization.
+                raw interaction.
             org_id: Organization ID — set as ContextVar for this background task
                 since middleware already reset it before this runs (Sprint 175b).
         """
@@ -192,7 +347,10 @@ class BackgroundTaskRunner:
                     from uuid import UUID as UUIDType
                     try:
                         session_uuid = UUIDType(session_id)
-                        recent_messages = self._chat_history.get_recent_messages(session_uuid)
+                        recent_messages = self._chat_history.get_recent_messages(
+                            session_uuid,
+                            organization_id=org_id or None,
+                        )
                         conversation_history = [msg.content for msg in recent_messages[-5:]]
                     except ValueError:
                         pass
@@ -216,12 +374,6 @@ class BackgroundTaskRunner:
                 extract_facts=not skip_fact_extraction,
             )
 
-            # Check and summarize if needed
-            await self._semantic_memory.check_and_summarize(
-                user_id=user_id,
-                session_id=session_id
-            )
-
             logger.debug("Background stored semantic interaction for user %s (skip_extract=%s)", user_id, skip_fact_extraction)
         except Exception as e:
             logger.error("Failed to store semantic interaction: %s", e)
@@ -233,6 +385,56 @@ class BackgroundTaskRunner:
                     current_org_id.reset(_org_token)
                 except Exception:
                     pass
+
+    async def _run_semantic_memory_maintenance(
+        self,
+        user_id: str,
+        session_id: str,
+        org_id: str = "",
+    ) -> None:
+        """
+        Run cold-path semantic memory maintenance after interaction storage.
+
+        This keeps pruning and LLM summarization out of fact extraction and
+        out of the minimum interaction-write task.
+        """
+        from app.tasks.semantic_memory_tasks import run_semantic_memory_maintenance
+
+        await run_semantic_memory_maintenance(
+            user_id=user_id,
+            session_id=session_id,
+            org_id=org_id,
+            semantic_memory=self._semantic_memory,
+            executor="local_fallback",
+        )
+
+    async def _enqueue_or_run_semantic_memory_maintenance(
+        self,
+        user_id: str,
+        session_id: str,
+        org_id: str = "",
+    ) -> None:
+        """Enqueue maintenance to the task broker or fall back locally."""
+        try:
+            from app.tasks.semantic_memory_tasks import (
+                enqueue_semantic_memory_maintenance,
+            )
+
+            enqueued = await enqueue_semantic_memory_maintenance(
+                user_id=user_id,
+                session_id=session_id,
+                org_id=org_id,
+            )
+            if enqueued:
+                return
+        except Exception as exc:
+            logger.debug("Semantic memory maintenance enqueue skipped: %s", exc)
+
+        await self._run_semantic_memory_maintenance(
+            user_id=user_id,
+            session_id=session_id,
+            org_id=org_id,
+        )
     
     async def _summarize_memory(
         self,
@@ -258,6 +460,7 @@ class BackgroundTaskRunner:
         user_id: str,
         message: str,
         response: str,
+        org_id: str = "",
     ) -> None:
         """
         Trigger character reflection (Sprint 94).
@@ -271,6 +474,7 @@ class BackgroundTaskRunner:
                 user_id=user_id,
                 message=message,
                 response=response,
+                organization_id=org_id or None,
             )
         except Exception as e:
             logger.warning("Character reflection failed: %s", e)

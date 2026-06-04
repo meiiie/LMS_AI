@@ -786,7 +786,7 @@ class TestAPI:
         mock_repo = MagicMock()
         mock_repo.is_user_in_org = MagicMock(return_value=False)
 
-        auth = _make_auth(user_id="outsider", role="student")
+        auth = _make_auth(user_id="outsider", role="student", org_id="private-org")
         with patch("app.api.v1.knowledge_visualization.get_settings",
                     return_value=_make_settings()):
             with patch("app.repositories.organization_repository.get_organization_repository",
@@ -804,13 +804,43 @@ class TestAPI:
         mock_repo = MagicMock()
         mock_repo.is_user_in_org = MagicMock(return_value=True)
 
-        auth = _make_auth(user_id="member-1", role="student")
+        auth = _make_auth(user_id="member-1", role="student", org_id="my-org")
         with patch("app.api.v1.knowledge_visualization.get_settings",
                     return_value=_make_settings()):
             with patch("app.repositories.organization_repository.get_organization_repository",
                        return_value=mock_repo):
                 user_id = await _require_org_member_viz(auth, "my-org")
                 assert user_id == "member-1"
+
+    @pytest.mark.asyncio
+    async def test_missing_active_org_rejected_before_membership_lookup(self):
+        """Non-admin calls need an active org before route org data is exposed."""
+        from app.api.v1.knowledge_visualization import _require_org_member_viz
+
+        auth = _make_auth(user_id="member-1", role="student", org_id=None)
+        with patch("app.api.v1.knowledge_visualization.get_settings",
+                    return_value=_make_settings()):
+            with patch("app.repositories.organization_repository.get_organization_repository") as repo_factory:
+                with pytest.raises(Exception) as exc_info:
+                    await _require_org_member_viz(auth, "my-org")
+                assert exc_info.value.status_code == 403
+                assert exc_info.value.detail == "Organization context required for knowledge visualization"
+                repo_factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_active_org_mismatch_rejected_before_membership_lookup(self):
+        """Route org must match active org for non-admin knowledge visualization."""
+        from app.api.v1.knowledge_visualization import _require_org_member_viz
+
+        auth = _make_auth(user_id="member-1", role="student", org_id="org-A")
+        with patch("app.api.v1.knowledge_visualization.get_settings",
+                    return_value=_make_settings()):
+            with patch("app.repositories.organization_repository.get_organization_repository") as repo_factory:
+                with pytest.raises(Exception) as exc_info:
+                    await _require_org_member_viz(auth, "org-B")
+                assert exc_info.value.status_code == 403
+                assert exc_info.value.detail == "Active organization does not match route organization"
+                repo_factory.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_scatter_bad_method_returns_400(self):

@@ -19,8 +19,30 @@ import jwt
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.engine.runtime.event_payload_sanitizer import (
+    hash_runtime_identifier,
+    redact_runtime_secret_text,
+)
 
 logger = logging.getLogger(__name__)
+_REDACTED_SECRET = "<redacted-secret>"
+_MAX_AUTH_DIAGNOSTIC_LENGTH = 500
+
+
+def _auth_ref(value: object) -> str:
+    return hash_runtime_identifier(value) or "sha256:empty"
+
+
+def _safe_auth_detail(value: object, *secret_values: object) -> str:
+    text = str(value or "")
+    seen: set[str] = set()
+    for raw_secret in secret_values:
+        secret = str(raw_secret or "")
+        if not secret or secret in seen:
+            continue
+        seen.add(secret)
+        text = text.replace(secret, _REDACTED_SECRET)
+    return redact_runtime_secret_text(text, max_length=_MAX_AUTH_DIAGNOSTIC_LENGTH)
 
 # =============================================================================
 # Sprint 192: In-memory JTI denylist with TTL
@@ -135,6 +157,20 @@ def _coerce_identity_snapshot(raw: object) -> dict:
         except Exception:
             return {}
     return {}
+
+
+def _is_refresh_identity_schema_error(exc: Exception) -> bool:
+    """Return True when refresh_tokens lacks Identity V2 columns."""
+    message = str(exc)
+    return "identity_snapshot" in message or "organization_id" in message
+
+
+def _is_strict_refresh_identity_mode() -> bool:
+    """Production/staging multi-tenant refresh tokens must carry org context."""
+    return (
+        bool(getattr(settings, "enable_multi_tenant", False))
+        and getattr(settings, "environment", "production") in {"production", "staging"}
+    )
 
 
 def create_access_token(
@@ -419,7 +455,13 @@ async def create_token_pair(
                     json.dumps(identity_snapshot, ensure_ascii=False),
                 )
             except Exception as exc:
-                if "identity_snapshot" not in str(exc) and "organization_id" not in str(exc):
+                if not _is_refresh_identity_schema_error(exc):
+                    raise
+                if _is_strict_refresh_identity_mode() and active_organization_id:
+                    logger.error(
+                        "Refresh-token Identity V2 columns are required in strict "
+                        "multi-tenant mode; refusing legacy refresh-token insert"
+                    )
                     raise
                 logger.warning(
                     "Refresh-token schema missing Identity V2 columns; falling back to legacy insert"
@@ -547,8 +589,14 @@ async def refresh_access_token(refresh_token: str) -> Optional[TokenPair]:
                     token_hash,
                 )
             except Exception as exc:
-                if "identity_snapshot" not in str(exc) and "organization_id" not in str(exc):
+                if not _is_refresh_identity_schema_error(exc):
                     raise
+                if _is_strict_refresh_identity_mode():
+                    logger.warning(
+                        "Rejected refresh rotation because refresh-token Identity V2 "
+                        "columns are missing in strict multi-tenant mode"
+                    )
+                    return None
                 logger.warning(
                     "Refresh-token schema missing Identity V2 columns; falling back to legacy lookup"
                 )
@@ -579,8 +627,11 @@ async def refresh_access_token(refresh_token: str) -> Optional[TokenPair]:
                     if active_count > 0:
                         # REPLAY ATTACK — purge entire family
                         logger.warning(
-                            "REPLAY ATTACK DETECTED: revoked token reused for user %s, family %s — purging %d active tokens",
-                            row["user_id"], family_id, active_count,
+                            "REPLAY ATTACK DETECTED: revoked refresh token reused "
+                            "user_ref=%s family_ref=%s purging %d active tokens",
+                            _auth_ref(row["user_id"]),
+                            _auth_ref(family_id),
+                            active_count,
                         )
                         await conn.execute(
                             "UPDATE refresh_tokens SET revoked_at = NOW() WHERE family_id = $1 AND revoked_at IS NULL",
@@ -593,15 +644,31 @@ async def refresh_access_token(refresh_token: str) -> Optional[TokenPair]:
                                 "token_replay_detected",
                                 user_id=row["user_id"],
                                 result="blocked",
-                                reason=f"family={family_id}, purged={active_count}",
+                                reason=(
+                                    f"family_ref={_auth_ref(family_id)}, "
+                                    f"purged={active_count}"
+                                ),
                             )
                         except Exception as _audit_err:
-                            logger.debug("Auth audit log failed (token_replay_detected): %s", _audit_err)
-                logger.warning("Refresh token already revoked (user %s)", row["user_id"])
+                            logger.debug(
+                                "Auth audit log failed (token_replay_detected): %s",
+                                _safe_auth_detail(
+                                    _audit_err,
+                                    row["user_id"],
+                                    family_id,
+                                ),
+                            )
+                logger.warning(
+                    "Refresh token already revoked user_ref=%s",
+                    _auth_ref(row["user_id"]),
+                )
                 return None
 
             if row["expires_at"].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
-                logger.warning("Refresh token expired (user %s)", row["user_id"])
+                logger.warning(
+                    "Refresh token expired user_ref=%s",
+                    _auth_ref(row["user_id"]),
+                )
                 return None
 
             # Revoke the old refresh token (rotation)
@@ -636,7 +703,10 @@ async def refresh_access_token(refresh_token: str) -> Optional[TokenPair]:
                 from app.auth.auth_audit import log_auth_event
                 await log_auth_event("token_refresh", user_id=row["user_id"])
             except Exception as _audit_err:
-                logger.debug("Auth audit log failed (token_refresh): %s", _audit_err)
+                logger.debug(
+                    "Auth audit log failed (token_refresh): %s",
+                    _safe_auth_detail(_audit_err, row["user_id"], row.get("family_id")),
+                )
 
             return new_pair
     except Exception:
@@ -655,7 +725,11 @@ async def revoke_user_tokens(user_id: str) -> int:
                 user_id,
             )
             count = int(result.split()[-1])
-            logger.info("Revoked %d refresh tokens for user %s", count, user_id)
+            logger.info(
+                "Revoked %d refresh tokens user_ref=%s",
+                count,
+                _auth_ref(user_id),
+            )
 
             # Sprint 176: Audit event
             try:
@@ -665,9 +739,12 @@ async def revoke_user_tokens(user_id: str) -> int:
                     metadata={"count": count},
                 )
             except Exception as _audit_err:
-                logger.debug("Auth audit log failed (token_revoked): %s", _audit_err)
+                logger.debug(
+                    "Auth audit log failed (token_revoked): %s",
+                    _safe_auth_detail(_audit_err, user_id),
+                )
 
             return count
     except Exception:
-        logger.exception("Error revoking tokens for user %s", user_id)
+        logger.exception("Error revoking tokens user_ref=%s", _auth_ref(user_id))
         return 0

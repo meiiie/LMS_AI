@@ -39,6 +39,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Awaitable, Callable, Optional
 
+from app.engine.runtime.event_payload_sanitizer import (
+    redact_runtime_secret_text,
+    sanitize_runtime_payload,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -122,6 +127,11 @@ class RunRetryPolicy:
 TransitionListener = Callable[[RunState, RunState, "RunStateMachine"], Awaitable[None]]
 
 
+def _safe_metadata(value: Any) -> dict[str, Any]:
+    safe_value = sanitize_runtime_payload(value or {})
+    return safe_value if isinstance(safe_value, dict) else {}
+
+
 class RunStateMachine:
     """Tracks a single chat run through its lifecycle.
 
@@ -156,7 +166,7 @@ class RunStateMachine:
     ) -> None:
         self.run_id = run_id or f"run_{uuid.uuid4().hex[:16]}"
         self.retry_policy = retry_policy or RunRetryPolicy()
-        self.metadata: dict[str, Any] = dict(metadata or {})
+        self.metadata: dict[str, Any] = _safe_metadata(metadata)
         self._state = RunState.PENDING
         self._attempt = 1
         self._error: Optional[str] = None
@@ -213,7 +223,7 @@ class RunStateMachine:
             self._state = target
             self._last_transition_at = time.monotonic()
             if error:
-                self._error = error
+                self._error = redact_runtime_secret_text(error)
             if target == RunState.RETRYING:
                 self._attempt += 1
                 # Clear the error string when we're going back into the
@@ -238,7 +248,7 @@ class RunStateMachine:
             started_at=self._started_at,
             last_transition_at=self._last_transition_at,
             error=self._error,
-            metadata=dict(self.metadata),
+            metadata=_safe_metadata(self.metadata),
         )
 
 

@@ -2,13 +2,13 @@
 Sprint 160b: "Hoàn Thiện" — Complete Isolation + OAuth Security Tests.
 
 Tests verify:
-1. Scheduler repo org filtering (5 tests)
+1. Scheduler repo org filtering (9 tests)
 2. Insight repo org filtering (3 tests)
 3. Preferences repo org filtering (3 tests)
-4. Learning profile repo org filtering (3 tests)
-5. Thread repo org filtering (6 tests)
+4. Learning profile repo org filtering (8 tests)
+5. Thread repo org filtering (8 tests)
 6. Character repo org filtering (4 tests)
-7. OAuth email_verified guard (5 tests)
+7. OAuth email_verified guard and diagnostics privacy (8 tests)
 8. Token fragment redirect (2 tests)
 9. Config security validation (2 tests)
 """
@@ -57,11 +57,108 @@ def _mock_session_factory():
 
 
 # ============================================================================
-# Group 1: Scheduler repo org filtering (5 tests)
+# Group 1: Scheduler repo org filtering (9 tests)
 # ============================================================================
 
 class TestSchedulerOrgFilter:
     """Test org filtering on scheduler_repository methods."""
+
+    def test_create_task_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Task creation fails closed when production org context is missing."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.repositories.scheduler_repository import SchedulerRepository
+
+        repo = SchedulerRepository()
+        factory, _session = _mock_session_factory()
+        repo._session_factory = factory
+        repo._initialized = True
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.create_task(
+                user_id="PRIVATE-USER",
+                description="private reminder",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result is None
+        factory.assert_not_called()
+        assert "scheduler_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+        assert "private reminder" not in caplog.text
+
+    def test_get_due_tasks_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Tenant-scoped due-task reads fail closed without production org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.repositories.scheduler_repository import SchedulerRepository
+
+        repo = SchedulerRepository()
+        factory, _session = _mock_session_factory()
+        repo._session_factory = factory
+        repo._initialized = True
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.get_due_tasks()
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        factory.assert_not_called()
+        assert "scheduler_repository_blocked_missing_org_context" in caplog.text
+
+    def test_cancel_task_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Task cancellation fails closed when production org context is missing."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.repositories.scheduler_repository import SchedulerRepository
+
+        repo = SchedulerRepository()
+        factory, _session = _mock_session_factory()
+        repo._session_factory = factory
+        repo._initialized = True
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.cancel_task(
+                task_id="PRIVATE-TASK",
+                user_id="PRIVATE-USER",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result is False
+        factory.assert_not_called()
+        assert "scheduler_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-TASK" not in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
 
     def test_get_due_tasks_includes_org_filter_when_enabled(self):
         """get_due_tasks() should include org_where_clause when multi-tenant enabled."""
@@ -83,8 +180,8 @@ class TestSchedulerOrgFilter:
                 assert "organization_id = :org_id" in sql_text
                 assert call_args[0][1].get("org_id") == "org-a"
 
-    def test_get_due_tasks_no_filter_when_disabled(self):
-        """get_due_tasks() should NOT filter by org when multi-tenant disabled."""
+    def test_get_due_tasks_uses_default_org_when_disabled(self):
+        """Single-tenant reads still bind the configured default org."""
         with _patch_settings(enable_multi_tenant=False):
             from app.repositories.scheduler_repository import SchedulerRepository
             repo = SchedulerRepository()
@@ -95,8 +192,28 @@ class TestSchedulerOrgFilter:
             session.execute.return_value.fetchall.return_value = []
             repo.get_due_tasks()
 
-            sql_text = str(session.execute.call_args[0][0])
-            assert "organization_id" not in sql_text
+            call_args = session.execute.call_args
+            sql_text = str(call_args[0][0])
+            assert "organization_id = :org_id" in sql_text
+            assert call_args[0][1].get("org_id") == "default"
+
+    def test_get_due_tasks_worker_scope_selects_org_id_without_filter(self):
+        """The background worker must opt into all-org polling explicitly."""
+        with _patch_settings(enable_multi_tenant=True):
+            from app.repositories.scheduler_repository import SchedulerRepository
+            repo = SchedulerRepository()
+            factory, session = _mock_session_factory()
+            repo._session_factory = factory
+            repo._initialized = True
+
+            session.execute.return_value.fetchall.return_value = []
+            repo.get_due_tasks(allow_all_orgs=True)
+
+            call_args = session.execute.call_args
+            sql_text = str(call_args[0][0])
+            assert "extra_data, organization_id" in sql_text
+            assert "organization_id = :org_id" not in sql_text
+            assert "org_id" not in call_args[0][1]
 
     def test_create_task_includes_org_id(self):
         """create_task() should include organization_id in INSERT."""
@@ -129,8 +246,10 @@ class TestSchedulerOrgFilter:
                 session.execute.return_value.fetchall.return_value = []
                 repo.list_tasks(user_id="u1")
 
-                sql_text = str(session.execute.call_args[0][0])
+                call_args = session.execute.call_args
+                sql_text = str(call_args[0][0])
                 assert "organization_id = :org_id" in sql_text
+                assert call_args[0][1].get("org_id") == "org-c"
 
     def test_cancel_task_includes_org_filter(self):
         """cancel_task() should include org_where_clause when enabled."""
@@ -146,8 +265,10 @@ class TestSchedulerOrgFilter:
                 session.execute.return_value.rowcount = 1
                 repo.cancel_task(task_id="t1", user_id="u1")
 
-                sql_text = str(session.execute.call_args[0][0])
+                call_args = session.execute.call_args
+                sql_text = str(call_args[0][0])
                 assert "organization_id = :org_id" in sql_text
+                assert call_args[0][1].get("org_id") == "org-d"
 
 
 # ============================================================================
@@ -171,6 +292,32 @@ class TestInsightOrgFilter:
         repo._session_factory = factory
         return repo, session
 
+    def test_get_user_insights_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Insight reads fail closed when production org context is missing."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo, _session = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.get_user_insights("PRIVATE-USER")
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        repo._session_factory.assert_not_called()
+        assert "insight_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+
     def test_get_user_insights_org_filter(self):
         with _patch_settings(enable_multi_tenant=True):
             with patch("app.core.org_context.current_org_id") as mock_cv:
@@ -180,7 +327,35 @@ class TestInsightOrgFilter:
                 repo.get_user_insights("u1")
 
                 sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
                 assert "organization_id = :org_id" in sql_text
+                assert params["org_id"] == "org-x"
+
+    def test_delete_user_insights_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Insight deletes fail closed when production org context is missing."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo, _session = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            deleted = repo.delete_user_insights("PRIVATE-USER")
+        finally:
+            current_org_id.reset(token)
+
+        assert deleted == 0
+        repo._session_factory.assert_not_called()
+        assert "insight_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
 
     def test_delete_user_insights_org_filter(self):
         with _patch_settings(enable_multi_tenant=True):
@@ -191,7 +366,9 @@ class TestInsightOrgFilter:
                 repo.delete_user_insights("u1")
 
                 sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
                 assert "organization_id = :org_id" in sql_text
+                assert params["org_id"] == "org-x"
 
     def test_get_insights_by_category_org_filter(self):
         with _patch_settings(enable_multi_tenant=True):
@@ -202,11 +379,13 @@ class TestInsightOrgFilter:
                 repo.get_insights_by_category("u1", "learning")
 
                 sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
                 assert "organization_id = :org_id" in sql_text
+                assert params["org_id"] == "org-x"
 
 
 # ============================================================================
-# Group 3: Learning profile repo org filtering (3 tests)
+# Group 3: Learning profile repo org filtering (8 tests)
 # ============================================================================
 
 class TestLearningProfileOrgFilter:
@@ -223,6 +402,88 @@ class TestLearningProfileOrgFilter:
         return repo, session
 
     @pytest.mark.asyncio
+    async def test_get_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Learning profile reads fail closed without production org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo, _session = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = await repo.get("PRIVATE-USER")
+        finally:
+            current_org_id.reset(token)
+
+        assert result is None
+        repo._session_factory.assert_not_called()
+        assert "learning_profile_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_create_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Learning profile creation fails closed without production org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo, _session = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = await repo.create("PRIVATE-USER")
+        finally:
+            current_org_id.reset(token)
+
+        assert result is None
+        repo._session_factory.assert_not_called()
+        assert "learning_profile_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_update_weak_areas_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Learning profile writes fail closed without production org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo, _session = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = await repo.update_weak_areas("PRIVATE-USER", ["private-topic"])
+        finally:
+            current_org_id.reset(token)
+
+        assert result is False
+        repo._session_factory.assert_not_called()
+        assert "learning_profile_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+        assert "private-topic" not in caplog.text
+
+    @pytest.mark.asyncio
     async def test_get_includes_org_filter(self):
         with _patch_settings(enable_multi_tenant=True):
             with patch("app.core.org_context.current_org_id") as mock_cv:
@@ -232,7 +493,9 @@ class TestLearningProfileOrgFilter:
                 await repo.get("u1")
 
                 sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
                 assert "organization_id = :org_id" in sql_text
+                assert params["org_id"] == "org-lp"
 
     @pytest.mark.asyncio
     async def test_create_includes_org_id(self):
@@ -245,8 +508,11 @@ class TestLearningProfileOrgFilter:
                 await repo.create("u1")
 
                 # First call is the INSERT
-                sql_text = str(session.execute.call_args_list[0][0][0])
+                call_args = session.execute.call_args_list[0]
+                sql_text = str(call_args[0][0])
                 assert "organization_id" in sql_text
+                assert "ON CONFLICT (organization_id, user_id)" in sql_text
+                assert call_args[0][1]["org_id"] == "org-lp"
 
     @pytest.mark.asyncio
     async def test_update_weak_areas_includes_org_filter(self):
@@ -257,7 +523,42 @@ class TestLearningProfileOrgFilter:
                 await repo.update_weak_areas("u1", ["topic1"])
 
                 sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
                 assert "organization_id = :org_id" in sql_text
+                assert params["org_id"] == "org-lp"
+
+    @pytest.mark.asyncio
+    async def test_update_strong_areas_includes_org_filter(self):
+        with _patch_settings(enable_multi_tenant=True):
+            with patch("app.core.org_context.current_org_id") as mock_cv:
+                mock_cv.get.return_value = "org-lp"
+                repo, session = self._make_repo()
+                await repo.update_strong_areas("u1", ["topic2"])
+
+                sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
+                assert "organization_id = :org_id" in sql_text
+                assert params["org_id"] == "org-lp"
+
+    @pytest.mark.asyncio
+    async def test_increment_stats_uses_org_for_get_or_create_and_update(self):
+        with _patch_settings(enable_multi_tenant=True):
+            with patch("app.core.org_context.current_org_id") as mock_cv:
+                mock_cv.get.return_value = "org-lp"
+                repo, session = self._make_repo()
+                repo.get_or_create = AsyncMock(return_value={"user_id": "u1"})
+
+                result = await repo.increment_stats("u1", messages=3)
+
+                assert result is True
+                repo.get_or_create.assert_awaited_once_with(
+                    "u1",
+                    organization_id="org-lp",
+                )
+                sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
+                assert "organization_id = :org_id" in sql_text
+                assert params["org_id"] == "org-lp"
 
 
 # ============================================================================
@@ -275,6 +576,60 @@ class TestThreadOrgFilter:
         repo._initialized = True
         return repo, session
 
+    def test_upsert_thread_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Thread upserts fail closed when production org context is missing."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo, _session = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.upsert_thread("PRIVATE-THREAD", "PRIVATE-USER")
+        finally:
+            current_org_id.reset(token)
+
+        assert result is None
+        repo._session_factory.assert_not_called()
+        assert "thread_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-THREAD" not in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+
+    def test_get_thread_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Thread reads fail closed when production org context is missing."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo, _session = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.get_thread("PRIVATE-THREAD", "PRIVATE-USER")
+        finally:
+            current_org_id.reset(token)
+
+        assert result is None
+        repo._session_factory.assert_not_called()
+        assert "thread_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-THREAD" not in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+
     def test_get_thread_includes_org_filter(self):
         with _patch_settings(enable_multi_tenant=True):
             with patch("app.core.org_context.current_org_id") as mock_cv:
@@ -285,6 +640,19 @@ class TestThreadOrgFilter:
 
                 sql_text = str(session.execute.call_args[0][0])
                 assert "organization_id = :org_id" in sql_text
+
+    def test_get_thread_accepts_explicit_org_without_context(self):
+        with _patch_settings(enable_multi_tenant=True):
+            with patch("app.core.org_context.current_org_id") as mock_cv:
+                mock_cv.get.return_value = None
+                repo, session = self._make_repo()
+                session.execute.return_value.fetchone.return_value = None
+                repo.get_thread("t1", "u1", organization_id="org-explicit")
+
+                sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
+                assert "organization_id = :org_id" in sql_text
+                assert params["org_id"] == "org-explicit"
 
     def test_delete_thread_includes_org_filter(self):
         with _patch_settings(enable_multi_tenant=True):
@@ -343,7 +711,7 @@ class TestThreadOrgFilter:
 
 
 # ============================================================================
-# Group 6: Character repo org filtering (4 tests)
+# Group 6: Character repo org filtering (9 tests)
 # ============================================================================
 
 class TestCharacterOrgFilter:
@@ -366,7 +734,9 @@ class TestCharacterOrgFilter:
                 repo.get_all_blocks("u1")
 
                 sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
                 assert "organization_id = :org_id" in sql_text
+                assert params["org_id"] == "org-ch"
 
     def test_get_block_includes_org_filter(self):
         with _patch_settings(enable_multi_tenant=True):
@@ -377,7 +747,28 @@ class TestCharacterOrgFilter:
                 repo.get_block("learned_lessons", "u1")
 
                 sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
                 assert "organization_id = :org_id" in sql_text
+                assert params["org_id"] == "org-ch"
+
+    def test_create_block_uses_org_conflict_key(self):
+        from app.engine.character.models import CharacterBlockCreate
+
+        with _patch_settings(enable_multi_tenant=True):
+            with patch("app.core.org_context.current_org_id") as mock_cv:
+                mock_cv.get.return_value = "org-ch"
+                repo, session = self._make_repo()
+                session.execute.return_value.fetchone.return_value = None
+                repo.create_block(
+                    CharacterBlockCreate(label="self_notes", content="x"),
+                    user_id="u1",
+                )
+
+                sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
+                assert "organization_id, user_id, label" in sql_text
+                assert "ON CONFLICT (organization_id, user_id, label)" in sql_text
+                assert params["org_id"] == "org-ch"
 
     def test_get_recent_experiences_includes_org_filter(self):
         with _patch_settings(enable_multi_tenant=True):
@@ -388,7 +779,9 @@ class TestCharacterOrgFilter:
                 repo.get_recent_experiences(user_id="u1")
 
                 sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
                 assert "organization_id = :org_id" in sql_text
+                assert params["org_id"] == "org-ch"
 
     def test_count_experiences_includes_org_filter(self):
         with _patch_settings(enable_multi_tenant=True):
@@ -399,11 +792,127 @@ class TestCharacterOrgFilter:
                 repo.count_experiences()
 
                 sql_text = str(session.execute.call_args[0][0])
+                params = session.execute.call_args[0][1]
                 assert "organization_id = :org_id" in sql_text
+                assert params["org_id"] == "org-ch"
+
+    def test_get_all_blocks_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo, _session = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.get_all_blocks(user_id="PRIVATE-USER")
+        finally:
+            current_org_id.reset(token)
+
+        assert result == []
+        repo._session_factory.assert_not_called()
+        assert "character_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+
+    def test_create_block_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.character.models import CharacterBlockCreate
+
+        repo, _session = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.create_block(
+                CharacterBlockCreate(label="PRIVATE-LABEL", content="PRIVATE CONTENT"),
+                user_id="PRIVATE-USER",
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result is None
+        repo._session_factory.assert_not_called()
+        assert "character_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-LABEL" not in caplog.text
+        assert "PRIVATE CONTENT" not in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+
+    def test_log_experience_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.character.models import CharacterExperienceCreate
+
+        repo, _session = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.log_experience(
+                CharacterExperienceCreate(
+                    experience_type="learning",
+                    content="PRIVATE EXPERIENCE",
+                    user_id="PRIVATE-USER",
+                )
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result is None
+        repo._session_factory.assert_not_called()
+        assert "character_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE EXPERIENCE" not in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+
+    def test_cleanup_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo, _session = self._make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.cleanup_old_experiences(user_id="PRIVATE-USER")
+        finally:
+            current_org_id.reset(token)
+
+        assert result == 0
+        repo._session_factory.assert_not_called()
+        assert "character_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
 
 
 # ============================================================================
-# Group 7: OAuth email_verified guard (5 tests)
+# Group 7: OAuth email_verified guard and diagnostics privacy (8 tests)
 # ============================================================================
 
 class TestOAuthEmailVerified:
@@ -462,9 +971,12 @@ class TestOAuthEmailVerified:
     @pytest.mark.asyncio
     async def test_unverified_email_logs_warning(self, caplog):
         """When email_verified=False and email match exists, should log SECURITY warning."""
-        existing_user = {"id": "user-1", "email": "test@example.com", "name": "T", "avatar_url": None, "role": "student", "is_active": True}
-        new_user = {"id": "user-2", "email": "test@example.com", "name": "T", "avatar_url": None, "role": "student", "is_active": True}
+        raw_email = "private@example.com"
+        raw_existing_user_id = "user-private-existing"
+        existing_user = {"id": raw_existing_user_id, "email": raw_email, "name": "T", "avatar_url": None, "role": "student", "is_active": True}
+        new_user = {"id": "user-private-new", "email": raw_email, "name": "T", "avatar_url": None, "role": "student", "is_active": True}
 
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
         from app.auth.user_service import find_or_create_by_provider
         with patch("app.auth.user_service.find_user_by_provider", return_value=None), \
              patch("app.auth.user_service.find_user_by_email", return_value=existing_user), \
@@ -475,11 +987,109 @@ class TestOAuthEmailVerified:
                 await find_or_create_by_provider(
                     provider="github",
                     provider_sub="gh-789",
-                    email="test@example.com",
+                    email=raw_email,
                     email_verified=False,
                 )
 
             assert any("SECURITY" in r.message and "UNVERIFIED" in r.message for r in caplog.records)
+            assert raw_email not in caplog.text
+            assert raw_existing_user_id not in caplog.text
+            assert hash_runtime_identifier(raw_email) in caplog.text
+            assert hash_runtime_identifier(raw_existing_user_id) in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_create_user_logs_hash_refs(self, caplog):
+        """create_user should log stable refs without raw user IDs or email."""
+        raw_email = "create-private@example.com"
+
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+        from app.auth.user_service import create_user
+
+        with patch("app.auth.user_service._get_pool") as mock_pool:
+            pool = MagicMock()
+            mock_pool.return_value = pool
+            conn = AsyncMock()
+            pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
+            pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with caplog.at_level(logging.INFO, logger="app.auth.user_service"):
+                user = await create_user(email=raw_email, name="Private User")
+
+        assert user["id"] not in caplog.text
+        assert raw_email not in caplog.text
+        assert hash_runtime_identifier(user["id"]) in caplog.text
+        assert hash_runtime_identifier(raw_email) in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_link_identity_logs_and_audits_hash_refs(self, caplog):
+        """link_identity should keep raw provider IDs out of logs and audit metadata."""
+        raw_user_id = "user-link-private"
+        raw_provider_sub = "github-oauth-private-sub"
+        raw_email = "link-private@example.com"
+
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+        from app.auth.user_service import link_identity
+
+        with patch("app.auth.user_service._get_pool") as mock_pool:
+            pool = MagicMock()
+            mock_pool.return_value = pool
+            conn = AsyncMock()
+            pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
+            pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+            audit_log = AsyncMock()
+
+            with patch("app.auth.auth_audit.log_auth_event", audit_log):
+                with caplog.at_level(logging.INFO, logger="app.auth.user_service"):
+                    identity_id = await link_identity(
+                        user_id=raw_user_id,
+                        provider="github",
+                        provider_sub=raw_provider_sub,
+                        email=raw_email,
+                    )
+
+        assert identity_id not in caplog.text
+        assert raw_user_id not in caplog.text
+        assert raw_provider_sub not in caplog.text
+        assert raw_email not in caplog.text
+        assert hash_runtime_identifier(raw_user_id) in caplog.text
+        assert hash_runtime_identifier(raw_provider_sub) in caplog.text
+        audit_log.assert_awaited_once()
+        assert audit_log.call_args.kwargs["metadata"] == {
+            "provider_sub_ref": hash_runtime_identifier(raw_provider_sub),
+        }
+
+    @pytest.mark.asyncio
+    async def test_unlink_identity_logs_and_audits_hash_refs(self, caplog):
+        """unlink_identity should log/audit identity refs instead of raw identity IDs."""
+        raw_user_id = "user-unlink-private"
+        raw_identity_id = "identity-private-id"
+
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+        from app.auth.user_service import unlink_identity
+
+        with patch("app.auth.user_service._get_pool") as mock_pool:
+            pool = MagicMock()
+            mock_pool.return_value = pool
+            conn = AsyncMock()
+            conn.fetchval.return_value = 2
+            conn.execute.return_value = "DELETE 1"
+            pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
+            pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+            audit_log = AsyncMock()
+
+            with patch("app.auth.auth_audit.log_auth_event", audit_log):
+                with caplog.at_level(logging.INFO, logger="app.auth.user_service"):
+                    result = await unlink_identity(raw_user_id, raw_identity_id)
+
+        assert result is True
+        assert raw_user_id not in caplog.text
+        assert raw_identity_id not in caplog.text
+        assert hash_runtime_identifier(raw_user_id) in caplog.text
+        assert hash_runtime_identifier(raw_identity_id) in caplog.text
+        audit_log.assert_awaited_once()
+        assert audit_log.call_args.kwargs["metadata"] == {
+            "identity_ref": hash_runtime_identifier(raw_identity_id),
+        }
 
     @pytest.mark.asyncio
     async def test_find_or_create_by_google_passes_email_verified(self):
@@ -573,6 +1183,7 @@ class TestConfigSecurity:
         with pytest.raises(ValueError, match="session_secret_key"):
             Settings(
                 environment="production",
+                enable_dev_login=False,
                 enable_google_oauth=True,
                 google_oauth_client_id="test-id",
                 google_oauth_client_secret="real-google-client-secret-for-session-test",

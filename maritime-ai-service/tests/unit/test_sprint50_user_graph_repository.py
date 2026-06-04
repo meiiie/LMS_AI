@@ -15,7 +15,6 @@ Tests Neo4j graph repository including:
 - Singleton
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
 from app.repositories.user_graph_repository import UserGraphRepository
@@ -335,6 +334,133 @@ class TestQueryOperations:
         session = _setup_session(repo)
         session.run.side_effect = Exception("DB error")
         assert repo.get_prerequisites("mod2") == []
+
+
+# ============================================================================
+# Organization scope
+# ============================================================================
+
+
+class TestOrgScope:
+    """Test organization-aware Neo4j graph boundaries."""
+
+    def test_single_tenant_keeps_legacy_user_merge(self, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", False)
+        repo = _make_repo()
+        session = _setup_session(repo)
+
+        assert repo.ensure_user_node("u1", "Minh") is True
+
+        query = session.run.call_args.args[0]
+        params = session.run.call_args.kwargs
+        assert "MERGE (u:User {id: $user_id})" in query
+        assert "organization_id" not in params
+
+    def test_user_node_uses_current_org_context(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set("org-A")
+        try:
+            repo = _make_repo()
+            session = _setup_session(repo)
+
+            assert repo.ensure_user_node("u1", "Minh") is True
+        finally:
+            current_org_id.reset(token)
+
+        query = session.run.call_args.args[0]
+        params = session.run.call_args.kwargs
+        assert "MERGE (u:User {id: $user_id, organization_id: $organization_id})" in query
+        assert params["organization_id"] == "org-A"
+
+    def test_relationships_scope_user_and_target_nodes(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set("org-B")
+        try:
+            repo = _make_repo()
+            session = _setup_session(repo)
+
+            assert repo.mark_studied("u1", "mod1", progress=0.5) is True
+        finally:
+            current_org_id.reset(token)
+
+        query = session.run.call_args.args[0]
+        params = session.run.call_args.kwargs
+        assert "User {id: $user_id, organization_id: $organization_id}" in query
+        assert "Module {id: $module_id, organization_id: $organization_id}" in query
+        assert params["organization_id"] == "org-B"
+
+    def test_query_scopes_knowledge_gaps_by_org(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set("org-C")
+        try:
+            repo = _make_repo()
+            session = _setup_session(repo, [])
+
+            assert repo.get_knowledge_gaps("u1") == []
+        finally:
+            current_org_id.reset(token)
+
+        query = session.run.call_args.args[0]
+        params = session.run.call_args.kwargs
+        assert "User {id: $user_id, organization_id: $organization_id}" in query
+        assert "Topic {organization_id: $organization_id}" in query
+        assert params["organization_id"] == "org-C"
+
+    def test_write_blocks_missing_org_context_before_neo4j(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            repo = _make_repo()
+
+            assert repo.ensure_user_node("raw-user", "Private") is False
+        finally:
+            current_org_id.reset(token)
+
+        repo._driver.session.assert_not_called()
+
+    def test_read_blocks_missing_org_context_before_neo4j(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            repo = _make_repo()
+
+            assert repo.get_learning_path("raw-user") == []
+        finally:
+            current_org_id.reset(token)
+
+        repo._driver.session.assert_not_called()
 
 
 # ============================================================================

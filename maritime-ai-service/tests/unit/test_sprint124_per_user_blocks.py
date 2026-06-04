@@ -209,15 +209,76 @@ class TestCharacterStateManagerPerUser:
         block_a = CharacterBlock(label="self_notes", content="User A note", char_limit=1000, version=1)
         block_b = CharacterBlock(label="self_notes", content="User B note", char_limit=1000, version=1)
         import time
-        mgr._cache["user-A"] = {"self_notes": block_a}
-        mgr._cache_timestamp["user-A"] = time.time()
-        mgr._cache["user-B"] = {"self_notes": block_b}
-        mgr._cache_timestamp["user-B"] = time.time()
+        key_a = mgr._cache_key(user_id="user-A")
+        key_b = mgr._cache_key(user_id="user-B")
+        mgr._cache[key_a] = {"self_notes": block_a}
+        mgr._cache_timestamp[key_a] = time.time()
+        mgr._cache[key_b] = {"self_notes": block_b}
+        mgr._cache_timestamp[key_b] = time.time()
 
         blocks_a = mgr.get_blocks(user_id="user-A")
         blocks_b = mgr.get_blocks(user_id="user-B")
         assert blocks_a["self_notes"].content == "User A note"
         assert blocks_b["self_notes"].content == "User B note"
+
+    def test_cache_is_per_org_for_same_user(self, monkeypatch):
+        """The same user gets separate cache entries per organization."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.character.models import CharacterBlock
+        import time
+
+        mgr = self._make_manager()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set("org-A")
+        try:
+            key_a = mgr._cache_key(user_id="same-user")
+        finally:
+            current_org_id.reset(token)
+
+        token = current_org_id.set("org-B")
+        try:
+            key_b = mgr._cache_key(user_id="same-user")
+        finally:
+            current_org_id.reset(token)
+
+        assert key_a != key_b
+        mgr._cache[key_a] = {
+            "self_notes": CharacterBlock(
+                label="self_notes",
+                content="Org A note",
+                char_limit=1000,
+                version=1,
+            )
+        }
+        mgr._cache_timestamp[key_a] = time.time()
+        mgr._cache[key_b] = {
+            "self_notes": CharacterBlock(
+                label="self_notes",
+                content="Org B note",
+                char_limit=1000,
+                version=1,
+            )
+        }
+        mgr._cache_timestamp[key_b] = time.time()
+
+        token = current_org_id.set("org-A")
+        try:
+            blocks_a = mgr.get_blocks(user_id="same-user")
+        finally:
+            current_org_id.reset(token)
+
+        token = current_org_id.set("org-B")
+        try:
+            blocks_b = mgr.get_blocks(user_id="same-user")
+        finally:
+            current_org_id.reset(token)
+
+        assert blocks_a["self_notes"].content == "Org A note"
+        assert blocks_b["self_notes"].content == "Org B note"
 
     def test_get_block_returns_user_specific(self):
         """get_block returns block for the specified user only."""
@@ -225,14 +286,16 @@ class TestCharacterStateManagerPerUser:
         from app.engine.character.models import CharacterBlock
         import time
 
-        mgr._cache["user-A"] = {
+        key_a = mgr._cache_key(user_id="user-A")
+        key_b = mgr._cache_key(user_id="user-B")
+        mgr._cache[key_a] = {
             "learned_lessons": CharacterBlock(label="learned_lessons", content="A's lessons", char_limit=1500, version=1)
         }
-        mgr._cache_timestamp["user-A"] = time.time()
-        mgr._cache["user-B"] = {
+        mgr._cache_timestamp[key_a] = time.time()
+        mgr._cache[key_b] = {
             "learned_lessons": CharacterBlock(label="learned_lessons", content="B's lessons", char_limit=1500, version=1)
         }
-        mgr._cache_timestamp["user-B"] = time.time()
+        mgr._cache_timestamp[key_b] = time.time()
 
         block_a = mgr.get_block("learned_lessons", user_id="user-A")
         block_b = mgr.get_block("learned_lessons", user_id="user-B")
@@ -243,8 +306,9 @@ class TestCharacterStateManagerPerUser:
         """get_block returns None for user with no cached blocks."""
         mgr = self._make_manager()
         import time
-        mgr._cache["user-A"] = {}
-        mgr._cache_timestamp["user-A"] = time.time()
+        key_a = mgr._cache_key(user_id="user-A")
+        mgr._cache[key_a] = {}
+        mgr._cache_timestamp[key_a] = time.time()
 
         result = mgr.get_block("self_notes", user_id="user-A")
         assert result is None
@@ -256,24 +320,28 @@ class TestCharacterStateManagerPerUser:
         import time
 
         block = CharacterBlock(label="self_notes", content="test", char_limit=1000, version=1)
-        mgr._cache["user-A"] = {"self_notes": block}
-        mgr._cache_timestamp["user-A"] = time.time()
-        mgr._cache["user-B"] = {"self_notes": block}
-        mgr._cache_timestamp["user-B"] = time.time()
+        key_a = mgr._cache_key(user_id="user-A")
+        key_b = mgr._cache_key(user_id="user-B")
+        mgr._cache[key_a] = {"self_notes": block}
+        mgr._cache_timestamp[key_a] = time.time()
+        mgr._cache[key_b] = {"self_notes": block}
+        mgr._cache_timestamp[key_b] = time.time()
 
         mgr.invalidate_cache(user_id="user-A")
 
-        assert "user-A" not in mgr._cache
-        assert "user-B" in mgr._cache
+        assert key_a not in mgr._cache
+        assert key_b in mgr._cache
 
     def test_invalidate_cache_all_users(self):
         """invalidate_cache() with no args clears ALL user caches."""
         mgr = self._make_manager()
         import time
-        mgr._cache["user-A"] = {}
-        mgr._cache_timestamp["user-A"] = time.time()
-        mgr._cache["user-B"] = {}
-        mgr._cache_timestamp["user-B"] = time.time()
+        key_a = mgr._cache_key(user_id="user-A")
+        key_b = mgr._cache_key(user_id="user-B")
+        mgr._cache[key_a] = {}
+        mgr._cache_timestamp[key_a] = time.time()
+        mgr._cache[key_b] = {}
+        mgr._cache_timestamp[key_b] = time.time()
 
         mgr.invalidate_cache()
 
@@ -284,7 +352,6 @@ class TestCharacterStateManagerPerUser:
         """update_block() updates the correct user's cache entry."""
         mgr = self._make_manager()
         from app.engine.character.models import CharacterBlock
-        import time
 
         mock_repo = MagicMock()
         updated = CharacterBlock(label="self_notes", content="updated", char_limit=1000, version=2)
@@ -294,7 +361,8 @@ class TestCharacterStateManagerPerUser:
             result = mgr.update_block("self_notes", content="updated", user_id="user-A")
 
         assert result == updated
-        assert mgr._cache["user-A"]["self_notes"].content == "updated"
+        key_a = mgr._cache_key(user_id="user-A")
+        assert mgr._cache[key_a]["self_notes"].content == "updated"
 
     def test_ensure_defaults_per_user(self):
         """_ensure_defaults seeds blocks for each user independently."""
@@ -313,8 +381,8 @@ class TestCharacterStateManagerPerUser:
         # Both users should get defaults created
         assert first_call_count > 0
         assert second_call_count > 0
-        assert "user-A" in mgr._initialized_defaults
-        assert "user-B" in mgr._initialized_defaults
+        assert mgr._cache_key(user_id="user-A") in mgr._initialized_defaults
+        assert mgr._cache_key(user_id="user-B") in mgr._initialized_defaults
 
     def test_ensure_defaults_idempotent_per_user(self):
         """_ensure_defaults doesn't re-seed for the same user."""
@@ -337,20 +405,22 @@ class TestCharacterStateManagerPerUser:
         from app.engine.character.models import CharacterBlock
         import time
 
-        mgr._initialized_defaults.add("user-A")
-        mgr._initialized_defaults.add("user-B")
+        key_a = mgr._cache_key(user_id="user-A")
+        key_b = mgr._cache_key(user_id="user-B")
+        mgr._initialized_defaults.add(key_a)
+        mgr._initialized_defaults.add(key_b)
 
-        mgr._cache["user-A"] = {
+        mgr._cache[key_a] = {
             "learned_lessons": CharacterBlock(label="learned_lessons", content="Rule 15 important", char_limit=1500, version=1),
             "self_notes": CharacterBlock(label="self_notes", content="", char_limit=1000, version=1),
         }
-        mgr._cache_timestamp["user-A"] = time.time()
+        mgr._cache_timestamp[key_a] = time.time()
 
-        mgr._cache["user-B"] = {
+        mgr._cache[key_b] = {
             "learned_lessons": CharacterBlock(label="learned_lessons", content="MARPOL Annex I", char_limit=1500, version=1),
             "self_notes": CharacterBlock(label="self_notes", content="", char_limit=1000, version=1),
         }
-        mgr._cache_timestamp["user-B"] = time.time()
+        mgr._cache_timestamp[key_b] = time.time()
 
         state_a = mgr.compile_living_state(user_id="user-A")
         state_b = mgr.compile_living_state(user_id="user-B")
@@ -366,11 +436,12 @@ class TestCharacterStateManagerPerUser:
         from app.engine.character.models import CharacterBlock
         import time
 
-        mgr._initialized_defaults.add("user-C")
-        mgr._cache["user-C"] = {
+        key_c = mgr._cache_key(user_id="user-C")
+        mgr._initialized_defaults.add(key_c)
+        mgr._cache[key_c] = {
             "self_notes": CharacterBlock(label="self_notes", content="", char_limit=1000, version=1),
         }
-        mgr._cache_timestamp["user-C"] = time.time()
+        mgr._cache_timestamp[key_c] = time.time()
 
         state = mgr.compile_living_state(user_id="user-C")
         assert state == ""
@@ -382,16 +453,18 @@ class TestCharacterStateManagerPerUser:
         import time
 
         # User A: block at 90% full
-        mgr._cache["user-A"] = {
+        key_a = mgr._cache_key(user_id="user-A")
+        key_b = mgr._cache_key(user_id="user-B")
+        mgr._cache[key_a] = {
             "self_notes": CharacterBlock(label="self_notes", content="x" * 900, char_limit=1000, version=1),
         }
-        mgr._cache_timestamp["user-A"] = time.time()
+        mgr._cache_timestamp[key_a] = time.time()
 
         # User B: block at 10% full
-        mgr._cache["user-B"] = {
+        mgr._cache[key_b] = {
             "self_notes": CharacterBlock(label="self_notes", content="x" * 100, char_limit=1000, version=1),
         }
-        mgr._cache_timestamp["user-B"] = time.time()
+        mgr._cache_timestamp[key_b] = time.time()
 
         assert mgr.needs_consolidation("self_notes", user_id="user-A") is True
         assert mgr.needs_consolidation("self_notes", user_id="user-B") is False
@@ -415,6 +488,56 @@ class TestCharacterToolsContextVar:
         from app.engine.character.character_tools import set_character_user, _get_user_id
         set_character_user("user-xyz")
         assert _get_user_id() == "user-xyz"
+
+    def test_set_character_user_replaces_previous_identity(self):
+        """Changing user context should replace living-character tool state."""
+        from app.engine.character.character_tools import (
+            _get_state,
+            set_character_user,
+        )
+
+        set_character_user("user-a")
+        first_state = _get_state()
+
+        set_character_user("user-b")
+        second_state = _get_state()
+
+        assert second_state is not first_state
+        assert second_state.user_id == "user-b"
+        assert "user=user-b" in (second_state.identity_key or "")
+
+    def test_runtime_context_identity_isolates_character_state(self):
+        """Runtime org/session identity should prevent character state reuse."""
+        from app.engine.character.character_tools import _get_state, set_character_user
+        from app.engine.tools.runtime_context import (
+            build_tool_runtime_context,
+            tool_runtime_scope,
+        )
+
+        ctx_a = build_tool_runtime_context(
+            user_id="user-a",
+            organization_id="org-a",
+            session_id="session-a",
+        )
+        ctx_b = build_tool_runtime_context(
+            user_id="user-a",
+            organization_id="org-b",
+            session_id="session-a",
+        )
+
+        with tool_runtime_scope(ctx_a):
+            set_character_user("user-a")
+            state_a = _get_state()
+            assert state_a.user_id == "user-a"
+            assert state_a.organization_id == "org-a"
+            assert "org=org-a" in (state_a.identity_key or "")
+
+        with tool_runtime_scope(ctx_b):
+            state_b = _get_state()
+            assert state_b is not state_a
+            assert state_b.user_id == "user-a"
+            assert state_b.organization_id == "org-b"
+            assert "org=org-b" in (state_b.identity_key or "")
 
     def test_get_user_id_defaults_to_global(self):
         """_get_user_id returns '__global__' when ContextVar not set."""
@@ -445,6 +568,39 @@ class TestCharacterToolsContextVar:
         call_kwargs = mock_manager.update_block.call_args
         assert call_kwargs[1]["user_id"] == "user-note-test"
 
+    def test_tool_character_note_passes_runtime_org(self):
+        """tool_character_note should pass runtime org scope to manager."""
+        from app.engine.character.character_tools import (
+            set_character_user,
+            tool_character_note,
+        )
+        from app.engine.tools.runtime_context import (
+            build_tool_runtime_context,
+            tool_runtime_scope,
+        )
+
+        mock_manager = MagicMock()
+        mock_block = MagicMock()
+        mock_block.remaining_chars.return_value = 500
+        mock_manager.update_block.return_value = mock_block
+
+        runtime = build_tool_runtime_context(
+            user_id="user-note-org",
+            organization_id="org-note",
+            session_id="session-note",
+        )
+        with tool_runtime_scope(runtime):
+            set_character_user("user-note-org")
+            with patch(
+                "app.engine.character.character_state.get_character_state_manager",
+                return_value=mock_manager,
+            ):
+                tool_character_note.invoke({"note": "test note", "block": "self_notes"})
+
+        call_kwargs = mock_manager.update_block.call_args.kwargs
+        assert call_kwargs["user_id"] == "user-note-org"
+        assert call_kwargs["organization_id"] == "org-note"
+
     def test_tool_character_read_uses_contextvar_user(self):
         """tool_character_read reads blocks for ContextVar user."""
         from app.engine.character.character_tools import (
@@ -466,6 +622,40 @@ class TestCharacterToolsContextVar:
             result = tool_character_read.invoke({"block": "self_notes"})
 
         mock_manager.get_block.assert_called_once_with("self_notes", user_id="user-read-test")
+
+    def test_tool_character_log_experience_passes_runtime_org(self):
+        """tool_character_log_experience should pass runtime org scope to repo."""
+        from app.engine.character.character_tools import (
+            set_character_user,
+            tool_character_log_experience,
+        )
+        from app.engine.tools.runtime_context import (
+            build_tool_runtime_context,
+            tool_runtime_scope,
+        )
+
+        mock_repo = MagicMock()
+        mock_repo.log_experience.return_value = MagicMock()
+
+        runtime = build_tool_runtime_context(
+            user_id="user-exp-org",
+            organization_id="org-exp",
+            session_id="session-exp",
+        )
+        with tool_runtime_scope(runtime):
+            set_character_user("user-exp-org")
+            with patch(
+                "app.engine.character.character_repository.get_character_repository",
+                return_value=mock_repo,
+            ):
+                tool_character_log_experience.invoke({
+                    "content": "learned one thing",
+                    "experience_type": "learning",
+                })
+
+        call_kwargs = mock_repo.log_experience.call_args.kwargs
+        assert call_kwargs["organization_id"] == "org-exp"
+        assert mock_repo.log_experience.call_args.args[0].user_id == "user-exp-org"
 
     def test_tool_character_note_invalid_block(self):
         """tool_character_note rejects invalid block labels."""
@@ -499,7 +689,8 @@ class TestPromptLoaderUserIdForwarding:
             )
 
             mock_mgr.compile_living_state.assert_called_once_with(
-                user_id="user-prompt-test"
+                user_id="user-prompt-test",
+                organization_id=None,
             )
 
     def test_build_system_prompt_defaults_to_global(self):
@@ -516,7 +707,8 @@ class TestPromptLoaderUserIdForwarding:
             loader.build_system_prompt(role="student")
 
             mock_mgr.compile_living_state.assert_called_once_with(
-                user_id="__global__"
+                user_id="__global__",
+                organization_id=None,
             )
 
     def test_build_system_prompt_accepts_kwargs(self):
@@ -554,6 +746,7 @@ class TestCharacterAPIUserFiltering:
 
         mock_auth = MagicMock()
         mock_auth.user_id = "api-user-123"
+        mock_auth.organization_id = "org-api"
 
         mock_settings = MagicMock()
         mock_settings.enable_character_tools = True
@@ -569,7 +762,10 @@ class TestCharacterAPIUserFiltering:
             mock_request = MagicMock()
             result = await get_character_state(request=mock_request, auth=mock_auth)
 
-        mock_manager.get_blocks.assert_called_once_with(user_id="api-user-123")
+        mock_manager.get_blocks.assert_called_once_with(
+            user_id="api-user-123",
+            organization_id="org-api",
+        )
 
 
 # =============================================================================
@@ -589,20 +785,22 @@ class TestConsolidationPerUser:
         mgr = CharacterStateManager()
 
         # User A: block at 90% full
-        mgr._cache["user-A"] = {
+        key_a = mgr._cache_key(user_id="user-A")
+        key_b = mgr._cache_key(user_id="user-B")
+        mgr._cache[key_a] = {
             "self_notes": CharacterBlock(
                 label="self_notes", content="x" * 900, char_limit=1000, version=1
             ),
         }
-        mgr._cache_timestamp["user-A"] = time.time()
+        mgr._cache_timestamp[key_a] = time.time()
 
         # User B: block at 90% full too
-        mgr._cache["user-B"] = {
+        mgr._cache[key_b] = {
             "self_notes": CharacterBlock(
                 label="self_notes", content="y" * 900, char_limit=1000, version=1
             ),
         }
-        mgr._cache_timestamp["user-B"] = time.time()
+        mgr._cache_timestamp[key_b] = time.time()
 
         mock_repo = MagicMock()
         mock_repo.update_block.return_value = CharacterBlock(
@@ -619,7 +817,7 @@ class TestConsolidationPerUser:
         assert count == 1
         mock_consolidate.assert_called_once()
         # User B's cache should be untouched
-        assert mgr._cache["user-B"]["self_notes"].content == "y" * 900
+        assert mgr._cache[key_b]["self_notes"].content == "y" * 900
 
 
 # =============================================================================
@@ -708,8 +906,9 @@ class TestLivingStateExclusions:
         import time
 
         mgr = CharacterStateManager()
-        mgr._initialized_defaults.add("user-X")
-        mgr._cache["user-X"] = {
+        key_x = mgr._cache_key(user_id="user-X")
+        mgr._initialized_defaults.add(key_x)
+        mgr._cache[key_x] = {
             "learned_lessons": CharacterBlock(
                 label="learned_lessons", content="Rule 15", char_limit=1500, version=1
             ),
@@ -717,7 +916,7 @@ class TestLivingStateExclusions:
                 label="user_patterns", content="SHOULD NOT APPEAR", char_limit=800, version=1
             ),
         }
-        mgr._cache_timestamp["user-X"] = time.time()
+        mgr._cache_timestamp[key_x] = time.time()
 
         state = mgr.compile_living_state(user_id="user-X")
         assert "Rule 15" in state
@@ -742,4 +941,7 @@ class TestCacheRefreshPerUser:
         with patch.object(mgr, '_get_repo', return_value=mock_repo):
             mgr._refresh_cache(user_id="user-refresh")
 
-        mock_repo.get_all_blocks.assert_called_once_with(user_id="user-refresh")
+        mock_repo.get_all_blocks.assert_called_once_with(
+            user_id="user-refresh",
+            organization_id=None,
+        )

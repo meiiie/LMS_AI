@@ -7,8 +7,10 @@ when it discovers something interesting during autonomous browsing.
 Updated for plugin architecture — tests use MessengerAdapter directly.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import parse_qs, urlparse
+
+import pytest
 
 
 # =============================================================================
@@ -66,8 +68,11 @@ class TestMessengerNotification:
             assert "CallMeBot" in result.detail
             mock_client.get.assert_called_once()
             call_url = mock_client.get.call_args[0][0]
-            assert "callmebot.com" in call_url
-            assert "test-api-key-123" in call_url
+            parsed_url = urlparse(call_url)
+            query = parse_qs(parsed_url.query)
+            assert parsed_url.scheme == "https"
+            assert parsed_url.netloc == "api.callmebot.com"
+            assert query["apikey"] == ["test-api-key-123"]
 
     @pytest.mark.asyncio
     async def test_messenger_fails_without_api_key(self):
@@ -107,6 +112,36 @@ class TestMessengerNotification:
 
             assert result.delivered is False
             assert "429" in result.detail
+
+    @pytest.mark.asyncio
+    async def test_messenger_api_error_omits_provider_body_secrets(self):
+        """Provider body is diagnostic-only and must not enter result detail."""
+        from app.services.notifications.adapters.messenger import MessengerAdapter
+
+        adapter = MessengerAdapter()
+        settings = _make_settings()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.text = (
+            "apikey=test-api-key-123 text=private-message user_id=user-1"
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(_SETTINGS_PATCH, settings), \
+             patch("httpx.AsyncClient", return_value=mock_client):
+
+            result = await adapter.send("user-1", "private-message")
+
+            assert result.delivered is False
+            assert result.detail == "CallMeBot API error: 429"
+            assert "test-api-key-123" not in result.detail
+            assert "private-message" not in result.detail
+            assert "user-1" not in result.detail
 
     @pytest.mark.asyncio
     async def test_messenger_handles_network_error(self):

@@ -17,6 +17,16 @@ from typing import List, Optional
 from app.core.config import settings
 from app.engine.embedding_runtime import EmbeddingBackendProtocol
 from app.engine.llm_pool import get_llm_light
+from app.engine.semantic_memory.privacy import (
+    hash_memory_identifier,
+    memory_log_reference,
+)
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    append_semantic_memory_write_audit_event,
+    build_semantic_memory_write_audit,
+    resolve_memory_write_scope,
+)
 from app.services.output_processor import extract_thinking_from_response
 from app.models.semantic_memory import (
     ALLOWED_FACT_TYPES,
@@ -255,6 +265,7 @@ class FactExtractor:
         message: str,
         session_id: Optional[str] = None,
         existing_facts: Optional[dict] = None,
+        emit_write_audit: bool = True,
     ) -> List[UserFact]:
         """
         Extract user facts from a message using LLM.
@@ -270,18 +281,33 @@ class FactExtractor:
             message: Message to extract facts from
             session_id: Optional session ID
             existing_facts: Pre-fetched existing facts dict
+            emit_write_audit: Whether to emit a fact-extraction write audit
 
         Returns:
             List of extracted UserFact objects
 
         Requirements: 4.1, 4.2, 4.3
         """
-        # Sprint 123 (P4): Prune stale memories before extracting new ones
-        try:
-            from app.services.memory_lifecycle import prune_stale_memories
-            await prune_stale_memories(user_id)
-        except Exception as e:
-            logger.debug("Memory pruning skipped: %s", e)
+        audit_scope = resolve_memory_write_scope()
+        if not audit_scope.write_allowed:
+            await self._append_fact_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                source_message=message,
+                scope=audit_scope,
+                write_kind="fact_extraction",
+                extract_facts=True,
+                stored_fact_count=0,
+                status="blocked",
+                warnings=["fact_write_blocked_missing_org_context"],
+                emit_write_audit=emit_write_audit,
+            )
+            logger.warning(
+                "Fact extraction write blocked for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                audit_scope.state,
+            )
+            return []
 
         try:
             extraction = await self.extract_user_facts(
@@ -289,6 +315,17 @@ class FactExtractor:
             )
 
             if not extraction.has_facts:
+                await self._append_fact_write_audit(
+                    user_id=user_id,
+                    session_id=session_id,
+                    source_message=message,
+                    scope=audit_scope,
+                    write_kind="fact_extraction",
+                    extract_facts=True,
+                    stored_fact_count=0,
+                    status="skipped",
+                    emit_write_audit=emit_write_audit,
+                )
                 return []
 
             # Store each fact using upsert logic (v0.4)
@@ -305,6 +342,7 @@ class FactExtractor:
                     confidence=fact.confidence,
                     session_id=session_id,
                     source_message=message,
+                    emit_write_audit=False,
                 )
 
                 if success:
@@ -318,7 +356,23 @@ class FactExtractor:
                 except Exception as _e:
                     logger.debug("CoreMemoryBlock cache invalidation skipped: %s", _e)
 
-                logger.info("Extracted and stored %d facts for user %s", len(stored_facts), user_id)
+                logger.info(
+                    "Extracted and stored %d facts for user_hash=%s",
+                    len(stored_facts),
+                    hash_memory_identifier(user_id),
+                )
+            await self._append_fact_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                source_message=message,
+                scope=audit_scope,
+                write_kind="fact_extraction",
+                extract_facts=True,
+                stored_fact_count=len(stored_facts),
+                status="saved" if stored_facts else "degraded",
+                warnings=[] if stored_facts else ["fact_extraction_stored_no_facts"],
+                emit_write_audit=emit_write_audit,
+            )
             return stored_facts
 
         except RuntimeError as e:
@@ -327,9 +381,33 @@ class FactExtractor:
                 logger.warning("Fact extraction skipped (event loop closed): %s", e)
             else:
                 logger.error("Fact extraction runtime error: %s", e)
+            await self._append_fact_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                source_message=message,
+                scope=audit_scope,
+                write_kind="fact_extraction",
+                extract_facts=True,
+                stored_fact_count=0,
+                status="failed",
+                warnings=["fact_extraction_failed"],
+                emit_write_audit=emit_write_audit,
+            )
             return []
         except Exception as e:
             logger.error("Failed to extract facts: %s", e)
+            await self._append_fact_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                source_message=message,
+                scope=audit_scope,
+                write_kind="fact_extraction",
+                extract_facts=True,
+                stored_fact_count=0,
+                status="failed",
+                warnings=["fact_extraction_failed"],
+                emit_write_audit=emit_write_audit,
+            )
             return []
     
     async def extract_user_facts(
@@ -402,6 +480,7 @@ class FactExtractor:
         confidence: float = 0.9,
         session_id: Optional[str] = None,
         source_message: Optional[str] = None,
+        emit_write_audit: bool = True,
     ) -> bool:
         """
         Store or update a user fact using upsert logic.
@@ -422,17 +501,51 @@ class FactExtractor:
             confidence: Confidence score (0.0 - 1.0)
             session_id: Optional session ID
             source_message: Original user message for provenance tracking
+            emit_write_audit: Whether to emit a fact-upsert write audit
 
         Returns:
             True if storage successful
 
         **Validates: Requirements 2.1, 2.2, 2.3, 2.4**
         """
+        audit_scope = resolve_memory_write_scope()
+        if not audit_scope.write_allowed:
+            await self._append_fact_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                source_message=source_message,
+                scope=audit_scope,
+                write_kind="fact_upsert",
+                extract_facts=False,
+                stored_fact_count=0,
+                status="blocked",
+                warnings=["fact_upsert_blocked_missing_org_context"],
+                emit_write_audit=emit_write_audit,
+            )
+            logger.warning(
+                "Fact upsert blocked for user_hash=%s: %s",
+                hash_memory_identifier(user_id),
+                audit_scope.state,
+            )
+            return False
+
         try:
             # Step 1: Validate and normalize fact_type
             validated_type = self._validate_fact_type(fact_type)
             if validated_type is None:
                 logger.debug("Fact type '%s' is invalid/ignored, skipping storage", fact_type)
+                await self._append_fact_write_audit(
+                    user_id=user_id,
+                    session_id=session_id,
+                    source_message=source_message,
+                    scope=audit_scope,
+                    write_kind="fact_upsert",
+                    extract_facts=False,
+                    stored_fact_count=0,
+                    status="skipped",
+                    warnings=["fact_type_ignored"],
+                    emit_write_audit=emit_write_audit,
+                )
                 return False
 
             # Step 2: Generate embedding for the fact when available.
@@ -443,8 +556,9 @@ class FactExtractor:
                     fact_embedding = fact_embeddings[0]
             except Exception as exc:
                 logger.warning(
-                    "Fact embedding unavailable for user %s; continuing without vector: %s",
-                    user_id,
+                    "Fact embedding unavailable for user_hash=%s; "
+                    "continuing without vector: %s",
+                    hash_memory_identifier(user_id),
                     exc,
                 )
 
@@ -488,7 +602,24 @@ class FactExtractor:
                         user_id=user_id,
                     )
                 if success:
-                    logger.info("Updated similar fact for %s: %s=%s...", user_id, validated_type, fact_content[:50])
+                    logger.info(
+                        "Updated similar fact for user_hash=%s: type=%s content_ref=%s",
+                        hash_memory_identifier(user_id),
+                        validated_type,
+                        memory_log_reference(fact_content),
+                    )
+                await self._append_fact_write_audit(
+                    user_id=user_id,
+                    session_id=session_id,
+                    source_message=source_message,
+                    scope=audit_scope,
+                    write_kind="fact_upsert",
+                    extract_facts=False,
+                    stored_fact_count=1 if success else 0,
+                    status="saved" if success else "degraded",
+                    warnings=[] if success else ["fact_upsert_not_persisted"],
+                    emit_write_audit=emit_write_audit,
+                )
                 return success
             
             # Step 4: Fallback - Check if fact of same type exists
@@ -512,7 +643,24 @@ class FactExtractor:
                         user_id=user_id,
                     )
                 if success:
-                    logger.info("Updated user fact for %s: %s=%s...", user_id, validated_type, fact_content[:50])
+                    logger.info(
+                        "Updated user fact for user_hash=%s: type=%s content_ref=%s",
+                        hash_memory_identifier(user_id),
+                        validated_type,
+                        memory_log_reference(fact_content),
+                    )
+                await self._append_fact_write_audit(
+                    user_id=user_id,
+                    session_id=session_id,
+                    source_message=source_message,
+                    scope=audit_scope,
+                    write_kind="fact_upsert",
+                    extract_facts=False,
+                    stored_fact_count=1 if success else 0,
+                    status="saved" if success else "degraded",
+                    warnings=[] if success else ["fact_upsert_not_persisted"],
+                    emit_write_audit=emit_write_audit,
+                )
                 return success
             else:
                 # Step 4b: Insert new fact (UPSERT - Insert)
@@ -528,18 +676,98 @@ class FactExtractor:
 
                 saved_memory = self._repository.save_memory(fact_memory)
                 if saved_memory is None:
-                    logger.warning("Failed to persist new fact for %s (%s)", user_id, validated_type)
+                    logger.warning(
+                        "Failed to persist new fact for user_hash=%s type=%s",
+                        hash_memory_identifier(user_id),
+                        validated_type,
+                    )
+                    await self._append_fact_write_audit(
+                        user_id=user_id,
+                        session_id=session_id,
+                        source_message=source_message,
+                        scope=audit_scope,
+                        write_kind="fact_upsert",
+                        extract_facts=False,
+                        stored_fact_count=0,
+                        status="degraded",
+                        warnings=["fact_upsert_not_persisted"],
+                        emit_write_audit=emit_write_audit,
+                    )
                     return False
-                logger.info("Stored new user fact for %s: %s=%s...", user_id, validated_type, fact_content[:50])
+                logger.info(
+                    "Stored new user fact for user_hash=%s: type=%s content_ref=%s",
+                    hash_memory_identifier(user_id),
+                    validated_type,
+                    memory_log_reference(fact_content),
+                )
                 
                 # Step 5: Enforce memory cap after insert
                 await self._enforce_memory_cap(user_id)
                 
+                await self._append_fact_write_audit(
+                    user_id=user_id,
+                    session_id=session_id,
+                    source_message=source_message,
+                    scope=audit_scope,
+                    write_kind="fact_upsert",
+                    extract_facts=False,
+                    stored_fact_count=1,
+                    status="saved",
+                    emit_write_audit=emit_write_audit,
+                )
                 return True
             
         except Exception as e:
             logger.error("Failed to store/update user fact: %s", e)
+            await self._append_fact_write_audit(
+                user_id=user_id,
+                session_id=session_id,
+                source_message=source_message,
+                scope=audit_scope,
+                write_kind="fact_upsert",
+                extract_facts=False,
+                stored_fact_count=0,
+                status="failed",
+                warnings=["fact_upsert_failed"],
+                emit_write_audit=emit_write_audit,
+            )
             return False
+
+    async def _append_fact_write_audit(
+        self,
+        *,
+        user_id: str,
+        session_id: Optional[str],
+        source_message: Optional[str],
+        scope: MemoryWriteScope,
+        write_kind: str,
+        extract_facts: bool,
+        stored_fact_count: int,
+        status: str,
+        warnings: Optional[list[str]] = None,
+        emit_write_audit: bool = True,
+    ) -> bool:
+        if not emit_write_audit:
+            return False
+        audit_payload = build_semantic_memory_write_audit(
+            user_id=user_id,
+            session_id=session_id,
+            message=source_message or "",
+            response="",
+            scope=scope,
+            write_kind=write_kind,
+            message_saved=False,
+            response_saved=False,
+            extract_facts=extract_facts,
+            stored_fact_count=stored_fact_count,
+            status=status,
+            warnings=warnings,
+        )
+        return await append_semantic_memory_write_audit_event(
+            session_id=session_id,
+            org_id=scope.org_id,
+            payload=audit_payload,
+        )
     
     def _validate_fact_type(self, fact_type: str) -> Optional[str]:
         """
@@ -625,16 +853,22 @@ class FactExtractor:
                 if success:
                     deleted += 1
                     logger.info(
-                        "Evicted low-importance fact for user %s: type=%s, "
-                        "effective_importance=%.3f, content='%s'",
-                        user_id, fact_type, importance, fact.content[:50],
+                        "Evicted low-importance fact for user_hash=%s: type=%s, "
+                        "effective_importance=%.3f, content_ref=%s",
+                        hash_memory_identifier(user_id),
+                        fact_type,
+                        importance,
+                        memory_log_reference(fact.content),
                     )
 
             if deleted > 0:
                 logger.info(
-                    "Memory cap enforced for user %s: evicted %d facts by importance "
+                    "Memory cap enforced for user_hash=%s: evicted %d facts by importance "
                     "(was %d, now %d)",
-                    user_id, deleted, current_count, current_count - deleted,
+                    hash_memory_identifier(user_id),
+                    deleted,
+                    current_count,
+                    current_count - deleted,
                 )
 
             return deleted

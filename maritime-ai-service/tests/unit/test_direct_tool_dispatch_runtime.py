@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -136,3 +137,62 @@ async def test_dispatch_direct_tool_call_returns_structured_unknown_tool_error()
         }
     ]
     assert events[1]["content"]["result"] == result.result
+
+
+@pytest.mark.asyncio
+async def test_dispatch_direct_tool_call_redacts_event_args_but_invokes_raw_args():
+    class FakeTool:
+        name = "tool_demo"
+
+    events: list[dict] = []
+    tool_call_events: list[dict] = []
+    captured_invocation: dict[str, object] = {}
+    raw_args = {
+        "query": "run demo",
+        "connection_ref": "wcn_secret_connection",
+        "page_id": "page_secret",
+        "nested": {
+            "access_token": "Bearer provider-token",
+            "items": [{"image_base64": "raw_image_payload"}],
+            "safe": "ok",
+        },
+    }
+
+    async def push_event(event):
+        events.append(event)
+
+    async def invoke_tool_with_runtime(tool, args, **kwargs):
+        captured_invocation.update({"tool": tool, "args": args, **kwargs})
+        return {"status": "ok"}
+
+    result = await dispatch_direct_tool_call(
+        tool_call={"id": "call-sensitive", "name": "tool_demo", "args": raw_args},
+        tool_round=0,
+        tools=[FakeTool()],
+        query="run demo",
+        push_event=push_event,
+        tool_call_events=tool_call_events,
+        get_tool_by_name=lambda tools, name: tools[0] if name == "tool_demo" else None,
+        invoke_tool_with_runtime=invoke_tool_with_runtime,
+        runtime_context_base=None,
+        is_search_tool_name=lambda _name: False,
+        prefer_official_query_for_known_docs=lambda args, _query: args,
+        summarize_tool_result_for_stream=lambda _name, value: value,
+        logger_obj=SimpleNamespace(warning=lambda *args, **kwargs: None),
+    )
+
+    assert result.matched is True
+    assert result.tool_args["connection_ref"] == "wcn_secret_connection"
+    assert captured_invocation["args"]["connection_ref"] == "wcn_secret_connection"
+    public_args = events[0]["content"]["args"]
+    assert public_args["query"] == "run demo"
+    assert public_args["connection_ref"] == "[redacted]"
+    assert public_args["page_id"] == "[redacted]"
+    assert public_args["nested"]["access_token"] == "[redacted]"
+    assert public_args["nested"]["items"][0]["image_base64"] == "[redacted]"
+    assert public_args["nested"]["safe"] == "ok"
+    assert tool_call_events[0]["args"] == public_args
+    public_payload = json.dumps([events, tool_call_events], ensure_ascii=False)
+    assert "wcn_secret_connection" not in public_payload
+    assert "page_secret" not in public_payload
+    assert "raw_image_payload" not in public_payload

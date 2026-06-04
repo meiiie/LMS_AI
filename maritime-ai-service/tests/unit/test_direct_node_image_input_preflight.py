@@ -94,3 +94,27 @@ async def test_image_preflight_analyzes_base64_images_before_llm(monkeypatch):
     assert result.response == "Anh co mot vung chu thich mau xanh."
     assert result.response_type == "image_input"
     assert state["thinking_content"]
+
+
+@pytest.mark.asyncio
+async def test_image_preflight_does_not_steal_facebook_post_with_image():
+    from app.engine.multi_agent.direct_node_image_input_preflight import (
+        execute_direct_node_image_input_preflight,
+    )
+
+    state = {}
+    result = await execute_direct_node_image_input_preflight(
+        request=DirectImageInputPreflightRequest(
+            query="Wiii đăng bài này lên Facebook giúp mình",
+            state=state,
+            ctx={"images": [{"type": "base64", "data": "abc"}]},
+            response_present=False,
+            has_uploaded_document_context=False,
+        ),
+        dependencies=DirectImageInputPreflightDependencies(
+            record_thinking_snapshot_fn=lambda *_args, **_kwargs: None,
+        ),
+    )
+
+    assert result is None
+    assert "thinking_content" not in state

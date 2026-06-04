@@ -18,6 +18,7 @@ from app.engine.runtime.eval_recorder import (
     EvalRecord,
     EvalRecorder,
     diff_records,
+    sanitize_eval_payload,
 )
 
 
@@ -53,6 +54,73 @@ def test_eval_record_round_trips_through_json():
     assert revived.metadata == {"latency_ms": 42}
 
 
+def test_sanitize_eval_payload_hashes_identity_and_strips_secrets():
+    payload = {
+        "user_id": "raw-user-id",
+        "message": "publish this",
+        "error": (
+            "provider rejected Authorization: Bearer raw-bearer-token-123 "
+            "access_token=raw-access-token-inline"
+        ),
+        "tool_calls": [
+            {
+                "name": "host_action",
+                "args": {
+                    "message": "hello",
+                    "access_token": "raw-access-token",
+                    "page_id": "raw-page-id",
+                },
+                "result": json.dumps(
+                    {
+                        "status": "action_completed",
+                        "approval_token": "raw-approval-token",
+                        "data": {
+                            "provider_payload": {"id": "raw-provider"},
+                            "safe_id": "post-1",
+                        },
+                    }
+                ),
+            }
+        ],
+    }
+
+    sanitized = sanitize_eval_payload(payload)
+    serialized = json.dumps(sanitized, ensure_ascii=False)
+
+    assert sanitized["user_id_hash"].startswith("sha256:")
+    assert sanitized["message"] == "publish this"
+    assert "<redacted-secret>" in sanitized["error"]
+    assert sanitized["tool_calls"][0]["args"]["message"] == "hello"
+    assert sanitized["tool_calls"][0]["result"]["status"] == "action_completed"
+    assert sanitized["tool_calls"][0]["result"]["data"]["safe_id"] == "post-1"
+    assert "raw-user-id" not in serialized
+    assert "raw-bearer-token-123" not in serialized
+    assert "raw-access-token-inline" not in serialized
+    assert "raw-access-token" not in serialized
+    assert "raw-page-id" not in serialized
+    assert "raw-approval-token" not in serialized
+    assert "raw-provider" not in serialized
+    assert "access_token" not in serialized
+    assert "approval_token" not in serialized
+    assert "provider_payload" not in serialized
+
+
+def test_sanitize_eval_payload_keeps_non_secret_auth_explanations():
+    sanitized = sanitize_eval_payload(
+        {
+            "message": (
+                "Giải thích lifecycle token: login, Bearer request, "
+                "authorization middleware, refresh."
+            )
+        }
+    )
+
+    assert sanitized["message"] == (
+        "Giải thích lifecycle token: login, Bearer request, "
+        "authorization middleware, refresh."
+    )
+
+
 # ── Recorder write/read ──
 
 @pytest.fixture
@@ -84,6 +152,71 @@ async def test_write_appends_one_record_per_call(recorder: EvalRecorder):
     assert len(lines) == 2
     assert json.loads(lines[0])["response"] == "r1"
     assert json.loads(lines[1])["response"] == "r2"
+
+
+async def test_write_sanitizes_record_before_persisting(recorder: EvalRecorder):
+    rec = _make_record(
+        request={
+            "message": "publish this",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        '{"status":"draft",'
+                        '"access_token":"raw-message-token"}'
+                    ),
+                }
+            ],
+            "user_id": "raw-user-id",
+            "access_token": "raw-access-token",
+        },
+        response=(
+            "provider rejected Bearer raw-bearer-token-123 "
+            "token=raw-token-inline"
+        ),
+        tool_calls=[
+            {
+                "name": "host_action",
+                "args": {
+                    "message": "hello",
+                    "approval_token": "raw-approval-token",
+                },
+                "result": json.dumps(
+                    {
+                        "status": "ok",
+                        "safe_id": "post-1",
+                        "provider_payload": {"id": "raw-provider"},
+                    }
+                ),
+            }
+        ],
+        metadata={"latency_ms": 42, "provider_payload": {"id": "raw-meta"}},
+    )
+
+    path = await recorder.write(rec)
+    raw_line = path.read_text(encoding="utf-8").strip()
+    persisted = json.loads(raw_line)
+
+    assert persisted["request"]["message"] == "publish this"
+    message_content = persisted["request"]["messages"][0]["content"]
+    assert isinstance(message_content, str)
+    assert '"status":"draft"' in message_content
+    assert "<redacted-secret>" in message_content
+    assert persisted["request"]["user_id_hash"].startswith("sha256:")
+    assert "<redacted-secret>" in persisted["response"]
+    assert persisted["tool_calls"][0]["args"]["message"] == "hello"
+    assert persisted["tool_calls"][0]["result"]["status"] == "ok"
+    assert persisted["tool_calls"][0]["result"]["safe_id"] == "post-1"
+    assert persisted["metadata"] == {"latency_ms": 42, "redacted_secret_count": 1}
+    assert "raw-user-id" not in raw_line
+    assert "raw-access-token" not in raw_line
+    assert "raw-message-token" not in raw_line
+    assert "raw-bearer-token-123" not in raw_line
+    assert "raw-token-inline" not in raw_line
+    assert "raw-approval-token" not in raw_line
+    assert "raw-provider" not in raw_line
+    assert "raw-meta" not in raw_line
+    assert "provider_payload" not in raw_line
 
 
 async def test_write_path_traversal_is_neutralised(recorder: EvalRecorder, tmp_path: Path):

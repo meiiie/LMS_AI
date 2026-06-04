@@ -1,8 +1,6 @@
 """Sprint 222b Phase 5: Dynamic tool generation from host capabilities."""
 import json
 
-import pytest
-
 
 class TestGenerateHostActionTools:
     def test_generates_tools_for_role(self):
@@ -44,6 +42,35 @@ class TestGenerateHostActionTools:
         )
         result = tools[0].invoke({"url": "/course/123"})
         assert "navigate" in str(result).lower() or "req-" in str(result)
+
+    def test_tool_schema_preserves_required_fields_and_rejects_blank_required_input(self):
+        from app.engine.context.action_tools import generate_host_action_tools
+
+        tools = generate_host_action_tools(
+            [
+                {
+                    "name": "wiii_connect.facebook_post.direct_apply",
+                    "description": "Publish a Facebook post",
+                    "input_schema": {
+                        "type": "object",
+                        "required": ["message"],
+                        "properties": {
+                            "message": {"type": "string"},
+                            "provider_slug": {"type": "string", "default": "facebook"},
+                        },
+                    },
+                }
+            ],
+            "student",
+            event_bus_id="bus-1",
+        )
+
+        schema = tools[0].to_openai_schema()["function"]["parameters"]
+        result = json.loads(tools[0].invoke({"message": "   "}))
+
+        assert schema["required"] == ["message"]
+        assert result["status"] == "validation_failed"
+        assert result["missing_fields"] == ["message"]
 
     def test_empty_capabilities_returns_empty(self):
         from app.engine.context.action_tools import generate_host_action_tools

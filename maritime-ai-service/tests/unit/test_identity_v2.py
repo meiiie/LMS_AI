@@ -16,6 +16,7 @@ def _make_settings():
     settings.jwt_expire_minutes = 15
     settings.jwt_audience = "wiii"
     settings.environment = "production"
+    settings.enable_multi_tenant = False
     settings.enable_org_membership_check = False
     settings.enable_jti_denylist = False
     settings.enforce_api_key_role_restriction = True
@@ -114,6 +115,143 @@ async def test_lms_service_rejects_header_jwt_identity_mismatch():
 
     assert exc_info.value.status_code == 401
     assert "mismatch" in exc_info.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_jwt_rejects_header_org_mismatch_in_prod_multi_tenant():
+    settings = _make_settings()
+    settings.enable_multi_tenant = True
+    token = _make_lms_token(auth_method="jwt", active_organization_id="org-token")
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    with (
+        patch("app.core.security.settings", settings),
+        patch("app.auth.token_service.settings", settings),
+    ):
+        from app.core.security import require_auth
+
+        with pytest.raises(HTTPException) as exc_info:
+            await require_auth(
+                api_key=None,
+                credentials=creds,
+                x_user_id=None,
+                x_role=None,
+                x_session_id=None,
+                x_org_id="org-header",
+                x_host_role=None,
+            )
+
+    assert exc_info.value.status_code == 403
+    assert "does not match authenticated organization" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_jwt_uses_token_org_when_header_matches_in_prod_multi_tenant():
+    settings = _make_settings()
+    settings.enable_multi_tenant = True
+    token = _make_lms_token(auth_method="jwt", active_organization_id="org-token")
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    with (
+        patch("app.core.security.settings", settings),
+        patch("app.auth.token_service.settings", settings),
+    ):
+        from app.core.security import require_auth
+
+        user = await require_auth(
+            api_key=None,
+            credentials=creds,
+            x_user_id=None,
+            x_role=None,
+            x_session_id=None,
+            x_org_id="org-token",
+            x_host_role=None,
+        )
+
+    assert user.organization_id == "org-token"
+
+
+@pytest.mark.asyncio
+async def test_jwt_rejects_header_only_org_in_prod_multi_tenant():
+    settings = _make_settings()
+    settings.enable_multi_tenant = True
+    token = _make_lms_token(auth_method="jwt", active_organization_id=None)
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    with (
+        patch("app.core.security.settings", settings),
+        patch("app.auth.token_service.settings", settings),
+    ):
+        from app.core.security import require_auth
+
+        with pytest.raises(HTTPException) as exc_info:
+            await require_auth(
+                api_key=None,
+                credentials=creds,
+                x_user_id=None,
+                x_role=None,
+                x_session_id=None,
+                x_org_id="org-header-only",
+                x_host_role=None,
+            )
+
+    assert exc_info.value.status_code == 403
+    assert "does not carry an active organization" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_jwt_development_preserves_header_org_override():
+    settings = _make_settings()
+    settings.enable_multi_tenant = True
+    settings.environment = "development"
+    token = _make_lms_token(auth_method="jwt", active_organization_id="org-token")
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    with (
+        patch("app.core.security.settings", settings),
+        patch("app.auth.token_service.settings", settings),
+    ):
+        from app.core.security import require_auth
+
+        user = await require_auth(
+            api_key=None,
+            credentials=creds,
+            x_user_id=None,
+            x_role=None,
+            x_session_id=None,
+            x_org_id="org-header",
+            x_host_role=None,
+        )
+
+    assert user.organization_id == "org-header"
+
+
+@pytest.mark.asyncio
+async def test_lms_service_rejects_header_org_mismatch_with_jwt():
+    settings = _make_settings()
+    settings.enable_multi_tenant = True
+    token = _make_lms_token(active_organization_id="org-lms")
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    with (
+        patch("app.core.security.settings", settings),
+        patch("app.auth.token_service.settings", settings),
+    ):
+        from app.core.security import require_auth
+
+        with pytest.raises(HTTPException) as exc_info:
+            await require_auth(
+                api_key="lms-service-token",
+                credentials=creds,
+                x_user_id="wiii-user-1",
+                x_role="teacher",
+                x_session_id="sess-1",
+                x_org_id="org-header",
+                x_host_role="org_admin",
+            )
+
+    assert exc_info.value.status_code == 403
+    assert "does not match authenticated organization" in exc_info.value.detail
 
 
 @pytest.mark.asyncio

@@ -687,11 +687,12 @@ class TestBackgroundTaskIntegration:
                 response="Rule 15 is...",
             )
 
-        mock_reflect.assert_called_once_with(
-            last_user_message="Rule 15?",
-            last_response="Rule 15 is...",
-            user_id="test-user",
-        )
+            mock_reflect.assert_called_once_with(
+                last_user_message="Rule 15?",
+                last_response="Rule 15 is...",
+                user_id="test-user",
+                organization_id=None,
+            )
 
     @pytest.mark.asyncio
     async def test_trigger_exception_handled(self):

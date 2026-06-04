@@ -10,10 +10,59 @@ Uses asyncio.Task — no external worker dependencies (Taskiq/Celery).
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from app.engine.runtime.runtime_metrics import inc_counter, record_latency_ms
+
 logger = logging.getLogger(__name__)
+
+
+_TASK_MODE_LABELS = {"agent", "notification"}
+
+
+def _task_mode_label(task: dict) -> str:
+    extra = task.get("extra_data") or {}
+    if isinstance(extra, dict) and extra.get("agent_invoke"):
+        return "agent"
+    return "notification"
+
+
+def _result_mode_label(value: object, *, fallback: str) -> str:
+    mode = str(value or fallback).strip().lower()
+    return mode if mode in _TASK_MODE_LABELS else "unknown"
+
+
+def _emit_poll_metric(status: str) -> None:
+    inc_counter("runtime.scheduled_tasks.polls", labels={"status": status})
+
+
+def _emit_due_metric(count: int) -> None:
+    if count > 0:
+        inc_counter("runtime.scheduled_tasks.due", by=count)
+
+
+def _emit_task_run_metric(
+    *,
+    mode: str,
+    status: str,
+    started_ns: int,
+) -> None:
+    labels = {"mode": mode, "status": status}
+    inc_counter("runtime.scheduled_tasks.runs", labels=labels)
+    elapsed_ms = (time.perf_counter_ns() - started_ns) / 1_000_000.0
+    record_latency_ms("runtime.scheduled_tasks.duration_ms", elapsed_ms, labels=labels)
+
+
+def _emit_delivery_metric(*, mode: str, delivered: bool) -> None:
+    inc_counter(
+        "runtime.scheduled_tasks.delivery",
+        labels={
+            "mode": mode,
+            "status": "delivered" if delivered else "not_delivered",
+        },
+    )
 
 
 class ScheduledTaskExecutor:
@@ -74,46 +123,128 @@ class ScheduledTaskExecutor:
         from app.repositories.scheduler_repository import get_scheduler_repository
         from app.services.notification_dispatcher import get_notification_dispatcher
 
-        repo = get_scheduler_repository()
-        dispatcher = get_notification_dispatcher()
+        try:
+            repo = get_scheduler_repository()
+            dispatcher = get_notification_dispatcher()
+            due_tasks = repo.get_due_tasks(
+                limit=settings.scheduler_max_concurrent,
+                allow_all_orgs=True,
+            )
+        except Exception:
+            _emit_poll_metric("error")
+            raise
 
-        due_tasks = repo.get_due_tasks(limit=settings.scheduler_max_concurrent)
+        _emit_poll_metric("success")
+        _emit_due_metric(len(due_tasks))
         if not due_tasks:
             return
 
         logger.info("[EXECUTOR] Found %d due task(s)", len(due_tasks))
 
         for task in due_tasks:
-            task_id_short = task["id"][:8] if task.get("id") else "unknown"
-            try:
-                result = await self._execute_single_task(task)
+            await self._execute_due_task_with_observability(
+                task,
+                repo=repo,
+                dispatcher=dispatcher,
+            )
 
-                # Notify user
-                delivery = await dispatcher.notify_task_result(task, result)
-                logger.info(
-                    "[EXECUTOR] Task %s completed: "
-                    "mode=%s, delivered=%s",
-                    task_id_short, result.get('mode'), delivery.get('delivered'),
-                )
+    async def _execute_due_task_with_observability(
+        self,
+        task: dict,
+        *,
+        repo,
+        dispatcher,
+    ) -> dict:
+        """Execute one due task through the worker side-effect pipeline."""
+        task_id_short = task["id"][:8] if task.get("id") else "unknown"
+        mode_label = _task_mode_label(task)
+        started_ns = time.perf_counter_ns()
+        try:
+            result = await self._execute_single_task(task)
+            mode_label = _result_mode_label(
+                result.get("mode"),
+                fallback=mode_label,
+            )
 
-                # Mark executed and calculate next_run for recurring
-                next_run = (
-                    self._calculate_next_run(task)
-                    if task.get("schedule_type") != "once"
-                    else None
-                )
-                repo.mark_executed(task["id"], next_run=next_run)
+            # Notify user
+            delivery = await dispatcher.notify_task_result(task, result)
+            _emit_delivery_metric(
+                mode=mode_label,
+                delivered=isinstance(delivery, dict)
+                and delivery.get("delivered") is True,
+            )
+            logger.info(
+                "[EXECUTOR] Task %s completed: "
+                "mode=%s, delivered=%s",
+                task_id_short, result.get('mode'), delivery.get('delivered'),
+            )
 
-            except asyncio.TimeoutError:
-                logger.error("[EXECUTOR] Task %s timed out", task_id_short)
-                repo.mark_failed(task["id"], "timeout")
-            except Exception as e:
-                logger.error(
-                    "[EXECUTOR] Task %s execution failed: %s",
-                    task_id_short, e,
-                    exc_info=True,
-                )
-                repo.mark_failed(task["id"], str(e)[:200])
+            # Mark executed and calculate next_run for recurring
+            next_run = (
+                self._calculate_next_run(task)
+                if task.get("schedule_type") != "once"
+                else None
+            )
+            repo.mark_executed(
+                task["id"],
+                next_run=next_run,
+                organization_id=task.get("organization_id"),
+            )
+            _emit_task_run_metric(
+                mode=mode_label,
+                status="success",
+                started_ns=started_ns,
+            )
+            return {
+                "status": "success",
+                "mode": mode_label,
+                "result": result,
+                "delivery": delivery,
+                "next_run": next_run.isoformat() if next_run else None,
+            }
+
+        except asyncio.TimeoutError:
+            logger.error("[EXECUTOR] Task %s timed out", task_id_short)
+            _emit_task_run_metric(
+                mode=mode_label,
+                status="timeout",
+                started_ns=started_ns,
+            )
+            repo.mark_failed(
+                task["id"],
+                "timeout",
+                organization_id=task.get("organization_id"),
+            )
+            return {
+                "status": "timeout",
+                "mode": mode_label,
+                "result": None,
+                "delivery": None,
+                "error_type": "timeout",
+            }
+        except Exception as e:
+            logger.error(
+                "[EXECUTOR] Task %s execution failed: %s",
+                task_id_short, e,
+                exc_info=True,
+            )
+            _emit_task_run_metric(
+                mode=mode_label,
+                status="error",
+                started_ns=started_ns,
+            )
+            repo.mark_failed(
+                task["id"],
+                str(e)[:200],
+                organization_id=task.get("organization_id"),
+            )
+            return {
+                "status": "error",
+                "mode": mode_label,
+                "result": None,
+                "delivery": None,
+                "error_type": type(e).__name__,
+            }
 
     async def _execute_single_task(self, task: dict) -> dict:
         """
@@ -143,6 +274,7 @@ class ScheduledTaskExecutor:
                             user_id=task["user_id"],
                             session_id=f"scheduled_{task['id'][:8]}",
                             domain_id=task.get("domain_id", "maritime"),
+                            organization_id=task.get("organization_id"),
                         ),
                     )
                 ),

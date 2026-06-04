@@ -27,12 +27,58 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, Iterator, Optional, Protocol, runtime_checkable
 
 from fastapi import WebSocket
 
+from app.engine.runtime.event_payload_sanitizer import (
+    hash_runtime_identifier,
+    redact_runtime_secret_text,
+)
+
 
 logger = logging.getLogger(__name__)
+_REDACTED_SECRET = "<redacted-secret>"
+_MAX_DIAGNOSTIC_ERROR_LENGTH = 500
+
+
+def _session_ref(session_id: str) -> str:
+    return hash_runtime_identifier(session_id) or "sha256:empty"
+
+
+def _iter_payload_strings(value: Any, *, _depth: int = 0) -> Iterator[str]:
+    if _depth > 4:
+        return
+    if isinstance(value, str):
+        if value:
+            yield value
+        return
+    if isinstance(value, dict):
+        for item in list(value.values())[:32]:
+            yield from _iter_payload_strings(item, _depth=_depth + 1)
+        return
+    if isinstance(value, (list, tuple, set)):
+        for item in list(value)[:32]:
+            yield from _iter_payload_strings(item, _depth=_depth + 1)
+
+
+def _safe_magic_link_error(
+    exc: Any,
+    *secret_values: Any,
+    payload: Any = None,
+) -> str:
+    text = str(exc or "")
+    seen: set[str] = set()
+    for raw_secret in (*secret_values, *_iter_payload_strings(payload)):
+        secret = str(raw_secret or "")
+        if not secret or secret in seen:
+            continue
+        seen.add(secret)
+        text = text.replace(secret, _REDACTED_SECRET)
+    return redact_runtime_secret_text(
+        text,
+        max_length=_MAX_DIAGNOSTIC_ERROR_LENGTH,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -76,20 +122,33 @@ class InMemorySessionStore:
         self._sessions[session_id] = _SessionEntry(
             websocket=websocket, created_at=time.monotonic()
         )
-        logger.info("Magic link WS session registered (in-memory): %s", session_id)
+        logger.info(
+            "Magic link WS session registered (in-memory) session_ref=%s",
+            _session_ref(session_id),
+        )
 
     async def push_tokens(self, session_id: str, payload: dict) -> bool:
         entry = self._sessions.pop(session_id, None)
         if entry is None:
-            logger.warning("Magic link WS session not found: %s", session_id)
+            logger.warning(
+                "Magic link WS session not found session_ref=%s",
+                _session_ref(session_id),
+            )
             return False
         try:
             await entry.websocket.send_json(payload)
             await entry.websocket.close()
-            logger.info("Magic link tokens pushed (in-memory): %s", session_id)
+            logger.info(
+                "Magic link tokens pushed (in-memory) session_ref=%s",
+                _session_ref(session_id),
+            )
             return True
         except Exception as exc:
-            logger.error("Failed to push tokens to WS session %s: %s", session_id, exc)
+            logger.error(
+                "Failed to push tokens to WS session_ref=%s: %s",
+                _session_ref(session_id),
+                _safe_magic_link_error(exc, session_id, payload=payload),
+            )
             return False
 
     def remove(self, session_id: str) -> None:
@@ -154,7 +213,10 @@ class ValkeySessionStore:
         )
         # Per-session subscriber task — auto-exits after first delivery
         self._tasks[session_id] = asyncio.create_task(self._wait_for_push(session_id))
-        logger.info("Magic link WS session registered (Valkey): %s", session_id)
+        logger.info(
+            "Magic link WS session registered (Valkey) session_ref=%s",
+            _session_ref(session_id),
+        )
 
     async def push_tokens(self, session_id: str, payload: dict) -> bool:
         # Local-first: same worker as the WS, deliver directly without Valkey hop
@@ -169,11 +231,18 @@ class ValkeySessionStore:
                 f"{_KEY_PREFIX}:{session_id}", body, ex=self._default_ttl
             )
             await self._redis.publish(f"{_CHANNEL_PREFIX}:{session_id}", body)
-            logger.info("Magic link tokens published to Valkey: %s", session_id)
+            logger.info(
+                "Magic link tokens published to Valkey session_ref=%s",
+                _session_ref(session_id),
+            )
             return True
         except Exception as exc:
             # Per spec: log + raise rather than silently dropping
-            logger.error("Valkey push_tokens failed for %s: %s", session_id, exc)
+            logger.error(
+                "Valkey push_tokens failed session_ref=%s: %s",
+                _session_ref(session_id),
+                _safe_magic_link_error(exc, session_id, payload=payload),
+            )
             raise
 
     def remove(self, session_id: str) -> None:
@@ -226,7 +295,10 @@ class ValkeySessionStore:
                 if asyncio.iscoroutine(result):
                     await result
             except Exception as exc:
-                logger.warning("Valkey client close failed during aclose: %s", exc)
+                logger.warning(
+                    "Valkey client close failed during aclose: %s",
+                    _safe_magic_link_error(exc),
+                )
 
     # -- internals ---------------------------------------------------------
 
@@ -243,7 +315,11 @@ class ValkeySessionStore:
             await entry.websocket.close()
             return True
         except Exception as exc:
-            logger.error("Local WS delivery failed for %s: %s", session_id, exc)
+            logger.error(
+                "Local WS delivery failed session_ref=%s: %s",
+                _session_ref(session_id),
+                _safe_magic_link_error(exc, session_id, payload=payload),
+            )
             return False
 
     async def _wait_for_push(self, session_id: str) -> None:
@@ -270,7 +346,11 @@ class ValkeySessionStore:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.error("Valkey subscriber failed for %s: %s", session_id, exc)
+            logger.error(
+                "Valkey subscriber failed session_ref=%s: %s",
+                _session_ref(session_id),
+                _safe_magic_link_error(exc, session_id),
+            )
         finally:
             if pubsub is not None:
                 try:
@@ -294,7 +374,11 @@ class ValkeySessionStore:
         try:
             payload = json.loads(raw)
         except Exception as exc:
-            logger.error("Valkey payload decode failed for %s: %s", session_id, exc)
+            logger.error(
+                "Valkey payload decode failed session_ref=%s: %s",
+                _session_ref(session_id),
+                _safe_magic_link_error(exc, session_id, raw),
+            )
             return
         entry = self._sessions.pop(session_id, None)
         if entry is None:
@@ -302,9 +386,16 @@ class ValkeySessionStore:
         try:
             await entry.websocket.send_json(payload)
             await entry.websocket.close()
-            logger.info("Magic link tokens delivered via Valkey: %s", session_id)
+            logger.info(
+                "Magic link tokens delivered via Valkey session_ref=%s",
+                _session_ref(session_id),
+            )
         except Exception as exc:
-            logger.error("WS delivery after Valkey publish failed for %s: %s", session_id, exc)
+            logger.error(
+                "WS delivery after Valkey publish failed session_ref=%s: %s",
+                _session_ref(session_id),
+                _safe_magic_link_error(exc, session_id, payload=payload),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +443,8 @@ async def initialize_session_store(settings_obj: Any) -> MagicLinkSessionStore:
         import redis.asyncio as redis_asyncio  # type: ignore[import-not-found]
     except ImportError as exc:
         logger.warning(
-            "redis.asyncio not installed (%s); falling back to in-memory store", exc
+            "redis.asyncio not installed (%s); falling back to in-memory store",
+            _safe_magic_link_error(exc),
         )
         _active_store = InMemorySessionStore()
         return _active_store
@@ -366,11 +458,12 @@ async def initialize_session_store(settings_obj: Any) -> MagicLinkSessionStore:
         await client.ping()
         ttl = int(getattr(settings_obj, "magic_link_ws_timeout_seconds", 900))
         _active_store = ValkeySessionStore(client, default_ttl_seconds=ttl)
-        logger.info("Magic link session store: Valkey at %s (TTL=%ds)", valkey_url, ttl)
+        logger.info("Magic link session store: Valkey enabled (TTL=%ds)", ttl)
         return _active_store
     except Exception as exc:
         logger.error(
-            "Valkey connection failed (%s); falling back to in-memory store", exc
+            "Valkey connection failed (%s); falling back to in-memory store",
+            _safe_magic_link_error(exc, valkey_url),
         )
         _active_store = InMemorySessionStore()
         return _active_store

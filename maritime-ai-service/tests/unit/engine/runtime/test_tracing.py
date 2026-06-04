@@ -62,11 +62,39 @@ def test_span_set_attribute_overwrites():
     assert s.attributes["a"] == 2
 
 
+def test_span_set_attribute_sanitizes_identity_and_secrets():
+    s = tracing.Span(name="x", trace_id="t", span_id="s")
+    s.set_attribute("user_id", "raw-user-id")
+    s.set_attribute("access_token", "raw-access-token")
+
+    serialized = str(s.attributes)
+    assert s.attributes["user_id_hash"].startswith("sha256:")
+    assert s.attributes["redacted_secret_count"] == 1
+    assert "user_id" not in s.attributes
+    assert "raw-user-id" not in serialized
+    assert "raw-access-token" not in serialized
+
+
 def test_span_set_status_records_error():
     s = tracing.Span(name="x", trace_id="t", span_id="s")
     s.set_status("error", error="provider down")
     assert s.status == "error"
     assert s.error == "provider down"
+
+
+def test_span_set_status_redacts_secret_like_error_text():
+    s = tracing.Span(name="x", trace_id="t", span_id="s")
+    s.set_status(
+        "error",
+        error=(
+            "provider failed Authorization: Bearer raw-bearer-token-123 "
+            "refresh_token=raw-refresh-token-inline"
+        ),
+    )
+
+    assert "<redacted-secret>" in (s.error or "")
+    assert "raw-bearer-token-123" not in (s.error or "")
+    assert "raw-refresh-token-inline" not in (s.error or "")
 
 
 # ── span() context manager ──
@@ -92,6 +120,20 @@ def test_span_context_records_error_on_exception(in_memory):
     assert len(in_memory.spans) == 1
     assert in_memory.spans[0].status == "error"
     assert "RuntimeError: boom" in in_memory.spans[0].error
+
+
+def test_span_context_redacts_exception_secret_text(in_memory):
+    with pytest.raises(RuntimeError, match="raw-bearer-token-123"):
+        with tracing.span("op.fail"):
+            raise RuntimeError(
+                "provider failed Bearer raw-bearer-token-123 "
+                "api_key=raw-api-key-inline"
+            )
+
+    error = in_memory.spans[0].error or ""
+    assert "<redacted-secret>" in error
+    assert "raw-bearer-token-123" not in error
+    assert "raw-api-key-inline" not in error
 
 
 def test_nested_spans_set_parent_id(in_memory):
@@ -121,6 +163,34 @@ def test_attributes_propagate_to_recorded_span(in_memory):
     with tracing.span("op", attributes={"a": 1, "org_id": "org-A"}):
         pass
     assert in_memory.spans[0].attributes == {"a": 1, "org_id": "org-A"}
+
+
+def test_attributes_are_sanitized_before_processors(in_memory):
+    with tracing.span(
+        "op",
+        attributes={
+            "user_id": "raw-user-id",
+            "access_token": "raw-access-token",
+            "nested": {
+                "safe_id": "page-1",
+                "provider_payload": {"id": "raw-provider"},
+            },
+        },
+    ) as s:
+        s.attributes["refresh_token"] = "late-raw-token"
+        s.set_attribute("api_key", "raw-api-key")
+
+    attrs = in_memory.spans[0].attributes
+    assert attrs["user_id_hash"].startswith("sha256:")
+    assert attrs["nested"]["safe_id"] == "page-1"
+    assert attrs["redacted_secret_count"] >= 2
+    serialized = str(attrs)
+    assert "user_id" not in attrs
+    assert "raw-user-id" not in serialized
+    assert "raw-access-token" not in serialized
+    assert "late-raw-token" not in serialized
+    assert "raw-api-key" not in serialized
+    assert "provider_payload" not in serialized
 
 
 def test_set_attribute_inside_span_block(in_memory):

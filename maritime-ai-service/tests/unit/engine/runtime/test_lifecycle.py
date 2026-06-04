@@ -15,11 +15,23 @@ import logging
 
 import pytest
 
+from app.engine.runtime import runtime_metrics as rm
 from app.engine.runtime.lifecycle import (
     HookPoint,
+    HookRegistration,
+    LIFECYCLE_REGISTRATION_REPORT_VERSION,
     Lifecycle,
+    build_lifecycle_registration_report,
     get_lifecycle,
+    register_default_lifecycle_hooks,
 )
+
+
+@pytest.fixture(autouse=True)
+def reset_runtime_metrics():
+    rm._reset_for_tests()
+    yield
+    rm._reset_for_tests()
 
 
 @pytest.fixture
@@ -37,6 +49,28 @@ async def test_register_records_hook(lifecycle):
     assert lifecycle.hooks_at(HookPoint.ON_RUN_START) == [hook]
 
 
+async def test_register_records_explicit_owner_metadata(lifecycle):
+    async def hook(payload):
+        pass
+
+    lifecycle.register(
+        HookPoint.ON_RUN_END,
+        hook,
+        owner="engine.semantic_memory",
+    )
+
+    registrations = lifecycle.registrations_at(HookPoint.ON_RUN_END)
+    assert registrations == [
+        HookRegistration(
+            hook=hook,
+            owner="engine.semantic_memory",
+            name="hook",
+            module=hook.__module__,
+        )
+    ]
+    assert lifecycle.hooks_at(HookPoint.ON_RUN_END) == [hook]
+
+
 async def test_register_is_idempotent(lifecycle):
     async def hook(payload):
         pass
@@ -44,6 +78,134 @@ async def test_register_is_idempotent(lifecycle):
     lifecycle.register(HookPoint.ON_RUN_START, hook)
     lifecycle.register(HookPoint.ON_RUN_START, hook)
     assert lifecycle.hooks_at(HookPoint.ON_RUN_START) == [hook]
+
+
+async def test_register_idempotency_preserves_original_owner(lifecycle):
+    async def hook(payload):
+        pass
+
+    lifecycle.register(HookPoint.ON_RUN_START, hook, owner="engine.runtime")
+    lifecycle.register(HookPoint.ON_RUN_START, hook, owner="engine.semantic_memory")
+
+    registrations = lifecycle.registrations_at(HookPoint.ON_RUN_START)
+    assert [registration.owner for registration in registrations] == ["engine.runtime"]
+
+
+async def test_register_default_lifecycle_hooks_installs_runtime_owned_hooks(lifecycle):
+    registrations = register_default_lifecycle_hooks(lifecycle)
+    register_default_lifecycle_hooks(lifecycle)
+
+    assert {
+        (registration.owner, registration.name)
+        for registration in registrations
+    } == {
+        ("engine.runtime", "_record_run_end_hook"),
+        ("engine.runtime", "_record_run_error_hook"),
+    }
+    assert [
+        registration.name
+        for registration in lifecycle.registrations_at(HookPoint.ON_RUN_END)
+    ] == ["_record_run_end_hook"]
+    assert [
+        registration.name
+        for registration in lifecycle.registrations_at(HookPoint.ON_RUN_ERROR)
+    ] == ["_record_run_error_hook"]
+    assert len(lifecycle.hooks_at(HookPoint.ON_RUN_END)) == 1
+    assert len(lifecycle.hooks_at(HookPoint.ON_RUN_ERROR)) == 1
+
+    await lifecycle.fire(HookPoint.ON_RUN_END, {"status": "success"})
+    await lifecycle.fire(HookPoint.ON_RUN_ERROR, {"error": "provider down"})
+
+    snap = rm.snapshot()
+    assert snap["counters"]["runtime.lifecycle.hook_runs"][
+        (
+            ("owner", "engine.runtime"),
+            ("point", "on_run_end"),
+            ("status", "success"),
+        )
+    ] == 1
+    assert snap["counters"]["runtime.lifecycle.hook_runs"][
+        (
+            ("owner", "engine.runtime"),
+            ("point", "on_run_error"),
+            ("status", "error"),
+        )
+    ] == 1
+
+
+async def test_lifecycle_registration_report_summarizes_owners_and_runtime_defaults(
+    lifecycle,
+):
+    async def memory_hook(payload):
+        pass
+
+    lifecycle.register(
+        HookPoint.ON_RUN_END,
+        memory_hook,
+        owner="engine.semantic_memory",
+    )
+    register_default_lifecycle_hooks(lifecycle)
+
+    report = build_lifecycle_registration_report(lifecycle)
+
+    assert report["version"] == LIFECYCLE_REGISTRATION_REPORT_VERSION
+    assert report["registration_count"] == 3
+    assert report["owner_counts"] == {
+        "engine.runtime": 2,
+        "engine.semantic_memory": 1,
+    }
+    assert report["point_counts"]["on_run_end"] == 2
+    assert report["point_counts"]["on_run_error"] == 1
+    assert report["default_runtime_hooks"]["installed"] is True
+    assert report["default_runtime_hooks"]["registered_count"] == 2
+    assert {
+        (registration["point"], registration["owner"], registration["name"])
+        for registration in report["registrations"]
+    } == {
+        ("on_run_end", "engine.semantic_memory", "memory_hook"),
+        ("on_run_end", "engine.runtime", "_record_run_end_hook"),
+        ("on_run_error", "engine.runtime", "_record_run_error_hook"),
+    }
+    assert report["privacy"] == {
+        "raw_content_included": False,
+        "identifier_strategy": "code_metadata_only",
+    }
+
+
+def test_startup_registration_installs_default_lifecycle_hooks():
+    from app.engine.runtime import lifecycle as lc_mod
+    from app.main_startup_runtime import _register_runtime_lifecycle_hooks
+
+    lc_mod._reset_for_tests()
+    try:
+        _register_runtime_lifecycle_hooks(logging.getLogger("test"))
+        lc = lc_mod.get_lifecycle()
+
+        assert [
+            registration.owner
+            for registration in lc.registrations_at(HookPoint.ON_RUN_END)
+        ] == ["engine.runtime", "engine.semantic_memory"]
+        assert [
+            registration.owner
+            for registration in lc.registrations_at(HookPoint.ON_RUN_ERROR)
+        ] == ["engine.runtime", "engine.semantic_memory"]
+    finally:
+        lc_mod._reset_for_tests()
+
+
+async def test_bound_method_registration_is_idempotent(lifecycle):
+    class Hooks:
+        async def hook(self, payload):
+            pass
+
+    hooks = Hooks()
+
+    lifecycle.register(HookPoint.ON_RUN_START, hooks.hook, owner="engine.runtime")
+    lifecycle.register(HookPoint.ON_RUN_START, hooks.hook, owner="engine.runtime")
+
+    assert len(lifecycle.hooks_at(HookPoint.ON_RUN_START)) == 1
+    assert lifecycle.unregister(HookPoint.ON_RUN_START, hooks.hook) is True
+    assert lifecycle.hooks_at(HookPoint.ON_RUN_START) == []
 
 
 async def test_unregister_returns_true_when_present(lifecycle):
@@ -99,6 +261,44 @@ async def test_fire_passes_payload_to_each_hook(lifecycle):
     ]
 
 
+async def test_fire_sanitizes_payload_before_hooks(lifecycle):
+    received: list[dict] = []
+
+    async def hook(payload):
+        received.append(dict(payload))
+
+    lifecycle.register(HookPoint.ON_RUN_START, hook)
+    await lifecycle.fire(
+        HookPoint.ON_RUN_START,
+        {
+            "session_id": "s1",
+            "user_id": "raw-user-id",
+            "access_token": "raw-access-token",
+            "error": (
+                "provider failed with Bearer raw-bearer-token-123 "
+                "client_secret=raw-client-secret-inline"
+            ),
+            "host": {
+                "safe_id": "page-1",
+                "provider_payload": {"id": "raw-provider"},
+            },
+        },
+    )
+
+    payload = received[0]
+    assert payload["session_id"] == "s1"
+    assert payload["user_id_hash"].startswith("sha256:")
+    assert payload["host"]["safe_id"] == "page-1"
+    assert "<redacted-secret>" in payload["error"]
+    serialized = str(payload)
+    assert "raw-user-id" not in serialized
+    assert "raw-access-token" not in serialized
+    assert "raw-bearer-token-123" not in serialized
+    assert "raw-client-secret-inline" not in serialized
+    assert "raw-provider" not in serialized
+    assert "provider_payload" not in serialized
+
+
 async def test_fire_preserves_registration_order(lifecycle):
     received: list[str] = []
 
@@ -128,6 +328,7 @@ async def test_faulty_hook_does_not_break_chain(lifecycle, caplog):
     async def good(payload):
         received.append("good ran")
 
+    boom.__module__ = "app.engine.semantic_memory.write_audit"
     lifecycle.register(HookPoint.ON_RUN_START, boom)
     lifecycle.register(HookPoint.ON_RUN_START, good)
 
@@ -136,6 +337,53 @@ async def test_faulty_hook_does_not_break_chain(lifecycle, caplog):
 
     # Good hook still ran.
     assert received == ["good ran"]
+    snap = rm.snapshot()
+    labels = (
+        ("owner", "engine.semantic_memory"),
+        ("point", "on_run_start"),
+    )
+    assert snap["counters"]["runtime.lifecycle.hook_failures"][labels] == 1
+
+
+async def test_faulty_hook_metric_uses_explicit_registration_owner(lifecycle):
+    async def boom(payload):
+        raise RuntimeError("boom")
+
+    boom.__module__ = "app.engine.semantic_memory.write_audit"
+    lifecycle.register(HookPoint.ON_RUN_END, boom, owner="engine.runtime")
+
+    await lifecycle.fire(HookPoint.ON_RUN_END, {})
+
+    snap = rm.snapshot()
+    labels = (
+        ("owner", "engine.runtime"),
+        ("point", "on_run_end"),
+    )
+    assert snap["counters"]["runtime.lifecycle.hook_failures"][labels] == 1
+    inferred_labels = (
+        ("owner", "engine.semantic_memory"),
+        ("point", "on_run_end"),
+    )
+    assert inferred_labels not in snap["counters"]["runtime.lifecycle.hook_failures"]
+
+
+async def test_invalid_explicit_owner_falls_back_to_inferred_owner(lifecycle):
+    async def boom(payload):
+        raise RuntimeError("boom")
+
+    boom.__module__ = "app.engine.semantic_memory.write_audit"
+    lifecycle.register(HookPoint.ON_RUN_END, boom, owner="unsafe owner value")
+
+    registration = lifecycle.registrations_at(HookPoint.ON_RUN_END)[0]
+    assert registration.owner == "engine.semantic_memory"
+
+    await lifecycle.fire(HookPoint.ON_RUN_END, {})
+    snap = rm.snapshot()
+    labels = (
+        ("owner", "engine.semantic_memory"),
+        ("point", "on_run_end"),
+    )
+    assert snap["counters"]["runtime.lifecycle.hook_failures"][labels] == 1
 
 
 async def test_fire_uses_empty_dict_when_payload_omitted(lifecycle):
@@ -242,6 +490,9 @@ async def test_lifecycle_fires_around_native_dispatch():
         HookPoint.ON_RUN_END,
     ]
     assert events[0][1]["session_id"] == "s1"
+    assert events[0][1]["user_message"] == "ping"
+    assert events[0][1]["user_id_hash"].startswith("sha256:")
+    assert "user_id" not in events[0][1]
     assert events[1][1]["status"] == "success"
     lc_mod._reset_for_tests()
 

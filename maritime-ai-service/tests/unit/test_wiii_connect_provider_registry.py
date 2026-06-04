@@ -19,7 +19,8 @@ def test_provider_registry_exposes_disabled_composio_catalog_without_secrets():
 
     assert metadata["version"] == "wiii_connect_provider_registry.v1"
     assert by_slug["facebook"]["provider_kind"] == "composio"
-    assert by_slug["facebook"]["action_catalog"]["catalog_action_count"] == 0
+    assert by_slug["facebook"]["action_catalog"]["catalog_action_count"] == 3
+    assert by_slug["facebook"]["action_catalog"]["enabled_action_count"] == 0
     assert by_slug["gmail"]["action_catalog"]["catalog_action_count"] == 1
     assert by_slug["gmail"]["action_catalog"]["enabled_action_count"] == 0
     assert by_slug["gmail"]["enabled"] is False
@@ -152,8 +153,11 @@ def test_snapshot_projects_external_provider_registry_fail_closed(monkeypatch):
     facebook = next(item for item in metadata["connections"] if item["slug"] == "facebook")
 
     assert status["facebook"]["active"] is False
-    assert status["facebook"]["status"] == "disabled"
-    assert status["facebook"]["reason"] == "provider_adapter_disabled"
+    assert status["facebook"]["status"] == "not_connected"
+    assert status["facebook"]["reason"] == "connection_storage_unavailable"
     assert status["facebook"]["agent_ready"] is False
+    assert status["facebook"]["adapter_bound"] is False
+    assert "adapter_disabled" in status["facebook"]["warnings"]
+    assert "connection_storage_unavailable" in status["facebook"]["warnings"]
     assert facebook["provider_kind"] == "composio"
     assert facebook["requirement_count"] == 6

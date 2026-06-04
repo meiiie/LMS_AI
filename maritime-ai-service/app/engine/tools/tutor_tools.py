@@ -35,6 +35,7 @@ class TutorToolState:
     """Per-request state for tutor tools."""
     user_id: str = "current_user"
     session_id: Optional[str] = None
+    identity_key: Optional[str] = None
 
 
 _tutor_tool_state: contextvars.ContextVar[Optional[TutorToolState]] = contextvars.ContextVar(
@@ -45,12 +46,61 @@ _tutor_tool_state: contextvars.ContextVar[Optional[TutorToolState]] = contextvar
 _tutor_agent = None
 
 
-def _get_state() -> TutorToolState:
-    """Get or create per-request tutor tool state."""
+def _tool_identity(user_id: Optional[str] = None) -> tuple[str, str, bool]:
+    """Resolve the current tutor-tool identity for state isolation."""
+    runtime_user_id = None
+    runtime_org_id = ""
+    runtime_session_id = ""
+    identity_available = bool(user_id)
+
+    try:
+        from app.engine.tools.runtime_context import get_current_tool_runtime_context
+
+        runtime = get_current_tool_runtime_context()
+        if runtime:
+            runtime_user_id = runtime.user_id
+            runtime_org_id = str(runtime.organization_id or "").strip()
+            runtime_session_id = str(runtime.session_id or "").strip()
+            identity_available = identity_available or bool(
+                runtime_user_id or runtime_org_id or runtime_session_id
+            )
+    except Exception:
+        pass
+
+    if not runtime_org_id:
+        try:
+            from app.core.org_context import get_current_org_id
+
+            runtime_org_id = str(get_current_org_id() or "").strip()
+            identity_available = identity_available or bool(runtime_org_id)
+        except Exception:
+            pass
+
+    resolved_user_id = str(user_id or runtime_user_id or "current_user").strip() or "current_user"
+    identity_key = (
+        f"user={resolved_user_id}|org={runtime_org_id}|session={runtime_session_id}"
+    )
+    return identity_key, resolved_user_id, identity_available
+
+
+def _new_state(user_id: Optional[str] = None) -> TutorToolState:
+    identity_key, resolved_user_id, _ = _tool_identity(user_id)
+    return TutorToolState(user_id=resolved_user_id, identity_key=identity_key)
+
+
+def _get_state(user_id: Optional[str] = None) -> TutorToolState:
+    """Get or create identity-scoped tutor tool state."""
+    identity_key, resolved_user_id, identity_available = _tool_identity(user_id)
     state = _tutor_tool_state.get(None)
     if state is None:
-        state = TutorToolState()
+        state = _new_state(user_id)
         _tutor_tool_state.set(state)
+    elif identity_available and state.identity_key != identity_key:
+        state = _new_state(user_id)
+        _tutor_tool_state.set(state)
+    elif state.identity_key is None:
+        state.identity_key = identity_key
+        state.user_id = resolved_user_id
     return state
 
 
@@ -72,15 +122,13 @@ def init_tutor_tools(user_id: Optional[str] = None):
             return
 
     if user_id:
-        state = _get_state()
-        state.user_id = user_id
+        _get_state(user_id)
     logger.info("Tutor tools initialized for user: %s", user_id)
 
 
 def set_tutor_user(user_id: str):
     """Set the current user ID for tutor operations (per-request)."""
-    state = _get_state()
-    state.user_id = user_id
+    _get_state(user_id)
 
 
 def get_current_session_id() -> Optional[str]:

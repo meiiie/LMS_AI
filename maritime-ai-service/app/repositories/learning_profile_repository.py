@@ -11,6 +11,7 @@ Learning Profile persistence operations.
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Protocol
 from uuid import UUID
 
@@ -25,6 +26,16 @@ from app.models.learning_profile import (
 )
 
 logger = logging.getLogger(__name__)
+_LEARNING_PROFILE_MISSING_ORG_WARNING = "learning_profile_blocked_missing_org_context"
+_LEARNING_PROFILE_ORG_FILTER = " AND organization_id = :org_id"
+
+
+@dataclass(frozen=True)
+class LearningProfileOrgScope:
+    org_id: Optional[str]
+    state: str
+    warnings: list[str]
+    write_allowed: bool
 
 
 class ILearningProfileRepository(Protocol):
@@ -267,8 +278,74 @@ class LearningProfileRepository:
     def is_available(self) -> bool:
         """Check if repository is available."""
         return self._available
+
+    def _org_scope(
+        self,
+        organization_id: Optional[str] = None,
+        *,
+        write: bool = False,
+    ) -> tuple[LearningProfileOrgScope, Optional[str], dict[str, object]]:
+        scope = self._resolve_learning_profile_org_scope(
+            organization_id=organization_id,
+            write=write,
+        )
+        if not scope.write_allowed or not scope.org_id:
+            return scope, None, {}
+        return scope, _LEARNING_PROFILE_ORG_FILTER, {"org_id": scope.org_id}
+
+    def _resolve_learning_profile_org_scope(
+        self,
+        *,
+        organization_id: Optional[str] = None,
+        write: bool = False,
+    ) -> LearningProfileOrgScope:
+        if isinstance(organization_id, str) and organization_id.strip():
+            return LearningProfileOrgScope(
+                org_id=organization_id.strip(),
+                state="explicit",
+                warnings=[],
+                write_allowed=True,
+            )
+
+        from app.engine.semantic_memory.write_audit import (
+            resolve_memory_read_scope,
+            resolve_memory_write_scope,
+        )
+
+        scope = resolve_memory_write_scope() if write else resolve_memory_read_scope()
+        return LearningProfileOrgScope(
+            org_id=scope.org_id,
+            state=scope.state,
+            warnings=list(scope.warnings),
+            write_allowed=scope.write_allowed,
+        )
+
+    def _log_learning_profile_scope_blocked(
+        self,
+        operation: str,
+        scope: LearningProfileOrgScope,
+        *,
+        user_id: Optional[str] = None,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_LEARNING_PROFILE_MISSING_ORG_WARNING)
+        logger.warning(
+            "[LEARNING_PROFILE] %s blocked user_hash=%s org_hash=%s "
+            "org_scope=%s warnings=%s",
+            operation,
+            _hash_memory_identifier(user_id),
+            _hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
     
-    async def get(self, user_id: str) -> Optional[dict]:
+    async def get(
+        self,
+        user_id: str,
+        *,
+        organization_id: Optional[str] = None,
+    ) -> Optional[dict]:
         """
         Get a learning profile by user ID.
 
@@ -281,22 +358,28 @@ class LearningProfileRepository:
         if not self._available:
             return None
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=False,
+        )
+        if org_filter is None:
+            self._log_learning_profile_scope_blocked(
+                "get",
+                scope,
+                user_id=user_id,
+            )
+            return None
 
         try:
             user_id_param = str(self._convert_user_id(user_id))
-            params: dict = {"user_id": user_id_param}
-            if eff_org_id is not None:
-                params["org_id"] = eff_org_id
+            params: dict = {"user_id": user_id_param, **org_params}
 
             with self._session_factory() as session:
                 result = session.execute(
                     text(f"""
                         SELECT user_id, attributes, weak_areas, strong_areas,
-                               total_sessions, total_messages, updated_at
+                               total_sessions, total_messages, updated_at,
+                               organization_id
                         FROM learning_profile
                         WHERE user_id = :user_id{org_filter}
                     """),
@@ -312,7 +395,8 @@ class LearningProfileRepository:
                         "strong_areas": row[3] or [],
                         "total_sessions": row[4] or 0,
                         "total_messages": row[5] or 0,
-                        "updated_at": row[6]
+                        "updated_at": row[6],
+                        "organization_id": row[7],
                     }
                 return None
         except Exception as e:
@@ -332,7 +416,13 @@ class LearningProfileRepository:
             # This handles cases like "test-user"
             return user_id
     
-    async def create(self, user_id: str, attributes: dict = None) -> Optional[dict]:
+    async def create(
+        self,
+        user_id: str,
+        attributes: dict = None,
+        *,
+        organization_id: Optional[str] = None,
+    ) -> Optional[dict]:
         """
         Create a new learning profile.
 
@@ -346,40 +436,59 @@ class LearningProfileRepository:
         if not self._available:
             return None
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id
-        eff_org_id = get_effective_org_id()
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_learning_profile_scope_blocked(
+                "create",
+                scope,
+                user_id=user_id,
+            )
+            return None
 
         try:
             user_id_param = str(self._convert_user_id(user_id))
-            insert_cols = "user_id, attributes"
-            insert_vals = ":user_id, :attributes"
             params: dict = {
                 "user_id": user_id_param,
                 "attributes": json.dumps(attributes or {"level": "beginner"}),
+                **org_params,
             }
-            if eff_org_id is not None:
-                insert_cols += ", organization_id"
-                insert_vals += ", :org_id"
-                params["org_id"] = eff_org_id
 
             with self._session_factory() as session:
                 session.execute(
-                    text(f"""
-                        INSERT INTO learning_profile ({insert_cols})
-                        VALUES ({insert_vals})
-                        ON CONFLICT (user_id) DO NOTHING
+                    text("""
+                        INSERT INTO learning_profile
+                            (organization_id, user_id, attributes)
+                        VALUES (:org_id, :user_id, :attributes)
+                        ON CONFLICT (organization_id, user_id) DO NOTHING
                     """),
                     params,
                 )
                 session.commit()
-                logger.info("Created learning profile for user %s", user_id)
-                return await self.get(user_id)
+            logger.info(
+                "Created learning profile for user_hash=%s org_hash=%s",
+                _hash_memory_identifier(user_id),
+                _hash_memory_identifier(scope.org_id),
+            )
+            return await self.get(user_id, organization_id=scope.org_id)
         except Exception as e:
-            logger.error("Failed to create learning profile: %s", e)
+            if "there is no unique or exclusion constraint" in str(e):
+                logger.error(
+                    "Failed to create learning profile: migration 054 is required "
+                    "for ON CONFLICT (organization_id, user_id)"
+                )
+            else:
+                logger.error("Failed to create learning profile: %s", e)
             return None
     
-    async def get_or_create(self, user_id: str) -> Optional[dict]:
+    async def get_or_create(
+        self,
+        user_id: str,
+        *,
+        organization_id: Optional[str] = None,
+    ) -> Optional[dict]:
         """
         Get existing profile or create default one.
         
@@ -389,12 +498,18 @@ class LearningProfileRepository:
         Returns:
             Existing or newly created profile dict
         """
-        profile = await self.get(user_id)
+        profile = await self.get(user_id, organization_id=organization_id)
         if profile is None:
-            profile = await self.create(user_id)
+            profile = await self.create(user_id, organization_id=organization_id)
         return profile
     
-    async def update_weak_areas(self, user_id: str, weak_areas: List[str]) -> bool:
+    async def update_weak_areas(
+        self,
+        user_id: str,
+        weak_areas: List[str],
+        *,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """
         Update user's weak areas.
 
@@ -408,19 +523,25 @@ class LearningProfileRepository:
         if not self._available:
             return False
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_learning_profile_scope_blocked(
+                "update_weak_areas",
+                scope,
+                user_id=user_id,
+            )
+            return False
 
         try:
             user_id_param = str(self._convert_user_id(user_id))
             params: dict = {
                 "user_id": user_id_param,
                 "weak_areas": json.dumps(weak_areas),
+                **org_params,
             }
-            if eff_org_id is not None:
-                params["org_id"] = eff_org_id
 
             with self._session_factory() as session:
                 session.execute(
@@ -432,13 +553,23 @@ class LearningProfileRepository:
                     params,
                 )
                 session.commit()
-                logger.info("Updated weak areas for user %s", user_id)
+                logger.info(
+                    "Updated weak areas for user_hash=%s org_hash=%s",
+                    _hash_memory_identifier(user_id),
+                    _hash_memory_identifier(scope.org_id),
+                )
                 return True
         except Exception as e:
             logger.error("Failed to update weak areas: %s", e)
             return False
     
-    async def update_strong_areas(self, user_id: str, strong_areas: List[str]) -> bool:
+    async def update_strong_areas(
+        self,
+        user_id: str,
+        strong_areas: List[str],
+        *,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """
         Update user's strong areas.
 
@@ -452,19 +583,25 @@ class LearningProfileRepository:
         if not self._available:
             return False
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_learning_profile_scope_blocked(
+                "update_strong_areas",
+                scope,
+                user_id=user_id,
+            )
+            return False
 
         try:
             user_id_param = str(self._convert_user_id(user_id))
             params: dict = {
                 "user_id": user_id_param,
                 "strong_areas": json.dumps(strong_areas),
+                **org_params,
             }
-            if eff_org_id is not None:
-                params["org_id"] = eff_org_id
 
             with self._session_factory() as session:
                 session.execute(
@@ -476,13 +613,23 @@ class LearningProfileRepository:
                     params,
                 )
                 session.commit()
-                logger.info("Updated strong areas for user %s", user_id)
+                logger.info(
+                    "Updated strong areas for user_hash=%s org_hash=%s",
+                    _hash_memory_identifier(user_id),
+                    _hash_memory_identifier(scope.org_id),
+                )
                 return True
         except Exception as e:
             logger.error("Failed to update strong areas: %s", e)
             return False
     
-    async def increment_stats(self, user_id: str, messages: int = 1) -> bool:
+    async def increment_stats(
+        self,
+        user_id: str,
+        messages: int = 1,
+        *,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """
         Increment user's message count.
 
@@ -496,17 +643,24 @@ class LearningProfileRepository:
         if not self._available:
             return False
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_learning_profile_scope_blocked(
+                "increment_stats",
+                scope,
+                user_id=user_id,
+            )
+            return False
 
         try:
-            await self.get_or_create(user_id)
+            profile = await self.get_or_create(user_id, organization_id=scope.org_id)
+            if profile is None:
+                return False
             user_id_param = str(self._convert_user_id(user_id))
-            params: dict = {"user_id": user_id_param, "messages": messages}
-            if eff_org_id is not None:
-                params["org_id"] = eff_org_id
+            params: dict = {"user_id": user_id_param, "messages": messages, **org_params}
 
             with self._session_factory() as session:
                 session.execute(
@@ -524,7 +678,6 @@ class LearningProfileRepository:
             logger.error("Failed to increment stats: %s", e)
             return False
 
-
 # Singleton instance
 _pg_profile_repo: Optional[LearningProfileRepository] = None
 
@@ -535,3 +688,12 @@ def get_learning_profile_repository() -> LearningProfileRepository:
     if _pg_profile_repo is None:
         _pg_profile_repo = LearningProfileRepository()
     return _pg_profile_repo
+
+
+def _hash_memory_identifier(value) -> str | None:
+    try:
+        from app.engine.semantic_memory.privacy import hash_memory_identifier
+
+        return hash_memory_identifier(value)
+    except Exception:
+        return None

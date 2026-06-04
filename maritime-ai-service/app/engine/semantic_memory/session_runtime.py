@@ -5,6 +5,12 @@ from __future__ import annotations
 import json
 from typing import List, Optional
 
+from app.engine.semantic_memory.privacy import (
+    hash_memory_identifier,
+    memory_log_reference,
+)
+from app.engine.semantic_memory.write_audit import resolve_memory_write_scope
+from app.engine.semantic_memory.write_audit import resolve_memory_read_scope
 from app.models.semantic_memory import (
     ConversationSummary,
     Insight,
@@ -30,6 +36,15 @@ def count_tokens_impl(text: str, logger_obj) -> int:
 
 def get_session_messages_impl(repository, user_id: str, session_id: str, logger_obj) -> List[SemanticMemorySearchResult]:
     """Load chronological session messages using the repository fast path."""
+    scope = resolve_memory_read_scope()
+    if not scope.write_allowed:
+        logger_obj.warning(
+            "Session memory read blocked for user_hash=%s: %s",
+            hash_memory_identifier(user_id),
+            scope.state,
+        )
+        return []
+
     try:
         session_messages = repository.get_memories_by_type(
             user_id=user_id,
@@ -45,6 +60,15 @@ def get_session_messages_impl(repository, user_id: str, session_id: str, logger_
 
 def count_session_tokens_impl(repository, user_id: str, session_id: str, count_tokens_fn, logger_obj) -> int:
     """Count tokens for all message memories in a session."""
+    scope = resolve_memory_read_scope()
+    if not scope.write_allowed:
+        logger_obj.warning(
+            "Session token memory read blocked for user_hash=%s: %s",
+            hash_memory_identifier(user_id),
+            scope.state,
+        )
+        return 0
+
     try:
         messages = repository.get_memories_by_type(
             user_id=user_id,
@@ -168,10 +192,24 @@ async def check_and_summarize_impl(engine, user_id: str, session_id: str, thresh
 
 async def delete_memory_by_keyword_impl(repository, user_id: str, keyword: str, logger_obj) -> int:
     """Delete memories by keyword and log result."""
+    scope = resolve_memory_write_scope()
+    if not scope.write_allowed:
+        logger_obj.warning(
+            "Keyword memory delete blocked for user_hash=%s: %s",
+            hash_memory_identifier(user_id),
+            scope.state,
+        )
+        return 0
+
     try:
         deleted = repository.delete_memories_by_keyword(user_id=user_id, keyword=keyword)
         if deleted > 0:
-            logger_obj.info("Deleted %d memories matching '%s' for user %s", deleted, keyword, user_id)
+            logger_obj.info(
+                "Deleted %d memories matching keyword_ref=%s for user_hash=%s",
+                deleted,
+                memory_log_reference(keyword),
+                hash_memory_identifier(user_id),
+            )
         return deleted
     except Exception as exc:
         logger_obj.error("Failed to delete memories by keyword: %s", exc)
@@ -180,12 +218,29 @@ async def delete_memory_by_keyword_impl(repository, user_id: str, keyword: str, 
 
 async def delete_all_user_memories_impl(repository, user_id: str, logger_obj) -> int:
     """Delete all memories for a user."""
+    scope = resolve_memory_write_scope()
+    if not scope.write_allowed:
+        logger_obj.warning(
+            "Full memory delete blocked for user_hash=%s: %s",
+            hash_memory_identifier(user_id),
+            scope.state,
+        )
+        return 0
+
     try:
         deleted = repository.delete_all_user_memories(user_id=user_id)
-        logger_obj.info("Deleted ALL %d memories for user %s (factory reset)", deleted, user_id)
+        logger_obj.info(
+            "Deleted ALL %d memories for user_hash=%s (factory reset)",
+            deleted,
+            hash_memory_identifier(user_id),
+        )
         return deleted
     except Exception as exc:
-        logger_obj.error("Failed to delete all memories for user %s: %s", user_id, exc)
+        logger_obj.error(
+            "Failed to delete all memories for user_hash=%s: %s",
+            hash_memory_identifier(user_id),
+            exc,
+        )
         return 0
 
 
@@ -207,7 +262,11 @@ async def store_explicit_insight_impl(engine, user_id: str, insight_text: str, c
 
         stored = await engine._insight_provider._store_insight(insight, session_id)
         if stored:
-            logger_obj.info("Stored explicit insight for user %s: %s...", user_id, insight_text[:50])
+            logger_obj.info(
+                "Stored explicit insight for user_hash=%s content_ref=%s",
+                hash_memory_identifier(user_id),
+                memory_log_reference(insight_text),
+            )
         return stored
     except Exception as exc:
         logger_obj.error("Failed to store explicit insight: %s", exc)

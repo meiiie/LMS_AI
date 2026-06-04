@@ -20,9 +20,11 @@ from app.api.v1 import (
 from app.api.v1 import chat_context_endpoint_support as _chat_context_support
 from app.api.v1 import chat_endpoint_presenter as _chat_endpoint_presenter
 from app.api.v1 import chat_history_endpoint_support as _chat_history_support
+from app.core.config import settings
 from app.core.security import resolve_interaction_role
 from app.core.rate_limit import limiter
 from app.engine.llm_runtime_metadata import resolve_runtime_llm_metadata
+from app.models.host_context_schemas import sanitize_user_context_for_ingress
 from app.models.schemas import (
     ChatRequest,
     ChatResponse,
@@ -64,12 +66,21 @@ router = APIRouter(tags=["Chat"])
 def _canonicalize_chat_request_from_auth(chat_request: ChatRequest, auth: RequireAuth) -> ChatRequest:
     """Project canonical auth identity onto transport request fields."""
     effective_role = resolve_interaction_role(auth)
-    effective_org_id = auth.organization_id or chat_request.organization_id
+    effective_org_id = auth.organization_id
+    if (
+        not effective_org_id
+        and not (
+            settings.enable_multi_tenant
+            and settings.environment in ("production", "staging")
+        )
+    ):
+        effective_org_id = chat_request.organization_id
     return chat_request.model_copy(
         update={
             "user_id": str(auth.user_id),
             "role": UserRole(effective_role),
             "organization_id": effective_org_id,
+            "user_context": sanitize_user_context_for_ingress(chat_request.user_context),
         }
     )
 
@@ -211,6 +222,7 @@ async def get_chat_history(
             user_id=user_id,
             limit=limit,
             offset=offset,
+            organization_id=auth.organization_id,
         )
 
     except Exception as error:
@@ -268,6 +280,7 @@ async def delete_chat_history(
             user_id=user_id,
             deleted_by=auth.user_id,
             role=resolve_interaction_role(auth),
+            organization_id=auth.organization_id,
         )
 
     except Exception as error:
@@ -316,6 +329,7 @@ async def compact_context(
         summary, history_list = await _chat_context_support.compact_context_session(
             session_id=session_id,
             user_id=user_id,
+            organization_id=auth.organization_id,
         )
 
         return _chat_context_support.build_context_compacted_response(
@@ -412,6 +426,7 @@ async def get_context_info(
         compactor, history_list = _chat_context_support.load_context_info_inputs(
             session_id=session_id,
             user_id=user_id,
+            organization_id=auth.organization_id,
         )
 
         # Sprint 210g: Fetch system_prompt + core_memory for accurate layer display

@@ -88,6 +88,18 @@ async def _require_org_knowledge_admin(auth: AuthenticatedUser, org_id: str) -> 
             detail="Admin role required",
         )
 
+    active_org_id = getattr(auth, "organization_id", None)
+    if not active_org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization context required for org knowledge access",
+        )
+    if active_org_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Active organization does not match route organization",
+        )
+
     from app.repositories.organization_repository import get_organization_repository
     repo = get_organization_repository()
     org_role = repo.get_user_org_role(auth.user_id, org_id)
@@ -114,6 +126,18 @@ async def _require_org_member(auth: AuthenticatedUser, org_id: str) -> str:
 
     if is_platform_admin(auth):
         return auth.user_id
+
+    active_org_id = getattr(auth, "organization_id", None)
+    if not active_org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization context required for org knowledge access",
+        )
+    if active_org_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Active organization does not match route organization",
+        )
 
     from app.repositories.organization_repository import get_organization_repository
     repo = get_organization_repository()
@@ -150,7 +174,7 @@ async def _insert_document(pool, doc_id: str, org_id: str, filename: str,
         )
 
 
-async def _update_document_status(pool, doc_id: str, new_status: str,
+async def _update_document_status(pool, doc_id: str, org_id: str, new_status: str,
                                   page_count: Optional[int] = None,
                                   chunk_count: Optional[int] = None,
                                   error_message: Optional[str] = None) -> None:
@@ -159,11 +183,11 @@ async def _update_document_status(pool, doc_id: str, new_status: str,
         await conn.execute(
             """
             UPDATE organization_documents
-            SET status = $2, page_count = $3, chunk_count = $4,
-                error_message = $5, updated_at = NOW()
-            WHERE document_id = $1
+            SET status = $3, page_count = $4, chunk_count = $5,
+                error_message = $6, updated_at = NOW()
+            WHERE document_id = $1 AND organization_id = $2
             """,
-            doc_id, new_status, page_count, chunk_count, error_message,
+            doc_id, org_id, new_status, page_count, chunk_count, error_message,
         )
 
 
@@ -302,7 +326,7 @@ async def upload_org_document(
             tmp_path = tmp_file.name
 
         # Update status → processing
-        await _update_document_status(pool, document_id, "processing")
+        await _update_document_status(pool, document_id, org_id, "processing")
 
         # Ingest via existing service
         from app.services.multimodal_ingestion_service import get_ingestion_service
@@ -317,7 +341,7 @@ async def upload_org_document(
         # Use pages_processed (actual pages attempted) instead of total_pages
         # When max_pages is set, total_pages is the full PDF but only a subset was processed
         await _update_document_status(
-            pool, document_id, "ready",
+            pool, document_id, org_id, "ready",
             page_count=result.pages_processed if result.pages_processed > 0 else result.total_pages,
             chunk_count=result.successful_pages,
         )
@@ -366,7 +390,7 @@ async def upload_org_document(
     except Exception as e:
         logger.error("Org knowledge upload failed: org=%s err=%s", org_id, e)
         await _update_document_status(
-            pool, document_id, "failed",
+            pool, document_id, org_id, "failed",
             error_message=str(e)[:500],
         )
         raise HTTPException(
@@ -482,8 +506,12 @@ async def delete_org_document(
             )
             logger.info("Deleted embeddings: %s (org=%s, doc=%s)", result, org_id, doc_id)
             await conn.execute(
-                "UPDATE organization_documents SET status = 'deleted', updated_at = NOW() WHERE document_id = $1",
-                doc_id,
+                """
+                UPDATE organization_documents
+                SET status = 'deleted', updated_at = NOW()
+                WHERE document_id = $1 AND organization_id = $2
+                """,
+                doc_id, org_id,
             )
 
     logger.info("Org knowledge deleted: org=%s doc=%s user=%s", org_id, doc_id, user_id)

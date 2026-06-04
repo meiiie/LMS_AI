@@ -11,10 +11,16 @@ from typing import Optional
 
 import asyncpg
 
+from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
 logger = logging.getLogger(__name__)
 
 _VALID_ROLES = {"student", "teacher", "admin"}
 _VALID_PLATFORM_ROLES = {"user", "platform_admin"}
+
+
+def _auth_identity_ref(value: object) -> str:
+    return hash_runtime_identifier(value) or "sha256:empty"
 
 
 def _derive_platform_role(legacy_role: Optional[str], platform_role: Optional[str] = None) -> str:
@@ -149,7 +155,11 @@ async def create_user(
                 """,
                 user_id, email, name, avatar_url, role, now,
             )
-    logger.info("Created user %s (email=%s)", user_id, email)
+    logger.info(
+        "Created user user_ref=%s email_ref=%s",
+        _auth_identity_ref(user_id),
+        _auth_identity_ref(email),
+    )
     return {
         "id": user_id,
         "email": email,
@@ -183,14 +193,19 @@ async def link_identity(
             """,
             identity_id, user_id, provider, provider_sub, provider_issuer, email, display_name, avatar_url,
         )
-    logger.info("Linked identity %s/%s to user %s", provider, provider_sub, user_id)
+    logger.info(
+        "Linked identity provider=%s provider_sub_ref=%s user_ref=%s",
+        provider,
+        _auth_identity_ref(provider_sub),
+        _auth_identity_ref(user_id),
+    )
 
     # Sprint 176: Audit event
     try:
         from app.auth.auth_audit import log_auth_event
         await log_auth_event(
             "identity_linked", user_id=user_id, provider=provider,
-            metadata={"provider_sub": provider_sub},
+            metadata={"provider_sub_ref": _auth_identity_ref(provider_sub)},
         )
     except Exception:
         pass
@@ -229,7 +244,11 @@ async def find_or_create_by_provider(
     # 1. Exact provider match
     user = await find_user_by_provider(provider, provider_sub, provider_issuer)
     if user:
-        logger.debug("%s login: existing user %s", provider, user["id"])
+        logger.debug(
+            "%s login: existing user_ref=%s",
+            provider,
+            _auth_identity_ref(user["id"]),
+        )
         return user
 
     # 2. Email match → auto-link (only when email is verified by provider)
@@ -246,12 +265,21 @@ async def find_or_create_by_provider(
                     display_name=name,
                     avatar_url=avatar_url,
                 )
-                logger.info("%s login: auto-linked to existing user %s via verified email %s", provider, user["id"], email)
+                logger.info(
+                    "%s login: auto-linked existing user_ref=%s email_ref=%s",
+                    provider,
+                    _auth_identity_ref(user["id"]),
+                    _auth_identity_ref(email),
+                )
                 return user
             else:
                 logger.warning(
-                    "SECURITY: %s login attempted auto-link to user %s via UNVERIFIED email %s — blocked",
-                    provider, user["id"], email,
+                    "SECURITY: %s login attempted auto-link "
+                    "UNVERIFIED email user_ref=%s email_ref=%s "
+                    "email_verified=false blocked",
+                    provider,
+                    _auth_identity_ref(user["id"]),
+                    _auth_identity_ref(email),
                 )
                 # Fall through to step 3 (create new account)
 
@@ -269,7 +297,12 @@ async def find_or_create_by_provider(
         display_name=name,
         avatar_url=avatar_url,
     )
-    logger.info("%s login: created new user %s for email %s", provider, user["id"], email)
+    logger.info(
+        "%s login: created new user_ref=%s email_ref=%s",
+        provider,
+        _auth_identity_ref(user["id"]),
+        _auth_identity_ref(email),
+    )
     return user
 
 
@@ -447,7 +480,7 @@ async def deactivate_user(user_id: str) -> Optional[dict]:
     # Revoke all refresh tokens
     from app.auth.token_service import revoke_user_tokens
     await revoke_user_tokens(user_id)
-    logger.info("Deactivated user %s", user_id)
+    logger.info("Deactivated user user_ref=%s", _auth_identity_ref(user_id))
 
     return await get_user(user_id)
 
@@ -462,7 +495,7 @@ async def reactivate_user(user_id: str) -> Optional[dict]:
         )
         if result == "UPDATE 0":
             return None
-    logger.info("Reactivated user %s", user_id)
+    logger.info("Reactivated user user_ref=%s", _auth_identity_ref(user_id))
     return await get_user(user_id)
 
 
@@ -515,14 +548,18 @@ async def unlink_identity(user_id: str, identity_id: str) -> bool:
         if deleted == 0:
             return False
 
-        logger.info("Unlinked identity %s from user %s", identity_id, user_id)
+        logger.info(
+            "Unlinked identity identity_ref=%s user_ref=%s",
+            _auth_identity_ref(identity_id),
+            _auth_identity_ref(user_id),
+        )
 
         # Sprint 176: Audit event
         try:
             from app.auth.auth_audit import log_auth_event
             await log_auth_event(
                 "identity_unlinked", user_id=user_id,
-                metadata={"identity_id": identity_id},
+                metadata={"identity_ref": _auth_identity_ref(identity_id)},
             )
         except Exception:
             pass

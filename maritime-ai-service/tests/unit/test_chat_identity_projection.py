@@ -47,15 +47,66 @@ def test_stream_chat_projects_canonical_identity_from_auth():
 
 
 def test_stream_chat_preserves_request_org_when_auth_has_no_org():
+    from app.core.config import settings
     from app.api.v1.chat_stream import _canonicalize_stream_request_from_auth
 
-    projected = _canonicalize_stream_request_from_auth(
-        _make_request(organization_id="org-host"),
-        _make_auth(organization_id=None),
-    )
+    original_multi_tenant = settings.enable_multi_tenant
+    original_environment = settings.environment
+    settings.enable_multi_tenant = True
+    settings.environment = "development"
+    try:
+        projected = _canonicalize_stream_request_from_auth(
+            _make_request(organization_id="org-host"),
+            _make_auth(organization_id=None),
+        )
+    finally:
+        settings.enable_multi_tenant = original_multi_tenant
+        settings.environment = original_environment
 
     assert projected.user_id == "canonical-user"
     assert projected.organization_id == "org-host"
+
+
+def test_sync_chat_drops_body_org_when_prod_auth_has_no_org():
+    from app.core.config import settings
+    from app.api.v1.chat import _canonicalize_chat_request_from_auth
+
+    original_multi_tenant = settings.enable_multi_tenant
+    original_environment = settings.environment
+    settings.enable_multi_tenant = True
+    settings.environment = "production"
+    try:
+        projected = _canonicalize_chat_request_from_auth(
+            _make_request(organization_id="org-body-only"),
+            _make_auth(organization_id=None),
+        )
+    finally:
+        settings.enable_multi_tenant = original_multi_tenant
+        settings.environment = original_environment
+
+    assert projected.user_id == "canonical-user"
+    assert projected.organization_id is None
+
+
+def test_stream_chat_drops_body_org_when_prod_auth_has_no_org():
+    from app.core.config import settings
+    from app.api.v1.chat_stream import _canonicalize_stream_request_from_auth
+
+    original_multi_tenant = settings.enable_multi_tenant
+    original_environment = settings.environment
+    settings.enable_multi_tenant = True
+    settings.environment = "production"
+    try:
+        projected = _canonicalize_stream_request_from_auth(
+            _make_request(organization_id="org-body-only"),
+            _make_auth(organization_id=None),
+        )
+    finally:
+        settings.enable_multi_tenant = original_multi_tenant
+        settings.environment = original_environment
+
+    assert projected.user_id == "canonical-user"
+    assert projected.organization_id is None
 
 
 def test_sync_chat_prefers_host_role_overlay_for_lms_sessions():

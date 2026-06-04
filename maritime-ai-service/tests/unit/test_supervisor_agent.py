@@ -378,6 +378,66 @@ class TestSupervisorRoute:
         mock_route.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_route_weather_turn_uses_turn_path_preflight(self, mock_llm):
+        sup = _make_supervisor(mock_llm)
+        state = {
+            "query": "nay thoi tiet nong nhi",
+            "context": {},
+            "domain_config": {},
+        }
+
+        mock_route = AsyncMock(return_value="rag_agent")
+        with patch.object(sup, "_route_structured", new=mock_route):
+            result = await sup.route(state)
+
+        assert result == "direct"
+        assert state["routing_metadata"]["method"] == "turn_path_governor_preflight"
+        assert state["routing_metadata"]["intent"] == "weather_lookup"
+        assert state["routing_metadata"]["turn_path"] == "weather_lookup"
+        assert state["_turn_path_decision"]["path"] == "weather_lookup"
+        mock_route.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_route_wiii_connect_status_uses_turn_path_preflight(self, mock_llm):
+        sup = _make_supervisor(mock_llm)
+        state = {
+            "query": "Wiii co ket noi duoc facebook khong?",
+            "context": {},
+            "domain_config": {},
+        }
+
+        mock_route = AsyncMock(return_value="rag_agent")
+        with patch.object(sup, "_route_structured", new=mock_route):
+            result = await sup.route(state)
+
+        assert result == "direct"
+        assert state["routing_metadata"]["method"] == "turn_path_governor_preflight"
+        assert state["routing_metadata"]["intent"] == "external_connection_status"
+        assert state["routing_metadata"]["turn_path"] == "external_connection_status"
+        assert state["_turn_path_decision"]["path"] == "external_connection_status"
+        mock_route.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_route_wiii_connect_action_uses_turn_path_preflight(self, mock_llm):
+        sup = _make_supervisor(mock_llm)
+        state = {
+            "query": "Wiii dang mot bai bat ky len facebook di",
+            "context": {},
+            "domain_config": {},
+        }
+
+        mock_route = AsyncMock(return_value="rag_agent")
+        with patch.object(sup, "_route_structured", new=mock_route):
+            result = await sup.route(state)
+
+        assert result == "direct"
+        assert state["routing_metadata"]["method"] == "turn_path_governor_preflight"
+        assert state["routing_metadata"]["intent"] == "external_app_action"
+        assert state["routing_metadata"]["turn_path"] == "external_app_action"
+        assert state["_turn_path_decision"]["path"] == "external_app_action"
+        mock_route.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_route_learning_course_question_does_not_use_host_ui_fast_path(self, mock_llm):
         sup = _make_supervisor(mock_llm)
         state = {
@@ -522,6 +582,41 @@ class TestSupervisorRoute:
 
         assert result == "code_studio_agent"
         assert base_state["routing_metadata"]["method"] == "structured+capability_override"
+
+    @pytest.mark.asyncio
+    async def test_code_studio_domain_simulation_overrides_rag(self, mock_llm, base_state):
+        from app.engine.multi_agent import supervisor as supervisor_module
+
+        sup = _make_supervisor(mock_llm)
+        base_state["query"] = (
+            "Tao mot mini app Code Studio mo phong COLREG Rule 15 "
+            "co slider va canvas tuong tac."
+        )
+
+        with (
+            patch.object(supervisor_module.settings, "enable_conservative_fast_routing", False),
+            _mock_structured_route("RAG_AGENT", intent="lookup", confidence=0.91),
+        ):
+            result = await sup.route(base_state)
+
+        assert result == "code_studio_agent"
+        assert base_state["routing_metadata"]["method"] == "structured+capability_override"
+
+    @pytest.mark.asyncio
+    async def test_code_studio_domain_simulation_fast_routes_before_rag(self, mock_llm, base_state):
+        from app.engine.multi_agent import supervisor as supervisor_module
+
+        sup = _make_supervisor(mock_llm)
+        base_state["query"] = (
+            "Tao mot mini app Code Studio mo phong COLREG Rule 15 "
+            "co slider va canvas tuong tac."
+        )
+
+        with patch.object(supervisor_module.settings, "enable_conservative_fast_routing", True):
+            result = await sup.route(base_state)
+
+        assert result == "code_studio_agent"
+        assert base_state["routing_metadata"]["method"] == "conservative_fast_path"
 
     @pytest.mark.asyncio
     async def test_wiii_capability_inventory_does_not_override_to_code_studio(self, mock_llm, base_state):

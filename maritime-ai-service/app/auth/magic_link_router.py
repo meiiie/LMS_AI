@@ -19,6 +19,10 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.auth.email_service import send_magic_link_email
+from app.auth.organization_context import (
+    ensure_user_org_membership,
+    resolve_default_login_organization_id,
+)
 from app.auth.magic_link_service import (
     generate_magic_token,
     get_session_manager,
@@ -29,8 +33,33 @@ from app.auth.magic_link_service import (
 )
 from app.core.config import settings
 from app.core.secret_validation import is_missing_or_placeholder_secret
+from app.engine.runtime.event_payload_sanitizer import (
+    hash_runtime_identifier,
+    redact_runtime_secret_text,
+)
 
 logger = logging.getLogger(__name__)
+_REDACTED_SECRET = "<redacted-secret>"
+_MAX_MAGIC_LINK_DIAGNOSTIC_LENGTH = 500
+
+
+def _magic_link_ref(value: object) -> str:
+    return hash_runtime_identifier(value) or "sha256:empty"
+
+
+def _safe_magic_link_detail(value: object, *secret_values: object) -> str:
+    text = str(value or "")
+    seen: set[str] = set()
+    for raw_secret in secret_values:
+        secret = str(raw_secret or "")
+        if not secret or secret in seen:
+            continue
+        seen.add(secret)
+        text = text.replace(secret, _REDACTED_SECRET)
+    return redact_runtime_secret_text(
+        text,
+        max_length=_MAX_MAGIC_LINK_DIAGNOSTIC_LENGTH,
+    )
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -152,7 +181,11 @@ async def _create_magic_link(email: str, conn) -> dict:
             detail="Failed to send magic link email. Vui lòng thử lại.",
         )
 
-    logger.info("Magic link created for %s (session=%s)", email, session_id)
+    logger.info(
+        "Magic link created email_ref=%s session_ref=%s",
+        _magic_link_ref(email),
+        _magic_link_ref(session_id),
+    )
 
     response: dict = {
         "session_id": session_id,
@@ -218,7 +251,7 @@ async def _audit_verify_failure(reason: str, request: Optional[Request], email: 
             result="failed",
             reason=reason,
             ip_address=ip,
-            metadata={"email": email} if email else None,
+            metadata={"email_ref": _magic_link_ref(email)} if email else None,
         )
     except Exception:
         pass
@@ -282,12 +315,19 @@ async def verify_magic_link(token: str, request: Request):
     if not user:
         return _error_page("Không thể tạo tài khoản.")
 
+    assigned_org_id = resolve_default_login_organization_id(settings)
+    if assigned_org_id:
+        await ensure_user_org_membership(user["id"], assigned_org_id)
+
     # ---- Create JWT pair ----
     token_pair = await create_token_pair(
         user_id=user["id"],
         email=user.get("email"),
         name=user.get("name"),
         role=user.get("role", "student"),
+        platform_role=user.get("platform_role"),
+        role_source="platform",
+        active_organization_id=assigned_org_id,
         auth_method="magic_link",
     )
 
@@ -299,11 +339,16 @@ async def verify_magic_link(token: str, request: Request):
         "refresh_token": token_pair.refresh_token,
         "token_type": token_pair.token_type,
         "expires_in": token_pair.expires_in,
+        "organization_id": assigned_org_id or "",
         "user": {
             "id": user["id"],
             "email": user.get("email"),
             "name": user.get("name"),
             "role": user.get("role", "student"),
+            "legacy_role": user.get("role", "student"),
+            "platform_role": user.get("platform_role"),
+            "role_source": "platform",
+            "active_organization_id": assigned_org_id or "",
         },
     }
 
@@ -311,21 +356,26 @@ async def verify_magic_link(token: str, request: Request):
     ws_pushed = await mgr.push_tokens(session_id, payload)
 
     if not ws_pushed:
-        logger.warning("WS session %s not found -- user may have closed the app", session_id)
+        logger.warning(
+            "Magic link WS session not found session_ref=%s",
+            _magic_link_ref(session_id),
+        )
 
     # ---- Audit log ----
     try:
         from app.auth.auth_audit import log_auth_event
         await log_auth_event(
             "login", user_id=user["id"], provider="magic_link",
-            metadata={"email": email},
+            metadata={"email_ref": _magic_link_ref(email)},
         )
     except Exception:
         pass
 
     logger.info(
-        "Magic link verified for %s (ws_pushed=%s, user=%s)",
-        email, ws_pushed, user["id"],
+        "Magic link verified email_ref=%s ws_pushed=%s user_ref=%s",
+        _magic_link_ref(email),
+        ws_pushed,
+        _magic_link_ref(user["id"]),
     )
 
     return _success_page(ws_pushed)
@@ -351,16 +401,26 @@ async def magic_link_websocket(websocket: WebSocket, session_id: str):
             timeout=timeout,
         )
     except asyncio.TimeoutError:
-        logger.info("Magic link WS session timed out: %s", session_id)
+        logger.info(
+            "Magic link WS session timed out session_ref=%s",
+            _magic_link_ref(session_id),
+        )
         try:
             await websocket.send_json({"type": "timeout", "message": "Session expired"})
             await websocket.close()
         except Exception:
             pass
     except WebSocketDisconnect:
-        logger.info("Magic link WS client disconnected: %s", session_id)
+        logger.info(
+            "Magic link WS client disconnected session_ref=%s",
+            _magic_link_ref(session_id),
+        )
     except Exception as e:
-        logger.error("Magic link WS error for session %s: %s", session_id, e)
+        logger.error(
+            "Magic link WS error session_ref=%s: %s",
+            _magic_link_ref(session_id),
+            _safe_magic_link_detail(e, session_id),
+        )
     finally:
         mgr.remove(session_id)
 

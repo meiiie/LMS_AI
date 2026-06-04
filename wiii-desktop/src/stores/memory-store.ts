@@ -4,7 +4,7 @@
  */
 import { create } from "zustand";
 import { fetchMemories, deleteMemory, clearMemories } from "@/api/memories";
-import type { MemoryItem } from "@/api/types";
+import type { MemoryHealthSummary, MemoryItem } from "@/api/types";
 
 /** Vietnamese labels for fact types (Sprint 73: 15 FactTypes). */
 export const FACT_TYPE_LABELS: Record<string, string> = {
@@ -29,6 +29,7 @@ export const FACT_TYPE_LABELS: Record<string, string> = {
 
 interface MemoryState {
   memories: MemoryItem[];
+  memorySummary: MemoryHealthSummary | null;
   isLoading: boolean;
   error: string | null;
 
@@ -40,6 +41,7 @@ interface MemoryState {
 
 export const useMemoryStore = create<MemoryState>((set, get) => ({
   memories: [],
+  memorySummary: null,
   isLoading: false,
   error: null,
 
@@ -48,7 +50,11 @@ export const useMemoryStore = create<MemoryState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const res = await fetchMemories(userId);
-      set({ memories: res.data ?? [], isLoading: false });
+      set({
+        memories: res.data ?? [],
+        memorySummary: res.summary ?? null,
+        isLoading: false,
+      });
     } catch (err) {
       set({
         isLoading: false,
@@ -61,9 +67,39 @@ export const useMemoryStore = create<MemoryState>((set, get) => ({
     try {
       await deleteMemory(userId, memoryId);
       // Optimistic removal
-      set((state) => ({
-        memories: state.memories.filter((m) => m.id !== memoryId),
-      }));
+      set((state) => {
+        const nextMemories = state.memories.filter((m) => m.id !== memoryId);
+        const nextTypeCounts = nextMemories.reduce<Record<string, number>>(
+          (acc, memory) => {
+            acc[memory.type] = (acc[memory.type] || 0) + 1;
+            return acc;
+          },
+          {},
+        );
+        const sortedDates = nextMemories
+          .map((memory) => memory.created_at)
+          .sort();
+        const latestCreatedAt = sortedDates[sortedDates.length - 1] ?? null;
+        const nextSourceKinds: Record<string, number> = nextMemories.length
+          ? { semantic_fact: nextMemories.length }
+          : {};
+
+        return {
+          memories: nextMemories,
+          memorySummary: state.memorySummary
+            ? {
+                ...state.memorySummary,
+                total: nextMemories.length,
+                type_counts: nextTypeCounts,
+                latest_created_at: latestCreatedAt,
+                provenance: {
+                  ...state.memorySummary.provenance,
+                  source_kinds: nextSourceKinds,
+                },
+              }
+            : null,
+        };
+      });
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Không thể xóa bộ nhớ",
@@ -75,7 +111,22 @@ export const useMemoryStore = create<MemoryState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       await clearMemories(userId);
-      set({ memories: [], isLoading: false });
+      set((state) => ({
+        memories: [],
+        memorySummary: state.memorySummary
+          ? {
+              ...state.memorySummary,
+              total: 0,
+              type_counts: {},
+              latest_created_at: null,
+              provenance: {
+                ...state.memorySummary.provenance,
+                source_kinds: {},
+              },
+            }
+          : null,
+        isLoading: false,
+      }));
     } catch (err) {
       set({
         isLoading: false,
@@ -86,5 +137,6 @@ export const useMemoryStore = create<MemoryState>((set, get) => ({
     }
   },
 
-  reset: () => set({ memories: [], isLoading: false, error: null }),
+  reset: () =>
+    set({ memories: [], memorySummary: null, isLoading: false, error: null }),
 }));

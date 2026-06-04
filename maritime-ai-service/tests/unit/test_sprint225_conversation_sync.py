@@ -181,7 +181,12 @@ class TestThreadMessagesEndpoint:
         response = await get_thread_messages(
             request=MagicMock(),
             thread_id="user_test__session_session-1",
-            auth=AuthenticatedUser(user_id="test", auth_method="jwt", role="student"),
+            auth=AuthenticatedUser(
+                user_id="test",
+                auth_method="jwt",
+                role="student",
+                organization_id="org-active",
+            ),
             limit=2,
             offset=4,
         )
@@ -189,10 +194,16 @@ class TestThreadMessagesEndpoint:
         assert isinstance(response, ThreadMessagesResponse)
         assert response.total == 10
         assert len(response.messages) == 2
+        thread_repo.get_thread.assert_called_once_with(
+            thread_id="user_test__session_session-1",
+            user_id="test",
+            organization_id="org-active",
+        )
         chat_repo.get_session_history.assert_called_once_with(
             session_id=norm_session_id,
             limit=2,
             offset=4,
+            organization_id="org-active",
         )
 
     @pytest.mark.asyncio

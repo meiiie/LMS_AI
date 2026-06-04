@@ -15,6 +15,7 @@ from app.engine.multi_agent.subagents.search.workers_runtime import (
     platform_worker_impl,
     synthesize_response_impl,
 )
+from app.engine.multi_agent.subagents.event_stream import push_subagent_stream_event
 from app.engine.reasoning import ReasoningRenderRequest, get_reasoning_narrator
 from app.engine.reasoning.reasoning_narrator import build_tool_context_summary
 
@@ -101,11 +102,7 @@ def _get_event_queue(bus_id: Optional[str]):
 
 async def _push(queue, event: dict) -> None:
     """Non-blocking push to event queue."""
-    if queue is not None:
-        try:
-            queue.put_nowait(event)
-        except Exception as exc:
-            logger.debug("[WORKER] Event push failed: %s", exc)
+    push_subagent_stream_event(queue, event)
 
 
 async def _push_thinking_deltas(

@@ -7,6 +7,23 @@ from app.core.constants import (
     CONFIDENCE_MAX,
     CONFIDENCE_PER_SOURCE,
 )
+from app.engine.multi_agent.runtime_flow_ledger import sanitize_runtime_flow_trace
+from app.engine.runtime.event_payload_sanitizer import (
+    redact_runtime_secret_text,
+    sanitize_runtime_payload,
+)
+from app.models.schemas import (
+    ChatRequest,
+    ChatResponse,
+    ChatResponseData,
+    ChatResponseMetadata,
+    InternalChatResponse,
+    SourceInfo,
+    ToolUsageInfo,
+)
+from app.services.model_switch_prompt_service import (
+    build_model_switch_prompt_for_failover,
+)
 
 # ── Soul Emotion Tag Stripper (Sprint 35e follow-up) ───────────────────────
 # DeepSeek + other LLMs occasionally emit ``<!-- WIII_SOUL:{...} -->`` HTML
@@ -24,35 +41,43 @@ def _strip_soul_tags(text: str | None) -> str:
     if not text or "WIII_SOUL" not in text:
         return text or ""
     return _SOUL_TAG_RE.sub("", text).lstrip()
-from app.models.schemas import (
-    ChatRequest,
-    ChatResponse,
-    ChatResponseData,
-    ChatResponseMetadata,
-    InternalChatResponse,
-    SourceInfo,
-    ToolUsageInfo,
-)
-from app.services.model_switch_prompt_service import (
-    build_model_switch_prompt_for_failover,
-)
+
+
+def _safe_metadata(value: dict | None) -> dict:
+    safe = sanitize_runtime_payload(value or {})
+    return safe if isinstance(safe, dict) else {}
+
+
+def _safe_text(value: object) -> str:
+    return redact_runtime_secret_text(value)
+
+
+def _safe_optional_text(value: object) -> str | None:
+    text = _safe_text(value).strip()
+    return text or None
+
+
+def _safe_dict(value: object) -> dict | None:
+    safe = sanitize_runtime_payload(value)
+    return safe if isinstance(safe, dict) else None
 
 
 def get_tool_description(tool: dict) -> str:
     """Generate a short human-readable description for a used tool."""
-    name = tool.get("name", "unknown")
+    name = _safe_text(tool.get("name", "unknown"))
     args = tool.get("args", {})
-    result = tool.get("result", "")
+    args = args if isinstance(args, dict) else {}
+    result = _safe_text(tool.get("result", ""))
 
     if name in ("tool_knowledge_search", "tool_maritime_search"):
-        query = args.get("query", "")
+        query = _safe_text(args.get("query", ""))
         return f"Tra cứu: {query}" if query else "Tra cứu kiến thức"
     if name == "tool_save_user_info":
-        key = args.get("key", "")
-        value = args.get("value", "")
+        key = _safe_text(args.get("key", ""))
+        value = _safe_text(args.get("value", ""))
         return f"Lưu thông tin: {key}={value}" if key else "Lưu thông tin người dùng"
     if name == "tool_get_user_info":
-        key = args.get("key", "all")
+        key = _safe_text(args.get("key", "all"))
         return f"Lấy thông tin: {key}"
     return result[:100] if result else f"Gọi tool: {name}"
 
@@ -139,23 +164,32 @@ def build_chat_response(
     sources = []
     if internal_response.sources:
         for src in internal_response.sources:
+            safe_bounding_boxes = sanitize_runtime_payload(
+                getattr(src, "bounding_boxes", None),
+            )
             sources.append(
                 SourceInfo(
-                    title=src.title,
-                    content=src.content_snippet or "",
-                    image_url=getattr(src, "image_url", None),
+                    title=_safe_text(src.title),
+                    content=_safe_text(src.content_snippet or ""),
+                    image_url=_safe_optional_text(getattr(src, "image_url", None)),
                     page_number=getattr(src, "page_number", None),
-                    document_id=getattr(src, "document_id", None),
-                    bounding_boxes=getattr(src, "bounding_boxes", None),
+                    document_id=_safe_optional_text(getattr(src, "document_id", None)),
+                    bounding_boxes=(
+                        safe_bounding_boxes
+                        if isinstance(safe_bounding_boxes, list)
+                        else None
+                    ),
                 )
             )
 
     tools_used = []
-    metadata = internal_response.metadata or {}
+    metadata = _safe_metadata(internal_response.metadata)
     for tool in metadata.get("tools_used", []):
+        if not isinstance(tool, dict):
+            continue
         tools_used.append(
             ToolUsageInfo(
-                name=tool.get("name", "unknown"),
+                name=_safe_text(tool.get("name", "unknown")),
                 description=get_tool_description(tool),
             )
         )
@@ -169,7 +203,21 @@ def build_chat_response(
             CONFIDENCE_MAX,
         )
 
-    cleaned_message = _strip_soul_tags(internal_response.message)
+    cleaned_message = _safe_text(_strip_soul_tags(internal_response.message))
+    thinking_lifecycle = _safe_dict(metadata.get("thinking_lifecycle"))
+    public_thinking = (
+        str((thinking_lifecycle or {}).get("final_text") or "").strip()
+        or str(metadata.get("thinking_content") or "").strip()
+        or str(metadata.get("thinking") or "").strip()
+        or None
+    )
+    failover = _safe_dict(metadata.get("failover"))
+    model_switch_prompt = _safe_dict(
+        build_model_switch_prompt_for_failover(
+            failover=failover,
+            requested_provider=getattr(chat_request, "provider", None),
+        )
+    )
     return ChatResponse(
         status="success",
         data=ChatResponseData(
@@ -179,25 +227,28 @@ def build_chat_response(
                 chat_request.message,
                 cleaned_message,
             ),
-            domain_notice=metadata.get("domain_notice"),
+            domain_notice=_safe_optional_text(metadata.get("domain_notice")),
         ),
         metadata=ChatResponseMetadata(
             processing_time=round(processing_time, 3),
-            provider=provider_name,
-            model=model_name or "",
+            provider=_safe_optional_text(provider_name),
+            model=_safe_text(model_name or ""),
             agent_type=internal_response.agent_type,
-            session_id=metadata.get("session_id"),
+            session_id=_safe_optional_text(metadata.get("session_id")),
             tools_used=tools_used,
-            reasoning_trace=metadata.get("reasoning_trace"),
-            thinking_content=metadata.get("thinking_content"),
-            thinking=metadata.get("thinking"),
-            thinking_lifecycle=metadata.get("thinking_lifecycle"),
-            failover=metadata.get("failover"),
-            model_switch_prompt=build_model_switch_prompt_for_failover(
-                failover=metadata.get("failover"),
-                requested_provider=getattr(chat_request, "provider", None),
+            reasoning_trace=_safe_dict(metadata.get("reasoning_trace")),
+            thinking_content=public_thinking,
+            thinking=public_thinking,
+            thinking_lifecycle=thinking_lifecycle,
+            failover=failover,
+            model_switch_prompt=model_switch_prompt,
+            routing_metadata=_safe_dict(metadata.get("routing_metadata")),
+            runtime_flow_trace=(
+                sanitize_runtime_flow_trace(metadata.get("runtime_flow_trace"))
+                if metadata.get("runtime_flow_trace")
+                else None
             ),
-            routing_metadata=metadata.get("routing_metadata"),
+            post_turn_lifecycle=_safe_dict(metadata.get("post_turn_lifecycle")),
             topics_accessed=topics_accessed,
             confidence_score=round(confidence_score, 2) if confidence_score else None,
             document_ids_used=document_ids_used,

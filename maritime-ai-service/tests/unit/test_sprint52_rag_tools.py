@@ -44,6 +44,7 @@ class TestRAGToolState:
         assert state.reasoning_trace is None
         assert state.confidence == 0.0
         assert state.is_complete is False
+        assert state.identity_key is None
 
     def test_get_state_creates_new(self):
         from app.engine.tools.rag_tools import _get_state
@@ -55,6 +56,74 @@ class TestRAGToolState:
         s1 = _get_state()
         s2 = _get_state()
         assert s1 is s2
+
+    def test_same_runtime_identity_preserves_state(self):
+        from app.engine.tools.rag_tools import _get_state, get_last_retrieved_sources
+        from app.engine.tools.runtime_context import (
+            build_tool_runtime_context,
+            tool_runtime_scope,
+        )
+
+        ctx = build_tool_runtime_context(
+            user_id="user-a",
+            organization_id="org-a",
+            session_id="session-a",
+        )
+
+        with tool_runtime_scope(ctx):
+            state = _get_state()
+            state.sources = [{"title": "SOLAS"}]
+
+            assert _get_state() is state
+            assert get_last_retrieved_sources() == [{"title": "SOLAS"}]
+
+    def test_runtime_context_identity_isolates_rag_state(self):
+        from app.engine.tools.rag_tools import (
+            _get_state,
+            get_last_confidence,
+            get_last_native_thinking,
+            get_last_reasoning_trace,
+            get_last_retrieved_sources,
+        )
+        from app.engine.tools.runtime_context import (
+            build_tool_runtime_context,
+            tool_runtime_scope,
+        )
+
+        ctx_a = build_tool_runtime_context(
+            user_id="user-a",
+            organization_id="org-a",
+            session_id="session-a",
+        )
+        ctx_b = build_tool_runtime_context(
+            user_id="user-a",
+            organization_id="org-b",
+            session_id="session-a",
+        )
+        trace = MagicMock()
+
+        with tool_runtime_scope(ctx_a):
+            state = _get_state()
+            state.sources = [{"title": "Private Org A Source"}]
+            state.native_thinking = "Org A reasoning"
+            state.reasoning_trace = trace
+            state.confidence = 0.92
+            state.is_complete = True
+
+            assert get_last_retrieved_sources() == [{"title": "Private Org A Source"}]
+            assert get_last_native_thinking() == "Org A reasoning"
+            assert get_last_reasoning_trace() is trace
+            assert get_last_confidence() == (0.92, True)
+
+        with tool_runtime_scope(ctx_b):
+            assert get_last_retrieved_sources() == []
+            assert get_last_native_thinking() is None
+            assert get_last_reasoning_trace() is None
+            assert get_last_confidence() == (0.0, False)
+
+        with tool_runtime_scope(ctx_a):
+            assert get_last_retrieved_sources() == []
+            assert get_last_native_thinking() is None
 
 
 class TestInitRagTools:

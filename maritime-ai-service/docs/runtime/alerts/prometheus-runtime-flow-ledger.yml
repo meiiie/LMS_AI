@@ -1,0 +1,53 @@
+# Prometheus alert rules for Wiii runtime-flow ledger diagnostics.
+#
+# Source metric: app code emits runtime.runtime_flow_ledger.alerts and
+# GET /metrics serializes it as runtime_runtime_flow_ledger_alerts.
+# Labels on the source counter: code, severity, status, transport.
+groups:
+  - name: wiii-runtime-flow-ledger
+    interval: 30s
+    rules:
+      - alert: WiiiRuntimeFlowLedgerCritical
+        expr: |
+          sum by (code, transport) (
+            increase(runtime_runtime_flow_ledger_alerts{severity="critical"}[10m])
+          ) > 0
+        for: 2m
+        labels:
+          service: wiii-ai
+          component: runtime-flow-ledger
+          severity: p1_page
+        annotations:
+          summary: "Critical runtime-flow ledger alert: {{ $labels.code }}"
+          description: "A critical privacy or request-correlation ledger alert was emitted on {{ $labels.transport }}."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/runtime-flow-ledger-alerts.md"
+
+      - alert: WiiiRuntimeFlowLedgerError
+        expr: |
+          sum by (code, transport) (
+            increase(runtime_runtime_flow_ledger_alerts{severity="error"}[15m])
+          ) > 0
+        for: 5m
+        labels:
+          service: wiii-ai
+          component: runtime-flow-ledger
+          severity: p2_page
+        annotations:
+          summary: "Runtime-flow ledger error: {{ $labels.code }}"
+          description: "An error-level ledger alert was emitted on {{ $labels.transport }}. Common codes include missing_done_event, failed_finalization, and provider_call_stage_request_id_missing."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/runtime-flow-ledger-alerts.md"
+
+      - alert: WiiiRuntimeFlowLedgerWarningBurst
+        expr: |
+          sum by (code, transport) (
+            increase(runtime_runtime_flow_ledger_alerts{severity="warning"}[30m])
+          ) > 10
+        for: 10m
+        labels:
+          service: wiii-ai
+          component: runtime-flow-ledger
+          severity: p3_ticket
+        annotations:
+          summary: "Runtime-flow ledger warning burst: {{ $labels.code }}"
+          description: "Warning-level ledger alerts crossed the operational threshold on {{ $labels.transport }}. Common codes include missing_request_id and context_warning."
+          runbook: "maritime-ai-service/docs/runtime/runbooks/runtime-flow-ledger-alerts.md"

@@ -12,12 +12,15 @@ Thread views track all user conversations for:
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
+_THREAD_REPOSITORY_MISSING_ORG_WARNING = "thread_repository_blocked_missing_org_context"
+_THREAD_ORG_FILTER = " AND organization_id = :org_id"
 
 # Sprint 194b (M1): Thread ID segment sanitizer — prevents injection via
 # composite thread IDs (org_{X}__user_{Y}__session_{Z}).
@@ -27,6 +30,14 @@ _THREAD_SEGMENT_RE = re.compile(r"[^a-zA-Z0-9_\-.]")
 def _sanitize_thread_segment(segment: str, max_len: int = 128) -> str:
     """Remove characters that could break thread ID format or enable injection."""
     return _THREAD_SEGMENT_RE.sub("", segment)[:max_len]
+
+
+@dataclass(frozen=True)
+class ThreadOrgScope:
+    org_id: Optional[str]
+    state: str
+    warnings: list[str]
+    write_allowed: bool
 
 
 class ThreadRepository:
@@ -64,6 +75,69 @@ class ThreadRepository:
             logger.debug("ThreadRepository availability check failed: %s", e)
             return False
 
+    def _org_scope(
+        self,
+        organization_id: Optional[str] = None,
+        *,
+        write: bool = False,
+    ) -> tuple[ThreadOrgScope, Optional[str], dict[str, object]]:
+        scope = self._resolve_thread_org_scope(
+            organization_id=organization_id,
+            write=write,
+        )
+        if not scope.write_allowed or not scope.org_id:
+            return scope, None, {}
+        return scope, _THREAD_ORG_FILTER, {"org_id": scope.org_id}
+
+    def _resolve_thread_org_scope(
+        self,
+        *,
+        organization_id: Optional[str] = None,
+        write: bool = False,
+    ) -> ThreadOrgScope:
+        if isinstance(organization_id, str) and organization_id.strip():
+            return ThreadOrgScope(
+                org_id=organization_id.strip(),
+                state="explicit",
+                warnings=[],
+                write_allowed=True,
+            )
+
+        from app.engine.semantic_memory.write_audit import (
+            resolve_memory_read_scope,
+            resolve_memory_write_scope,
+        )
+
+        scope = resolve_memory_write_scope() if write else resolve_memory_read_scope()
+        return ThreadOrgScope(
+            org_id=scope.org_id,
+            state=scope.state,
+            warnings=list(scope.warnings),
+            write_allowed=scope.write_allowed,
+        )
+
+    def _log_thread_scope_blocked(
+        self,
+        operation: str,
+        scope: ThreadOrgScope,
+        *,
+        user_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_THREAD_REPOSITORY_MISSING_ORG_WARNING)
+        logger.warning(
+            "[THREAD_REPO] %s blocked user_hash=%s thread_hash=%s org_hash=%s "
+            "org_scope=%s warnings=%s",
+            operation,
+            _hash_memory_identifier(user_id),
+            _hash_memory_identifier(thread_id),
+            _hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
+
     def upsert_thread(
         self,
         thread_id: str,
@@ -99,10 +173,18 @@ class ThreadRepository:
         thread_id = _sanitize_thread_segment(thread_id, max_len=512)
         user_id = _sanitize_thread_segment(user_id)
 
-        # Ensure org_id is never None (background tasks lack request context)
-        if organization_id is None:
-            from app.core.org_filter import get_effective_org_id
-            organization_id = get_effective_org_id()
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_thread_scope_blocked(
+                "upsert_thread",
+                scope,
+                user_id=user_id,
+                thread_id=thread_id,
+            )
+            return None
 
         now = datetime.now(timezone.utc)
 
@@ -113,9 +195,10 @@ class ThreadRepository:
                     text(
                         f"SELECT thread_id, message_count, extra_data "
                         f"FROM {self.TABLE_NAME} "
-                        f"WHERE thread_id = :thread_id"
+                        f"WHERE thread_id = :thread_id AND user_id = :user_id"
+                        f"{org_filter}"
                     ),
-                    {"thread_id": thread_id},
+                    {"thread_id": thread_id, "user_id": user_id, **org_params},
                 ).fetchone()
 
                 if result:
@@ -142,16 +225,21 @@ class ThreadRepository:
                     )
                     if title:
                         update_sql += ", title = :title"
-                    update_sql += " WHERE thread_id = :thread_id"
+                    update_sql += (
+                        " WHERE thread_id = :thread_id AND user_id = :user_id"
+                        f"{org_filter}"
+                    )
 
                     session.execute(
                         text(update_sql),
                         {
                             "thread_id": thread_id,
+                            "user_id": user_id,
                             "count": current_count + message_count_increment,
                             "now": now,
                             "extra": _json.dumps(current_extra, ensure_ascii=False),
                             **({"title": title} if title else {}),
+                            **org_params,
                         },
                     )
                 else:
@@ -174,7 +262,7 @@ class ThreadRepository:
                             "count": message_count_increment,
                             "now": now,
                             "extra": json.dumps(extra_data or {}),
-                            "org_id": organization_id,
+                            **org_params,
                         },
                     )
 
@@ -222,16 +310,27 @@ class ThreadRepository:
         self._ensure_initialized()
         if not self._session_factory:
             return []
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_thread_scope_blocked(
+                "list_threads",
+                scope,
+                user_id=user_id,
+            )
+            return []
 
         try:
             with self._session_factory() as session:
                 where_clause = "WHERE user_id = :user_id"
-                params: dict = {"user_id": user_id, "limit": limit, "offset": offset}
+                params: dict = {
+                    "user_id": user_id,
+                    "limit": limit,
+                    "offset": offset,
+                    **org_params,
+                }
                 if not include_deleted:
                     where_clause += " AND (is_deleted = false OR is_deleted IS NULL)"
-                if organization_id is not None:
-                    where_clause += " AND organization_id = :org_id"
-                    params["org_id"] = organization_id
+                where_clause += org_filter
 
                 result = session.execute(
                     text(
@@ -252,13 +351,19 @@ class ThreadRepository:
             logger.error("Thread list failed: %s", e)
             return []
 
-    def get_thread(self, thread_id: str, user_id: Optional[str] = None) -> Optional[dict]:
+    def get_thread(
+        self,
+        thread_id: str,
+        user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+    ) -> Optional[dict]:
         """
         Get a single thread by ID, optionally with ownership check.
 
         Args:
             thread_id: Thread ID to retrieve
             user_id: User ID for ownership verification (None = no ownership filter)
+            organization_id: Organization ID for multi-tenant isolation
 
         Returns:
             Thread dict, or None if not found
@@ -267,10 +372,15 @@ class ThreadRepository:
         if not self._session_factory:
             return None
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_thread_scope_blocked(
+                "get_thread",
+                scope,
+                user_id=user_id,
+                thread_id=thread_id,
+            )
+            return None
 
         try:
             with self._session_factory() as session:
@@ -283,7 +393,11 @@ class ThreadRepository:
                         f"WHERE thread_id = :thread_id AND user_id = :user_id"
                         f"{org_filter}"
                     )
-                    params: dict = {"thread_id": thread_id, "user_id": user_id}
+                    params: dict = {
+                        "thread_id": thread_id,
+                        "user_id": user_id,
+                        **org_params,
+                    }
                 else:
                     query = text(
                         f"SELECT thread_id, user_id, domain_id, title, "
@@ -293,9 +407,7 @@ class ThreadRepository:
                         f"WHERE thread_id = :thread_id"
                         f"{org_filter}"
                     )
-                    params = {"thread_id": thread_id}
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
+                    params = {"thread_id": thread_id, **org_params}
                 result = session.execute(query, params).fetchone()
 
                 if not result:
@@ -307,13 +419,19 @@ class ThreadRepository:
             logger.error("Thread get failed: %s", e)
             return None
 
-    def delete_thread(self, thread_id: str, user_id: str) -> bool:
+    def delete_thread(
+        self,
+        thread_id: str,
+        user_id: str,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """
         Soft-delete a thread (set is_deleted=true).
 
         Args:
             thread_id: Thread ID to delete
             user_id: User ID for ownership verification
+            organization_id: Organization ID for multi-tenant isolation
 
         Returns:
             True if deleted, False if not found or not owned
@@ -322,10 +440,18 @@ class ThreadRepository:
         if not self._session_factory:
             return False
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_thread_scope_blocked(
+                "delete_thread",
+                scope,
+                user_id=user_id,
+                thread_id=thread_id,
+            )
+            return False
 
         try:
             with self._session_factory() as session:
@@ -333,9 +459,8 @@ class ThreadRepository:
                     "thread_id": thread_id,
                     "user_id": user_id,
                     "now": datetime.now(timezone.utc),
+                    **org_params,
                 }
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
 
                 result = session.execute(
                     text(
@@ -354,7 +479,13 @@ class ThreadRepository:
             logger.error("Thread delete failed: %s", e)
             return False
 
-    def rename_thread(self, thread_id: str, user_id: str, title: str) -> bool:
+    def rename_thread(
+        self,
+        thread_id: str,
+        user_id: str,
+        title: str,
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """
         Rename a thread with ownership check.
 
@@ -362,6 +493,7 @@ class ThreadRepository:
             thread_id: Thread ID to rename
             user_id: User ID for ownership verification
             title: New title
+            organization_id: Organization ID for multi-tenant isolation
 
         Returns:
             True if renamed, False if not found or not owned
@@ -370,10 +502,18 @@ class ThreadRepository:
         if not self._session_factory:
             return False
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_thread_scope_blocked(
+                "rename_thread",
+                scope,
+                user_id=user_id,
+                thread_id=thread_id,
+            )
+            return False
 
         try:
             with self._session_factory() as session:
@@ -382,9 +522,8 @@ class ThreadRepository:
                     "user_id": user_id,
                     "title": title,
                     "now": datetime.now(timezone.utc),
+                    **org_params,
                 }
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
 
                 result = session.execute(
                     text(
@@ -403,7 +542,11 @@ class ThreadRepository:
             return False
 
     def update_extra_data(
-        self, thread_id: str, user_id: str, extra_data: dict
+        self,
+        thread_id: str,
+        user_id: str,
+        extra_data: dict,
+        organization_id: Optional[str] = None,
     ) -> bool:
         """
         Merge extra_data into a thread's JSONB field.
@@ -414,6 +557,7 @@ class ThreadRepository:
             thread_id: Thread ID
             user_id: User ID for ownership verification
             extra_data: Dict to merge into existing extra_data
+            organization_id: Organization ID for multi-tenant isolation
 
         Returns:
             True if updated
@@ -422,10 +566,18 @@ class ThreadRepository:
         if not self._session_factory:
             return False
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(
+            organization_id,
+            write=True,
+        )
+        if org_filter is None:
+            self._log_thread_scope_blocked(
+                "update_extra_data",
+                scope,
+                user_id=user_id,
+                thread_id=thread_id,
+            )
+            return False
 
         try:
             import json
@@ -435,9 +587,8 @@ class ThreadRepository:
                     "user_id": user_id,
                     "extra": json.dumps(extra_data),
                     "now": datetime.now(timezone.utc),
+                    **org_params,
                 }
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
 
                 result = session.execute(
                     text(
@@ -457,7 +608,10 @@ class ThreadRepository:
             return False
 
     def get_threads_with_summaries(
-        self, user_id: str, limit: int = 15
+        self,
+        user_id: str,
+        limit: int = 15,
+        organization_id: Optional[str] = None,
     ) -> list[dict]:
         """
         Get recent threads that have summaries (for Layer 3 context).
@@ -467,6 +621,7 @@ class ThreadRepository:
         Args:
             user_id: Owner user ID
             limit: Max threads to return
+            organization_id: Organization ID for multi-tenant isolation
 
         Returns:
             List of dicts with thread_id, title, summary, last_message_at
@@ -475,16 +630,18 @@ class ThreadRepository:
         if not self._session_factory:
             return []
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_thread_scope_blocked(
+                "get_threads_with_summaries",
+                scope,
+                user_id=user_id,
+            )
+            return []
 
         try:
             with self._session_factory() as session:
-                params: dict = {"user_id": user_id, "limit": limit}
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
+                params: dict = {"user_id": user_id, "limit": limit, **org_params}
 
                 result = session.execute(
                     text(
@@ -516,22 +673,28 @@ class ThreadRepository:
             logger.error("Thread summaries retrieval failed: %s", e)
             return []
 
-    def count_threads(self, user_id: str) -> int:
+    def count_threads(
+        self,
+        user_id: str,
+        organization_id: Optional[str] = None,
+    ) -> int:
         """Count active (non-deleted) threads for a user."""
         self._ensure_initialized()
         if not self._session_factory:
             return 0
 
-        # Sprint 160b: Org-scoped filtering
-        from app.core.org_filter import get_effective_org_id, org_where_clause
-        eff_org_id = get_effective_org_id()
-        org_filter = org_where_clause(eff_org_id)
+        scope, org_filter, org_params = self._org_scope(organization_id)
+        if org_filter is None:
+            self._log_thread_scope_blocked(
+                "count_threads",
+                scope,
+                user_id=user_id,
+            )
+            return 0
 
         try:
             with self._session_factory() as session:
-                params: dict = {"user_id": user_id}
-                if eff_org_id is not None:
-                    params["org_id"] = eff_org_id
+                params: dict = {"user_id": user_id, **org_params}
 
                 result = session.execute(
                     text(
@@ -578,3 +741,9 @@ def get_thread_repository() -> ThreadRepository:
     if _thread_repo is None:
         _thread_repo = ThreadRepository()
     return _thread_repo
+
+
+def _hash_memory_identifier(value) -> str | None:
+    from app.engine.semantic_memory.privacy import hash_memory_identifier
+
+    return hash_memory_identifier(value)

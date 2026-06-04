@@ -1,0 +1,166 @@
+name: Semantic Memory Write Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/semantic-memory-write-evidence.yml"
+      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
+      - "docs/operations/WIII_SELF_HARNESS.md"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/api/v1/admin.py"
+      - "maritime-ai-service/app/engine/multi_agent/runtime_flow_doctor.py"
+      - "maritime-ai-service/app/engine/multi_agent/runtime_flow_ledger.py"
+      - "maritime-ai-service/app/engine/runtime/session_event_log.py"
+      - "maritime-ai-service/app/engine/semantic_memory/**"
+      - "maritime-ai-service/app/services/post_turn_lifecycle.py"
+      - "maritime-ai-service/scripts/probe_live_semantic_memory_write_doctor.py"
+      - "maritime-ai-service/tests/unit/test_post_turn_lifecycle.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_semantic_memory_write_doctor.py"
+      - "maritime-ai-service/tests/unit/test_runtime_flow_doctor.py"
+      - "maritime-ai-service/tests/unit/test_semantic_memory_privacy.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/semantic-memory-write-evidence.yml"
+      - "docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md"
+      - "docs/operations/WIII_SELF_HARNESS.md"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/api/v1/admin.py"
+      - "maritime-ai-service/app/engine/multi_agent/runtime_flow_doctor.py"
+      - "maritime-ai-service/app/engine/multi_agent/runtime_flow_ledger.py"
+      - "maritime-ai-service/app/engine/runtime/session_event_log.py"
+      - "maritime-ai-service/app/engine/semantic_memory/**"
+      - "maritime-ai-service/app/services/post_turn_lifecycle.py"
+      - "maritime-ai-service/scripts/probe_live_semantic_memory_write_doctor.py"
+      - "maritime-ai-service/tests/unit/test_post_turn_lifecycle.py"
+      - "maritime-ai-service/tests/unit/test_probe_live_semantic_memory_write_doctor.py"
+      - "maritime-ai-service/tests/unit/test_runtime_flow_doctor.py"
+      - "maritime-ai-service/tests/unit/test_semantic_memory_privacy.py"
+  schedule:
+    - cron: "20 4 * * *"
+  workflow_dispatch:
+    inputs:
+      run_semantic_memory_write_doctor:
+        description: "Run the guarded semantic-memory write doctor evidence probe."
+        required: true
+        type: boolean
+        default: false
+      allow_production:
+        description: "Permit production settings.environment."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Semantic Memory Write Doctor Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      GOOGLE_API_KEY: fake-key-for-unit-tests
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run semantic-memory write doctor unit tests
+        working-directory: maritime-ai-service
+        run: python -m pytest tests/unit/test_probe_live_semantic_memory_write_doctor.py tests/unit/test_runtime_evidence_output.py tests/unit/test_semantic_memory_privacy.py tests/unit/test_post_turn_lifecycle.py tests/unit/test_runtime_flow_doctor.py -q --tb=short
+
+  live-semantic-memory-write-evidence:
+    name: Live Semantic Memory Write Evidence
+    runs-on: ubuntu-latest
+    environment: wiii-runtime-evidence
+    timeout-minutes: 30
+    needs: contract
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && inputs.run_semantic_memory_write_doctor == true) ||
+        (github.event_name == 'schedule' && vars.WIII_SEMANTIC_MEMORY_WRITE_EVIDENCE_ENABLED == '1')
+      }}
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      WIII_LIVE_SEMANTIC_MEMORY_WRITE_DOCTOR: "1"
+      GOOGLE_API_KEY: fake-key-for-local-replay
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate semantic-memory write evidence
+        working-directory: maritime-ai-service
+        env:
+          ALLOW_PRODUCTION_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_production || false }}
+        run: |
+          set -euo pipefail
+
+          args=()
+          if [[ "${ALLOW_PRODUCTION_INPUT}" == "true" ]]; then
+            args+=(--allow-production)
+          fi
+
+          python scripts/probe_live_semantic_memory_write_doctor.py --allow-run "${args[@]}" \
+            --out semantic-memory-write-evidence.json
+
+      - name: Validate semantic-memory write evidence
+        working-directory: maritime-ai-service
+        run: |
+          python ../tools/wiii_self_harness/validate_runtime_evidence_artifact.py \
+            semantic-memory-write-evidence.json \
+            --requirement-id semantic-memory-write-doctor
+
+      - name: Upload semantic-memory write evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: semantic-memory-write-evidence-${{ github.run_id }}
+          path: maritime-ai-service/semantic-memory-write-evidence.json
+          if-no-files-found: error
+          retention-days: 30

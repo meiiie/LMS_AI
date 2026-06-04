@@ -44,6 +44,113 @@ async def test_wake_skips_unknown_event_types(log):
 
 # ── basic message replay ──
 
+async def test_wake_reconstructs_subagent_runs_without_raw_child_history(log):
+    await log.append(
+        session_id="s",
+        event_type="subagent_started",
+        payload={
+            "child_session_id": "s::sub::abc12345",
+            "task": {
+                "version": "wiii.subagent_task_provenance.v1",
+                "description": {
+                    "present": True,
+                    "char_count": 42,
+                    "hash": "sha256:taskhash",
+                    "text": "raw task must not replay",
+                },
+                "context_hint_count": 2,
+                "metadata_keys": ["route"],
+                "raw_prompt": "Bearer raw-task-token-123",
+            },
+        },
+    )
+    await log.append(
+        session_id="s",
+        event_type="subagent_completed",
+        payload={
+            "child_session_id": "s::sub::abc12345",
+            "result": {
+                "version": "wiii.subagent_result_provenance.v1",
+                "status": "success",
+                "summary": {
+                    "present": True,
+                    "char_count": 11,
+                    "hash": "sha256:summaryhash",
+                    "text": "raw answer",
+                },
+                "source_count": 1,
+                "tool_calls_made": 2,
+                "duration_ms": 50,
+                "provider_payload": {"id": "raw-provider"},
+            },
+        },
+    )
+
+    state = await wake(session_id="s", log=log)
+
+    assert state.messages == []
+    assert state.pending_subagents == []
+    assert state.subagent_runs == [
+        {
+            "child_session_id": "s::sub::abc12345",
+            "result": {
+                "version": "wiii.subagent_result_provenance.v1",
+                "status": "success",
+                "summary": {
+                    "present": True,
+                    "char_count": 11,
+                    "hash": "sha256:summaryhash",
+                },
+                "source_count": 1,
+                "tool_calls_made": 2,
+                "duration_ms": 50,
+                "error": {"present": False, "char_count": 0},
+            },
+            "task": {
+                "version": "wiii.subagent_task_provenance.v1",
+                "description": {
+                    "present": True,
+                    "char_count": 42,
+                    "hash": "sha256:taskhash",
+                },
+                "context_hint_count": 2,
+                "metadata_keys": ["route"],
+            },
+        }
+    ]
+    serialized = str(state.subagent_runs)
+    assert "raw task must not replay" not in serialized
+    assert "raw answer" not in serialized
+    assert "raw-provider" not in serialized
+    assert "raw-task-token-123" not in serialized
+
+
+async def test_wake_tracks_pending_subagent_without_completion(log):
+    await log.append(
+        session_id="s",
+        event_type="subagent_started",
+        payload={
+            "child_session_id": "s::sub::pending",
+            "description": "legacy raw task Bearer raw-task-token-123",
+            "metadata": {"route": "research", "access_token": "raw-token"},
+        },
+    )
+
+    state = await wake(session_id="s", log=log)
+
+    assert state.subagent_runs == []
+    assert len(state.pending_subagents) == 1
+    pending = state.pending_subagents[0]
+    assert pending["child_session_id"] == "s::sub::pending"
+    assert pending["task"]["description"]["present"] is True
+    assert pending["task"]["description"]["hash"].startswith("sha256:")
+    assert pending["task"]["metadata_keys"] == ["route"]
+    serialized = str(state.pending_subagents)
+    assert "legacy raw task" not in serialized
+    assert "raw-task-token-123" not in serialized
+    assert "raw-token" not in serialized
+
+
 async def test_wake_user_then_assistant(log):
     await log.append(
         session_id="s", event_type="user_message", payload={"text": "hello"}
@@ -137,6 +244,54 @@ async def test_wake_tool_result_clears_pending_call(log):
     assert state.messages[1].tool_call_id == "call_1"
     assert state.messages[1].content == "result-text"
     assert state.pending_tool_calls == []
+
+
+async def test_wake_sanitizes_replayed_tool_result_payload(log):
+    await log.append(
+        session_id="s",
+        event_type="assistant_message",
+        payload={
+            "text": "let me check",
+            "tool_calls": [
+                {"id": "call_1", "name": "host_action", "arguments": {}}
+            ],
+        },
+    )
+    await log.append(
+        session_id="s",
+        event_type="tool_result",
+        payload={"tool_call_id": "call_1", "content": "placeholder"},
+    )
+
+    import dataclasses
+
+    # Simulate a legacy/custom backend returning an unsanitized row.
+    state_obj = log._sessions["s"]
+    state_obj.events[1] = dataclasses.replace(
+        state_obj.events[1],
+        payload={
+            "tool_call_id": "call_1",
+            "content": (
+                '{"status":"ok","safe_id":"post-1",'
+                '"note":"Bearer raw-bearer-token-123",'
+                '"approval_token":"raw-approval-token"}'
+            ),
+            "access_token": "raw-access-token",
+        },
+    )
+
+    state = await wake(session_id="s", log=log)
+
+    assert [m.role for m in state.messages] == ["assistant", "tool"]
+    tool_message = state.messages[1]
+    assert tool_message.tool_call_id == "call_1"
+    assert '"safe_id": "post-1"' in tool_message.content
+    assert "Bearer <redacted-secret>" in tool_message.content
+    assert state.pending_tool_calls == []
+    serialized = str(state.messages)
+    assert "raw-bearer-token-123" not in serialized
+    assert "raw-approval-token" not in serialized
+    assert "raw-access-token" not in serialized
 
 
 async def test_wake_partial_tool_results_keeps_remaining_pending(log):

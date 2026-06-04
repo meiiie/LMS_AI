@@ -128,3 +128,123 @@ async def test_submit_host_action_audit_logs_success(monkeypatch):
     assert captured["organization_id"] == "org-1"
     assert captured["target_id"] == "quiz-1"
     assert captured["metadata"]["quiz_title"] == "Quiz cuoi chuong"
+
+
+@pytest.mark.asyncio
+async def test_host_action_result_bridge_resumes_pending_result() -> None:
+    from app.engine.context.host_action_result_bridge import (
+        publish_host_action_result,
+        register_host_action_result_request,
+        wait_for_host_action_result,
+    )
+
+    ticket = register_host_action_result_request(
+        request_id="req-result-bridge-1",
+        action="wiii_connect.facebook_post.direct_apply",
+        user_id="teacher-1",
+        organization_id="org-1",
+    )
+
+    publication = publish_host_action_result(
+        request_id="req-result-bridge-1",
+        action="wiii_connect.facebook_post.direct_apply",
+        success=True,
+        summary="Da dang.",
+        data={
+            "post_id": "post-1",
+            "approval_token": "secret-approval",
+            "nested": {"image_base64": "secret-image"},
+        },
+        user_id="teacher-1",
+        organization_id="org-1",
+    )
+    payload = await wait_for_host_action_result(ticket, timeout_seconds=0.1)
+
+    assert publication.status == "accepted"
+    assert payload is not None
+    assert payload["status"] == "action_completed"
+    assert payload["success"] is True
+    assert payload["data"]["post_id"] == "post-1"
+    assert payload["data"]["approval_token"] == "[redacted]"
+    assert payload["data"]["nested"]["image_base64"] == "[redacted]"
+
+
+@pytest.mark.asyncio
+async def test_submit_host_action_result_rejects_identity_mismatch() -> None:
+    from app.api.v1.host_actions import submit_host_action_result
+    from app.core.security import AuthenticatedUser
+    from app.engine.context.host_action_result_bridge import (
+        register_host_action_result_request,
+        wait_for_host_action_result,
+    )
+    from app.models.host_context_schemas import HostActionResultRequest
+    from fastapi import HTTPException
+
+    ticket = register_host_action_result_request(
+        request_id="req-result-identity-1",
+        action="wiii_connect.facebook_post.direct_apply",
+        user_id="teacher-1",
+        organization_id="org-1",
+    )
+    auth = AuthenticatedUser(
+        user_id="other-user",
+        auth_method="jwt",
+        role="teacher",
+        organization_id="org-1",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await submit_host_action_result(
+            _make_request(),
+            HostActionResultRequest(
+                action="wiii_connect.facebook_post.direct_apply",
+                request_id="req-result-identity-1",
+                success=True,
+            ),
+            auth,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert await wait_for_host_action_result(ticket, timeout_seconds=0.01) is None
+
+
+@pytest.mark.asyncio
+async def test_submit_host_action_result_accepts_matching_pending_request() -> None:
+    from app.api.v1.host_actions import submit_host_action_result
+    from app.core.security import AuthenticatedUser
+    from app.engine.context.host_action_result_bridge import (
+        register_host_action_result_request,
+        wait_for_host_action_result,
+    )
+    from app.models.host_context_schemas import HostActionResultRequest
+
+    ticket = register_host_action_result_request(
+        request_id="req-result-api-1",
+        action="wiii_connect.facebook_post.direct_apply",
+        user_id="teacher-1",
+        organization_id="org-1",
+    )
+    auth = AuthenticatedUser(
+        user_id="teacher-1",
+        auth_method="jwt",
+        role="teacher",
+        organization_id="org-1",
+    )
+
+    response = await submit_host_action_result(
+        _make_request(),
+        HostActionResultRequest(
+            action="wiii_connect.facebook_post.direct_apply",
+            request_id="req-result-api-1",
+            success=True,
+            summary="Da dang len Facebook.",
+            data={"provider_post_id": "post-123"},
+        ),
+        auth,
+    )
+    payload = await wait_for_host_action_result(ticket, timeout_seconds=0.1)
+
+    assert response.status == "accepted"
+    assert response.matched is True
+    assert payload is not None
+    assert payload["summary"] == "Da dang len Facebook."

@@ -19,6 +19,9 @@ from app.engine.tools.tool_capability_registry import (
     HOST_ACTION_PREFIX,
     LMS_DOCUMENT_PREVIEW_TOOL_NAMES,
     POINTY_TOOL_PREFIX,
+    WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL,
+    WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+    WIII_CONNECT_LIST_ACTIONS_TOOL,
     WEATHER_TOOL_NAMES,
 )
 
@@ -28,6 +31,8 @@ TurnPathName = Literal[
     "host_ui_navigation",
     "pointy_guidance",
     "lms_document_preview",
+    "external_connection_status",
+    "external_app_action",
     "weather_lookup",
     "web_search",
     "datetime_lookup",
@@ -66,6 +71,8 @@ class TurnPathSignals:
     looks_document_preview: bool = False
     looks_reasoning_safety_meta: bool = False
     looks_wiii_pipeline_meta: bool = False
+    needs_external_connection_status: bool = False
+    needs_external_app_action: bool = False
     needs_weather_lookup: bool = False
     needs_web_search: bool = False
     needs_datetime: bool = False
@@ -117,6 +124,7 @@ class TurnPathDecision:
 
     def to_metadata(self) -> dict[str, Any]:
         return {
+            "version": "turn_path_decision.v1",
             "path": self.path,
             "reason": self.reason,
             "bind_tools": self.bind_tools,
@@ -179,6 +187,32 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             allow_agent_handoff=False,
         )
 
+    if signals.needs_external_connection_status:
+        return TurnPathDecision(
+            path="external_connection_status",
+            reason="wiii_connect_provider_status_request",
+            bind_tools=False,
+            allow_all_tools=False,
+            allow_agent_handoff=False,
+        )
+
+    if signals.needs_external_app_action:
+        return TurnPathDecision(
+            path="external_app_action",
+            reason="wiii_connect_external_app_action_request",
+            force_tools=True,
+            allow_all_tools=False,
+            allowed_tool_names=frozenset(
+                {
+                    WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL,
+                    WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+                    WIII_CONNECT_LIST_ACTIONS_TOOL,
+                }
+            ),
+            forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
+            allow_agent_handoff=False,
+        )
+
     if signals.host_ui_navigation:
         return TurnPathDecision(
             path="host_ui_navigation",
@@ -206,6 +240,32 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             reason="low_signal_noise_no_tool",
             bind_tools=False,
             allow_all_tools=False,
+            allow_agent_handoff=False,
+        )
+
+    if signals.prefers_code_execution_lane and not signals.web_search_forced:
+        return TurnPathDecision(
+            path="code_execution",
+            reason="code_or_analysis_belongs_to_code_studio",
+            bind_tools=False,
+            allow_all_tools=False,
+            allow_agent_handoff=False,
+        )
+
+    if signals.visual_force_tool and not signals.web_search_forced:
+        allowed_tool_names = frozenset(signals.visual_required_tool_names)
+        strict_visual_lane = (
+            signals.visual_presentation_intent
+            in {"article_figure", "chart_runtime", "code_studio_app", "artifact"}
+            and bool(allowed_tool_names)
+        )
+        return TurnPathDecision(
+            path="visual_generation",
+            reason=f"visual_intent_{signals.visual_presentation_intent or 'unknown'}",
+            force_tools=True,
+            allow_all_tools=not strict_visual_lane,
+            allowed_tool_names=allowed_tool_names,
+            forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
             allow_agent_handoff=False,
         )
 
@@ -277,32 +337,6 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             reason="character_memory_tool_request",
             allow_all_tools=False,
             allowed_tool_names=CHARACTER_MEMORY_TOOL_NAMES,
-            allow_agent_handoff=False,
-        )
-
-    if signals.prefers_code_execution_lane:
-        return TurnPathDecision(
-            path="code_execution",
-            reason="code_or_analysis_belongs_to_code_studio",
-            bind_tools=False,
-            allow_all_tools=False,
-            allow_agent_handoff=False,
-        )
-
-    if signals.visual_force_tool:
-        allowed_tool_names = frozenset(signals.visual_required_tool_names)
-        strict_visual_lane = (
-            signals.visual_presentation_intent
-            in {"article_figure", "chart_runtime", "code_studio_app", "artifact"}
-            and bool(allowed_tool_names)
-        )
-        return TurnPathDecision(
-            path="visual_generation",
-            reason=f"visual_intent_{signals.visual_presentation_intent or 'unknown'}",
-            force_tools=True,
-            allow_all_tools=not strict_visual_lane,
-            allowed_tool_names=allowed_tool_names,
-            forbidden_tool_prefixes=POINTY_TOOL_PREFIXES,
             allow_agent_handoff=False,
         )
 
@@ -461,6 +495,8 @@ def _has_tool_or_output_signal(signals: TurnPathSignals) -> bool:
             signals.host_ui_navigation,
             signals.looks_document_preview,
             signals.looks_reasoning_safety_meta,
+            signals.needs_external_connection_status,
+            signals.needs_external_app_action,
             signals.needs_weather_lookup,
             signals.needs_web_search,
             signals.needs_datetime,

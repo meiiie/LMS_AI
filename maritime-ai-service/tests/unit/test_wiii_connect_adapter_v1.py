@@ -474,3 +474,23 @@ def test_execution_audit_event_reports_connection_presence_only():
     assert metadata["connection_ref_present"] is True
     assert "ca_secret_provider_ref" not in serialized
     assert "connection_id" not in serialized
+
+
+def test_execution_request_audit_metadata_includes_sanitized_request_id():
+    from app.engine.wiii_connect.adapter_v1 import WiiiConnectExecutionRequest
+
+    metadata = WiiiConnectExecutionRequest(
+        provider_slug="gmail",
+        action_slug="GMAIL_FETCH_EMAILS",
+        path="external_app_action",
+        request_id="req-wiii-connect-1",
+    ).to_audit_metadata()
+    redacted = WiiiConnectExecutionRequest(
+        provider_slug="gmail",
+        action_slug="GMAIL_FETCH_EMAILS",
+        path="external_app_action",
+        request_id="Bearer abcdefgh123456",
+    ).to_audit_metadata()
+
+    assert metadata["request_id"] == "req-wiii-connect-1"
+    assert redacted["request_id"] == "Bearer <redacted-secret>"

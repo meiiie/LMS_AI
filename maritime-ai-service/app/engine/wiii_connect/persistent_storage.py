@@ -22,6 +22,13 @@ from .adapter_v1 import (
     normalize_connection_state,
 )
 from .audit_ledger import WiiiConnectAuditLedgerRecord
+from .operation_approval import (
+    WiiiConnectOperationApprovalDecision,
+    WiiiConnectOperationApprovalRecord,
+    blocked_operation_approval_decision,
+    consumed_operation_approval_decision,
+    unavailable_operation_approval_decision,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +46,7 @@ class WiiiConnectPersistentStorageStatus:
     backend: str = "postgres"
     connection_table_ready: bool = False
     audit_ledger_ready: bool = False
+    operation_approval_table_ready: bool = False
     reason: str = "database_probe_not_requested"
     warnings: tuple[str, ...] = ()
 
@@ -50,6 +58,7 @@ class WiiiConnectPersistentStorageStatus:
             "backend": self.backend,
             "connection_table_ready": self.connection_table_ready,
             "audit_ledger_ready": self.audit_ledger_ready,
+            "operation_approval_table_ready": self.operation_approval_table_ready,
             "reason": self.reason,
             "warnings": list(self.warnings),
         }
@@ -60,6 +69,7 @@ class WiiiConnectPersistentStorage:
 
     CONNECTIONS_TABLE = "wiii_connect_connections"
     AUDIT_TABLE = "wiii_connect_audit_ledger"
+    OPERATION_APPROVALS_TABLE = "wiii_connect_operation_approvals"
 
     def __init__(self, session_factory: Callable[[], Any] | None = None) -> None:
         self._session_factory = session_factory
@@ -93,11 +103,13 @@ class WiiiConnectPersistentStorage:
                 row = session.execute(
                     text(
                         "SELECT to_regclass(:connections_table), "
-                        "to_regclass(:audit_table)"
+                        "to_regclass(:audit_table), "
+                        "to_regclass(:operation_approvals_table)"
                     ),
                     {
                         "connections_table": self.CONNECTIONS_TABLE,
                         "audit_table": self.AUDIT_TABLE,
+                        "operation_approvals_table": self.OPERATION_APPROVALS_TABLE,
                     },
                 ).fetchone()
         except Exception as exc:
@@ -107,15 +119,21 @@ class WiiiConnectPersistentStorage:
                 warnings=("status_probe_failed",),
             )
 
-        connection_ready = bool(row and row[0])
-        audit_ready = bool(row and row[1])
+        connection_ready = bool(row and _row_index_value(row, 0))
+        audit_ready = bool(row and _row_index_value(row, 1))
+        operation_approval_ready = bool(row and _row_index_value(row, 2))
         ready = connection_ready and audit_ready
+        warnings: tuple[str, ...] = ()
+        if ready and not operation_approval_ready:
+            warnings = ("operation_approval_table_missing",)
         return WiiiConnectPersistentStorageStatus(
             enabled=ready,
             persistent=ready,
             connection_table_ready=connection_ready,
             audit_ledger_ready=audit_ready,
+            operation_approval_table_ready=operation_approval_ready,
             reason="ready" if ready else "migration_not_applied",
+            warnings=warnings,
         )
 
     def append_audit_record(
@@ -167,6 +185,260 @@ class WiiiConnectPersistentStorage:
                 return False
             logger.warning("Wiii Connect audit append failed: %s", exc)
             return False
+
+    def append_operation_approval_record(
+        self,
+        record: WiiiConnectOperationApprovalRecord,
+        *,
+        organization_id: str,
+        user_id: str,
+    ) -> bool:
+        """Persist one pending preview approval without raw request values."""
+
+        owner = _normalize_owner(organization_id=organization_id, user_id=user_id)
+        if owner is None or not record.preview_evidence_id:
+            return False
+        self._ensure_initialized()
+        if self._session_factory is None:
+            return False
+
+        try:
+            with self._session_factory() as session:
+                session.execute(
+                    text(
+                        f"INSERT INTO {self.OPERATION_APPROVALS_TABLE} "
+                        f"(organization_id, user_id, provider_slug, action_slug, "
+                        f"preview_evidence_id, request_fingerprint, status, reason, "
+                        f"metadata, issued_at, expires_at, consumed_at, updated_at) "
+                        f"VALUES (:organization_id, :user_id, :provider_slug, "
+                        f":action_slug, :preview_evidence_id, :request_fingerprint, "
+                        f":status, :reason, CAST(:metadata AS jsonb), :issued_at, "
+                        f":expires_at, :consumed_at, :updated_at) "
+                        f"ON CONFLICT (organization_id, user_id, provider_slug, "
+                        f"preview_evidence_id) DO UPDATE SET "
+                        f"action_slug = EXCLUDED.action_slug, "
+                        f"request_fingerprint = EXCLUDED.request_fingerprint, "
+                        f"status = 'pending', "
+                        f"reason = EXCLUDED.reason, "
+                        f"metadata = EXCLUDED.metadata, "
+                        f"issued_at = EXCLUDED.issued_at, "
+                        f"expires_at = EXCLUDED.expires_at, "
+                        f"consumed_at = NULL, "
+                        f"updated_at = EXCLUDED.updated_at"
+                    ),
+                    {
+                        "organization_id": owner["organization_id"],
+                        "user_id": owner["user_id"],
+                        "provider_slug": record.provider_slug,
+                        "action_slug": record.action_slug,
+                        "preview_evidence_id": record.preview_evidence_id,
+                        "request_fingerprint": record.request_fingerprint,
+                        "status": record.status,
+                        "reason": record.reason,
+                        "metadata": _json_dumps(record.to_public_metadata()["metadata"]),
+                        "issued_at": _parse_datetime(record.issued_at)
+                        or datetime.now(UTC),
+                        "expires_at": _parse_datetime(record.expires_at)
+                        or datetime.now(UTC),
+                        "consumed_at": _parse_datetime(record.consumed_at),
+                        "updated_at": datetime.now(UTC),
+                    },
+                )
+                session.commit()
+            return True
+        except Exception as exc:
+            if _is_missing_storage_table_error(exc):
+                logger.info(
+                    "Wiii Connect operation approval storage unavailable; "
+                    "skipping append."
+                )
+                return False
+            logger.warning("Wiii Connect operation approval append failed: %s", exc)
+            return False
+
+    def consume_operation_approval_record(
+        self,
+        *,
+        preview_evidence_id: str,
+        request_fingerprint: str,
+        organization_id: str,
+        user_id: str,
+        provider_slug: str,
+        action_slug: str,
+        consumed_at: datetime | None = None,
+    ) -> WiiiConnectOperationApprovalDecision:
+        """Consume one pending approval row for an apply request."""
+
+        owner = _normalize_owner(organization_id=organization_id, user_id=user_id)
+        if owner is None:
+            return unavailable_operation_approval_decision(
+                provider_slug=provider_slug,
+                action_slug=action_slug,
+                preview_evidence_id=preview_evidence_id,
+                request_fingerprint=request_fingerprint,
+            )
+        safe_preview_evidence_id = str(preview_evidence_id or "").strip()
+        safe_request_fingerprint = str(request_fingerprint or "").strip().lower()
+        if not safe_preview_evidence_id or not safe_request_fingerprint:
+            return blocked_operation_approval_decision(
+                provider_slug=provider_slug,
+                action_slug=action_slug,
+                preview_evidence_id=safe_preview_evidence_id,
+                request_fingerprint=safe_request_fingerprint,
+                reason="approval_record_missing",
+            )
+        self._ensure_initialized()
+        if self._session_factory is None:
+            return unavailable_operation_approval_decision(
+                provider_slug=provider_slug,
+                action_slug=action_slug,
+                preview_evidence_id=safe_preview_evidence_id,
+                request_fingerprint=safe_request_fingerprint,
+            )
+
+        now = consumed_at or datetime.now(UTC)
+        try:
+            with self._session_factory() as session:
+                result = session.execute(
+                    text(
+                        f"SELECT provider_slug, action_slug, request_fingerprint, "
+                        f"status, expires_at "
+                        f"FROM {self.OPERATION_APPROVALS_TABLE} "
+                        f"WHERE organization_id = :organization_id "
+                        f"AND user_id = :user_id "
+                        f"AND provider_slug = :provider_slug "
+                        f"AND preview_evidence_id = :preview_evidence_id "
+                        f"FOR UPDATE"
+                    ),
+                    {
+                        "organization_id": owner["organization_id"],
+                        "user_id": owner["user_id"],
+                        "provider_slug": str(provider_slug or "")
+                        .strip()
+                        .lower()
+                        .replace("-", "_"),
+                        "preview_evidence_id": safe_preview_evidence_id,
+                    },
+                )
+                row = _fetch_mapping_row(result)
+                if row is None:
+                    return blocked_operation_approval_decision(
+                        provider_slug=provider_slug,
+                        action_slug=action_slug,
+                        preview_evidence_id=safe_preview_evidence_id,
+                        request_fingerprint=safe_request_fingerprint,
+                        reason="approval_record_missing",
+                    )
+
+                row_status = str(_row_value(row, "status") or "").strip().lower()
+                expires_at = _parse_datetime(_row_value(row, "expires_at"))
+                if row_status != "pending":
+                    reason = (
+                        "approval_record_expired"
+                        if row_status == "expired"
+                        else "approval_record_already_consumed"
+                    )
+                    return blocked_operation_approval_decision(
+                        provider_slug=provider_slug,
+                        action_slug=action_slug,
+                        preview_evidence_id=safe_preview_evidence_id,
+                        request_fingerprint=safe_request_fingerprint,
+                        reason=reason,
+                    )
+                if expires_at is not None and expires_at < now:
+                    session.execute(
+                        text(
+                            f"UPDATE {self.OPERATION_APPROVALS_TABLE} "
+                            f"SET status = 'expired', "
+                            f"reason = 'approval_record_expired', "
+                            f"updated_at = :updated_at "
+                            f"WHERE organization_id = :organization_id "
+                            f"AND user_id = :user_id "
+                            f"AND provider_slug = :provider_slug "
+                            f"AND preview_evidence_id = :preview_evidence_id"
+                        ),
+                        {
+                            "updated_at": now,
+                            "organization_id": owner["organization_id"],
+                            "user_id": owner["user_id"],
+                            "provider_slug": str(provider_slug or "")
+                            .strip()
+                            .lower()
+                            .replace("-", "_"),
+                            "preview_evidence_id": safe_preview_evidence_id,
+                        },
+                    )
+                    session.commit()
+                    return blocked_operation_approval_decision(
+                        provider_slug=provider_slug,
+                        action_slug=action_slug,
+                        preview_evidence_id=safe_preview_evidence_id,
+                        request_fingerprint=safe_request_fingerprint,
+                        reason="approval_record_expired",
+                    )
+                row_fingerprint = str(
+                    _row_value(row, "request_fingerprint") or ""
+                ).strip().lower()
+                if row_fingerprint != safe_request_fingerprint:
+                    return blocked_operation_approval_decision(
+                        provider_slug=provider_slug,
+                        action_slug=action_slug,
+                        preview_evidence_id=safe_preview_evidence_id,
+                        request_fingerprint=safe_request_fingerprint,
+                        reason="approval_fingerprint_mismatch",
+                    )
+
+                session.execute(
+                    text(
+                        f"UPDATE {self.OPERATION_APPROVALS_TABLE} "
+                        f"SET status = 'consumed', "
+                        f"reason = 'approval_consumed', "
+                        f"consumed_at = :consumed_at, "
+                        f"updated_at = :updated_at "
+                        f"WHERE organization_id = :organization_id "
+                        f"AND user_id = :user_id "
+                        f"AND provider_slug = :provider_slug "
+                        f"AND preview_evidence_id = :preview_evidence_id "
+                        f"AND status = 'pending'"
+                    ),
+                    {
+                        "consumed_at": now,
+                        "updated_at": now,
+                        "organization_id": owner["organization_id"],
+                        "user_id": owner["user_id"],
+                        "provider_slug": str(provider_slug or "")
+                        .strip()
+                        .lower()
+                        .replace("-", "_"),
+                        "preview_evidence_id": safe_preview_evidence_id,
+                    },
+                )
+                session.commit()
+            return consumed_operation_approval_decision(
+                provider_slug=provider_slug,
+                action_slug=action_slug,
+                preview_evidence_id=safe_preview_evidence_id,
+                request_fingerprint=safe_request_fingerprint,
+            )
+        except Exception as exc:
+            if _is_missing_storage_table_error(exc):
+                logger.info(
+                    "Wiii Connect operation approval storage unavailable; "
+                    "skipping consume."
+                )
+                return unavailable_operation_approval_decision(
+                    provider_slug=provider_slug,
+                    action_slug=action_slug,
+                    preview_evidence_id=safe_preview_evidence_id,
+                    request_fingerprint=safe_request_fingerprint,
+                )
+            logger.warning("Wiii Connect operation approval consume failed: %s", exc)
+            return unavailable_operation_approval_decision(
+                provider_slug=provider_slug,
+                action_slug=action_slug,
+                preview_evidence_id=safe_preview_evidence_id,
+                request_fingerprint=safe_request_fingerprint,
+            )
 
     def upsert_connection_record(
         self,
@@ -522,6 +794,13 @@ def _row_value(row: Any, key: str) -> Any:
         return mapping.get(key)
     try:
         return row[key]
+    except Exception:
+        return None
+
+
+def _row_index_value(row: Any, index: int) -> Any:
+    try:
+        return row[index]
     except Exception:
         return None
 

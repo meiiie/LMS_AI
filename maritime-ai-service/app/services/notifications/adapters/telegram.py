@@ -14,6 +14,10 @@ from app.services.notifications.base import (
     NotificationChannelAdapter,
     NotificationResult,
 )
+from app.services.notifications.privacy import (
+    notification_recipient_ref,
+    sanitize_notification_detail,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +43,13 @@ class TelegramAdapter(NotificationChannelAdapter):
         message: str,
         metadata: Optional[dict] = None,
     ) -> NotificationResult:
+        recipient_ref = notification_recipient_ref(user_id)
+        bot_token = ""
         try:
             from app.core.config import settings
 
-            if not settings.telegram_bot_token:
+            bot_token = settings.telegram_bot_token or ""
+            if not bot_token:
                 return NotificationResult(
                     delivered=False,
                     channel="telegram",
@@ -58,7 +65,7 @@ class TelegramAdapter(NotificationChannelAdapter):
 
             import httpx
 
-            url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.post(
                     url,
@@ -70,7 +77,10 @@ class TelegramAdapter(NotificationChannelAdapter):
                 )
 
             if response.status_code == 200:
-                logger.info("[NOTIFY] Telegram notification sent to user %s", user_id)
+                logger.info(
+                    "[NOTIFY] Telegram notification sent recipient_ref=%s",
+                    recipient_ref,
+                )
                 return NotificationResult(
                     delivered=True,
                     channel="telegram",
@@ -85,12 +95,14 @@ class TelegramAdapter(NotificationChannelAdapter):
                 )
 
         except Exception as e:
+            safe_detail = sanitize_notification_detail(e, bot_token, user_id, message)
             logger.error(
-                "[NOTIFY] Telegram failed for user %s: %s",
-                user_id, e,
+                "[NOTIFY] Telegram failed recipient_ref=%s: %s",
+                recipient_ref,
+                safe_detail,
             )
             return NotificationResult(
                 delivered=False,
                 channel="telegram",
-                detail=str(e),
+                detail=safe_detail,
             )

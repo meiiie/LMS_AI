@@ -14,6 +14,7 @@ Total: 22 tests
 import hashlib
 import hmac
 import json
+import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -45,6 +46,28 @@ def _mock_settings(**overrides):
     for k, v in defaults.items():
         setattr(mock, k, v)
     return mock
+
+
+def _mock_lms_request(payload: dict, signature: str = "sha256=test") -> MagicMock:
+    from starlette.requests import Request
+
+    body = json.dumps(payload).encode("utf-8")
+
+    async def _receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/auth/lms/token",
+            "headers": [(b"x-lms-signature", signature.encode("utf-8"))],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+            "scheme": "http",
+        },
+        _receive,
+    )
 
 
 # ===========================================================================
@@ -355,3 +378,151 @@ class TestTokenExchange:
             assert mock_create.call_args.kwargs["role"] == "teacher"
             assert mock_create.call_args.kwargs["platform_role"] == "user"
             assert mock_create.call_args.kwargs["host_role"] == "org_admin"
+
+
+# ===========================================================================
+# TestLMSAuthRouterDiagnostics
+# ===========================================================================
+
+
+class TestLMSAuthRouterDiagnostics:
+    """Test LMS auth router diagnostics privacy."""
+
+    @pytest.mark.asyncio
+    async def test_token_exchange_failure_redacts_http_log_and_audit_reason(self, caplog):
+        """Exchange failures must not expose raw LMS identity or secrets."""
+        from fastapi import HTTPException
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+        raw_connector = "lms-private-connector"
+        raw_lms_user = "lms-private-user"
+        raw_email = "student-private@example.edu"
+        raw_org = "org-private-lms"
+        raw_secret = "lms-secret-private-value"
+        request = _mock_lms_request(
+            {
+                "connector_id": raw_connector,
+                "lms_user_id": raw_lms_user,
+                "email": raw_email,
+                "organization_id": raw_org,
+                "timestamp": int(time.time()),
+            }
+        )
+        audit_log = AsyncMock()
+
+        with (
+            patch("app.auth.lms_token_exchange.validate_lms_signature", return_value=True),
+            patch("app.auth.lms_token_exchange.validate_request_timestamp", return_value=True),
+            patch(
+                "app.auth.lms_token_exchange.exchange_lms_token",
+                new=AsyncMock(
+                    side_effect=RuntimeError(
+                        f"failed connector={raw_connector} user={raw_lms_user} "
+                        f"email={raw_email} org={raw_org} secret={raw_secret}"
+                    )
+                ),
+            ),
+            patch("app.auth.auth_audit.log_auth_event", audit_log),
+        ):
+            from app.auth.lms_auth_router import lms_token_exchange
+
+            with caplog.at_level(logging.ERROR, logger="app.auth.lms_auth_router"):
+                with pytest.raises(HTTPException) as exc:
+                    await lms_token_exchange(request)
+
+        assert exc.value.status_code == 500
+        assert exc.value.detail == "Token exchange failed"
+        for raw_value in (raw_connector, raw_lms_user, raw_email, raw_org, raw_secret):
+            assert raw_value not in caplog.text
+        assert f"connector_ref={hash_runtime_identifier(raw_connector)}" in caplog.text
+        assert f"lms_user_ref={hash_runtime_identifier(raw_lms_user)}" in caplog.text
+        assert f"org_ref={hash_runtime_identifier(raw_org)}" in caplog.text
+        assert "<redacted-secret>" in caplog.text
+        audit_log.assert_awaited_once()
+        audit_kwargs = audit_log.await_args.kwargs
+        assert audit_kwargs["reason"]
+        for raw_value in (raw_connector, raw_lms_user, raw_email, raw_org, raw_secret):
+            assert raw_value not in audit_kwargs["reason"]
+        assert audit_kwargs["metadata"] == {
+            "connector_ref": hash_runtime_identifier(raw_connector),
+        }
+
+    @pytest.mark.asyncio
+    async def test_signature_config_error_uses_generic_http_detail_and_hash_log(self, caplog):
+        """Signature setup errors should not expose raw connector ids or signatures."""
+        from fastapi import HTTPException
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+        raw_connector = "lms-private-connector"
+        raw_signature = "sha256=private-signature"
+        request = _mock_lms_request(
+            {
+                "connector_id": raw_connector,
+                "lms_user_id": "student-1",
+            },
+            signature=raw_signature,
+        )
+
+        with patch(
+            "app.auth.lms_token_exchange.validate_lms_signature",
+            side_effect=ValueError(
+                f"No HMAC secret configured for connector '{raw_connector}' "
+                f"signature={raw_signature}"
+            ),
+        ):
+            from app.auth.lms_auth_router import lms_token_exchange
+
+            with caplog.at_level(logging.WARNING, logger="app.auth.lms_auth_router"):
+                with pytest.raises(HTTPException) as exc:
+                    await lms_token_exchange(request)
+
+        assert exc.value.status_code == 401
+        assert exc.value.detail == "Invalid HMAC signature"
+        assert raw_connector not in caplog.text
+        assert raw_signature not in caplog.text
+        assert f"connector_ref={hash_runtime_identifier(raw_connector)}" in caplog.text
+        assert "<redacted-secret>" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_connector_grant_warning_logs_hash_refs(self, caplog):
+        """Connector-grant refresh warnings should not expose raw IDs."""
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+        raw_user = "wiii-private-user"
+        raw_connector = "lms-private-connector"
+        raw_org = "org-private-lms"
+        user = {"id": raw_user, "email": "student@example.edu", "name": "S", "role": "student"}
+        mock_token = MagicMock(
+            access_token="at", refresh_token="rt",
+            token_type="bearer", expires_in=1800,
+        )
+
+        with (
+            patch("app.auth.user_service.find_or_create_by_provider", new_callable=AsyncMock, return_value=user),
+            patch("app.auth.token_service.create_token_pair", new_callable=AsyncMock, return_value=mock_token),
+            patch("app.auth.lms_token_exchange._ensure_org_membership", new_callable=AsyncMock),
+            patch(
+                "app.repositories.connector_grant_repository.upsert_connector_grant",
+                new=AsyncMock(
+                    side_effect=RuntimeError(
+                        f"grant failed user={raw_user} connector={raw_connector} org={raw_org}"
+                    )
+                ),
+                create=True,
+            ),
+        ):
+            from app.auth.lms_token_exchange import exchange_lms_token
+
+            with caplog.at_level(logging.WARNING, logger="app.auth.lms_token_exchange"):
+                await exchange_lms_token(
+                    connector_id=raw_connector,
+                    lms_user_id="student-1",
+                    organization_id=raw_org,
+                )
+
+        assert raw_user not in caplog.text
+        assert raw_connector not in caplog.text
+        assert raw_org not in caplog.text
+        assert f"user_ref={hash_runtime_identifier(raw_user)}" in caplog.text
+        assert f"connector_ref={hash_runtime_identifier(raw_connector)}" in caplog.text
+        assert f"org_ref={hash_runtime_identifier(raw_org)}" in caplog.text

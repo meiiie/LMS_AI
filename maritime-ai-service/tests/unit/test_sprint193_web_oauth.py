@@ -8,6 +8,7 @@ Tests for:
 4. config flag: oauth_allowed_redirect_origins
 """
 import json
+import logging
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -233,6 +234,46 @@ class TestGoogleCallbackWebRedirect:
     """Test /auth/google/callback with web_redirect_uri."""
 
     @pytest.mark.asyncio
+    async def test_callback_token_exchange_failure_redacts_log_and_audit_reason(self, caplog):
+        """OAuth failure diagnostics should not expose raw auth code or client secret."""
+        from fastapi import HTTPException
+
+        raw_code = "oauth-code-private-123"
+        raw_secret = "google-client-secret-private-456"
+        req = MagicMock()
+        req.session = {}
+        req.client = MagicMock(host="127.0.0.1")
+        req.headers = MagicMock()
+        req.headers.get = MagicMock(return_value="test-agent")
+        req.query_params = {"code": raw_code}
+        audit_log = AsyncMock()
+
+        with patch.object(_oauth_mod, "settings") as ms, \
+             patch.object(_oauth_mod, "oauth") as mo, \
+             patch("app.auth.auth_audit.log_auth_event", audit_log):
+            ms.enable_google_oauth = True
+            ms.google_oauth_client_secret = raw_secret
+            mo.google.authorize_access_token = AsyncMock(
+                side_effect=RuntimeError(
+                    f"provider rejected code={raw_code} client_secret={raw_secret}"
+                )
+            )
+
+            with caplog.at_level(logging.ERROR, logger="app.auth.google_oauth"):
+                with pytest.raises(HTTPException) as exc_info:
+                    await _oauth_mod.google_callback(req)
+
+        assert exc_info.value.status_code == 400
+        assert raw_code not in caplog.text
+        assert raw_secret not in caplog.text
+        assert "OAuth token exchange failed" in caplog.text
+        audit_log.assert_awaited_once()
+        reason = audit_log.await_args.kwargs["reason"]
+        assert raw_code not in reason
+        assert raw_secret not in reason
+        assert reason == "google_oauth_exchange_failed"
+
+    @pytest.mark.asyncio
     async def test_callback_web_redirect_returns_html_with_hash(self):
         req, tp, user = _make_callback_mocks({"web_redirect_uri": "http://localhost:1420"})
 
@@ -367,6 +408,25 @@ class TestGoogleCallbackAutoAssignOrg:
             assert "INSERT INTO user_organizations" in first_call[0][0]
             assert first_call[0][1] == "user-123"
             assert first_call[0][2] == "default"
+
+    @pytest.mark.asyncio
+    async def test_callback_mints_token_with_default_org_claim(self):
+        """Frontend org context must match the org embedded in minted tokens."""
+        req, tp, user = _make_callback_mocks({})
+
+        with _patch_callback(user, tp) as ctx:
+            ctx.ms.enable_multi_tenant = True
+            ctx.ms.default_organization_id = "default"
+
+            with patch(
+                "app.auth.google_oauth.ensure_user_org_membership",
+                new=AsyncMock(return_value=True),
+            ):
+                await _oauth_mod.google_callback(req)
+
+            kwargs = ctx.mc.call_args.kwargs
+            assert kwargs["active_organization_id"] == "default"
+            assert kwargs["role_source"] == "platform"
 
     @pytest.mark.asyncio
     async def test_callback_skips_auto_assign_when_multi_tenant_disabled(self):

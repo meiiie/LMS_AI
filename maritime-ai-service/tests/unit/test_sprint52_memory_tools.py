@@ -14,7 +14,6 @@ Tests memory tools including ContextVar state management:
 
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
-import contextvars
 import unicodedata
 
 
@@ -87,6 +86,27 @@ class TestInitMemoryTools:
         state = mod._get_state()
         assert state.user_id == "user-123"
 
+    def test_resets_cache_when_user_changes(self):
+        import app.engine.tools.memory_tools as mod
+        mod.init_memory_tools(MagicMock(), user_id="user-a")
+        mod._get_state().user_cache["name"] = "Alice"
+
+        mod.init_memory_tools(MagicMock(), user_id="user-b")
+        state = mod._get_state()
+
+        assert state.user_id == "user-b"
+        assert state.user_cache == {}
+
+    def test_preserves_cache_for_same_user(self):
+        import app.engine.tools.memory_tools as mod
+        engine = MagicMock()
+        mod.init_memory_tools(engine, user_id="user-a")
+        mod._get_state().user_cache["name"] = "Alice"
+
+        mod.init_memory_tools(engine, user_id="user-a")
+
+        assert mod._get_state().user_cache["name"] == "Alice"
+
     def test_no_user_id(self):
         import app.engine.tools.memory_tools as mod
         mod.init_memory_tools(MagicMock())
@@ -104,6 +124,45 @@ class TestSetCurrentUser:
         from app.engine.tools.memory_tools import set_current_user, _get_state
         set_current_user("user-456")
         assert _get_state().user_id == "user-456"
+
+    def test_set_current_user_resets_previous_cache(self):
+        from app.engine.tools.memory_tools import set_current_user, _get_state
+
+        set_current_user("user-a")
+        _get_state().user_cache["name"] = "Alice"
+        set_current_user("user-b")
+
+        assert _get_state().user_id == "user-b"
+        assert _get_state().user_cache == {}
+
+    def test_runtime_context_identity_isolates_cache(self):
+        from app.engine.tools.memory_tools import _get_state
+        from app.engine.tools.runtime_context import (
+            build_tool_runtime_context,
+            tool_runtime_scope,
+        )
+
+        ctx_a = build_tool_runtime_context(
+            user_id="user-a",
+            organization_id="org-a",
+            session_id="session-a",
+        )
+        ctx_b = build_tool_runtime_context(
+            user_id="user-a",
+            organization_id="org-b",
+            session_id="session-a",
+        )
+
+        with tool_runtime_scope(ctx_a):
+            _get_state().user_cache["name"] = "Alice"
+            assert _get_state().user_cache["name"] == "Alice"
+
+        with tool_runtime_scope(ctx_b):
+            assert _get_state().user_cache == {}
+            _get_state().user_cache["name"] = "Bob"
+
+        with tool_runtime_scope(ctx_a):
+            assert _get_state().user_cache == {}
 
 
 class TestGetUserCache:

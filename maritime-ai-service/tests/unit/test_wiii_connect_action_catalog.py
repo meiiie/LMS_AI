@@ -30,7 +30,7 @@ def test_action_catalog_exposes_disabled_read_only_candidate_without_secrets():
     assert "provider_payload" not in serialized
 
 
-def test_action_catalog_redacts_sensitive_argument_keys():
+def test_action_catalog_projects_only_model_visible_argument_keys():
     from app.engine.wiii_connect.action_catalog import WiiiConnectCuratedAction
 
     action = WiiiConnectCuratedAction(
@@ -43,10 +43,32 @@ def test_action_catalog_redacts_sensitive_argument_keys():
     metadata = action.to_public_metadata()
     serialized = json.dumps(metadata, sort_keys=True)
 
-    assert "page_id" in metadata["argument_keys"]
+    assert "page_id" not in metadata["argument_keys"]
     assert "redacted_sensitive_field" in metadata["argument_keys"]
+    assert metadata["model_argument_keys"] == metadata["argument_keys"]
+    assert metadata["hidden_argument_count"] == 3
     assert "access_token" not in serialized
     assert "client_secret" not in serialized
+
+
+def test_action_catalog_hides_backend_owned_facebook_post_arguments():
+    from app.engine.wiii_connect.action_catalog import action_catalog_public_metadata
+
+    metadata = action_catalog_public_metadata(
+        provider_slug="facebook",
+        enabled_slugs=("FACEBOOK_CREATE_POST",),
+    )
+    post = {
+        action["slug"]: action for action in metadata["actions"]
+    }["FACEBOOK_CREATE_POST"]
+    serialized = json.dumps(post, sort_keys=True)
+
+    assert post["argument_keys"] == ["message", "link"]
+    assert post["model_argument_keys"] == ["message", "link"]
+    assert post["hidden_argument_count"] == 3
+    assert "page_id" not in serialized
+    assert "published" not in serialized
+    assert "scheduled_publish_time" not in serialized
 
 
 def test_action_catalog_can_project_runtime_enabled_curated_action():

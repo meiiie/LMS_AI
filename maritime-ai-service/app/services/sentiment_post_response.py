@@ -73,6 +73,7 @@ def schedule_living_sentiment_continuity(
                 message=context.message,
                 response_text=context.response_text,
                 organization_id=context.organization_id,
+                session_id=context.session_id,
             )
         )
         return True

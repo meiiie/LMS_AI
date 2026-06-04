@@ -44,7 +44,9 @@ import re
 import time
 from typing import AsyncGenerator, Optional
 
+from app.engine.multi_agent.runtime_flow_doctor import build_runtime_flow_doctor_report
 from app.engine.runtime.lifecycle import HookPoint, get_lifecycle
+from app.engine.runtime.event_payload_sanitizer import redact_runtime_secret_text
 from app.engine.runtime.runtime_metrics import inc_counter, record_latency_ms
 from app.engine.runtime.session_event_log import (
     SessionEventLog,
@@ -86,6 +88,169 @@ def _extract_answer_token(chunk: str) -> Optional[str]:
     if isinstance(content, str) and content:
         return content
     return None
+
+
+def _extract_runtime_flow_ledger(chunk: str) -> Optional[dict]:
+    """Pull a sanitized RuntimeFlowLedger payload out of an SSE chunk."""
+
+    if not isinstance(chunk, str):
+        return None
+    event_match = _EVENT_LINE.search(chunk)
+    if event_match is None or event_match.group(1) not in {"metadata", "done"}:
+        return None
+    data_match = _DATA_LINE.search(chunk)
+    if data_match is None:
+        return None
+    raw = data_match.group(1).strip()
+    if not raw:
+        return None
+    try:
+        body = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(body, dict):
+        return None
+    ledger = body.get("runtime_flow_ledger")
+    return ledger if isinstance(ledger, dict) else None
+
+
+def _emit_finalization_metric(
+    *,
+    stage: str,
+    status: str,
+    stream_status: str,
+    transport: str = "stream/v3",
+) -> None:
+    inc_counter(
+        "runtime.native_stream_dispatch.finalization",
+        labels={
+            "stage": str(stage or "unknown"),
+            "status": str(status or "unknown"),
+            "stream_status": str(stream_status or "unknown"),
+            "transport": str(transport or "unknown"),
+        },
+    )
+
+
+async def _append_assistant_message_event(
+    log: SessionEventLog,
+    *,
+    session_id: str,
+    org_id: Optional[str],
+    payload: dict,
+    stream_status: str,
+) -> bool:
+    try:
+        await log.append(
+            session_id=session_id,
+            event_type="assistant_message",
+            payload=payload,
+            org_id=org_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _emit_finalization_metric(
+            stage="assistant_message_append",
+            status="error",
+            stream_status=stream_status,
+        )
+        logger.debug(
+            "[native_stream_dispatch] assistant_message append skipped: %s",
+            exc,
+        )
+        return False
+    _emit_finalization_metric(
+        stage="assistant_message_append",
+        status="success",
+        stream_status=stream_status,
+    )
+    return True
+
+
+async def _append_runtime_flow_ledger_event(
+    log: SessionEventLog,
+    *,
+    session_id: str,
+    org_id: Optional[str],
+    ledger: dict,
+    status: str,
+    duration_ms: int,
+) -> None:
+    _emit_runtime_flow_ledger_metrics(
+        ledger,
+        status=status,
+        transport="stream/v3",
+    )
+    try:
+        await log.append(
+            session_id=session_id,
+            event_type="runtime_flow_ledger",
+            payload={
+                "runtime_flow_ledger": ledger,
+                "status": status,
+                "duration_ms": duration_ms,
+                "transport": "stream/v3",
+            },
+            org_id=org_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _emit_finalization_metric(
+            stage="runtime_flow_ledger_append",
+            status="error",
+            stream_status=status,
+        )
+        logger.debug(
+            "[native_stream_dispatch] runtime_flow_ledger append skipped: %s",
+            exc,
+        )
+        return
+    _emit_finalization_metric(
+        stage="runtime_flow_ledger_append",
+        status="success",
+        stream_status=status,
+    )
+
+
+def _emit_runtime_flow_ledger_metrics(
+    ledger: dict,
+    *,
+    status: str,
+    transport: str,
+) -> None:
+    """Forward aggregate runtime-flow doctor alert codes to metrics."""
+
+    try:
+        report = build_runtime_flow_doctor_report([ledger])
+        doctor_status = str(report.get("status") or "unknown")
+        inc_counter(
+            "runtime.runtime_flow_ledger.events",
+            labels={
+                "status": str(status or "unknown"),
+                "doctor_status": doctor_status,
+                "transport": str(transport or "unknown"),
+            },
+        )
+        for alert in report.get("alerts") or []:
+            if not isinstance(alert, dict):
+                continue
+            code = str(alert.get("code") or "unknown")[:96]
+            severity = str(alert.get("severity") or "warning")[:32]
+            count = alert.get("count")
+            by = count if type(count) is int and count > 0 else 1
+            inc_counter(
+                "runtime.runtime_flow_ledger.alerts",
+                labels={
+                    "code": code,
+                    "severity": severity,
+                    "status": str(status or "unknown"),
+                    "transport": str(transport or "unknown"),
+                },
+                by=by,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "[native_stream_dispatch] runtime_flow_ledger metrics skipped: %s",
+            exc,
+        )
 
 
 async def native_stream_dispatch(
@@ -140,6 +305,7 @@ async def native_stream_dispatch(
 
     started = time.monotonic()
     accumulated_text_parts: list[str] = []
+    latest_runtime_flow_ledger: Optional[dict] = None
     error_str: Optional[str] = None
 
     span_ctx = trace_span(
@@ -161,9 +327,14 @@ async def native_stream_dispatch(
                     token = _extract_answer_token(chunk)
                     if token:
                         accumulated_text_parts.append(token)
+                    runtime_flow_ledger = _extract_runtime_flow_ledger(chunk)
+                    if runtime_flow_ledger is not None:
+                        latest_runtime_flow_ledger = runtime_flow_ledger
                     yield chunk
             except Exception as exc:  # noqa: BLE001
-                error_str = f"{type(exc).__name__}: {exc}"
+                error_str = redact_runtime_secret_text(
+                    f"{type(exc).__name__}: {exc}"
+                )
                 raise
     except Exception:
         # Span context already recorded status=error before re-raise;
@@ -175,9 +346,9 @@ async def native_stream_dispatch(
     accumulated_text = "".join(accumulated_text_parts)
 
     if error_str is None:
-        await log.append(
+        await _append_assistant_message_event(
+            log,
             session_id=session_id,
-            event_type="assistant_message",
             payload={
                 "text": accumulated_text,
                 "status": "success",
@@ -185,6 +356,7 @@ async def native_stream_dispatch(
                 "transport": "stream/v3",
             },
             org_id=org_id,
+            stream_status="success",
         )
         inc_counter(
             "runtime.native_stream_dispatch.runs",
@@ -205,12 +377,21 @@ async def native_stream_dispatch(
                 "transport": "stream/v3",
             },
         )
+        if latest_runtime_flow_ledger is not None:
+            await _append_runtime_flow_ledger_event(
+                log,
+                session_id=session_id,
+                org_id=org_id,
+                ledger=latest_runtime_flow_ledger,
+                status="success",
+                duration_ms=duration_ms,
+            )
         return
 
     # Error path — same shape as the success path, but status=error.
-    await log.append(
+    await _append_assistant_message_event(
+        log,
         session_id=session_id,
-        event_type="assistant_message",
         payload={
             "text": accumulated_text,
             "status": "error",
@@ -219,6 +400,7 @@ async def native_stream_dispatch(
             "transport": "stream/v3",
         },
         org_id=org_id,
+        stream_status="error",
     )
     inc_counter(
         "runtime.native_stream_dispatch.runs", labels={"status": "error"}
@@ -248,9 +430,22 @@ async def native_stream_dispatch(
             "transport": "stream/v3",
         },
     )
+    if latest_runtime_flow_ledger is not None:
+        await _append_runtime_flow_ledger_event(
+            log,
+            session_id=session_id,
+            org_id=org_id,
+            ledger=latest_runtime_flow_ledger,
+            status="error",
+            duration_ms=duration_ms,
+        )
     # Re-raise the original exception so the SSE caller's error handler
     # still kicks in (e.g. ``emit_internal_error_sse_events``).
     raise RuntimeError(error_str)
 
 
-__all__ = ["native_stream_dispatch", "_extract_answer_token"]
+__all__ = [
+    "native_stream_dispatch",
+    "_extract_answer_token",
+    "_extract_runtime_flow_ledger",
+]

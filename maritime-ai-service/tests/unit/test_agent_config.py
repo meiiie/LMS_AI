@@ -198,8 +198,8 @@ class TestAgentConfigRegistry:
         }
         assert set(AgentConfigRegistry._configs.keys()) == expected
 
-    def test_direct_chatter_uses_nvidia_flash_model_when_nvidia_selected(self):
-        from app.engine.model_catalog import NVIDIA_DEEPSEEK_FLASH_MODEL
+    def test_direct_chatter_uses_nvidia_default_model_when_nvidia_selected(self):
+        from app.engine.model_catalog import NVIDIA_DEFAULT_MODEL
 
         mock_llm = MagicMock()
         AgentConfigRegistry.initialize()
@@ -217,7 +217,7 @@ class TestAgentConfigRegistry:
         assert result is mock_llm
         mock_create.assert_called_once()
         assert mock_create.call_args.args[0] == "nvidia"
-        assert mock_create.call_args.args[1] == NVIDIA_DEEPSEEK_FLASH_MODEL
+        assert mock_create.call_args.args[1] == NVIDIA_DEFAULT_MODEL
 
     def test_direct_identity_uses_creative_profile_model_for_zhipu(self):
         mock_llm = MagicMock()

@@ -16,6 +16,7 @@ Tests fact repository operations including:
 
 import pytest
 import json
+import logging
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -400,6 +401,40 @@ class TestDeleteOldestFacts:
 class TestSaveTriple:
     """Test triple saving."""
 
+    def test_blocks_missing_org_context_before_embedding_or_save(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo = MockRepo()
+        repo._session_factory = MagicMock()
+        repo.save_memory = MagicMock()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        triple = SemanticTriple(
+            subject="PRIVATE-USER",
+            predicate=Predicate.HAS_NAME,
+            object="Minh",
+        )
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.save_triple(triple, generate_embedding=True)
+        finally:
+            current_org_id.reset(token)
+
+        assert result is None
+        repo.save_memory.assert_not_called()
+        repo._session_factory.assert_not_called()
+        assert "triple_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+
     def test_success_with_embedding(self):
         repo, _ = _make_repo()
         triple = SemanticTriple(
@@ -469,6 +504,28 @@ class TestSaveTriple:
 
 class TestFindByPredicate:
     """Test predicate-based lookup."""
+
+    def test_blocks_missing_org_context_before_db(self, monkeypatch, caplog):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo = MockRepo()
+        repo._session_factory = MagicMock()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.find_by_predicate("PRIVATE-USER", Predicate.HAS_NAME)
+        finally:
+            current_org_id.reset(token)
+
+        assert result is None
+        repo._session_factory.assert_not_called()
+        assert "triple_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
 
     def test_found(self):
         repo, session = _make_repo()
@@ -567,6 +624,39 @@ class TestUpsertTriple:
 
 class TestUpdateMemoryContent:
     """Test content updates when embedding regeneration is unavailable."""
+
+    def test_blocks_missing_org_context_before_embedding_or_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo = MockRepo()
+        repo._session_factory = MagicMock()
+        repo._format_embedding = MagicMock(return_value="[0.1]")
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            result = repo.update_memory_content(
+                memory_id=uuid4(),
+                user_id="PRIVATE-USER",
+                new_content="private update",
+                new_metadata={"fact_type": "name"},
+            )
+        finally:
+            current_org_id.reset(token)
+
+        assert result is None
+        repo._format_embedding.assert_not_called()
+        repo._session_factory.assert_not_called()
+        assert "triple_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
 
     def test_preserves_existing_embedding_when_generator_unavailable(self):
         import sys

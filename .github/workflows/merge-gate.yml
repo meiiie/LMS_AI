@@ -172,6 +172,12 @@ jobs:
           max_delta=20000
 
           if [[ "$file_count" -gt "$max_files" || "$total_delta" -gt "$max_delta" ]]; then
+            has_bypass_label="$(jq -r '[.pull_request.labels[]?.name] | any(. == "reviewability-bypass")' "$GITHUB_EVENT_PATH")"
+            has_bypass_rationale="$(jq -r '(.pull_request.body // "") | test("(?is)##\\s*Reviewability Bypass.*Rationale:")' "$GITHUB_EVENT_PATH")"
+            if [[ "$has_bypass_label" == "true" && "$has_bypass_rationale" == "true" ]]; then
+              echo "Reviewability bypass accepted: label and written rationale are present."
+              exit 0
+            fi
             {
               echo "This PR is too large for reliable review."
               echo ""
@@ -180,7 +186,8 @@ jobs:
               echo "- total line delta: ${total_delta}/${max_delta}"
               echo ""
               echo "Split the work into smaller PRs by subsystem, or use an explicit"
-              echo "maintainer/admin bypass with a written rationale in the PR body."
+              echo "maintainer/admin bypass with label 'reviewability-bypass' and"
+              echo "a '## Reviewability Bypass' section containing 'Rationale:' in the PR body."
             } >&2
             exit 1
           fi

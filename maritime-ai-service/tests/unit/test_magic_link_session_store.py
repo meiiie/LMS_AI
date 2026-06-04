@@ -10,6 +10,7 @@ Covers:
 """
 import asyncio
 import json
+import logging
 import os
 import time
 from types import SimpleNamespace
@@ -223,6 +224,92 @@ class TestInMemorySessionStoreApi:
         from app.auth.magic_link_service import MagicLinkSessionManager
         from app.auth.magic_link_session_store import InMemorySessionStore
         assert MagicLinkSessionManager is InMemorySessionStore
+
+
+# ---------------------------------------------------------------------------
+# Diagnostic privacy
+# ---------------------------------------------------------------------------
+
+class TestMagicLinkSessionStoreDiagnostics:
+    @pytest.mark.asyncio
+    async def test_session_logs_use_hashed_session_ref(self, caplog):
+        from app.auth.magic_link_session_store import InMemorySessionStore
+        from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
+
+        raw_session = "magic-link-session-secret-123"
+        missing_session = "magic-link-session-missing-456"
+        store = InMemorySessionStore()
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+
+        with caplog.at_level(logging.INFO, logger="app.auth.magic_link_session_store"):
+            await store.register(raw_session, ws)
+            assert await store.push_tokens(missing_session, {"x": 1}) is False
+
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        assert raw_session not in log_text
+        assert missing_session not in log_text
+        assert f"session_ref={hash_runtime_identifier(raw_session)}" in log_text
+        assert f"session_ref={hash_runtime_identifier(missing_session)}" in log_text
+
+    @pytest.mark.asyncio
+    async def test_in_memory_delivery_error_redacts_session_and_payload(self, caplog):
+        from app.auth.magic_link_session_store import InMemorySessionStore
+
+        raw_session = "magic-link-session-error-123"
+        access_token = "access-token-super-secret-123"
+        refresh_token = "refresh-token-super-secret-456"
+        payload = {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "user": {"email": "student@example.com"},
+        }
+        store = InMemorySessionStore()
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        ws.send_json = AsyncMock(
+            side_effect=RuntimeError(
+                f"send failed for {raw_session} with {access_token}"
+            )
+        )
+        ws.close = AsyncMock()
+
+        await store.register(raw_session, ws)
+        with caplog.at_level(logging.ERROR, logger="app.auth.magic_link_session_store"):
+            delivered = await store.push_tokens(raw_session, payload)
+
+        assert delivered is False
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        assert raw_session not in log_text
+        assert access_token not in log_text
+        assert refresh_token not in log_text
+        assert "session_ref=sha256:" in log_text
+        assert "<redacted-secret>" in log_text
+
+    @pytest.mark.asyncio
+    async def test_valkey_push_error_redacts_session_and_payload(self, caplog):
+        from app.auth.magic_link_session_store import ValkeySessionStore
+
+        raw_session = "magic-link-valkey-session-secret-123"
+        access_token = "valkey-access-token-super-secret"
+        broken = MagicMock()
+        broken.set = AsyncMock(
+            side_effect=ConnectionError(
+                f"set failed magic_link_session:{raw_session} payload={access_token}"
+            )
+        )
+        broken.publish = AsyncMock()
+        store = ValkeySessionStore(broken, default_ttl_seconds=900)
+
+        with caplog.at_level(logging.ERROR, logger="app.auth.magic_link_session_store"):
+            with pytest.raises(ConnectionError):
+                await store.push_tokens(raw_session, {"access_token": access_token})
+
+        log_text = "\n".join(record.getMessage() for record in caplog.records)
+        assert raw_session not in log_text
+        assert access_token not in log_text
+        assert "session_ref=sha256:" in log_text
+        assert "<redacted-secret>" in log_text
 
 
 # ---------------------------------------------------------------------------

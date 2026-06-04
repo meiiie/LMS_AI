@@ -27,14 +27,22 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 from uuid import uuid4
 
+from app.engine.semantic_memory.privacy import hash_memory_identifier
 from app.engine.semantic_memory.temporal_graph_runtime import (
     build_context_text_impl,
     extract_graph_from_facts_impl,
     from_dict_impl,
     to_dict_impl,
 )
+from app.engine.semantic_memory.write_audit import (
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 
 logger = logging.getLogger(__name__)
+TEMPORAL_GRAPH_SCOPE_BLOCKED_ERROR = (
+    "temporal graph memory blocked missing organization context"
+)
 
 
 # =============================================================================
@@ -224,6 +232,28 @@ class TemporalGraphManager:
         self._relations: Dict[str, Dict[str, GraphRelation]] = {}  # user_id → {relation_id → relation}
         self._episodes: Dict[str, Dict[str, Episode]] = {}  # user_id → {episode_id → episode}
 
+    def _scope_key(self, user_id: str, *, write: bool = False) -> str | None:
+        scope = resolve_memory_write_scope() if write else resolve_memory_read_scope()
+        if not scope.write_allowed:
+            logger.warning(
+                "[TGraph] %s blocked user_hash=%s org_hash=%s org_scope=%s warnings=%s",
+                "write" if write else "read",
+                hash_memory_identifier(user_id),
+                hash_memory_identifier(scope.org_id),
+                scope.state,
+                scope.warnings,
+            )
+            return None
+        if scope.state == "single_tenant_default":
+            return user_id
+        return f"{scope.org_id}:{user_id}" if scope.org_id else user_id
+
+    def _write_scope_key(self, user_id: str) -> str:
+        scope_key = self._scope_key(user_id, write=True)
+        if scope_key is None:
+            raise ValueError(TEMPORAL_GRAPH_SCOPE_BLOCKED_ERROR)
+        return scope_key
+
     def add_entity(
         self,
         user_id: str,
@@ -240,13 +270,14 @@ class TemporalGraphManager:
         - If same: update ingestion_time only
         """
         now = datetime.now(timezone.utc)
+        scope_key = self._write_scope_key(user_id)
 
-        if user_id not in self._entities:
-            self._entities[user_id] = {}
+        if scope_key not in self._entities:
+            self._entities[scope_key] = {}
 
         # Check for existing entity with same name+type
         existing = None
-        for e in self._entities[user_id].values():
+        for e in self._entities[scope_key].values():
             if e.name == name and e.entity_type == entity_type and e.is_current:
                 existing = e
                 break
@@ -269,7 +300,7 @@ class TemporalGraphManager:
                     version=existing.version + 1,
                     is_current=True,
                 )
-                self._entities[user_id][entity.entity_id] = entity
+                self._entities[scope_key][entity.entity_id] = entity
                 logger.info(
                     "[TGraph] Versioned entity: %s v%d → v%d",
                     name, existing.version, entity.version,
@@ -291,7 +322,7 @@ class TemporalGraphManager:
             event_time=event_time or now,
             ingestion_time=now,
         )
-        self._entities[user_id][entity_id] = entity
+        self._entities[scope_key][entity_id] = entity
         return entity
 
     def add_relation(
@@ -306,9 +337,10 @@ class TemporalGraphManager:
     ) -> GraphRelation:
         """Add a relation between two entities."""
         now = datetime.now(timezone.utc)
+        scope_key = self._write_scope_key(user_id)
 
-        if user_id not in self._relations:
-            self._relations[user_id] = {}
+        if scope_key not in self._relations:
+            self._relations[scope_key] = {}
 
         relation_id = f"{source_id}__{relation_type.value}__{target_id}"
         relation = GraphRelation(
@@ -321,7 +353,7 @@ class TemporalGraphManager:
             event_time=event_time or now,
             ingestion_time=now,
         )
-        self._relations[user_id][relation_id] = relation
+        self._relations[scope_key][relation_id] = relation
         return relation
 
     def add_episode(
@@ -336,9 +368,10 @@ class TemporalGraphManager:
     ) -> Episode:
         """Record an interaction episode."""
         now = datetime.now(timezone.utc)
+        scope_key = self._write_scope_key(user_id)
 
-        if user_id not in self._episodes:
-            self._episodes[user_id] = {}
+        if scope_key not in self._episodes:
+            self._episodes[scope_key] = {}
 
         episode_id = f"ep_{session_id or uuid4().hex[:8]}_{now.strftime('%Y%m%d_%H%M%S')}"
         episode = Episode(
@@ -351,7 +384,7 @@ class TemporalGraphManager:
             start_time=start_time or now,
             end_time=end_time,
         )
-        self._episodes[user_id][episode_id] = episode
+        self._episodes[scope_key][episode_id] = episode
         return episode
 
     def get_entities(
@@ -361,7 +394,10 @@ class TemporalGraphManager:
         current_only: bool = True,
     ) -> List[GraphEntity]:
         """Get entities for a user, optionally filtered by type."""
-        entities = list(self._entities.get(user_id, {}).values())
+        scope_key = self._scope_key(user_id)
+        if scope_key is None:
+            return []
+        entities = list(self._entities.get(scope_key, {}).values())
 
         if current_only:
             entities = [e for e in entities if e.is_current]
@@ -378,7 +414,10 @@ class TemporalGraphManager:
         relation_type: Optional[RelationType] = None,
     ) -> List[GraphRelation]:
         """Get relations for a user, optionally filtered."""
-        relations = list(self._relations.get(user_id, {}).values())
+        scope_key = self._scope_key(user_id)
+        if scope_key is None:
+            return []
+        relations = list(self._relations.get(scope_key, {}).values())
 
         if entity_id:
             relations = [
@@ -401,7 +440,8 @@ class TemporalGraphManager:
 
         Performs BFS up to max_hops from the source entity.
         """
-        if user_id not in self._entities:
+        scope_key = self._scope_key(user_id)
+        if scope_key is None or scope_key not in self._entities:
             return []
 
         visited: Set[str] = {entity_id}
@@ -410,7 +450,7 @@ class TemporalGraphManager:
 
         for _hop in range(max_hops):
             next_frontier: Set[str] = set()
-            relations = self._relations.get(user_id, {})
+            relations = self._relations.get(scope_key, {})
 
             for rel in relations.values():
                 if rel.source_id in frontier and rel.target_id not in visited:
@@ -423,7 +463,7 @@ class TemporalGraphManager:
             frontier = next_frontier
 
         # Collect entities
-        entities = self._entities.get(user_id, {})
+        entities = self._entities.get(scope_key, {})
         for eid in visited:
             if eid != entity_id and eid in entities:
                 result.append(entities[eid])
@@ -437,7 +477,10 @@ class TemporalGraphManager:
         session_id: Optional[str] = None,
     ) -> List[Episode]:
         """Get recent episodes for a user."""
-        episodes = list(self._episodes.get(user_id, {}).values())
+        scope_key = self._scope_key(user_id)
+        if scope_key is None:
+            return []
+        episodes = list(self._episodes.get(scope_key, {}).values())
 
         if session_id:
             episodes = [e for e in episodes if e.session_id == session_id]
@@ -457,7 +500,10 @@ class TemporalGraphManager:
         entity_type: EntityType,
     ) -> List[GraphEntity]:
         """Get version history of an entity (all versions, including superseded)."""
-        entities = self._entities.get(user_id, {})
+        scope_key = self._scope_key(user_id)
+        if scope_key is None:
+            return []
+        entities = self._entities.get(scope_key, {})
         history = [
             e for e in entities.values()
             if e.name == name and e.entity_type == entity_type
@@ -476,8 +522,11 @@ class TemporalGraphManager:
 
         Formats entities and their relations into a natural paragraph.
         """
+        scope_key = self._scope_key(user_id)
+        if scope_key is None:
+            return ""
         return build_context_text_impl(
-            user_id=user_id,
+            user_id=scope_key,
             entities_by_user=self._entities,
             relations_by_user=self._relations,
             relevant_entity_ids=relevant_entity_ids,
@@ -487,8 +536,11 @@ class TemporalGraphManager:
 
     def to_dict(self, user_id: str) -> Dict[str, Any]:
         """Serialize user's graph to dict for JSON storage."""
+        scope_key = self._scope_key(user_id)
+        if scope_key is None:
+            return {"entities": {}, "relations": {}, "episodes": {}}
         return to_dict_impl(
-            user_id=user_id,
+            user_id=scope_key,
             entities_by_user=self._entities,
             relations_by_user=self._relations,
             episodes_by_user=self._episodes,
@@ -496,6 +548,7 @@ class TemporalGraphManager:
 
     def from_dict(self, user_id: str, data: Dict[str, Any]) -> None:
         """Load user's graph from serialized dict."""
+        scope_key = self._write_scope_key(user_id)
         entities, relations, episodes = from_dict_impl(
             user_id=user_id,
             data=data,
@@ -503,15 +556,18 @@ class TemporalGraphManager:
             relation_from_dict=GraphRelation.from_dict,
             episode_from_dict=Episode.from_dict,
         )
-        self._entities[user_id] = entities
-        self._relations[user_id] = relations
-        self._episodes[user_id] = episodes
+        self._entities[scope_key] = entities
+        self._relations[scope_key] = relations
+        self._episodes[scope_key] = episodes
 
     def clear_user(self, user_id: str) -> None:
         """Clear all graph data for a user."""
-        self._entities.pop(user_id, None)
-        self._relations.pop(user_id, None)
-        self._episodes.pop(user_id, None)
+        scope_key = self._scope_key(user_id, write=True)
+        if scope_key is None:
+            return
+        self._entities.pop(scope_key, None)
+        self._relations.pop(scope_key, None)
+        self._episodes.pop(scope_key, None)
 
 
 # =============================================================================

@@ -853,6 +853,70 @@ class TestBackwardCompat:
             )
             assert result is None
 
+    @pytest.mark.asyncio
+    async def test_optional_auth_reraises_invalid_api_key(self, mock_settings):
+        from fastapi import HTTPException
+
+        mock_settings.api_key = "test-key"
+
+        with patch("app.core.security.settings", mock_settings):
+            from app.core.security import optional_auth
+
+            with pytest.raises(HTTPException) as exc_info:
+                await optional_auth(
+                    api_key="wrong-key",
+                    credentials=None,
+                    x_user_id=None,
+                    x_role=None,
+                    x_session_id=None,
+                    x_org_id=None,
+                )
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail == "Invalid API key"
+
+    @pytest.mark.asyncio
+    async def test_optional_auth_reraises_bearer_org_mismatch(self, mock_settings):
+        from fastapi import HTTPException
+        from fastapi.security import HTTPAuthorizationCredentials
+        import jwt as jose_jwt
+
+        mock_settings.environment = "production"
+        mock_settings.enable_multi_tenant = True
+        mock_settings.enable_org_membership_check = False
+        mock_settings.enable_jti_denylist = False
+
+        token_payload = {
+            "sub": "jwt-user",
+            "aud": "wiii",
+            "role": "student",
+            "active_organization_id": "org-token",
+            "type": "access",
+            "iat": datetime.now(timezone.utc),
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+        }
+        token = jose_jwt.encode(token_payload, "test-secret-key", algorithm="HS256")
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        with (
+            patch("app.core.security.settings", mock_settings),
+            patch("app.auth.token_service.settings", mock_settings),
+        ):
+            from app.core.security import optional_auth
+
+            with pytest.raises(HTTPException) as exc_info:
+                await optional_auth(
+                    api_key=None,
+                    credentials=creds,
+                    x_user_id=None,
+                    x_role=None,
+                    x_session_id=None,
+                    x_org_id="org-header",
+                )
+
+        assert exc_info.value.status_code == 403
+        assert "does not match authenticated organization" in exc_info.value.detail
+
 
 # ============================================================================
 # 11. Combined scenarios

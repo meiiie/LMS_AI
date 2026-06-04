@@ -269,6 +269,38 @@ def test_migrate_embedding_space_rows_dry_run_counts_candidates(monkeypatch):
     assert result.tables[0].skipped_rows == 2
 
 
+def test_migrate_embedding_space_rows_apply_requires_maintenance_ack(monkeypatch):
+    from app.services import embedding_space_migration_service as mod
+
+    monkeypatch.setattr(
+        mod,
+        "plan_embedding_space_migration",
+        lambda **_kwargs: mod.EmbeddingSpaceMigrationPlan(
+            current_contract_fingerprint="ollama:embeddinggemma:768",
+            target_contract_fingerprint="openai:text-embedding-3-small:1536",
+            current_contract_label="embeddinggemma [ollama, 768d]",
+            target_contract_label="text-embedding-3-small [openai, 1536d]",
+            same_space=False,
+            transition_allowed=True,
+            target_backend_constructible=True,
+            maintenance_required=False,
+            total_candidate_rows=1,
+            total_embedded_rows=1,
+            tables=(),
+            warnings=(),
+            detail="shadow path",
+            recommended_steps=("prepare shadow",),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Maintenance window acknowledgement"):
+        mod.migrate_embedding_space_rows(
+            target_model="text-embedding-3-small",
+            dry_run=False,
+            acknowledge_maintenance_window=False,
+        )
+
+
 def test_migrate_embedding_space_rows_apply_updates_and_stamps_target_metadata(monkeypatch):
     from app.services import embedding_space_migration_service as mod
 
@@ -406,10 +438,44 @@ def test_promote_embedding_space_shadow_updates_policy_and_registry(monkeypatch)
     monkeypatch.setattr(mod, "promote_shadow_embedding_space", lambda **kwargs: promoted.append(tuple(kwargs["entity_types"])) or ())
     monkeypatch.setattr(mod, "_flush_embedding_version", lambda _version: None)
 
-    result = mod.promote_embedding_space_shadow(target_model="text-embedding-3-small")
+    result = mod.promote_embedding_space_shadow(
+        target_model="text-embedding-3-small",
+        acknowledge_maintenance_window=True,
+    )
 
     assert result.target_contract_fingerprint == "openai:text-embedding-3-small:1536"
     assert applied_snapshots[0]["embedding_model"] == "text-embedding-3-small"
     assert applied_snapshots[0]["embedding_dimensions"] == 1536
     assert applied_snapshots[0]["embedding_failover_chain"][0] == "openai"
     assert promoted[0] == ("semantic_memories", "knowledge_embeddings")
+
+
+def test_promote_embedding_space_shadow_requires_maintenance_ack(monkeypatch):
+    from app.services import embedding_space_migration_service as mod
+
+    monkeypatch.setattr(
+        mod,
+        "plan_embedding_space_migration",
+        lambda **_kwargs: mod.EmbeddingSpaceMigrationPlan(
+            current_contract_fingerprint="ollama:embeddinggemma:768",
+            target_contract_fingerprint="openai:text-embedding-3-small:1536",
+            current_contract_label="embeddinggemma [ollama, 768d]",
+            target_contract_label="text-embedding-3-small [openai, 1536d]",
+            same_space=False,
+            transition_allowed=True,
+            target_backend_constructible=True,
+            maintenance_required=False,
+            total_candidate_rows=1,
+            total_embedded_rows=1,
+            tables=(),
+            warnings=(),
+            detail="shadow ready",
+            recommended_steps=("promote",),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Maintenance window acknowledgement"):
+        mod.promote_embedding_space_shadow(
+            target_model="text-embedding-3-small",
+            acknowledge_maintenance_window=False,
+        )

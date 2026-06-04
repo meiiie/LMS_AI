@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -307,7 +308,7 @@ def test_code_studio_tool_policy_denies_stale_tool_call() -> None:
     decision, message = denial
     assert decision.allowed is False
     assert decision.path == "code_studio"
-    assert decision.reason == "not_allowed_by_path_policy"
+    assert decision.reason == "surface_scope_not_allowed"
     assert "Tool bị chặn bởi chính sách" in message
 
 
@@ -379,7 +380,11 @@ async def test_code_studio_tool_round_denies_out_of_policy_call_without_invoking
                     {
                         "id": "tc-stale",
                         "name": "tool_web_search",
-                        "args": {"query": "should not run"},
+                        "args": {
+                            "query": "should not run",
+                            "connection_ref": "wcn_secret_connection",
+                            "code_html": "<html>private code</html>",
+                        },
                     }
                 ],
             )
@@ -452,8 +457,13 @@ async def test_code_studio_tool_round_denies_out_of_policy_call_without_invoking
     assert getattr(llm_response, "content", "") == "done"
     assert tool_events[0]["policy"]["allowed"] is False
     assert tool_events[0]["policy"]["path"] == "code_studio"
+    assert tool_events[0]["args"]["connection_ref"] == "[redacted]"
+    assert tool_events[0]["args"]["code_html"]["redacted"] is True
     assert "Tool bị chặn bởi chính sách" in tool_events[1]["result"]
     tool_call_event = next(event for event in emitted if event["type"] == "tool_call")
     tool_result_event = next(event for event in emitted if event["type"] == "tool_result")
     assert tool_call_event["content"]["policy"]["allowed"] is False
+    assert tool_call_event["content"]["args"] == tool_events[0]["args"]
+    assert "wcn_secret_connection" not in json.dumps(emitted, ensure_ascii=False)
+    assert "<html>private code</html>" not in json.dumps(tool_events, ensure_ascii=False)
     assert tool_result_event["content"]["name"] == "tool_web_search"

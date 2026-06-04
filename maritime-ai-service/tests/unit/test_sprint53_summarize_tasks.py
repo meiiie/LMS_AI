@@ -25,11 +25,20 @@ class TestSummarizeThreadBackground:
         with patch("app.services.session_summarizer.get_session_summarizer",
                     return_value=mock_summarizer):
             from app.tasks.summarize_tasks import summarize_thread_background
-            result = await summarize_thread_background("thread-1", "user-1")
+            result = await summarize_thread_background(
+                "thread-1",
+                "user-1",
+                organization_id="org-active",
+            )
 
         assert result["thread_id"] == "thread-1"
         assert result["summary"] == "User discussed SOLAS chapter III"
         assert result["success"] is True
+        mock_summarizer.summarize_thread.assert_awaited_once_with(
+            thread_id="thread-1",
+            user_id="user-1",
+            organization_id="org-active",
+        )
 
     @pytest.mark.asyncio
     async def test_none_summary(self):

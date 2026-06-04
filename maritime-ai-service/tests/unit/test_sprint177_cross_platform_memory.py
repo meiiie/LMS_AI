@@ -287,6 +287,111 @@ class TestMemoryMerge:
 
         assert result["migrated"] == 1
 
+    @pytest.mark.asyncio
+    async def test_merge_blocks_missing_org_context_before_db(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.semantic_memory.cross_platform import CrossPlatformMemory
+
+        merger = CrossPlatformMemory()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory, \
+                 patch(
+                     "app.engine.semantic_memory.cross_platform."
+                     "append_semantic_memory_write_audit_event",
+                     new_callable=AsyncMock,
+                 ) as mock_audit:
+                result = await merger.merge_memories(
+                    "raw-canonical-cross-platform-user",
+                    "raw-legacy-cross-platform-user",
+                    "messenger",
+                    session_id="raw-cross-platform-session",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert result == {"migrated": 0, "duplicates_resolved": 0}
+        mock_factory.assert_not_called()
+        mock_audit.assert_awaited_once()
+        payload = mock_audit.await_args.kwargs["payload"]
+        assert payload["write"]["kind"] == "cross_platform_memory_merge"
+        assert payload["write"]["status"] == "blocked"
+        assert "cross_platform_merge_blocked_missing_org_context" in payload["warnings"]
+        serialized = str(payload)
+        assert "raw-canonical-cross-platform-user" not in serialized
+        assert "raw-legacy-cross-platform-user" not in serialized
+        assert "raw-cross-platform-session" not in serialized
+
+    @pytest.mark.asyncio
+    async def test_merge_filters_by_org_and_appends_audit(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.semantic_memory.cross_platform import CrossPlatformMemory
+
+        merger = CrossPlatformMemory()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        legacy_id = str(uuid4())
+        legacy_rows = [
+            (legacy_id, "Private cross-platform fact", 0.7, "fact", {}, datetime.now(timezone.utc)),
+        ]
+        execute_calls = []
+        mock_session = MagicMock()
+
+        def execute_side_effect(statement, params=None):
+            execute_calls.append((str(statement), dict(params or {})))
+            result = MagicMock()
+            if len(execute_calls) == 1:
+                result.fetchall.return_value = legacy_rows
+            elif len(execute_calls) == 2:
+                result.fetchall.return_value = []
+            return result
+
+        mock_session.execute.side_effect = execute_side_effect
+        mock_session.commit = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory), \
+                 patch(
+                     "app.engine.semantic_memory.cross_platform."
+                     "append_semantic_memory_write_audit_event",
+                     new_callable=AsyncMock,
+                 ) as mock_audit:
+                result = await merger.merge_memories(
+                    "raw-canonical-cross-platform-user",
+                    "raw-legacy-cross-platform-user",
+                    "messenger",
+                    session_id="raw-cross-platform-session",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert result == {"migrated": 1, "duplicates_resolved": 0}
+        assert execute_calls
+        assert all(params.get("org_id") == "org-A" for _, params in execute_calls)
+        assert all("organization_id = :org_id" in statement for statement, _ in execute_calls)
+        mock_audit.assert_awaited_once()
+        payload = mock_audit.await_args.kwargs["payload"]
+        assert payload["write"]["kind"] == "cross_platform_memory_merge"
+        assert payload["write"]["status"] == "saved"
+        assert payload["write"]["stored_fact_count"] == 1
+        assert payload["write"]["stored_insight_count"] == 0
+        serialized = str(payload)
+        assert "raw-canonical-cross-platform-user" not in serialized
+        assert "raw-legacy-cross-platform-user" not in serialized
+        assert "raw-cross-platform-session" not in serialized
+
 
 # =============================================================================
 # Cross-Platform Summary Tests
@@ -401,6 +506,68 @@ class TestCrossPlatformSummary:
         lines = summary.strip().split("\n")
         assert len(lines) <= 2
 
+    @pytest.mark.asyncio
+    async def test_summary_blocks_missing_org_context_before_db(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.semantic_memory.cross_platform import CrossPlatformMemory
+
+        merger = CrossPlatformMemory()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                summary = await merger.get_cross_platform_summary(
+                    "raw-summary-user",
+                    "desktop",
+                    max_items=1,
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert summary == ""
+        mock_factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_summary_filters_by_org_context(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.semantic_memory.cross_platform import CrossPlatformMemory
+
+        merger = CrossPlatformMemory()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        rows = [
+            ("Private summary fact", "messenger_abc", "fact", datetime.now(timezone.utc)),
+        ]
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = rows
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                summary = await merger.get_cross_platform_summary(
+                    "raw-summary-user",
+                    "desktop",
+                    max_items=1,
+                )
+        finally:
+            current_org_id.reset(token)
+
+        params = mock_session.execute.call_args.args[1]
+        statement = str(mock_session.execute.call_args.args[0])
+        assert params["org_id"] == "org-A"
+        assert "organization_id = :org_id" in statement
+        assert "Messenger" in summary
+
 
 # =============================================================================
 # Platform Activity Tests
@@ -442,6 +609,57 @@ class TestPlatformActivity:
             activity = await merger.get_platform_activity("user-1")
 
         assert activity == {}
+
+    @pytest.mark.asyncio
+    async def test_platform_activity_blocks_missing_org_context_before_db(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.semantic_memory.cross_platform import CrossPlatformMemory
+
+        merger = CrossPlatformMemory()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                activity = await merger.get_platform_activity("raw-activity-user")
+        finally:
+            current_org_id.reset(token)
+
+        assert activity == {}
+        mock_factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_platform_activity_filters_by_org_context(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.semantic_memory.cross_platform import CrossPlatformMemory
+
+        merger = CrossPlatformMemory()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = [("messenger_abc", 2)]
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                activity = await merger.get_platform_activity("raw-activity-user")
+        finally:
+            current_org_id.reset(token)
+
+        params = mock_session.execute.call_args.args[1]
+        statement = str(mock_session.execute.call_args.args[0])
+        assert params["org_id"] == "org-A"
+        assert "organization_id = :org_id" in statement
+        assert activity == {"messenger": 2}
 
 
 # =============================================================================

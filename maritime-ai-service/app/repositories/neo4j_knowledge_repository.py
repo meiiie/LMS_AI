@@ -24,6 +24,12 @@ from functools import wraps
 from typing import Any, List, Optional
 
 from app.core.config import settings
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 from app.models.knowledge_graph import (
     Citation,
     KnowledgeNode,
@@ -31,6 +37,7 @@ from app.models.knowledge_graph import (
 )
 
 logger = logging.getLogger(__name__)
+NEO4J_KNOWLEDGE_SCOPE_BLOCKED_WARNING = "neo4j_knowledge_blocked_missing_org_context"
 
 
 # =============================================================================
@@ -167,6 +174,57 @@ class Neo4jKnowledgeRepository:
         """Check if Neo4j is available."""
         return self._available
 
+    def _resolve_scope(
+        self,
+        organization_id: Optional[str] = None,
+        *,
+        write: bool = False,
+    ) -> MemoryWriteScope:
+        if isinstance(organization_id, str) and organization_id.strip():
+            return MemoryWriteScope(
+                org_id=organization_id.strip(),
+                state="explicit",
+                warnings=[],
+                write_allowed=True,
+            )
+        return resolve_memory_write_scope() if write else resolve_memory_read_scope()
+
+    def _uses_org_scope(self, scope: MemoryWriteScope) -> bool:
+        return bool(scope.org_id and scope.state != "single_tenant_default")
+
+    def _org_params(self, scope: MemoryWriteScope) -> dict[str, Any]:
+        if not self._uses_org_scope(scope):
+            return {}
+        return {"organization_id": scope.org_id}
+
+    def _scope_for_operation(
+        self,
+        operation: str,
+        *,
+        write: bool,
+        organization_id: Optional[str] = None,
+        entity_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+    ) -> Optional[MemoryWriteScope]:
+        scope = self._resolve_scope(organization_id, write=write)
+        if scope.write_allowed:
+            return scope
+
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(NEO4J_KNOWLEDGE_SCOPE_BLOCKED_WARNING)
+        logger.warning(
+            "[Neo4jKG] %s blocked entity_hash=%s document_hash=%s "
+            "org_hash=%s org_scope=%s warnings=%s",
+            operation,
+            hash_memory_identifier(entity_id),
+            hash_memory_identifier(document_id),
+            hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
+        return None
+
     def ping(self) -> bool:
         """
         Ping Neo4j with a lightweight query to keep connection alive.
@@ -229,13 +287,26 @@ class Neo4jKnowledgeRepository:
     async def hybrid_search(
         self,
         query: str,
-        limit: int = 5
+        limit: int = 5,
+        organization_id: Optional[str] = None,
     ) -> List[KnowledgeNode]:
         """Search knowledge base using text matching with synonym expansion."""
-        logger.info("Neo4j hybrid_search called with query: %s", query)
+        logger.info(
+            "Neo4j hybrid_search called query_hash=%s query_chars=%d",
+            hash_memory_identifier(query),
+            len(query or ""),
+        )
 
         if not self._available:
             logger.warning("Neo4j not available for search")
+            return []
+
+        scope = self._scope_for_operation(
+            "hybrid_search",
+            write=False,
+            organization_id=organization_id,
+        )
+        if scope is None:
             return []
 
         stop_words = {
@@ -271,7 +342,7 @@ class Neo4jKnowledgeRepository:
                     expanded_keywords.update(synonyms)
 
         keywords = list(expanded_keywords)
-        logger.info("Search keywords (expanded): %s", keywords)
+        logger.info("Search keywords expanded_count=%d", len(keywords))
 
         import re
         rule_numbers = re.findall(r'\b(\d+)\b', query)
@@ -280,30 +351,55 @@ class Neo4jKnowledgeRepository:
                 keywords.append(f"rule {num}")
                 keywords.append(f"rule{num}")
 
-        logger.info("Final keywords: %s", keywords)
+        logger.info("Final keyword_count=%d", len(keywords))
 
         try:
             with self._driver.session() as session:
-                cypher = """
-                MATCH (k:Knowledge)
-                WHERE ANY(keyword IN $keywords WHERE
-                    toLower(k.title) CONTAINS keyword OR
-                    toLower(k.content) CONTAINS keyword OR
-                    toLower(k.category) CONTAINS keyword
-                )
-                WITH DISTINCT k,
-                    REDUCE(score = 0, keyword IN $keywords |
-                        score +
-                        CASE WHEN toLower(k.title) CONTAINS keyword THEN 15 ELSE 0 END +
-                        CASE WHEN toLower(k.content) CONTAINS keyword THEN 1 ELSE 0 END
-                    ) AS relevance
-                RETURN k, relevance
-                ORDER BY relevance DESC
-                LIMIT $max_results
-                """
+                if self._uses_org_scope(scope):
+                    cypher = """
+                    MATCH (k:Knowledge {organization_id: $organization_id})
+                    WHERE ANY(keyword IN $keywords WHERE
+                        toLower(k.title) CONTAINS keyword OR
+                        toLower(k.content) CONTAINS keyword OR
+                        toLower(k.category) CONTAINS keyword
+                    )
+                    WITH DISTINCT k,
+                        REDUCE(score = 0, keyword IN $keywords |
+                            score +
+                            CASE WHEN toLower(k.title) CONTAINS keyword THEN 15 ELSE 0 END +
+                            CASE WHEN toLower(k.content) CONTAINS keyword THEN 1 ELSE 0 END
+                        ) AS relevance
+                    RETURN k, relevance
+                    ORDER BY relevance DESC
+                    LIMIT $max_results
+                    """
+                else:
+                    cypher = """
+                    MATCH (k:Knowledge)
+                    WHERE ANY(keyword IN $keywords WHERE
+                        toLower(k.title) CONTAINS keyword OR
+                        toLower(k.content) CONTAINS keyword OR
+                        toLower(k.category) CONTAINS keyword
+                    )
+                    WITH DISTINCT k,
+                        REDUCE(score = 0, keyword IN $keywords |
+                            score +
+                            CASE WHEN toLower(k.title) CONTAINS keyword THEN 15 ELSE 0 END +
+                            CASE WHEN toLower(k.content) CONTAINS keyword THEN 1 ELSE 0 END
+                        ) AS relevance
+                    RETURN k, relevance
+                    ORDER BY relevance DESC
+                    LIMIT $max_results
+                    """
 
-                logger.info("Executing Neo4j query with keywords: %s", keywords)
-                result = session.run(cypher, keywords=keywords, max_results=limit)
+                params = {
+                    "keywords": keywords,
+                    "max_results": limit,
+                    **self._org_params(scope),
+                }
+
+                logger.info("Executing Neo4j query keyword_count=%d", len(keywords))
+                result = session.run(cypher, **params)
 
                 nodes = []
                 seen_ids = set()
@@ -317,7 +413,11 @@ class Neo4jKnowledgeRepository:
                         continue
                     seen_ids.add(node_id)
 
-                    logger.info("Found node: %s (score: %s)", node_data.get('title', 'N/A'), relevance)
+                    logger.info(
+                        "Found Neo4j node node_hash=%s score=%s",
+                        hash_memory_identifier(node_id),
+                        relevance,
+                    )
                     nodes.append(KnowledgeNode(
                         id=node_id,
                         node_type=NodeType.CONCEPT,
@@ -375,25 +475,56 @@ class Neo4jKnowledgeRepository:
             logger.warning("Neo4j not available for entity creation")
             return False
 
+        scope = self._scope_for_operation(
+            "create_entity",
+            write=True,
+            organization_id=organization_id,
+            entity_id=entity_id,
+            document_id=document_id,
+        )
+        if scope is None:
+            return False
+
+        org_params = self._org_params(scope)
+        effective_org_id = org_params.get("organization_id")
+
         try:
             with self._driver.session() as session:
-                cypher = """
-                MERGE (e:Entity {id: $entity_id})
-                ON CREATE SET
-                    e.type = $entity_type,
-                    e.name = $name,
-                    e.name_vi = $name_vi,
-                    e.description = $description,
-                    e.created_at = datetime(),
-                    e.document_id = $document_id,
-                    e.chunk_id = $chunk_id,
-                    e.organization_id = $organization_id
-                ON MATCH SET
-                    e.updated_at = datetime(),
-                    e.description = CASE WHEN size($description) > size(e.description)
-                                         THEN $description ELSE e.description END
-                RETURN e.id as id
-                """
+                if self._uses_org_scope(scope):
+                    cypher = """
+                    MERGE (e:Entity {id: $entity_id, organization_id: $organization_id})
+                    ON CREATE SET
+                        e.type = $entity_type,
+                        e.name = $name,
+                        e.name_vi = $name_vi,
+                        e.description = $description,
+                        e.created_at = datetime(),
+                        e.document_id = $document_id,
+                        e.chunk_id = $chunk_id
+                    ON MATCH SET
+                        e.updated_at = datetime(),
+                        e.description = CASE WHEN size($description) > size(e.description)
+                                             THEN $description ELSE e.description END
+                    RETURN e.id as id
+                    """
+                else:
+                    cypher = """
+                    MERGE (e:Entity {id: $entity_id})
+                    ON CREATE SET
+                        e.type = $entity_type,
+                        e.name = $name,
+                        e.name_vi = $name_vi,
+                        e.description = $description,
+                        e.created_at = datetime(),
+                        e.document_id = $document_id,
+                        e.chunk_id = $chunk_id,
+                        e.organization_id = $organization_id
+                    ON MATCH SET
+                        e.updated_at = datetime(),
+                        e.description = CASE WHEN size($description) > size(e.description)
+                                             THEN $description ELSE e.description END
+                    RETURN e.id as id
+                    """
                 result = session.run(
                     cypher,
                     entity_id=entity_id,
@@ -403,14 +534,19 @@ class Neo4jKnowledgeRepository:
                     description=description,
                     document_id=document_id,
                     chunk_id=chunk_id,
-                    organization_id=organization_id,
+                    organization_id=effective_org_id,
                 )
                 record = result.single()
-                logger.debug("Created/merged entity: %s (%s)", entity_id, entity_type)
+                logger.debug(
+                    "Created/merged entity entity_hash=%s type=%s org_hash=%s",
+                    hash_memory_identifier(entity_id),
+                    entity_type,
+                    hash_memory_identifier(effective_org_id),
+                )
                 return record is not None
 
         except Exception as e:
-            logger.error("Failed to create entity %s: %s", entity_id, e)
+            logger.error("Failed to create entity entity_hash=%s: %s", hash_memory_identifier(entity_id), e)
             return False
 
     async def create_entity_relation(
@@ -441,31 +577,64 @@ class Neo4jKnowledgeRepository:
         if not self._available:
             return False
 
+        scope = self._scope_for_operation(
+            "create_entity_relation",
+            write=True,
+            organization_id=organization_id,
+            entity_id=source_id,
+        )
+        if scope is None:
+            return False
+
+        org_params = self._org_params(scope)
+        effective_org_id = org_params.get("organization_id")
+
         try:
             with self._driver.session() as session:
-                cypher = f"""
-                MATCH (s:Entity {{id: $source_id}})
-                MATCH (t:Entity {{id: $target_id}})
-                MERGE (s)-[r:{relation_type}]->(t)
-                ON CREATE SET r.description = $description, r.created_at = datetime(),
-                              r.organization_id = $organization_id
-                RETURN type(r) as rel_type
-                """
+                if self._uses_org_scope(scope):
+                    cypher = f"""
+                    MATCH (s:Entity {{id: $source_id, organization_id: $organization_id}})
+                    MATCH (t:Entity {{id: $target_id, organization_id: $organization_id}})
+                    MERGE (s)-[r:{relation_type}]->(t)
+                    ON CREATE SET r.description = $description, r.created_at = datetime(),
+                                  r.organization_id = $organization_id
+                    RETURN type(r) as rel_type
+                    """
+                else:
+                    cypher = f"""
+                    MATCH (s:Entity {{id: $source_id}})
+                    MATCH (t:Entity {{id: $target_id}})
+                    MERGE (s)-[r:{relation_type}]->(t)
+                    ON CREATE SET r.description = $description, r.created_at = datetime(),
+                                  r.organization_id = $organization_id
+                    RETURN type(r) as rel_type
+                    """
                 result = session.run(
                     cypher,
                     source_id=source_id,
                     target_id=target_id,
                     description=description,
-                    organization_id=organization_id,
+                    organization_id=effective_org_id,
                 )
                 record = result.single()
                 if record:
-                    logger.debug("Created relation: %s -[%s]-> %s", source_id, relation_type, target_id)
+                    logger.debug(
+                        "Created relation source_hash=%s rel_type=%s target_hash=%s org_hash=%s",
+                        hash_memory_identifier(source_id),
+                        relation_type,
+                        hash_memory_identifier(target_id),
+                        hash_memory_identifier(effective_org_id),
+                    )
                     return True
                 return False
 
         except Exception as e:
-            logger.error("Failed to create relation %s->%s: %s", source_id, target_id, e)
+            logger.error(
+                "Failed to create relation source_hash=%s target_hash=%s: %s",
+                hash_memory_identifier(source_id),
+                hash_memory_identifier(target_id),
+                e,
+            )
             return False
 
     async def get_entity_relations(
@@ -475,15 +644,24 @@ class Neo4jKnowledgeRepository:
         if not self._available:
             return []
 
+        scope = self._scope_for_operation(
+            "get_entity_relations",
+            write=False,
+            organization_id=organization_id,
+            entity_id=entity_id,
+        )
+        if scope is None:
+            return []
+
         try:
             with self._driver.session() as session:
-                if organization_id:
+                if self._uses_org_scope(scope):
                     cypher = """
                     MATCH (e:Entity {id: $entity_id, organization_id: $organization_id})-[r]->(t:Entity)
                     RETURN type(r) as relation_type, t.id as target_id,
                            t.name as target_name, t.type as target_type
                     """
-                    result = session.run(cypher, entity_id=entity_id, organization_id=organization_id)
+                    result = session.run(cypher, entity_id=entity_id, **self._org_params(scope))
                 else:
                     cypher = """
                     MATCH (e:Entity {id: $entity_id})-[r]->(t:Entity)
@@ -494,7 +672,7 @@ class Neo4jKnowledgeRepository:
                 return [dict(record) for record in result]
 
         except Exception as e:
-            logger.error("Failed to get relations for %s: %s", entity_id, e)
+            logger.error("Failed to get relations for entity_hash=%s: %s", hash_memory_identifier(entity_id), e)
             return []
 
     @neo4j_retry(max_attempts=2, backoff=1.0)
@@ -503,18 +681,30 @@ class Neo4jKnowledgeRepository:
     ) -> List[dict]:
         """Get all entities extracted from a document, optionally filtered by org."""
         if not self._available:
-            logger.warning("Neo4j not available for get_document_entities(%s)", document_id)
+            logger.warning(
+                "Neo4j not available for get_document_entities document_hash=%s",
+                hash_memory_identifier(document_id),
+            )
+            return []
+
+        scope = self._scope_for_operation(
+            "get_document_entities",
+            write=False,
+            organization_id=organization_id,
+            document_id=document_id,
+        )
+        if scope is None:
             return []
 
         try:
             with self._driver.session() as session:
-                if organization_id:
+                if self._uses_org_scope(scope):
                     cypher = """
                     MATCH (e:Entity {document_id: $document_id, organization_id: $organization_id})
                     RETURN e.id as id, e.name as name, e.name_vi as name_vi,
                            e.type as type, e.description as description
                     """
-                    result = session.run(cypher, document_id=document_id, organization_id=organization_id)
+                    result = session.run(cypher, document_id=document_id, **self._org_params(scope))
                 else:
                     cypher = """
                     MATCH (e:Entity {document_id: $document_id})
@@ -525,7 +715,11 @@ class Neo4jKnowledgeRepository:
                 return [dict(record) for record in result]
 
         except Exception as e:
-            logger.error("Failed to get entities for document %s: %s", document_id, e)
+            logger.error(
+                "Failed to get entities for document_hash=%s: %s",
+                hash_memory_identifier(document_id),
+                e,
+            )
             raise  # Let retry decorator handle it
 
     def close(self):

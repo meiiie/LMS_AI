@@ -36,12 +36,18 @@ def test_load_recent_history_payload_maps_message_shape():
         chat_history=chat_history,
         session_id="session-1",
         user_id="user-1",
+        organization_id="org-1",
     )
 
     assert result == [
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "hi"},
     ]
+    chat_history.get_recent_messages.assert_called_once_with(
+        "session-1",
+        user_id="user-1",
+        organization_id="org-1",
+    )
 
 
 def test_build_context_compacted_response_uses_standard_payload():

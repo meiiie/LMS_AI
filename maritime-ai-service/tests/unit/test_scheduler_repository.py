@@ -14,10 +14,9 @@ Verifies:
 - Error handling (DB failures)
 """
 
-import json
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from app.repositories.scheduler_repository import (
     SchedulerRepository,
@@ -395,6 +394,9 @@ class TestMarkExecuted:
         assert result is True
         # Should have 2 execute calls: UPDATE status + check max_runs
         assert repo._mock_session.execute.call_count == 2
+        first_call = repo._mock_session.execute.call_args_list[0]
+        assert "next_run = NULL" in str(first_call[0][0])
+        assert "status = 'completed'" in str(first_call[0][0])
         repo._mock_session.commit.assert_called_once()
 
     def test_mark_executed_recurring(self, repo):
@@ -415,6 +417,7 @@ class TestMarkExecuted:
         second_call = repo._mock_session.execute.call_args_list[1]
         sql_text = str(second_call[0][0])
         assert "max_runs" in sql_text
+        assert "next_run = NULL" in sql_text
 
     def test_mark_executed_not_initialized(self):
         """Returns False when DB not initialized."""

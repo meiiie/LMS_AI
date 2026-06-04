@@ -16,6 +16,7 @@ Verifies:
 """
 
 import pytest
+from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock, MagicMock
 
 from app.services.session_summarizer import (
@@ -70,7 +71,38 @@ class TestSummarizeThread:
 
         assert result == summary_text
         mock_llm.ainvoke.assert_awaited_once()
-        mock_save.assert_called_once_with("user_abc__session_001", "abc", summary_text)
+        mock_save.assert_called_once_with(
+            "user_abc__session_001",
+            "abc",
+            summary_text,
+            organization_id=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_summarize_passes_org_scope_to_summary_write(self):
+        """Generated summaries persist through the active org boundary."""
+        summarizer = SessionSummarizer()
+
+        summary_text = "Nguoi dung hoi ve COLREG."
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(return_value=_make_llm_response(summary_text))
+        summarizer._llm = mock_llm
+
+        with patch.object(summarizer, "_save_summary") as mock_save:
+            result = await summarizer.summarize_thread(
+                thread_id="user_abc__session_001",
+                user_id="abc",
+                messages=SAMPLE_MESSAGES,
+                organization_id="org-active",
+            )
+
+        assert result == summary_text
+        mock_save.assert_called_once_with(
+            "user_abc__session_001",
+            "abc",
+            summary_text,
+            organization_id="org-active",
+        )
 
     @pytest.mark.asyncio
     async def test_summarize_no_messages_returns_none(self):
@@ -206,7 +238,35 @@ class TestGetRecentSummaries:
         assert "SOLAS Chapter" in result
         assert "Reviewed fire safety." in result
         assert "LỊCH SỬ CÁC PHIÊN TRƯỚC" in result
-        mock_repo.get_threads_with_summaries.assert_called_once_with(user_id="abc", limit=15)
+        mock_repo.get_threads_with_summaries.assert_called_once_with(
+            user_id="abc",
+            limit=15,
+            organization_id=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_recent_summaries_passes_org_scope(self):
+        """Layer 3 summaries are retrieved from the active org only."""
+        summarizer = SessionSummarizer()
+
+        mock_repo = MagicMock()
+        mock_repo.get_threads_with_summaries.return_value = []
+
+        with patch(
+            "app.repositories.thread_repository.get_thread_repository",
+            return_value=mock_repo,
+        ):
+            result = await summarizer.get_recent_summaries(
+                user_id="abc",
+                organization_id="org-active",
+            )
+
+        assert result == ""
+        mock_repo.get_threads_with_summaries.assert_called_once_with(
+            user_id="abc",
+            limit=15,
+            organization_id="org-active",
+        )
 
     @pytest.mark.asyncio
     async def test_get_recent_summaries_empty(self):
@@ -323,7 +383,67 @@ class TestSaveSummary:
             thread_id="user_abc__session_001",
             user_id="abc",
             extra_data={"summary": "Test summary."},
+            organization_id=None,
         )
+
+    def test_save_summary_passes_org_scope(self):
+        """_save_summary delegates with the resolved organization."""
+        summarizer = SessionSummarizer()
+
+        mock_repo = MagicMock()
+
+        with patch(
+            "app.repositories.thread_repository.get_thread_repository",
+            return_value=mock_repo,
+        ):
+            summarizer._save_summary(
+                thread_id="user_abc__session_001",
+                user_id="abc",
+                summary="Test summary.",
+                organization_id="org-active",
+            )
+
+        mock_repo.update_extra_data.assert_called_once_with(
+            thread_id="user_abc__session_001",
+            user_id="abc",
+            extra_data={"summary": "Test summary."},
+            organization_id="org-active",
+        )
+
+
+class TestSessionSummaryContextInjection:
+    """Test Layer 3 summary retrieval from the context builder path."""
+
+    @pytest.mark.asyncio
+    async def test_parallel_context_passes_request_org_to_recent_summaries(self):
+        from app.services.input_processor_context_runtime import _populate_parallel_context
+
+        summarizer = MagicMock()
+        summarizer.get_recent_summaries = AsyncMock(return_value="Scoped summary")
+        context = SimpleNamespace(semantic_context="", conversation_summary=None)
+        semantic_parts: list[str] = []
+
+        with patch(
+            "app.services.session_summarizer.get_session_summarizer",
+            return_value=summarizer,
+        ):
+            await _populate_parallel_context(
+                context=context,
+                request=SimpleNamespace(role=None, organization_id="org-active"),
+                user_id="abc",
+                message="Long enough message",
+                session_id="session-1",
+                learning_graph=None,
+                memory_summarizer=None,
+                semantic_parts=semantic_parts,
+                logger_obj=MagicMock(),
+            )
+
+        summarizer.get_recent_summaries.assert_awaited_once_with(
+            "abc",
+            organization_id="org-active",
+        )
+        assert semantic_parts == ["Scoped summary"]
 
 
 # =============================================================================

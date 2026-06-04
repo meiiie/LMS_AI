@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import json
 
 import pytest
 
@@ -74,7 +75,11 @@ async def test_recipe_fast_path_returns_typed_result(monkeypatch) -> None:
 
     async def fake_invoke_tool_with_runtime(*_args, **_kwargs):
         invoked_args.update(_args[1])
-        return '{"visual_session_id":"vs-fast","fallback_html":"<canvas></canvas>"}'
+        return (
+            '{"visual_session_id":"vs-fast","fallback_html":'
+            '"<canvas>raw-code-token-123456</canvas>",'
+            '"provider_payload":{"access_token":"raw-provider-token-123456"}}'
+        )
 
     async def fake_maybe_emit_visual_event(**_kwargs):
         return ["vs-fast"], []
@@ -117,7 +122,15 @@ async def test_recipe_fast_path_returns_typed_result(monkeypatch) -> None:
     assert result.fast_path == "fast_colreg15"
     assert result.tools_used == [{"name": "tool_create_visual_code"}]
     assert result.tool_call_events[0]["type"] == "call"
-    assert result.tool_call_events[0]["args"]["code_html"] == _COLREG_RULE15_FAST_PATH_HTML
+    assert result.tool_call_events[0]["args"]["code_html"]["redacted"] is True
+    assert _COLREG_RULE15_FAST_PATH_HTML not in str(result.tool_call_events[0]["args"])
+    public_result = json.loads(result.tool_call_events[1]["result"])
+    assert public_result["fallback_html"]["redacted"] is True
+    serialized_result = json.dumps(public_result, ensure_ascii=False)
+    assert "provider_payload" not in serialized_result
+    assert "access_token" not in serialized_result
+    assert "raw-code-token" not in serialized_result
+    assert "raw-provider-token" not in serialized_result
     assert invoked_args["code_html"] == _COLREG_RULE15_FAST_PATH_HTML
     tool_call_event = next(event for event in pushed_events if event["type"] == "tool_call")
     public_args = tool_call_event["content"]["args"]

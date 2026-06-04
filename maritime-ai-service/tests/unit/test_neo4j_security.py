@@ -7,11 +7,30 @@ through LLM-generated relation types.
 **Security:** CRITICAL - Prevents CVSS 8.1 vulnerability
 """
 import pytest
+from unittest.mock import MagicMock
 
 from app.repositories.neo4j_knowledge_repository import (
     Neo4jKnowledgeRepository,
     ALLOWED_RELATION_TYPES
 )
+
+
+def _repo_with_mock_session(result_records=None):
+    repo = Neo4jKnowledgeRepository()
+    repo._available = True
+    repo._driver = MagicMock()
+
+    session = MagicMock()
+    result = MagicMock()
+    result.single.return_value = (
+        result_records[0] if result_records else {"id": "entity-1"}
+    )
+    result.__iter__ = lambda self: iter(result_records or [])
+    session.run.return_value = result
+    session.__enter__ = lambda s: session
+    session.__exit__ = MagicMock(return_value=False)
+    repo._driver.session.return_value = session
+    return repo, session
 
 
 class TestCypherInjectionPrevention:
@@ -251,6 +270,98 @@ class TestSecurityLogging:
             "SECURITY" in record.message and malicious_type in record.message
             for record in caplog.records
         ), "Rejected relation types should be logged with [SECURITY] tag"
+
+
+class TestNeo4jKnowledgeOrgScope:
+    """Test organization-scoped Neo4j entity graph access."""
+
+    @pytest.mark.asyncio
+    async def test_create_entity_uses_current_org_context(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set("org-A")
+        try:
+            repo, session = _repo_with_mock_session()
+            assert await repo.create_entity(
+                entity_id="entity-1",
+                entity_type="ARTICLE",
+                name="Rule 15",
+                document_id="doc-1",
+            ) is True
+        finally:
+            current_org_id.reset(token)
+
+        query = session.run.call_args.args[0]
+        params = session.run.call_args.kwargs
+        assert "MERGE (e:Entity {id: $entity_id, organization_id: $organization_id})" in query
+        assert params["organization_id"] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_create_entity_relation_scopes_source_and_target(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set("org-B")
+        try:
+            repo, session = _repo_with_mock_session([{"rel_type": "REFERENCES"}])
+            assert await repo.create_entity_relation(
+                source_id="entity-source",
+                target_id="entity-target",
+                relation_type="REFERENCES",
+            ) is True
+        finally:
+            current_org_id.reset(token)
+
+        query = session.run.call_args.args[0]
+        params = session.run.call_args.kwargs
+        assert "Entity {id: $source_id, organization_id: $organization_id}" in query
+        assert "Entity {id: $target_id, organization_id: $organization_id}" in query
+        assert params["organization_id"] == "org-B"
+
+    @pytest.mark.asyncio
+    async def test_get_document_entities_blocks_missing_org_before_session(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            repo, _session = _repo_with_mock_session([])
+            assert await repo.get_document_entities("private-doc") == []
+        finally:
+            current_org_id.reset(token)
+
+        repo._driver.session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_entity_relations_blocks_missing_org_before_session(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            repo, _session = _repo_with_mock_session([])
+            assert await repo.get_entity_relations("private-entity") == []
+        finally:
+            current_org_id.reset(token)
+
+        repo._driver.session.assert_not_called()
 
 
 class TestBackwardCompatibility:

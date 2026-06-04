@@ -26,6 +26,7 @@ from app.engine.multi_agent.tool_policy_session import (
     ToolPolicyDecision,
     resolve_tool_policy_denial,
 )
+from app.engine.multi_agent.tool_event_sanitizer import sanitize_tool_result_for_event
 from app.engine.runtime.runtime_metrics import inc_counter
 
 logger = logging.getLogger(__name__)
@@ -731,14 +732,15 @@ async def execute_code_studio_tool_rounds_impl(
                     policy_decision.path,
                     policy_decision.reason,
                 )
+                public_tc_args = sanitize_code_studio_tool_call_args_for_stream(
+                    tc_name,
+                    tc_args,
+                )
                 await push_event({
                     "type": "tool_call",
                     "content": {
                         "name": tc_name,
-                        "args": sanitize_code_studio_tool_call_args_for_stream(
-                            tc_name,
-                            tc_args,
-                        ),
+                        "args": public_tc_args,
                         "id": tc_id,
                         "policy": policy_metadata,
                     },
@@ -748,7 +750,7 @@ async def execute_code_studio_tool_rounds_impl(
                     {
                         "type": "call",
                         "name": tc_name,
-                        "args": tc_args,
+                        "args": public_tc_args,
                         "id": tc_id,
                         "policy": policy_metadata,
                     }
@@ -768,26 +770,29 @@ async def execute_code_studio_tool_rounds_impl(
                     {
                         "type": "result",
                         "name": tc_name,
-                        "result": str(result),
+                        "result": sanitize_tool_result_for_event(result),
                         "id": tc_id,
                         "policy": policy_metadata,
                     }
                 )
                 messages.append(_TM(content=str(result), tool_call_id=tc_id))
                 continue
+            public_tc_args = sanitize_code_studio_tool_call_args_for_stream(
+                tc_name,
+                tc_args,
+            )
             await push_event({
                 "type": "tool_call",
                 "content": {
                     "name": tc_name,
-                    "args": sanitize_code_studio_tool_call_args_for_stream(
-                        tc_name,
-                        tc_args,
-                    ),
+                    "args": public_tc_args,
                     "id": tc_id,
                 },
                 "node": "code_studio_agent",
             })
-            tool_call_events.append({"type": "call", "name": tc_name, "args": tc_args, "id": tc_id})
+            tool_call_events.append(
+                {"type": "call", "name": tc_name, "args": public_tc_args, "id": tc_id}
+            )
             matched = get_tool_by_name(tools, str(tc_name).strip())
             logger.info(
                 "[CODE_STUDIO] Tool match: %s (matched=%s, tools_count=%d)",
@@ -883,7 +888,14 @@ async def execute_code_studio_tool_rounds_impl(
                     step="code_generation",
                     subtype="tool_reflection",
                 )
-            tool_call_events.append({"type": "result", "name": tc_name, "result": str(result), "id": tc_id})
+            tool_call_events.append(
+                {
+                    "type": "result",
+                    "name": tc_name,
+                    "result": sanitize_tool_result_for_event(result),
+                    "id": tc_id,
+                }
+            )
             messages.append(_TM(content=str(result), tool_call_id=tc_id))
             if is_terminal_code_studio_tool_error(tc_name, result):
                 terminal_failure_detected = True

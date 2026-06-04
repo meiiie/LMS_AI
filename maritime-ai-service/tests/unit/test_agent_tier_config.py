@@ -18,7 +18,7 @@ class TestDefaultTierMapping:
     def setup_method(self):
         from app.engine.multi_agent.agent_config import AgentConfigRegistry
 
-        AgentConfigRegistry.reset()
+        AgentConfigRegistry.initialize("{}", "{}")
 
     def test_rag_agent_is_moderate(self):
         from app.engine.multi_agent.agent_config import AgentConfigRegistry

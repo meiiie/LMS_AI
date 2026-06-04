@@ -60,6 +60,7 @@ class HostSessionV1(BaseModel):
     selection_label: Optional[str] = None
     editable_scope_type: Optional[str] = None
     resource_uri: Optional[str] = None
+    external_connection_summaries: list[str] = Field(default_factory=list)
 
 
 class HostContext(BaseModel):
@@ -311,9 +312,11 @@ def build_operator_session_v1(
     if isinstance(last_result, dict):
         data = last_result.get("data")
         if isinstance(data, dict):
-            preview_token = str(data.get("preview_token") or "").strip()
+            preview_available = bool(data.get("preview_available")) or bool(
+                str(data.get("preview_token") or "").strip()
+            )
             preview_kind = str(data.get("preview_kind") or "").strip()
-            if preview_token:
+            if preview_available:
                 pending_approval = True
                 follow_up_action = {
                     "lesson_patch": "authoring.apply_lesson_patch",
@@ -321,7 +324,7 @@ def build_operator_session_v1(
                     "quiz_publish": "publish.apply_quiz",
                 }.get(preview_kind, "matching apply/publish action")
                 next_best_step = (
-                    f"Nếu người dùng xác nhận rõ, gọi `{follow_up_action}` với preview token hiện tại; "
+                    f"Nếu người dùng xác nhận rõ, gọi `{follow_up_action}` cho preview hiện tại; "
                     "nếu chưa chắc, tiếp tục giải thích preview thay vì áp dụng ngay."
                 )
 
@@ -400,6 +403,48 @@ def _extract_scope_type(editable_scope: Optional[dict[str, Any]]) -> Optional[st
     return None
 
 
+def _extract_external_connection_summaries(page_metadata: dict[str, Any]) -> list[str]:
+    raw = page_metadata.get("wiii_connect")
+    if not isinstance(raw, dict):
+        return []
+
+    summaries: list[str] = []
+    providers = raw.get("providers")
+    if isinstance(providers, list):
+        provider_items = [item for item in providers if isinstance(item, dict)]
+    else:
+        provider_items = [raw]
+
+    for provider in provider_items[:5]:
+        slug = str(provider.get("provider_slug") or provider.get("slug") or "").strip()
+        label = str(provider.get("provider_label") or provider.get("label") or slug or "provider").strip()
+        status = str(provider.get("status") or "unknown").strip()
+        active_count = provider.get("active_connection_count")
+        page_count = provider.get("page_count")
+        page_names = provider.get("page_names")
+        actions = provider.get("available_actions")
+
+        parts = [f"{label}: {status}"]
+        if isinstance(active_count, int):
+            parts.append(f"{active_count} active account(s)")
+        if isinstance(page_count, int):
+            page_part = f"{page_count} page(s)"
+            if isinstance(page_names, list) and page_names:
+                names = [str(name) for name in page_names[:3] if str(name).strip()]
+                if names:
+                    page_part += " (" + ", ".join(names) + ")"
+            parts.append(page_part)
+        if isinstance(actions, list):
+            action_names = [str(action) for action in actions[:4] if str(action).strip()]
+            if action_names:
+                parts.append("actions: " + ", ".join(action_names))
+        if slug:
+            parts.append(f"provider={slug}")
+        summaries.append("; ".join(parts))
+
+    return summaries
+
+
 def build_host_session_v1(
     *,
     host_context: HostContext | dict[str, Any],
@@ -432,6 +477,7 @@ def build_host_session_v1(
         selection_label=_summarize_selection(ctx.selection),
         editable_scope_type=_extract_scope_type(ctx.editable_scope),
         resource_uri=ctx.resource_uri,
+        external_connection_summaries=_extract_external_connection_summaries(page_metadata),
     )
 
 
@@ -465,6 +511,11 @@ def format_host_session_for_prompt(session: HostSessionV1 | dict[str, Any]) -> s
         lines.append("- Available host actions: " + ", ".join(host_session.available_action_names))
     if host_session.resource_uri:
         lines.append(f"- Resource URI: {host_session.resource_uri}")
+    if host_session.external_connection_summaries:
+        lines.append(
+            "- External connections: "
+            + " | ".join(host_session.external_connection_summaries)
+        )
     return "\n".join(lines)
 
 

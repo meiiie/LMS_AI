@@ -15,7 +15,6 @@ Covers:
 
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, patch
 
 
 # =============================================================================
@@ -276,7 +275,7 @@ class TestTemporalGraphManagerRelations:
         assert len(rels) == 2
 
     def test_get_relations_by_type(self):
-        from app.engine.semantic_memory.temporal_graph import TemporalGraphManager, EntityType, RelationType
+        from app.engine.semantic_memory.temporal_graph import TemporalGraphManager, RelationType
         m = TemporalGraphManager()
         m.add_relation("u1", "e1", "e2", RelationType.STUDIES)
         m.add_relation("u1", "e1", "e3", RelationType.WEAK_AT)
@@ -395,6 +394,76 @@ class TestSerialization:
 
 
 # =============================================================================
+# 6b. Organization Scope Tests
+# =============================================================================
+
+
+class TestTemporalGraphOrgScope:
+    def test_same_user_graph_isolated_by_current_org(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.semantic_memory.temporal_graph import (
+            EntityType,
+            TemporalGraphManager,
+        )
+
+        m = TemporalGraphManager()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set("org-A")
+        try:
+            m.add_entity("same-user", "Org A fact", EntityType.FACT)
+            assert [e.name for e in m.get_entities("same-user")] == ["Org A fact"]
+        finally:
+            current_org_id.reset(token)
+
+        token = current_org_id.set("org-B")
+        try:
+            m.add_entity("same-user", "Org B fact", EntityType.FACT)
+            assert [e.name for e in m.get_entities("same-user")] == ["Org B fact"]
+            data = m.to_dict("same-user")
+        finally:
+            current_org_id.reset(token)
+
+        assert list(data["entities"]) == ["Org B fact_fact_v1"]
+
+        token = current_org_id.set("org-A")
+        try:
+            assert [e.name for e in m.get_entities("same-user")] == ["Org A fact"]
+        finally:
+            current_org_id.reset(token)
+
+    def test_write_blocks_without_org_context_in_production(self, monkeypatch):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.semantic_memory.temporal_graph import (
+            EntityType,
+            TEMPORAL_GRAPH_SCOPE_BLOCKED_ERROR,
+            TemporalGraphManager,
+        )
+
+        m = TemporalGraphManager()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            with pytest.raises(ValueError, match=TEMPORAL_GRAPH_SCOPE_BLOCKED_ERROR):
+                m.add_entity("raw-temporal-user", "Private fact", EntityType.FACT)
+            assert m.get_entities("raw-temporal-user") == []
+            assert m.to_dict("raw-temporal-user") == {
+                "entities": {},
+                "relations": {},
+                "episodes": {},
+            }
+        finally:
+            current_org_id.reset(token)
+
+
+# =============================================================================
 # 7. Context Text Tests
 # =============================================================================
 
@@ -448,7 +517,6 @@ class TestExtractGraphFromFacts:
     async def test_extract_basic_facts(self):
         from app.engine.semantic_memory.temporal_graph import (
             extract_graph_from_facts,
-            get_temporal_graph_manager,
         )
 
         # Reset singleton
@@ -498,7 +566,6 @@ class TestExtractGraphFromFacts:
         from app.engine.semantic_memory.temporal_graph import (
             extract_graph_from_facts,
             EntityType,
-            get_temporal_graph_manager,
         )
         import app.engine.semantic_memory.temporal_graph as mod
         mod._manager = None
@@ -515,6 +582,42 @@ class TestExtractGraphFromFacts:
         assert EntityType.LOCATION in entity_types
         assert EntityType.SKILL in entity_types
         assert EntityType.CONCEPT in entity_types
+
+    @pytest.mark.asyncio
+    async def test_extract_blocks_without_org_context_in_production(
+        self,
+        monkeypatch,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.semantic_memory.temporal_graph import (
+            TEMPORAL_GRAPH_SCOPE_BLOCKED_ERROR,
+            extract_graph_from_facts,
+            get_temporal_graph_manager,
+        )
+        import app.engine.semantic_memory.temporal_graph as mod
+        mod._manager = None
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            with pytest.raises(ValueError, match=TEMPORAL_GRAPH_SCOPE_BLOCKED_ERROR):
+                await extract_graph_from_facts(
+                    "raw-temporal-user",
+                    [{"fact_type": "goal", "value": "PRIVATE TEMPORAL FACT"}],
+                    session_id="raw-temporal-session",
+                )
+            manager = get_temporal_graph_manager()
+            assert manager.to_dict("raw-temporal-user") == {
+                "entities": {},
+                "relations": {},
+                "episodes": {},
+            }
+        finally:
+            current_org_id.reset(token)
 
 
 # =============================================================================
@@ -566,6 +669,18 @@ class TestImports:
             TemporalGraphManager,
             get_temporal_graph_manager,
             extract_graph_from_facts,
+        )
+        assert all(
+            item is not None
+            for item in (
+                EntityType,
+                RelationType,
+                GraphEntity,
+                GraphRelation,
+                Episode,
+                TemporalGraphContext,
+                TemporalGraphManager,
+            )
         )
         assert callable(get_temporal_graph_manager)
         assert callable(extract_graph_from_facts)

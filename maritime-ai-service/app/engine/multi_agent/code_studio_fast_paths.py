@@ -20,6 +20,7 @@ from app.engine.multi_agent.code_studio_event_payloads import (
     sanitize_code_studio_tool_call_args_for_stream,
 )
 from app.engine.multi_agent.state import AgentState
+from app.engine.multi_agent.tool_event_sanitizer import sanitize_tool_result_for_event
 from app.engine.multi_agent.visual_events import (
     _collect_active_visual_session_ids,
     _emit_visual_commit_events,
@@ -511,18 +512,19 @@ async def execute_code_studio_fast_path(
         )
         return None
 
+    public_tool_args = sanitize_code_studio_tool_call_args_for_stream(
+        tool_name,
+        tool_args,
+    )
     tool_call_events: list[dict[str, Any]] = [
-        {"type": "call", "name": tool_name, "args": tool_args, "id": tool_call_id},
+        {"type": "call", "name": tool_name, "args": public_tool_args, "id": tool_call_id},
     ]
 
     await push_event({
         "type": "tool_call",
         "content": {
             "name": tool_name,
-            "args": sanitize_code_studio_tool_call_args_for_stream(
-                tool_name,
-                tool_args,
-            ),
+            "args": public_tool_args,
             "id": tool_call_id,
         },
         "node": "code_studio_agent",
@@ -554,7 +556,7 @@ async def execute_code_studio_fast_path(
     tool_call_events.append({
         "type": "result",
         "name": tool_name,
-        "result": str(result),
+        "result": sanitize_tool_result_for_event(result),
         "id": tool_call_id,
     })
 

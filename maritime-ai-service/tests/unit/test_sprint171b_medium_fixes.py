@@ -173,50 +173,52 @@ class TestLivingAgentOrgIsolation:
     """Verify Living Agent methods use org_id filtering."""
 
     def test_skill_find_by_name_uses_org_filter(self):
-        """_find_by_name source includes org_where_clause."""
+        """_find_by_name source includes explicit org scoping."""
         from app.engine.living_agent.skill_builder import SkillBuilder
 
         source = inspect.getsource(SkillBuilder._find_by_name)
-        assert "org_where_clause" in source
-        assert "get_effective_org_id" in source
+        assert "_resolve_skill_scope" in source
+        assert "AND organization_id = :org_id" in source
 
     def test_skill_query_skills_uses_org_filter(self):
-        """_query_skills source includes org_where_clause."""
+        """_query_skills source includes explicit org scoping."""
         from app.engine.living_agent.skill_builder import SkillBuilder
 
         source = inspect.getsource(SkillBuilder._query_skills)
-        assert "org_where_clause" in source
-        assert "get_effective_org_id" in source
+        assert "_resolve_skill_scope" in source
+        assert "organization_id = :org_id" in source
 
     def test_skill_count_recent_uses_org_filter(self):
-        """_count_recent_discoveries source includes org_where_clause."""
+        """_count_recent_discoveries source includes explicit org scoping."""
         from app.engine.living_agent.skill_builder import SkillBuilder
 
         source = inspect.getsource(SkillBuilder._count_recent_discoveries)
-        assert "org_where_clause" in source
+        assert "_resolve_skill_scope" in source
+        assert "organization_id = :org_id" in source
 
     def test_heartbeat_queue_pending_includes_org_id(self):
-        """_queue_pending_actions INSERT includes organization_id."""
-        from app.engine.living_agent.heartbeat import HeartbeatScheduler
+        """queue_pending_actions_impl resolves write scope and inserts org_id."""
+        from app.engine.living_agent.heartbeat_runtime_support import queue_pending_actions_impl
 
-        source = inspect.getsource(HeartbeatScheduler._queue_pending_actions)
+        source = inspect.getsource(queue_pending_actions_impl)
         assert "organization_id" in source
-        assert "get_effective_org_id" in source
+        assert "resolve_memory_write_scope" in source
 
     def test_heartbeat_load_pending_filters_by_org(self):
-        """_load_pending_action uses org_where_clause."""
-        from app.engine.living_agent.heartbeat import HeartbeatScheduler
+        """load_pending_action_impl uses explicit org filtering."""
+        from app.engine.living_agent.heartbeat_runtime_support import load_pending_action_impl
 
-        source = inspect.getsource(HeartbeatScheduler._load_pending_action)
-        assert "org_where_clause" in source
+        source = inspect.getsource(load_pending_action_impl)
+        assert "resolve_memory_read_scope" in source
+        assert "AND organization_id = :org_id" in source
 
     def test_heartbeat_audit_includes_org_id(self):
-        """_save_heartbeat_audit INSERT includes organization_id."""
-        from app.engine.living_agent.heartbeat import HeartbeatScheduler
+        """save_heartbeat_audit_impl resolves write scope and inserts org_id."""
+        from app.engine.living_agent.heartbeat_runtime_support import save_heartbeat_audit_impl
 
-        source = inspect.getsource(HeartbeatScheduler._save_heartbeat_audit)
+        source = inspect.getsource(save_heartbeat_audit_impl)
         assert "organization_id" in source
-        assert "get_effective_org_id" in source
+        assert "resolve_memory_write_scope" in source
 
 
 # ============================================================================

@@ -12,12 +12,11 @@ Tests for:
 - Page param passthrough
 """
 
-import asyncio
 import json
 import logging
 import threading
 import time
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -256,7 +255,6 @@ class TestThreadSafeSingleton:
         """get_product_search_agent_node() returns same instance on repeated calls."""
         from app.engine.multi_agent.agents.product_search_node import (
             get_product_search_agent_node,
-            _node_lock,
         )
         import app.engine.multi_agent.agents.product_search_node as psn
 
@@ -301,9 +299,9 @@ class TestTikTokTokenRefresh:
     def test_cached_token_returns_immediately(self):
         """If token is valid, return without HTTP call."""
         from app.engine.search_platforms.adapters.tiktok_research import (
+            _credential_cache_key,
             _get_access_token,
             _token_cache,
-            _token_lock,
         )
         import app.engine.search_platforms.adapters.tiktok_research as ttr
 
@@ -311,6 +309,7 @@ class TestTikTokTokenRefresh:
         _original = dict(_token_cache)
 
         try:
+            ttr._token_cache["cache_key"] = _credential_cache_key("key", "secret")
             ttr._token_cache["access_token"] = "cached-token"
             ttr._token_cache["expires_at"] = time.time() + 3600
 

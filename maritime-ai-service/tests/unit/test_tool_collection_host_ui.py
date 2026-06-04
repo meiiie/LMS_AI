@@ -1,6 +1,71 @@
 from types import SimpleNamespace
 
 
+_DEFAULT_VISIBLE_ACTIONS_BY_PROVIDER = {
+    "facebook": ("FACEBOOK_CREATE_POST", "FACEBOOK_CREATE_PHOTO_POST"),
+    "gmail": ("GMAIL_FETCH_EMAILS",),
+}
+
+
+def _patch_wiii_connect_ready_providers(
+    monkeypatch,
+    module,
+    providers,
+    action_allowlists_by_provider=None,
+):
+    from app.engine.multi_agent import tool_policy_session as policy_module
+    from app.engine.multi_agent import external_app_action_runtime as action_runtime
+
+    provider_tuple = tuple(providers)
+    visible_actions = (
+        {
+            provider: _DEFAULT_VISIBLE_ACTIONS_BY_PROVIDER[provider]
+            for provider in provider_tuple
+            if provider in _DEFAULT_VISIBLE_ACTIONS_BY_PROVIDER
+        }
+        if action_allowlists_by_provider is None
+        else {
+            str(provider): tuple(actions)
+            for provider, actions in action_allowlists_by_provider.items()
+        }
+    )
+
+    class FakeSnapshot:
+        def agent_ready_external_provider_slugs(self):
+            return provider_tuple
+
+        def connection_status_map(self):
+            return {
+                provider: {
+                    "active": True,
+                    "status": "connected",
+                    "agent_ready": True,
+                }
+                for provider in provider_tuple
+            }
+
+    fake_snapshot = FakeSnapshot()
+    monkeypatch.setattr(
+        module,
+        "build_wiii_connect_snapshot",
+        lambda **_kwargs: fake_snapshot,
+    )
+    monkeypatch.setattr(
+        policy_module,
+        "build_wiii_connect_snapshot",
+        lambda **_kwargs: fake_snapshot,
+    )
+    monkeypatch.setattr(
+        action_runtime,
+        "_action_allowlists_for_providers",
+        lambda provider_slugs, **_kwargs: {
+            provider: tuple(visible_actions[provider])
+            for provider in provider_slugs
+            if provider in visible_actions
+        },
+    )
+
+
 def test_host_ui_route_without_host_caps_does_not_force_generic_tools(monkeypatch):
     from app.engine.multi_agent import tool_collection as module
 
@@ -336,6 +401,577 @@ def test_uploaded_document_preview_binds_safe_preview_when_global_host_actions_d
     assert [tool.name for tool in tools] == ["host_action__authoring__preview_lesson_patch"]
     assert [tool["name"] for tool in generated_from] == ["authoring.preview_lesson_patch"]
     assert force_tools is True
+
+
+def test_wiii_connect_facebook_post_request_binds_direct_apply_host_action(monkeypatch):
+    from app.engine.multi_agent import tool_collection as module
+    from app.engine.tools.tool_capability_registry import (
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+    )
+
+    monkeypatch.setattr(module.settings, "enable_character_tools", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_lms_integration", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_host_actions", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_structured_visuals", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_wiii_connect_composio", True, raising=False)
+    _patch_wiii_connect_ready_providers(monkeypatch, module, ("facebook",))
+    monkeypatch.setattr(module, "_needs_web_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_datetime", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_news_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_legal_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_lms_query", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_direct_knowledge_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_analysis_tool", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_pointy", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_weather_lookup", lambda _query: False)
+    monkeypatch.setattr(module, "_infer_direct_thinking_mode", lambda *_args, **_kwargs: "general")
+    monkeypatch.setattr(module, "_should_strip_visual_tools_from_direct", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "_should_strip_visual_tools_for_analytical_text_turn", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "filter_tools_for_role", lambda tools, _role: tools)
+    monkeypatch.setattr(module, "filter_tools_for_visual_intent", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        module,
+        "resolve_visual_intent",
+        lambda _query: SimpleNamespace(
+            force_tool=False,
+            mode="text",
+            visual_type=None,
+            preferred_tool=None,
+            presentation_intent="text",
+        ),
+    )
+
+    generated_from: list[dict] = []
+
+    def fake_generate_host_action_tools(capabilities_tools, *_args, **_kwargs):
+        generated_from.extend(capabilities_tools)
+        return [
+            SimpleNamespace(
+                name="host_action__" + str(tool["name"]).replace(".", "__")
+            )
+            for tool in capabilities_tools
+        ]
+
+    def fake_load_attr(module_name: str, attr_name: str):
+        if module_name.endswith("wiii_connect_tools"):
+            assert attr_name == "make_wiii_connect_facebook_post_direct_apply_tool"
+            return lambda **_kwargs: SimpleNamespace(
+                name=WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL
+            )
+        if module_name.endswith("utility_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_search_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_fetch_tool"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("agent_tools") and attr_name == "RAG_KNOWLEDGE_TOOL":
+            return SimpleNamespace(name="tool_rag_knowledge")
+        if module_name.endswith("action_tools") and attr_name == "generate_host_action_tools":
+            return fake_generate_host_action_tools
+        if module_name.endswith("direct_intent") and attr_name == "_needs_maritime_search":
+            return lambda _query: False
+        if module_name.endswith("direct_intent") and attr_name == "_normalize_for_intent":
+            return lambda query: str(query).lower()
+        if attr_name == "get_visual_tools":
+            return lambda: [SimpleNamespace(name="tool_generate_visual")]
+        raise AssertionError(f"Unexpected load: {module_name}.{attr_name}")
+
+    monkeypatch.setattr(module, "_load_attr", fake_load_attr)
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        "Wiii tao bai viet Facebook ve lop hoc hom nay",
+        user_role="student",
+        state=state,
+    )
+
+    assert [tool.name for tool in tools] == [WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL]
+    assert generated_from == []
+    assert state["_turn_path_decision"]["path"] == "external_app_action"
+    assert state["_external_app_action_plan"]["kind"] == "facebook_post_direct_apply"
+    assert state["_external_app_action_plan"]["status"] == "ready"
+    assert force_tools is True
+
+
+def test_wiii_connect_facebook_post_request_uses_backend_owner_when_host_declares_same_action(monkeypatch):
+    from app.engine.multi_agent import tool_collection as module
+    from app.engine.tools.tool_capability_registry import (
+        WIII_CONNECT_FACEBOOK_POST_APPLY_ACTION,
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION,
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+        WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION,
+    )
+
+    monkeypatch.setattr(module.settings, "enable_character_tools", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_lms_integration", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_host_actions", True, raising=False)
+    monkeypatch.setattr(module.settings, "enable_structured_visuals", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_wiii_connect_composio", True, raising=False)
+    _patch_wiii_connect_ready_providers(monkeypatch, module, ("facebook",))
+    monkeypatch.setattr(module, "_needs_web_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_datetime", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_news_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_legal_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_lms_query", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_direct_knowledge_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_analysis_tool", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_pointy", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_weather_lookup", lambda _query: False)
+    monkeypatch.setattr(module, "_infer_direct_thinking_mode", lambda *_args, **_kwargs: "general")
+    monkeypatch.setattr(module, "_should_strip_visual_tools_from_direct", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "_should_strip_visual_tools_for_analytical_text_turn", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "filter_tools_for_role", lambda tools, _role: tools)
+    monkeypatch.setattr(module, "filter_tools_for_visual_intent", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        module,
+        "resolve_visual_intent",
+        lambda _query: SimpleNamespace(
+            force_tool=False,
+            mode="text",
+            visual_type=None,
+            preferred_tool=None,
+            presentation_intent="text",
+        ),
+    )
+
+    generated_from: list[dict] = []
+
+    def fake_generate_host_action_tools(capabilities_tools, *_args, **_kwargs):
+        generated_from.extend(capabilities_tools)
+        return [
+            SimpleNamespace(
+                name="host_action__" + str(tool["name"]).replace(".", "__"),
+                wiii_connect_action_owner="host_action_bridge",
+            )
+            for tool in capabilities_tools
+        ]
+
+    def fake_load_attr(module_name: str, attr_name: str):
+        if module_name.endswith("wiii_connect_tools"):
+            assert attr_name == "make_wiii_connect_facebook_post_direct_apply_tool"
+            return lambda **_kwargs: SimpleNamespace(
+                name=WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL,
+                wiii_connect_action_owner="backend_gateway",
+            )
+        if module_name.endswith("utility_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_search_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_fetch_tool"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("agent_tools") and attr_name == "RAG_KNOWLEDGE_TOOL":
+            return SimpleNamespace(name="tool_rag_knowledge")
+        if module_name.endswith("action_tools") and attr_name == "generate_host_action_tools":
+            return fake_generate_host_action_tools
+        if module_name.endswith("direct_intent") and attr_name == "_needs_maritime_search":
+            return lambda _query: False
+        if module_name.endswith("direct_intent") and attr_name == "_normalize_for_intent":
+            return lambda query: str(query).lower()
+        if attr_name == "get_visual_tools":
+            return lambda: [SimpleNamespace(name="tool_generate_visual")]
+        raise AssertionError(f"Unexpected load: {module_name}.{attr_name}")
+
+    monkeypatch.setattr(module, "_load_attr", fake_load_attr)
+
+    state = {
+        "context": {},
+        "host_capabilities": {
+            "tools": [
+                {"name": WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION},
+                {"name": WIII_CONNECT_FACEBOOK_POST_APPLY_ACTION},
+                {"name": WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION},
+                {"name": "ui.highlight"},
+            ]
+        },
+    }
+    tools, force_tools = module._collect_direct_tools(
+        "Wiii dang mot bai tho ngan len Facebook di",
+        user_role="student",
+        state=state,
+    )
+
+    assert [tool["name"] for tool in generated_from] == ["ui.highlight"]
+    assert [tool.name for tool in tools] == [WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_TOOL]
+    assert tools[0].wiii_connect_action_owner == "backend_gateway"
+    assert state["_external_app_action_plan"]["kind"] == "facebook_post_direct_apply"
+    assert state["_external_app_integration_lane"]["executor"] == "specialized_direct_tool"
+    assert force_tools is True
+
+
+def test_wiii_connect_external_action_filters_legacy_host_bridge_capabilities():
+    from app.engine.multi_agent import tool_collection as module
+    from app.engine.tools.tool_capability_registry import (
+        WIII_CONNECT_FACEBOOK_POST_APPLY_ACTION,
+        WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION,
+        WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION,
+    )
+
+    filtered = module._filter_host_capability_tools_for_external_action_plan(
+        [
+            {"name": WIII_CONNECT_FACEBOOK_POST_PREVIEW_ACTION},
+            {"name": WIII_CONNECT_FACEBOOK_POST_APPLY_ACTION},
+            {"name": WIII_CONNECT_FACEBOOK_POST_DIRECT_APPLY_ACTION},
+            {"name": "ui.highlight"},
+        ],
+        SimpleNamespace(kind="provider_action"),
+    )
+
+    assert filtered == [{"name": "ui.highlight"}]
+
+
+def test_wiii_connect_synthetic_host_capabilities_hide_account_binding_fields():
+    from app.engine.multi_agent import tool_collection as module
+
+    preview = module._wiii_connect_facebook_post_preview_capability()
+    direct_apply = module._wiii_connect_facebook_post_direct_apply_capability()
+
+    for capability in (preview, direct_apply):
+        properties = capability["input_schema"]["properties"]
+        assert set(properties) == {"message", "image_policy"}
+        assert "connection_ref" not in properties
+        assert "provider_slug" not in properties
+        assert "page_id" not in properties
+        assert "image_base64" not in properties
+        assert "image_url" not in properties
+
+
+def test_wiii_connect_facebook_post_request_fails_closed_without_backend_tool(monkeypatch):
+    from app.engine.multi_agent import tool_collection as module
+
+    monkeypatch.setattr(module.settings, "enable_character_tools", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_lms_integration", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_host_actions", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_structured_visuals", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_wiii_connect_composio", True, raising=False)
+    _patch_wiii_connect_ready_providers(monkeypatch, module, ("facebook",))
+    monkeypatch.setattr(module, "_needs_web_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_datetime", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_news_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_legal_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_lms_query", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_direct_knowledge_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_analysis_tool", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_pointy", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_weather_lookup", lambda _query: False)
+    monkeypatch.setattr(module, "_infer_direct_thinking_mode", lambda *_args, **_kwargs: "general")
+    monkeypatch.setattr(module, "_should_strip_visual_tools_from_direct", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "_should_strip_visual_tools_for_analytical_text_turn", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "filter_tools_for_role", lambda tools, _role: tools)
+    monkeypatch.setattr(module, "filter_tools_for_visual_intent", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        module,
+        "resolve_visual_intent",
+        lambda _query: SimpleNamespace(
+            force_tool=False,
+            mode="text",
+            visual_type=None,
+            preferred_tool=None,
+            presentation_intent="text",
+        ),
+    )
+
+    generated_from: list[dict] = []
+
+    def fake_generate_host_action_tools(capabilities_tools, *_args, **_kwargs):
+        generated_from.extend(capabilities_tools)
+        return [
+            SimpleNamespace(
+                name="host_action__" + str(tool["name"]).replace(".", "__")
+            )
+            for tool in capabilities_tools
+        ]
+
+    def fake_load_attr(module_name: str, attr_name: str):
+        if module_name.endswith("wiii_connect_tools"):
+            raise RuntimeError("backend tool unavailable")
+        if module_name.endswith("utility_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_search_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_fetch_tool"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("agent_tools") and attr_name == "RAG_KNOWLEDGE_TOOL":
+            return SimpleNamespace(name="tool_rag_knowledge")
+        if module_name.endswith("action_tools") and attr_name == "generate_host_action_tools":
+            return fake_generate_host_action_tools
+        if module_name.endswith("direct_intent") and attr_name == "_needs_maritime_search":
+            return lambda _query: False
+        if module_name.endswith("direct_intent") and attr_name == "_normalize_for_intent":
+            return lambda query: str(query).lower()
+        if attr_name == "get_visual_tools":
+            return lambda: [SimpleNamespace(name="tool_generate_visual")]
+        raise AssertionError(f"Unexpected load: {module_name}.{attr_name}")
+
+    monkeypatch.setattr(module, "_load_attr", fake_load_attr)
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        "Wiii tao bai viet Facebook ve lop hoc hom nay",
+        user_role="student",
+        state=state,
+    )
+
+    assert tools == []
+    assert generated_from == []
+    assert state["_turn_path_decision"]["path"] == "external_app_action"
+    assert state["_external_app_action_plan"]["kind"] == "facebook_post_direct_apply"
+    assert state["_external_app_action_plan"]["status"] == "ready"
+    assert force_tools is False
+
+
+def test_wiii_connect_provider_action_request_binds_integration_delegate(monkeypatch):
+    from app.engine.multi_agent import tool_collection as module
+    from app.engine.tools.tool_capability_registry import (
+        WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL,
+        WIII_CONNECT_LIST_ACTIONS_TOOL,
+    )
+
+    monkeypatch.setattr(module.settings, "enable_character_tools", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_lms_integration", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_host_actions", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_structured_visuals", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_wiii_connect_composio", True, raising=False)
+    _patch_wiii_connect_ready_providers(monkeypatch, module, ("facebook", "gmail"))
+    monkeypatch.setattr(module, "_needs_web_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_datetime", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_news_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_legal_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_lms_query", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_direct_knowledge_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_analysis_tool", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_pointy", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_weather_lookup", lambda _query: False)
+    monkeypatch.setattr(module, "_infer_direct_thinking_mode", lambda *_args, **_kwargs: "general")
+    monkeypatch.setattr(module, "_should_strip_visual_tools_from_direct", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "_should_strip_visual_tools_for_analytical_text_turn", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "filter_tools_for_role", lambda tools, _role: tools)
+    monkeypatch.setattr(module, "filter_tools_for_visual_intent", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        module,
+        "resolve_visual_intent",
+        lambda _query: SimpleNamespace(
+            force_tool=False,
+            mode="text",
+            visual_type=None,
+            preferred_tool=None,
+            presentation_intent="text",
+        ),
+    )
+
+    list_kwargs = {}
+    delegate_kwargs = {}
+
+    def fake_load_attr(module_name: str, attr_name: str):
+        if module_name.endswith("wiii_connect_tools"):
+            if attr_name == "make_wiii_connect_list_actions_tool":
+                def make_list(**kwargs):
+                    list_kwargs.update(kwargs)
+                    return SimpleNamespace(name=WIII_CONNECT_LIST_ACTIONS_TOOL)
+
+                return make_list
+            if attr_name == "make_wiii_connect_delegate_to_integration_tool":
+                def make_delegate(**kwargs):
+                    delegate_kwargs.update(kwargs)
+                    return SimpleNamespace(name=WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL)
+
+                return make_delegate
+            raise AssertionError(f"Unexpected Wiii Connect tool: {attr_name}")
+        if module_name.endswith("utility_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_search_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_fetch_tool"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("agent_tools") and attr_name == "RAG_KNOWLEDGE_TOOL":
+            return SimpleNamespace(name="tool_rag_knowledge")
+        if module_name.endswith("direct_intent") and attr_name == "_needs_maritime_search":
+            return lambda _query: False
+        if module_name.endswith("direct_intent") and attr_name == "_normalize_for_intent":
+            return lambda query: str(query).lower()
+        if attr_name == "get_visual_tools":
+            return lambda: [SimpleNamespace(name="tool_generate_visual")]
+        raise AssertionError(f"Unexpected load: {module_name}.{attr_name}")
+
+    monkeypatch.setattr(module, "_load_attr", fake_load_attr)
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        "Wiii đọc Gmail từ giáo viên giúp tôi",
+        user_role="student",
+        state=state,
+    )
+
+    assert [tool.name for tool in tools] == [
+        WIII_CONNECT_LIST_ACTIONS_TOOL,
+        WIII_CONNECT_DELEGATE_TO_INTEGRATION_TOOL,
+    ]
+    assert state["_turn_path_decision"]["path"] == "external_app_action"
+    assert state["_external_app_action_plan"]["kind"] == "provider_action"
+    assert state["_external_app_action_plan"]["provider_slug"] == "gmail"
+    assert state["_external_app_action_plan"]["status"] == "ready"
+    plan_allowlists = state["_external_app_action_plan"]["action_allowlists_by_provider"]
+    assert list_kwargs["allowed_provider_slugs"] == ("gmail",)
+    assert {
+        provider: list(actions)
+        for provider, actions in list_kwargs["allowed_action_slugs_by_provider"].items()
+    } == plan_allowlists
+    assert delegate_kwargs["allowed_provider_slugs"] == ("gmail",)
+    assert {
+        provider: list(actions)
+        for provider, actions in delegate_kwargs[
+            "allowed_action_slugs_by_provider"
+        ].items()
+    } == plan_allowlists
+    assert force_tools is True
+
+
+def test_wiii_connect_external_action_does_not_bind_without_agent_ready_provider(monkeypatch):
+    from app.engine.multi_agent import tool_collection as module
+
+    monkeypatch.setattr(module.settings, "enable_character_tools", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_lms_integration", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_host_actions", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_structured_visuals", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_wiii_connect_composio", True, raising=False)
+    _patch_wiii_connect_ready_providers(monkeypatch, module, ())
+    monkeypatch.setattr(module, "_needs_web_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_datetime", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_news_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_legal_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_lms_query", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_direct_knowledge_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_analysis_tool", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_pointy", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_weather_lookup", lambda _query: False)
+    monkeypatch.setattr(module, "_infer_direct_thinking_mode", lambda *_args, **_kwargs: "general")
+    monkeypatch.setattr(module, "_should_strip_visual_tools_from_direct", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "_should_strip_visual_tools_for_analytical_text_turn", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "filter_tools_for_role", lambda tools, _role: tools)
+    monkeypatch.setattr(module, "filter_tools_for_visual_intent", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        module,
+        "resolve_visual_intent",
+        lambda _query: SimpleNamespace(
+            force_tool=False,
+            mode="text",
+            visual_type=None,
+            preferred_tool=None,
+            presentation_intent="text",
+        ),
+    )
+
+    def fake_load_attr(module_name: str, attr_name: str):
+        if module_name.endswith("wiii_connect_tools"):
+            raise AssertionError("Wiii Connect tools must not bind without agent-ready provider")
+        if module_name.endswith("utility_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_search_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_fetch_tool"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("agent_tools") and attr_name == "RAG_KNOWLEDGE_TOOL":
+            return SimpleNamespace(name="tool_rag_knowledge")
+        if module_name.endswith("direct_intent") and attr_name == "_needs_maritime_search":
+            return lambda _query: False
+        if module_name.endswith("direct_intent") and attr_name == "_normalize_for_intent":
+            return lambda query: str(query).lower()
+        if attr_name == "get_visual_tools":
+            return lambda: [SimpleNamespace(name="tool_generate_visual")]
+        raise AssertionError(f"Unexpected load: {module_name}.{attr_name}")
+
+    monkeypatch.setattr(module, "_load_attr", fake_load_attr)
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        "Wiii đọc Gmail từ giáo viên giúp tôi",
+        user_role="student",
+        state=state,
+    )
+
+    assert tools == []
+    assert state["_turn_path_decision"]["path"] == "external_app_action"
+    assert state["_external_app_action_plan"]["kind"] == "provider_action"
+    assert state["_external_app_action_plan"]["status"] == "blocked"
+    assert force_tools is False
+
+
+def test_wiii_connect_external_action_does_not_bind_without_visible_action_inventory(monkeypatch):
+    from app.engine.multi_agent import tool_collection as module
+
+    monkeypatch.setattr(module.settings, "enable_character_tools", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_lms_integration", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_host_actions", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_structured_visuals", False, raising=False)
+    monkeypatch.setattr(module.settings, "enable_wiii_connect_composio", True, raising=False)
+    _patch_wiii_connect_ready_providers(
+        monkeypatch,
+        module,
+        ("gmail",),
+        action_allowlists_by_provider={},
+    )
+    monkeypatch.setattr(module, "_needs_web_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_datetime", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_news_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_legal_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_lms_query", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_direct_knowledge_search", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_analysis_tool", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_pointy", lambda _query: False)
+    monkeypatch.setattr(module, "_needs_weather_lookup", lambda _query: False)
+    monkeypatch.setattr(module, "_infer_direct_thinking_mode", lambda *_args, **_kwargs: "general")
+    monkeypatch.setattr(module, "_should_strip_visual_tools_from_direct", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "_should_strip_visual_tools_for_analytical_text_turn", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(module, "filter_tools_for_role", lambda tools, _role: tools)
+    monkeypatch.setattr(module, "filter_tools_for_visual_intent", lambda tools, *_args, **_kwargs: tools)
+    monkeypatch.setattr(
+        module,
+        "resolve_visual_intent",
+        lambda _query: SimpleNamespace(
+            force_tool=False,
+            mode="text",
+            visual_type=None,
+            preferred_tool=None,
+            presentation_intent="text",
+        ),
+    )
+
+    def fake_load_attr(module_name: str, attr_name: str):
+        if module_name.endswith("wiii_connect_tools"):
+            raise AssertionError("Wiii Connect tools must not bind without visible action inventory")
+        if module_name.endswith("utility_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_search_tools"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("web_fetch_tool"):
+            return SimpleNamespace(name=attr_name)
+        if module_name.endswith("agent_tools") and attr_name == "RAG_KNOWLEDGE_TOOL":
+            return SimpleNamespace(name="tool_rag_knowledge")
+        if module_name.endswith("direct_intent") and attr_name == "_needs_maritime_search":
+            return lambda _query: False
+        if module_name.endswith("direct_intent") and attr_name == "_normalize_for_intent":
+            return lambda query: str(query).lower()
+        if attr_name == "get_visual_tools":
+            return lambda: [SimpleNamespace(name="tool_generate_visual")]
+        raise AssertionError(f"Unexpected load: {module_name}.{attr_name}")
+
+    monkeypatch.setattr(module, "_load_attr", fake_load_attr)
+
+    state = {"context": {}}
+    tools, force_tools = module._collect_direct_tools(
+        "Wiii đọc Gmail từ giáo viên giúp tôi",
+        user_role="student",
+        state=state,
+    )
+
+    assert tools == []
+    assert state["_turn_path_decision"]["path"] == "external_app_action"
+    assert state["_external_app_action_plan"]["kind"] == "provider_action"
+    assert state["_external_app_action_plan"]["provider_slug"] == "gmail"
+    assert state["_external_app_action_plan"]["status"] == "blocked"
+    assert state["_external_app_action_plan"]["reason"] == "no_agent_ready_actions"
+    assert state["_external_app_integration_lane"]["status"] == "blocked"
+    assert state["_external_app_integration_lane"]["visible_tool_names"] == []
+    assert force_tools is False
 
 
 def test_uploaded_document_preview_does_not_bind_lms_authoring_without_connection(monkeypatch):

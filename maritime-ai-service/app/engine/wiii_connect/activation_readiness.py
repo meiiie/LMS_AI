@@ -16,6 +16,7 @@ from .adapter_v1 import (
     WiiiConnectConnectionRecordV1,
     WiiiConnectProviderRegistryEntry,
 )
+from .connection_lifecycle import build_connection_lifecycle_decision
 from .execution_gateway import WiiiConnectExecutionGatewayDecision
 from .provider_adapters import WiiiConnectProviderAdapterCapability
 from .vault import WiiiConnectVaultCapability
@@ -82,11 +83,14 @@ def build_activation_readiness_metadata(
         and storage_ready
         and audit_ready
     )
-    ready_to_execute_readonly = bool(
+    ready_to_execute_action = bool(
         ready_to_connect
         and action_ready
         and connection_ready
         and gateway_allowed
+    )
+    ready_to_execute_readonly = bool(
+        ready_to_execute_action and action is not None and action.mutation == "read"
     )
     gates = (
         _provider_gate(connect_entry),
@@ -99,12 +103,26 @@ def build_activation_readiness_metadata(
         _connection_gate(connection),
         _execution_gateway_gate(execution_gateway),
     )
+    lifecycle_reason = (
+        _safe_reason(connection.reason)
+        if connection is not None and connection.reason
+        else _first_blocked_gate_reason(gates)
+    )
+    connection_lifecycle = build_connection_lifecycle_decision(
+        provider_slug=provider_slug,
+        connection=connection,
+        reason=lifecycle_reason,
+        agent_ready=bool(execution_entry is not None and execution_entry.agent_ready),
+        ready_to_connect=ready_to_connect,
+        ready_to_execute_action=ready_to_execute_action,
+    )
     return {
         "version": WIII_CONNECT_ACTIVATION_READINESS_VERSION,
-        "status": "ready" if ready_to_execute_readonly else "blocked",
+        "status": "ready" if ready_to_execute_action else "blocked",
         "provider_slug": _safe_key(provider_slug),
         "provider_kind": provider_kind,
         "ready_to_connect": ready_to_connect,
+        "ready_to_execute_action": ready_to_execute_action,
         "ready_to_execute_readonly": ready_to_execute_readonly,
         "gates": [gate.to_public_metadata() for gate in gates],
         "provider": connect_entry.to_public_metadata() if connect_entry else None,
@@ -116,6 +134,7 @@ def build_activation_readiness_metadata(
         "storage": _safe_storage_metadata(storage_metadata),
         "action": _action_metadata(action, runtime_enabled=action_runtime_enabled),
         "connection": _connection_metadata(connection),
+        "connection_lifecycle": connection_lifecycle.to_public_metadata(),
         "execution_gateway": (
             execution_gateway.to_public_metadata() if execution_gateway else None
         ),
@@ -238,16 +257,16 @@ def _action_gate(
 ) -> WiiiConnectActivationGate:
     if action is None:
         return WiiiConnectActivationGate(
-            key="curated_readonly_action",
+            key="curated_action",
             ready=False,
             reason="action_not_curated",
-            required_next=("curate_readonly_action",),
+            required_next=("curate_action",),
         )
-    ready = bool(action.mutation == "read" and runtime_enabled)
+    ready = bool(runtime_enabled)
     reason = "ready" if ready else "action_not_runtime_enabled"
-    required_next = () if ready else ("enable_readonly_action_allowlist",)
+    required_next = () if ready else ("enable_action_allowlist",)
     return WiiiConnectActivationGate(
-        key="curated_readonly_action",
+        key="curated_readonly_action" if action.mutation == "read" else "curated_action",
         ready=ready,
         reason=reason,
         required_next=required_next,
@@ -349,6 +368,13 @@ def _connection_metadata(
         "reason": _safe_reason(connection.reason),
         "warnings": [_safe_reason(warning) for warning in connection.warnings],
     }
+
+
+def _first_blocked_gate_reason(gates: tuple[WiiiConnectActivationGate, ...]) -> str:
+    for gate in gates:
+        if not gate.ready:
+            return gate.reason
+    return "connected"
 
 
 def _safe_storage_metadata(storage: dict[str, Any]) -> dict[str, Any]:

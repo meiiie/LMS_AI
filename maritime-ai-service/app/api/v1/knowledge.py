@@ -19,9 +19,13 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
-from app.api.deps import RequireAdmin
+from app.api.deps import RequireAdmin, RequireAuth
 from app.core.rate_limit import limiter
 from app.engine.embedding_runtime import get_embedding_backend
+from app.repositories.knowledge_search_org_scope import (
+    log_knowledge_search_scope_blocked,
+    resolve_knowledge_search_org_scope,
+)
 from app.services.multimodal_ingestion_service import get_ingestion_service
 
 logger = logging.getLogger(__name__)
@@ -208,9 +212,20 @@ def build_knowledge_stats_warning(total_chunks: int, total_documents: int) -> Op
     return None
 
 
+def _resolve_knowledge_stats_org(auth: RequireAuth) -> str:
+    scope = resolve_knowledge_search_org_scope(getattr(auth, "organization_id", None))
+    if not scope.write_allowed or not scope.org_id:
+        log_knowledge_search_scope_blocked(logger, "knowledge_stats", scope)
+        raise HTTPException(
+            status_code=403,
+            detail="Organization context required for knowledge statistics",
+        )
+    return scope.org_id
+
+
 @router.get("/stats", response_model=KnowledgeStatsResponse)
 @limiter.limit("60/minute")
-async def get_statistics(request: Request) -> KnowledgeStatsResponse:
+async def get_statistics(request: Request, auth: RequireAuth) -> KnowledgeStatsResponse:
     """
     Get knowledge base statistics from PostgreSQL.
     
@@ -222,39 +237,59 @@ async def get_statistics(request: Request) -> KnowledgeStatsResponse:
         import asyncpg
         from app.core.config import settings
 
+        org_id = _resolve_knowledge_stats_org(auth)
+        org_filter = "(organization_id = $1 OR organization_id IS NULL)"
+
         # Use connection as context manager to ensure proper cleanup
         conn = await asyncpg.connect(settings.asyncpg_url)
         try:
             # Run all stats queries in a single connection
             total_chunks = await conn.fetchval(
-                "SELECT COUNT(*) FROM knowledge_embeddings"
+                f"SELECT COUNT(*) FROM knowledge_embeddings WHERE {org_filter}",
+                org_id,
             )
 
             total_documents = await conn.fetchval(
-                "SELECT COUNT(DISTINCT document_id) FROM knowledge_embeddings WHERE document_id IS NOT NULL"
+                f"""
+                SELECT COUNT(DISTINCT document_id)
+                FROM knowledge_embeddings
+                WHERE document_id IS NOT NULL
+                AND {org_filter}
+                """,
+                org_id,
             )
 
             content_type_rows = await conn.fetch(
-                """
+                f"""
                 SELECT content_type, COUNT(*) as count
                 FROM knowledge_embeddings
                 WHERE content_type IS NOT NULL
+                AND {org_filter}
                 GROUP BY content_type
-                """
+                """,
+                org_id,
             )
             content_types = {row['content_type']: row['count'] for row in content_type_rows}
 
             avg_confidence = await conn.fetchval(
-                "SELECT AVG(confidence_score) FROM knowledge_embeddings WHERE confidence_score IS NOT NULL"
+                f"""
+                SELECT AVG(confidence_score)
+                FROM knowledge_embeddings
+                WHERE confidence_score IS NOT NULL
+                AND {org_filter}
+                """,
+                org_id,
             ) or 0.0
 
             # Sprint 136: Domain breakdown
             domain_rows = await conn.fetch(
-                """
+                f"""
                 SELECT COALESCE(domain_id, 'untagged') as domain, COUNT(*) as count
                 FROM knowledge_embeddings
+                WHERE {org_filter}
                 GROUP BY domain_id
-                """
+                """,
+                org_id,
             )
             domain_breakdown = {row['domain']: row['count'] for row in domain_rows}
 
@@ -272,6 +307,8 @@ async def get_statistics(request: Request) -> KnowledgeStatsResponse:
         finally:
             await conn.close()
             
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Stats error: %s", e)
         return KnowledgeStatsResponse(

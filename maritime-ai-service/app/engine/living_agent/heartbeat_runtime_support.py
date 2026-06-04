@@ -13,11 +13,55 @@ from uuid import uuid4
 from app.engine.living_agent.heartbeat_runtime_state import (
     set_current_heartbeat_count,
 )
-from app.engine.living_agent.models import HeartbeatAction, HeartbeatResult
+from app.engine.living_agent.models import ActionType, HeartbeatAction, HeartbeatResult
+from app.engine.runtime.runtime_metrics import inc_counter, record_latency_ms
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 
 logger = logging.getLogger(__name__)
 
 _VN_OFFSET = timedelta(hours=7)
+_HEARTBEAT_MISSING_ORG_WARNING = "heartbeat_runtime_blocked_missing_org_context"
+_ACTION_TYPE_LABELS = {action_type.value for action_type in ActionType}
+
+
+def _action_type_metric_label(action: HeartbeatAction) -> str:
+    value = getattr(action.action_type, "value", None)
+    if value in _ACTION_TYPE_LABELS:
+        return str(value)
+    return "unknown"
+
+
+def _emit_action_queue_metric(action: HeartbeatAction) -> None:
+    inc_counter(
+        "runtime.living_agent.heartbeat.actions",
+        labels={
+            "action_type": _action_type_metric_label(action),
+            "status": "queued",
+        },
+    )
+
+
+def _heartbeat_cycle_status(result: HeartbeatResult) -> str:
+    if result.error:
+        return "error"
+    if result.is_noop:
+        return "noop"
+    return "success"
+
+
+def _emit_heartbeat_cycle_metric(result: HeartbeatResult) -> None:
+    labels = {"status": _heartbeat_cycle_status(result)}
+    inc_counter("runtime.living_agent.heartbeat.cycles", labels=labels)
+    record_latency_ms(
+        "runtime.living_agent.heartbeat.duration_ms",
+        float(result.duration_ms),
+        labels=labels,
+    )
 
 
 async def save_emotional_snapshot_impl(engine: Any) -> None:
@@ -41,13 +85,16 @@ async def save_emotional_snapshot_impl(engine: Any) -> None:
 
 async def queue_pending_actions_impl(actions: list[HeartbeatAction]) -> None:
     """Queue actions for human approval with org scoping."""
+    scope = resolve_memory_write_scope()
+    if not _scope_allows_heartbeat(scope):
+        _log_heartbeat_scope_blocked("queue_pending_actions", scope)
+        return
+
     try:
         from sqlalchemy import text
 
         from app.core.database import get_shared_session_factory
-        from app.core.org_filter import get_effective_org_id
 
-        effective_org_id = get_effective_org_id()
         session_factory = get_shared_session_factory()
         with session_factory() as session:
             for action in actions:
@@ -67,7 +114,7 @@ async def queue_pending_actions_impl(actions: list[HeartbeatAction]) -> None:
                         "target": action.target,
                         "priority": action.priority,
                         "metadata": json.dumps(action.metadata, ensure_ascii=False),
-                        "org_id": effective_org_id,
+                        "org_id": scope.org_id,
                     },
                 )
             session.commit()
@@ -77,26 +124,25 @@ async def queue_pending_actions_impl(actions: list[HeartbeatAction]) -> None:
 
 async def load_pending_action_impl(action_id: str) -> Optional[dict]:
     """Load an approved pending action, respecting org isolation."""
+    scope = resolve_memory_read_scope()
+    if not _scope_allows_heartbeat(scope):
+        _log_heartbeat_scope_blocked("load_pending_action", scope, action_id=action_id)
+        return None
+
     try:
         from sqlalchemy import text
 
         from app.core.database import get_shared_session_factory
-        from app.core.org_filter import get_effective_org_id, org_where_clause
 
-        effective_org_id = get_effective_org_id()
         session_factory = get_shared_session_factory()
         with session_factory() as session:
             query = """
                 SELECT action_type, target, priority, metadata
                 FROM wiii_pending_actions
                 WHERE id = :id AND status = 'approved'
+                AND organization_id = :org_id
             """
-            params: dict[str, Any] = {"id": action_id}
-
-            org_clause = org_where_clause(effective_org_id)
-            if org_clause:
-                query += org_clause
-                params["org_id"] = effective_org_id
+            params: dict[str, Any] = {"id": action_id, "org_id": scope.org_id}
 
             row = session.execute(text(query), params).fetchone()
             if row:
@@ -113,26 +159,25 @@ async def load_pending_action_impl(action_id: str) -> Optional[dict]:
 
 async def mark_action_completed_impl(action_id: str) -> None:
     """Mark a pending action as completed with org filtering."""
+    scope = resolve_memory_write_scope()
+    if not _scope_allows_heartbeat(scope):
+        _log_heartbeat_scope_blocked("mark_action_completed", scope, action_id=action_id)
+        return
+
     try:
         from sqlalchemy import text
 
         from app.core.database import get_shared_session_factory
-        from app.core.org_filter import get_effective_org_id, org_where_clause
 
-        effective_org_id = get_effective_org_id()
         session_factory = get_shared_session_factory()
         with session_factory() as session:
             query = """
                 UPDATE wiii_pending_actions
                 SET status = 'completed', resolved_at = NOW()
                 WHERE id = :id
+                AND organization_id = :org_id
             """
-            params: dict[str, Any] = {"id": action_id}
-
-            org_clause = org_where_clause(effective_org_id)
-            if org_clause:
-                query += org_clause
-                params["org_id"] = effective_org_id
+            params: dict[str, Any] = {"id": action_id, "org_id": scope.org_id}
 
             session.execute(text(query), params)
             session.commit()
@@ -145,13 +190,20 @@ async def save_heartbeat_audit_impl(
     result: HeartbeatResult,
 ) -> None:
     """Persist a heartbeat audit row with org isolation."""
+    scope = resolve_memory_write_scope()
+    if not _scope_allows_heartbeat(scope):
+        _log_heartbeat_scope_blocked(
+            "save_heartbeat_audit",
+            scope,
+            action_id=str(result.cycle_id),
+        )
+        return
+
     try:
         from sqlalchemy import text
 
         from app.core.database import get_shared_session_factory
-        from app.core.org_filter import get_effective_org_id
 
-        effective_org_id = get_effective_org_id()
         actions_json = json.dumps(
             [
                 {"action_type": action.action_type.value, "target": action.target}
@@ -179,12 +231,35 @@ async def save_heartbeat_audit_impl(
                     "insights_gained": result.insights_gained,
                     "duration_ms": result.duration_ms,
                     "error": result.error,
-                    "org_id": effective_org_id,
+                    "org_id": scope.org_id,
                 },
             )
             session.commit()
     except Exception as exc:  # pragma: no cover - defensive logging path
         logger.warning("[HEARTBEAT] Failed to save audit record: %s", exc)
+
+
+def _scope_allows_heartbeat(scope: MemoryWriteScope) -> bool:
+    return bool(scope.write_allowed and scope.org_id)
+
+
+def _log_heartbeat_scope_blocked(
+    operation: str,
+    scope: MemoryWriteScope,
+    *,
+    action_id: Optional[str] = None,
+) -> None:
+    warnings = list(scope.warnings)
+    if "missing_org_context" in warnings:
+        warnings.append(_HEARTBEAT_MISSING_ORG_WARNING)
+    logger.warning(
+        "[HEARTBEAT] %s blocked action_hash=%s org_hash=%s org_scope=%s warnings=%s",
+        operation,
+        hash_memory_identifier(action_id),
+        hash_memory_identifier(scope.org_id),
+        scope.state,
+        sorted(set(warnings)),
+    )
 
 
 def check_daily_limit_impl(scheduler: Any) -> bool:
@@ -327,6 +402,7 @@ async def execute_heartbeat_cycle_impl(
             result.is_noop = True
             result.duration_ms = int((scheduler._time_monotonic() - start_time) * 1000)
             await scheduler._save_heartbeat_audit(result)
+            _emit_heartbeat_cycle_metric(result)
             return result
 
         require_approval = settings.living_agent_require_human_approval
@@ -341,6 +417,8 @@ async def execute_heartbeat_cycle_impl(
 
         if pending_actions:
             await scheduler._queue_pending_actions(pending_actions)
+            for action in pending_actions:
+                _emit_action_queue_metric(action)
             logger_obj.info(
                 "[HEARTBEAT] Queued %d actions for human approval: %s",
                 len(pending_actions),
@@ -379,6 +457,7 @@ async def execute_heartbeat_cycle_impl(
 
     result.duration_ms = int((scheduler._time_monotonic() - start_time) * 1000)
     await scheduler._save_heartbeat_audit(result)
+    _emit_heartbeat_cycle_metric(result)
     return result
 
 
@@ -420,6 +499,10 @@ async def notify_discovery_impl(items: list, topic: str) -> None:
         channel = settings.living_agent_notification_channel
         if channel == "websocket" and not settings.enable_websocket:
             return
+        scope = resolve_memory_write_scope()
+        if not _scope_allows_heartbeat(scope):
+            _log_heartbeat_scope_blocked("notify_discovery", scope)
+            return
 
         lines = [f"Wiii tìm thấy {len(items)} nội dung thú vị về {topic}:"]
         for item in items[:3]:
@@ -429,15 +512,35 @@ async def notify_discovery_impl(items: list, topic: str) -> None:
             lines.append(f"• {title}{score}")
             if url:
                 lines.append(f"  {url}")
-        message = "\n".join(lines)
+        from app.engine.living_agent.heartbeat_action_runtime import (
+            _format_discovery_notification_message,
+        )
+
+        message = _format_discovery_notification_message(items, topic)
+        payload = json.dumps(
+            {
+                "type": "proactive_message",
+                "trigger": "heartbeat_discovery",
+                "content": message,
+                "topic": topic,
+                "item_count": len(items),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            ensure_ascii=False,
+        )
 
         from app.services.notification_dispatcher import get_notification_dispatcher
 
         dispatcher = get_notification_dispatcher()
         result = await dispatcher.notify_user(
             user_id="wiii_owner",
-            message=message,
+            message=payload if channel == "websocket" else message,
             channel=channel,
+            metadata={
+                "organization_id": scope.org_id,
+                "notification_type": "proactive_message",
+                "trigger": "heartbeat_discovery",
+            },
         )
 
         if result.get("delivered"):

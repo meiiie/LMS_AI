@@ -58,6 +58,18 @@ async def _require_org_member_viz(auth: AuthenticatedUser, org_id: str) -> str:
     if is_platform_admin(auth):
         return auth.user_id
 
+    active_org_id = getattr(auth, "organization_id", None)
+    if not active_org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization context required for knowledge visualization",
+        )
+    if active_org_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Active organization does not match route organization",
+        )
+
     # Check org membership
     from app.repositories.organization_repository import get_organization_repository
     repo = get_organization_repository()

@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -23,14 +24,30 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from runtime_evidence_output import emit_json_payload  # noqa: E402
+
+
 DEFAULT_BACKEND_URL = "http://localhost:8080"
 DEFAULT_PROVIDER = "gmail"
 DEFAULT_ACTION = "GMAIL_FETCH_EMAILS"
+DEFAULT_ACTION_BY_PROVIDER = {
+    "facebook": "FACEBOOK_LIST_MANAGED_PAGES",
+    "gmail": "GMAIL_FETCH_EMAILS",
+}
 DEFAULT_DEMO_EMAIL = "dev@localhost"
 DEFAULT_DEMO_NAME = "Dev User"
 DEFAULT_DEMO_ROLE = "admin"
 DEFAULT_EXPECTED_PLATFORM_ROLE = "platform_admin"
 SCOPE_POLICY_VERSION = "wiii_connect_scope_policy.v1"
+SCHEMA_VERSION = "wiii.live_wiii_connect_composio_acceptance.v1"
+LEGACY_SCHEMA_VERSION = "wiii_connect_composio_acceptance_evidence.v1"
+PREFLIGHT_SCHEMA_VERSION = "wiii.connect_composio_acceptance_preflight.v1"
+SETUP_CONTRACT_VERSION = "wiii.live_evidence_setup_contract.v1"
+ENV_FLAG = "WIII_LIVE_WIII_CONNECT_COMPOSIO_ACCEPTANCE"
 TOKEN_ENV = "WIII_ACCEPTANCE_BEARER_TOKEN"
 TARGET_ENV = "WIII_ACCEPTANCE_TARGET_ENV"
 COMMIT_SHA_ENV = "WIII_ACCEPTANCE_COMMIT_SHA"
@@ -389,6 +406,569 @@ def _safe_report_text(value: Any) -> str:
     return text[:160]
 
 
+def _redact_acceptance_failure_text(
+    value: Any,
+    args: argparse.Namespace | None = None,
+) -> str:
+    text = str(value or "")[:1000]
+    text = re.sub(r"\bBearer\s+[A-Za-z0-9._~+/=-]{6,}", "Bearer [redacted]", text)
+    replacements = {
+        ENV_FLAG: "live_composio_acceptance_flag",
+        TOKEN_ENV: "acceptance_bearer_token",
+        "authorization": "[redacted-sensitive-field]",
+        "access_token": "[redacted-sensitive-field]",
+        "refresh_token": "[redacted-sensitive-field]",
+        "api_key": "[redacted-sensitive-field]",
+        "connected_account_id": "[redacted-sensitive-field]",
+        "connection_id": "[redacted-sensitive-field]",
+        "connection_ref": "[redacted-sensitive-field]",
+    }
+    if args is not None:
+        for raw_value in (
+            getattr(args, "backend_url", None),
+            getattr(args, "bearer_token", None),
+            getattr(args, "org_id", None),
+            getattr(args, "redirect_uri", None),
+            getattr(args, "connection_ref", None),
+            getattr(args, "arguments_json", None),
+        ):
+            raw = str(raw_value or "")
+            if raw:
+                replacements[raw] = opaque_ref(raw)
+    for raw, replacement in replacements.items():
+        text = re.sub(re.escape(raw), replacement, text, flags=re.IGNORECASE)
+    return text
+
+
+def check_status_key(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    safe = "".join(char if char.isalnum() else "_" for char in text)
+    return "_".join(part for part in safe.split("_") if part)[:80] or "unknown"
+
+
+def _list_count(value: Any) -> int:
+    if isinstance(value, (list, tuple, set)):
+        return len(value)
+    return 0
+
+
+def _scope_policy_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    gateway = payload.get("execution_gateway")
+    source = gateway if isinstance(gateway, dict) else payload
+    scope_policy = source.get("scope_policy") if isinstance(source, dict) else None
+    if not isinstance(scope_policy, dict):
+        return {
+            "version": "",
+            "status": "missing",
+            "reason": "missing",
+            "read_required": False,
+            "read_allowed": False,
+            "required_scope_count": 0,
+            "allowed_scope_count": 0,
+        }
+    required_scopes = scope_policy.get("required_scopes")
+    allowed_scopes = scope_policy.get("allowed_scopes")
+    required = required_scopes if isinstance(required_scopes, list) else []
+    allowed = allowed_scopes if isinstance(allowed_scopes, list) else []
+    return {
+        "version": str(scope_policy.get("version") or ""),
+        "status": check_status_key(scope_policy.get("status") or ""),
+        "reason": check_status_key(scope_policy.get("reason") or ""),
+        "read_required": "read" in required,
+        "read_allowed": "read" in allowed,
+        "required_scope_count": len(required),
+        "allowed_scope_count": len(allowed),
+    }
+
+
+def _schema_summary(schema: Any, *, supplied_argument_keys: list[str]) -> dict[str, Any]:
+    if not isinstance(schema, dict):
+        return {
+            "status": "missing",
+            "schema_present": False,
+            "provider_slug": "",
+            "action_slug": "",
+            "argument_key_count": 0,
+            "required_argument_key_count": 0,
+            "required_argument_keys_present": False,
+            "raw_schema_included": False,
+        }
+    argument_keys = schema.get("argument_keys")
+    required_keys = schema.get("required_argument_keys")
+    safe_argument_keys = argument_keys if isinstance(argument_keys, list) else []
+    safe_required_keys = required_keys if isinstance(required_keys, list) else []
+    supplied = {str(key) for key in supplied_argument_keys}
+    required = {str(key) for key in safe_required_keys}
+    return {
+        "status": check_status_key(schema.get("status") or ""),
+        "schema_present": schema.get("schema_present") is True,
+        "provider_slug": normalize_provider(str(schema.get("provider_slug") or "")),
+        "action_slug": normalize_action(str(schema.get("action_slug") or "")),
+        "argument_key_count": len(safe_argument_keys),
+        "required_argument_key_count": len(safe_required_keys),
+        "required_argument_keys_present": required.issubset(supplied),
+        "raw_schema_included": False,
+    }
+
+
+def _execution_summary(execution: Any) -> dict[str, Any]:
+    if not isinstance(execution, dict):
+        return {
+            "status": "missing",
+            "successful": False,
+            "provider_slug": "",
+            "action_slug": "",
+            "status_code": 0,
+            "data_key_count": 0,
+            "error_present": False,
+            "session_info_present": False,
+            "log_id_present": False,
+            "provider_response_included": False,
+        }
+    data_keys = execution.get("data_keys")
+    return {
+        "status": check_status_key(execution.get("status") or ""),
+        "successful": execution.get("successful") is True,
+        "provider_slug": normalize_provider(str(execution.get("provider_slug") or "")),
+        "action_slug": normalize_action(str(execution.get("action_slug") or "")),
+        "status_code": int(execution.get("status_code") or 0),
+        "data_key_count": _list_count(data_keys),
+        "error_present": execution.get("error_present") is True,
+        "session_info_present": execution.get("session_info_present") is True,
+        "log_id_present": execution.get("log_id_present") is True,
+        "provider_response_included": False,
+    }
+
+
+def _backend_url_preflight(raw_url: str) -> dict[str, Any]:
+    parsed = urllib.parse.urlsplit(str(raw_url or ""))
+    hostname = (parsed.hostname or "").strip().lower()
+    valid = parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    placeholder = hostname in {"wiii.example.com", "example.com"}
+    origin = f"{parsed.scheme}://{parsed.netloc}" if valid else ""
+    return {
+        "valid": valid,
+        "placeholder": placeholder,
+        "scheme": parsed.scheme if parsed.scheme in {"http", "https"} else "",
+        "host_hash_present": bool(hostname),
+        "origin_hash_present": bool(opaque_ref(origin)) if origin else False,
+        "raw_backend_url_included": False,
+    }
+
+
+def _arguments_preflight(raw_value: str) -> dict[str, Any]:
+    try:
+        parsed = parse_json_argument_object(raw_value)
+    except AcceptanceFailure:
+        return {
+            "valid_json_object": False,
+            "argument_key_count": 0,
+            "arguments_present": False,
+            "raw_arguments_included": False,
+        }
+    return {
+        "valid_json_object": True,
+        "argument_key_count": len(parsed),
+        "arguments_present": bool(parsed),
+        "raw_arguments_included": False,
+    }
+
+
+def _preflight_required_next(
+    args: argparse.Namespace,
+    *,
+    backend: dict[str, Any],
+    auth: dict[str, Any],
+    arguments: dict[str, Any],
+    live_env_flag_set: bool,
+) -> list[str]:
+    required_next: list[str] = []
+    if not getattr(args, "allow_live", False):
+        required_next.append("pass_allow_live")
+    if not live_env_flag_set:
+        required_next.append("set_live_composio_acceptance_flag")
+    if backend.get("valid") is not True or backend.get("placeholder") is True:
+        required_next.append("configure_backend_url")
+    if args.auth_mode == "bearer" and auth.get("bearer_token_present") is not True:
+        required_next.append("configure_acceptance_bearer_token")
+    if (
+        args.execute_readonly
+        or args.require_execution_ready
+        or args.disconnect
+    ) and not args.expect_connected:
+        required_next.append("pass_expect_connected")
+    if args.execute_readonly and not args.require_execution_ready:
+        required_next.append("pass_require_execution_ready")
+    if args.execute_readonly and arguments.get("valid_json_object") is not True:
+        required_next.append("fix_arguments_json")
+    return required_next
+
+
+def build_composio_acceptance_preflight(args: argparse.Namespace) -> dict[str, Any]:
+    env_token = os.environ.get(TOKEN_ENV, "")
+    bearer_from_argument = bool(str(getattr(args, "bearer_token", "") or "").strip())
+    bearer_from_environment = bool(env_token.strip())
+    auth = {
+        "mode": args.auth_mode,
+        "bearer_token_present": (
+            args.auth_mode != "dev-login"
+            and (bearer_from_argument or bearer_from_environment)
+        ),
+        "bearer_source": (
+            "argument"
+            if bearer_from_argument
+            else "environment"
+            if bearer_from_environment and args.auth_mode != "dev-login"
+            else "none"
+        ),
+        "dev_login_allowed_by_mode": args.auth_mode in {"auto", "dev-login"},
+        "bearer_value_included": False,
+        "bearer_env_name_included": False,
+    }
+    backend = _backend_url_preflight(args.backend_url)
+    arguments = _arguments_preflight(str(getattr(args, "arguments_json", "{}") or "{}"))
+    live_env_flag_set = os.getenv(ENV_FLAG) == "1"
+    required_next = _preflight_required_next(
+        args,
+        backend=backend,
+        auth=auth,
+        arguments=arguments,
+        live_env_flag_set=live_env_flag_set,
+    )
+    return {
+        "schema_version": PREFLIGHT_SCHEMA_VERSION,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "status": "pass" if not required_next else "fail",
+        "requested_provider": normalize_provider(args.provider),
+        "requested_action": normalize_action(args.action),
+        "allow_live_acknowledged": bool(args.allow_live),
+        "live_env_flag_set": live_env_flag_set,
+        "live_backend_call_attempted": False,
+        "provider_execution_attempted": False,
+        "backend": backend,
+        "authentication": auth,
+        "flags": {
+            "expect_connected": bool(args.expect_connected),
+            "require_execution_ready": bool(args.require_execution_ready),
+            "execute_readonly": bool(args.execute_readonly),
+            "skip_connect_link": bool(args.skip_connect_link),
+            "explicit_connection_selection_present": bool(args.connection_ref),
+        },
+        "arguments": arguments,
+        "required_next": required_next,
+        "setup_contract": composio_setup_contract(args, required_next),
+        "privacy": {
+            "secret_values_included": False,
+            "credential_names_included": False,
+            "bearer_value_included": False,
+            "bearer_env_name_included": False,
+            "raw_backend_url_included": False,
+            "raw_connection_selection_included": False,
+            "raw_arguments_included": False,
+            "provider_payload_included": False,
+            "provider_response_included": False,
+        },
+    }
+
+
+def safe_composio_preflight_summary(args: argparse.Namespace) -> dict[str, Any]:
+    preflight = build_composio_acceptance_preflight(args)
+    flags = preflight.get("flags") if isinstance(preflight.get("flags"), dict) else {}
+    return {
+        "schema_version": PREFLIGHT_SCHEMA_VERSION,
+        "generated_at": preflight.get("generated_at"),
+        "status": preflight.get("status"),
+        "requested_provider": preflight.get("requested_provider"),
+        "requested_action": preflight.get("requested_action"),
+        "allow_live_acknowledged": preflight.get("allow_live_acknowledged"),
+        "live_env_flag_set": preflight.get("live_env_flag_set"),
+        "live_backend_call_attempted": False,
+        "provider_execution_attempted": False,
+        "backend": preflight.get("backend"),
+        "authentication": preflight.get("authentication"),
+        "flags": {
+            "expect_connected": flags.get("expect_connected") is True,
+            "require_execution_ready": flags.get("require_execution_ready") is True,
+            "execute_readonly": flags.get("execute_readonly") is True,
+            "skip_connect_link": flags.get("skip_connect_link") is True,
+            "explicit_connection_selection_present": flags.get(
+                "explicit_connection_selection_present"
+            )
+            is True,
+        },
+        "arguments": preflight.get("arguments"),
+        "required_next": preflight.get("required_next")
+        if isinstance(preflight.get("required_next"), list)
+        else [],
+        "setup_contract": preflight.get("setup_contract")
+        if isinstance(preflight.get("setup_contract"), dict)
+        else composio_setup_contract(args, []),
+        "privacy": preflight.get("privacy")
+        if isinstance(preflight.get("privacy"), dict)
+        else {},
+    }
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise AcceptanceFailure("preflight required_next must be a string list")
+    if value != list(dict.fromkeys(value)):
+        raise AcceptanceFailure("preflight required_next must not contain duplicates")
+    if any(not item for item in value):
+        raise AcceptanceFailure("preflight required_next must not contain empty strings")
+    return list(value)
+
+
+def _safe_bool_map(value: Any, keys: set[str]) -> dict[str, bool]:
+    source = value if isinstance(value, dict) else {}
+    return {key: source.get(key) is True for key in keys}
+
+
+def load_composio_preflight_summary(
+    path: Path,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    if not path.is_file() or path.is_symlink():
+        raise AcceptanceFailure("--failure-preflight-json must point at a regular file")
+    try:
+        raw_payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:  # noqa: BLE001
+        raise AcceptanceFailure(
+            f"--failure-preflight-json could not be read as JSON: {exc}"
+        ) from exc
+    if not isinstance(raw_payload, dict):
+        raise AcceptanceFailure("--failure-preflight-json root must be a JSON object")
+    if raw_payload.get("schema_version") != PREFLIGHT_SCHEMA_VERSION:
+        raise AcceptanceFailure(
+            "--failure-preflight-json schema_version does not match Composio preflight"
+        )
+    if raw_payload.get("status") != "fail":
+        raise AcceptanceFailure("--failure-preflight-json status must be fail")
+    if raw_payload.get("live_backend_call_attempted") is not False:
+        raise AcceptanceFailure(
+            "--failure-preflight-json live_backend_call_attempted must be false"
+        )
+    if raw_payload.get("provider_execution_attempted") is not False:
+        raise AcceptanceFailure(
+            "--failure-preflight-json provider_execution_attempted must be false"
+        )
+    required_next = _string_list(raw_payload.get("required_next"))
+    setup_contract = raw_payload.get("setup_contract")
+    if not isinstance(setup_contract, dict):
+        raise AcceptanceFailure("--failure-preflight-json setup_contract must be an object")
+    if setup_contract.get("requirement_id") != "wiii-connect-composio-acceptance":
+        raise AcceptanceFailure(
+            "--failure-preflight-json setup_contract.requirement_id is invalid"
+        )
+    if setup_contract.get("required_next") != required_next:
+        raise AcceptanceFailure(
+            "--failure-preflight-json setup_contract.required_next must match required_next"
+        )
+    backend = raw_payload.get("backend") if isinstance(raw_payload.get("backend"), dict) else {}
+    authentication = (
+        raw_payload.get("authentication")
+        if isinstance(raw_payload.get("authentication"), dict)
+        else {}
+    )
+    arguments = (
+        raw_payload.get("arguments") if isinstance(raw_payload.get("arguments"), dict) else {}
+    )
+    flags = raw_payload.get("flags") if isinstance(raw_payload.get("flags"), dict) else {}
+    privacy = raw_payload.get("privacy") if isinstance(raw_payload.get("privacy"), dict) else {}
+    return {
+        "schema_version": PREFLIGHT_SCHEMA_VERSION,
+        "generated_at": raw_payload.get("generated_at"),
+        "status": raw_payload.get("status"),
+        "requested_provider": normalize_provider(raw_payload.get("requested_provider")),
+        "requested_action": normalize_action(raw_payload.get("requested_action")),
+        "allow_live_acknowledged": raw_payload.get("allow_live_acknowledged") is True,
+        "live_env_flag_set": raw_payload.get("live_env_flag_set") is True,
+        "live_backend_call_attempted": False,
+        "provider_execution_attempted": False,
+        "backend": {
+            "valid": backend.get("valid") is True,
+            "placeholder": backend.get("placeholder") is True,
+            "scheme": backend.get("scheme") if backend.get("scheme") in {"http", "https"} else "",
+            "host_hash_present": backend.get("host_hash_present") is True,
+            "origin_hash_present": backend.get("origin_hash_present") is True,
+            "raw_backend_url_included": False,
+        },
+        "authentication": {
+            "mode": authentication.get("mode")
+            if authentication.get("mode") in {"auto", "bearer", "dev-login"}
+            else args.auth_mode,
+            "bearer_token_present": authentication.get("bearer_token_present") is True,
+            "bearer_source": authentication.get("bearer_source")
+            if authentication.get("bearer_source") in {"argument", "environment", "none"}
+            else "none",
+            "dev_login_allowed_by_mode": authentication.get("dev_login_allowed_by_mode")
+            is True,
+            "bearer_value_included": False,
+            "bearer_env_name_included": False,
+        },
+        "flags": _safe_bool_map(
+            flags,
+            {
+                "expect_connected",
+                "require_execution_ready",
+                "execute_readonly",
+                "skip_connect_link",
+                "explicit_connection_selection_present",
+            },
+        ),
+        "arguments": {
+            "valid_json_object": arguments.get("valid_json_object") is True,
+            "argument_key_count": int(arguments.get("argument_key_count") or 0)
+            if isinstance(arguments.get("argument_key_count"), int)
+            and int(arguments.get("argument_key_count") or 0) >= 0
+            else 0,
+            "arguments_present": arguments.get("arguments_present") is True,
+            "raw_arguments_included": False,
+        },
+        "required_next": required_next,
+        "setup_contract": setup_contract,
+        "privacy": {
+            "secret_values_included": False,
+            "credential_names_included": False,
+            "bearer_value_included": False,
+            "bearer_env_name_included": False,
+            "raw_backend_url_included": False,
+            "raw_connection_selection_included": False,
+            "raw_arguments_included": False,
+            "provider_payload_included": False,
+            "provider_response_included": False,
+            **{key: value for key, value in privacy.items() if value is False},
+        },
+    }
+
+
+def failed_composio_acceptance_evidence_payload(
+    args: argparse.Namespace,
+    *,
+    reason: Any,
+    preflight_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    preflight = preflight_summary or safe_composio_preflight_summary(args)
+    required_next = preflight["required_next"]
+    preflight_flags = (
+        preflight.get("flags") if isinstance(preflight.get("flags"), dict) else {}
+    )
+    preflight_arguments = (
+        preflight.get("arguments") if isinstance(preflight.get("arguments"), dict) else {}
+    )
+    authentication = (
+        preflight.get("authentication")
+        if isinstance(preflight.get("authentication"), dict)
+        else {}
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "schema": LEGACY_SCHEMA_VERSION,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "status": "fail",
+        "error_code": "composio_acceptance_setup_blocked",
+        "error_message": _redact_acceptance_failure_text(reason, args),
+        "provider": preflight.get("requested_provider") or normalize_provider(args.provider),
+        "action": preflight.get("requested_action") or normalize_action(args.action),
+        "auth_mode": authentication.get("mode") or args.auth_mode,
+        "live_backend_call_attempted": False,
+        "provider_execution_attempted": False,
+        "required_next": required_next,
+        "setup_contract": preflight["setup_contract"],
+        "preflight_summary": preflight,
+        "summary": {
+            "passed": 0,
+            "failed": 1,
+            "total": 1,
+            "success": False,
+        },
+        "flags": {
+            "expect_connected": preflight_flags.get("expect_connected") is True,
+            "require_execution_ready": preflight_flags.get("require_execution_ready")
+            is True,
+            "execute_readonly": preflight_flags.get("execute_readonly") is True,
+            "skip_connect_link": preflight_flags.get("skip_connect_link") is True,
+            "explicit_connection_selection_supplied": preflight_flags.get(
+                "explicit_connection_selection_present"
+            )
+            is True,
+            "arguments_present": preflight_arguments.get("arguments_present") is True,
+        },
+        "runtime": {
+            "path": "external_app_action",
+            "mutation": "read",
+            "argument_key_count": int(preflight_arguments.get("argument_key_count") or 0),
+            "arguments_present": preflight_arguments.get("arguments_present") is True,
+            "check_count": 0,
+            "observed_section_count": 0,
+        },
+        "evidence_contract": {
+            "backend_only_harness": True,
+            "external_provider_execution": False,
+            "requires_connected_account": bool(
+                preflight_flags.get("expect_connected") is True
+                or preflight_flags.get("require_execution_ready") is True
+                or preflight_flags.get("execute_readonly") is True
+            ),
+            "requires_readonly_execution": preflight_flags.get("execute_readonly")
+            is True,
+            "diagnostic_only": True,
+        },
+        "privacy": {
+            "identifier_strategy": "hash_or_count_only",
+            "raw_content_included": False,
+            "provider_payload_included": False,
+            "provider_arguments_included": False,
+            "provider_response_included": False,
+            "raw_schema_included": False,
+            "connect_link_included": False,
+            "bearer_value_included": False,
+            "bearer_env_name_included": False,
+            "raw_backend_url_included": False,
+            "raw_connection_locator_included": False,
+        },
+        "checks": [],
+    }
+
+
+def composio_setup_contract(
+    args: argparse.Namespace,
+    required_next: list[str],
+) -> dict[str, Any]:
+    credential_slots = (
+        ["acceptance_bearer_token"] if args.auth_mode == "bearer" else []
+    )
+    external_setup = ["staging_or_live_backend"]
+    if args.expect_connected or args.require_execution_ready or args.execute_readonly:
+        external_setup.append("connected_provider_account")
+    if args.require_execution_ready or args.execute_readonly:
+        external_setup.extend(
+            [
+                "readonly_action_schema",
+                "execution_gateway_scope_policy",
+            ]
+        )
+    return {
+        "version": SETUP_CONTRACT_VERSION,
+        "requirement_id": "wiii-connect-composio-acceptance",
+        "required_next": list(required_next),
+        "workflow_inputs_required": [
+            "backend_url",
+            "auth_mode",
+            "provider",
+            "allow_live",
+            "expect_connected",
+            "require_execution_ready",
+            "execute_readonly",
+            "arguments_json",
+        ],
+        "environment_flags_required": ["live_composio_acceptance_flag"],
+        "credential_slots_required": credential_slots,
+        "external_setup_required": list(dict.fromkeys(external_setup)),
+        "dispatch_ready": not required_next,
+    }
+
+
 class WiiiConnectComposioAcceptance:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
@@ -398,6 +978,10 @@ class WiiiConnectComposioAcceptance:
         self.failed = 0
         self.started_at = datetime.now(UTC)
         self.check_records: list[dict[str, Any]] = []
+        self.observations: dict[str, Any] = {}
+
+    def observe(self, section: str, value: dict[str, Any]) -> None:
+        self.observations[check_status_key(section)] = value
 
     def api_url(self, path: str) -> str:
         return join_url(self.args.backend_url, path)
@@ -507,7 +1091,7 @@ class WiiiConnectComposioAcceptance:
 
         total = self.passed + self.failed
         print(f"\nResult: {self.passed}/{total} checks passed")
-        if getattr(self.args, "evidence_json", ""):
+        if evidence_output_path(self.args):
             self.write_evidence_json()
         return 1 if self.failed else 0
 
@@ -548,11 +1132,16 @@ class WiiiConnectComposioAcceptance:
         backend_origin = ""
         if parsed_backend.scheme and parsed_backend.netloc:
             backend_origin = f"{parsed_backend.scheme}://{parsed_backend.netloc}"
+        success = self.failed == 0
+        argument_keys = self.argument_keys()
+        observations = dict(self.observations)
         return redact_for_log(
             {
-                "schema": "wiii_connect_composio_acceptance_evidence.v1",
+                "schema_version": SCHEMA_VERSION,
+                "schema": LEGACY_SCHEMA_VERSION,
                 "generated_at": datetime.now(UTC).isoformat(),
                 "started_at": self.started_at.isoformat(),
+                "status": "pass" if success else "fail",
                 "backend_origin": backend_origin or "[invalid_backend_url]",
                 "target_env": getattr(self.args, "target_env", "")
                 or os.environ.get(TARGET_ENV, "")
@@ -583,7 +1172,7 @@ class WiiiConnectComposioAcceptance:
                         getattr(self.args, "execute_readonly", False)
                     ),
                     "disconnect": bool(getattr(self.args, "disconnect", False)),
-                    "explicit_connection_ref_selected": bool(
+                    "explicit_connection_selected": bool(
                         getattr(self.args, "connection_ref", "")
                     ),
                     "connection_selected_for_action": bool(
@@ -596,25 +1185,72 @@ class WiiiConnectComposioAcceptance:
                         )
                     ),
                 },
+                "runtime": {
+                    "path": "external_app_action",
+                    "mutation": "read",
+                    "argument_key_count": len(argument_keys),
+                    "arguments_present": bool(argument_keys),
+                    "check_count": len(self.check_records),
+                    "observed_section_count": len(observations),
+                },
+                "evidence_contract": {
+                    "backend_only_harness": True,
+                    "external_provider_execution": bool(
+                        getattr(self.args, "execute_readonly", False)
+                    ),
+                    "requires_connected_account": bool(
+                        getattr(self.args, "expect_connected", False)
+                        or getattr(self.args, "require_execution_ready", False)
+                        or getattr(self.args, "execute_readonly", False)
+                    ),
+                    "requires_readonly_execution": bool(
+                        getattr(self.args, "execute_readonly", False)
+                    ),
+                },
                 "summary": {
                     "passed": self.passed,
                     "failed": self.failed,
                     "total": self.passed + self.failed,
-                    "success": self.failed == 0,
+                    "success": success,
+                },
+                "check_statuses": {
+                    check_status_key(record.get("name")): record.get("status")
+                    for record in self.check_records
+                },
+                "backend": observations.get("backend", {}),
+                "authentication": observations.get("authentication", {}),
+                "provider_registry": observations.get("provider_registry", {}),
+                "adapter": observations.get("adapter", {}),
+                "storage": observations.get("storage", {}),
+                "audit_ledger": observations.get("audit_ledger", {}),
+                "activation": {
+                    "connect": observations.get("activation_connect", {}),
+                    "execution": observations.get("activation_execution", {}),
+                },
+                "curated_action": observations.get("curated_action", {}),
+                "gateway_fail_closed": observations.get("gateway_fail_closed", {}),
+                "connection_selection": observations.get("connection_selection", {}),
+                "execution_gateway": observations.get("execution_gateway", {}),
+                "readonly_execution": observations.get("readonly_execution", {}),
+                "privacy": {
+                    "identifier_strategy": "hash_or_count_only",
+                    "raw_content_included": False,
+                    "opaque_connection_included": False,
+                    "provider_payload_included": False,
+                    "provider_arguments_included": False,
+                    "provider_response_included": False,
+                    "raw_schema_included": False,
+                    "connect_link_included": False,
+                    "bearer_value_included": False,
+                    "bearer_env_name_included": False,
                 },
                 "checks": self.check_records,
             }
         )
 
     def write_evidence_json(self) -> None:
-        path = validate_evidence_path(getattr(self.args, "evidence_json", ""))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = self.evidence_payload()
-        path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
-            + "\n",
-            encoding="utf-8",
-        )
+        path = validate_evidence_path(evidence_output_path(self.args))
+        emit_json_payload(self.evidence_payload(), path)
         print(f"[INFO] Wrote redacted evidence JSON: {path}")
 
     def check_backend_health(self) -> str:
@@ -623,7 +1259,9 @@ class WiiiConnectComposioAcceptance:
             self.api_url("/api/v1/health"),
             timeout=self.args.timeout,
         ).json()
-        return str(payload.get("status") or "ok")
+        status = check_status_key(payload.get("status") or "ok")
+        self.observe("backend", {"health_status": status, "origin_present": True})
+        return status
 
     def authenticate(self) -> str:
         env_token = os.environ.get(TOKEN_ENV, "")
@@ -634,10 +1272,21 @@ class WiiiConnectComposioAcceptance:
         )
         if token:
             self.token = token
-            return f"bearer token from {'argument' if self.args.bearer_token else TOKEN_ENV}"
+            self.observe(
+                "authentication",
+                {
+                    "status": "authenticated",
+                    "mode": "bearer",
+                    "source": "argument" if self.args.bearer_token else "environment",
+                    "bearer_value_included": False,
+                    "bearer_env_name_included": False,
+                },
+            )
+            return "bearer auth supplied"
         if self.args.auth_mode == "bearer":
             raise AcceptanceFailure(
-                f"No bearer token supplied. Pass --bearer-token or set {TOKEN_ENV}."
+                "No bearer credential supplied. Pass --bearer-token or configure "
+                "the acceptance bearer secret."
             )
         status = request_bytes(
             "GET",
@@ -670,7 +1319,17 @@ class WiiiConnectComposioAcceptance:
                 f"{self.args.expected_platform_role!r}"
             )
         self.token = token
-        return f"dev-login user={user.get('email')}"
+        self.observe(
+            "authentication",
+            {
+                "status": "authenticated",
+                "mode": "dev_login",
+                "platform_role_verified": True,
+                "bearer_value_included": False,
+                "bearer_env_name_included": False,
+            },
+        )
+        return "dev-login authenticated"
 
     def check_provider_registry(self) -> str:
         payload = request_bytes(
@@ -684,6 +1343,14 @@ class WiiiConnectComposioAcceptance:
             raise AcceptanceFailure(
                 f"{self.args.provider} provider kind is {provider.get('provider_kind')!r}"
             )
+        self.observe(
+            "provider_registry",
+            {
+                "provider_slug": normalize_provider(self.args.provider),
+                "provider_kind": "composio",
+                "provider_found": True,
+            },
+        )
         return f"{provider.get('slug')} kind=composio"
 
     def check_adapter_readiness(self) -> str:
@@ -708,6 +1375,15 @@ class WiiiConnectComposioAcceptance:
             "can_execute_actions"
         ) is not True:
             raise AcceptanceFailure("Composio adapter cannot execute curated actions")
+        self.observe(
+            "adapter",
+            {
+                "bound": adapter.get("bound") is True,
+                "configured": adapter.get("configured") is True,
+                "auth_ready": adapter.get("authorization_ready") is True,
+                "can_execute_actions": adapter.get("can_execute_actions") is True,
+            },
+        )
         return (
             "authorization_ready=true "
             f"can_execute_actions={bool(adapter.get('can_execute_actions'))}"
@@ -727,6 +1403,14 @@ class WiiiConnectComposioAcceptance:
                 f"Wiii Connect storage is not ready: missing={missing} "
                 f"reason={payload.get('reason')!r}"
             )
+        self.observe(
+            "storage",
+            {
+                "persistent": payload.get("persistent") is True,
+                "connection_table_ready": payload.get("connection_table_ready") is True,
+                "audit_ledger_ready": payload.get("audit_ledger_ready") is True,
+            },
+        )
         return "postgres tables ready"
 
     def check_audit_readiness(self) -> str:
@@ -740,6 +1424,7 @@ class WiiiConnectComposioAcceptance:
             raise AcceptanceFailure(
                 f"Audit ledger is not persistent: reason={payload.get('reason')!r}"
             )
+        self.observe("audit_ledger", {"persistent": True})
         return "persistent=true"
 
     def check_curated_actions(self) -> str:
@@ -758,6 +1443,15 @@ class WiiiConnectComposioAcceptance:
             "enabled"
         ) is not True:
             raise AcceptanceFailure(f"{self.args.action} is not runtime-enabled")
+        self.observe(
+            "curated_action",
+            {
+                "provider_slug": normalize_provider(self.args.provider),
+                "action_slug": normalize_action(self.args.action),
+                "mutation": "read",
+                "enabled": action.get("enabled") is True,
+            },
+        )
         return (
             f"{action.get('slug')} mutation=read enabled={bool(action.get('enabled'))}"
         )
@@ -785,6 +1479,15 @@ class WiiiConnectComposioAcceptance:
                 "Gateway did not enforce explicit connection selection: "
                 f"reason={payload.get('reason')!r}"
             )
+        self.observe(
+            "gateway_fail_closed",
+            {
+                "status": check_status_key(payload.get("status") or ""),
+                "reason": "connection_selection_required",
+                "missing_connection_selection_blocked": True,
+                "provider_execution_attempted": False,
+            },
+        )
         return f"blocked reason={payload.get('reason')}"
 
     def activation_readiness_payload(
@@ -816,6 +1519,15 @@ class WiiiConnectComposioAcceptance:
             flag="ready_to_connect",
             label="connect-ready",
         )
+        self.observe(
+            "activation_connect",
+            {
+                "status": check_status_key(payload.get("status") or ""),
+                "ready_to_connect": True,
+                "ready_to_execute_readonly": payload.get("ready_to_execute_readonly")
+                is True,
+            },
+        )
         return (
             "ready_to_connect=true "
             f"ready_to_execute_readonly={bool(payload.get('ready_to_execute_readonly'))}"
@@ -832,6 +1544,15 @@ class WiiiConnectComposioAcceptance:
         scope_detail = assert_scope_policy_allowed(
             payload,
             label="activation readiness",
+        )
+        self.observe(
+            "activation_execution",
+            {
+                "status": check_status_key(payload.get("status") or ""),
+                "ready_to_execute_readonly": True,
+                "selected_connection_hash_present": True,
+                "scope_policy": _scope_policy_summary(payload),
+            },
         )
         return (
             "ready_to_execute_readonly=true "
@@ -870,7 +1591,15 @@ class WiiiConnectComposioAcceptance:
             raise AcceptanceFailure("Connect Link decision omitted authorization_url")
         if self.args.print_connect_url:
             print(f"[INFO] Open this operator-only Connect Link: {authorization_url}")
-        return "authorization_url_present=true"
+        self.observe(
+            "connect_link",
+            {
+                "status": "ready",
+                "link_present": True,
+                "raw_link_included": False,
+            },
+        )
+        return "connect_link_present=true"
 
     def check_connections(self) -> str:
         payload = request_bytes(
@@ -895,9 +1624,32 @@ class WiiiConnectComposioAcceptance:
                 or self.args.disconnect
             ):
                 raise AcceptanceFailure("No active connected account was returned")
+            self.observe(
+                "connection_selection",
+                {
+                    "list_status": "ready",
+                    "account_count": _list_count(payload.get("connections")),
+                    "active_connection_found": False,
+                    "selected_connection_hash_present": False,
+                    "opaque_connection_included": False,
+                },
+            )
             return "ready; no active account required for this run"
         self.selected_connection_ref = str(
             connection.get("connection_ref") or ""
+        )
+        self.observe(
+            "connection_selection",
+            {
+                "list_status": "ready",
+                "account_count": _list_count(payload.get("connections")),
+                "active_connection_found": True,
+                "selected_connection_hash_present": True,
+                "selected_connection_source": "listing"
+                if not getattr(self.args, "connection_ref", "")
+                else "explicit",
+                "opaque_connection_included": False,
+            },
         )
         return f"active_connection={opaque_ref(self.selected_connection_ref)}"
 
@@ -926,6 +1678,17 @@ class WiiiConnectComposioAcceptance:
         scope_detail = assert_scope_policy_allowed(
             payload,
             label="execution gateway",
+        )
+        self.observe(
+            "execution_gateway",
+            {
+                "status": "allowed",
+                "reason": check_status_key(payload.get("reason") or "allowed"),
+                "selected_connection_hash_present": True,
+                "argument_key_count": len(self.argument_keys()),
+                "scope_policy": _scope_policy_summary(payload),
+                "provider_execution_attempted": False,
+            },
         )
         return f"allowed {scope_detail} connection={opaque_ref(connection_ref)}"
 
@@ -960,6 +1723,33 @@ class WiiiConnectComposioAcceptance:
             if isinstance(payload.get("execution"), dict)
             else {}
         )
+        schema = payload.get("schema") if isinstance(payload.get("schema"), dict) else {}
+        schema_summary = _schema_summary(
+            schema,
+            supplied_argument_keys=self.argument_keys(),
+        )
+        execution_summary = _execution_summary(execution)
+        if schema_summary["status"] != "ready" or schema_summary["schema_present"] is not True:
+            raise AcceptanceFailure(
+                "Read-only execution omitted live schema readiness proof"
+            )
+        if execution_summary["status"] != "succeeded" or execution_summary["successful"] is not True:
+            raise AcceptanceFailure(
+                "Read-only execution omitted successful execution metadata"
+            )
+        self.observe(
+            "readonly_execution",
+            {
+                "status": check_status_key(payload.get("status") or ""),
+                "reason": check_status_key(payload.get("reason") or ""),
+                "provider_slug": normalize_provider(self.args.provider),
+                "action_slug": normalize_action(self.args.action),
+                "selected_connection_hash_present": True,
+                "schema": schema_summary,
+                "execution": execution_summary,
+                "provider_payload_included": False,
+            },
+        )
         return f"succeeded data_keys={execution.get('data_keys', [])}"
 
     def check_disconnect(self) -> str:
@@ -986,16 +1776,19 @@ class WiiiConnectComposioAcceptance:
         return f"local_disabled=true connection={opaque_ref(connection_ref)}"
 
     def argument_keys(self) -> list[str]:
-        if self.args.argument_keys:
+        argument_keys = str(getattr(self.args, "argument_keys", "") or "")
+        if argument_keys:
             return [
                 item.strip()
-                for item in self.args.argument_keys.split(",")
+                for item in argument_keys.split(",")
                 if item.strip()
             ]
         return sorted(self.arguments().keys())
 
     def arguments(self) -> dict[str, Any]:
-        return parse_json_argument_object(self.args.arguments_json)
+        return parse_json_argument_object(
+            str(getattr(self.args, "arguments_json", "{}") or "{}")
+        )
 
     def connection_ref_for_action(self) -> str:
         candidate = (self.args.connection_ref or self.selected_connection_ref).strip()
@@ -1022,7 +1815,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
     parser.add_argument("--provider", default=DEFAULT_PROVIDER)
-    parser.add_argument("--action", default=DEFAULT_ACTION)
+    parser.add_argument(
+        "--action",
+        default="",
+        help=(
+            "Curated action slug. Defaults to the selected provider's safe "
+            "read-only diagnostic action."
+        ),
+    )
     parser.add_argument(
         "--auth-mode",
         choices=("auto", "bearer", "dev-login"),
@@ -1048,6 +1848,30 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Fetch and print the redacted activation-readiness report, then stop. "
             "Does not issue Connect Links, list provider accounts, execute, or disconnect."
+        ),
+    )
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help=(
+            "Check live evidence setup without calling the backend or provider. "
+            "Writes a diagnostic payload when --out/--evidence-json is supplied."
+        ),
+    )
+    parser.add_argument(
+        "--failure-from-preflight",
+        action="store_true",
+        help=(
+            "Write a failed registered evidence artifact from sanitized preflight "
+            "setup diagnostics without calling the backend or provider."
+        ),
+    )
+    parser.add_argument(
+        "--failure-preflight-json",
+        default="",
+        help=(
+            "Validated preflight JSON to embed in --failure-from-preflight output. "
+            "Use the exact file produced by --preflight-only."
         ),
     )
     parser.add_argument("--print-connect-url", action="store_true")
@@ -1080,7 +1904,33 @@ def build_parser() -> argparse.ArgumentParser:
             ".env files, logs, screenshots, coverage, dist, or dependency folders."
         ),
     )
+    parser.add_argument(
+        "--out",
+        default="",
+        help=(
+            "Write UTF-8 JSON. Live runtime evidence requires "
+            f"{ENV_FLAG}=1 and --allow-live; --preflight-only writes diagnostics."
+        ),
+    )
+    parser.add_argument(
+        "--allow-live",
+        action="store_true",
+        help="Acknowledge that --out may call a credentialed backend/provider path.",
+    )
     return parser
+
+
+def evidence_output_path(args: argparse.Namespace) -> str:
+    return str(getattr(args, "out", "") or getattr(args, "evidence_json", "") or "")
+
+
+def require_runtime_evidence_guard(args: argparse.Namespace) -> None:
+    if not getattr(args, "out", ""):
+        return
+    if not getattr(args, "allow_live", False):
+        raise SystemExit("--allow-live is required with --out")
+    if os.getenv(ENV_FLAG) != "1":
+        raise SystemExit(f"Set {ENV_FLAG}=1 to write registry runtime evidence")
 
 
 def validate_evidence_path(raw_path: str) -> Path:
@@ -1112,9 +1962,82 @@ def validate_evidence_path(raw_path: str) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    raw_args = parser.parse_args(argv)
+    try:
+        args = prepare_acceptance_args(raw_args)
+    except SystemExit as exc:
+        args = normalize_acceptance_args(raw_args)
+        output_path = evidence_output_path(args)
+        if output_path:
+            emit_json_payload(
+                failed_composio_acceptance_evidence_payload(
+                    args,
+                    reason=exc,
+                ),
+                validate_evidence_path(output_path),
+            )
+        print(_redact_acceptance_failure_text(exc, args), file=sys.stderr)
+        return exc.code if isinstance(exc.code, int) else 1
+    if getattr(args, "preflight_only", False):
+        payload = build_composio_acceptance_preflight(args)
+        output_path = evidence_output_path(args)
+        emit_json_payload(
+            payload,
+            validate_evidence_path(output_path) if output_path else None,
+        )
+        return 0 if payload.get("status") == "pass" else 1
+    if getattr(args, "failure_from_preflight", False):
+        output_path = evidence_output_path(args)
+        if not output_path:
+            raise SystemExit("--failure-from-preflight requires --out or --evidence-json")
+        if not getattr(args, "failure_preflight_json", ""):
+            raise SystemExit("--failure-from-preflight requires --failure-preflight-json")
+        try:
+            preflight_summary = load_composio_preflight_summary(
+                Path(args.failure_preflight_json).expanduser(),
+                args,
+            )
+        except AcceptanceFailure as exc:
+            print(_redact_acceptance_failure_text(exc, args), file=sys.stderr)
+            return 1
+        emit_json_payload(
+            failed_composio_acceptance_evidence_payload(
+                args,
+                reason="preflight blocked live Composio acceptance",
+                preflight_summary=preflight_summary,
+            ),
+            validate_evidence_path(output_path),
+        )
+        return 1
     harness = WiiiConnectComposioAcceptance(args)
     return harness.run()
+
+
+def prepare_acceptance_args(args: argparse.Namespace) -> argparse.Namespace:
+    args = normalize_acceptance_args(args)
+    if getattr(args, "out", "") and getattr(args, "evidence_json", ""):
+        if str(args.out).strip() != str(args.evidence_json).strip():
+            raise SystemExit("--out and --evidence-json must not point to different files")
+    if getattr(args, "out", ""):
+        args.evidence_json = args.out
+    if getattr(args, "preflight_only", False) or getattr(
+        args,
+        "failure_from_preflight",
+        False,
+    ):
+        return args
+    require_runtime_evidence_guard(args)
+    return args
+
+
+def normalize_acceptance_args(args: argparse.Namespace) -> argparse.Namespace:
+    provider = str(getattr(args, "provider", "") or "").strip().lower()
+    action = str(getattr(args, "action", "") or "").strip().upper().replace("-", "_")
+    if not action:
+        action = DEFAULT_ACTION_BY_PROVIDER.get(provider, DEFAULT_ACTION)
+    args.action = action
+    return args
 
 
 if __name__ == "__main__":

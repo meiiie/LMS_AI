@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from app.engine.runtime.event_payload_sanitizer import hash_runtime_identifier
 from app.engine.tools import ToolAccess, ToolCategory, _init_extended_tools
 from app.engine.tools.browser_sandbox_tools import (
     get_browser_sandbox_tools,
@@ -131,6 +132,22 @@ class TestBrowserSandboxService:
         assert kwargs["metadata"]["target_url"] == "https://example.com"
         assert kwargs["metadata"]["result_format"] == "wiii.browser.v1"
 
+    def test_build_execution_metadata_redacts_url_and_metadata_secrets(self):
+        service = BrowserSandboxService(limiter_provider=lambda: None)
+
+        metadata = service.build_execution_metadata(
+            BrowserAutomationRequest(
+                url="https://example.com/?token=raw-url-token",
+                metadata={"api_key": "raw-api-key"},
+            )
+        )
+
+        serialized = str(metadata)
+        assert "raw-url-token" not in serialized
+        assert "raw-api-key" not in serialized
+        assert "api_key" not in serialized
+        assert "<redacted-secret>" in metadata["target_url"]
+
     @pytest.mark.asyncio
     async def test_execute_async_reports_missing_structured_payload(self):
         class _SandboxService:
@@ -163,7 +180,12 @@ class TestBrowserSandboxService:
             response_status=200,
             screenshot_base64="BASE64PNG",
             screenshot_label="Loaded page",
-            metadata={"execution_id": "exec-1", "request_id": "req-1"},
+            metadata={
+                "execution_id": "exec-1",
+                "request_id": "req-1",
+                "user_id": "user-1",
+                "access_token": "raw-access-token",
+            },
             sandbox_result=SandboxExecutionResult(
                 success=True,
                 sandbox_id="sandbox-1",
@@ -186,7 +208,9 @@ class TestBrowserSandboxService:
                 "metadata": {
                     "execution_id": "exec-1",
                     "request_id": "req-1",
+                    "user_id_hash": hash_runtime_identifier("user-1"),
                     "sandbox_id": "sandbox-1",
+                    "redacted_secret_count": 1,
                 },
             },
             "node": "browser",
@@ -195,7 +219,14 @@ class TestBrowserSandboxService:
         assert artifact_event["content"]["artifact_type"] == "document"
         assert artifact_event["content"]["artifact_id"] == "browser-art-1"
         assert artifact_event["content"]["metadata"]["execution_id"] == "exec-1"
+        assert artifact_event["content"]["metadata"][
+            "user_id_hash"
+        ] == hash_runtime_identifier("user-1")
         assert artifact_event["content"]["metadata"]["sandbox_id"] == "sandbox-1"
+        serialized = str(artifact_event["content"]["metadata"])
+        assert "user-1" not in serialized
+        assert "raw-access-token" not in serialized
+        assert "access_token" not in serialized
         assert "Example excerpt" in artifact_event["content"]["content"]
 
 
@@ -256,6 +287,7 @@ class TestBrowserSandboxTool:
 
         assert output == "Browser run succeeded."
         assert queue.put_nowait.call_count == 2
+        user_hash = hash_runtime_identifier("user-1")
         queue.put_nowait.assert_has_calls([
             call({
                 "type": "browser_screenshot",
@@ -265,7 +297,7 @@ class TestBrowserSandboxTool:
                         "request_id": "req-1",
                         "session_id": "sess-1",
                         "organization_id": "org-1",
-                        "user_id": "user-1",
+                        "user_id_hash": user_hash,
                         "user_role": "admin",
                         "node": "direct",
                         "request_source": "agentic_loop",
@@ -284,7 +316,7 @@ class TestBrowserSandboxTool:
                         "request_id": "req-1",
                         "session_id": "sess-1",
                         "organization_id": "org-1",
-                        "user_id": "user-1",
+                        "user_id_hash": user_hash,
                         "user_role": "admin",
                         "node": "direct",
                         "request_source": "agentic_loop",

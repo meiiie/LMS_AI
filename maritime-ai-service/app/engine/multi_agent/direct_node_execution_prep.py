@@ -38,6 +38,15 @@ def _tool_name(tool: Any) -> str:
     return str(getattr(tool, "name", getattr(tool, "__name__", "")) or "")
 
 
+def _append_force_skill(state: AgentState, skill: str) -> None:
+    skills = state.get("force_skills")
+    if isinstance(skills, list):
+        if skill not in skills:
+            skills.append(skill)
+        return
+    state["force_skills"] = [skill]
+
+
 def prepare_direct_node_tool_execution(
     *,
     llm: Any,
@@ -88,6 +97,13 @@ def prepare_direct_node_tool_execution(
             logger_obj.warning(
                 "[DIRECT] Visual intent detected but tool_generate_visual not in tools list",
             )
+
+    if routing_intent == "web_search" and not force_tools:
+        has_web_search_tool = any(_tool_name(tool) == "tool_web_search" for tool in tools)
+        if has_web_search_tool:
+            force_tools = True
+            _append_force_skill(state, "web-search")
+            logger_obj.info("[DIRECT] Web-search routing intent -> force tool_choice='any'")
 
     bound_provider, bound_model = extract_runtime_target(llm)
     bound_provider = bound_provider or state.get("provider")

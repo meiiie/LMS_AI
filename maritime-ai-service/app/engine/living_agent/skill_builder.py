@@ -1,23 +1,9 @@
-"""
-Skill Builder — Wiii's autonomous learning and skill development system.
-
-Sprint 170: "Linh Hồn Sống"
-
-Manages the lifecycle of self-built skills:
-    DISCOVER → LEARN → PRACTICE → EVALUATE → MASTER
-
-Design:
-    - Uses LOCAL MODEL for learning (zero cost)
-    - Skills stored in PostgreSQL (wiii_skills table)
-    - Integrates with browsing insights for discovery
-    - Tracks usage in conversations for practice phase
-    - Self-evaluation via reflection for mastery
-"""
+"""Autonomous learning and skill development for Wiii."""
 
 import json
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from app.engine.living_agent.models import SkillStatus, WiiiSkill
 from app.engine.living_agent.skill_singleton_registry import (
@@ -25,19 +11,25 @@ from app.engine.living_agent.skill_singleton_registry import (
     get_or_create_registered_skill_learner,
     register_skill_builder_factory,
 )
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 
 logger = logging.getLogger(__name__)
+_SKILL_MISSING_ORG_WARNING = "skill_builder_blocked_missing_org_context"
+
+_SKILL_COLUMNS = """
+    id, skill_name, domain, status, confidence, notes, sources,
+    usage_count, success_rate, discovered_at, last_practiced, mastered_at,
+    organization_id, metadata
+"""
 
 
 class SkillBuilder:
-    """Manages Wiii's skill development lifecycle.
-
-    Usage:
-        builder = SkillBuilder()
-        builder.discover("COLREGs Rule 14 — Head-on situation", domain="maritime")
-        await builder.learn_step("COLREGs Rule 14")
-        builder.record_usage("COLREGs Rule 14", success=True)
-    """
+    """Manages Wiii's self-built skill lifecycle."""
 
     def discover(
         self,
@@ -46,168 +38,191 @@ class SkillBuilder:
         source: Optional[str] = None,
         organization_id: Optional[str] = None,
     ) -> Optional[WiiiSkill]:
-        """Discover a new skill (add to tracking).
-
-        Returns:
-            New WiiiSkill if created, None if already exists or limit reached.
-        """
+        """Discover a new skill and add it to org-scoped tracking."""
         from app.core.config import settings
 
-        # Check weekly limit
-        recent_count = self._count_recent_discoveries()
+        scope = self._resolve_skill_scope(organization_id, write=True)
+        if not self._scope_allows_skills(scope):
+            self._log_scope_blocked("discover", scope, skill_name=skill_name)
+            return None
+
+        recent_count = self._count_recent_discoveries(scope=scope)
         if recent_count >= settings.living_agent_max_skills_per_week:
             logger.debug("[SKILL] Weekly discovery limit reached (%d)", recent_count)
             return None
 
-        # Check if skill already exists
-        existing = self._find_by_name(skill_name)
+        existing = self._find_by_name(skill_name, scope=scope)
         if existing:
-            logger.debug("[SKILL] Skill already tracked: %s", skill_name)
+            logger.debug(
+                "[SKILL] Skill already tracked skill_hash=%s",
+                hash_memory_identifier(skill_name),
+            )
             return None
-
-        # Ensure org_id is set (heartbeat runs without request context)
-        if organization_id is None:
-            from app.core.org_filter import get_effective_org_id
-            organization_id = get_effective_org_id()
 
         skill = WiiiSkill(
             skill_name=skill_name,
             domain=domain,
             status=SkillStatus.DISCOVERED,
             sources=[source] if source else [],
-            organization_id=organization_id,
+            organization_id=scope.org_id,
         )
 
-        self._save_skill(skill)
-        logger.info("[SKILL] Discovered: %s (domain=%s)", skill_name, domain)
+        self._save_skill(skill, scope=scope)
+        logger.info(
+            "[SKILL] Discovered skill_hash=%s (domain=%s)",
+            hash_memory_identifier(skill_name),
+            domain,
+        )
         return skill
 
-    async def learn_step(self, topic: str) -> bool:
-        """Execute one learning step for a topic.
+    async def learn_step(
+        self,
+        topic: str,
+        organization_id: Optional[str] = None,
+    ) -> bool:
+        """Execute one local-LLM learning step for an org-scoped topic."""
+        scope = self._resolve_skill_scope(organization_id, write=True)
+        if not self._scope_allows_skills(scope):
+            self._log_scope_blocked("learn_step", scope, skill_name=topic)
+            return False
 
-        Uses the local LLM to generate study notes from web content.
-
-        Returns:
-            True if learning occurred, False otherwise.
-        """
-        from app.engine.living_agent.local_llm import get_local_llm
-
-        skill = self._find_by_name(topic)
+        skill = self._find_by_name(topic, scope=scope)
         if not skill:
-            # Auto-discover if not tracked yet
-            skill = self.discover(topic)
+            skill = self.discover(topic, organization_id=scope.org_id)
             if not skill:
                 return False
 
         if skill.status == SkillStatus.MASTERED:
-            return False  # Already mastered
+            return False
 
-        # Transition to LEARNING if still DISCOVERED
         if skill.status == SkillStatus.DISCOVERED:
             skill.status = SkillStatus.LEARNING
 
-        # Generate learning notes via local LLM
+        from app.engine.living_agent.local_llm import get_local_llm
+
         llm = get_local_llm()
         prompt = (
             f"Mình là Wiii và mình đang học về: {topic}\n\n"
             f"Ghi chú hiện tại: {skill.notes[:500] if skill.notes else '(chưa có)'}\n\n"
-            f"Hãy tạo ghi chú học tập ngắn gọn (100-200 từ) về chủ đề này. "
-            f"Tập trung vào kiến thức cốt lõi và ví dụ thực tế."
+            "Hãy tạo ghi chú học tập ngắn gọn (100-200 từ) về chủ đề này. "
+            "Tập trung vào kiến thức cốt lõi và ví dụ thực tế."
         )
         notes = await llm.generate(prompt, temperature=0.5, max_tokens=512)
 
-        if notes:
-            # Append to existing notes
-            separator = "\n\n---\n\n" if skill.notes else ""
-            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-            skill.notes = f"{skill.notes}{separator}[{timestamp}] {notes}"
+        if not notes:
+            return False
 
-            # Boost confidence slightly
-            skill.confidence = min(1.0, skill.confidence + 0.1)
+        separator = "\n\n---\n\n" if skill.notes else ""
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        skill.notes = f"{skill.notes}{separator}[{timestamp}] {notes}"
+        skill.confidence = min(1.0, skill.confidence + 0.1)
 
-            # Check for advancement
-            if skill.can_advance():
-                skill.advance()
-                logger.info("[SKILL] Advanced: %s → %s", topic, skill.status.value)
+        if skill.can_advance():
+            skill.advance()
+            logger.info(
+                "[SKILL] Advanced skill_hash=%s -> %s",
+                hash_memory_identifier(topic),
+                skill.status.value,
+            )
 
-            self._update_skill(skill)
-            logger.debug("[SKILL] Learned about: %s (confidence=%.2f)", topic, skill.confidence)
-            return True
+        self._update_skill(skill, scope=scope)
+        logger.debug(
+            "[SKILL] Learned skill_hash=%s (confidence=%.2f)",
+            hash_memory_identifier(topic),
+            skill.confidence,
+        )
+        return True
 
-        return False
+    def record_usage(
+        self,
+        skill_name: str,
+        success: bool = True,
+        organization_id: Optional[str] = None,
+    ) -> None:
+        """Record successful or failed use of a skill in the current org."""
+        scope = self._resolve_skill_scope(organization_id, write=True)
+        if not self._scope_allows_skills(scope):
+            self._log_scope_blocked("record_usage", scope, skill_name=skill_name)
+            return
 
-    def record_usage(self, skill_name: str, success: bool = True) -> None:
-        """Record that a skill was used in a conversation.
-
-        Args:
-            skill_name: Name of the skill used.
-            success: Whether the usage was successful (user satisfied).
-        """
-        skill = self._find_by_name(skill_name)
+        skill = self._find_by_name(skill_name, scope=scope)
         if not skill:
             return
 
         skill.usage_count += 1
         skill.last_practiced = datetime.now(timezone.utc)
 
-        # Update success rate (exponential moving average)
-        alpha = 0.3  # Weight for new observation
+        alpha = 0.3
         new_success = 1.0 if success else 0.0
         skill.success_rate = alpha * new_success + (1 - alpha) * skill.success_rate
 
-        # Transition to PRACTICING if enough learned
         if skill.status == SkillStatus.LEARNING and skill.can_advance():
             skill.advance()
 
-        # Check for mastery
         if skill.status == SkillStatus.PRACTICING and skill.can_advance():
-            skill.advance()  # → EVALUATING
+            skill.advance()
         if skill.status == SkillStatus.EVALUATING and skill.confidence >= 0.8:
-            skill.advance()  # → MASTERED
-            logger.info("[SKILL] Mastered: %s! 🎉", skill_name)
+            skill.advance()
+            logger.info(
+                "[SKILL] Mastered skill_hash=%s",
+                hash_memory_identifier(skill_name),
+            )
 
-        self._update_skill(skill)
+        self._update_skill(skill, scope=scope)
 
     def get_all_skills(
         self,
         status: Optional[SkillStatus] = None,
         domain: Optional[str] = None,
+        organization_id: Optional[str] = None,
     ) -> List[WiiiSkill]:
         """Get all tracked skills, optionally filtered."""
-        return self._query_skills(status=status, domain=domain)
+        scope = self._resolve_skill_scope(organization_id, write=False)
+        if not self._scope_allows_skills(scope):
+            self._log_scope_blocked("get_all_skills", scope)
+            return []
+        return self._query_skills(status=status, domain=domain, scope=scope)
 
-    def get_active_learning(self) -> List[WiiiSkill]:
+    def get_active_learning(
+        self,
+        organization_id: Optional[str] = None,
+    ) -> List[WiiiSkill]:
         """Get skills currently being learned or practiced."""
-        learning = self._query_skills(status=SkillStatus.LEARNING)
-        practicing = self._query_skills(status=SkillStatus.PRACTICING)
+        scope = self._resolve_skill_scope(organization_id, write=False)
+        if not self._scope_allows_skills(scope):
+            self._log_scope_blocked("get_active_learning", scope)
+            return []
+        learning = self._query_skills(status=SkillStatus.LEARNING, scope=scope)
+        practicing = self._query_skills(status=SkillStatus.PRACTICING, scope=scope)
         return learning + practicing
 
     async def learn_from_material(self, topic: str, material) -> bool:
-        """Learn from actual content material (Sprint 177).
-
-        Delegates to SkillLearner for content-based learning with real articles.
-
-        Args:
-            topic: Skill name to learn about.
-            material: LearningMaterial instance.
-
-        Returns:
-            True if learning occurred.
-        """
+        """Learn from actual content material via SkillLearner."""
         learner = get_skill_learner()
         return await learner.learn_from_content(topic, material)
 
     def get_skills_for_review(self) -> List[WiiiSkill]:
-        """Get skills due for spaced repetition review (Sprint 177).
-
-        Returns:
-            Skills whose review_schedule.next_review_at has passed.
-        """
+        """Get skills due for spaced repetition review."""
         learner = get_skill_learner()
         return learner.get_skills_due_for_review()
 
-    def update_skill_metadata(self, skill: WiiiSkill) -> None:
-        """Persist skill metadata JSON changes to database (Sprint 177)."""
+    def update_skill_metadata(
+        self,
+        skill: WiiiSkill,
+        organization_id: Optional[str] = None,
+    ) -> None:
+        """Persist skill metadata JSON changes to the current org row."""
+        scope = self._resolve_skill_scope(organization_id or skill.organization_id, write=True)
+        if not self._scope_allows_skills(scope):
+            self._log_scope_blocked(
+                "update_skill_metadata",
+                scope,
+                skill_name=skill.skill_name,
+                skill_id=str(skill.id),
+            )
+            return
+        skill.organization_id = scope.org_id
+
         try:
             from sqlalchemy import text
             from app.core.database import get_shared_session_factory
@@ -220,9 +235,11 @@ class SkillBuilder:
                             metadata = :meta,
                             updated_at = NOW()
                         WHERE id = :id
+                        AND organization_id = :org_id
                     """),
                     {
                         "id": str(skill.id),
+                        "org_id": scope.org_id,
                         "meta": json.dumps(skill.metadata, ensure_ascii=False),
                     },
                 )
@@ -234,8 +251,19 @@ class SkillBuilder:
     # Database operations
     # =========================================================================
 
-    def _save_skill(self, skill: WiiiSkill) -> None:
+    def _save_skill(
+        self,
+        skill: WiiiSkill,
+        *,
+        scope: MemoryWriteScope | None = None,
+    ) -> None:
         """Insert a new skill into the database."""
+        scope = scope or self._resolve_skill_scope(skill.organization_id, write=True)
+        if not self._scope_allows_skills(scope):
+            self._log_scope_blocked("save_skill", scope, skill_name=skill.skill_name)
+            return
+        skill.organization_id = scope.org_id
+
         from sqlalchemy import text
         from app.core.database import get_shared_session_factory
 
@@ -261,7 +289,7 @@ class SkillBuilder:
                         "usage": skill.usage_count,
                         "rate": skill.success_rate,
                         "discovered": skill.discovered_at,
-                        "org_id": skill.organization_id,
+                        "org_id": scope.org_id,
                         "meta": json.dumps(skill.metadata, ensure_ascii=False),
                     },
                 )
@@ -269,8 +297,24 @@ class SkillBuilder:
         except Exception as e:
             logger.error("[SKILL] Failed to save skill: %s", e)
 
-    def _update_skill(self, skill: WiiiSkill) -> None:
+    def _update_skill(
+        self,
+        skill: WiiiSkill,
+        *,
+        scope: MemoryWriteScope | None = None,
+    ) -> None:
         """Update an existing skill in the database."""
+        scope = scope or self._resolve_skill_scope(skill.organization_id, write=True)
+        if not self._scope_allows_skills(scope):
+            self._log_scope_blocked(
+                "update_skill",
+                scope,
+                skill_name=skill.skill_name,
+                skill_id=str(skill.id),
+            )
+            return
+        skill.organization_id = scope.org_id
+
         from sqlalchemy import text
         from app.core.database import get_shared_session_factory
 
@@ -283,11 +327,13 @@ class SkillBuilder:
                             status = :status, confidence = :confidence, notes = :notes,
                             sources = :sources, usage_count = :usage, success_rate = :rate,
                             last_practiced = :practiced, mastered_at = :mastered,
-                            updated_at = NOW()
+                            metadata = :meta, updated_at = NOW()
                         WHERE id = :id
+                        AND organization_id = :org_id
                     """),
                     {
                         "id": str(skill.id),
+                        "org_id": scope.org_id,
                         "status": skill.status.value,
                         "confidence": skill.confidence,
                         "notes": skill.notes,
@@ -296,32 +342,41 @@ class SkillBuilder:
                         "rate": skill.success_rate,
                         "practiced": skill.last_practiced,
                         "mastered": skill.mastered_at,
+                        "meta": json.dumps(skill.metadata, ensure_ascii=False),
                     },
                 )
                 session.commit()
         except Exception as e:
             logger.error("[SKILL] Failed to update skill: %s", e)
 
-    def _find_by_name(self, name: str) -> Optional[WiiiSkill]:
-        """Find a skill by name (case-insensitive), scoped by org_id."""
+    def _find_by_name(
+        self,
+        name: str,
+        *,
+        scope: MemoryWriteScope | None = None,
+    ) -> Optional[WiiiSkill]:
+        """Find a skill by name, scoped by org_id."""
+        scope = scope or self._resolve_skill_scope(None, write=False)
+        if not self._scope_allows_skills(scope):
+            self._log_scope_blocked("find_by_name", scope, skill_name=name)
+            return None
+
         from sqlalchemy import text
         from app.core.database import get_shared_session_factory
-        from app.core.org_filter import get_effective_org_id, org_where_clause
 
         try:
-            effective_org_id = get_effective_org_id()
             session_factory = get_shared_session_factory()
             with session_factory() as session:
-                query = "SELECT * FROM wiii_skills WHERE LOWER(skill_name) = LOWER(:name)"
-                params: dict = {"name": name}
-
-                org_clause = org_where_clause(effective_org_id)
-                if org_clause:
-                    query += org_clause
-                    params["org_id"] = effective_org_id
-
-                query += " LIMIT 1"
-                row = session.execute(text(query), params).fetchone()
+                row = session.execute(
+                    text(f"""
+                        SELECT {_SKILL_COLUMNS}
+                        FROM wiii_skills
+                        WHERE LOWER(skill_name) = LOWER(:name)
+                        AND organization_id = :org_id
+                        LIMIT 1
+                    """),
+                    {"name": name, "org_id": scope.org_id},
+                ).fetchone()
                 if row:
                     return self._row_to_skill(row)
         except Exception as e:
@@ -332,23 +387,27 @@ class SkillBuilder:
         self,
         status: Optional[SkillStatus] = None,
         domain: Optional[str] = None,
+        *,
+        scope: MemoryWriteScope | None = None,
     ) -> List[WiiiSkill]:
         """Query skills with optional filters, scoped by org_id."""
+        scope = scope or self._resolve_skill_scope(None, write=False)
+        if not self._scope_allows_skills(scope):
+            self._log_scope_blocked("query_skills", scope)
+            return []
+
         from sqlalchemy import text
         from app.core.database import get_shared_session_factory
-        from app.core.org_filter import get_effective_org_id, org_where_clause
 
         try:
-            effective_org_id = get_effective_org_id()
             session_factory = get_shared_session_factory()
             with session_factory() as session:
-                query = "SELECT * FROM wiii_skills WHERE 1=1"
-                params: dict = {}
-
-                org_clause = org_where_clause(effective_org_id)
-                if org_clause:
-                    query += org_clause
-                    params["org_id"] = effective_org_id
+                query = f"""
+                    SELECT {_SKILL_COLUMNS}
+                    FROM wiii_skills
+                    WHERE organization_id = :org_id
+                """
+                params: dict[str, Any] = {"org_id": scope.org_id}
 
                 if status:
                     query += " AND status = :status"
@@ -364,56 +423,139 @@ class SkillBuilder:
             logger.error("[SKILL] Failed to query skills: %s", e)
             return []
 
-    def _count_recent_discoveries(self) -> int:
+    def _count_recent_discoveries(
+        self,
+        *,
+        scope: MemoryWriteScope | None = None,
+    ) -> int:
         """Count skills discovered in the last 7 days, scoped by org_id."""
+        scope = scope or self._resolve_skill_scope(None, write=False)
+        if not self._scope_allows_skills(scope):
+            self._log_scope_blocked("count_recent_discoveries", scope)
+            return 0
+
         from sqlalchemy import text
         from app.core.database import get_shared_session_factory
-        from app.core.org_filter import get_effective_org_id, org_where_clause
 
         try:
-            effective_org_id = get_effective_org_id()
             session_factory = get_shared_session_factory()
             with session_factory() as session:
-                query = """
-                    SELECT COUNT(*) FROM wiii_skills
-                    WHERE discovered_at >= NOW() - INTERVAL '7 days'
-                """
-                params: dict = {}
-
-                org_clause = org_where_clause(effective_org_id)
-                if org_clause:
-                    query += org_clause
-                    params["org_id"] = effective_org_id
-
-                result = session.execute(text(query), params).scalar()
+                result = session.execute(
+                    text("""
+                        SELECT COUNT(*) FROM wiii_skills
+                        WHERE discovered_at >= NOW() - INTERVAL '7 days'
+                        AND organization_id = :org_id
+                    """),
+                    {"org_id": scope.org_id},
+                ).scalar()
                 return result or 0
         except Exception:
             return 0
 
+    def _resolve_skill_scope(
+        self,
+        organization_id: Optional[str],
+        *,
+        write: bool,
+    ) -> MemoryWriteScope:
+        if isinstance(organization_id, str) and organization_id.strip():
+            return MemoryWriteScope(
+                org_id=organization_id.strip(),
+                state="explicit",
+                warnings=[],
+                write_allowed=True,
+            )
+        return resolve_memory_write_scope() if write else resolve_memory_read_scope()
+
+    def _scope_allows_skills(self, scope: MemoryWriteScope) -> bool:
+        return bool(scope.write_allowed and scope.org_id)
+
+    def _log_scope_blocked(
+        self,
+        operation: str,
+        scope: MemoryWriteScope,
+        *,
+        skill_name: Optional[str] = None,
+        skill_id: Optional[str] = None,
+    ) -> None:
+        warnings = list(scope.warnings)
+        if "missing_org_context" in warnings:
+            warnings.append(_SKILL_MISSING_ORG_WARNING)
+        logger.warning(
+            "[SKILL] %s blocked skill_hash=%s skill_id_hash=%s org_hash=%s "
+            "org_scope=%s warnings=%s",
+            operation,
+            hash_memory_identifier(skill_name),
+            hash_memory_identifier(skill_id),
+            hash_memory_identifier(scope.org_id),
+            scope.state,
+            sorted(set(warnings)),
+        )
+
     @staticmethod
     def _row_to_skill(row) -> WiiiSkill:
         """Convert a database row to WiiiSkill model."""
-        # Row is a SQLAlchemy Row object — access by index
         return WiiiSkill(
-            id=row[0],
-            skill_name=row[1],
-            domain=row[2] or "general",
-            status=SkillStatus(row[3]) if row[3] else SkillStatus.DISCOVERED,
-            confidence=row[4] or 0.0,
-            notes=row[5] or "",
-            sources=json.loads(row[6]) if row[6] else [],
-            usage_count=row[7] or 0,
-            success_rate=row[8] or 0.0,
-            discovered_at=row[9],
-            last_practiced=row[10],
-            mastered_at=row[11],
-            organization_id=row[12],
+            id=SkillBuilder._row_get(row, 0),
+            skill_name=SkillBuilder._row_get(row, 1, ""),
+            domain=SkillBuilder._row_get(row, 2) or "general",
+            status=SkillBuilder._status_from_row(row),
+            confidence=SkillBuilder._row_get(row, 4) or 0.0,
+            notes=SkillBuilder._row_get(row, 5) or "",
+            sources=SkillBuilder._json_list(SkillBuilder._row_get(row, 6)),
+            usage_count=SkillBuilder._row_get(row, 7) or 0,
+            success_rate=SkillBuilder._row_get(row, 8) or 0.0,
+            discovered_at=SkillBuilder._row_get(row, 9),
+            last_practiced=SkillBuilder._row_get(row, 10),
+            mastered_at=SkillBuilder._row_get(row, 11),
+            organization_id=SkillBuilder._row_get(row, 12),
+            metadata=SkillBuilder._json_dict(SkillBuilder._row_get(row, 13)),
         )
+
+    @staticmethod
+    def _row_get(row, index: int, default: Any = None) -> Any:
+        try:
+            return row[index]
+        except (IndexError, KeyError, TypeError):
+            return default
+
+    @staticmethod
+    def _status_from_row(row) -> SkillStatus:
+        value = SkillBuilder._row_get(row, 3)
+        try:
+            return SkillStatus(value) if value else SkillStatus.DISCOVERED
+        except ValueError:
+            return SkillStatus.DISCOVERED
+
+    @staticmethod
+    def _json_list(value: Any) -> list[Any]:
+        if isinstance(value, list):
+            return value
+        if not value:
+            return []
+        try:
+            parsed = json.loads(value) if isinstance(value, str) else value
+            return parsed if isinstance(parsed, list) else []
+        except (TypeError, json.JSONDecodeError):
+            return []
+
+    @staticmethod
+    def _json_dict(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if not value:
+            return {}
+        try:
+            parsed = json.loads(value) if isinstance(value, str) else value
+            return parsed if isinstance(parsed, dict) else {}
+        except (TypeError, json.JSONDecodeError):
+            return {}
 
 
 # =============================================================================
 # Singleton
 # =============================================================================
+
 
 def get_skill_builder() -> SkillBuilder:
     """Get the singleton SkillBuilder instance."""

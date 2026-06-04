@@ -75,7 +75,10 @@ async def get_character_state(
         from app.engine.character.character_state import get_character_state_manager
         manager = get_character_state_manager()
         # Sprint 124: Per-user character blocks
-        blocks_dict = manager.get_blocks(user_id=str(auth.user_id))
+        blocks_dict = manager.get_blocks(
+            user_id=str(auth.user_id),
+            organization_id=auth.organization_id,
+        )
 
         blocks = []
         for label, block in blocks_dict.items():
@@ -94,7 +97,10 @@ async def get_character_state(
             from app.engine.character.character_card import build_character_card_payload
 
             card_payload = CharacterCardResponse(
-                **build_character_card_payload(user_id=str(auth.user_id))
+                **build_character_card_payload(
+                    user_id=str(auth.user_id),
+                    organization_id=auth.organization_id,
+                )
             )
         except Exception as exc:
             logger.debug("[CHARACTER_API] Card payload unavailable: %s", exc)

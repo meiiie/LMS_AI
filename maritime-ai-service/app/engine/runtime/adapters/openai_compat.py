@@ -15,6 +15,7 @@ import json
 from typing import Any, Optional
 
 from app.engine.messages import Message, ToolCall
+from app.engine.runtime.adapters.message_summary import summarize_provider_messages
 from app.engine.runtime.turn_request import TurnRequest
 
 _VALID_ROLES = {"system", "user", "assistant", "tool"}
@@ -23,9 +24,9 @@ _VALID_ROLES = {"system", "user", "assistant", "tool"}
 def _coerce_content(raw: Any) -> str:
     """Reduce OpenAI's content (str / list of blocks) to a string.
 
-    Multimodal content arrays are flattened to their text portions; the
-    original structure rides in ``metadata.original_messages`` so
-    downstream vision-aware code can recover it if needed.
+    Multimodal content arrays are flattened to their text portions. A
+    compact, privacy-safe structure summary rides in metadata for
+    observability; raw provider messages do not.
     """
     if raw is None:
         return ""
@@ -115,7 +116,7 @@ def openai_chat_completions_to_turn_request(
 
     metadata: dict[str, Any] = {
         "openai_model": body.get("model"),
-        "original_messages": raw_messages,
+        "original_messages_summary": summarize_provider_messages(raw_messages),
     }
     for opt_key in ("temperature", "top_p", "max_tokens", "tool_choice"):
         if opt_key in body:

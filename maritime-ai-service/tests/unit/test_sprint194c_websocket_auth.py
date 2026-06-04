@@ -110,8 +110,12 @@ class TestWSProductionRoleDowngrade:
         from app.api.v1.websocket import websocket_chat, manager
         from fastapi import WebSocketDisconnect
         ws = _ws()
-        ms = MagicMock(); ms.api_key = "key"; ms.environment = "production"
-        _set_receive_sequence(ws, _auth_msg(key="key", role="admin"), WebSocketDisconnect())
+        ms = MagicMock(); ms.api_key = "key"; ms.environment = "production"; ms.enable_multi_tenant = True
+        _set_receive_sequence(
+            ws,
+            _auth_msg(key="key", role="admin", organization_id="org-test"),
+            WebSocketDisconnect(),
+        )
         with patch(_SP, ms):
             await websocket_chat(ws, session_id="prod-admin")
         ws.send_json.assert_awaited_once_with({"type": "auth_ok"})
@@ -122,8 +126,12 @@ class TestWSProductionRoleDowngrade:
         from app.api.v1.websocket import websocket_chat, manager
         from fastapi import WebSocketDisconnect
         ws = _ws()
-        ms = MagicMock(); ms.api_key = "key"; ms.environment = "production"
-        _set_receive_sequence(ws, _auth_msg(key="key", role="teacher"), WebSocketDisconnect())
+        ms = MagicMock(); ms.api_key = "key"; ms.environment = "production"; ms.enable_multi_tenant = True
+        _set_receive_sequence(
+            ws,
+            _auth_msg(key="key", role="teacher", organization_id="org-test"),
+            WebSocketDisconnect(),
+        )
         with patch(_SP, ms):
             await websocket_chat(ws, session_id="prod-teacher")
         ws.send_json.assert_awaited_once_with({"type": "auth_ok"})

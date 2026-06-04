@@ -8,6 +8,11 @@ import re
 import unicodedata
 from typing import Any, Callable, Optional
 
+from app.services.post_turn_lifecycle import (
+    PostTurnLifecycleContext,
+    schedule_post_turn_lifecycle,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +106,8 @@ def finalize_response_turn_impl(
     include_lms_insights: bool,
     continuity_channel: str,
     transport_type: str,
-) -> None:
+    request_id: str | None = None,
+) -> dict[str, Any]:
     """Run post-response continuity, persistence, and thread sync."""
     used_name = (
         bool(context and context.user_name)
@@ -112,6 +118,7 @@ def finalize_response_turn_impl(
         session_id=session_id,
         phrase=opening,
         used_name=used_name,
+        organization_id=organization_id,
     )
 
     persist_chat_message(
@@ -119,6 +126,7 @@ def finalize_response_turn_impl(
         role="assistant",
         content=response_text,
         user_id=user_id,
+        organization_id=organization_id,
         background_save=background_save,
         immediate=save_response_immediately,
     )
@@ -126,6 +134,7 @@ def finalize_response_turn_impl(
         session_id=session_id,
         role="assistant",
         content=response_text,
+        organization_id=organization_id,
     )
 
     if response_text:
@@ -155,23 +164,25 @@ def finalize_response_turn_impl(
         current_agent=current_agent,
         message=message,
     )
-    background_tasks_scheduled = False
-
-    if background_save and background_runner and not ephemeral_direct_turn:
-        skip_fact_extraction = should_skip_post_response_fact_extraction_impl(
-            current_agent=current_agent,
-            message=message,
-        )
-        background_runner.schedule_all(
+    skip_fact_extraction = should_skip_post_response_fact_extraction_impl(
+        current_agent=current_agent,
+        message=message,
+    )
+    post_turn_lifecycle = schedule_post_turn_lifecycle(
+        PostTurnLifecycleContext(
             background_save=background_save,
+            background_runner=background_runner,
             user_id=user_id,
             session_id=session_id,
             message=message,
-            response=response_text,
+            response_text=response_text,
+            organization_id=organization_id,
+            transport_type=transport_type,
             skip_fact_extraction=skip_fact_extraction,
-            org_id=organization_id or "",
+            ephemeral_direct_turn=ephemeral_direct_turn,
         )
-        background_tasks_scheduled = True
+    )
+    background_tasks_scheduled = post_turn_lifecycle.background_tasks_scheduled
 
     include_lms_insights_for_turn = include_lms_insights and not ephemeral_direct_turn
 
@@ -181,6 +192,8 @@ def finalize_response_turn_impl(
             user_role=user_role,
             message=message,
             response_text=response_text,
+            session_id=str(session_id) if session_id else None,
+            request_id=request_id,
             domain_id=domain_id or "",
             organization_id=organization_id,
             channel=continuity_channel,
@@ -190,6 +203,7 @@ def finalize_response_turn_impl(
 
     continuity_summary = {
         "session_id": str(session_id),
+        "request_id": str(request_id or ""),
         "user_id": str(user_id),
         "domain_id": domain_id or "",
         "organization_id": organization_id or "",
@@ -198,6 +212,7 @@ def finalize_response_turn_impl(
         "include_lms_insights": include_lms_insights_for_turn,
         "scheduled_hooks": list(scheduled_hooks),
         "background_tasks_scheduled": background_tasks_scheduled,
+        "post_turn_lifecycle": post_turn_lifecycle.to_summary(),
         "response_persistence": (
             "immediate"
             if save_response_immediately or background_save is None
@@ -208,6 +223,7 @@ def finalize_response_turn_impl(
         "[CONTINUITY] Finalized turn summary: %s",
         json.dumps(continuity_summary, sort_keys=True),
     )
+    return post_turn_lifecycle.to_summary()
 
 
 def load_pronoun_style_from_facts_impl(
@@ -289,6 +305,7 @@ def maybe_summarize_previous_session_impl(
     *,
     background_save: Callable,
     user_id: str,
+    organization_id: str | None = None,
 ) -> None:
     """Schedule background summarization for the previous thread when needed."""
     try:
@@ -296,7 +313,11 @@ def maybe_summarize_previous_session_impl(
         from app.tasks.summarize_tasks import summarize_thread_background
 
         repo = get_thread_repository()
-        threads = repo.list_threads(user_id=user_id, limit=2)
+        threads = repo.list_threads(
+            user_id=user_id,
+            limit=2,
+            organization_id=organization_id,
+        )
         if len(threads) < 2:
             return
 
@@ -309,6 +330,7 @@ def maybe_summarize_previous_session_impl(
             summarize_thread_background,
             previous_thread["thread_id"],
             user_id,
+            organization_id,
         )
         logger.info(
             "[SPRINT79] Triggered auto-summarize of previous session %s",

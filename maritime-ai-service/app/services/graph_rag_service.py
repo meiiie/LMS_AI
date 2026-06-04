@@ -30,6 +30,16 @@ _entity_cache: Dict[str, Tuple[List[str], float]] = {}
 _ENTITY_CACHE_TTL = 300  # 5 minutes
 
 
+def _current_graph_org_id() -> Optional[str]:
+    try:
+        from app.core.org_context import get_current_org_id
+
+        org_id = get_current_org_id()
+        return org_id.strip() if isinstance(org_id, str) and org_id.strip() else None
+    except Exception:
+        return None
+
+
 @dataclass
 class GraphEnhancedResult:
     """Search result with entity context from Neo4j"""
@@ -89,7 +99,8 @@ class GraphRAGService:
         self,
         query: str,
         limit: int = 5,
-        include_entity_context: bool = True
+        include_entity_context: bool = True,
+        organization_id: Optional[str] = None,
     ) -> List[GraphEnhancedResult]:
         """
         Perform graph-enhanced search.
@@ -111,6 +122,7 @@ class GraphRAGService:
             List of GraphEnhancedResult with entity context
         """
         logger.info("[GraphRAG] Search: %s...", query[:50])
+        effective_org_id = organization_id or _current_graph_org_id()
         
         # ============================================================
         # Phase 2.2b: PARALLEL execution - save ~10s
@@ -150,7 +162,8 @@ class GraphRAGService:
                 try:
                     entity_context = await self._get_entity_context(
                         result.document_id,
-                        query_entities
+                        query_entities,
+                        organization_id=effective_org_id,
                     )
                     enhanced.related_entities = entity_context.get("entities", [])
                     enhanced.related_regulations = entity_context.get("regulations", [])
@@ -210,7 +223,8 @@ class GraphRAGService:
     async def _get_entity_context(
         self,
         document_id: Optional[str],
-        query_entities: List[str]
+        query_entities: List[str],
+        organization_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Get entity context from Neo4j.
@@ -227,7 +241,10 @@ class GraphRAGService:
         
         # Get entities from the document
         if document_id:
-            doc_entities = await self._neo4j.get_document_entities(document_id)
+            doc_entities = await self._neo4j.get_document_entities(
+                document_id,
+                organization_id=organization_id,
+            )
             entities.extend(doc_entities)
         
         # Get related regulations
@@ -237,7 +254,10 @@ class GraphRAGService:
         
         # Get relations for query entities
         for entity_id in query_entities[:3]:  # Limit to avoid too many queries
-            relations = await self._neo4j.get_entity_relations(entity_id)
+            relations = await self._neo4j.get_entity_relations(
+                entity_id,
+                organization_id=organization_id,
+            )
             for rel in relations:
                 if rel.get("target_type") == "ARTICLE":
                     regulations.append(rel.get("target_name", ""))
@@ -258,7 +278,8 @@ class GraphRAGService:
     async def search_with_graph_context(
         self,
         query: str,
-        limit: int = 5
+        limit: int = 5,
+        organization_id: Optional[str] = None,
     ) -> tuple[List[GraphEnhancedResult], str]:
         """
         Search and return results with combined entity context.
@@ -266,7 +287,12 @@ class GraphRAGService:
         Returns:
             Tuple of (results, entity_context_string)
         """
-        results = await self.search(query, limit, include_entity_context=True)
+        results = await self.search(
+            query,
+            limit,
+            include_entity_context=True,
+            organization_id=organization_id,
+        )
         
         # Combine entity context
         all_entities = []

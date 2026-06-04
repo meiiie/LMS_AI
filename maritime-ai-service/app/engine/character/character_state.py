@@ -57,33 +57,74 @@ class CharacterStateManager:
         from app.engine.character.character_repository import get_character_repository
         return get_character_repository()
 
-    def _is_cache_fresh(self, user_id: str = "__global__") -> bool:
+    def _cache_key(
+        self,
+        user_id: str = "__global__",
+        organization_id: Optional[str] = None,
+    ) -> str:
+        """Build the in-memory cache key for a user within an org scope."""
+        if isinstance(organization_id, str) and organization_id.strip():
+            return f"{organization_id.strip()}::{user_id}"
+
+        multi_tenant_enabled = False
+        try:
+            from app.core.config import settings
+
+            multi_tenant_enabled = bool(getattr(settings, "enable_multi_tenant", False))
+            if not multi_tenant_enabled:
+                return user_id
+
+            from app.engine.semantic_memory.write_audit import resolve_memory_read_scope
+
+            scope = resolve_memory_read_scope()
+            return f"{scope.org_id or scope.state}::{user_id}"
+        except Exception:
+            if multi_tenant_enabled:
+                return f"unknown::{user_id}"
+            return user_id
+
+    def _is_cache_fresh(
+        self,
+        user_id: str = "__global__",
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """Check if cached blocks are still fresh for a user."""
-        ts = self._cache_timestamp.get(user_id, 0.0)
+        cache_key = self._cache_key(user_id=user_id, organization_id=organization_id)
+        ts = self._cache_timestamp.get(cache_key, 0.0)
         return (time.time() - ts) < _CACHE_TTL_SECONDS
 
-    def _refresh_cache(self, user_id: str = "__global__") -> None:
+    def _refresh_cache(
+        self,
+        user_id: str = "__global__",
+        organization_id: Optional[str] = None,
+    ) -> None:
         """Load all blocks from DB into cache for a specific user."""
+        cache_key = self._cache_key(user_id=user_id, organization_id=organization_id)
         try:
             repo = self._get_repo()
-            blocks = repo.get_all_blocks(user_id=user_id)
-            self._cache[user_id] = {b.label: b for b in blocks}
-            self._cache_timestamp[user_id] = time.time()
+            blocks = repo.get_all_blocks(user_id=user_id, organization_id=organization_id)
+            self._cache[cache_key] = {b.label: b for b in blocks}
+            self._cache_timestamp[cache_key] = time.time()
         except Exception as e:
             logger.warning("Failed to refresh character state cache for user '%s': %s", user_id, e)
 
-    def _ensure_defaults(self, user_id: str = "__global__") -> None:
+    def _ensure_defaults(
+        self,
+        user_id: str = "__global__",
+        organization_id: Optional[str] = None,
+    ) -> None:
         """Create default blocks if they don't exist yet for a user.
 
         Called on first compile — seeds the DB with empty blocks
         matching the living_state config in wiii_identity.yaml.
         """
-        if user_id in self._initialized_defaults:
+        cache_key = self._cache_key(user_id=user_id, organization_id=organization_id)
+        if cache_key in self._initialized_defaults:
             return
 
         try:
             repo = self._get_repo()
-            existing = repo.get_all_blocks(user_id=user_id)
+            existing = repo.get_all_blocks(user_id=user_id, organization_id=organization_id)
             if hasattr(repo, "is_available") and not repo.is_available():
                 logger.debug(
                     "Skipping default character block seed for user '%s': repository unavailable",
@@ -103,25 +144,36 @@ class CharacterStateManager:
                             char_limit=char_limit,
                         ),
                         user_id=user_id,
+                        organization_id=organization_id,
                     )
                     if created:
                         logger.info("Created default character block '%s' for user '%s'", label, user_id)
                     elif hasattr(repo, "is_available") and not repo.is_available():
                         return
 
-            self._initialized_defaults.add(user_id)
+            self._initialized_defaults.add(cache_key)
         except Exception as e:
             logger.warning("Could not seed default character blocks for user '%s': %s", user_id, e)
 
-    def get_blocks(self, user_id: str = "__global__") -> Dict[str, CharacterBlock]:
+    def get_blocks(
+        self,
+        user_id: str = "__global__",
+        organization_id: Optional[str] = None,
+    ) -> Dict[str, CharacterBlock]:
         """Get all character blocks for a user (from cache or DB)."""
-        if not self._is_cache_fresh(user_id):
-            self._refresh_cache(user_id)
-        return self._cache.get(user_id, {}).copy()
+        cache_key = self._cache_key(user_id=user_id, organization_id=organization_id)
+        if not self._is_cache_fresh(user_id=user_id, organization_id=organization_id):
+            self._refresh_cache(user_id=user_id, organization_id=organization_id)
+        return self._cache.get(cache_key, {}).copy()
 
-    def get_block(self, label: str, user_id: str = "__global__") -> Optional[CharacterBlock]:
+    def get_block(
+        self,
+        label: str,
+        user_id: str = "__global__",
+        organization_id: Optional[str] = None,
+    ) -> Optional[CharacterBlock]:
         """Get a specific block for a user."""
-        blocks = self.get_blocks(user_id=user_id)
+        blocks = self.get_blocks(user_id=user_id, organization_id=organization_id)
         return blocks.get(label)
 
     def update_block(
@@ -130,6 +182,7 @@ class CharacterStateManager:
         content: Optional[str] = None,
         append: Optional[str] = None,
         user_id: str = "__global__",
+        organization_id: Optional[str] = None,
     ) -> Optional[CharacterBlock]:
         """Update a character block (replace or append) for a specific user.
 
@@ -137,13 +190,19 @@ class CharacterStateManager:
         """
         repo = self._get_repo()
         update = CharacterBlockUpdate(content=content, append=append)
-        result = repo.update_block(label, update, user_id=user_id)
+        result = repo.update_block(
+            label,
+            update,
+            user_id=user_id,
+            organization_id=organization_id,
+        )
         if result:
             # Update per-user cache
-            if user_id not in self._cache:
-                self._cache[user_id] = {}
-            self._cache[user_id][label] = result
-            self._cache_timestamp[user_id] = time.time()
+            cache_key = self._cache_key(user_id=user_id, organization_id=organization_id)
+            if cache_key not in self._cache:
+                self._cache[cache_key] = {}
+            self._cache[cache_key][label] = result
+            self._cache_timestamp[cache_key] = time.time()
         return result
 
     # ─── Sprint 118: Block Consolidation (Letta pattern) ───────────────
@@ -151,14 +210,23 @@ class CharacterStateManager:
     CONSOLIDATION_THRESHOLD = 0.80  # Trigger at 80% full
     CONSOLIDATION_TARGET = 0.60     # Target 60% after consolidation
 
-    def needs_consolidation(self, label: str, user_id: str = "__global__") -> bool:
+    def needs_consolidation(
+        self,
+        label: str,
+        user_id: str = "__global__",
+        organization_id: Optional[str] = None,
+    ) -> bool:
         """Check if a block needs consolidation (>80% full)."""
-        block = self.get_block(label, user_id=user_id)
+        block = self.get_block(label, user_id=user_id, organization_id=organization_id)
         if not block or block.char_limit <= 0:
             return False
         return len(block.content) / block.char_limit >= self.CONSOLIDATION_THRESHOLD
 
-    async def consolidate_full_blocks(self, user_id: str = "__global__") -> int:
+    async def consolidate_full_blocks(
+        self,
+        user_id: str = "__global__",
+        organization_id: Optional[str] = None,
+    ) -> int:
         """Check all blocks for a user and consolidate any that are >80% full.
 
         Uses LIGHT tier LLM to summarize/deduplicate content.
@@ -167,7 +235,7 @@ class CharacterStateManager:
         Returns:
             Number of blocks consolidated.
         """
-        blocks = self.get_blocks(user_id=user_id)
+        blocks = self.get_blocks(user_id=user_id, organization_id=organization_id)
         consolidated_count = 0
 
         for label, block in blocks.items():
@@ -180,7 +248,12 @@ class CharacterStateManager:
             try:
                 new_content = await self._consolidate_block_content(block)
                 if new_content and len(new_content) < len(block.content):
-                    self.update_block(label=label, content=new_content, user_id=user_id)
+                    self.update_block(
+                        label=label,
+                        content=new_content,
+                        user_id=user_id,
+                        organization_id=organization_id,
+                    )
                     consolidated_count += 1
                     logger.info(
                         "[CONSOLIDATE] Block '%s' user '%s': %d -> %d chars (%.0f%% reduction)",
@@ -237,7 +310,11 @@ class CharacterStateManager:
 
         return text
 
-    def compile_living_state(self, user_id: str = "__global__") -> str:
+    def compile_living_state(
+        self,
+        user_id: str = "__global__",
+        organization_id: Optional[str] = None,
+    ) -> str:
         """Compile all living character blocks into prompt text for a user.
 
         Sprint 124: Now per-user. Each user sees only their own blocks.
@@ -254,9 +331,9 @@ class CharacterStateManager:
             - COLREGs, dac biet phan tranh va...
         """
         # Ensure default blocks exist for this user
-        self._ensure_defaults(user_id=user_id)
+        self._ensure_defaults(user_id=user_id, organization_id=organization_id)
 
-        blocks = self.get_blocks(user_id=user_id)
+        blocks = self.get_blocks(user_id=user_id, organization_id=organization_id)
 
         # Only include non-empty blocks
         non_empty = {k: v for k, v in blocks.items() if v.content.strip()}
@@ -289,7 +366,11 @@ class CharacterStateManager:
 
         return "\n".join(sections)
 
-    def invalidate_cache(self, user_id: Optional[str] = None) -> None:
+    def invalidate_cache(
+        self,
+        user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+    ) -> None:
         """Force cache invalidation.
 
         Args:
@@ -297,8 +378,9 @@ class CharacterStateManager:
                      If None, invalidate ALL users' caches.
         """
         if user_id is not None:
-            self._cache.pop(user_id, None)
-            self._cache_timestamp.pop(user_id, None)
+            cache_key = self._cache_key(user_id=user_id, organization_id=organization_id)
+            self._cache.pop(cache_key, None)
+            self._cache_timestamp.pop(cache_key, None)
         else:
             self._cache = {}
             self._cache_timestamp = {}

@@ -17,15 +17,35 @@ Tests the 8 bug fixes that bring Wiii's Living Agent from clock to consciousness
 
 import asyncio
 import json
+import logging
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 from uuid import uuid4
 
+from app.engine.runtime import runtime_metrics as rm
+
 
 # ============================================================================
 # Shared helpers
 # ============================================================================
+
+def _counter_value(name: str, labels: dict[str, str] | None = None) -> int:
+    key = tuple(sorted((k, v) for k, v in (labels or {}).items()))
+    return rm.snapshot()["counters"].get(name, {}).get(key, 0)
+
+
+def _histogram_values(name: str, labels: dict[str, str]) -> list[float]:
+    key = tuple(sorted(labels.items()))
+    return rm.snapshot()["histograms"].get(name, {}).get(key, [])
+
+
+@pytest.fixture(autouse=True)
+def reset_runtime_metrics():
+    rm._reset_for_tests()
+    yield
+    rm._reset_for_tests()
+
 
 def _make_settings(**overrides):
     """Create a settings mock with Sprint 210 flags."""
@@ -700,6 +720,2235 @@ class TestInsightExtraction:
         browser = SocialBrowser()
         assert hasattr(browser, '_mark_as_insight')
 
+    @pytest.mark.asyncio
+    async def test_insight_write_blocks_missing_org_context_before_db(self, monkeypatch):
+        """Autonomous browsing insight writes fail closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.social_browser import SocialBrowser
+        from app.engine.living_agent.models import BrowsingItem
+
+        browser = SocialBrowser()
+        items = [
+            BrowsingItem(
+                platform="web",
+                title="PRIVATE DISCOVERY TITLE",
+                summary="PRIVATE DISCOVERY SUMMARY",
+                relevance_score=0.9,
+            ),
+        ]
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory, \
+                 patch(
+                     "app.engine.living_agent.social_browser."
+                     "append_semantic_memory_write_audit_event",
+                     new_callable=AsyncMock,
+                 ) as mock_audit:
+                saved = await browser._extract_and_save_insights(
+                    items,
+                    session_id="raw-social-session",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert saved == 0
+        mock_factory.assert_not_called()
+        mock_audit.assert_awaited_once()
+        payload = mock_audit.await_args.kwargs["payload"]
+        assert payload["write"]["kind"] == "social_browsing_insight"
+        assert payload["write"]["status"] == "blocked"
+        assert "social_browsing_insight_blocked_missing_org_context" in payload["warnings"]
+        serialized = str(payload)
+        assert "PRIVATE DISCOVERY TITLE" not in serialized
+        assert "PRIVATE DISCOVERY SUMMARY" not in serialized
+        assert "raw-social-session" not in serialized
+
+    @pytest.mark.asyncio
+    async def test_insight_write_filters_by_org_and_appends_audit(self, monkeypatch):
+        """Autonomous browsing insight writes attach request org and safe audit."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.social_browser import SocialBrowser
+        from app.engine.living_agent.models import BrowsingItem
+
+        browser = SocialBrowser()
+        item = BrowsingItem(
+            platform="web",
+            url="https://private.example/discovery",
+            title="PRIVATE DISCOVERY TITLE",
+            summary="PRIVATE DISCOVERY SUMMARY",
+            relevance_score=0.9,
+        )
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory), \
+                 patch(
+                     "app.engine.living_agent.social_browser."
+                     "append_semantic_memory_write_audit_event",
+                     new_callable=AsyncMock,
+                 ) as mock_audit:
+                saved = await browser._extract_and_save_insights(
+                    [item],
+                    session_id="raw-social-session",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert saved == 1
+        execute_params = [
+            call.args[1]
+            for call in mock_session.execute.call_args_list
+            if len(call.args) > 1 and isinstance(call.args[1], dict)
+        ]
+        assert execute_params
+        assert all(params.get("org_id") == "org-A" for params in execute_params)
+        insert_params = next(params for params in execute_params if "content" in params)
+        assert insert_params["user_id"] == "__wiii__"
+        assert "PRIVATE DISCOVERY TITLE" in insert_params["content"]
+        metadata = json.loads(insert_params["metadata"])
+        assert metadata["source"] == "social_browser"
+        assert metadata["url_hash"].startswith("sha256:")
+        assert item.url not in metadata["url_hash"]
+        mock_audit.assert_awaited_once()
+        payload = mock_audit.await_args.kwargs["payload"]
+        assert payload["write"]["kind"] == "social_browsing_insight"
+        assert payload["write"]["status"] == "saved"
+        assert payload["write"]["stored_insight_count"] == 1
+        serialized = str(payload)
+        assert "PRIVATE DISCOVERY TITLE" not in serialized
+        assert "raw-social-session" not in serialized
+
+    @pytest.mark.asyncio
+    async def test_topic_memory_read_blocks_missing_org_context_before_db(self, monkeypatch):
+        """Smart topic memory reads fail closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.social_browser import SocialBrowser
+
+        browser = SocialBrowser()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                topic = await browser._get_topic_from_memories()
+        finally:
+            current_org_id.reset(token)
+
+        assert topic is None
+        mock_factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_topic_memory_read_filters_by_org_context(self, monkeypatch):
+        """Smart topic memory reads only request-scoped org memories."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.social_browser import SocialBrowser
+
+        browser = SocialBrowser()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [
+            ("COLREGs maritime safety training interest",),
+        ]
+        mock_session.execute.return_value = mock_result
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                topic = await browser._get_topic_from_memories()
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert topic == "maritime"
+        assert "organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    def test_browsing_log_blocks_missing_org_context_before_db(self, monkeypatch):
+        """Browsing log writes fail closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.social_browser import SocialBrowser
+        from app.engine.living_agent.models import BrowsingItem
+
+        browser = SocialBrowser()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                browser._save_browsing_log([BrowsingItem(platform="web", title="Title")])
+        finally:
+            current_org_id.reset(token)
+
+        mock_factory.assert_not_called()
+
+
+class TestJournalWriterOrgScope:
+    """Test org-scoped autonomous journal guardrails."""
+
+    @pytest.mark.asyncio
+    async def test_journal_write_blocks_missing_org_context_before_db_or_llm(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Journal writing fails closed before duplicate checks or LLM calls."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.journal import JournalWriter
+        from app.engine.living_agent.models import EmotionalState
+
+        writer = JournalWriter()
+        state = EmotionalState()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory, \
+                 patch("app.engine.living_agent.local_llm.get_local_llm") as mock_llm:
+                entry = await writer.write_daily_entry(state)
+        finally:
+            current_org_id.reset(token)
+
+        assert entry is None
+        mock_factory.assert_not_called()
+        mock_llm.assert_not_called()
+        assert "journal_blocked_missing_org_context" in caplog.text
+
+    def test_journal_recent_entries_filters_by_org_context(self, monkeypatch):
+        """Recent journal reads only query current-org entries."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.journal import JournalWriter
+
+        writer = JournalWriter()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        row = (
+            uuid4(),
+            datetime.now(timezone.utc),
+            "Private journal",
+            "calm",
+            0.6,
+            json.dumps(["event"]),
+            json.dumps(["learning"]),
+            json.dumps(["goal"]),
+            "org-A",
+        )
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = [row]
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                entries = writer.get_recent_entries(days=3)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert len(entries) == 1
+        assert entries[0].organization_id == "org-A"
+        assert "organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    def test_journal_get_entry_by_date_filters_by_org_context(self, monkeypatch):
+        """Duplicate-entry checks are scoped by current org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.journal import JournalWriter
+
+        writer = JournalWriter()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        row = (
+            uuid4(),
+            datetime.now(timezone.utc),
+            "Private journal",
+            "calm",
+            0.6,
+            json.dumps([]),
+            json.dumps([]),
+            json.dumps([]),
+            "org-A",
+        )
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = row
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                entry = writer._get_entry_by_date(datetime.now(timezone.utc).date())
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert entry is not None
+        assert entry.organization_id == "org-A"
+        assert "organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    def test_journal_save_entry_includes_org_context(self, monkeypatch):
+        """Journal inserts include resolved org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.journal import JournalWriter
+        from app.engine.living_agent.models import JournalEntry
+
+        writer = JournalWriter()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        entry = JournalEntry(
+            entry_date=datetime.now(timezone.utc),
+            content="Private journal",
+            mood_summary="calm",
+            notable_events=["event"],
+        )
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                writer._save_entry(entry)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert "organization_id" in statement
+        assert params["org_id"] == "org-A"
+        assert entry.organization_id == "org-A"
+
+
+class TestEmotionEngineOrgScope:
+    """Test org-scoped emotional persistence and relationship cache guardrails."""
+
+    @pytest.mark.asyncio
+    async def test_emotion_state_save_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Persistent emotion saves fail closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.emotion_engine import EmotionEngine
+
+        engine = EmotionEngine()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                await engine.save_state_to_db()
+        finally:
+            current_org_id.reset(token)
+
+        mock_factory.assert_not_called()
+        assert "emotion_state_blocked_missing_org_context" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_emotion_state_save_filters_persistent_state_by_org_context(
+        self,
+        monkeypatch,
+    ):
+        """Persistent state replacement only deletes/inserts current-org rows."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.emotion_engine import EmotionEngine
+
+        engine = EmotionEngine()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                await engine.save_state_to_db()
+        finally:
+            current_org_id.reset(token)
+
+        delete_statement = str(mock_session.execute.call_args_list[0].args[0])
+        delete_params = mock_session.execute.call_args_list[0].args[1]
+        insert_statement = str(mock_session.execute.call_args_list[1].args[0])
+        insert_params = mock_session.execute.call_args_list[1].args[1]
+        assert "AND organization_id = :org_id" in delete_statement
+        assert delete_params["org_id"] == "org-A"
+        assert "organization_id" in insert_statement
+        assert insert_params["org_id"] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_emotion_state_load_filters_by_org_context(self, monkeypatch):
+        """Persistent emotion loads only read current-org state."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.emotion_engine import EmotionEngine
+
+        engine = EmotionEngine()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = None
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                loaded = await engine.load_state_from_db()
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert loaded is False
+        assert "AND organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    def test_known_user_cache_refresh_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Known-user cache refresh fails closed without org context."""
+        import app.engine.living_agent.emotion_engine as mod
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                count = mod.refresh_known_user_cache()
+        finally:
+            current_org_id.reset(token)
+
+        assert count == 0
+        mock_factory.assert_not_called()
+        assert "known_user_cache_blocked_missing_org_context" in caplog.text
+
+    def test_known_user_cache_refresh_filters_by_org_context(self, monkeypatch):
+        """Known-user cache refresh only reads current-org routines."""
+        import app.engine.living_agent.emotion_engine as mod
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        old_cache = mod._known_user_cache
+        old_by_org = dict(mod._known_user_cache_by_org)
+        mod._known_user_cache = set()
+        mod._known_user_cache_by_org = {}
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = [("user-a",), ("user-b",)]
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+        app_settings = _make_settings(living_agent_known_user_threshold=50)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory), \
+                 patch("app.core.config.get_settings", return_value=app_settings):
+                count = mod.refresh_known_user_cache()
+                scoped_cache = dict(mod._known_user_cache_by_org)
+                legacy_cache = set(mod._known_user_cache)
+        finally:
+            current_org_id.reset(token)
+            mod._known_user_cache = old_cache
+            mod._known_user_cache_by_org = old_by_org
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert count == 2
+        assert "AND organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+        assert scoped_cache["org-A"] == {"user-a", "user-b"}
+        assert "user-a" not in legacy_cache
+
+    def test_known_user_tier_uses_org_scoped_cache(self):
+        """Known-user tier ignores legacy/global cache for explicit org lookups."""
+        import app.engine.living_agent.emotion_engine as mod
+
+        old_cache = mod._known_user_cache
+        old_by_org = dict(mod._known_user_cache_by_org)
+        try:
+            mod._known_user_cache = {"global-known-user"}
+            mod._known_user_cache_by_org = {
+                "org-A": {"user-a"},
+                "org-B": {"user-b"},
+            }
+            app_settings = _make_settings(living_agent_creator_user_ids="")
+
+            with patch("app.core.config.get_settings", return_value=app_settings):
+                assert mod.get_relationship_tier(
+                    "user-a",
+                    "student",
+                    organization_id="org-A",
+                ) == mod.TIER_KNOWN
+                assert mod.get_relationship_tier(
+                    "user-a",
+                    "student",
+                    organization_id="org-B",
+                ) == mod.TIER_OTHER
+                assert mod.get_relationship_tier(
+                    "global-known-user",
+                    "student",
+                    organization_id="org-A",
+                ) == mod.TIER_OTHER
+        finally:
+            mod._known_user_cache = old_cache
+            mod._known_user_cache_by_org = old_by_org
+
+
+class TestEmotionalStateRepositoryOrgScope:
+    """Test org-scoped emotional snapshot repository guardrails."""
+
+    def test_emotional_repo_save_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Snapshot writes fail closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.repositories.emotional_state_repository import EmotionalStateRepository
+
+        repo = EmotionalStateRepository()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.repositories.emotional_state_repository.get_shared_session_factory") as mock_factory:
+                snapshot_id = repo.save_snapshot(
+                    primary_mood="private",
+                    energy_level=0.5,
+                    social_battery=0.5,
+                    engagement=0.5,
+                    state_json={"private": True},
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert snapshot_id == ""
+        mock_factory.assert_not_called()
+        assert "emotional_state_repository_blocked_missing_org_context" in caplog.text
+        assert "private" not in caplog.text
+
+    def test_emotional_repo_save_includes_org_context(self, monkeypatch):
+        """Snapshot inserts include resolved org scope."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.repositories.emotional_state_repository import EmotionalStateRepository
+
+        repo = EmotionalStateRepository()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.repositories.emotional_state_repository.get_shared_session_factory", return_value=mock_factory):
+                snapshot_id = repo.save_snapshot(
+                    primary_mood="happy",
+                    energy_level=0.8,
+                    social_battery=0.7,
+                    engagement=0.6,
+                )
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert snapshot_id
+        assert "organization_id" in statement
+        assert params["org_id"] == "org-A"
+
+    def test_emotional_repo_latest_filters_by_org_context(self, monkeypatch):
+        """Latest snapshot reads are scoped by current org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.repositories.emotional_state_repository import EmotionalStateRepository
+
+        repo = EmotionalStateRepository()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        now = datetime.now(timezone.utc)
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (
+            "snapshot-1",
+            "calm",
+            0.6,
+            0.7,
+            0.8,
+            "heartbeat_cycle",
+            now,
+            json.dumps({"primary_mood": "calm"}),
+        )
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.repositories.emotional_state_repository.get_shared_session_factory", return_value=mock_factory):
+                latest = repo.get_latest()
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert latest["id"] == "snapshot-1"
+        assert "WHERE organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    def test_emotional_repo_history_filters_by_org_context(self, monkeypatch):
+        """History reads are scoped by current org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.repositories.emotional_state_repository import EmotionalStateRepository
+
+        repo = EmotionalStateRepository()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        now = datetime.now(timezone.utc)
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = [
+            ("snapshot-1", "calm", 0.6, 0.7, 0.8, "heartbeat_cycle", now),
+        ]
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.repositories.emotional_state_repository.get_shared_session_factory", return_value=mock_factory):
+                history = repo.get_history(hours=2)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert len(history) == 1
+        assert "AND organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+        assert params["hours"] == 2
+
+    def test_emotional_repo_cleanup_filters_by_org_context(self, monkeypatch):
+        """Snapshot cleanup cannot delete another org's history."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.repositories.emotional_state_repository import EmotionalStateRepository
+
+        repo = EmotionalStateRepository()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        result = MagicMock()
+        result.rowcount = 3
+        mock_session = MagicMock()
+        mock_session.execute.return_value = result
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.repositories.emotional_state_repository.get_shared_session_factory", return_value=mock_factory):
+                deleted = repo.cleanup_old_snapshots(keep_days=7)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert deleted == 3
+        assert "AND organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+        assert params["keep_days"] == 7
+
+
+class TestBriefingComposerOrgScope:
+    """Test org-scoped autonomous briefing guardrails."""
+
+    @pytest.mark.asyncio
+    async def test_briefing_compose_blocks_missing_org_context_before_llm_or_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Briefing composition fails closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.briefing_composer import BriefingComposer
+
+        composer = BriefingComposer()
+        monkeypatch.setattr(settings, "living_agent_enable_briefing", True)
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.engine.living_agent.weather_service.get_weather_service") as mock_weather, \
+                 patch("app.engine.living_agent.local_llm.get_local_llm") as mock_llm, \
+                 patch("app.core.database.get_shared_session_factory") as mock_factory:
+                briefing = await composer.compose_for_time()
+        finally:
+            current_org_id.reset(token)
+
+        assert briefing is None
+        mock_weather.assert_not_called()
+        mock_llm.assert_not_called()
+        mock_factory.assert_not_called()
+        assert "briefing_composer_blocked_missing_org_context" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_briefing_highlights_filter_by_org_context(self, monkeypatch):
+        """Briefing highlights only read current-org browsing rows."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.briefing_composer import BriefingComposer
+
+        composer = BriefingComposer()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = [("Org A headline",)]
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                highlights = await composer._get_recent_highlights(2)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert highlights == ["Org A headline"]
+        assert "AND organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+        assert params["count"] == 2
+
+    def test_briefing_save_includes_org_context(self, monkeypatch):
+        """Briefing audit rows include resolved org scope."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.briefing_composer import BriefingComposer
+        from app.engine.living_agent.models import Briefing, BriefingType
+
+        composer = BriefingComposer()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        briefing = Briefing(briefing_type=BriefingType.MORNING, content="Org scoped")
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                composer._save_briefing(briefing)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert "organization_id" in statement
+        assert params["org_id"] == "org-A"
+        assert briefing.organization_id == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_briefing_deliver_blocks_missing_org_context_before_send_or_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Briefing delivery fails closed before outbound channel sends."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.briefing_composer import BriefingComposer
+        from app.engine.living_agent.models import Briefing, BriefingType
+
+        composer = BriefingComposer()
+        briefing = Briefing(briefing_type=BriefingType.MORNING, content="PRIVATE BRIEFING")
+        monkeypatch.setattr(settings, "living_agent_briefing_channels", '["messenger"]')
+        monkeypatch.setattr(settings, "living_agent_briefing_users", '["raw-user"]')
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch.object(composer, "_send_to_channel", new_callable=AsyncMock) as mock_send, \
+                 patch("app.core.database.get_shared_session_factory") as mock_factory:
+                delivered = await composer.deliver(briefing)
+        finally:
+            current_org_id.reset(token)
+
+        assert delivered == []
+        mock_send.assert_not_called()
+        mock_factory.assert_not_called()
+        assert "briefing_composer_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE BRIEFING" not in caplog.text
+        assert "raw-user" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_briefing_delivery_window_is_scoped_per_org(self, monkeypatch):
+        """One org's daily briefing marker does not suppress another org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.briefing_composer import BriefingComposer
+        from app.engine.living_agent.models import Briefing, BriefingType
+
+        composer = BriefingComposer()
+        monkeypatch.setattr(settings, "living_agent_enable_briefing", True)
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        today = "2026-01-02"
+        composer._delivered_today[("org-B", BriefingType.MORNING)] = today
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.engine.living_agent.briefing_composer.datetime") as mock_datetime, \
+                 patch.object(
+                     composer,
+                     "_compose_morning",
+                     new_callable=AsyncMock,
+                     return_value=Briefing(briefing_type=BriefingType.MORNING, content="Org A"),
+                 ) as mock_compose:
+                mock_datetime.now.return_value = datetime(2026, 1, 1, 23, 0, tzinfo=timezone.utc)
+                briefing = await composer.compose_for_time()
+        finally:
+            current_org_id.reset(token)
+
+        assert briefing is not None
+        assert briefing.organization_id == "org-A"
+        mock_compose.assert_awaited_once()
+        assert composer._delivered_today[("org-A", BriefingType.MORNING)] == today
+
+
+class TestHeartbeatRuntimeOrgScope:
+    """Test org-scoped heartbeat persistence guardrails."""
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_queue_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Pending action queueing fails closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.heartbeat_runtime_support import queue_pending_actions_impl
+        from app.engine.living_agent.models import ActionType, HeartbeatAction
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                await queue_pending_actions_impl([
+                    HeartbeatAction(action_type=ActionType.BROWSE_SOCIAL, target="private"),
+                ])
+        finally:
+            current_org_id.reset(token)
+
+        mock_factory.assert_not_called()
+        assert "heartbeat_runtime_blocked_missing_org_context" in caplog.text
+        assert "private" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_pending_load_filters_by_org_context(self, monkeypatch):
+        """Approved pending action reads are scoped to the current org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.heartbeat_runtime_support import load_pending_action_impl
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (
+            "browse_social",
+            "private",
+            0.8,
+            json.dumps({"reason": "test"}),
+        )
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                action = await load_pending_action_impl("raw-action-id")
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert action is not None
+        assert "AND organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_pending_completion_filters_by_org_context(self, monkeypatch):
+        """Pending action completion cannot update another org's action id."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.heartbeat_runtime_support import mark_action_completed_impl
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                await mark_action_completed_impl("raw-action-id")
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert "AND organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_audit_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Heartbeat audit writes fail closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.heartbeat_runtime_support import save_heartbeat_audit_impl
+        from app.engine.living_agent.models import HeartbeatResult
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                await save_heartbeat_audit_impl(1, HeartbeatResult(error="PRIVATE ERROR"))
+        finally:
+            current_org_id.reset(token)
+
+        mock_factory.assert_not_called()
+        assert "heartbeat_runtime_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE ERROR" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_audit_insert_includes_org_context(self, monkeypatch):
+        """Heartbeat audit rows include the resolved org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.heartbeat_runtime_support import save_heartbeat_audit_impl
+        from app.engine.living_agent.models import ActionType, HeartbeatAction, HeartbeatResult
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        result = HeartbeatResult(
+            actions_taken=[HeartbeatAction(action_type=ActionType.REFLECT, target="private")],
+            insights_gained=1,
+            duration_ms=12,
+        )
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                await save_heartbeat_audit_impl(5, result)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert "organization_id" in statement
+        assert params["org_id"] == "org-A"
+
+
+class TestAutonomyManagerOrgScope:
+    """Test org-scoped autonomy graduation guardrails."""
+
+    @pytest.mark.asyncio
+    async def test_autonomy_graduation_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Graduation checks fail closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.autonomy_manager import AutonomyManager
+
+        manager = AutonomyManager()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        monkeypatch.setattr(settings, "living_agent_enable_autonomy_graduation", True)
+        monkeypatch.setattr(settings, "living_agent_autonomy_level", 0)
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                upgraded = await manager.check_graduation()
+        finally:
+            current_org_id.reset(token)
+
+        assert upgraded is False
+        mock_factory.assert_not_called()
+        assert "autonomy_manager_blocked_missing_org_context" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_autonomy_load_stats_filters_by_org_context(self, monkeypatch):
+        """Autonomy stats only aggregate current-org heartbeat audit rows."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.autonomy_manager import AutonomyManager
+
+        manager = AutonomyManager()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = (
+            10,
+            datetime.now(timezone.utc) - timedelta(days=20),
+            1,
+        )
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                stats = await manager._load_stats()
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert stats["successful_actions"] == 9
+        assert "WHERE organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_autonomy_approve_graduation_upserts_by_org_key(self, monkeypatch):
+        """Approved autonomy levels are keyed by org and state key."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.autonomy_manager import AutonomyManager
+
+        manager = AutonomyManager()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                approved = await manager.approve_graduation(1)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert approved is True
+        assert "organization_id" in statement
+        assert "ON CONFLICT (organization_id, key)" in statement
+        assert params["org_id"] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_autonomy_pending_graduation_upserts_by_org_key(self, monkeypatch):
+        """Pending graduation proposals are isolated by org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.autonomy_manager import AutonomyManager
+
+        manager = AutonomyManager()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                await manager._propose_graduation(
+                    0,
+                    1,
+                    {"successful_actions": 50},
+                )
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert "organization_id" in statement
+        assert "ON CONFLICT (organization_id, key)" in statement
+        assert params["org_id"] == "org-A"
+        payload = json.loads(params["data"])
+        assert payload["to_level"] == 1
+
+
+class TestProactiveMessengerOrgScope:
+    """Test org-scoped proactive messaging guardrails."""
+
+    @pytest.mark.asyncio
+    async def test_proactive_send_blocks_missing_org_context_before_delivery(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Autonomous proactive sends fail closed before delivery without org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.proactive_messenger import ProactiveMessenger
+
+        messenger = ProactiveMessenger()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch.object(messenger, "_deliver", new_callable=AsyncMock) as mock_deliver, \
+                 patch("app.core.database.get_shared_session_factory") as mock_factory:
+                sent = await messenger.send(
+                    "raw-proactive-user",
+                    "messenger",
+                    "PRIVATE PROACTIVE BODY",
+                    trigger="briefing",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert sent is False
+        mock_deliver.assert_not_called()
+        mock_factory.assert_not_called()
+        assert "proactive_message_blocked_missing_org_context" in caplog.text
+        assert "raw-proactive-user" not in caplog.text
+        assert "PRIVATE PROACTIVE BODY" not in caplog.text
+        assert _counter_value(
+            "runtime.living_agent.proactive.sends",
+            {"status": "blocked_missing_org_context"},
+        ) == 1
+
+    @pytest.mark.asyncio
+    async def test_proactive_opt_out_filters_by_org_context(self, monkeypatch):
+        """Opt-out writes are keyed by current org and user."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.proactive_messenger import ProactiveMessenger
+
+        messenger = ProactiveMessenger()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                await messenger.opt_out("raw-proactive-user")
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert "organization_id" in statement
+        assert "ON CONFLICT (organization_id, user_id)" in statement
+        assert params["org_id"] == "org-A"
+        assert params["uid"] == "raw-proactive-user"
+
+    @pytest.mark.asyncio
+    async def test_proactive_can_send_reads_opt_out_by_org_context(self, monkeypatch):
+        """Opt-out reads use request org before allowing autonomous send."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.proactive_messenger import ProactiveMessenger
+
+        messenger = ProactiveMessenger()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        monkeypatch.setattr(settings, "living_agent_enable_proactive_messaging", True)
+        monkeypatch.setattr(settings, "living_agent_proactive_quiet_start", 23)
+        monkeypatch.setattr(settings, "living_agent_proactive_quiet_end", 5)
+        monkeypatch.setattr(settings, "living_agent_max_proactive_per_day", 3)
+
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = (False,)
+        mock_session = MagicMock()
+        mock_session.execute.return_value = mock_result
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+        fixed_time = datetime(2026, 2, 26, 3, 0, 0, tzinfo=timezone.utc)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory), \
+                 patch("app.engine.living_agent.proactive_messenger.datetime") as mock_dt:
+                mock_dt.now.return_value = fixed_time
+                mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
+                allowed = await messenger.can_send("raw-proactive-user")
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert allowed is True
+        assert "organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+        assert _counter_value(
+            "runtime.living_agent.proactive.can_send",
+            {"status": "allowed", "reason": "allowed"},
+        ) == 1
+
+    @pytest.mark.asyncio
+    async def test_proactive_save_message_includes_org_context(self, monkeypatch):
+        """Proactive message log rows include current org scope."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.models import ProactiveMessage
+        from app.engine.living_agent.proactive_messenger import ProactiveMessenger
+
+        messenger = ProactiveMessenger()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        message = ProactiveMessage(
+            user_id="raw-proactive-user",
+            channel="messenger",
+            content="PRIVATE PROACTIVE BODY",
+            trigger="briefing",
+        )
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                await messenger._save_message(message)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert "organization_id" in statement
+        assert params["org_id"] == "org-A"
+        assert params["uid"] == "raw-proactive-user"
+        assert params["content"] == "PRIVATE PROACTIVE BODY"
+
+    @pytest.mark.asyncio
+    async def test_proactive_send_records_delivered_metric(self, monkeypatch):
+        """Delivered proactive sends are visible without user/content labels."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.proactive_messenger import ProactiveMessenger
+
+        messenger = ProactiveMessenger()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch.object(messenger, "can_send", new_callable=AsyncMock, return_value=True), \
+                 patch.object(messenger, "_deliver", new_callable=AsyncMock, return_value=True), \
+                 patch.object(messenger, "_save_message", new_callable=AsyncMock):
+                sent = await messenger.send(
+                    "raw-proactive-user",
+                    "messenger",
+                    "PRIVATE PROACTIVE BODY",
+                    trigger="briefing",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert sent is True
+        assert _counter_value(
+            "runtime.living_agent.proactive.sends",
+            {"status": "delivered"},
+        ) == 1
+        assert _histogram_values(
+            "runtime.living_agent.proactive.send_duration_ms",
+            {"status": "delivered"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_proactive_send_records_delivery_failed_metric(self, monkeypatch):
+        """Delivery failures are distinct from guardrail blocks."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.proactive_messenger import ProactiveMessenger
+
+        messenger = ProactiveMessenger()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch.object(messenger, "can_send", new_callable=AsyncMock, return_value=True), \
+                 patch.object(messenger, "_deliver", new_callable=AsyncMock, return_value=False), \
+                 patch.object(messenger, "_save_message", new_callable=AsyncMock) as mock_save:
+                sent = await messenger.send(
+                    "raw-proactive-user",
+                    "messenger",
+                    "PRIVATE PROACTIVE BODY",
+                    trigger="briefing",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert sent is False
+        mock_save.assert_not_called()
+        assert _counter_value(
+            "runtime.living_agent.proactive.sends",
+            {"status": "delivery_failed"},
+        ) == 1
+
+    @pytest.mark.asyncio
+    async def test_proactive_websocket_delivery_uses_org_scoped_connection_manager(
+        self,
+        monkeypatch,
+    ):
+        """A proactive WebSocket send reaches only sessions in the current org."""
+        from app.api.v1.websocket import ConnectionManager
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.proactive_messenger import ProactiveMessenger
+        from app.services.notification_dispatcher import NotificationDispatcher
+        from app.services.notifications.adapters.websocket import WebSocketAdapter
+        from app.services.notifications.registry import NotificationChannelRegistry
+
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        monkeypatch.setattr(settings, "living_agent_enable_proactive_messaging", True)
+        monkeypatch.setattr(settings, "living_agent_proactive_quiet_start", 0)
+        monkeypatch.setattr(settings, "living_agent_proactive_quiet_end", 0)
+        monkeypatch.setattr(settings, "living_agent_max_proactive_per_day", 3)
+
+        registry = NotificationChannelRegistry()
+        registry.register(WebSocketAdapter())
+        dispatcher = NotificationDispatcher()
+        dispatcher._registry = registry
+        manager = ConnectionManager()
+        org_socket = AsyncMock()
+        other_org_socket = AsyncMock()
+        await manager.connect(org_socket, "proactive-org-session")
+        await manager.connect(other_org_socket, "proactive-other-org-session")
+        manager.register_user("proactive-org-session", "proactive-user", "org-proactive")
+        manager.register_user(
+            "proactive-other-org-session",
+            "proactive-user",
+            "org-other",
+        )
+
+        messenger = ProactiveMessenger()
+        token = current_org_id.set("org-proactive")
+        try:
+            with patch.object(
+                messenger,
+                "_is_opted_out",
+                new_callable=AsyncMock,
+                return_value=False,
+            ), patch.object(
+                messenger,
+                "_save_message",
+                new_callable=AsyncMock,
+            ) as mock_save, patch(
+                "app.services.notification_dispatcher.get_notification_dispatcher",
+                return_value=dispatcher,
+            ), patch("app.api.v1.websocket.manager", manager):
+                sent = await messenger.send(
+                    "proactive-user",
+                    "websocket",
+                    "Review COLREG Rule 13 soon",
+                    trigger="inactive_reengage",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert sent is True
+        org_socket.send_text.assert_awaited_once()
+        sent_payload = json.loads(org_socket.send_text.await_args.args[0])
+        assert sent_payload["type"] == "proactive_message"
+        assert sent_payload["content"] == "Review COLREG Rule 13 soon"
+        assert sent_payload["trigger"] == "inactive_reengage"
+        other_org_socket.send_text.assert_not_awaited()
+        saved_message = mock_save.await_args.args[0]
+        assert saved_message.user_id == "proactive-user"
+        assert saved_message.channel == "websocket"
+        assert saved_message.organization_id == "org-proactive"
+        assert messenger._daily_counts["org-proactive:proactive-user"] == 1
+        assert _counter_value(
+            "runtime.living_agent.proactive.can_send",
+            {"status": "allowed", "reason": "allowed"},
+        ) == 1
+        assert _counter_value(
+            "runtime.living_agent.proactive.sends",
+            {"status": "delivered"},
+        ) == 1
+
+
+class TestRoutineTrackerOrgScope:
+    """Test org-scoped routine tracking guardrails."""
+
+    @pytest.mark.asyncio
+    async def test_routine_record_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Routine writes fail closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.routine_tracker import RoutineTracker
+
+        tracker = RoutineTracker()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        monkeypatch.setattr(settings, "living_agent_enable_routine_tracking", True)
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                await tracker.record_interaction(
+                    "raw-routine-user",
+                    "web",
+                    "PRIVATE ROUTINE TOPIC",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        mock_factory.assert_not_called()
+        assert "routine_tracking_blocked_missing_org_context" in caplog.text
+        assert "raw-routine-user" not in caplog.text
+        assert "PRIVATE ROUTINE TOPIC" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_inactive_user_query_filters_by_org_context(self, monkeypatch):
+        """Inactive-user reads only return current-org routines."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.routine_tracker import RoutineTracker
+
+        tracker = RoutineTracker()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = [("user-a",)]
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                inactive = await tracker.get_inactive_users(days=2)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert inactive == ["user-a"]
+        assert "organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_routine_upsert_uses_org_conflict_key(self, monkeypatch):
+        """Routine profile writes are keyed by org and user."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.models import UserRoutine
+        from app.engine.living_agent.routine_tracker import RoutineTracker
+
+        tracker = RoutineTracker()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        routine = UserRoutine(
+            user_id="raw-routine-user",
+            typical_active_hours=[8],
+            common_topics=["PRIVATE ROUTINE TOPIC"],
+            total_messages=6,
+            last_seen=datetime.now(timezone.utc),
+        )
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                await tracker._save_routine(routine)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert "organization_id" in statement
+        assert "ON CONFLICT (organization_id, user_id)" in statement
+        assert params["org_id"] == "org-A"
+        assert params["uid"] == "raw-routine-user"
+
+    @pytest.mark.asyncio
+    async def test_routine_load_filters_by_org_context(self, monkeypatch):
+        """Routine reads request exactly one org/user row."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.routine_tracker import RoutineTracker
+
+        tracker = RoutineTracker()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = (
+            "raw-routine-user",
+            [8],
+            8,
+            1.0,
+            ["maritime"],
+            datetime.now(timezone.utc),
+            6,
+            datetime.now(timezone.utc),
+            "org-A",
+        )
+        mock_session = MagicMock()
+        mock_session.execute.return_value = mock_result
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                routine = await tracker.get_routine("raw-routine-user")
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert routine is not None
+        assert routine.organization_id == "org-A"
+        assert "organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+
+class TestReflectorOrgScope:
+    """Test org-scoped reflection guardrails."""
+
+    @pytest.mark.asyncio
+    async def test_reflection_blocks_missing_org_context_before_db_or_llm(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Reflection generation fails closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.reflector import Reflector
+
+        reflector = Reflector()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory, \
+                 patch("app.engine.living_agent.local_llm.get_local_llm") as mock_llm:
+                entry = await reflector.reflect()
+        finally:
+            current_org_id.reset(token)
+
+        assert entry is None
+        mock_factory.assert_not_called()
+        mock_llm.assert_not_called()
+        assert "reflection_blocked_missing_org_context" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_recent_reflections_filters_by_org_context(self, monkeypatch):
+        """Recent reflection reads only query current org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.reflector import Reflector
+
+        reflector = Reflector()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        row = (
+            uuid4(),
+            "Reflection content",
+            json.dumps(["insight"]),
+            json.dumps(["goal"]),
+            json.dumps(["pattern"]),
+            "calm",
+            datetime.now(timezone.utc),
+        )
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = [row]
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                entries = await reflector.get_recent_reflections(count=2)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert len(entries) == 1
+        assert "organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_reflect_passes_resolved_org_to_summaries(self, monkeypatch):
+        """Daily reflection gathers all summaries for one resolved org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.reflector import Reflector
+
+        reflector = Reflector()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch.object(reflector, "_has_reflected_today", new_callable=AsyncMock, return_value=False), \
+                 patch.object(reflector, "_get_journal_summary", new_callable=AsyncMock, return_value="") as mock_journal, \
+                 patch.object(reflector, "_get_emotion_summary", new_callable=AsyncMock, return_value="") as mock_emotion, \
+                 patch.object(reflector, "_get_browsing_summary", new_callable=AsyncMock, return_value="") as mock_browsing, \
+                 patch.object(reflector, "_get_skills_summary", new_callable=AsyncMock, return_value="") as mock_skills, \
+                 patch("app.engine.living_agent.local_llm.get_local_llm") as mock_llm:
+                mock_llm.return_value.generate = AsyncMock(return_value=None)
+                entry = await reflector.reflect()
+        finally:
+            current_org_id.reset(token)
+
+        assert entry is None
+        mock_journal.assert_called_once_with(1, "org-A")
+        mock_emotion.assert_called_once_with(1, "org-A")
+        mock_browsing.assert_called_once_with(1, "org-A")
+        mock_skills.assert_called_once_with("org-A")
+
+    @pytest.mark.asyncio
+    async def test_browsing_summary_filters_by_org_context(self):
+        """Browsing summary SQL uses org filter."""
+        from app.engine.living_agent.reflector import Reflector
+
+        reflector = Reflector()
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = [
+            ("Private discovery", 0.9),
+        ]
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+            summary = await reflector._get_browsing_summary(1, "org-A")
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert "Private discovery" in summary
+        assert "organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+
+class TestGoalManagerOrgScope:
+    """Test org-scoped dynamic goal guardrails."""
+
+    @pytest.mark.asyncio
+    async def test_goal_create_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Goal creation fails closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.goal_manager import GoalManager
+
+        manager = GoalManager()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                goal = await manager.create_goal(
+                    "PRIVATE GOAL TITLE",
+                    description="PRIVATE GOAL BODY",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert goal is None
+        mock_factory.assert_not_called()
+        assert "goal_manager_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE GOAL TITLE" not in caplog.text
+        assert "PRIVATE GOAL BODY" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_goal_query_filters_by_org_context(self, monkeypatch):
+        """Goal queries always include current org filter."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.goal_manager import GoalManager
+
+        manager = GoalManager()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        row = (
+            uuid4(),
+            "Goal title",
+            "Goal body",
+            "active",
+            "medium",
+            0.2,
+            "reflection",
+            json.dumps(["m1"]),
+            json.dumps([]),
+            datetime.now(timezone.utc),
+            None,
+            None,
+            "org-A",
+        )
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = [row]
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                goals = await manager.get_active_goals()
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert len(goals) == 1
+        assert "organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_goal_update_progress_filters_by_org_context(self, monkeypatch):
+        """Progress updates cannot update another org's goal id."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.goal_manager import GoalManager
+
+        manager = GoalManager()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                updated = await manager.update_progress("raw-goal-id", 0.7)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert updated is True
+        assert "AND organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_goal_review_stale_filters_by_org_context(self, monkeypatch):
+        """Stale-goal review only mutates current-org rows."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.goal_manager import GoalManager
+
+        manager = GoalManager()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        result = MagicMock()
+        result.rowcount = 2
+        mock_session = MagicMock()
+        mock_session.execute.return_value = result
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                count = await manager.review_stale_goals(stale_days=14)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert count == 2
+        assert "AND organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+
+class TestIdentityCoreOrgScope:
+    """Test org-scoped identity insight cache guardrails."""
+
+    def test_identity_context_filters_by_org_context(self, monkeypatch):
+        """Hot-path identity context only exposes current-org insights."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.identity_core import IdentityCore
+        from app.engine.living_agent.models import IdentityInsight
+
+        core = IdentityCore()
+        core._insights = [
+            IdentityInsight(text="Org A identity", validated=True, organization_id="org-A"),
+            IdentityInsight(text="Org B identity", validated=True, organization_id="org-B"),
+            IdentityInsight(text="Legacy identity", validated=True),
+        ]
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        app_settings = _make_settings(
+            enable_living_agent=True,
+            enable_identity_core=True,
+            enable_multi_tenant=True,
+            environment="production",
+            default_organization_id="default",
+        )
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.config.get_settings", return_value=app_settings):
+                context = core.get_identity_context()
+        finally:
+            current_org_id.reset(token)
+
+        assert "Org A identity" in context
+        assert "Org B identity" not in context
+        assert "Legacy identity" not in context
+
+    @pytest.mark.asyncio
+    async def test_identity_generation_blocks_missing_org_before_reflection_or_llm(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Identity generation fails closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.identity_core import IdentityCore
+
+        core = IdentityCore()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        app_settings = _make_settings(
+            enable_living_agent=True,
+            enable_identity_core=True,
+            enable_multi_tenant=True,
+            environment="production",
+            default_organization_id="default",
+        )
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.config.get_settings", return_value=app_settings), \
+                 patch("app.engine.living_agent.reflector.get_reflector") as mock_reflector, \
+                 patch("app.engine.living_agent.local_llm.get_local_llm") as mock_llm:
+                insights = await core.generate_self_insights()
+        finally:
+            current_org_id.reset(token)
+
+        assert insights == []
+        mock_reflector.assert_not_called()
+        mock_llm.assert_not_called()
+        assert "identity_core_blocked_missing_org_context" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_identity_generation_tags_insights_with_org(self, monkeypatch):
+        """Cold-path identity insights are generated and cached for one org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.identity_core import IdentityCore
+
+        core = IdentityCore()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        app_settings = _make_settings(
+            enable_living_agent=True,
+            enable_identity_core=True,
+            enable_multi_tenant=True,
+            environment="production",
+            default_organization_id="default",
+        )
+        soul = MagicMock()
+        soul.core_truths = []
+        soul.boundaries = []
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.config.get_settings", return_value=app_settings), \
+                 patch.object(core, "_get_recent_reflection_text", new_callable=AsyncMock, return_value="Reflection") as mock_reflection, \
+                 patch.object(core, "_get_skills_summary", return_value="Skills") as mock_skills, \
+                 patch("app.engine.living_agent.local_llm.get_local_llm") as mock_llm, \
+                 patch("app.engine.living_agent.soul_loader.get_soul", return_value=soul):
+                mock_llm.return_value.generate = AsyncMock(return_value="- Minh hoc nhanh hon")
+                insights = await core.generate_self_insights()
+        finally:
+            current_org_id.reset(token)
+
+        assert len(insights) == 1
+        assert insights[0].organization_id == "org-A"
+        assert core.get_all_insights("org-A")[0].organization_id == "org-A"
+        mock_reflection.assert_awaited_once_with("org-A")
+        mock_skills.assert_called_once_with("org-A")
+
+
+class TestSkillBuilderOrgScope:
+    """Test org-scoped autonomous skill-learning guardrails."""
+
+    def test_skill_discover_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Skill discovery fails closed without org context."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.skill_builder import SkillBuilder
+
+        builder = SkillBuilder()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory:
+                skill = builder.discover(
+                    "PRIVATE SKILL TOPIC",
+                    domain="private",
+                    source="https://example.invalid/private",
+                )
+        finally:
+            current_org_id.reset(token)
+
+        assert skill is None
+        mock_factory.assert_not_called()
+        assert "skill_builder_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE SKILL TOPIC" not in caplog.text
+
+    def test_skill_query_filters_by_org_context(self, monkeypatch):
+        """Skill list reads only query the current org."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.models import SkillStatus
+        from app.engine.living_agent.skill_builder import SkillBuilder
+
+        builder = SkillBuilder()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+
+        row = (
+            uuid4(),
+            "Org A Skill",
+            "maritime",
+            SkillStatus.LEARNING.value,
+            0.4,
+            "notes",
+            json.dumps(["https://example.invalid"]),
+            1,
+            0.8,
+            datetime.now(timezone.utc),
+            None,
+            None,
+            "org-A",
+            json.dumps({"review_schedule": {"interval_days": 1}}),
+        )
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchall.return_value = [row]
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                skills = builder.get_all_skills(status=SkillStatus.LEARNING, domain="maritime")
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert len(skills) == 1
+        assert skills[0].organization_id == "org-A"
+        assert skills[0].metadata["review_schedule"]["interval_days"] == 1
+        assert "organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    def test_skill_update_filters_by_org_context(self, monkeypatch):
+        """Skill lifecycle updates cannot mutate another org's row id."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.models import WiiiSkill
+        from app.engine.living_agent.skill_builder import SkillBuilder
+
+        builder = SkillBuilder()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        skill = WiiiSkill(
+            skill_name="PRIVATE SKILL TOPIC",
+            notes="private notes",
+            metadata={"review_schedule": {"interval_days": 1}},
+        )
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                builder._update_skill(skill)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert "AND organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+        assert params["meta"] == json.dumps(skill.metadata, ensure_ascii=False)
+
+    def test_skill_metadata_update_filters_by_org_context(self, monkeypatch):
+        """Metadata-only writes keep the same org boundary as lifecycle writes."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.models import WiiiSkill
+        from app.engine.living_agent.skill_builder import SkillBuilder
+
+        builder = SkillBuilder()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        skill = WiiiSkill(
+            skill_name="PRIVATE SKILL TOPIC",
+            metadata={"learning_materials": [{"url": "https://example.invalid/private"}]},
+        )
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                builder.update_skill_metadata(skill)
+        finally:
+            current_org_id.reset(token)
+
+        statement = str(mock_session.execute.call_args.args[0])
+        params = mock_session.execute.call_args.args[1]
+        assert "AND organization_id = :org_id" in statement
+        assert params["org_id"] == "org-A"
+
+    @pytest.mark.asyncio
+    async def test_skill_learn_step_blocks_missing_org_before_llm(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        """Learning steps fail closed before DB reads or local LLM calls."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.skill_builder import SkillBuilder
+
+        builder = SkillBuilder()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            with patch("app.core.database.get_shared_session_factory") as mock_factory, \
+                 patch("app.engine.living_agent.local_llm.get_local_llm") as mock_llm:
+                learned = await builder.learn_step("PRIVATE SKILL TOPIC")
+        finally:
+            current_org_id.reset(token)
+
+        assert learned is False
+        mock_factory.assert_not_called()
+        mock_llm.assert_not_called()
+        assert "skill_builder_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE SKILL TOPIC" not in caplog.text
+
 
 # ============================================================================
 # GROUP 9: Goal Seeding
@@ -949,8 +3198,8 @@ class TestReflectorDailyMethod:
                                 mock_llm.return_value.generate = AsyncMock(return_value=None)
                                 await reflector.reflect()
 
-                                # Check journal_summary called with days=1
-                                mock_journal.assert_called_once_with(1, None)
+                                # Check journal_summary called with days=1 and resolved org
+                                mock_journal.assert_called_once_with(1, "default")
 
     def test_is_reflection_time_daily(self):
         """is_reflection_time should return True at 21:00 any day."""

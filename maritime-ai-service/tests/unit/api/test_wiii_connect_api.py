@@ -8,7 +8,7 @@ import pytest
 from fastapi import FastAPI
 
 from app.api.v1.wiii_connect import router as wiii_connect_router
-from app.core.security import require_auth
+from app.core.security import optional_auth, require_auth
 from app.core.security_models import AuthenticatedUser
 
 
@@ -28,6 +28,20 @@ def authenticated_app():
         auth_method="test",
         role="admin",
         organization_id="org_1",
+    )
+    return app
+
+
+@pytest.fixture
+def optionally_authenticated_app():
+    app = FastAPI()
+    app.include_router(wiii_connect_router)
+    app.dependency_overrides[optional_auth] = lambda: AuthenticatedUser(
+        user_id="user_1",
+        auth_method="test",
+        role="admin",
+        organization_id="org_1",
+        session_id="session_1",
     )
     return app
 
@@ -57,8 +71,216 @@ async def test_wiii_connect_provider_registry_api_is_privacy_safe(app):
     assert "access_token" not in serialized
     assert "refresh_token" not in serialized
     assert "api_key" not in serialized
-    assert "approval_token" not in serialized
+    assert "approval-secret" not in serialized
     assert "vault://" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_snapshot_api_returns_runtime_contract_without_secrets(app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/wiii-connect/snapshot",
+            params={"query": "đăng facebook", "surface": "desktop"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    by_slug = {connection["slug"]: connection for connection in payload["connections"]}
+    by_path = {item["path"]: item for item in payload["path_capabilities"]}
+
+    assert payload["version"] == "wiii_connect_snapshot.v0"
+    assert payload["surface"] == "desktop"
+    assert by_slug["server"]["status"] == "connected"
+    assert by_slug["facebook"]["provider_kind"] == "composio"
+    assert by_path["external_app_action"]["delegation_policy"] == (
+        "delegate_to_integrations_agent"
+    )
+    assert "access_token" not in serialized
+    assert "refresh_token" not in serialized
+    assert "api_key" not in serialized
+    assert "approval-secret" not in serialized
+    assert "đăng facebook" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_doctor_api_returns_readiness_summary_without_secrets(app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/wiii-connect/doctor",
+            params={"query": "post private secret text", "surface": "desktop"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    by_path = {item["path"]: item for item in payload["path_diagnostics"]}
+    by_provider = {
+        item["provider_slug"]: item for item in payload["provider_diagnostics"]
+    }
+
+    assert payload["version"] == "wiii_connect_doctor.v0"
+    assert payload["surface"] == "desktop"
+    assert payload["summary"]["total_paths"] >= 1
+    assert by_path["casual_chat"]["status"] == "ready"
+    assert by_path["external_app_action"]["reason"] == (
+        "no_agent_ready_external_provider"
+    )
+    assert by_provider["facebook"]["status"] == "blocked"
+    assert by_provider["facebook"]["reason"] == "connection_storage_unavailable"
+    assert by_provider["facebook"]["required_next"] == [
+        "configure_wiii_connect_storage"
+    ]
+    assert "post private secret text" not in serialized
+    assert "access_token" not in serialized
+    assert "refresh_token" not in serialized
+    assert "api_key" not in serialized
+    assert "approval-secret" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_snapshot_rejects_invalid_optional_api_key(app):
+    from unittest.mock import MagicMock, patch
+
+    mock_settings = MagicMock()
+    mock_settings.api_key = "valid-api-key"
+    mock_settings.lms_service_token = None
+    mock_settings.environment = "production"
+    mock_settings.enable_auth_audit = False
+
+    with patch("app.core.security.settings", mock_settings):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            response = await client.get(
+                "/wiii-connect/snapshot",
+                headers={"X-API-Key": "wrong-api-key"},
+            )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid API key"
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_snapshot_and_doctor_use_optional_auth_scope(
+    optionally_authenticated_app,
+    monkeypatch,
+):
+    from dataclasses import replace
+
+    from app.engine.wiii_connect import snapshot as snapshot_module
+    from app.engine.wiii_connect.adapter_v1 import (
+        WiiiConnectConnectionRecordV1,
+        WiiiConnectScopeGrant,
+    )
+
+    def enable_provider(entry, config):
+        return replace(
+            entry,
+            enabled=True,
+            agent_ready=True,
+            action_allowlist=("FACEBOOK_CREATE_PAGE_POST",),
+            default_scopes=WiiiConnectScopeGrant(read=True, preview=True, apply=True),
+            requirements=(),
+            connect_requirements=(),
+            agent_ready_requirements=(),
+            warnings=(),
+        )
+
+    class FakeStorage:
+        def list_connection_records(self, **kwargs):
+            assert kwargs["organization_id"] == "org_1"
+            assert kwargs["user_id"] == "user_1"
+            if kwargs["provider_slug"] != "facebook":
+                return ()
+            return (
+                WiiiConnectConnectionRecordV1(
+                    connection_id="ca_private_active",
+                    provider_slug="facebook",
+                    state="connected",
+                    scopes=WiiiConnectScopeGrant(read=True, preview=True, apply=True),
+                    account_label="Private Facebook Page",
+                    external_account_ref="external-private-ref",
+                    reason="provider_connection_list",
+                ),
+            )
+
+    monkeypatch.setattr(
+        snapshot_module,
+        "build_composio_execution_enabled_entry",
+        enable_provider,
+    )
+    monkeypatch.setattr(
+        snapshot_module,
+        "storage_status_metadata",
+        lambda: {
+            "persistent": True,
+            "connection_table_ready": True,
+            "audit_ledger_ready": True,
+        },
+    )
+    monkeypatch.setattr(
+        snapshot_module,
+        "get_wiii_connect_persistent_storage",
+        lambda: FakeStorage(),
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=optionally_authenticated_app),
+        base_url="http://test",
+    ) as client:
+        snapshot_response = await client.get(
+            "/wiii-connect/snapshot",
+            params={"query": "dang facebook private text", "surface": "desktop"},
+        )
+        doctor_response = await client.get(
+            "/wiii-connect/doctor",
+            params={"query": "dang facebook private text", "surface": "desktop"},
+        )
+
+    assert snapshot_response.status_code == 200
+    assert doctor_response.status_code == 200
+    snapshot_payload = snapshot_response.json()
+    doctor_payload = doctor_response.json()
+    serialized = json.dumps(
+        {"snapshot": snapshot_payload, "doctor": doctor_payload},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    facebook = {
+        connection["slug"]: connection
+        for connection in snapshot_payload["connections"]
+    }["facebook"]
+    by_path = {item["path"]: item for item in doctor_payload["path_diagnostics"]}
+    by_provider = {
+        item["provider_slug"]: item for item in doctor_payload["provider_diagnostics"]
+    }
+
+    assert facebook["status"] == "connected"
+    assert facebook["agent_ready"] is True
+    assert facebook["connection_ref_present"] is True
+    assert doctor_payload["summary"]["external_agent_ready_connections"] == 1
+    assert by_path["external_app_action"]["status"] == "guarded"
+    assert by_path["external_app_action"]["reason"] == (
+        "provider_worker_gateway_required"
+    )
+    assert by_provider["facebook"]["status"] == "guarded"
+    assert by_provider["facebook"]["reason"] == "agent_ready_gateway_required"
+    assert by_provider["facebook"]["connection_status"] == "connected"
+    assert by_provider["facebook"]["required_next"] == [
+        "select_action_and_evaluate_gateway"
+    ]
+    assert "ca_private_active" not in serialized
+    assert "Private Facebook Page" not in serialized
+    assert "external-private-ref" not in serialized
+    assert "dang facebook private text" not in serialized
 
 
 @pytest.mark.asyncio
@@ -254,6 +476,61 @@ async def test_wiii_connect_provider_status_api_is_fail_closed(app):
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_session_status_uses_runtime_composio_config(
+    app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            apply_execute_enabled=True,
+            apply_action_allowlist_by_provider={
+                "facebook": ("FACEBOOK_CREATE_POST",),
+            },
+        ),
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        status_response = await client.get("/wiii-connect/providers/facebook/status")
+        session_response = await client.post(
+            "/wiii-connect/providers/facebook/sessions",
+            json={
+                "surface": "desktop",
+                "redirect_uri": "https://wiii.example.test/callback",
+            },
+        )
+
+    assert status_response.status_code == 200
+    assert session_response.status_code == 200
+    status_payload = status_response.json()
+    session_payload = session_response.json()
+    serialized = json.dumps(
+        {"status": status_payload, "session": session_payload},
+        sort_keys=True,
+    )
+
+    assert status_payload["enabled"] is True
+    assert status_payload["agent_ready"] is True
+    assert status_payload["reason"] == "provider_adapter_not_bound"
+    assert status_payload["missing_requirements"] == []
+    assert session_payload["status"] == "blocked"
+    assert session_payload["reason"] == "provider_adapter_not_bound"
+    assert "secret-api-key" not in serialized
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_activation_readiness_api_fails_closed_without_config(
     authenticated_app,
 ):
@@ -282,12 +559,37 @@ async def test_wiii_connect_activation_readiness_api_fails_closed_without_config
     assert gates["curated_readonly_action"]["ready"] is False
     assert gates["local_connection"]["reason"] == "connection_missing"
     assert payload["connection"]["present"] is False
+    assert payload["connection_lifecycle"]["version"] == (
+        "wiii_connect_connection_lifecycle.v1"
+    )
+    assert payload["connection_lifecycle"]["status"] == "disconnected"
+    assert payload["connection_lifecycle"]["connection_present"] is False
     assert "access_token" not in serialized
     assert "refresh_token" not in serialized
     assert "api_key" not in serialized
     assert "approval_token" not in serialized
     assert "authcfg" not in serialized
     assert "vault://" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_activation_readiness_default_action_is_provider_scoped(
+    authenticated_app,
+):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/wiii-connect/providers/facebook/activation-readiness",
+            params={"probe_database": "false"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider_slug"] == "facebook"
+    assert payload["action"]["provider_slug"] == "facebook"
+    assert payload["action"]["slug"] == "FACEBOOK_LIST_MANAGED_PAGES"
 
 
 @pytest.mark.asyncio
@@ -435,6 +737,9 @@ async def test_wiii_connect_activation_readiness_api_reports_ready_without_leaks
     assert payload["connection"]["present"] is True
     assert payload["connection"]["active"] is True
     assert payload["connection"]["vault_ref_present"] is True
+    assert payload["connection_lifecycle"]["status"] == "connected"
+    assert payload["connection_lifecycle"]["active"] is True
+    assert payload["connection_lifecycle"]["ready_to_execute_action"] is True
     assert payload["execution_gateway"]["status"] == "allowed"
     assert gates["provider_adapter"]["ready"] is True
     assert gates["vault"]["ready"] is True
@@ -524,6 +829,9 @@ async def test_wiii_connect_activation_readiness_requires_selected_connection(
     assert payload["ready_to_connect"] is True
     assert payload["ready_to_execute_readonly"] is False
     assert payload["connection"]["present"] is False
+    assert payload["connection_lifecycle"]["status"] == "disconnected"
+    assert payload["connection_lifecycle"]["ready_to_connect"] is True
+    assert "complete_provider_oauth" in payload["connection_lifecycle"]["required_next"]
     assert payload["execution_gateway"]["reason"] == "connection_selection_required"
     assert (
         "select_provider_connection" in payload["execution_gateway"]["required_next"]
@@ -854,6 +1162,96 @@ async def test_wiii_connect_connections_api_requires_auth(app):
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_connections_api_returns_stored_rows_when_provider_disabled(
+    authenticated_app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect.adapter_v1 import WiiiConnectConnectionRecordV1
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+
+    class FakeStorage:
+        def status(self, *, probe_database: bool = True):
+            assert probe_database is True
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                reason="ready",
+            )
+
+        def list_connection_records(
+            self,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_slug: str,
+        ):
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_slug == "facebook"
+            return (
+                WiiiConnectConnectionRecordV1(
+                    connection_id="ca_active",
+                    provider_slug="facebook",
+                    state="connected",
+                    reason="stored_connection",
+                ),
+            )
+
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(enabled=False),
+    )
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async def fail_list_connections(**kwargs):
+        raise AssertionError("disabled provider must not call provider network")
+
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "list_composio_connected_accounts",
+        fail_list_connections,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/wiii-connect/providers/facebook/connections",
+            params={"probe_database": "true"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["status"] == "blocked"
+    assert payload["reason"] == "provider_disabled"
+    assert payload["connection_count"] == 1
+    assert payload["connections"][0]["connection_ref"].startswith("wcn_")
+    assert payload["connections"][0]["state"] == "connected"
+    assert payload["connections"][0]["connection_lifecycle"]["status"] == "connected"
+    assert payload["connection_lifecycle"]["status"] == "connected"
+    assert payload["connection_lifecycle"]["reason"] == "provider_disabled"
+    assert payload["storage"]["reason"] == "ready"
+    assert "ca_active" not in serialized
+    assert "connection_id" not in serialized
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_connections_api_lists_and_persists_safely(
     authenticated_app,
     monkeypatch,
@@ -954,6 +1352,9 @@ async def test_wiii_connect_connections_api_lists_and_persists_safely(
     assert payload["connection_count"] == 1
     assert payload["connections"][0]["connection_ref"].startswith("wcn_")
     assert payload["connections"][0]["state"] == "connected"
+    assert payload["connections"][0]["connection_lifecycle"]["status"] == "connected"
+    assert payload["connection_lifecycle"]["status"] == "connected"
+    assert payload["connection_lifecycle"]["connection_present"] is True
     assert fake_storage.upserts == 1
     assert "ca_active" not in serialized
     assert "connection_id" not in serialized
@@ -1275,6 +1676,237 @@ async def test_wiii_connect_actions_api_lists_curated_catalog_without_secrets(ap
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_actions_api_hides_backend_owned_argument_keys(app):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/wiii-connect/providers/facebook/actions")
+
+    assert response.status_code == 200
+    payload = response.json()
+    by_slug = {action["slug"]: action for action in payload["actions"]}
+    post = by_slug["FACEBOOK_CREATE_POST"]
+    serialized = json.dumps(post, sort_keys=True)
+
+    assert post["argument_keys"] == ["message", "link"]
+    assert post["model_argument_keys"] == ["message", "link"]
+    assert post["hidden_argument_count"] == 3
+    assert "page_id" not in serialized
+    assert "published" not in serialized
+    assert "scheduled_publish_time" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_effective_actions_api_requires_selected_connection(
+    authenticated_app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+
+    class FakeStorage:
+        fetches = 0
+
+        def status(self, *, probe_database: bool = True):
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                reason="ready",
+            )
+
+        def get_connection_record(self, **kwargs):
+            self.fetches += 1
+            raise AssertionError("inventory must not select a connection without a ref")
+
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            auth_config_by_provider={"gmail": "authcfg_gmail"},
+            readonly_execute_enabled=True,
+            readonly_action_allowlist_by_provider={
+                "gmail": ("GMAIL_FETCH_EMAILS",),
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/wiii-connect/providers/gmail/effective-actions")
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["version"] == "wiii_connect_action_inventory.v1"
+    assert payload["status"] == "blocked"
+    assert payload["reason"] == "connection_selection_required"
+    assert payload["selected_connection_required"] is True
+    assert payload["runtime_enabled_action_count"] == 1
+    assert payload["visible_action_count"] == 0
+    assert payload["actions"][0]["slug"] == "GMAIL_FETCH_EMAILS"
+    assert payload["actions"][0]["runtime_enabled"] is True
+    assert payload["actions"][0]["visible_to_agent"] is False
+    assert payload["actions"][0]["gateway"]["reason"] == "connection_selection_required"
+    assert fake_storage.fetches == 0
+    assert "secret-api-key" not in serialized
+    assert "authcfg_gmail" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_effective_actions_api_projects_ready_read_action(
+    authenticated_app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect.adapter_v1 import (
+        WiiiConnectConnectionRecordV1,
+        WiiiConnectScopeGrant,
+        WiiiConnectVaultSecretRef,
+        public_connection_ref,
+    )
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+
+    connection_ref = public_connection_ref("gmail", "ca_private")
+
+    class FakeStorage:
+        fetches = 0
+        lists = 0
+
+        def status(self, *, probe_database: bool = True):
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                reason="ready",
+            )
+
+        def expire_stale_pending_connections(self, **kwargs):
+            return 0
+
+        def list_connection_records(
+            self,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_slug: str,
+        ):
+            self.lists += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_slug == "gmail"
+            return [
+                WiiiConnectConnectionRecordV1(
+                    connection_id="ca_private",
+                    provider_slug="gmail",
+                    state="connected",
+                    scopes=WiiiConnectScopeGrant(read=True),
+                    vault_ref=WiiiConnectVaultSecretRef(
+                        provider_slug="gmail",
+                        connection_id="ca_private",
+                        vault_key_id="provider-managed://composio/ca_private",
+                    ),
+                    account_label="private-user@example.test",
+                    external_account_ref="acct_private",
+                    reason="provider_connection_list",
+                ),
+            ]
+
+        def get_connection_record(
+            self,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_slug: str,
+            connection_id: str | None = None,
+        ):
+            self.fetches += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_slug == "gmail"
+            assert connection_id == "ca_private"
+            return self.list_connection_records(
+                organization_id=organization_id,
+                user_id=user_id,
+                provider_slug=provider_slug,
+            )[0]
+
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            auth_config_by_provider={"gmail": "authcfg_gmail"},
+            readonly_execute_enabled=True,
+            readonly_action_allowlist_by_provider={
+                "gmail": ("GMAIL_FETCH_EMAILS",),
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/wiii-connect/providers/gmail/effective-actions",
+            params={"connection_ref": connection_ref},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["status"] == "ready"
+    assert payload["reason"] == "ready"
+    assert payload["connection_ref_present"] is True
+    assert payload["connection_present"] is True
+    assert payload["visible_action_count"] == 1
+    assert payload["executable_action_count"] == 1
+    assert payload["actions"][0]["gateway"]["status"] == "allowed"
+    assert payload["actions"][0]["executable_now"] is True
+    assert fake_storage.fetches == 1
+    assert fake_storage.lists >= 1
+    assert "ca_private" not in serialized
+    assert "secret-api-key" not in serialized
+    assert "authcfg_gmail" not in serialized
+    assert "provider-managed://" not in serialized
+    assert "private-user@example.test" not in serialized
+    assert "acct_private" not in serialized
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_execution_decision_api_requires_auth(app):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -1369,6 +2001,7 @@ async def test_wiii_connect_execution_decision_api_audits_fail_closed(
             assert organization_id == "org_1"
             assert user_id == "user_1"
             assert metadata["request"]["action_slug"] == "FACEBOOK_GET_PAGE"
+            assert metadata["request"]["request_id"] == "req-wiii-connect-api-1"
             assert metadata["connection_found"] is True
             assert "approval_token" not in serialized
             assert "secret-value" not in serialized
@@ -1398,6 +2031,7 @@ async def test_wiii_connect_execution_decision_api_audits_fail_closed(
     ) as client:
         response = await client.post(
             "/wiii-connect/providers/facebook/execution-decision",
+            headers={"X-Request-ID": "req-wiii-connect-api-1"},
             json={
                 "surface": "desktop",
                 "connection_ref": public_connection_ref("facebook", "ca_active"),
@@ -1530,6 +2164,7 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
     monkeypatch,
 ):
     from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect import backend_action_executor as executor_module
     from app.engine.wiii_connect.adapter_v1 import (
         WiiiConnectConnectionRecordV1,
         WiiiConnectScopeGrant,
@@ -1607,6 +2242,7 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
             assert organization_id == "org_1"
             assert user_id == "user_1"
             assert metadata["request"]["action_slug"] == "GMAIL_FETCH_EMAILS"
+            assert metadata["request"]["request_id"] == "req-wiii-connect-execute-1"
             assert "access_token" not in serialized
             assert "client-secret" not in serialized
             assert "private subject" not in serialized
@@ -1629,7 +2265,7 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
         ),
     )
     monkeypatch.setattr(
-        wiii_connect_api,
+        executor_module,
         "get_wiii_connect_persistent_storage",
         lambda: fake_storage,
     )
@@ -1637,11 +2273,13 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
     async def fake_schema(**kwargs):
         assert kwargs["provider_slug"] == "gmail"
         assert kwargs["action_slug"] == "GMAIL_FETCH_EMAILS"
+        assert kwargs["request_id"] == "req-wiii-connect-execute-1"
         return WiiiConnectComposioToolSchemaResult(
             ready=True,
             provider_slug="gmail",
             action_slug="GMAIL_FETCH_EMAILS",
             reason="ready",
+            request_id=kwargs["request_id"],
             schema_present=True,
             argument_keys=("query",),
         )
@@ -1650,23 +2288,22 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
         assert kwargs["provider_slug"] == "gmail"
         assert kwargs["action_slug"] == "GMAIL_FETCH_EMAILS"
         assert kwargs["connected_account_id"] == "ca_active"
-        assert kwargs["arguments"] == {
-            "query": "from:me",
-            "access_token": "client-secret",
-        }
+        assert kwargs["request_id"] == "req-wiii-connect-execute-1"
+        assert kwargs["arguments"] == {"query": "from:me"}
         return WiiiConnectComposioExecuteResult(
             ready=True,
             provider_slug="gmail",
             action_slug="GMAIL_FETCH_EMAILS",
             reason="ready",
+            request_id=kwargs["request_id"],
             successful=True,
             status_code=200,
             data_keys=("messages",),
             log_id_present=True,
         )
 
-    monkeypatch.setattr(wiii_connect_api, "verify_composio_tool_schema", fake_schema)
-    monkeypatch.setattr(wiii_connect_api, "execute_composio_tool", fake_execute)
+    monkeypatch.setattr(executor_module, "verify_composio_tool_schema", fake_schema)
+    monkeypatch.setattr(executor_module, "execute_composio_tool", fake_execute)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=authenticated_app),
@@ -1674,6 +2311,7 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
     ) as client:
         response = await client.post(
             "/wiii-connect/providers/gmail/execute",
+            headers={"X-Request-ID": "req-wiii-connect-execute-1"},
             json={
                 "surface": "desktop",
                 "connection_ref": public_connection_ref("gmail", "ca_active"),
@@ -1696,8 +2334,11 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
     assert payload["schema"]["status"] == "ready"
     assert payload["execution"]["status"] == "succeeded"
     assert payload["execution"]["log_id_present"] is True
+    assert payload["argument_policy"]["accepted_argument_keys"] == ["query"]
+    assert payload["argument_policy"]["hidden_argument_count"] == 1
+    assert payload["operation_policy"]["status"] == "not_required"
     assert fake_storage.lists == 1
-    assert fake_storage.fetches == 1
+    assert fake_storage.fetches == 0
     assert fake_storage.audit_appends == 2
     assert "client-secret" not in serialized
     assert "access_token" not in serialized
@@ -1707,11 +2348,158 @@ async def test_wiii_connect_execute_api_runs_readonly_composio_action_safely(
 
 
 @pytest.mark.asyncio
+async def test_wiii_connect_execute_api_ignores_unverified_mutation_authorization(
+    authenticated_app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect import backend_action_executor as executor_module
+    from app.engine.wiii_connect.adapter_v1 import (
+        WiiiConnectConnectionRecordV1,
+        WiiiConnectScopeGrant,
+        public_connection_ref,
+    )
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+    )
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+
+    class FakeStorage:
+        audit_appends = 0
+        lists = 0
+
+        def status(self, *, probe_database: bool = True):
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                reason="ready",
+            )
+
+        def list_connection_records(
+            self,
+            *,
+            organization_id: str,
+            user_id: str,
+            provider_slug: str,
+        ):
+            self.lists += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert provider_slug == "facebook"
+            return [
+                WiiiConnectConnectionRecordV1(
+                    connection_id="ca_facebook",
+                    provider_slug="facebook",
+                    state="connected",
+                    scopes=WiiiConnectScopeGrant(
+                        read=True,
+                        preview=True,
+                        apply=True,
+                    ),
+                    reason="provider_connection_list",
+                ),
+            ]
+
+        def append_audit_record(self, record, *, organization_id: str, user_id: str):
+            self.audit_appends += 1
+            metadata = record.to_public_metadata()["metadata"]
+            serialized = json.dumps(record.to_public_metadata(), sort_keys=True)
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert metadata["operation_policy"]["status"] == "required"
+            assert metadata["operation_policy"]["caller_claim_ignored"] is True
+            assert "approval-token" not in serialized
+            assert "page_private" not in serialized
+            assert "secret-api-key" not in serialized
+            return True
+
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            auth_config_by_provider={"facebook": "authcfg_fb"},
+            readonly_execute_enabled=True,
+            readonly_action_allowlist_by_provider={
+                "facebook": ("FACEBOOK_LIST_MANAGED_PAGES",),
+            },
+            apply_execute_enabled=True,
+            apply_action_allowlist_by_provider={
+                "facebook": ("FACEBOOK_CREATE_POST",),
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        executor_module,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async def fake_schema(**kwargs):
+        raise AssertionError("schema probe must not run without verified authorization")
+
+    async def fake_execute(**kwargs):
+        raise AssertionError("provider execution must not run without verified authorization")
+
+    monkeypatch.setattr(executor_module, "verify_composio_tool_schema", fake_schema)
+    monkeypatch.setattr(executor_module, "execute_composio_tool", fake_execute)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/wiii-connect/providers/facebook/execute",
+            json={
+                "surface": "desktop",
+                "connection_ref": public_connection_ref("facebook", "ca_facebook"),
+                "action_slug": "FACEBOOK_CREATE_POST",
+                "path": "external_app_action",
+                "mutation": "apply",
+                "preview_evidence_required": True,
+                "preview_evidence_id": "preview_injected",
+                "approval_token_present": True,
+                "arguments": {
+                    "page_id": "page_private",
+                    "message": "safe public copy",
+                    "published": True,
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, sort_keys=True)
+    assert payload["status"] == "blocked"
+    assert payload["reason"] == "missing_preview_evidence"
+    assert payload["operation_policy"]["status"] == "required"
+    assert payload["operation_policy"]["caller_claim_ignored"] is True
+    assert payload["argument_policy"]["accepted_argument_keys"] == ["message"]
+    assert payload["argument_policy"]["hidden_argument_count"] == 2
+    assert payload["schema"] is None
+    assert payload["execution"] is None
+    assert fake_storage.lists == 1
+    assert fake_storage.audit_appends == 1
+    assert "preview_injected" not in serialized
+    assert "approval-token" not in serialized
+    assert "page_private" not in serialized
+    assert "secret-api-key" not in serialized
+
+
+@pytest.mark.asyncio
 async def test_wiii_connect_execute_blocks_missing_required_schema_arguments(
     authenticated_app,
     monkeypatch,
 ):
     from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect import backend_action_executor as executor_module
     from app.engine.wiii_connect.adapter_v1 import (
         WiiiConnectConnectionRecordV1,
         WiiiConnectScopeGrant,
@@ -1787,8 +2575,8 @@ async def test_wiii_connect_execute_blocks_missing_required_schema_arguments(
             serialized = json.dumps(record.to_public_metadata(), sort_keys=True)
             assert organization_id == "org_1"
             assert user_id == "user_1"
-            assert metadata["stage"] == "schema"
-            assert metadata["missing_required_arguments"] == [
+            assert metadata["stage"] == "argument_validation"
+            assert metadata["missing_argument_keys"] == [
                 "query",
                 "redacted_sensitive_field",
             ]
@@ -1815,7 +2603,7 @@ async def test_wiii_connect_execute_blocks_missing_required_schema_arguments(
         ),
     )
     monkeypatch.setattr(
-        wiii_connect_api,
+        executor_module,
         "get_wiii_connect_persistent_storage",
         lambda: fake_storage,
     )
@@ -1838,8 +2626,8 @@ async def test_wiii_connect_execute_blocks_missing_required_schema_arguments(
             "provider execution must not run with missing required arguments",
         )
 
-    monkeypatch.setattr(wiii_connect_api, "verify_composio_tool_schema", fake_schema)
-    monkeypatch.setattr(wiii_connect_api, "execute_composio_tool", fake_execute)
+    monkeypatch.setattr(executor_module, "verify_composio_tool_schema", fake_schema)
+    monkeypatch.setattr(executor_module, "execute_composio_tool", fake_execute)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=authenticated_app),
@@ -1870,7 +2658,7 @@ async def test_wiii_connect_execute_blocks_missing_required_schema_arguments(
     assert payload["execution"] is None
     assert payload["missing_argument_keys"] == ["query", "redacted_sensitive_field"]
     assert fake_storage.lists == 1
-    assert fake_storage.fetches == 1
+    assert fake_storage.fetches == 0
     assert fake_storage.audit_appends == 1
     assert "client-secret" not in serialized
     assert "private subject" not in serialized
@@ -1886,6 +2674,7 @@ async def test_wiii_connect_execute_requires_selected_connection_before_provider
     monkeypatch,
 ):
     from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect import backend_action_executor as executor_module
     from app.engine.wiii_connect.composio_adapter import (
         WiiiConnectComposioAdapterConfig,
     )
@@ -1916,8 +2705,8 @@ async def test_wiii_connect_execute_requires_selected_connection_before_provider
             serialized = json.dumps(record.to_public_metadata(), sort_keys=True)
             assert organization_id == "org_1"
             assert user_id == "user_1"
-            assert metadata["stage"] == "gateway"
-            assert metadata["connection_id_present"] is False
+            assert metadata["stage"] == "api_execute"
+            assert metadata["connection_ref_present"] is False
             assert metadata["connection_found"] is False
             assert metadata["request"]["action_slug"] == "GMAIL_FETCH_EMAILS"
             assert "client-secret" not in serialized
@@ -1940,7 +2729,7 @@ async def test_wiii_connect_execute_requires_selected_connection_before_provider
         ),
     )
     monkeypatch.setattr(
-        wiii_connect_api,
+        executor_module,
         "get_wiii_connect_persistent_storage",
         lambda: fake_storage,
     )
@@ -1953,8 +2742,8 @@ async def test_wiii_connect_execute_requires_selected_connection_before_provider
             "provider execution must not run without selected connection",
         )
 
-    monkeypatch.setattr(wiii_connect_api, "verify_composio_tool_schema", fake_schema)
-    monkeypatch.setattr(wiii_connect_api, "execute_composio_tool", fake_execute)
+    monkeypatch.setattr(executor_module, "verify_composio_tool_schema", fake_schema)
+    monkeypatch.setattr(executor_module, "execute_composio_tool", fake_execute)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=authenticated_app),
@@ -1990,6 +2779,334 @@ async def test_wiii_connect_execute_requires_selected_connection_before_provider
     assert "client-secret" not in serialized
     assert "access_token" not in serialized
     assert "secret-api-key" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_facebook_post_preview_apply_requires_scope_and_token(
+    authenticated_app,
+    monkeypatch,
+):
+    from app.api.v1 import wiii_connect as wiii_connect_api
+    from app.engine.wiii_connect.adapter_v1 import (
+        WiiiConnectConnectionRecordV1,
+        WiiiConnectScopeGrant,
+        public_connection_ref,
+    )
+    from app.engine.wiii_connect.composio_adapter import (
+        WiiiConnectComposioAdapterConfig,
+        WiiiConnectComposioExecuteResult,
+        WiiiConnectComposioToolSchemaResult,
+    )
+    from app.engine.wiii_connect.persistent_storage import (
+        WiiiConnectPersistentStorageStatus,
+    )
+    from app.engine.wiii_connect.operation_approval import (
+        WiiiConnectOperationApprovalDecision,
+    )
+
+    class FakeStorage:
+        def __init__(self):
+            self.connection = WiiiConnectConnectionRecordV1(
+                connection_id="ca_facebook",
+                provider_slug="facebook",
+                state="connected",
+                scopes=WiiiConnectScopeGrant(read=True),
+            )
+            self.audit_appends = 0
+            self.operation_approval_appends = 0
+            self.operation_approval_consumes = 0
+            self.operation_approvals = {}
+            self.upserts = 0
+
+        def status(self, *, probe_database: bool = True):
+            return WiiiConnectPersistentStorageStatus(
+                enabled=True,
+                persistent=True,
+                connection_table_ready=True,
+                audit_ledger_ready=True,
+                operation_approval_table_ready=True,
+                reason="ready",
+            )
+
+        def expire_stale_pending_connections(self, **kwargs):
+            return 0
+
+        def list_connection_records(self, **kwargs):
+            return (self.connection,)
+
+        def get_connection_record(self, **kwargs):
+            assert kwargs["provider_slug"] == "facebook"
+            assert kwargs["connection_id"] == "ca_facebook"
+            return self.connection
+
+        def upsert_connection_record(self, connection, **kwargs):
+            self.upserts += 1
+            self.connection = connection
+            return True
+
+        def append_audit_record(self, record, *, organization_id: str, user_id: str):
+            self.audit_appends += 1
+            serialized = json.dumps(record.to_public_metadata(), sort_keys=True)
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert "approval-token" not in serialized
+            assert "secret post message" not in serialized
+            assert "ca_facebook" not in serialized
+            return True
+
+        def append_operation_approval_record(
+            self,
+            record,
+            *,
+            organization_id: str,
+            user_id: str,
+        ):
+            self.operation_approval_appends += 1
+            serialized = json.dumps(record.to_public_metadata(), sort_keys=True)
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            assert "approval-token" not in serialized
+            assert "secret post message" not in serialized
+            assert "ca_facebook" not in serialized
+            assert "123456" not in serialized
+            self.operation_approvals[record.preview_evidence_id] = {
+                "record": record,
+                "consumed": False,
+            }
+            return True
+
+        def consume_operation_approval_record(
+            self,
+            *,
+            preview_evidence_id: str,
+            request_fingerprint: str,
+            organization_id: str,
+            user_id: str,
+            provider_slug: str,
+            action_slug: str,
+            consumed_at=None,
+        ):
+            self.operation_approval_consumes += 1
+            assert organization_id == "org_1"
+            assert user_id == "user_1"
+            stored = self.operation_approvals.get(preview_evidence_id)
+            if stored is None:
+                return WiiiConnectOperationApprovalDecision(
+                    status="blocked",
+                    reason="approval_record_missing",
+                    provider_slug=provider_slug,
+                    action_slug=action_slug,
+                    preview_evidence_id_present=bool(preview_evidence_id),
+                    request_fingerprint_present=bool(request_fingerprint),
+                    persistent=True,
+                    blocked=True,
+                )
+            if stored["consumed"]:
+                return WiiiConnectOperationApprovalDecision(
+                    status="blocked",
+                    reason="approval_record_already_consumed",
+                    provider_slug=provider_slug,
+                    action_slug=action_slug,
+                    preview_evidence_id_present=True,
+                    request_fingerprint_present=True,
+                    persistent=True,
+                    blocked=True,
+                )
+            record = stored["record"]
+            if record.request_fingerprint != request_fingerprint:
+                return WiiiConnectOperationApprovalDecision(
+                    status="blocked",
+                    reason="approval_fingerprint_mismatch",
+                    provider_slug=provider_slug,
+                    action_slug=action_slug,
+                    preview_evidence_id_present=True,
+                    request_fingerprint_present=True,
+                    persistent=True,
+                    blocked=True,
+                )
+            stored["consumed"] = True
+            return WiiiConnectOperationApprovalDecision(
+                status="consumed",
+                reason="approval_consumed",
+                provider_slug=provider_slug,
+                action_slug=action_slug,
+                preview_evidence_id_present=True,
+                request_fingerprint_present=True,
+                persistent=True,
+                consumed=True,
+            )
+
+    fake_storage = FakeStorage()
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "build_composio_adapter_config",
+        lambda: WiiiConnectComposioAdapterConfig(
+            enabled=True,
+            api_key="secret-api-key",
+            api_key_present=True,
+            auth_config_by_provider={"facebook": "authcfg_fb"},
+            readonly_execute_enabled=True,
+            readonly_action_allowlist_by_provider={
+                "facebook": ("FACEBOOK_LIST_MANAGED_PAGES",),
+            },
+            apply_execute_enabled=True,
+            apply_action_allowlist_by_provider={
+                "facebook": (
+                    "FACEBOOK_CREATE_POST",
+                    "FACEBOOK_CREATE_PHOTO_POST",
+                ),
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        wiii_connect_api,
+        "get_wiii_connect_persistent_storage",
+        lambda: fake_storage,
+    )
+
+    async def fake_schema(**kwargs):
+        return WiiiConnectComposioToolSchemaResult(
+            ready=True,
+            provider_slug="facebook",
+            action_slug=kwargs["action_slug"],
+            reason="ready",
+            schema_present=True,
+            argument_keys=("page_id", "message", "published"),
+            required_argument_keys=("page_id", "message"),
+        )
+
+    execute_calls = 0
+
+    async def fake_execute(**kwargs):
+        nonlocal execute_calls
+        execute_calls += 1
+        assert kwargs["provider_slug"] == "facebook"
+        assert kwargs["action_slug"] == "FACEBOOK_CREATE_POST"
+        assert kwargs["connected_account_id"] == "ca_facebook"
+        assert kwargs["arguments"]["page_id"] == "123456"
+        assert kwargs["arguments"]["message"] == "secret post message"
+        return WiiiConnectComposioExecuteResult(
+            ready=True,
+            provider_slug="facebook",
+            action_slug="FACEBOOK_CREATE_POST",
+            reason="ready",
+            successful=True,
+            status_code=200,
+            data_keys=("id",),
+        )
+
+    monkeypatch.setattr(wiii_connect_api, "verify_composio_tool_schema", fake_schema)
+    monkeypatch.setattr(wiii_connect_api, "execute_composio_tool", fake_execute)
+
+    connection_ref = public_connection_ref("facebook", "ca_facebook")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        blocked_preview = await client.post(
+            "/wiii-connect/providers/facebook/facebook-post/preview",
+            json={
+                "connection_ref": connection_ref,
+                "page_id": "123456",
+                "message": "secret post message",
+            },
+        )
+        scope_response = await client.post(
+            f"/wiii-connect/providers/facebook/connections/{connection_ref}/scope-grant",
+            json={"scopes": {"read": True, "preview": True, "apply": True}},
+        )
+        preview_response = await client.post(
+            "/wiii-connect/providers/facebook/facebook-post/preview",
+            json={
+                "connection_ref": connection_ref,
+                "page_id": "123456",
+                "message": "secret post message",
+            },
+        )
+        preview_payload = preview_response.json()
+        apply_response = await client.post(
+            "/wiii-connect/providers/facebook/facebook-post/apply",
+            json={
+                "connection_ref": connection_ref,
+                "page_id": "123456",
+                "message": "secret post message",
+                "approval_token": preview_payload["approval_token"],
+                "preview_evidence_id": preview_payload["preview_evidence_id"],
+            },
+        )
+        replay_response = await client.post(
+            "/wiii-connect/providers/facebook/facebook-post/apply",
+            json={
+                "connection_ref": connection_ref,
+                "page_id": "123456",
+                "message": "secret post message",
+                "approval_token": preview_payload["approval_token"],
+                "preview_evidence_id": preview_payload["preview_evidence_id"],
+            },
+        )
+
+    blocked_payload = blocked_preview.json()
+    scope_payload = scope_response.json()
+    apply_payload = apply_response.json()
+    replay_payload = replay_response.json()
+    serialized = json.dumps(
+        {
+            "scope": scope_payload,
+            "preview": preview_payload,
+            "apply": apply_payload,
+            "replay": replay_payload,
+        },
+        sort_keys=True,
+    )
+
+    assert blocked_payload["status"] == "blocked"
+    assert blocked_payload["reason"] == "missing_scope"
+    assert scope_payload["status"] == "ready"
+    assert scope_payload["connection"]["scopes"]["preview"] is True
+    assert scope_payload["connection"]["scopes"]["apply"] is True
+    assert preview_payload["status"] == "ready"
+    assert preview_payload["preview_evidence_id"].startswith("wcp_")
+    assert preview_payload["approval_token"]
+    assert preview_payload["approval_ledger"]["status"] == "pending"
+    assert preview_payload["approval_ledger"]["persistent"] is True
+    assert apply_payload["status"] == "succeeded"
+    assert apply_payload["approval_ledger"]["status"] == "consumed"
+    assert apply_payload["approval_ledger"]["consumed"] is True
+    assert apply_payload["execution"]["status"] == "succeeded"
+    assert replay_payload["status"] == "blocked"
+    assert replay_payload["reason"] == "approval_record_already_consumed"
+    assert replay_payload["approval_ledger"]["blocked"] is True
+    assert fake_storage.upserts == 1
+    assert fake_storage.audit_appends >= 3
+    assert fake_storage.operation_approval_appends == 1
+    assert fake_storage.operation_approval_consumes == 2
+    assert execute_calls == 1
+    assert "secret-api-key" not in serialized
+    assert "authcfg_fb" not in serialized
+    assert "ca_facebook" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_wiii_connect_facebook_post_preview_rejects_missing_message(
+    authenticated_app,
+):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=authenticated_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/wiii-connect/providers/facebook/facebook-post/preview",
+            json={
+                "connection_ref": "wcn_placeholder",
+                "page_id": "123456",
+                "message": "   ",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "validation_failed"
+    assert payload["reason"] == "missing_message"
 
 
 @pytest.mark.asyncio

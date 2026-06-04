@@ -425,6 +425,7 @@ class Briefing(BaseModel):
     weather_summary: str = ""
     news_highlights: List[str] = Field(default_factory=list)
     delivered_to: List[str] = Field(default_factory=list)
+    organization_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -436,6 +437,7 @@ class UserRoutine(BaseModel):
     """Learned pattern of user behavior."""
 
     user_id: str
+    organization_id: Optional[str] = None
     typical_active_hours: List[int] = Field(default_factory=list)
     preferred_briefing_time: int = Field(default=7, ge=0, le=23)
     conversation_frequency: float = Field(default=0.0, ge=0.0)
@@ -488,6 +490,7 @@ class IdentityInsight(BaseModel):
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     source: str = Field(default="reflection", description="Where this insight came from: reflection/skill/journal")
     validated: bool = Field(default=False, description="Passed Soul Core drift check")
+    organization_id: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -550,6 +553,7 @@ class ProactiveMessage(BaseModel):
 
     id: UUID = Field(default_factory=uuid4)
     user_id: str
+    organization_id: Optional[str] = None
     channel: str = "messenger"
     content: str
     trigger: str = Field(default="", description="What triggered this message")

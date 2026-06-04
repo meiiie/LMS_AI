@@ -176,7 +176,13 @@ def reembed_legacy_embedding_rows(
     batch_size: int = 16,
     limit_per_table: int | None = None,
     tables: Iterable[str] | None = None,
+    acknowledge_maintenance_window: bool = False,
 ) -> LegacyEmbeddingReembedResult:
+    if not dry_run and not acknowledge_maintenance_window:
+        raise RuntimeError(
+            "Maintenance window acknowledgement is required before applying legacy embedding re-embed."
+        )
+
     backend = get_embedding_backend()
     active_backend = backend.active_backend if backend is not None else None
     contract = (

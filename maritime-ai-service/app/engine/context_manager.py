@@ -37,6 +37,12 @@ from app.engine.context_budget_runtime import (
     ContextBudget,
     TokenBudgetManager,
 )
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +64,11 @@ class ConversationCompactor:
         self._running_summaries: Dict[str, str] = {}  # cache_key -> summary
 
     @staticmethod
-    def _cache_key(session_id: str, user_id: str = "") -> str:
+    def _cache_key(
+        session_id: str,
+        user_id: str = "",
+        org_id: str | None = None,
+    ) -> str:
         """Build composite cache key for user+session isolation.
 
         Sprint 125: Defense-in-depth — even if session IDs are already
@@ -66,8 +76,37 @@ class ConversationCompactor:
         prevents any possibility of cross-user cache collision.
         """
         if user_id:
+            if org_id:
+                return f"{org_id}::{user_id}::{session_id}"
             return f"{user_id}::{session_id}"
+        if org_id:
+            return f"{org_id}::{session_id}"
         return session_id
+
+    @staticmethod
+    def _cache_org_id(scope: MemoryWriteScope) -> str | None:
+        """Add org to cache keys only when multi-tenant isolation is active."""
+
+        if scope.state == "request_scoped":
+            return scope.org_id
+        return None
+
+    @staticmethod
+    def _log_scope_blocked(
+        *,
+        operation: str,
+        user_id: str,
+        session_id: str,
+        scope: MemoryWriteScope,
+    ) -> None:
+        logger.warning(
+            "[CONTEXT_MANAGER] Running summary %s blocked for user_hash=%s "
+            "session_hash=%s scope=%s",
+            operation,
+            hash_memory_identifier(user_id),
+            hash_memory_identifier(session_id),
+            scope.state,
+        )
 
     def get_running_summary(self, session_id: str, user_id: str = "") -> str:
         """Get the running summary for a session.
@@ -75,7 +114,23 @@ class ConversationCompactor:
         Sprint 79: Cache-first, then DB fallback when user_id is provided.
         Sprint 125: Uses composite cache key for user isolation.
         """
-        key = self._cache_key(session_id, user_id)
+        read_scope: MemoryWriteScope | None = None
+        if user_id:
+            read_scope = resolve_memory_read_scope()
+            if not read_scope.write_allowed or not read_scope.org_id:
+                self._log_scope_blocked(
+                    operation="read",
+                    user_id=user_id,
+                    session_id=session_id,
+                    scope=read_scope,
+                )
+                return ""
+
+        key = self._cache_key(
+            session_id,
+            user_id,
+            org_id=self._cache_org_id(read_scope) if read_scope else None,
+        )
 
         # Cache hit
         cached = self._running_summaries.get(key, "")
@@ -99,7 +154,23 @@ class ConversationCompactor:
         Sprint 79: Also persists to DB when user_id is provided.
         Sprint 125: Uses composite cache key for user isolation.
         """
-        key = self._cache_key(session_id, user_id)
+        write_scope: MemoryWriteScope | None = None
+        if user_id:
+            write_scope = resolve_memory_write_scope()
+            if not write_scope.write_allowed or not write_scope.org_id:
+                self._log_scope_blocked(
+                    operation="write",
+                    user_id=user_id,
+                    session_id=session_id,
+                    scope=write_scope,
+                )
+                return
+
+        key = self._cache_key(
+            session_id,
+            user_id,
+            org_id=self._cache_org_id(write_scope) if write_scope else None,
+        )
         if summary:
             self._running_summaries[key] = summary
             if user_id:
@@ -113,16 +184,31 @@ class ConversationCompactor:
     # ── Sprint 79: DB persistence for running summaries ──────────────────────
 
     def _persist_summary_to_db(
-        self, session_id: str, user_id: str, summary: str
+        self,
+        session_id: str,
+        user_id: str,
+        summary: str,
+        *,
+        scope: MemoryWriteScope | None = None,
     ) -> None:
         """Upsert running summary to semantic_memories table (fire-and-forget)."""
         try:
             from app.core.database import get_shared_session_factory
-            from app.core.org_filter import get_effective_org_id, org_where_clause
+            from app.core.org_filter import org_where_clause
             from sqlalchemy import text as sa_text
             import json
 
-            eff_org_id = get_effective_org_id()
+            write_scope = scope or resolve_memory_write_scope()
+            if not write_scope.write_allowed or not write_scope.org_id:
+                self._log_scope_blocked(
+                    operation="persist",
+                    user_id=user_id,
+                    session_id=session_id,
+                    scope=write_scope,
+                )
+                return
+
+            eff_org_id = write_scope.org_id
             org_filter = org_where_clause(eff_org_id)
 
             factory = get_shared_session_factory()
@@ -156,14 +242,30 @@ class ConversationCompactor:
         except Exception as e:
             logger.debug("Failed to persist running summary to DB: %s", e)
 
-    def _load_summary_from_db(self, session_id: str, user_id: str) -> str:
+    def _load_summary_from_db(
+        self,
+        session_id: str,
+        user_id: str,
+        *,
+        scope: MemoryWriteScope | None = None,
+    ) -> str:
         """Load running summary from semantic_memories table."""
         try:
             from app.core.database import get_shared_session_factory
-            from app.core.org_filter import get_effective_org_id, org_where_clause
+            from app.core.org_filter import org_where_clause
             from sqlalchemy import text as sa_text
 
-            eff_org_id = get_effective_org_id()
+            read_scope = scope or resolve_memory_read_scope()
+            if not read_scope.write_allowed or not read_scope.org_id:
+                self._log_scope_blocked(
+                    operation="load",
+                    user_id=user_id,
+                    session_id=session_id,
+                    scope=read_scope,
+                )
+                return ""
+
+            eff_org_id = read_scope.org_id
             org_filter = org_where_clause(eff_org_id)
 
             factory = get_shared_session_factory()
@@ -182,14 +284,30 @@ class ConversationCompactor:
             logger.debug("Failed to load running summary from DB: %s", e)
             return ""
 
-    def _delete_summary_from_db(self, session_id: str, user_id: str) -> None:
+    def _delete_summary_from_db(
+        self,
+        session_id: str,
+        user_id: str,
+        *,
+        scope: MemoryWriteScope | None = None,
+    ) -> None:
         """Delete running summary from DB."""
         try:
             from app.core.database import get_shared_session_factory
-            from app.core.org_filter import get_effective_org_id, org_where_clause
+            from app.core.org_filter import org_where_clause
             from sqlalchemy import text as sa_text
 
-            eff_org_id = get_effective_org_id()
+            write_scope = scope or resolve_memory_write_scope()
+            if not write_scope.write_allowed or not write_scope.org_id:
+                self._log_scope_blocked(
+                    operation="delete",
+                    user_id=user_id,
+                    session_id=session_id,
+                    scope=write_scope,
+                )
+                return
+
+            eff_org_id = write_scope.org_id
             org_filter = org_where_clause(eff_org_id)
 
             factory = get_shared_session_factory()
@@ -207,18 +325,37 @@ class ConversationCompactor:
             logger.debug("Failed to delete running summary from DB: %s", e)
 
     def _persist_session_summary(
-        self, session_id: str, user_id: str, summary: str
+        self,
+        session_id: str,
+        user_id: str,
+        summary: str,
+        *,
+        scope: MemoryWriteScope | None = None,
     ) -> None:
         """Also save as thread session summary for cross-session retrieval."""
         try:
             from app.core.thread_utils import build_thread_id
-            from app.core.org_filter import get_effective_org_id
             from app.repositories.thread_repository import get_thread_repository
 
-            # Sprint 170c: Include org_id for cross-org thread isolation
-            thread_id = build_thread_id(user_id, session_id, org_id=get_effective_org_id())
+            write_scope = scope or resolve_memory_write_scope()
+            if not write_scope.write_allowed or not write_scope.org_id:
+                self._log_scope_blocked(
+                    operation="thread_persist",
+                    user_id=user_id,
+                    session_id=session_id,
+                    scope=write_scope,
+                )
+                return
+
+            # Sprint 170c: Include org_id for cross-org thread isolation.
+            thread_id = build_thread_id(user_id, session_id, org_id=write_scope.org_id)
             repo = get_thread_repository()
-            repo.update_extra_data(thread_id, user_id, {"summary": summary})
+            repo.update_extra_data(
+                thread_id,
+                user_id,
+                {"summary": summary},
+                organization_id=write_scope.org_id,
+            )
         except Exception as e:
             logger.debug("Failed to persist session summary: %s", e)
 
@@ -339,7 +476,23 @@ class ConversationCompactor:
         Sprint 79: Also deletes from DB when user_id provided.
         Sprint 125: Uses composite cache key for user isolation.
         """
-        key = self._cache_key(session_id, user_id)
+        write_scope: MemoryWriteScope | None = None
+        if user_id:
+            write_scope = resolve_memory_write_scope()
+            if not write_scope.write_allowed or not write_scope.org_id:
+                self._log_scope_blocked(
+                    operation="clear",
+                    user_id=user_id,
+                    session_id=session_id,
+                    scope=write_scope,
+                )
+                return
+
+        key = self._cache_key(
+            session_id,
+            user_id,
+            org_id=self._cache_org_id(write_scope) if write_scope else None,
+        )
         if key in self._running_summaries:
             del self._running_summaries[key]
         if user_id:

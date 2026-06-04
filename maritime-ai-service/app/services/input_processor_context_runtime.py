@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from math import isfinite
 import re
 from typing import Any, Optional
 
@@ -186,6 +187,9 @@ async def build_context_impl(
         host_context=user_context.host_context if user_context else None,
         host_capabilities=user_context.host_capabilities if user_context else None,
         host_action_feedback=user_context.host_action_feedback if user_context else None,
+        host_action_control_feedback=(
+            user_context.host_action_control_feedback if user_context else None
+        ),
         visual_context=user_context.visual_context if user_context else None,
         widget_feedback=user_context.widget_feedback if user_context else None,
         code_studio_context=user_context.code_studio_context if user_context else None,
@@ -287,8 +291,11 @@ async def build_context_impl(
         session_id=session_id,
         chat_history=chat_history,
         recent_history_fallback=recent_history_fallback,
+        organization_id=getattr(request, "organization_id", None),
         logger_obj=logger_obj,
     )
+
+    episodic_org_id = getattr(request, "organization_id", None)
 
     # Phase 34 (#207): episodic recall — surface prior-session turns
     # that look related to the current message. Best-effort; if the
@@ -304,13 +311,43 @@ async def build_context_impl(
                 search_prior_user_turns,
             )
 
+            if not episodic_org_id:
+                try:
+                    from app.core.org_context import get_current_org_id
+
+                    episodic_org_id = get_current_org_id()
+                except Exception:
+                    episodic_org_id = None
             episodic_matches = await search_prior_user_turns(
                 user_id=str(user_id),
                 query=current_message,
                 limit=3,
                 exclude_session_id=str(session_id) if session_id else None,
-                org_id=getattr(request, "organization_id", None),
+                org_id=episodic_org_id,
             )
+            event_types = sorted(
+                {
+                    str(getattr(match, "event_type", "") or "").strip()
+                    for match in episodic_matches
+                    if str(getattr(match, "event_type", "") or "").strip()
+                }
+            )
+            scores = [
+                float(getattr(match, "score", 0.0) or 0.0)
+                for match in episodic_matches
+            ]
+            context.episodic_retrieval_summary = {
+                "schema_version": "wiii.episodic_retrieval.v1",
+                "status": "ready",
+                "match_count": len(episodic_matches),
+                "event_types": event_types,
+                "max_score": max(scores) if scores else 0.0,
+                "min_score": min(scores) if scores else 0.0,
+                "current_session_excluded": bool(session_id),
+                "org_scoped": bool(episodic_org_id),
+                "raw_content_included": False,
+                "warning_codes": [],
+            }
             episodic_block = render_for_prompt(episodic_matches)
             if episodic_block:
                 context.core_memory_block = (
@@ -322,6 +359,20 @@ async def build_context_impl(
                     user_id,
                 )
     except Exception as exc:  # noqa: BLE001
+        context.episodic_retrieval_summary = {
+            "schema_version": "wiii.episodic_retrieval.v1",
+            "status": "failed",
+            "match_count": 0,
+            "event_types": [],
+            "max_score": 0.0,
+            "min_score": 0.0,
+            "current_session_excluded": bool(session_id),
+            "org_scoped": bool(episodic_org_id),
+            "raw_content_included": False,
+            "warning_codes": ["episodic_retrieval_failed"],
+        }
+        if hasattr(context, "memory_warnings"):
+            context.memory_warnings.append("episodic_retrieval_failed")
         logger_obj.warning("[EPISODIC] retrieval skipped: %s", exc)
 
     if conversation_analyzer and context.history_list:
@@ -422,6 +473,66 @@ async def _populate_semantic_memory_context(
     logger_obj,
 ) -> None:
     semantic_parts: list[str] = []
+    retrieval_summary = {
+        "schema_version": "wiii.semantic_memory_retrieval.v1",
+        "status": "ready",
+        "relevant_memory_count": 0,
+        "insight_count": 0,
+        "user_fact_count": 0,
+        "semantic_memory_count": 0,
+        "memory_type_names": [],
+        "fact_type_names": [],
+        "insight_category_names": [],
+        "warning_codes": [],
+    }
+
+    def _set_retrieval_summary() -> None:
+        retrieval_summary["semantic_memory_count"] = (
+            int(retrieval_summary["relevant_memory_count"])
+            + int(retrieval_summary["insight_count"])
+            + int(retrieval_summary["user_fact_count"])
+        )
+        if hasattr(context, "memory_retrieval_summary"):
+            context.memory_retrieval_summary = dict(retrieval_summary)
+
+    def _append_unique(key: str, value) -> None:
+        token = " ".join(str(value or "").strip().split())
+        if not token:
+            return
+        target = retrieval_summary[key]
+        if token not in target and len(target) < 24:
+            target.append(token)
+
+    def _warn(code: str) -> None:
+        if code not in retrieval_summary["warning_codes"]:
+            retrieval_summary["warning_codes"].append(code)
+        if hasattr(context, "memory_warnings") and code not in context.memory_warnings:
+            context.memory_warnings.append(code)
+
+    _set_retrieval_summary()
+    read_scope = None
+    try:
+        from app.engine.semantic_memory.write_audit import resolve_memory_read_scope
+
+        read_scope = resolve_memory_read_scope()
+        if not read_scope.write_allowed:
+            warning = "semantic_memory_read_blocked_missing_org_context"
+            retrieval_summary["status"] = "blocked"
+            _warn(warning)
+            _set_retrieval_summary()
+            logger_obj.warning(
+                "Semantic memory context blocked for user due to org scope: %s",
+                read_scope.state,
+            )
+            context.user_facts = []
+            return
+    except Exception as exc:
+        logger_obj.warning("Semantic memory read scope check failed: %s", exc)
+        retrieval_summary["status"] = "blocked"
+        _warn("semantic_memory_read_scope_unknown")
+        _set_retrieval_summary()
+        context.user_facts = []
+        return
 
     try:
         insights_task = semantic_memory.retrieve_insights_prioritized(
@@ -444,8 +555,14 @@ async def _populate_semantic_memory_context(
 
         if isinstance(insights, Exception):
             logger_obj.warning("Insights retrieval failed: %s", insights)
+            retrieval_summary["status"] = "degraded"
+            _warn("semantic_insights_retrieval_failed")
             insights = []
         elif insights:
+            retrieval_summary["insight_count"] = len(insights)
+            for insight in insights[:24]:
+                category = getattr(getattr(insight, "category", None), "value", None)
+                _append_unique("insight_category_names", category)
             insight_lines = [f"- [{i.category.value}] {i.content}" for i in insights[:5]]
             semantic_parts.append("=== Behavioral Insights ===\n" + "\n".join(insight_lines))
             logger_obj.info(
@@ -456,8 +573,15 @@ async def _populate_semantic_memory_context(
 
         if isinstance(mem_context, Exception):
             logger_obj.warning("Context retrieval failed: %s", mem_context)
+            retrieval_summary["status"] = "degraded"
+            _warn("semantic_context_retrieval_failed")
             context.user_facts = []
         else:
+            memories = list(getattr(mem_context, "relevant_memories", []) or [])
+            retrieval_summary["relevant_memory_count"] = len(memories)
+            for memory in memories[:24]:
+                memory_type = getattr(getattr(memory, "memory_type", None), "value", None)
+                _append_unique("memory_type_names", memory_type)
             traditional_context = mem_context.to_prompt_context()
             if traditional_context:
                 semantic_parts.append(traditional_context)
@@ -465,6 +589,8 @@ async def _populate_semantic_memory_context(
 
     except Exception as exc:
         logger_obj.warning("Semantic memory retrieval failed: %s", exc)
+        retrieval_summary["status"] = "degraded"
+        _warn("semantic_memory_retrieval_failed")
 
     try:
         from app.models.semantic_memory import FactWithProvenance
@@ -493,6 +619,8 @@ async def _populate_semantic_memory_context(
                         )
         except Exception as exc:
             logger_obj.debug("Semantic fact retrieval fallback: %s", exc)
+            retrieval_summary["status"] = "degraded"
+            _warn("semantic_fact_retrieval_failed")
 
         if not raw_facts and semantic_memory and hasattr(semantic_memory, "_repository"):
             raw_facts = semantic_memory._repository.get_user_facts(
@@ -505,6 +633,7 @@ async def _populate_semantic_memory_context(
         for rf in raw_facts or []:
             meta = rf.metadata or {}
             fact_type = meta.get("fact_type", "unknown")
+            _append_unique("fact_type_names", fact_type)
             access_count = meta.get("access_count", 0)
             effective = calculate_effective_importance_from_timestamps(
                 base_importance=rf.importance,
@@ -528,12 +657,17 @@ async def _populate_semantic_memory_context(
                 )
             )
         context.user_facts = provenance_facts
+        retrieval_summary["user_fact_count"] = len(provenance_facts)
     except Exception as exc:
         logger_obj.warning("User facts retrieval failed: %s", exc)
+        retrieval_summary["status"] = "degraded"
+        _warn("user_facts_retrieval_failed")
         context.user_facts = []
 
     if semantic_parts:
         context.semantic_context = "\n\n".join(semantic_parts)
+
+    _set_retrieval_summary()
 
 
 async def _populate_parallel_context(
@@ -560,7 +694,10 @@ async def _populate_parallel_context(
         try:
             from app.services.session_summarizer import get_session_summarizer
 
-            parallel_tasks["session_summaries"] = get_session_summarizer().get_recent_summaries(user_id)
+            parallel_tasks["session_summaries"] = get_session_summarizer().get_recent_summaries(
+                user_id,
+                organization_id=getattr(request, "organization_id", None),
+            )
         except Exception as exc:
             logger_obj.debug("Session summarizer not available: %s", exc)
     else:
@@ -612,14 +749,21 @@ def _populate_history_context(
     session_id,
     chat_history,
     recent_history_fallback,
+    organization_id=None,
     logger_obj,
 ) -> None:
     persisted_history: list[dict[str, str]] = []
     fallback_history = _normalize_history_list(recent_history_fallback)
     persisted_prompt = ""
+    history_warning_codes: list[str] = []
+    chat_history_available = bool(chat_history and chat_history.is_available())
+    user_name_present = bool(getattr(context, "user_name", None))
 
-    if chat_history and chat_history.is_available():
-        recent_messages = chat_history.get_recent_messages(session_id)
+    if chat_history_available:
+        recent_messages = chat_history.get_recent_messages(
+            session_id,
+            organization_id=organization_id,
+        )
         logger_obj.info(
             "[HISTORY] Loaded %d messages for session %s",
             len(recent_messages),
@@ -636,8 +780,13 @@ def _populate_history_context(
         persisted_prompt = chat_history.format_history_for_prompt(recent_messages)
 
         if not context.user_name:
-            context.user_name = chat_history.get_user_name(session_id)
+            context.user_name = chat_history.get_user_name(
+                session_id,
+                organization_id=organization_id,
+            )
+        user_name_present = bool(getattr(context, "user_name", None))
     else:
+        history_warning_codes.append("chat_history_unavailable")
         logger_obj.warning(
             "[HISTORY] Chat history unavailable — using session continuity fallback."
         )
@@ -647,6 +796,7 @@ def _populate_history_context(
         fallback_history=fallback_history,
     )
     if chosen_history is fallback_history and fallback_history:
+        history_warning_codes.append("session_history_fallback_used")
         logger_obj.info(
             "[HISTORY] Using session continuity fallback with %d messages for session %s",
             len(fallback_history),
@@ -658,10 +808,23 @@ def _populate_history_context(
         context.conversation_history = persisted_prompt
     else:
         context.conversation_history = _format_history_for_prompt(chosen_history)
+    if hasattr(context, "history_retrieval_summary"):
+        context.history_retrieval_summary = _build_history_retrieval_summary(
+            chat_history_available=chat_history_available,
+            persisted_history=persisted_history,
+            fallback_history=fallback_history,
+            chosen_history=chosen_history,
+            organization_id=organization_id,
+            user_name_present=user_name_present,
+            warning_codes=history_warning_codes,
+        )
     return
 
     if chat_history and chat_history.is_available():
-        recent_messages = chat_history.get_recent_messages(session_id)
+        recent_messages = chat_history.get_recent_messages(
+            session_id,
+            organization_id=organization_id,
+        )
         logger_obj.info("[HISTORY] Loaded %d messages for session %s", len(recent_messages), session_id)
         context.conversation_history = chat_history.format_history_for_prompt(recent_messages)
 
@@ -674,7 +837,10 @@ def _populate_history_context(
             )
 
         if not context.user_name:
-            context.user_name = chat_history.get_user_name(session_id)
+            context.user_name = chat_history.get_user_name(
+                session_id,
+                organization_id=organization_id,
+            )
         return
 
     logger_obj.warning(
@@ -694,6 +860,43 @@ def _normalize_history_list(history_items) -> list[dict[str, str]]:
             continue
         normalized.append({"role": role, "content": content})
     return normalized
+
+
+def _build_history_retrieval_summary(
+    *,
+    chat_history_available: bool,
+    persisted_history: list[dict[str, str]],
+    fallback_history: list[dict[str, str]],
+    chosen_history: list[dict[str, str]],
+    organization_id,
+    user_name_present: bool,
+    warning_codes: list[str],
+) -> dict[str, object]:
+    if chosen_history is persisted_history and persisted_history:
+        source = "persisted_chat_history"
+        status = "ready"
+    elif chosen_history is fallback_history and fallback_history:
+        source = "session_continuity_fallback"
+        status = "fallback"
+    elif chat_history_available:
+        source = "persisted_chat_history"
+        status = "empty"
+    else:
+        source = "none"
+        status = "unavailable"
+
+    return {
+        "schema_version": "wiii.chat_history_retrieval.v1",
+        "status": status,
+        "source": source,
+        "persisted_history_item_count": len(persisted_history),
+        "fallback_history_item_count": len(fallback_history),
+        "selected_history_item_count": len(chosen_history),
+        "org_scoped": bool(organization_id),
+        "user_name_present": bool(user_name_present),
+        "raw_content_included": False,
+        "warning_codes": sorted(set(warning_codes)),
+    }
 
 
 def _history_quality_score(history_items: list[dict[str, str]]) -> tuple[int, int, int]:
@@ -785,6 +988,13 @@ async def _apply_budgeted_history(
             context.conversation_summary = running_summary
 
         if budget:
+            if hasattr(context, "context_budget_summary"):
+                context.context_budget_summary = _build_context_budget_summary(
+                    status="ready",
+                    budget=budget,
+                    langchain_message_count=len(lc_messages or []),
+                    warning_codes=[],
+                )
             logger_obj.info(
                 "[CONTEXT_MGR] Budget: %d/%d tokens (%.0f%%), %d msgs included, %d dropped%s",
                 budget.total_used,
@@ -797,5 +1007,51 @@ async def _apply_budgeted_history(
     except Exception as exc:
         logger_obj.warning("[CONTEXT_MGR] Budget manager unavailable, using fixed window: %s", exc)
         context.langchain_messages = window_mgr.build_messages(context.history_list or [])
+        if hasattr(context, "context_budget_summary"):
+            context.context_budget_summary = _build_context_budget_summary(
+                status="fallback",
+                budget=None,
+                langchain_message_count=len(context.langchain_messages or []),
+                warning_codes=["context_budget_unavailable"],
+            )
 
     context.conversation_history = window_mgr.format_for_prompt(context.history_list or [])
+
+
+def _build_context_budget_summary(
+    *,
+    status: str,
+    budget,
+    langchain_message_count: int,
+    warning_codes: list[str],
+) -> dict[str, object]:
+    budget_dict = budget.to_dict() if budget and hasattr(budget, "to_dict") else {}
+    layers = budget_dict.get("layers") if isinstance(budget_dict, dict) else {}
+    return {
+        "schema_version": "wiii.context_budget.v1",
+        "status": status,
+        "total_budget": _nonnegative_int(budget_dict.get("total_budget")),
+        "total_used": _nonnegative_int(budget_dict.get("total_used")),
+        "utilization": _safe_budget_float(budget_dict.get("utilization")),
+        "needs_compaction": bool(budget_dict.get("needs_compaction")),
+        "messages_included": _nonnegative_int(budget_dict.get("messages_included")),
+        "messages_dropped": _nonnegative_int(budget_dict.get("messages_dropped")),
+        "has_summary": bool(budget_dict.get("has_summary")),
+        "langchain_message_count": max(0, int(langchain_message_count or 0)),
+        "layers": layers if isinstance(layers, dict) else {},
+        "raw_content_included": False,
+        "warning_codes": sorted(set(warning_codes)),
+    }
+
+
+def _nonnegative_int(value) -> int:
+    return value if type(value) is int and value >= 0 else 0
+
+
+def _safe_budget_float(value) -> float:
+    if type(value) not in (int, float):
+        return 0.0
+    numeric = float(value)
+    if not isfinite(numeric):
+        return 0.0
+    return round(numeric, 4)

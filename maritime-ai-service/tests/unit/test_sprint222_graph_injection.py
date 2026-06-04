@@ -1,6 +1,7 @@
 """Sprint 222/234: Graph-level host and operator context injection."""
 
 import inspect
+from unittest.mock import patch
 
 
 def test_inject_host_context_empty_when_no_context():
@@ -125,6 +126,51 @@ def test_inject_host_context_uses_turn_role_when_host_role_missing():
     assert "host_capabilities_prompt" in state
     assert "authoring.preview_lesson_patch" in state["host_capabilities_prompt"]
     assert state["host_capabilities"]["tools"][0]["name"] == "authoring.preview_lesson_patch"
+
+
+def test_inject_host_context_keeps_legacy_lms_course_author_permission():
+    from app.engine.multi_agent.graph import _inject_host_context
+
+    state = {
+        "organization_id": "maritime-lms",
+        "user_id": "teacher-1",
+        "context": {
+            "user_role": "teacher",
+            "host_context": {
+                "host_type": "lms",
+                "connector_id": "live-lms-test-course",
+                "host_user_id": "teacher-1",
+                "page": {"type": "course_editor", "title": "Curriculum"},
+            },
+            "host_capabilities": {
+                "host_type": "lms",
+                "host_name": "Maritime LMS",
+                "connector_id": "live-lms-test-course",
+                "tools": [
+                    {
+                        "name": "authoring.preview_lesson_patch",
+                        "description": "Preview lesson patch",
+                        "roles": ["teacher", "admin"],
+                        "permission": "course.author",
+                        "requires_confirmation": True,
+                        "mutates_state": False,
+                    }
+                ],
+            },
+        },
+    }
+
+    with patch(
+        "app.engine.context.capability_policy.get_org_permissions",
+        return_value=["read:chat", "use:tools", "manage:courses"],
+    ):
+        result = _inject_host_context(state)
+
+    assert "<host_context" in result
+    assert "host_capabilities_prompt" in state
+    assert [tool["name"] for tool in state["host_capabilities"]["tools"]] == [
+        "authoring.preview_lesson_patch"
+    ]
 
 
 def test_inject_host_context_filters_disallowed_capabilities_for_student():
@@ -353,7 +399,7 @@ def test_inject_operator_context_mentions_preview_confirmation_when_pending():
     }
 
     prompt = _inject_operator_context(state)
-    assert "lesson-preview-123" in prompt
+    assert "lesson-preview-123" not in prompt
     assert "authoring.apply_lesson_patch" in prompt
 
 

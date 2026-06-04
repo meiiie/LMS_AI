@@ -20,6 +20,7 @@ import json
 
 # Patch targets — lazy imports in reflection_engine
 _LLM_PATCH = "app.engine.llm_pool.get_llm_light"
+_LLM_FOR_PROVIDER_PATCH = "app.engine.llm_pool.get_llm_for_provider"
 _CHAR_STATE_PATCH = "app.engine.character.character_state.get_character_state_manager"
 _CHAR_REPO_PATCH = "app.engine.character.character_repository.get_character_repository"
 
@@ -163,13 +164,24 @@ class TestReflectUserIsolation:
 
         with patch(_CHAR_STATE_PATCH, return_value=mock_manager), \
              patch(_CHAR_REPO_PATCH, return_value=mock_repo), \
+             patch(_LLM_FOR_PROVIDER_PATCH, return_value=None), \
              patch(_LLM_PATCH, return_value=mock_llm):
-            await engine.reflect("hello", "hi", user_id="test-user-42")
+            await engine.reflect(
+                "hello",
+                "hi",
+                user_id="test-user-42",
+                organization_id="org-ref",
+            )
 
         # Verify user_id was passed
-        mock_manager.get_blocks.assert_called_once_with(user_id="test-user-42")
+        mock_manager.get_blocks.assert_called_once_with(
+            user_id="test-user-42",
+            organization_id="org-ref",
+        )
         mock_repo.get_recent_experiences.assert_called_once_with(
-            limit=10, user_id="test-user-42",
+            limit=10,
+            user_id="test-user-42",
+            organization_id="org-ref",
         )
 
     @pytest.mark.asyncio
@@ -195,19 +207,28 @@ class TestReflectUserIsolation:
 
         with patch(_CHAR_STATE_PATCH, return_value=mock_manager), \
              patch(_CHAR_REPO_PATCH, return_value=mock_repo), \
+             patch(_LLM_FOR_PROVIDER_PATCH, return_value=None), \
              patch(_LLM_PATCH, return_value=mock_llm), \
              patch("app.core.config.settings") as mock_settings:
             mock_settings.character_experience_retention_days = 90
             mock_settings.character_experience_keep_min = 100
-            result = await engine.reflect("hello", "hi", user_id="user-X")
+            result = await engine.reflect(
+                "hello",
+                "hi",
+                user_id="user-X",
+                organization_id="org-X",
+            )
 
         # Verify update_block was called with user_id
         call_kwargs = mock_manager.update_block.call_args[1]
         assert call_kwargs["user_id"] == "user-X"
+        assert call_kwargs["organization_id"] == "org-X"
 
         # Verify cleanup was called with user_id
         cleanup_kwargs = mock_repo.cleanup_old_experiences.call_args[1]
         assert cleanup_kwargs["user_id"] == "user-X"
+        assert cleanup_kwargs["organization_id"] == "org-X"
+        assert mock_repo.log_experience.call_args.kwargs["organization_id"] == "org-X"
 
     @pytest.mark.asyncio
     async def test_reflect_none_user_defaults_to_global(self):
@@ -229,10 +250,14 @@ class TestReflectUserIsolation:
 
         with patch(_CHAR_STATE_PATCH, return_value=mock_manager), \
              patch(_CHAR_REPO_PATCH, return_value=mock_repo), \
+             patch(_LLM_FOR_PROVIDER_PATCH, return_value=None), \
              patch(_LLM_PATCH, return_value=mock_llm):
             await engine.reflect("hi", "hello", user_id=None)
 
-        mock_manager.get_blocks.assert_called_once_with(user_id="__global__")
+        mock_manager.get_blocks.assert_called_once_with(
+            user_id="__global__",
+            organization_id=None,
+        )
 
 
 # =============================================================================

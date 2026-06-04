@@ -31,6 +31,7 @@ class SubagentResult(BaseModel):
     sources: List[Dict[str, Any]] = Field(default_factory=list)
     tools_used: List[Dict[str, Any]] = Field(default_factory=list)
     evidence_images: List[Dict[str, Any]] = Field(default_factory=list)  # Sprint 189b
+    boundary: Dict[str, Any] = Field(default_factory=dict)
     thinking: Optional[str] = None
     error_message: Optional[str] = None
     duration_ms: int = Field(default=0, ge=0)

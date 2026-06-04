@@ -6,14 +6,28 @@ on:
     paths:
       - 'tools/wiii_self_harness/**'
       - 'tools/wiii_understand_harness/**'
+      - 'maritime-ai-service/scripts/runtime_evidence_output.py'
+      - 'maritime-ai-service/tests/unit/test_runtime_evidence_output.py'
+      - 'wiii-desktop/scripts/runtime-evidence-output.mjs'
+      - 'wiii-desktop/scripts/test-runtime-evidence-output.mjs'
       - 'docs/operations/WIII_SELF_HARNESS.md'
       - 'docs/operations/WIII_SYSTEM_CONTROL_PLANE.md'
+      - 'docs/operations/WIII_CONNECT_COMPOSIO_ACCEPTANCE_RUNBOOK.md'
       - 'docs/operations/WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md'
       - 'docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md'
       - 'docs/operations/WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md'
       - 'docs/operations/WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_*.md'
       - '.understandignore'
       - '.github/workflows/wiii-self-harness.yml'
+      - '.github/workflows/provider-runtime-evidence.yml'
+      - '.github/workflows/subagent-boundary-evidence.yml'
+      - '.github/workflows/autonomy-runtime-evidence.yml'
+      - '.github/workflows/lms-test-course-evidence.yml'
+      - '.github/workflows/semantic-memory-write-evidence.yml'
+      - '.github/workflows/wiii-connect-action-evidence.yml'
+      - '.github/workflows/wiii-connect-facebook-post-replay-evidence.yml'
+      - '.github/workflows/wiii-connect-composio-acceptance-evidence.yml'
+      - '.github/workflows/runtime-ledger-browser-replay-evidence.yml'
       - 'maritime-ai-service/app/engine/multi_agent/context_provenance_ledger.py'
       - 'maritime-ai-service/app/engine/multi_agent/runtime_flow_ledger.py'
       - 'maritime-ai-service/tests/unit/test_context_provenance_ledger.py'
@@ -45,14 +59,28 @@ on:
     paths:
       - 'tools/wiii_self_harness/**'
       - 'tools/wiii_understand_harness/**'
+      - 'maritime-ai-service/scripts/runtime_evidence_output.py'
+      - 'maritime-ai-service/tests/unit/test_runtime_evidence_output.py'
+      - 'wiii-desktop/scripts/runtime-evidence-output.mjs'
+      - 'wiii-desktop/scripts/test-runtime-evidence-output.mjs'
       - 'docs/operations/WIII_SELF_HARNESS.md'
       - 'docs/operations/WIII_SYSTEM_CONTROL_PLANE.md'
+      - 'docs/operations/WIII_CONNECT_COMPOSIO_ACCEPTANCE_RUNBOOK.md'
       - 'docs/operations/WIII_REFERENCE_SYSTEMS_AUDIT_2026-05-25.md'
       - 'docs/operations/WIII_OPENHUMAN_REFERENCE_AUDIT_2026-05-26.md'
       - 'docs/operations/WIII_OPENCLAW_REFERENCE_AUDIT_2026-05-25.md'
       - 'docs/operations/WIII_UNDERSTAND_ANYTHING_REFERENCE_AUDIT_*.md'
       - '.understandignore'
       - '.github/workflows/wiii-self-harness.yml'
+      - '.github/workflows/provider-runtime-evidence.yml'
+      - '.github/workflows/subagent-boundary-evidence.yml'
+      - '.github/workflows/autonomy-runtime-evidence.yml'
+      - '.github/workflows/lms-test-course-evidence.yml'
+      - '.github/workflows/semantic-memory-write-evidence.yml'
+      - '.github/workflows/wiii-connect-action-evidence.yml'
+      - '.github/workflows/wiii-connect-facebook-post-replay-evidence.yml'
+      - '.github/workflows/wiii-connect-composio-acceptance-evidence.yml'
+      - '.github/workflows/runtime-ledger-browser-replay-evidence.yml'
       - 'maritime-ai-service/app/engine/multi_agent/context_provenance_ledger.py'
       - 'maritime-ai-service/app/engine/multi_agent/runtime_flow_ledger.py'
       - 'maritime-ai-service/tests/unit/test_context_provenance_ledger.py'
@@ -91,6 +119,7 @@ jobs:
   self-harness:
     name: Wiii Self-Harness
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -101,11 +130,239 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Generate self-harness report artifacts
+        run: python tools/wiii_self_harness/generate_self_harness_report_bundle.py --out-dir artifacts/wiii-self-harness --require-no-synthetic-gaps --require-credentialed-external-contracts
+
+      - name: Validate self-harness report bundle
+        run: python tools/wiii_self_harness/validate_self_harness_report_bundle.py artifacts/wiii-self-harness --json --require-self-validation --require-no-synthetic-gaps --require-credentialed-external-contracts --out artifacts/wiii-self-harness-report-bundle-validation.json
+
       - name: Validate scenario manifest
-        run: python tools/wiii_self_harness/run_wiii_self_harness.py
+        run: python tools/wiii_self_harness/run_wiii_self_harness.py --json --out artifacts/wiii-self-harness-validation.json
+
+      - name: Validate runtime evidence registry
+        run: python tools/wiii_self_harness/validate_runtime_evidence_registry.py --json --out artifacts/wiii-runtime-evidence-registry-validation.json
+
+      - name: Validate self-harness sidecar parity
+        run: python tools/wiii_self_harness/validate_self_harness_sidecar_parity.py --bundle-root artifacts/wiii-self-harness --self-harness-sidecar artifacts/wiii-self-harness-validation.json --registry-sidecar artifacts/wiii-runtime-evidence-registry-validation.json --json --out artifacts/wiii-self-harness-sidecar-parity-validation.json
+
+      - name: Smoke completion audit handoff
+        run: python tools/wiii_self_harness/smoke_completion_audit_handoff.py --self-harness-report-bundle artifacts/wiii-self-harness --artifact-bundle-root artifacts/runtime-evidence-empty --out-dir artifacts/wiii-completion-audit-smoke --json-out artifacts/wiii-completion-audit-smoke.json --release-gate-json-out artifacts/wiii-completion-audit-smoke-release-gate-validation.json
+
+      - name: Validate completion audit handoff smoke bundle
+        run: python tools/wiii_self_harness/validate_completion_audit_handoff.py artifacts/wiii-completion-audit-smoke --json --out artifacts/wiii-completion-audit-smoke-validation.json
+
+      - name: Validate completion audit smoke sidecars
+        run: python tools/wiii_self_harness/validate_completion_audit_smoke.py artifacts/wiii-completion-audit-smoke.json --release-gate-json artifacts/wiii-completion-audit-smoke-release-gate-validation.json --structural-validation-json artifacts/wiii-completion-audit-smoke-validation.json --require-handoff-root-source --json --out artifacts/wiii-completion-audit-smoke-sidecars-validation.json
+
+      - name: Report non-LMS completion audit readiness
+        run: |
+          READINESS_AS_OF="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python tools/wiii_self_harness/report_completion_audit_readiness.py artifacts/runtime-evidence-empty --self-harness-report-bundle artifacts/wiii-self-harness --exclude-requirement-id lms-test-course-replay --as-of "$READINESS_AS_OF" --format json --out artifacts/wiii-completion-audit-readiness-non-lms.json
+          python tools/wiii_self_harness/report_completion_audit_readiness.py artifacts/runtime-evidence-empty --self-harness-report-bundle artifacts/wiii-self-harness --exclude-requirement-id lms-test-course-replay --as-of "$READINESS_AS_OF" --format markdown --out artifacts/wiii-completion-audit-readiness-non-lms.md
+
+      - name: Validate non-LMS completion audit readiness report
+        run: python tools/wiii_self_harness/validate_completion_audit_readiness.py artifacts/wiii-completion-audit-readiness-non-lms.json --markdown-report artifacts/wiii-completion-audit-readiness-non-lms.md --self-harness-report-bundle artifacts/wiii-self-harness --json --out artifacts/wiii-completion-audit-readiness-validation-non-lms.json
+
+      - name: Generate non-LMS completion audit run plan
+        run: |
+          python tools/wiii_self_harness/generate_completion_audit_run_plan.py artifacts/wiii-completion-audit-readiness-non-lms.json --format json --out artifacts/wiii-completion-audit-run-plan-non-lms.json
+          python tools/wiii_self_harness/generate_completion_audit_run_plan.py artifacts/wiii-completion-audit-readiness-non-lms.json --format markdown --out artifacts/wiii-completion-audit-run-plan-non-lms.md
+
+      - name: Validate non-LMS completion audit run plan
+        run: python tools/wiii_self_harness/validate_completion_audit_run_plan.py artifacts/wiii-completion-audit-run-plan-non-lms.json --readiness-report artifacts/wiii-completion-audit-readiness-non-lms.json --readiness-markdown-report artifacts/wiii-completion-audit-readiness-non-lms.md --readiness-preflight-dir artifacts --self-harness-report-bundle artifacts/wiii-self-harness --markdown-report artifacts/wiii-completion-audit-run-plan-non-lms.md --json --out artifacts/wiii-completion-audit-run-plan-validation-non-lms.json
+
+      - name: Generate non-LMS completion audit launch pack
+        run: |
+          python tools/wiii_self_harness/generate_completion_audit_launch_pack.py artifacts/wiii-completion-audit-run-plan-non-lms.json --format json --out artifacts/wiii-completion-audit-launch-pack-non-lms.json
+          python tools/wiii_self_harness/generate_completion_audit_launch_pack.py artifacts/wiii-completion-audit-run-plan-non-lms.json --format markdown --out artifacts/wiii-completion-audit-launch-pack-non-lms.md
+
+      - name: Validate non-LMS completion audit launch pack
+        run: python tools/wiii_self_harness/validate_completion_audit_launch_pack.py artifacts/wiii-completion-audit-launch-pack-non-lms.json --run-plan artifacts/wiii-completion-audit-run-plan-non-lms.json --repo-root . --markdown-report artifacts/wiii-completion-audit-launch-pack-non-lms.md --json --out artifacts/wiii-completion-audit-launch-pack-validation-non-lms.json
+
+      - name: Generate non-LMS completion audit setup state
+        run: python tools/wiii_self_harness/generate_completion_audit_setup_state.py artifacts/wiii-completion-audit-launch-pack-non-lms.json --repo-root . --out artifacts/wiii-completion-audit-setup-state-non-lms.json
+
+      - name: Validate non-LMS completion audit setup state
+        run: python tools/wiii_self_harness/validate_completion_audit_setup_state.py artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --json --out artifacts/wiii-completion-audit-setup-state-validation-non-lms.json
+
+      - name: Generate non-LMS completion audit setup handle plan
+        run: python tools/wiii_self_harness/generate_completion_audit_setup_handle_plan.py artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --out artifacts/wiii-completion-audit-setup-handle-plan-non-lms.json
+
+      - name: Validate non-LMS completion audit setup handle plan
+        run: python tools/wiii_self_harness/validate_completion_audit_setup_handle_plan.py artifacts/wiii-completion-audit-setup-handle-plan-non-lms.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --json --out artifacts/wiii-completion-audit-setup-handle-plan-validation-non-lms.json
+
+      - name: Report non-LMS completion audit setup gaps
+        run: |
+          python tools/wiii_self_harness/report_completion_audit_setup_gaps.py artifacts/wiii-completion-audit-setup-handle-plan-non-lms.json --format json --out artifacts/wiii-completion-audit-setup-gaps-non-lms.json
+          python tools/wiii_self_harness/report_completion_audit_setup_gaps.py artifacts/wiii-completion-audit-setup-handle-plan-non-lms.json --format markdown --out artifacts/wiii-completion-audit-setup-gaps-non-lms.md
+
+      - name: Validate non-LMS completion audit setup gaps
+        run: python tools/wiii_self_harness/validate_completion_audit_setup_gaps.py artifacts/wiii-completion-audit-setup-gaps-non-lms.json --setup-handle-plan artifacts/wiii-completion-audit-setup-handle-plan-non-lms.json --markdown-report artifacts/wiii-completion-audit-setup-gaps-non-lms.md --json --out artifacts/wiii-completion-audit-setup-gaps-validation-non-lms.json
+
+      - name: Generate non-LMS completion audit setup attestation template
+        run: python tools/wiii_self_harness/generate_completion_audit_setup_attestation_template.py artifacts/wiii-completion-audit-setup-handle-plan-non-lms.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --out artifacts/wiii-completion-audit-setup-attestation-template-non-lms.json
+
+      - name: Validate non-LMS completion audit setup attestation template
+        run: python tools/wiii_self_harness/validate_completion_audit_setup_attestation_template.py artifacts/wiii-completion-audit-setup-attestation-template-non-lms.json --setup-handle-plan artifacts/wiii-completion-audit-setup-handle-plan-non-lms.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --json --out artifacts/wiii-completion-audit-setup-attestation-template-validation-non-lms.json
+
+      - name: Smoke non-LMS completion audit setup attestation path
+        run: python tools/wiii_self_harness/smoke_completion_audit_setup_attestation.py --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --setup-handle-plan artifacts/wiii-completion-audit-setup-handle-plan-non-lms.json --template artifacts/wiii-completion-audit-setup-attestation-template-non-lms.json --out-dir artifacts/wiii-completion-audit-setup-attestation-smoke --json-out artifacts/wiii-completion-audit-setup-attestation-smoke.json --repo-root .
+
+      - name: Validate non-LMS completion audit setup attestation smoke
+        run: python tools/wiii_self_harness/validate_completion_audit_setup_attestation_smoke.py artifacts/wiii-completion-audit-setup-attestation-smoke.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --setup-handle-plan artifacts/wiii-completion-audit-setup-handle-plan-non-lms.json --template artifacts/wiii-completion-audit-setup-attestation-template-non-lms.json --out-dir artifacts/wiii-completion-audit-setup-attestation-smoke --repo-root . --json --out artifacts/wiii-completion-audit-setup-attestation-smoke-validation-non-lms.json
+
+      - name: Generate non-LMS completion audit dispatch gate
+        run: python tools/wiii_self_harness/generate_completion_audit_dispatch_gate.py artifacts/wiii-completion-audit-launch-pack-non-lms.json artifacts/wiii-completion-audit-setup-state-non-lms.json --out artifacts/wiii-completion-audit-dispatch-gate-non-lms.json
+
+      - name: Validate non-LMS completion audit dispatch gate
+        run: python tools/wiii_self_harness/validate_completion_audit_dispatch_gate.py artifacts/wiii-completion-audit-dispatch-gate-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --json --out artifacts/wiii-completion-audit-dispatch-gate-validation-non-lms.json
+
+      - name: Materialize non-LMS completion audit dispatch run
+        run: python tools/wiii_self_harness/run_completion_audit_dispatch_gate.py artifacts/wiii-completion-audit-dispatch-gate-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --repo-root . --allow-pending-report --out artifacts/wiii-completion-audit-dispatch-run-non-lms.json
+
+      - name: Validate non-LMS completion audit dispatch run
+        run: python tools/wiii_self_harness/validate_completion_audit_dispatch_run.py artifacts/wiii-completion-audit-dispatch-run-non-lms.json --dispatch-gate artifacts/wiii-completion-audit-dispatch-gate-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --repo-root . --json --out artifacts/wiii-completion-audit-dispatch-run-validation-non-lms.json
+
+      - name: Materialize non-LMS completion audit dispatch diagnostics
+        run: python tools/wiii_self_harness/run_completion_audit_dispatch_diagnostics.py artifacts/wiii-completion-audit-dispatch-run-non-lms.json --dispatch-gate artifacts/wiii-completion-audit-dispatch-gate-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --repo-root . --out artifacts/wiii-completion-audit-dispatch-diagnostics-non-lms.json
+
+      - name: Validate non-LMS completion audit dispatch diagnostics
+        run: python tools/wiii_self_harness/validate_completion_audit_dispatch_diagnostics.py artifacts/wiii-completion-audit-dispatch-diagnostics-non-lms.json --dispatch-run artifacts/wiii-completion-audit-dispatch-run-non-lms.json --dispatch-gate artifacts/wiii-completion-audit-dispatch-gate-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --repo-root . --json --out artifacts/wiii-completion-audit-dispatch-diagnostics-validation-non-lms.json
+
+      - name: Generate non-LMS completion audit handoff for recovery
+        run: python tools/wiii_self_harness/generate_completion_audit_handoff.py artifacts/runtime-evidence-empty --self-harness-report-bundle artifacts/wiii-self-harness --readiness-report artifacts/wiii-completion-audit-readiness-non-lms.json --setup-gap-report artifacts/wiii-completion-audit-setup-gaps-non-lms.json --setup-gap-markdown-report artifacts/wiii-completion-audit-setup-gaps-non-lms.md --out-dir artifacts/wiii-completion-audit-handoff-non-lms --allow-not-ready
+
+      - name: Validate non-LMS completion audit handoff for recovery
+        run: python tools/wiii_self_harness/validate_completion_audit_handoff.py artifacts/wiii-completion-audit-handoff-non-lms --json --out artifacts/wiii-completion-audit-handoff-validation-non-lms.json
+
+      - name: Generate non-LMS completion audit recovery plan
+        run: |
+          python tools/wiii_self_harness/generate_completion_audit_recovery_plan.py artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --format json --out artifacts/wiii-completion-audit-recovery-plan-non-lms.json
+          python tools/wiii_self_harness/generate_completion_audit_recovery_plan.py artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --format markdown --out artifacts/wiii-completion-audit-recovery-plan-non-lms.md
+
+      - name: Validate non-LMS completion audit recovery plan
+        run: python tools/wiii_self_harness/validate_completion_audit_recovery_plan.py artifacts/wiii-completion-audit-recovery-plan-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --json --out artifacts/wiii-completion-audit-recovery-plan-validation-non-lms.json
+
+      - name: Materialize non-LMS completion audit recovery queue
+        run: python tools/wiii_self_harness/run_completion_audit_recovery_queue.py artifacts/wiii-completion-audit-recovery-plan-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --out artifacts/wiii-completion-audit-recovery-queue-non-lms.json
+
+      - name: Validate non-LMS completion audit recovery queue
+        run: python tools/wiii_self_harness/validate_completion_audit_recovery_queue.py artifacts/wiii-completion-audit-recovery-queue-non-lms.json --recovery-plan artifacts/wiii-completion-audit-recovery-plan-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --json --out artifacts/wiii-completion-audit-recovery-queue-validation-non-lms.json
+
+      - name: Generate non-LMS completion audit recovery work order
+        run: python tools/wiii_self_harness/generate_completion_audit_recovery_work_order.py artifacts/wiii-completion-audit-recovery-queue-non-lms.json --recovery-plan artifacts/wiii-completion-audit-recovery-plan-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --out artifacts/wiii-completion-audit-recovery-work-order-non-lms.json
+
+      - name: Validate non-LMS completion audit recovery work order
+        run: python tools/wiii_self_harness/validate_completion_audit_recovery_work_order.py artifacts/wiii-completion-audit-recovery-work-order-non-lms.json --recovery-queue artifacts/wiii-completion-audit-recovery-queue-non-lms.json --recovery-plan artifacts/wiii-completion-audit-recovery-plan-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --json --out artifacts/wiii-completion-audit-recovery-work-order-validation-non-lms.json
+
+      - name: Report non-LMS completion audit recovery work-order status
+        run: python tools/wiii_self_harness/report_completion_audit_recovery_work_order_status.py artifacts/wiii-completion-audit-recovery-work-order-non-lms.json --recovery-queue artifacts/wiii-completion-audit-recovery-queue-non-lms.json --recovery-plan artifacts/wiii-completion-audit-recovery-plan-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --out artifacts/wiii-completion-audit-recovery-work-order-status-non-lms.json
+
+      - name: Validate non-LMS completion audit recovery work-order status
+        run: python tools/wiii_self_harness/validate_completion_audit_recovery_work_order_status.py artifacts/wiii-completion-audit-recovery-work-order-status-non-lms.json --recovery-work-order artifacts/wiii-completion-audit-recovery-work-order-non-lms.json --recovery-queue artifacts/wiii-completion-audit-recovery-queue-non-lms.json --recovery-plan artifacts/wiii-completion-audit-recovery-plan-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --json --out artifacts/wiii-completion-audit-recovery-work-order-status-validation-non-lms.json
+
+      - name: Generate non-LMS completion audit recovery queue progress
+        run: python tools/wiii_self_harness/generate_completion_audit_recovery_queue_progress.py artifacts/wiii-completion-audit-recovery-queue-non-lms.json --recovery-plan artifacts/wiii-completion-audit-recovery-plan-non-lms.json --work-order-status artifacts/wiii-completion-audit-recovery-work-order-status-non-lms.json --recovery-work-order artifacts/wiii-completion-audit-recovery-work-order-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --out artifacts/wiii-completion-audit-recovery-queue-progress-non-lms.json
+
+      - name: Validate non-LMS completion audit recovery queue progress
+        run: python tools/wiii_self_harness/validate_completion_audit_recovery_queue_progress.py artifacts/wiii-completion-audit-recovery-queue-progress-non-lms.json --source-recovery-queue artifacts/wiii-completion-audit-recovery-queue-non-lms.json --recovery-plan artifacts/wiii-completion-audit-recovery-plan-non-lms.json --work-order-status artifacts/wiii-completion-audit-recovery-work-order-status-non-lms.json --recovery-work-order artifacts/wiii-completion-audit-recovery-work-order-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --json --out artifacts/wiii-completion-audit-recovery-queue-progress-validation-non-lms.json
+
+      - name: Generate non-LMS completion audit recovery dispatch authorization
+        run: python tools/wiii_self_harness/generate_completion_audit_recovery_dispatch_authorization.py artifacts/wiii-completion-audit-recovery-queue-progress-non-lms.json --recovery-plan artifacts/wiii-completion-audit-recovery-plan-non-lms.json --dispatch-gate artifacts/wiii-completion-audit-dispatch-gate-non-lms.json --source-recovery-queue artifacts/wiii-completion-audit-recovery-queue-non-lms.json --work-order-status artifacts/wiii-completion-audit-recovery-work-order-status-non-lms.json --recovery-work-order artifacts/wiii-completion-audit-recovery-work-order-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --out artifacts/wiii-completion-audit-recovery-dispatch-authorization-non-lms.json
+
+      - name: Validate non-LMS completion audit recovery dispatch authorization
+        run: python tools/wiii_self_harness/validate_completion_audit_recovery_dispatch_authorization.py artifacts/wiii-completion-audit-recovery-dispatch-authorization-non-lms.json --queue-progress artifacts/wiii-completion-audit-recovery-queue-progress-non-lms.json --recovery-plan artifacts/wiii-completion-audit-recovery-plan-non-lms.json --dispatch-gate artifacts/wiii-completion-audit-dispatch-gate-non-lms.json --source-recovery-queue artifacts/wiii-completion-audit-recovery-queue-non-lms.json --work-order-status artifacts/wiii-completion-audit-recovery-work-order-status-non-lms.json --recovery-work-order artifacts/wiii-completion-audit-recovery-work-order-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --json --out artifacts/wiii-completion-audit-recovery-dispatch-authorization-validation-non-lms.json
+
+      - name: Materialize non-LMS completion audit recovery dispatch run
+        run: python tools/wiii_self_harness/run_completion_audit_recovery_dispatch_authorization.py artifacts/wiii-completion-audit-recovery-dispatch-authorization-non-lms.json --queue-progress artifacts/wiii-completion-audit-recovery-queue-progress-non-lms.json --recovery-plan artifacts/wiii-completion-audit-recovery-plan-non-lms.json --dispatch-gate artifacts/wiii-completion-audit-dispatch-gate-non-lms.json --source-recovery-queue artifacts/wiii-completion-audit-recovery-queue-non-lms.json --work-order-status artifacts/wiii-completion-audit-recovery-work-order-status-non-lms.json --recovery-work-order artifacts/wiii-completion-audit-recovery-work-order-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --allow-blocked-report --out artifacts/wiii-completion-audit-recovery-dispatch-run-non-lms.json
+
+      - name: Validate non-LMS completion audit recovery dispatch run
+        run: python tools/wiii_self_harness/validate_completion_audit_recovery_dispatch_run.py artifacts/wiii-completion-audit-recovery-dispatch-run-non-lms.json --recovery-dispatch-authorization artifacts/wiii-completion-audit-recovery-dispatch-authorization-non-lms.json --queue-progress artifacts/wiii-completion-audit-recovery-queue-progress-non-lms.json --recovery-plan artifacts/wiii-completion-audit-recovery-plan-non-lms.json --dispatch-gate artifacts/wiii-completion-audit-dispatch-gate-non-lms.json --source-recovery-queue artifacts/wiii-completion-audit-recovery-queue-non-lms.json --work-order-status artifacts/wiii-completion-audit-recovery-work-order-status-non-lms.json --recovery-work-order artifacts/wiii-completion-audit-recovery-work-order-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --json --out artifacts/wiii-completion-audit-recovery-dispatch-run-validation-non-lms.json
+
+      - name: Validate non-LMS completion audit recovery control chain
+        run: python tools/wiii_self_harness/validate_completion_audit_recovery_control_chain.py --recovery-plan artifacts/wiii-completion-audit-recovery-plan-non-lms.json --recovery-queue artifacts/wiii-completion-audit-recovery-queue-non-lms.json --recovery-work-order artifacts/wiii-completion-audit-recovery-work-order-non-lms.json --work-order-status artifacts/wiii-completion-audit-recovery-work-order-status-non-lms.json --queue-progress artifacts/wiii-completion-audit-recovery-queue-progress-non-lms.json --recovery-dispatch-authorization artifacts/wiii-completion-audit-recovery-dispatch-authorization-non-lms.json --recovery-dispatch-run artifacts/wiii-completion-audit-recovery-dispatch-run-non-lms.json --handoff-json artifacts/wiii-completion-audit-handoff-non-lms/completion-audit-handoff.json --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --dispatch-gate artifacts/wiii-completion-audit-dispatch-gate-non-lms.json --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --json --out artifacts/wiii-completion-audit-recovery-control-chain-non-lms.json
+
+      - name: Generate non-LMS completion audit recovery checkpoint
+        run: python tools/wiii_self_harness/generate_completion_audit_recovery_checkpoint.py artifacts/wiii-completion-audit-recovery-control-chain-non-lms.json --repo-root . --json --out artifacts/wiii-completion-audit-recovery-checkpoint-non-lms.json
+
+      - name: Validate non-LMS completion audit recovery checkpoint
+        run: python tools/wiii_self_harness/validate_completion_audit_recovery_checkpoint.py artifacts/wiii-completion-audit-recovery-checkpoint-non-lms.json --recovery-control-chain artifacts/wiii-completion-audit-recovery-control-chain-non-lms.json --repo-root . --json --out artifacts/wiii-completion-audit-recovery-checkpoint-validation-non-lms.json
+
+      - name: Validate non-LMS completion audit control chain
+        run: python tools/wiii_self_harness/validate_completion_audit_control_chain.py --readiness-report artifacts/wiii-completion-audit-readiness-non-lms.json --readiness-markdown-report artifacts/wiii-completion-audit-readiness-non-lms.md --readiness-preflight-dir artifacts --self-harness-report-bundle artifacts/wiii-self-harness --run-plan artifacts/wiii-completion-audit-run-plan-non-lms.json --run-plan-markdown artifacts/wiii-completion-audit-run-plan-non-lms.md --launch-pack artifacts/wiii-completion-audit-launch-pack-non-lms.json --launch-pack-markdown artifacts/wiii-completion-audit-launch-pack-non-lms.md --setup-state artifacts/wiii-completion-audit-setup-state-non-lms.json --setup-handle-plan artifacts/wiii-completion-audit-setup-handle-plan-non-lms.json --setup-gap-report artifacts/wiii-completion-audit-setup-gaps-non-lms.json --setup-gap-markdown-report artifacts/wiii-completion-audit-setup-gaps-non-lms.md --setup-attestation-template artifacts/wiii-completion-audit-setup-attestation-template-non-lms.json --setup-attestation-smoke artifacts/wiii-completion-audit-setup-attestation-smoke.json --setup-attestation-smoke-out-dir artifacts/wiii-completion-audit-setup-attestation-smoke --setup-attestation artifacts/wiii-completion-audit-setup-attestation-smoke/setup-attestation.json --setup-attestation-patch artifacts/wiii-completion-audit-setup-attestation-smoke/setup-handle-patch.json --attested-setup-state artifacts/wiii-completion-audit-setup-attestation-smoke/setup-state-attested.json --attested-dispatch-gate artifacts/wiii-completion-audit-setup-attestation-smoke/dispatch-gate-attested.json --attested-dispatch-run artifacts/wiii-completion-audit-setup-attestation-smoke/dispatch-run-dry.json --dispatch-gate artifacts/wiii-completion-audit-dispatch-gate-non-lms.json --dispatch-run artifacts/wiii-completion-audit-dispatch-run-non-lms.json --dispatch-diagnostics artifacts/wiii-completion-audit-dispatch-diagnostics-non-lms.json --recovery-control-chain artifacts/wiii-completion-audit-recovery-control-chain-non-lms.json --recovery-checkpoint artifacts/wiii-completion-audit-recovery-checkpoint-non-lms.json --repo-root . --json --out artifacts/wiii-completion-audit-control-chain-non-lms.json
+
+      - name: Render runtime evidence coverage
+        run: python tools/wiii_self_harness/report_runtime_evidence_coverage.py --format markdown --require-no-synthetic-gaps --require-credentialed-external-contracts
 
       - name: Run harness unit tests
         run: python -m unittest discover -s tools/wiii_self_harness -p "test_*.py"
 
       - name: Run Understand-Anything wrapper unit tests
         run: python -m unittest discover -s tools/wiii_understand_harness -p "test_*.py"
+
+      - name: Upload self-harness report artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: wiii-self-harness-reports-${{ github.run_id }}
+          path: |
+            artifacts/wiii-self-harness/
+            artifacts/wiii-self-harness-report-bundle-validation.json
+            artifacts/wiii-self-harness-validation.json
+            artifacts/wiii-runtime-evidence-registry-validation.json
+            artifacts/wiii-self-harness-sidecar-parity-validation.json
+            artifacts/wiii-completion-audit-smoke/
+            artifacts/wiii-completion-audit-smoke.json
+            artifacts/wiii-completion-audit-smoke-release-gate-validation.json
+            artifacts/wiii-completion-audit-smoke-validation.json
+            artifacts/wiii-completion-audit-smoke-sidecars-validation.json
+            artifacts/wiii-completion-audit-readiness-non-lms.json
+            artifacts/wiii-completion-audit-readiness-non-lms.md
+            artifacts/wiii-completion-audit-readiness-validation-non-lms.json
+            artifacts/wiii-completion-audit-run-plan-non-lms.json
+            artifacts/wiii-completion-audit-run-plan-non-lms.md
+            artifacts/wiii-completion-audit-run-plan-validation-non-lms.json
+            artifacts/wiii-completion-audit-launch-pack-non-lms.json
+            artifacts/wiii-completion-audit-launch-pack-non-lms.md
+            artifacts/wiii-completion-audit-launch-pack-validation-non-lms.json
+            artifacts/wiii-completion-audit-setup-state-non-lms.json
+            artifacts/wiii-completion-audit-setup-state-validation-non-lms.json
+            artifacts/wiii-completion-audit-setup-handle-plan-non-lms.json
+            artifacts/wiii-completion-audit-setup-handle-plan-validation-non-lms.json
+            artifacts/wiii-completion-audit-setup-gaps-non-lms.json
+            artifacts/wiii-completion-audit-setup-gaps-non-lms.md
+            artifacts/wiii-completion-audit-setup-gaps-validation-non-lms.json
+            artifacts/wiii-completion-audit-setup-attestation-template-non-lms.json
+            artifacts/wiii-completion-audit-setup-attestation-template-validation-non-lms.json
+            artifacts/wiii-completion-audit-setup-attestation-smoke/
+            artifacts/wiii-completion-audit-setup-attestation-smoke.json
+            artifacts/wiii-completion-audit-setup-attestation-smoke-validation-non-lms.json
+            artifacts/wiii-completion-audit-dispatch-gate-non-lms.json
+            artifacts/wiii-completion-audit-dispatch-gate-validation-non-lms.json
+            artifacts/wiii-completion-audit-dispatch-run-non-lms.json
+            artifacts/wiii-completion-audit-dispatch-run-validation-non-lms.json
+            artifacts/wiii-completion-audit-dispatch-diagnostics-non-lms.json
+            artifacts/wiii-completion-audit-dispatch-diagnostics-validation-non-lms.json
+            artifacts/wiii-completion-audit-handoff-non-lms/
+            artifacts/wiii-completion-audit-handoff-validation-non-lms.json
+            artifacts/wiii-completion-audit-recovery-plan-non-lms.json
+            artifacts/wiii-completion-audit-recovery-plan-non-lms.md
+            artifacts/wiii-completion-audit-recovery-plan-validation-non-lms.json
+            artifacts/wiii-completion-audit-recovery-queue-non-lms.json
+            artifacts/wiii-completion-audit-recovery-queue-validation-non-lms.json
+            artifacts/wiii-completion-audit-recovery-work-order-non-lms.json
+            artifacts/wiii-completion-audit-recovery-work-order-validation-non-lms.json
+            artifacts/wiii-completion-audit-recovery-work-order-status-non-lms.json
+            artifacts/wiii-completion-audit-recovery-work-order-status-validation-non-lms.json
+            artifacts/wiii-completion-audit-recovery-queue-progress-non-lms.json
+            artifacts/wiii-completion-audit-recovery-queue-progress-validation-non-lms.json
+            artifacts/wiii-completion-audit-recovery-dispatch-authorization-non-lms.json
+            artifacts/wiii-completion-audit-recovery-dispatch-authorization-validation-non-lms.json
+            artifacts/wiii-completion-audit-recovery-dispatch-run-non-lms.json
+            artifacts/wiii-completion-audit-recovery-dispatch-run-validation-non-lms.json
+            artifacts/wiii-completion-audit-recovery-control-chain-non-lms.json
+            artifacts/wiii-completion-audit-recovery-checkpoint-non-lms.json
+            artifacts/wiii-completion-audit-recovery-checkpoint-validation-non-lms.json
+            artifacts/wiii-completion-audit-control-chain-non-lms.json
+          if-no-files-found: error
+          retention-days: 14

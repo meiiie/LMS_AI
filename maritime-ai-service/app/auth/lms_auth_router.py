@@ -19,12 +19,30 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.core.config import settings
+from app.engine.runtime.event_payload_sanitizer import (
+    hash_runtime_identifier,
+    redact_runtime_secret_text,
+)
 
 limiter = Limiter(key_func=get_remote_address)
 
 logger = logging.getLogger(__name__)
+_MAX_LMS_AUTH_DIAGNOSTIC_LENGTH = 500
 
 router = APIRouter(prefix="/auth/lms", tags=["auth-lms"])
+
+
+def _lms_auth_ref(value: object) -> str:
+    return hash_runtime_identifier(value) or "sha256:empty"
+
+
+def _safe_lms_auth_detail(value: object, *secret_values: object) -> str:
+    text = str(value or "")
+    for secret_value in secret_values:
+        secret = str(secret_value or "")
+        if secret:
+            text = text.replace(secret, "<redacted-secret>")
+    return redact_runtime_secret_text(text, max_length=_MAX_LMS_AUTH_DIAGNOSTIC_LENGTH)
 
 
 # ---------------------------------------------------------------------------
@@ -90,13 +108,23 @@ async def lms_token_exchange(request: Request):
         if not validate_lms_signature(connector_id, body_bytes, signature):
             raise HTTPException(status_code=401, detail="Invalid HMAC signature")
     except ValueError as e:
-        raise HTTPException(status_code=401, detail=str(e))
+        logger.warning(
+            "LMS token exchange signature rejected connector_ref=%s detail=%s",
+            _lms_auth_ref(connector_id),
+            _safe_lms_auth_detail(e, connector_id, signature),
+        )
+        raise HTTPException(status_code=401, detail="Invalid HMAC signature")
 
     # 4. Parse full request body
     try:
         token_req = LMSTokenRequest(**raw)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid request: {e}")
+        logger.warning(
+            "LMS token exchange invalid request connector_ref=%s detail=%s",
+            _lms_auth_ref(connector_id),
+            _safe_lms_auth_detail(e, connector_id),
+        )
+        raise HTTPException(status_code=400, detail="Invalid request")
 
     # 5. Validate timestamp (replay protection)
     try:
@@ -115,20 +143,33 @@ async def lms_token_exchange(request: Request):
             organization_id=token_req.organization_id,
         )
     except Exception as e:
-        logger.exception("LMS token exchange failed")
+        safe_error = _safe_lms_auth_detail(
+            e,
+            token_req.connector_id,
+            token_req.lms_user_id,
+            token_req.email,
+            token_req.organization_id,
+        )
+        logger.error(
+            "LMS token exchange failed connector_ref=%s lms_user_ref=%s org_ref=%s detail=%s",
+            _lms_auth_ref(token_req.connector_id),
+            _lms_auth_ref(token_req.lms_user_id),
+            _lms_auth_ref(token_req.organization_id),
+            safe_error,
+        )
         # Sprint 176: Audit failed login
         try:
             from app.auth.auth_audit import log_auth_event
             await log_auth_event(
                 "login_failed", provider="lms",
-                result="failed", reason=str(e),
+                result="failed", reason=safe_error,
                 ip_address=request.client.host if request.client else None,
                 organization_id=token_req.organization_id,
-                metadata={"connector_id": token_req.connector_id},
+                metadata={"connector_ref": _lms_auth_ref(token_req.connector_id)},
             )
         except Exception:
             pass
-        raise HTTPException(status_code=500, detail=f"Token exchange failed: {e}")
+        raise HTTPException(status_code=500, detail="Token exchange failed")
 
     # Sprint 176: Audit successful LMS login
     try:
@@ -138,7 +179,7 @@ async def lms_token_exchange(request: Request):
             "login", user_id=user_id, provider="lms",
             ip_address=request.client.host if request.client else None,
             organization_id=token_req.organization_id,
-            metadata={"connector_id": token_req.connector_id},
+            metadata={"connector_ref": _lms_auth_ref(token_req.connector_id)},
         )
     except Exception:
         pass

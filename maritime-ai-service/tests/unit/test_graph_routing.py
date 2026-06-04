@@ -526,6 +526,33 @@ class TestDirectAnswerTimeoutProfile:
 
         assert state["_public_thinking_fragments"] == ["Mình muốn mở lời vừa đủ dịu."]
 
+    def test_capture_public_thinking_event_redacts_secret_text(self):
+        state = {"_public_thinking_fragments": []}
+
+        _capture_public_thinking_event(
+            state,
+            {
+                "type": "thinking_start",
+                "content": "Bearer raw-start-token-12345678",
+                "node": "direct",
+                "details": {"access_token": "raw-access-token"},
+            },
+        )
+        _capture_public_thinking_event(
+            state,
+            {
+                "type": "thinking_delta",
+                "content": "Mình kiểm tra Bearer raw-delta-token-12345678",
+                "node": "direct",
+            },
+        )
+
+        serialized = str(state)
+        assert "<redacted-secret>" in serialized
+        assert "raw-start-token-12345678" not in serialized
+        assert "raw-access-token" not in serialized
+        assert "raw-delta-token-12345678" not in serialized
+
     def test_resolve_public_thinking_content_prefers_interval_fragments_over_summary(self):
         state = {
             "_public_thinking_fragments": [

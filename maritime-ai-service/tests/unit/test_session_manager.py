@@ -9,7 +9,7 @@ Verifies:
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 from app.services.session_manager import (
@@ -242,6 +242,50 @@ class TestSessionManager:
         ctx2 = manager.get_or_create_session(user_id="user-1", organization_id="org-b")
 
         assert ctx1.session_id != ctx2.session_id
+        assert ctx1.organization_id == "org-a"
+        assert ctx2.organization_id == "org-b"
+
+    def test_same_thread_id_different_orgs_have_distinct_state(self, manager):
+        """Same thread/session ID must not share in-memory state across orgs."""
+        thread_id = str(uuid4())
+
+        ctx_a = manager.get_or_create_session(
+            user_id="user-1",
+            thread_id=thread_id,
+            organization_id="org-a",
+        )
+        ctx_b = manager.get_or_create_session(
+            user_id="user-1",
+            thread_id=thread_id,
+            organization_id="org-b",
+        )
+
+        assert ctx_a.session_id == ctx_b.session_id
+        assert ctx_a.state is not ctx_b.state
+
+        manager.update_state(
+            ctx_a.session_id,
+            phrase="org-a phrase",
+            organization_id="org-a",
+        )
+        manager.update_state(
+            ctx_b.session_id,
+            phrase="org-b phrase",
+            organization_id="org-b",
+        )
+
+        assert "org-a phrase" in manager.get_state(
+            ctx_a.session_id,
+            organization_id="org-a",
+        ).recent_phrases
+        assert "org-a phrase" not in manager.get_state(
+            ctx_b.session_id,
+            organization_id="org-b",
+        ).recent_phrases
+        assert "org-b phrase" in manager.get_state(
+            ctx_b.session_id,
+            organization_id="org-b",
+        ).recent_phrases
 
     # ---- get_or_create_session (with thread_id) ----
 
@@ -281,6 +325,10 @@ class TestSessionManager:
             "user-1",
             organization_id=None,
         )
+        mock_chat_history.get_user_name.assert_called_once_with(
+            mock_session.session_id,
+            organization_id=None,
+        )
 
     def test_session_from_chat_history_returns_none(self, mock_chat_history):
         """When DB is available but returns None, falls back to in-memory."""
@@ -311,6 +359,10 @@ class TestSessionManager:
         assert ctx.session_id == mock_session.session_id
         mock_chat_history.get_or_create_session.assert_called_once_with(
             "user-1",
+            organization_id="org-1",
+        )
+        mock_chat_history.get_user_name.assert_called_once_with(
+            mock_session.session_id,
             organization_id="org-1",
         )
 
@@ -397,6 +449,50 @@ class TestSessionManager:
             {"role": "assistant", "content": "Để mình giải thích rõ nhé."},
         ]
 
+    def test_recent_messages_are_org_scoped(self, manager):
+        """Recent-message fallback must not cross org boundaries."""
+        sid = uuid4()
+
+        manager.append_message(
+            sid,
+            "user",
+            "message for org-a",
+            organization_id="org-a",
+        )
+        manager.append_message(
+            sid,
+            "user",
+            "message for org-b",
+            organization_id="org-b",
+        )
+
+        assert manager.get_recent_messages(sid, organization_id="org-a") == [
+            {"role": "user", "content": "message for org-a"},
+        ]
+        assert manager.get_recent_messages(sid, organization_id="org-b") == [
+            {"role": "user", "content": "message for org-b"},
+        ]
+
+    def test_state_uses_current_org_context_for_legacy_callers(self, manager):
+        """Legacy session-state callers inherit request org context when present."""
+        from app.core.org_context import current_org_id
+
+        sid = uuid4()
+        token_a = current_org_id.set("org-a")
+        try:
+            manager.append_message(sid, "user", "org-a context message")
+            assert manager.get_recent_messages(sid) == [
+                {"role": "user", "content": "org-a context message"},
+            ]
+        finally:
+            current_org_id.reset(token_a)
+
+        token_b = current_org_id.set("org-b")
+        try:
+            assert manager.get_recent_messages(sid) == []
+        finally:
+            current_org_id.reset(token_b)
+
     # ---- update_user_name ----
 
     def test_update_user_name_with_db(self, mock_chat_history):
@@ -408,6 +504,20 @@ class TestSessionManager:
         manager.update_user_name(sid, "Trần Thị B")
 
         mock_chat_history.update_user_name.assert_called_once_with(sid, "Trần Thị B")
+
+    def test_update_user_name_passes_org_scope(self, mock_chat_history):
+        """update_user_name can bind writes to an explicit organization."""
+        mock_chat_history.is_available.return_value = True
+        manager = SessionManager(chat_history=mock_chat_history)
+
+        sid = uuid4()
+        manager.update_user_name(sid, "Scoped name", organization_id="org-1")
+
+        mock_chat_history.update_user_name.assert_called_once_with(
+            sid,
+            "Scoped name",
+            organization_id="org-1",
+        )
 
     def test_update_user_name_no_db(self, manager, mock_chat_history):
         """update_user_name is a no-op when DB is unavailable."""

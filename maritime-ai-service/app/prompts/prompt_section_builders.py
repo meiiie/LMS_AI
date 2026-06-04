@@ -515,7 +515,8 @@ def append_tools_examples_and_living_sections(
 
             char_user_id = kwargs.get("user_id", "__global__")
             living_state = get_character_state_manager().compile_living_state(
-                user_id=char_user_id
+                user_id=char_user_id,
+                organization_id=kwargs.get("organization_id"),
             )
             if living_state:
                 sections.append(f"\n{living_state}")

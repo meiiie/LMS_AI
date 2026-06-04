@@ -174,7 +174,7 @@ class TestOrgKnowledgeAuth:
         mock_repo = MagicMock()
         mock_repo.get_user_org_role = MagicMock(return_value="admin")
 
-        auth = _make_auth(role="student", user_id="org-admin-1")
+        auth = _make_auth(role="student", user_id="org-admin-1", org_id="test-org")
         with patch("app.api.v1.org_knowledge.get_settings", return_value=_make_settings()):
             with patch("app.repositories.organization_repository.get_organization_repository", return_value=mock_repo):
                 user_id = await _require_org_knowledge_admin(auth, "test-org")
@@ -188,7 +188,7 @@ class TestOrgKnowledgeAuth:
         mock_repo = MagicMock()
         mock_repo.get_user_org_role = MagicMock(return_value="owner")
 
-        auth = _make_auth(role="teacher", user_id="org-owner-1")
+        auth = _make_auth(role="teacher", user_id="org-owner-1", org_id="test-org")
         with patch("app.api.v1.org_knowledge.get_settings", return_value=_make_settings()):
             with patch("app.repositories.organization_repository.get_organization_repository", return_value=mock_repo):
                 user_id = await _require_org_knowledge_admin(auth, "test-org")
@@ -202,7 +202,7 @@ class TestOrgKnowledgeAuth:
         mock_repo = MagicMock()
         mock_repo.get_user_org_role = MagicMock(return_value="member")
 
-        auth = _make_auth(role="student", user_id="regular-user")
+        auth = _make_auth(role="student", user_id="regular-user", org_id="test-org")
         with patch("app.api.v1.org_knowledge.get_settings", return_value=_make_settings()):
             with patch("app.repositories.organization_repository.get_organization_repository", return_value=mock_repo):
                 with pytest.raises(Exception) as exc_info:
@@ -217,7 +217,7 @@ class TestOrgKnowledgeAuth:
         mock_repo = MagicMock()
         mock_repo.get_user_org_role = MagicMock(return_value=None)
 
-        auth = _make_auth(role="student", user_id="outsider")
+        auth = _make_auth(role="student", user_id="outsider", org_id="test-org")
         with patch("app.api.v1.org_knowledge.get_settings", return_value=_make_settings()):
             with patch("app.repositories.organization_repository.get_organization_repository", return_value=mock_repo):
                 with pytest.raises(Exception) as exc_info:
@@ -229,11 +229,39 @@ class TestOrgKnowledgeAuth:
         """Org admin is rejected when enable_org_admin=False."""
         from app.api.v1.org_knowledge import _require_org_knowledge_admin
 
-        auth = _make_auth(role="student", user_id="org-admin")
+        auth = _make_auth(role="student", user_id="org-admin", org_id="test-org")
         with patch("app.api.v1.org_knowledge.get_settings", return_value=_make_settings(enable_org_admin=False)):
             with pytest.raises(Exception) as exc_info:
                 await _require_org_knowledge_admin(auth, "test-org")
             assert "admin" in str(exc_info.value.detail).lower()
+
+    @pytest.mark.asyncio
+    async def test_admin_missing_active_org_rejected_before_role_lookup(self):
+        """Org admins need active org context before document access."""
+        from app.api.v1.org_knowledge import _require_org_knowledge_admin
+
+        auth = _make_auth(role="student", user_id="org-admin", org_id=None)
+        with patch("app.api.v1.org_knowledge.get_settings", return_value=_make_settings()):
+            with patch("app.repositories.organization_repository.get_organization_repository") as repo_factory:
+                with pytest.raises(Exception) as exc_info:
+                    await _require_org_knowledge_admin(auth, "test-org")
+                assert exc_info.value.status_code == 403
+                assert exc_info.value.detail == "Organization context required for org knowledge access"
+                repo_factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_admin_active_org_mismatch_rejected_before_role_lookup(self):
+        """Route org must match active org for non-platform org admins."""
+        from app.api.v1.org_knowledge import _require_org_knowledge_admin
+
+        auth = _make_auth(role="student", user_id="org-admin", org_id="org-A")
+        with patch("app.api.v1.org_knowledge.get_settings", return_value=_make_settings()):
+            with patch("app.repositories.organization_repository.get_organization_repository") as repo_factory:
+                with pytest.raises(Exception) as exc_info:
+                    await _require_org_knowledge_admin(auth, "org-B")
+                assert exc_info.value.status_code == 403
+                assert exc_info.value.detail == "Active organization does not match route organization"
+                repo_factory.assert_not_called()
 
 
 # ============================================================================
@@ -431,10 +459,12 @@ class TestDocumentLifecycle:
         from app.api.v1.org_knowledge import _update_document_status
 
         pool, conn = _make_pool()
-        await _update_document_status(pool, "doc-1", "processing")
+        await _update_document_status(pool, "doc-1", "org-1", "processing")
         conn.execute.assert_called_once()
         args = conn.execute.call_args
         assert "processing" in str(args)
+        assert "WHERE document_id = $1 AND organization_id = $2" in args.args[0]
+        assert args.args[1:4] == ("doc-1", "org-1", "processing")
 
     @pytest.mark.asyncio
     async def test_status_processing_to_ready(self):
@@ -442,10 +472,12 @@ class TestDocumentLifecycle:
         from app.api.v1.org_knowledge import _update_document_status
 
         pool, conn = _make_pool()
-        await _update_document_status(pool, "doc-1", "ready", page_count=10, chunk_count=50)
+        await _update_document_status(pool, "doc-1", "org-1", "ready", page_count=10, chunk_count=50)
         conn.execute.assert_called_once()
         args = conn.execute.call_args
         assert "ready" in str(args)
+        assert "WHERE document_id = $1 AND organization_id = $2" in args.args[0]
+        assert args.args[1:] == ("doc-1", "org-1", "ready", 10, 50, None)
 
     @pytest.mark.asyncio
     async def test_status_processing_to_failed(self):
@@ -453,8 +485,11 @@ class TestDocumentLifecycle:
         from app.api.v1.org_knowledge import _update_document_status
 
         pool, conn = _make_pool()
-        await _update_document_status(pool, "doc-1", "failed", error_message="Parse error")
+        await _update_document_status(pool, "doc-1", "org-1", "failed", error_message="Parse error")
         conn.execute.assert_called_once()
+        args = conn.execute.call_args
+        assert "WHERE document_id = $1 AND organization_id = $2" in args.args[0]
+        assert args.args[1:] == ("doc-1", "org-1", "failed", None, None, "Parse error")
 
     @pytest.mark.asyncio
     async def test_status_to_deleted(self):
@@ -462,8 +497,11 @@ class TestDocumentLifecycle:
         from app.api.v1.org_knowledge import _update_document_status
 
         pool, conn = _make_pool()
-        await _update_document_status(pool, "doc-1", "deleted")
+        await _update_document_status(pool, "doc-1", "org-1", "deleted")
         conn.execute.assert_called_once()
+        args = conn.execute.call_args
+        assert "WHERE document_id = $1 AND organization_id = $2" in args.args[0]
+        assert args.args[1:4] == ("doc-1", "org-1", "deleted")
 
     @pytest.mark.asyncio
     async def test_insert_document(self):
@@ -525,11 +563,39 @@ class TestDocumentList:
         mock_repo = MagicMock()
         mock_repo.is_user_in_org = MagicMock(return_value=True)
 
-        auth = _make_auth(role="student", user_id="member-1")
+        auth = _make_auth(role="student", user_id="member-1", org_id="test-org")
         with patch("app.api.v1.org_knowledge.get_settings", return_value=_make_settings()):
             with patch("app.repositories.organization_repository.get_organization_repository", return_value=mock_repo):
                 user_id = await _require_org_member(auth, "test-org")
                 assert user_id == "member-1"
+
+    @pytest.mark.asyncio
+    async def test_member_missing_active_org_rejected_before_membership_lookup(self):
+        """Document list/detail reads require active org context."""
+        from app.api.v1.org_knowledge import _require_org_member
+
+        auth = _make_auth(role="student", user_id="member-1", org_id=None)
+        with patch("app.api.v1.org_knowledge.get_settings", return_value=_make_settings()):
+            with patch("app.repositories.organization_repository.get_organization_repository") as repo_factory:
+                with pytest.raises(Exception) as exc_info:
+                    await _require_org_member(auth, "test-org")
+                assert exc_info.value.status_code == 403
+                assert exc_info.value.detail == "Organization context required for org knowledge access"
+                repo_factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_member_active_org_mismatch_rejected_before_membership_lookup(self):
+        """Document list/detail route org must match active org."""
+        from app.api.v1.org_knowledge import _require_org_member
+
+        auth = _make_auth(role="student", user_id="member-1", org_id="org-A")
+        with patch("app.api.v1.org_knowledge.get_settings", return_value=_make_settings()):
+            with patch("app.repositories.organization_repository.get_organization_repository") as repo_factory:
+                with pytest.raises(Exception) as exc_info:
+                    await _require_org_member(auth, "org-B")
+                assert exc_info.value.status_code == 403
+                assert exc_info.value.detail == "Active organization does not match route organization"
+                repo_factory.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_count_documents(self):
@@ -581,9 +647,15 @@ class TestDocumentDelete:
 
         # Verify both DELETE and UPDATE were called within the transaction
         assert conn.execute.call_count >= 2
-        calls = [str(c) for c in conn.execute.call_args_list]
-        assert any("knowledge_embeddings" in c for c in calls)
-        assert any("organization_documents" in c for c in calls)
+        calls = [call.args for call in conn.execute.call_args_list]
+        assert any("knowledge_embeddings" in args[0] for args in calls)
+        update_calls = [
+            args for args in calls
+            if "UPDATE organization_documents" in args[0]
+        ]
+        assert len(update_calls) == 1
+        assert "WHERE document_id = $1 AND organization_id = $2" in update_calls[0][0]
+        assert update_calls[0][1:] == ("doc-1", "test-org")
 
     @pytest.mark.asyncio
     async def test_delete_requires_admin(self):
@@ -594,7 +666,7 @@ class TestDocumentDelete:
         mock_repo.get_user_org_role = MagicMock(return_value="member")
 
         request = _make_request(role="student", user_id="regular-member")
-        auth = _make_auth(role="student", user_id="regular-member")
+        auth = _make_auth(role="student", user_id="regular-member", org_id="test-org")
         pool, conn = _make_pool()
 
         with patch("app.api.v1.org_knowledge.get_settings", return_value=_make_settings()):
@@ -620,8 +692,13 @@ class TestDocumentDelete:
                         await delete_org_document(request, "test-org", "doc-1", auth=_make_auth(role="admin"))
 
         # Verify UPDATE with status='deleted' was called
-        calls = [str(c) for c in conn.execute.call_args_list]
-        assert any("deleted" in c and "organization_documents" in c for c in calls)
+        calls = [call.args for call in conn.execute.call_args_list]
+        assert any("deleted" in args[0] and "organization_documents" in args[0] for args in calls)
+        assert any(
+            "WHERE document_id = $1 AND organization_id = $2" in args[0]
+            and args[1:] == ("doc-1", "test-org")
+            for args in calls
+        )
 
 
 # ============================================================================
@@ -664,11 +741,11 @@ class TestOrgIsolation:
         mock_repo = MagicMock()
         mock_repo.is_user_in_org = MagicMock(return_value=False)
 
-        request = _make_request(role="student", user_id="outsider")
+        auth = _make_auth(role="student", user_id="outsider", org_id="private-org")
         with patch("app.api.v1.org_knowledge.get_settings", return_value=_make_settings()):
             with patch("app.repositories.organization_repository.get_organization_repository", return_value=mock_repo):
                 with pytest.raises(Exception) as exc_info:
-                    await _require_org_member(request, "private-org")
+                    await _require_org_member(auth, "private-org")
                 assert "member" in str(exc_info.value.detail).lower()
 
 

@@ -10,6 +10,7 @@ def persist_chat_message_impl(
     role: str,
     content: str,
     user_id: str | None = None,
+    organization_id: str | None = None,
     background_save=None,
     immediate: bool = False,
 ) -> None:
@@ -20,7 +21,13 @@ def persist_chat_message_impl(
         return
 
     if immediate or background_save is None:
-        chat_history.save_message(session_id, role, content, user_id)
+        chat_history.save_message(
+            session_id,
+            role,
+            content,
+            user_id,
+            organization_id=organization_id,
+        )
         return
 
     background_save(
@@ -29,6 +36,7 @@ def persist_chat_message_impl(
         role,
         content,
         user_id,
+        organization_id=organization_id,
     )
 
 

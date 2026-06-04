@@ -4,11 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from app.core.exceptions import ProviderUnavailableError
 from app.engine.reasoning import capture_thinking_lifecycle_event
+from app.engine.runtime.event_payload_sanitizer import sanitize_runtime_payload
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_public_bus_event(event: Any) -> dict[str, Any]:
+    """Return a public-stream-safe bus event dict before SSE conversion."""
+
+    safe_event = sanitize_runtime_payload(event)
+    if isinstance(safe_event, dict):
+        if not str(safe_event.get("type") or "").strip():
+            safe_event["type"] = "status"
+        return safe_event
+    return {
+        "type": "status",
+        "node": "system",
+        "content": str(safe_event or ""),
+    }
 
 
 def _should_suppress_bus_event(event: dict | None) -> bool:
@@ -79,6 +96,7 @@ async def forward_bus_events_impl(
             event = await event_queue.get()
             if event is sentinel:
                 break
+            event = _sanitize_public_bus_event(event)
             if _should_suppress_bus_event(event):
                 logger.debug(
                     "[STREAM] Suppressed bus event type=%s node=%s",
@@ -118,6 +136,7 @@ async def handle_bus_message_impl(
 ):
     """Convert a merged bus payload into stream events and updated flags."""
     events = []
+    payload = _sanitize_public_bus_event(payload)
 
     if _should_suppress_bus_event(payload):
         logger.debug(
@@ -218,6 +237,7 @@ async def drain_pending_bus_events_impl(
         try:
             msg_type, payload = merged_queue.get_nowait()
             if msg_type == "bus":
+                payload = _sanitize_public_bus_event(payload)
                 if _should_suppress_bus_event(payload):
                     continue
                 if payload.get("type") == "answer_delta":
@@ -232,6 +252,7 @@ async def drain_pending_bus_events_impl(
             event = event_queue.get_nowait()
             if event is sentinel:
                 continue
+            event = _sanitize_public_bus_event(event)
             if _should_suppress_bus_event(event):
                 continue
             if event.get("type") == "answer_delta":

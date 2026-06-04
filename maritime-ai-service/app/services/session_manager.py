@@ -104,6 +104,7 @@ class SessionContext:
     session_id: UUID
     user_id: str
     thread_id: Optional[str] = None
+    organization_id: Optional[str] = None
     state: SessionState = None
     user_name: Optional[str] = None
     
@@ -172,13 +173,20 @@ class SessionManager:
             thread_id,
             organization_id=organization_id,
         )
-        state = self._get_or_create_state(session_id)
-        user_name = self._get_user_name(session_id)
+        state = self._get_or_create_state(
+            session_id,
+            organization_id=organization_id,
+        )
+        user_name = self._get_user_name(
+            session_id,
+            organization_id=organization_id,
+        )
         
         return SessionContext(
             session_id=session_id,
             user_id=user_id,
             thread_id=thread_id,
+            organization_id=organization_id,
             state=state,
             user_name=user_name
         )
@@ -229,9 +237,37 @@ class SessionManager:
             self._sessions[cache_key] = uuid4()
         return self._sessions[cache_key]
     
-    def _get_or_create_state(self, session_id: UUID) -> SessionState:
+    @staticmethod
+    def _current_org_id() -> Optional[str]:
+        """Best-effort request org for legacy callers that only pass session_id."""
+        try:
+            from app.core.org_context import get_current_org_id
+
+            org_id = get_current_org_id()
+            if isinstance(org_id, str) and org_id.strip():
+                return org_id.strip()
+        except Exception:
+            return None
+        return None
+
+    @classmethod
+    def _state_key(
+        cls,
+        session_id: UUID,
+        organization_id: Optional[str] = None,
+    ) -> str:
+        """Build an org-aware state cache key for thread/session reuse."""
+        org_id = organization_id or cls._current_org_id()
+        normalized_org_id = str(org_id or "default").strip() or "default"
+        return f"{normalized_org_id}::{session_id}"
+
+    def _get_or_create_state(
+        self,
+        session_id: UUID,
+        organization_id: Optional[str] = None,
+    ) -> SessionState:
         """Get or create session state for anti-repetition tracking."""
-        session_key = str(session_id)
+        session_key = self._state_key(session_id, organization_id)
         if session_key not in self._session_states:
             # Evict oldest entries if cache is full
             if len(self._session_states) >= self.MAX_CACHED_SESSIONS:
@@ -240,33 +276,63 @@ class SessionManager:
             self._session_states[session_key] = SessionState(session_id=session_id)
         return self._session_states[session_key]
     
-    def _get_user_name(self, session_id: UUID) -> Optional[str]:
+    def _get_user_name(
+        self,
+        session_id: UUID,
+        organization_id: Optional[str] = None,
+    ) -> Optional[str]:
         """Get user name from chat history if available."""
         if self._chat_history.is_available():
-            return self._chat_history.get_user_name(session_id)
+            return self._chat_history.get_user_name(
+                session_id,
+                organization_id=organization_id,
+            )
         return None
     
-    def update_user_name(self, session_id: UUID, name: str) -> None:
+    def update_user_name(
+        self,
+        session_id: UUID,
+        name: str,
+        organization_id: Optional[str] = None,
+    ) -> None:
         """Update user name in chat history."""
         if self._chat_history.is_available():
-            self._chat_history.update_user_name(session_id, name)
+            if organization_id is None:
+                self._chat_history.update_user_name(session_id, name)
+                return
+            self._chat_history.update_user_name(
+                session_id,
+                name,
+                organization_id=organization_id,
+            )
     
-    def get_state(self, session_id: UUID) -> SessionState:
+    def get_state(
+        self,
+        session_id: UUID,
+        organization_id: Optional[str] = None,
+    ) -> SessionState:
         """Get session state by session_id."""
-        return self._get_or_create_state(session_id)
+        return self._get_or_create_state(session_id, organization_id=organization_id)
 
-    def append_message(self, session_id: UUID, role: str, content: str) -> None:
+    def append_message(
+        self,
+        session_id: UUID,
+        role: str,
+        content: str,
+        organization_id: Optional[str] = None,
+    ) -> None:
         """Append a recent message to the in-memory continuity cache."""
-        state = self._get_or_create_state(session_id)
+        state = self._get_or_create_state(session_id, organization_id=organization_id)
         state.add_message(role, content)
 
     def get_recent_messages(
         self,
         session_id: UUID,
         limit: Optional[int] = None,
+        organization_id: Optional[str] = None,
     ) -> List[dict]:
         """Return cached recent messages for follow-up continuity fallback."""
-        state = self._get_or_create_state(session_id)
+        state = self._get_or_create_state(session_id, organization_id=organization_id)
         messages = list(state.recent_messages)
         if limit is not None and limit > 0:
             return messages[-limit:]
@@ -277,7 +343,8 @@ class SessionManager:
         session_id: UUID, 
         phrase: Optional[str] = None,
         used_name: bool = False,
-        pronoun_style: Optional[dict] = None
+        pronoun_style: Optional[dict] = None,
+        organization_id: Optional[str] = None,
     ) -> None:
         """
         Update session state after a response.
@@ -288,7 +355,7 @@ class SessionManager:
             used_name: Whether user's name was used in response
             pronoun_style: Detected pronoun style to update
         """
-        state = self._get_or_create_state(session_id)
+        state = self._get_or_create_state(session_id, organization_id=organization_id)
         
         if phrase:
             state.add_phrase(phrase)

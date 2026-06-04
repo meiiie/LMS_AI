@@ -129,6 +129,27 @@
   sudo crontab -e
   # Add: */2 * * * * /opt/wiii/maritime-ai-service/scripts/deploy/health-check.sh
   ```
+- [ ] Runtime metrics gate decided:
+  - Set `ENABLE_PROMETHEUS_METRICS=true` only when `/metrics` is reachable by an internal Prometheus scrape or protected monitoring path.
+  - Keep it `false` for public-only deployments and record the monitoring exception in the release notes.
+- [ ] Prometheus/Alertmanager loads Wiii runtime rules:
+  - `docs/runtime/alerts/prometheus-runtime-flow-ledger.yml`
+  - `docs/runtime/alerts/prometheus-native-stream-dispatch.yml`
+  - `docs/runtime/alerts/prometheus-native-dispatch.yml`
+  - `docs/runtime/alerts/prometheus-runtime-lifecycle.yml`
+  - `docs/runtime/alerts/prometheus-semantic-memory-maintenance.yml`
+  - `docs/runtime/alerts/prometheus-scheduled-task-executor.yml`
+  - `docs/runtime/alerts/prometheus-living-agent-heartbeat.yml`
+  - `docs/runtime/alerts/prometheus-proactive-messenger.yml`
+- [ ] On-call runbooks linked from the alert destination:
+  - `docs/runtime/runbooks/runtime-flow-ledger-alerts.md`
+  - `docs/runtime/runbooks/native-stream-finalization.md`
+  - `docs/runtime/runbooks/native-dispatch-finalization.md`
+  - `docs/runtime/runbooks/runtime-lifecycle-hook-failures.md`
+  - `docs/runtime/runbooks/semantic-memory-maintenance.md`
+  - `docs/runtime/runbooks/scheduled-task-executor.md`
+  - `docs/runtime/runbooks/living-agent-heartbeat.md`
+  - `docs/runtime/runbooks/proactive-messenger.md`
 - [ ] First backup created: `./scripts/deploy/backup-db.sh`
 - [ ] (Optional) Discord/Telegram webhook set for alerts
 - [ ] (Optional) UptimeRobot monitor on `https://holilihu.online/health`

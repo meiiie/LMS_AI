@@ -108,6 +108,7 @@ class TestEnvironmentValidator:
     def test_production(self):
         s = Settings(
             environment="production",
+            enable_dev_login=False,
             api_key="a" * 32,
             jwt_secret_key="prod-jwt-secret-key-32-bytes-min!",
             session_secret_key="a]b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",

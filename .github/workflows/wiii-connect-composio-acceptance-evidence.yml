@@ -1,0 +1,245 @@
+name: Wiii Connect Composio Acceptance Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/wiii-connect-composio-acceptance-evidence.yml"
+      - "docs/architecture/wiii-connect/**"
+      - "docs/operations/WIII_CONNECT_COMPOSIO_ACCEPTANCE_RUNBOOK.md"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/api/v1/wiii_connect.py"
+      - "maritime-ai-service/app/engine/wiii_connect/**"
+      - "maritime-ai-service/scripts/wiii_connect_composio_acceptance.py"
+      - "maritime-ai-service/tests/unit/test_wiii_connect_composio_acceptance.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/wiii-connect-composio-acceptance-evidence.yml"
+      - "docs/architecture/wiii-connect/**"
+      - "docs/operations/WIII_CONNECT_COMPOSIO_ACCEPTANCE_RUNBOOK.md"
+      - "docs/operations/WIII_SYSTEM_CONTROL_PLANE.md"
+      - "tools/wiii_self_harness/**"
+      - "maritime-ai-service/scripts/runtime_evidence_output.py"
+      - "maritime-ai-service/tests/unit/test_runtime_evidence_output.py"
+      - "maritime-ai-service/app/api/v1/wiii_connect.py"
+      - "maritime-ai-service/app/engine/wiii_connect/**"
+      - "maritime-ai-service/scripts/wiii_connect_composio_acceptance.py"
+      - "maritime-ai-service/tests/unit/test_wiii_connect_composio_acceptance.py"
+  schedule:
+    - cron: "15 5 * * *"
+  workflow_dispatch:
+    inputs:
+      run_composio_acceptance:
+        description: "Run the credentialed Wiii Connect Composio acceptance."
+        required: true
+        type: boolean
+        default: false
+      backend_url:
+        description: "Backend base URL already configured with Composio."
+        required: true
+        type: string
+        default: "https://wiii.example.com"
+      auth_mode:
+        description: "Authentication mode for the backend."
+        required: true
+        type: choice
+        default: bearer
+        options:
+          - bearer
+          - dev-login
+      provider:
+        description: "Connected Composio provider slug."
+        required: true
+        type: choice
+        default: gmail
+        options:
+          - gmail
+          - facebook
+      action:
+        description: "Optional curated action slug; empty uses provider default."
+        required: false
+        type: string
+        default: ""
+      arguments_json:
+        description: "Live schema-compatible read-only action arguments."
+        required: true
+        type: string
+        default: "{\"query\":\"from:me\",\"max_results\":1}"
+      target_env:
+        description: "Evidence target environment label."
+        required: true
+        type: string
+        default: "staging"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Composio Acceptance Harness Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      GOOGLE_API_KEY: fake-key-for-unit-tests
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Composio acceptance harness unit tests
+        working-directory: maritime-ai-service
+        run: python -m pytest tests/unit/test_wiii_connect_composio_acceptance.py tests/unit/test_runtime_evidence_output.py -q --tb=short
+
+  live-composio-acceptance-evidence:
+    name: Live Wiii Connect Composio Acceptance Evidence
+    runs-on: ubuntu-latest
+    environment: wiii-runtime-evidence
+    timeout-minutes: 45
+    needs: contract
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && inputs.run_composio_acceptance == true) ||
+        (github.event_name == 'schedule' && vars.WIII_CONNECT_COMPOSIO_ACCEPTANCE_EVIDENCE_ENABLED == '1')
+      }}
+
+    env:
+      ENVIRONMENT: development
+      PYTHONIOENCODING: utf-8
+      WIII_LIVE_WIII_CONNECT_COMPOSIO_ACCEPTANCE: "1"
+      WIII_ACCEPTANCE_BEARER_TOKEN: ${{ secrets.WIII_ACCEPTANCE_BEARER_TOKEN }}
+      WIII_ACCEPTANCE_TARGET_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.target_env || vars.WIII_CONNECT_COMPOSIO_ACCEPTANCE_TARGET_ENV }}
+      WIII_ACCEPTANCE_COMMIT_SHA: ${{ github.sha }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: maritime-ai-service/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: maritime-ai-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate Composio acceptance evidence
+        working-directory: maritime-ai-service
+        env:
+          BACKEND_URL_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.backend_url || vars.WIII_CONNECT_COMPOSIO_ACCEPTANCE_BACKEND_URL }}
+          AUTH_MODE_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.auth_mode || vars.WIII_CONNECT_COMPOSIO_ACCEPTANCE_AUTH_MODE }}
+          PROVIDER_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.provider || vars.WIII_CONNECT_COMPOSIO_ACCEPTANCE_PROVIDER }}
+          ACTION_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.action || vars.WIII_CONNECT_COMPOSIO_ACCEPTANCE_ACTION }}
+          ARGUMENTS_JSON_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.arguments_json || vars.WIII_CONNECT_COMPOSIO_ACCEPTANCE_ARGUMENTS_JSON }}
+          ORG_ID_INPUT: ${{ vars.WIII_CONNECT_COMPOSIO_ACCEPTANCE_ORG_ID }}
+        run: |
+          set -euo pipefail
+
+          default_arguments_json='{"query":"from:me","max_results":1}'
+          arguments_json="${ARGUMENTS_JSON_INPUT:-$default_arguments_json}"
+          args=(
+            --backend-url "${BACKEND_URL_INPUT:-https://wiii.example.com}"
+            --auth-mode "${AUTH_MODE_INPUT:-bearer}"
+            --provider "${PROVIDER_INPUT:-gmail}"
+            --expect-connected
+            --require-execution-ready
+            --execute-readonly
+            --skip-connect-link
+            --arguments-json "${arguments_json}"
+          )
+          if [[ -n "${ACTION_INPUT:-}" ]]; then
+            args+=(--action "${ACTION_INPUT}")
+          fi
+          if [[ -n "${ORG_ID_INPUT:-}" ]]; then
+            args+=(--org-id "${ORG_ID_INPUT}")
+          fi
+
+          preflight_status=0
+          python scripts/wiii_connect_composio_acceptance.py --preflight-only \
+            --allow-live "${args[@]}" \
+            --out wiii-connect-composio-acceptance-preflight.json \
+            || preflight_status=$?
+          preflight_validation_status=0
+          python ../tools/wiii_self_harness/validate_runtime_evidence_preflight.py \
+            wiii-connect-composio-acceptance-preflight.json \
+            --requirement-id wiii-connect-composio-acceptance \
+            || preflight_validation_status=$?
+          if [[ "${preflight_validation_status}" -ne 0 ]]; then
+            rm -f wiii-connect-composio-acceptance-preflight.json
+            exit "${preflight_validation_status}"
+          fi
+          cat wiii-connect-composio-acceptance-preflight.json
+          if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            {
+              echo "### Wiii Connect Composio acceptance preflight"
+              echo '```json'
+              cat wiii-connect-composio-acceptance-preflight.json
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          if [[ "${preflight_status}" -ne 0 ]]; then
+            echo "Composio acceptance preflight blocked live run; writing failed evidence artifact."
+            python scripts/wiii_connect_composio_acceptance.py --failure-from-preflight \
+              --failure-preflight-json wiii-connect-composio-acceptance-preflight.json \
+              --allow-live "${args[@]}" \
+              --out wiii-connect-composio-acceptance-evidence.json || true
+            exit "${preflight_status}"
+          fi
+
+          python scripts/wiii_connect_composio_acceptance.py --allow-live "${args[@]}" \
+            --out wiii-connect-composio-acceptance-evidence.json
+
+      - name: Upload Composio acceptance preflight
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: wiii-connect-composio-acceptance-preflight-${{ github.run_id }}
+          path: maritime-ai-service/wiii-connect-composio-acceptance-preflight.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Validate Composio acceptance evidence
+        working-directory: maritime-ai-service
+        run: |
+          python ../tools/wiii_self_harness/validate_runtime_evidence_artifact.py \
+            wiii-connect-composio-acceptance-evidence.json \
+            --requirement-id wiii-connect-composio-acceptance
+
+      - name: Upload Composio acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: wiii-connect-composio-acceptance-evidence-${{ github.run_id }}
+          path: maritime-ai-service/wiii-connect-composio-acceptance-evidence.json
+          if-no-files-found: error
+          retention-days: 30

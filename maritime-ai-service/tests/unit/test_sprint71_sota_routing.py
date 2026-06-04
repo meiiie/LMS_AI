@@ -409,7 +409,12 @@ class TestConfidenceGate:
                             _make_domain_config(["colregs"]))
 
         # Sprint 103: No feature flag check — always structured, falls back to rule-based
-        result = await supervisor_with_llm.route(state)
+        with patch.object(
+            supervisor_module.settings,
+            "enable_conservative_fast_routing",
+            False,
+        ):
+            result = await supervisor_with_llm.route(state)
 
         # Sprint 103: rule-based has no learning keywords → domain match → RAG
         assert result == AgentType.RAG.value
@@ -567,14 +572,17 @@ class TestRoutingMetadata:
     @pytest.mark.asyncio
     async def test_error_fallback_sets_metadata(self):
         """LLM error fallback sets metadata with error info."""
-        with patch.object(AgentConfigRegistry, "get_llm", return_value=MagicMock()):
+        with (
+            patch.object(supervisor_module.settings, "enable_conservative_fast_routing", False),
+            patch.object(AgentConfigRegistry, "get_llm", return_value=MagicMock()),
+        ):
             agent = SupervisorAgent()
 
-        state = _make_state("COLREGs rule 15?", _make_domain_config(["colregs"]))
+            state = _make_state("COLREGs rule 15?", _make_domain_config(["colregs"]))
 
-        # Sprint 103: No feature flag check — always structured
-        agent._llm.with_structured_output.side_effect = ValueError("broken")
-        await agent.route(state)
+            # Sprint 103: No feature flag check — always structured
+            agent._llm.with_structured_output.side_effect = ValueError("broken")
+            await agent.route(state)
 
         meta = state["routing_metadata"]
         assert meta["method"] == "rule_based"

@@ -24,6 +24,7 @@ from app.api.v1 import chat_stream_transport as _stream_transport
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.core.security import resolve_interaction_role
+from app.models.host_context_schemas import sanitize_user_context_for_ingress
 from app.models.schemas import ChatRequest, UserRole
 from app.services.chat_stream_coordinator import generate_stream_v3_events
 
@@ -56,14 +57,33 @@ def _canonicalize_stream_request_from_auth(
 ) -> ChatRequest:
     """Project canonical auth identity onto transport request fields."""
     effective_role = resolve_interaction_role(auth)
-    effective_org_id = auth.organization_id or chat_request.organization_id
+    effective_org_id = auth.organization_id
+    if (
+        not effective_org_id
+        and not (
+            settings.enable_multi_tenant
+            and settings.environment in ("production", "staging")
+        )
+    ):
+        effective_org_id = chat_request.organization_id
     return chat_request.model_copy(
         update={
             "user_id": str(auth.user_id),
             "role": UserRole(effective_role),
             "organization_id": effective_org_id,
+            "user_context": sanitize_user_context_for_ingress(chat_request.user_context),
         }
     )
+
+
+def _stream_request_headers_with_request_id(request: Request) -> dict[str, str]:
+    """Expose middleware request id to the stream coordinator."""
+
+    headers = dict(request.headers)
+    request_id = str(getattr(request.state, "request_id", "") or "").strip()
+    if request_id:
+        headers["X-Request-ID"] = request_id
+    return headers
 
 
 async def _keepalive_generator(
@@ -167,14 +187,14 @@ async def chat_stream_v3(
         # chat_stream.py for Sprint 210d / enable_living_continuity sentiment
         # continuity notes and host_context threading expectations.
         # Historical post-stream ordering anchor preserved for legacy tests:
-        # save_message -> schedule_all -> routine_tracker.record_interaction
-        # -> _analyze_and_process_sentiment.
+        # save_message -> post-turn lifecycle scheduling ->
+        # routine_tracker.record_interaction -> _analyze_and_process_sentiment.
         async for chunk in generate_stream_v3_events(
             chat_request=chat_request,
             # host_context is threaded through request_headers/state by the
             # shared coordinator flow; keep the term visible in this adapter
             # because some tests still inspect chat_stream.py source directly.
-            request_headers=request.headers,
+            request_headers=_stream_request_headers_with_request_id(request),
             background_save=background_tasks.add_task,
             start_time=start_time,
         ):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from math import isfinite
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -73,6 +74,21 @@ def _count_sequence(value: Any) -> int | None:
 
 def _char_count(value: Any) -> int:
     return len(str(value or "").strip())
+
+
+def _positive_int(value: Any) -> int | None:
+    if type(value) is int and value >= 0:
+        return value
+    return None
+
+
+def _safe_float(value: Any) -> float | None:
+    if type(value) not in (int, float):
+        return None
+    numeric = float(value)
+    if not isfinite(numeric):
+        return None
+    return round(numeric, 4)
 
 
 def _source_ref_items(value: Any) -> list[Mapping[str, Any]]:
@@ -178,6 +194,8 @@ def _document_summary(context: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _conversation_summary(context: Mapping[str, Any]) -> dict[str, Any]:
+    retrieval = _plain_mapping(context.get("history_retrieval_summary"))
+    budget = _plain_mapping(context.get("context_budget_summary"))
     history_list_count = _count_sequence(context.get("history_list"))
     langchain_count = _count_sequence(context.get("langchain_messages"))
     history_chars = _char_count(context.get("conversation_history"))
@@ -187,6 +205,47 @@ def _conversation_summary(context: Mapping[str, Any]) -> dict[str, Any]:
         "history_char_count": history_chars,
         "history_item_count": history_list_count,
         "langchain_message_count": langchain_count,
+        "history_retrieval_present": bool(retrieval),
+        "history_retrieval_status": (
+            _safe_token(retrieval.get("status")) if retrieval else None
+        )
+        or "unknown",
+        "history_source": _safe_token(retrieval.get("source")),
+        "persisted_history_item_count": _positive_int(
+            retrieval.get("persisted_history_item_count")
+        ),
+        "fallback_history_item_count": _positive_int(
+            retrieval.get("fallback_history_item_count")
+        ),
+        "selected_history_item_count": _positive_int(
+            retrieval.get("selected_history_item_count")
+        ),
+        "history_org_scoped": bool(retrieval.get("org_scoped")),
+        "history_user_name_present": bool(retrieval.get("user_name_present")),
+        "history_raw_content_included": bool(retrieval.get("raw_content_included")),
+        "history_warning_codes": _safe_token_list(retrieval.get("warning_codes")),
+        "context_budget_present": bool(budget),
+        "context_budget_status": (
+            _safe_token(budget.get("status")) if budget else None
+        )
+        or "unknown",
+        "context_budget_total": _positive_int(budget.get("total_budget")),
+        "context_budget_used": _positive_int(budget.get("total_used")),
+        "context_budget_utilization": _safe_float(budget.get("utilization")),
+        "context_budget_needs_compaction": bool(budget.get("needs_compaction")),
+        "context_budget_messages_included": _positive_int(
+            budget.get("messages_included")
+        ),
+        "context_budget_messages_dropped": _positive_int(
+            budget.get("messages_dropped")
+        ),
+        "context_budget_has_summary": bool(budget.get("has_summary")),
+        "context_budget_raw_content_included": bool(
+            budget.get("raw_content_included")
+        ),
+        "context_budget_warning_codes": _safe_token_list(
+            budget.get("warning_codes")
+        ),
         "summary_present": summary_chars > 0,
         "summary_char_count": summary_chars,
     }
@@ -196,6 +255,8 @@ def _memory_summary(context: Mapping[str, Any]) -> dict[str, Any]:
     memories = context.get("semantic_memories")
     if memories is None:
         memories = context.get("memories")
+    retrieval = _plain_mapping(context.get("memory_retrieval_summary"))
+    episodic = _plain_mapping(context.get("episodic_retrieval_summary"))
     memory_count = _count_sequence(memories)
     memory_types: list[str] = []
     if isinstance(memories, (list, tuple)):
@@ -205,18 +266,61 @@ def _memory_summary(context: Mapping[str, Any]) -> dict[str, Any]:
                 memory_types,
                 item.get("memory_type") or item.get("type") or item.get("category"),
             )
+    for memory_type in _safe_token_list(retrieval.get("memory_type_names")):
+        _append_unique(memory_types, memory_type)
 
     user_fact_count = _count_sequence(context.get("user_facts"))
+    retrieval_user_fact_count = _positive_int(retrieval.get("user_fact_count"))
+    if retrieval_user_fact_count is not None:
+        user_fact_count = retrieval_user_fact_count
+    retrieval_memory_count = _positive_int(retrieval.get("semantic_memory_count"))
+    if memory_count is None and retrieval_memory_count is not None:
+        memory_count = retrieval_memory_count
     semantic_context_chars = _char_count(context.get("semantic_context"))
     core_memory_chars = _char_count(context.get("core_memory_block"))
+    warning_codes = _safe_token_list(context.get("memory_warnings"))
+    for warning in _safe_token_list(retrieval.get("warning_codes")):
+        _append_unique(warning_codes, warning)
+    for warning in _safe_token_list(episodic.get("warning_codes")):
+        _append_unique(warning_codes, warning)
+    if bool(episodic.get("raw_content_included")):
+        _append_unique(warning_codes, "episodic_retrieval_raw_content_flagged")
     return {
         "semantic_context_present": semantic_context_chars > 0,
         "semantic_context_char_count": semantic_context_chars,
         "semantic_memory_count": memory_count,
         "semantic_memory_types": memory_types,
+        "retrieval_present": bool(retrieval),
+        "retrieval_status": _safe_token(retrieval.get("status")) or "unknown",
+        "relevant_memory_count": _positive_int(
+            retrieval.get("relevant_memory_count")
+        ),
+        "insight_count": _positive_int(retrieval.get("insight_count")),
+        "fact_type_names": _safe_token_list(retrieval.get("fact_type_names")),
+        "insight_category_names": _safe_token_list(
+            retrieval.get("insight_category_names")
+        ),
         "user_fact_count": user_fact_count,
         "core_memory_present": core_memory_chars > 0,
         "core_memory_char_count": core_memory_chars,
+        "episodic_retrieval_present": bool(episodic),
+        "episodic_retrieval_status": (
+            _safe_token(episodic.get("status")) if episodic else None
+        ) or "unknown",
+        "episodic_match_count": (
+            _positive_int(episodic.get("match_count")) if episodic else None
+        ),
+        "episodic_event_types": _safe_token_list(episodic.get("event_types")),
+        "episodic_max_score": _safe_float(episodic.get("max_score")),
+        "episodic_min_score": _safe_float(episodic.get("min_score")),
+        "episodic_org_scoped": bool(episodic.get("org_scoped")),
+        "episodic_current_session_excluded": bool(
+            episodic.get("current_session_excluded")
+        ),
+        "episodic_raw_content_included": bool(
+            episodic.get("raw_content_included")
+        ),
+        "warning_codes": warning_codes,
     }
 
 
@@ -245,11 +349,20 @@ def _host_summary(context: Mapping[str, Any]) -> dict[str, Any]:
 
 def _warnings(
     *,
+    conversation: Mapping[str, Any],
     documents: Mapping[str, Any],
     memory: Mapping[str, Any],
     host: Mapping[str, Any],
 ) -> list[str]:
     warnings: list[str] = []
+    for warning in conversation.get("history_warning_codes") or []:
+        _append_unique(warnings, warning)
+    if bool(conversation.get("history_raw_content_included")):
+        _append_unique(warnings, "chat_history_retrieval_raw_content_flagged")
+    for warning in conversation.get("context_budget_warning_codes") or []:
+        _append_unique(warnings, warning)
+    if bool(conversation.get("context_budget_raw_content_included")):
+        _append_unique(warnings, "context_budget_raw_content_flagged")
     if (
         int(documents.get("usable_attachment_count") or 0) > 0
         and int(documents.get("source_ref_count") or 0) == 0
@@ -258,8 +371,11 @@ def _warnings(
     if (
         bool(memory.get("semantic_context_present"))
         and memory.get("semantic_memory_count") is None
+        and not bool(memory.get("retrieval_present"))
     ):
         warnings.append("memory_context_without_typed_items")
+    for warning in memory.get("warning_codes") or []:
+        _append_unique(warnings, warning)
     if (
         bool(host.get("host_context_present"))
         and not host.get("capability_names")
@@ -286,6 +402,7 @@ def build_context_provenance_ledger(context: Any) -> dict[str, Any]:
         "memory": memory,
         "host": host,
         "warnings": _warnings(
+            conversation=conversation,
             documents=documents,
             memory=memory,
             host=host,

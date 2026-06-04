@@ -1,5 +1,5 @@
 """Sprint 222: Universal Context Engine — host_context_prompt in AgentState."""
-import pytest
+import json
 
 
 def test_agent_state_has_host_context_prompt_field():
@@ -195,6 +195,201 @@ def test_user_context_accepts_host_context():
     assert uc.host_context["host_type"] == "lms"
 
 
+def test_user_context_sanitizes_public_host_payload_and_keeps_control_feedback():
+    from app.models.schemas import ChatRequest
+
+    request = ChatRequest(
+        user_id="user-1",
+        message="Hien thi context",
+        role="teacher",
+        user_context={
+            "display_name": "Minh",
+            "role": "teacher",
+            "current_course_id": "course-safe",
+            "host_context": {
+                "host_type": "lms",
+                "connection_ref": "conn-secret",
+                "page": {
+                    "type": "lesson",
+                    "title": "COLREGs",
+                    "page_id": "page-secret",
+                    "metadata": {
+                        "access_token": "access-secret",
+                        "safe_label": "visible",
+                    },
+                },
+            },
+            "available_actions": [
+                {
+                    "name": "authoring.apply_lesson_patch",
+                    "input_schema": {
+                        "type": "object",
+                        "required": ["preview_token", "approval_token", "message"],
+                        "properties": {
+                            "preview_token": {"type": "string"},
+                            "approval_token": {"type": "string"},
+                            "message": {"type": "string"},
+                            "page_id": {"type": "string"},
+                        },
+                    },
+                }
+            ],
+            "host_action_feedback": {
+                "last_action_result": {
+                    "action": "authoring.preview_lesson_patch",
+                    "success": True,
+                    "summary": "Preview ready",
+                    "data": {
+                        "preview_token": "preview-secret",
+                        "approval_token": "approval-secret",
+                        "preview_kind": "lesson_patch",
+                    },
+                }
+            },
+            "host_action_control_feedback": {
+                "last_action_result": {
+                    "data": {"approval_token": "client-injected-secret"}
+                }
+            },
+        },
+    )
+
+    public_payload = json.dumps(request.model_dump(mode="json"), ensure_ascii=False)
+
+    assert request.user_context.current_course_id == "course-safe"
+    assert request.user_context.host_context["host_type"] == "lms"
+    assert request.user_context.host_context["page"]["metadata"]["safe_label"] == "visible"
+    assert request.user_context.available_actions[0]["input_schema"]["required"] == [
+        "message"
+    ]
+    assert request.user_context.available_actions[0]["input_schema"]["properties"] == {
+        "message": {"type": "string"}
+    }
+    assert request.user_context.host_action_feedback["last_action_result"]["data"] == {
+        "preview_kind": "lesson_patch",
+        "preview_available": True,
+        "approval_available": True,
+    }
+    assert request.user_context.host_action_control_feedback["last_action_result"]["data"] == {
+        "approval_token": "approval-secret",
+        "preview_kind": "lesson_patch",
+        "preview_token": "preview-secret",
+    }
+
+    for forbidden in [
+        "conn-secret",
+        "page-secret",
+        "access-secret",
+        "preview-secret",
+        "approval-secret",
+        "client-injected-secret",
+        "connection_ref",
+        "page_id",
+        "access_token",
+        "preview_token",
+        "approval_token",
+        "host_action_control_feedback",
+    ]:
+        assert forbidden not in public_payload
+
+
+def test_chat_request_canonicalization_resanitizes_mutated_user_context():
+    from app.api.v1.chat import _canonicalize_chat_request_from_auth
+    from app.api.v1.chat_stream import _canonicalize_stream_request_from_auth
+    from app.core.security_models import AuthenticatedUser
+    from app.models.schemas import ChatRequest
+
+    chat_request = ChatRequest(
+        user_id="spoofed-user",
+        message="Hien thi context",
+        role="student",
+        user_context={
+            "display_name": "Minh",
+            "role": "student",
+            "host_context": {"host_type": "lms"},
+        },
+    )
+    chat_request.user_context.host_context["connection_ref"] = "late-conn-secret"
+    chat_request.user_context.host_action_feedback = {
+        "last_action_result": {
+            "action": "authoring.preview_lesson_patch",
+            "data": {
+                "preview_token": "late-preview-secret",
+                "approval_token": "late-approval-secret",
+                "preview_kind": "lesson_patch",
+            },
+        }
+    }
+
+    auth = AuthenticatedUser(
+        user_id="auth-user",
+        auth_method="api_key",
+        role="teacher",
+        organization_id="org-auth",
+    )
+
+    for canonical in [
+        _canonicalize_chat_request_from_auth(chat_request, auth),
+        _canonicalize_stream_request_from_auth(chat_request, auth),
+    ]:
+        public_payload = json.dumps(canonical.model_dump(mode="json"), ensure_ascii=False)
+
+        assert canonical.user_id == "auth-user"
+        assert canonical.role == "teacher"
+        assert canonical.organization_id == "org-auth"
+        assert canonical.user_context.host_context == {"host_type": "lms"}
+        assert canonical.user_context.host_action_feedback["last_action_result"]["data"] == {
+            "preview_kind": "lesson_patch",
+            "preview_available": True,
+            "approval_available": True,
+        }
+        assert canonical.user_context.host_action_control_feedback["last_action_result"]["data"] == {
+            "approval_token": "late-approval-secret",
+            "preview_kind": "lesson_patch",
+            "preview_token": "late-preview-secret",
+        }
+
+        assert "late-conn-secret" not in public_payload
+        assert "late-preview-secret" not in public_payload
+        assert "late-approval-secret" not in public_payload
+
+
+def test_graph_bootstrap_splits_control_feedback_from_model_context():
+    from app.engine.multi_agent.graph_process import _split_model_context as split_sync_context
+    from app.engine.multi_agent.graph_stream_runtime import (
+        _split_model_context as split_stream_context,
+    )
+
+    context = {
+        "host_context": {"host_type": "lms"},
+        "host_action_feedback": {
+            "last_action_result": {
+                "data": {
+                    "preview_kind": "lesson_patch",
+                    "preview_available": True,
+                }
+            }
+        },
+        "_host_action_control_feedback": {
+            "last_action_result": {
+                "data": {"preview_token": "internal-preview-secret"}
+            }
+        },
+    }
+
+    for split_context in [split_sync_context, split_stream_context]:
+        model_context, control_feedback = split_context(context)
+
+        assert "_host_action_control_feedback" not in model_context
+        assert "internal-preview-secret" not in json.dumps(
+            model_context,
+            ensure_ascii=False,
+        )
+        assert control_feedback["last_action_result"]["data"]["preview_token"] == (
+            "internal-preview-secret"
+        )
+
+
 def test_user_context_host_context_defaults_none():
     """host_context should default to None."""
     from app.models.schemas import UserContext
@@ -312,3 +507,44 @@ def test_build_operator_session_prefers_confirm_apply_when_preview_exists():
 
     assert session.pending_approval is True
     assert "authoring.apply_lesson_patch" in session.next_best_step
+
+
+def test_host_session_prompt_includes_wiii_connect_snapshot():
+    from app.engine.context.host_context import (
+        build_host_session_v1,
+        format_host_session_for_prompt,
+    )
+
+    session = build_host_session_v1(
+        host_context={
+            "host_type": "wiii_desktop",
+            "host_name": "Wiii Desktop",
+            "page": {
+                "type": "chat",
+                "title": "Wiii",
+                "metadata": {
+                    "wiii_connect": {
+                        "provider_slug": "facebook",
+                        "provider_label": "Facebook",
+                        "status": "connected",
+                        "active_connection_count": 1,
+                        "page_count": 1,
+                        "page_names": ["Wiii"],
+                        "available_actions": [
+                            "wiii_connect.facebook_post.direct_apply",
+                            "wiii_connect.facebook_post.preview",
+                            "wiii_connect.facebook_post.apply",
+                        ],
+                    }
+                },
+            },
+        }
+    )
+
+    prompt = format_host_session_for_prompt(session)
+
+    assert "External connections" in prompt
+    assert "Facebook: connected" in prompt
+    assert "Wiii" in prompt
+    assert "wiii_connect.facebook_post.direct_apply" in prompt
+    assert "wiii_connect.facebook_post.preview" in prompt

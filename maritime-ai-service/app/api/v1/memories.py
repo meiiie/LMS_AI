@@ -16,11 +16,47 @@ from pydantic import BaseModel
 from app.api.deps import RequireAuth
 from app.core.rate_limit import limiter
 from app.core.security import is_platform_admin
+from app.engine.semantic_memory.privacy import hash_memory_identifier
+from app.engine.semantic_memory.write_audit import (
+    MemoryWriteScope,
+    resolve_memory_read_scope,
+    resolve_memory_write_scope,
+)
 from app.repositories.semantic_memory_repository import SemanticMemoryRepository
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/memories", tags=["memories"])
+
+
+def _require_memory_mutation_scope(user_id: str) -> None:
+    scope = resolve_memory_write_scope()
+    if scope.write_allowed:
+        return
+    logger.warning(
+        "Memory mutation blocked for user_hash=%s: %s",
+        hash_memory_identifier(user_id),
+        scope.state,
+    )
+    raise HTTPException(
+        status_code=403,
+        detail="Organization context required for memory mutation",
+    )
+
+
+def _require_memory_read_scope(user_id: str) -> MemoryWriteScope:
+    scope = resolve_memory_read_scope()
+    if scope.write_allowed:
+        return scope
+    logger.warning(
+        "Memory read blocked for user_hash=%s: %s",
+        hash_memory_identifier(user_id),
+        scope.state,
+    )
+    raise HTTPException(
+        status_code=403,
+        detail="Organization context required for memory access",
+    )
 
 
 # ========== Response Models ==========
@@ -38,10 +74,82 @@ class MemoryItem(BaseModel):
         }
 
 
+class MemoryPrivacySummary(BaseModel):
+    """Privacy contract for user-visible memory diagnostics."""
+
+    raw_content_included: bool
+    identifier_strategy: str
+
+
+class MemoryProvenanceSummary(BaseModel):
+    """Count-only source summary for the memory surface."""
+
+    source_kinds: dict[str, int]
+    raw_content_included: bool
+    identifier_strategy: str
+
+
+class MemoryControlsSummary(BaseModel):
+    """Available user memory controls for the current auth/scope."""
+
+    can_delete_one: bool
+    can_clear_all: bool
+
+
+class MemoryHealthSummary(BaseModel):
+    """Aggregate, raw-content-free status for the memory surface."""
+
+    total: int
+    type_counts: dict[str, int]
+    latest_created_at: datetime | None
+    scope_state: str
+    org_scoped: bool
+    controls: MemoryControlsSummary
+    provenance: MemoryProvenanceSummary
+    privacy: MemoryPrivacySummary
+
+
 class MemoryListResponse(BaseModel):
     """Response for GET /memories/{user_id}."""
     data: List[MemoryItem]
     total: int
+    summary: MemoryHealthSummary
+
+
+def _build_memory_health_summary(
+    *,
+    items: list[MemoryItem],
+    scope_state: str,
+    org_scoped: bool,
+) -> MemoryHealthSummary:
+    type_counts: dict[str, int] = {}
+    latest_created_at: datetime | None = None
+    for item in items:
+        type_counts[item.type] = type_counts.get(item.type, 0) + 1
+        if latest_created_at is None or item.created_at > latest_created_at:
+            latest_created_at = item.created_at
+
+    total = len(items)
+    return MemoryHealthSummary(
+        total=total,
+        type_counts=dict(sorted(type_counts.items())),
+        latest_created_at=latest_created_at,
+        scope_state=scope_state,
+        org_scoped=org_scoped,
+        controls=MemoryControlsSummary(
+            can_delete_one=True,
+            can_clear_all=True,
+        ),
+        provenance=MemoryProvenanceSummary(
+            source_kinds={"semantic_fact": total} if total else {},
+            raw_content_included=False,
+            identifier_strategy="count_only",
+        ),
+        privacy=MemoryPrivacySummary(
+            raw_content_included=False,
+            identifier_strategy="hash_or_count_only",
+        ),
+    )
 
 
 # ========== API Endpoints ==========
@@ -73,6 +181,7 @@ async def get_user_memories(
             status_code=403,
             detail="You can only access your own memories"
         )
+    scope = _require_memory_read_scope(user_id)
     try:
         repository = SemanticMemoryRepository()
         
@@ -103,7 +212,12 @@ async def get_user_memories(
         
         return MemoryListResponse(
             data=items,
-            total=len(items)
+            total=len(items),
+            summary=_build_memory_health_summary(
+                items=items,
+                scope_state=scope.state,
+                org_scoped=scope.state == "request_scoped",
+            ),
         )
         
     except Exception as e:
@@ -147,6 +261,8 @@ async def delete_user_memory(
                 status_code=403,
                 detail="You can only delete your own memories"
             )
+
+        _require_memory_mutation_scope(user_id)
 
         repository = SemanticMemoryRepository()
 
@@ -205,6 +321,8 @@ async def clear_user_memories(
                 status_code=403,
                 detail="You can only clear your own memories"
             )
+
+        _require_memory_mutation_scope(user_id)
 
         repository = SemanticMemoryRepository()
         deleted_count = repository.delete_all_user_memories(user_id)

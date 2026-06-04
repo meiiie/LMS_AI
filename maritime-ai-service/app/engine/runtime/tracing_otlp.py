@@ -42,7 +42,12 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from app.engine.runtime.tracing import Span, SpanProcessor, get_tracer
+from app.engine.runtime.tracing import (
+    Span,
+    SpanProcessor,
+    get_tracer,
+    sanitize_trace_attributes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +183,7 @@ class OTLPSpanProcessor(SpanProcessor):
         with self._tracer.start_as_current_span(
             span.name, kind=otel_trace.SpanKind.INTERNAL
         ) as otel_span:
-            for key, value in (span.attributes or {}).items():
+            for key, value in sanitize_trace_attributes(span.attributes).items():
                 # OTel only accepts a fixed set of value types — coerce
                 # everything else to str so noisy attributes don't
                 # crash the export.

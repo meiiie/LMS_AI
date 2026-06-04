@@ -48,7 +48,7 @@ function createHandlers(): SSEEventHandler & { calls: Record<string, unknown[]> 
     onAnswer: (data) => calls.answer.push(data),
     onSources: (data) => calls.sources.push(data),
     onMetadata: (data) => calls.metadata.push(data),
-    onDone: () => calls.done.push({}),
+    onDone: (data) => calls.done.push(data || {}),
     onError: (data) => calls.error.push(data),
     onToolCall: (data) => calls.tool_call.push(data),
     onToolResult: (data) => calls.tool_result.push(data),
@@ -219,6 +219,33 @@ describe("SSE Parser", () => {
     const result = await parseSSEStream(stream, handlers);
 
     expect(handlers.calls.done).toHaveLength(1);
+    expect(handlers.calls.done[0]).toEqual({ status: "complete" });
+    expect(result.sawDone).toBe(true);
+  });
+
+  it("should pass terminal runtime ledger payload from done event", async () => {
+    const ledger = {
+      schema_version: "wiii.runtime_flow_ledger.v1",
+      stream: {
+        event_counts: { answer: 1, visual_open: 1, visual_commit: 1, done: 1 },
+        done_seen: true,
+      },
+    };
+    const stream = createStream([
+      `event: done\ndata: ${JSON.stringify({
+        status: "complete",
+        runtime_flow_ledger: ledger,
+      })}\n\n`,
+    ]);
+
+    const handlers = createHandlers();
+    const result = await parseSSEStream(stream, handlers);
+
+    expect(handlers.calls.done).toHaveLength(1);
+    expect(handlers.calls.done[0]).toMatchObject({
+      status: "complete",
+      runtime_flow_ledger: ledger,
+    });
     expect(result.sawDone).toBe(true);
   });
 

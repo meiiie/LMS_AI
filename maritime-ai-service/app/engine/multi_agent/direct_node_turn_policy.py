@@ -51,6 +51,15 @@ class DirectNodeTurnPolicy:
     explicit_web_search_turn: bool
 
 
+def _turn_path_requires_tools(state: AgentState) -> bool:
+    if not isinstance(state, dict):
+        return False
+    decision = state.get("_turn_path_decision")
+    if not isinstance(decision, dict):
+        return False
+    return bool(decision.get("bind_tools", True)) and bool(decision.get("force_tools"))
+
+
 def resolve_direct_node_turn_policy(
     *,
     query: str,
@@ -112,8 +121,10 @@ def resolve_direct_node_turn_policy(
         )
     )
     visual_decision = resolve_visual_intent(query)
+    turn_path_requires_tools = _turn_path_requires_tools(state)
     is_short_house_chatter = (
         not is_identity_turn
+        and not turn_path_requires_tools
         and (
             is_chatter_fast_path
             or is_social_fast_path
@@ -165,6 +176,7 @@ def resolve_direct_node_turn_policy(
     explicit_user_provider = get_explicit_user_provider(state)
     use_house_voice_direct = (
         routing_intent in {"social", "personal", "off_topic"}
+        and not turn_path_requires_tools
         and not needs_web_search(query)
         and not needs_datetime(query)
         and not visual_decision.force_tool

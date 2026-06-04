@@ -742,6 +742,16 @@ class BaseSettingsFieldsMixin:
         ),
     )
 
+    session_event_log_retention_days: int = Field(
+        default=30,
+        ge=1,
+        le=3650,
+        description=(
+            "Default retention window for admin-triggered session_events pruning. "
+            "Pruning is never automatic; operators must call the admin prune endpoint."
+        ),
+    )
+
     enable_eval_recording: bool = Field(
         default=False,
         description=(

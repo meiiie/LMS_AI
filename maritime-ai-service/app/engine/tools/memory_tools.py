@@ -38,6 +38,7 @@ class MemoryToolState:
     """Per-request state for memory tools. Isolated between concurrent requests."""
     user_id: str = "current_user"
     user_cache: Dict[str, Any] = field(default_factory=dict)
+    identity_key: Optional[str] = None
 
 
 # ContextVar: each async request gets its own MemoryToolState
@@ -49,12 +50,61 @@ _memory_tool_state: contextvars.ContextVar[Optional[MemoryToolState]] = contextv
 _semantic_memory = None
 
 
-def _get_state() -> MemoryToolState:
-    """Get or create per-request memory tool state."""
+def _tool_identity(user_id: Optional[str] = None) -> tuple[str, str, bool]:
+    """Resolve the current tool identity without exposing raw metadata in logs."""
+    runtime_user_id = None
+    runtime_org_id = ""
+    runtime_session_id = ""
+    identity_available = bool(user_id)
+
+    try:
+        from app.engine.tools.runtime_context import get_current_tool_runtime_context
+
+        runtime = get_current_tool_runtime_context()
+        if runtime:
+            runtime_user_id = runtime.user_id
+            runtime_org_id = str(runtime.organization_id or "").strip()
+            runtime_session_id = str(runtime.session_id or "").strip()
+            identity_available = identity_available or bool(
+                runtime_user_id or runtime_org_id or runtime_session_id
+            )
+    except Exception:
+        pass
+
+    if not runtime_org_id:
+        try:
+            from app.core.org_context import get_current_org_id
+
+            runtime_org_id = str(get_current_org_id() or "").strip()
+            identity_available = identity_available or bool(runtime_org_id)
+        except Exception:
+            pass
+
+    resolved_user_id = str(user_id or runtime_user_id or "current_user").strip() or "current_user"
+    identity_key = (
+        f"user={resolved_user_id}|org={runtime_org_id}|session={runtime_session_id}"
+    )
+    return identity_key, resolved_user_id, identity_available
+
+
+def _new_state(user_id: Optional[str] = None) -> MemoryToolState:
+    identity_key, resolved_user_id, _ = _tool_identity(user_id)
+    return MemoryToolState(user_id=resolved_user_id, identity_key=identity_key)
+
+
+def _get_state(user_id: Optional[str] = None) -> MemoryToolState:
+    """Get or create identity-scoped memory tool state."""
+    identity_key, resolved_user_id, identity_available = _tool_identity(user_id)
     state = _memory_tool_state.get(None)
     if state is None:
-        state = MemoryToolState()
+        state = _new_state(user_id)
         _memory_tool_state.set(state)
+    elif identity_available and state.identity_key != identity_key:
+        state = _new_state(user_id)
+        _memory_tool_state.set(state)
+    elif state.identity_key is None:
+        state.identity_key = identity_key
+        state.user_id = resolved_user_id
     return state
 
 
@@ -63,15 +113,13 @@ def init_memory_tools(semantic_memory, user_id: Optional[str] = None):
     global _semantic_memory
     _semantic_memory = semantic_memory
     if user_id:
-        state = _get_state()
-        state.user_id = user_id
+        _get_state(user_id)
     logger.info("Memory tools initialized (user_id=%s)", user_id)
 
 
 def set_current_user(user_id: str):
     """Set the current user ID for memory operations (per-request)."""
-    state = _get_state()
-    state.user_id = user_id
+    _get_state(user_id)
 
 
 def get_user_cache() -> Dict[str, Any]:

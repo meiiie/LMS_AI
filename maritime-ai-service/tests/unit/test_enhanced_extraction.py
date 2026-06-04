@@ -16,16 +16,6 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Prevent extract_and_store_facts from connecting to DB via prune_stale_memories
-@pytest.fixture(autouse=True)
-def _mock_prune_stale_memories():
-    with patch(
-        "app.services.memory_lifecycle.prune_stale_memories",
-        new_callable=AsyncMock,
-        return_value=0,
-    ):
-        yield
-
 from app.models.semantic_memory import (
     ALLOWED_FACT_TYPES,
     FACT_TYPE_MAPPING,

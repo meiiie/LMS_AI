@@ -23,11 +23,45 @@ strings; observers filter by type.
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Optional, Protocol
 
+from app.engine.runtime.event_payload_sanitizer import sanitize_runtime_payload
+
 logger = logging.getLogger(__name__)
+_DEFAULT_RECENT_EVENT_LIMIT = 50
+_MAX_RECENT_EVENT_LIMIT = 500
+
+
+def _safe_payload_dict(payload: object) -> dict:
+    safe_payload = sanitize_runtime_payload(payload)
+    return copy.deepcopy(safe_payload) if isinstance(safe_payload, dict) else {}
+
+
+def _bounded_recent_limit(limit: int | None) -> int:
+    if type(limit) is not int:
+        return _DEFAULT_RECENT_EVENT_LIMIT
+    return min(max(limit, 1), _MAX_RECENT_EVENT_LIMIT)
+
+
+def _utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _event_created_before(event: "SessionEvent", cutoff: datetime) -> bool:
+    raw_value = event.created_at
+    if not raw_value:
+        return False
+    try:
+        value = datetime.fromisoformat(str(raw_value).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return _utc_datetime(value) < _utc_datetime(cutoff)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +73,7 @@ class SessionEvent:
     payload: dict
     seq: int
     org_id: Optional[str] = None
+    created_at: Optional[str] = None
 
 
 class SessionEventLog(Protocol):
@@ -68,11 +103,41 @@ class SessionEventLog(Protocol):
     ) -> int:
         ...
 
+    async def get_recent_events(
+        self,
+        *,
+        org_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+        limit: int = _DEFAULT_RECENT_EVENT_LIMIT,
+    ) -> list[SessionEvent]:
+        ...
+
+    async def prune_older_than(
+        self,
+        *,
+        cutoff: datetime,
+        org_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+        dry_run: bool = True,
+    ) -> int:
+        ...
+
 
 @dataclass
 class _SessionState:
     seq: int = 0
     events: list[SessionEvent] = field(default_factory=list)
+
+
+def _copy_event(event: SessionEvent) -> SessionEvent:
+    return SessionEvent(
+        session_id=event.session_id,
+        event_type=event.event_type,
+        payload=copy.deepcopy(event.payload),
+        seq=event.seq,
+        org_id=event.org_id,
+        created_at=event.created_at,
+    )
 
 
 class InMemorySessionEventLog:
@@ -85,6 +150,7 @@ class InMemorySessionEventLog:
 
     def __init__(self) -> None:
         self._sessions: dict[str, _SessionState] = {}
+        self._events: list[SessionEvent] = []
         self._lock = asyncio.Lock()
 
     async def append(
@@ -98,15 +164,18 @@ class InMemorySessionEventLog:
         async with self._lock:
             state = self._sessions.setdefault(session_id, _SessionState())
             state.seq += 1
+            safe_payload = _safe_payload_dict(payload)
             event = SessionEvent(
                 session_id=session_id,
                 event_type=event_type,
-                payload=dict(payload),
+                payload=safe_payload,
                 seq=state.seq,
                 org_id=org_id,
+                created_at=datetime.now(UTC).isoformat(),
             )
             state.events.append(event)
-            return event
+            self._events.append(event)
+            return _copy_event(event)
 
     async def get_events(
         self,
@@ -124,7 +193,7 @@ class InMemorySessionEventLog:
                 events = [e for e in events if e.org_id == org_id]
             if since_seq is not None:
                 events = [e for e in events if e.seq > since_seq]
-            return list(events)
+            return [_copy_event(e) for e in events]
 
     async def latest_seq(
         self, *, session_id: str, org_id: Optional[str] = None
@@ -140,6 +209,54 @@ class InMemorySessionEventLog:
                 if event.org_id == org_id:
                     return event.seq
             return 0
+
+    async def get_recent_events(
+        self,
+        *,
+        org_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+        limit: int = _DEFAULT_RECENT_EVENT_LIMIT,
+    ) -> list[SessionEvent]:
+        async with self._lock:
+            bounded_limit = _bounded_recent_limit(limit)
+            events: list[SessionEvent] = []
+            for event in reversed(self._events):
+                if org_id is not None and event.org_id != org_id:
+                    continue
+                if event_type is not None and event.event_type != event_type:
+                    continue
+                events.append(event)
+                if len(events) >= bounded_limit:
+                    break
+            return [_copy_event(e) for e in events]
+
+    async def prune_older_than(
+        self,
+        *,
+        cutoff: datetime,
+        org_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+        dry_run: bool = True,
+    ) -> int:
+        async with self._lock:
+            def _matches(event: SessionEvent) -> bool:
+                if org_id is not None and event.org_id != org_id:
+                    return False
+                if event_type is not None and event.event_type != event_type:
+                    return False
+                return _event_created_before(event, cutoff)
+
+            removed_count = sum(1 for event in self._events if _matches(event))
+            if dry_run or removed_count == 0:
+                return removed_count
+
+            self._events = [event for event in self._events if not _matches(event)]
+            for session_id in list(self._sessions):
+                state = self._sessions[session_id]
+                state.events = [event for event in state.events if not _matches(event)]
+                if not state.events:
+                    del self._sessions[session_id]
+            return removed_count
 
 
 class PostgresSessionEventLog:
@@ -181,7 +298,8 @@ class PostgresSessionEventLog:
         import json
 
         pool = await self._pool()
-        payload_json = json.dumps(dict(payload), ensure_ascii=False)
+        safe_payload = _safe_payload_dict(payload)
+        payload_json = json.dumps(safe_payload, ensure_ascii=False)
 
         last_exc: Optional[Exception] = None
         for _ in range(self.MAX_APPEND_RETRIES):
@@ -262,6 +380,74 @@ class PostgresSessionEventLog:
                 )
         return int(seq or 0)
 
+    async def get_recent_events(
+        self,
+        *,
+        org_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+        limit: int = _DEFAULT_RECENT_EVENT_LIMIT,
+    ) -> list[SessionEvent]:
+        pool = await self._pool()
+        bounded_limit = _bounded_recent_limit(limit)
+        async with pool.acquire() as conn:
+            params: list = []
+            where: list[str] = []
+            if org_id is not None:
+                params.append(org_id)
+                where.append(f"org_id = ${len(params)}")
+            if event_type is not None:
+                params.append(event_type)
+                where.append(f"event_type = ${len(params)}")
+            params.append(bounded_limit)
+            limit_param = len(params)
+
+            where_clause = f"WHERE {' AND '.join(where)} " if where else ""
+            sql = (
+                "SELECT id, session_id, org_id, event_type, payload, seq, "
+                "       created_at "
+                "FROM session_events "
+                f"{where_clause}"
+                "ORDER BY created_at DESC, id DESC "
+                f"LIMIT ${limit_param}"
+            )
+            rows = await conn.fetch(sql, *params)
+        return [_row_to_event(r) for r in rows]
+
+    async def prune_older_than(
+        self,
+        *,
+        cutoff: datetime,
+        org_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+        dry_run: bool = True,
+    ) -> int:
+        pool = await self._pool()
+        cutoff_utc = _utc_datetime(cutoff)
+        async with pool.acquire() as conn:
+            params: list = [cutoff_utc]
+            where = ["created_at < $1"]
+            if org_id is not None:
+                params.append(org_id)
+                where.append(f"org_id = ${len(params)}")
+            if event_type is not None:
+                params.append(event_type)
+                where.append(f"event_type = ${len(params)}")
+            where_clause = " AND ".join(where)
+            if dry_run:
+                count = await conn.fetchval(
+                    f"SELECT COUNT(*) FROM session_events WHERE {where_clause}",
+                    *params,
+                )
+            else:
+                count = await conn.fetchval(
+                    "WITH deleted AS ("
+                    f"DELETE FROM session_events WHERE {where_clause} "
+                    "RETURNING 1"
+                    ") SELECT COUNT(*) FROM deleted",
+                    *params,
+                )
+        return int(count or 0)
+
 
 def _row_to_event(row) -> SessionEvent:
     """Materialise an asyncpg row → ``SessionEvent``.
@@ -281,6 +467,19 @@ def _row_to_event(row) -> SessionEvent:
         payload_dict = raw_payload
     else:
         payload_dict = {}
+    payload_dict = _safe_payload_dict(payload_dict)
+
+    raw_created_at = None
+    try:
+        raw_created_at = row["created_at"] if row else None
+    except (KeyError, TypeError):
+        raw_created_at = None
+    if hasattr(raw_created_at, "isoformat"):
+        created_at = raw_created_at.isoformat()
+    elif raw_created_at is not None:
+        created_at = str(raw_created_at)
+    else:
+        created_at = None
 
     return SessionEvent(
         session_id=row["session_id"],
@@ -288,6 +487,7 @@ def _row_to_event(row) -> SessionEvent:
         payload=payload_dict,
         seq=int(row["seq"]),
         org_id=row["org_id"],
+        created_at=created_at,
     )
 
 

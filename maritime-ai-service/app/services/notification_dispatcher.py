@@ -14,6 +14,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+from app.services.notifications.privacy import notification_recipient_ref
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,7 +59,11 @@ class NotificationDispatcher:
         """
         adapter = self._get_registry().get(channel)
         if adapter is None:
-            logger.warning("[NOTIFY] Unknown channel '%s' for user %s", channel, user_id)
+            logger.warning(
+                "[NOTIFY] Unknown channel '%s' recipient_ref=%s",
+                channel,
+                notification_recipient_ref(user_id),
+            )
             return {
                 "delivered": False,
                 "channel": channel,
@@ -97,7 +103,10 @@ class NotificationDispatcher:
             user_id=user_id,
             message=payload,
             channel=channel,
-            metadata={"task_id": task.get("id")},
+            metadata={
+                "task_id": task.get("id"),
+                "organization_id": task.get("organization_id"),
+            },
         )
 
 

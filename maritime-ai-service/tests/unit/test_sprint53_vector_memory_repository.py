@@ -5,8 +5,9 @@ Tests vector similarity search:
 - search_similar (basic, NaN/Inf handling, type filter, threshold, error)
 """
 
-import pytest
 import math
+import logging
+import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
@@ -64,6 +65,58 @@ def _make_row(content="test content", memory_type="message", similarity=0.85):
 
 class TestSearchSimilar:
     """Test cosine similarity search."""
+
+    def test_search_similar_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo = _make_repo()
+        repo._format_embedding = MagicMock(return_value="[0.1]")
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            results = repo.search_similar("PRIVATE-USER", [0.1] * 768)
+        finally:
+            current_org_id.reset(token)
+
+        assert results == []
+        repo._format_embedding.assert_not_called()
+        repo._session_factory.assert_not_called()
+        assert "vector_memory_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
+
+    def test_search_similar_text_blocks_missing_org_context_before_db(
+        self,
+        monkeypatch,
+        caplog,
+    ):
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+
+        repo = _make_repo()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        token = current_org_id.set(None)
+        try:
+            results = repo.search_similar_text("PRIVATE-USER", "private query")
+        finally:
+            current_org_id.reset(token)
+
+        assert results == []
+        repo._session_factory.assert_not_called()
+        assert "vector_memory_repository_blocked_missing_org_context" in caplog.text
+        assert "PRIVATE-USER" not in caplog.text
 
     def test_basic_search(self):
         repo = _make_repo()

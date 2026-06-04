@@ -69,6 +69,10 @@ from app.engine.multi_agent.direct_document_preview_payloads import (
     _build_uploaded_doc_course_params,
     _build_uploaded_doc_preview_params,
 )
+from app.engine.multi_agent.external_app_action_runtime import (
+    external_app_action_final_answer,
+    prepare_external_app_action_turn,
+)
 from app.engine.multi_agent.state import AgentState
 from app.engine.multi_agent.tool_call_text_parser import (
     extract_raw_tool_calls_from_text,
@@ -174,6 +178,23 @@ async def execute_direct_tool_rounds_impl(
     )
     streamed_direct_answer = False
     try:
+        external_action_preparation = prepare_external_app_action_turn(
+            query=query,
+            state=state,
+            tools=tools,
+            forced_tool_choice=forced_tool_choice,
+            native_tool_messages=native_tool_messages,
+            build_assistant_message=_build_assistant_message,
+        )
+        if external_action_preparation.preempted:
+            return (
+                external_action_preparation.preflight_response,
+                messages,
+                tool_call_events,
+            )
+        tools = external_action_preparation.tools
+        forced_tool_choice = external_action_preparation.forced_tool_choice
+
         forced_web_response = await execute_forced_web_search_shortcut(
             query=query,
             state=state,
@@ -331,6 +352,26 @@ async def execute_direct_tool_rounds_impl(
         )
         if search_template_response is not None:
             return search_template_response, messages, tool_call_events
+
+        external_action_answer = external_app_action_final_answer(
+            tool_call_events,
+        )
+        if external_action_answer:
+            state["_final_answer_trace"] = {
+                "version": "final_answer_trace.v1",
+                "source": "wiii_connect_action_result",
+                "reason": "external_app_action_payload",
+                "status": "resolved",
+                "answer_present": True,
+            }
+            return (
+                _build_assistant_message(
+                    external_action_answer,
+                    native_tool_messages=native_tool_messages,
+                ),
+                messages,
+                tool_call_events,
+            )
 
         # Phase 35 — convergence self-eval rubric injected after round 0.
         # SOTA Anthropic Claude tool-use pattern: explicit "is info sufficient?"
