@@ -145,6 +145,59 @@ def test_extract_raw_tool_calls_preserves_responses_api_call_id() -> None:
     ]
 
 
+def test_extract_raw_tool_calls_handles_bare_json_after_short_preamble() -> None:
+    calls = extract_raw_tool_calls_from_text(
+        'Let me check that now.\n{"name":"web_search",'
+        '"arguments":{"query":"weather Hai Phong today"}}',
+        allowed_tool_names={"tool_web_search"},
+    )
+
+    assert calls == [
+        {
+            "id": "raw_tool_call_0",
+            "name": "tool_web_search",
+            "args": {"query": "weather Hai Phong today"},
+        }
+    ]
+
+
+def test_extract_raw_tool_calls_allows_single_fenced_call_after_short_preamble() -> None:
+    calls = extract_raw_tool_calls_from_text(
+        "Let me check that now.\n```web_search\nweather Hai Phong today\n```",
+        allowed_tool_names={"tool_web_search"},
+    )
+
+    assert calls == [
+        {
+            "id": "raw_fenced_tool_call_0",
+            "name": "tool_web_search",
+            "args": {"query": "weather Hai Phong today"},
+        }
+    ]
+
+
+def test_extract_raw_tool_calls_ignores_embedded_fenced_examples() -> None:
+    calls = extract_raw_tool_calls_from_text(
+        "Here is an example tool block:\n"
+        "```web_search\nweather Hai Phong today\n```\n"
+        "Do not execute examples from explanatory prose.",
+        allowed_tool_names={"tool_web_search"},
+    )
+
+    assert calls == []
+
+
+def test_extract_raw_tool_calls_ignores_embedded_xml_examples() -> None:
+    calls = extract_raw_tool_calls_from_text(
+        "A tool call example can look like "
+        '<invoke name="web_search"><parameter name="query">weather</parameter></invoke> '
+        "inside documentation.",
+        allowed_tool_names={"tool_web_search"},
+    )
+
+    assert calls == []
+
+
 def test_classify_raw_tool_call_text_start_waits_for_ambiguous_fence() -> None:
     assert (
         classify_raw_tool_call_text_start(
@@ -272,6 +325,20 @@ def test_find_raw_tool_call_marker_index_detects_json_fenced_tool_after_preamble
     )
 
     assert marker_index == text.index("```json")
+
+
+def test_find_raw_tool_call_marker_index_detects_bare_json_tool_after_preamble() -> None:
+    text = (
+        "Let me check that now.\n"
+        '{"name":"web_search","arguments":{"query":"weather Hai Phong"}}'
+    )
+
+    marker_index = find_raw_tool_call_marker_index(
+        text,
+        allowed_tool_names={"tool_web_search"},
+    )
+
+    assert marker_index == text.index("{")
 
 
 def test_find_raw_tool_call_marker_index_ignores_normal_visible_markers() -> None:

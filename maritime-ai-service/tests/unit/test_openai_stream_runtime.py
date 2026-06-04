@@ -631,6 +631,99 @@ async def test_native_direct_stream_recovers_json_fenced_tool_call_after_preambl
 
 
 @pytest.mark.asyncio
+async def test_native_direct_stream_recovers_bare_json_tool_call_after_preamble():
+    events = []
+
+    async def _push_event(event):
+        events.append(event)
+
+    class _FakeStream:
+        def __aiter__(self):
+            async def _gen():
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                content="Let me check that now.\n",
+                            )
+                        )
+                    ]
+                )
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                content=(
+                                    '{"name":"web_search",'
+                                    '"arguments":{"query":"weather Hai Phong today"}}'
+                                ),
+                            )
+                        )
+                    ]
+                )
+
+            return _gen()
+
+    class _FakeChatCompletions:
+        async def create(self, **_kwargs):
+            return _FakeStream()
+
+    class _FakeChat:
+        completions = _FakeChatCompletions()
+
+    class _FakeClient:
+        chat = _FakeChat()
+
+    route = SimpleNamespace(
+        provider="nvidia",
+        llm=SimpleNamespace(
+            _wiii_tier_key="light",
+            _wiii_model_name="deepseek-ai/deepseek-v4-flash",
+            _wiii_bound_tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "tool_web_search",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+        ),
+    )
+
+    response, streamed = await _stream_openai_compatible_answer_with_route_impl(
+        route,
+        messages=[{"role": "user", "content": "Weather Hai Phong today?"}],
+        push_event=_push_event,
+        node="direct",
+        thinking_stop_signal=None,
+        supports_native_answer_streaming=lambda provider: provider == "nvidia",
+        create_openai_compatible_stream_client=lambda _provider: _FakeClient(),
+        resolve_openai_stream_model_name=lambda *_args: "deepseek-ai/deepseek-v4-flash",
+        langchain_message_to_openai_payload=lambda message: message,
+        extract_openai_delta_text=lambda delta: ("", str(getattr(delta, "content", "") or "")),
+    )
+
+    assert streamed is True
+    assert response.content == "Let me check that now.\n"
+    assert response.tool_calls == [
+        {
+            "id": "raw_tool_call_0",
+            "name": "tool_web_search",
+            "args": {"query": "weather Hai Phong today"},
+        }
+    ]
+    assert events == [
+        {
+            "type": "answer_delta",
+            "content": "Let me check that now.\n",
+            "node": "direct",
+        }
+    ]
+    assert "web_search" not in "".join(str(event.get("content") or "") for event in events)
+
+
+@pytest.mark.asyncio
 async def test_native_direct_stream_timeout_marks_model_degraded():
     from app.engine.llm_model_health import is_model_degraded, reset_model_health_state
 

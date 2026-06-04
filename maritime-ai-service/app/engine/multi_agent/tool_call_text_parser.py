@@ -42,6 +42,7 @@ _TOOL_CODE_RE = re.compile(
     r"<tool_code>\s*\{([\s\S]*?)\}\s*</tool_code>",
     re.IGNORECASE,
 )
+_RAW_TOOL_PREAMBLE_MAX_CHARS = 280
 _DSML_PIPES = r"[\uff5c|]+"
 _RAW_XML_START_MARKERS = (
     "<tool_call",
@@ -192,6 +193,19 @@ def _loads_json_object(value: str) -> Any | None:
         return None
 
 
+def _decode_json_prefix(value: str) -> tuple[Any, int] | None:
+    text = str(value or "")
+    stripped = text.lstrip()
+    if not stripped or stripped[0] not in "{[":
+        return None
+    leading = len(text) - len(stripped)
+    try:
+        payload, end = json.JSONDecoder().raw_decode(stripped)
+    except Exception:
+        return None
+    return payload, leading + end
+
+
 def _coerce_arguments(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         args = dict(value)
@@ -284,6 +298,27 @@ def _normalize_raw_tool_call(
         or f"raw_tool_call_{index}"
     ).strip()
     return {"id": call_id, "name": name, "args": args}
+
+
+def _json_prefix_contains_allowed_tool_call(
+    value: str,
+    *,
+    allowed_tool_names: set[str] | None,
+) -> bool:
+    decoded = _decode_json_prefix(value)
+    if decoded is not None:
+        payload, _end = decoded
+        for index, candidate in enumerate(_candidate_tool_call_objects(payload)):
+            if _normalize_raw_tool_call(
+                candidate,
+                allowed_tool_names=allowed_tool_names,
+                index=index,
+            ):
+                return True
+    return _contains_allowed_json_tool_name_hint(
+        value[:512],
+        allowed_tool_names=allowed_tool_names,
+    )
 
 
 def _normalize_dsml(value: str) -> str:
@@ -493,6 +528,76 @@ def _extract_tool_code_calls(
     return calls
 
 
+def _has_tight_tool_call_preamble(value: str) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return True
+    if len(text) > _RAW_TOOL_PREAMBLE_MAX_CHARS:
+        return False
+    return text.count("\n") <= 2
+
+
+def _is_complete_single_raw_tool_call_suffix(
+    value: str,
+    *,
+    allowed_tool_names: set[str] | None,
+) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+
+    decoded = _decode_json_prefix(text)
+    if decoded is not None:
+        payload, end = decoded
+        if text[end:].strip():
+            return False
+        return any(
+            _normalize_raw_tool_call(
+                candidate,
+                allowed_tool_names=allowed_tool_names,
+                index=index,
+            )
+            for index, candidate in enumerate(_candidate_tool_call_objects(payload))
+    )
+
+    if _FENCED_BLOCK_RE.fullmatch(text):
+        return bool(
+            _extract_fenced_tool_calls(text, allowed_tool_names=allowed_tool_names)
+        )
+    if _TOOL_CALL_BLOCK_RE.fullmatch(text):
+        return bool(
+            _extract_tool_call_blocks(text, allowed_tool_names=allowed_tool_names)
+        )
+    normalized = _normalize_dsml(text)
+    if _XML_TOOL_CALL_RE.fullmatch(normalized) or _XML_INVOKE_RE.fullmatch(normalized):
+        return bool(_extract_xml_tool_calls(text, allowed_tool_names=allowed_tool_names))
+    if _TOOL_CODE_RE.fullmatch(text):
+        return bool(_extract_tool_code_calls(text, allowed_tool_names=allowed_tool_names))
+    return False
+
+
+def _tool_call_suffix_with_boundary(
+    value: str,
+    *,
+    allowed_tool_names: set[str] | None,
+) -> str | None:
+    marker_index = find_raw_tool_call_marker_index(
+        value,
+        allowed_tool_names=allowed_tool_names,
+    )
+    if marker_index is None:
+        return None
+    if not _has_tight_tool_call_preamble(value[:marker_index]):
+        return None
+    suffix = value[marker_index:].strip()
+    if not _is_complete_single_raw_tool_call_suffix(
+        suffix,
+        allowed_tool_names=allowed_tool_names,
+    ):
+        return None
+    return suffix
+
+
 def classify_raw_tool_call_text_start(
     value: Any,
     *,
@@ -616,6 +721,18 @@ def find_raw_tool_call_marker_index(
         if _resolve_allowed_tool_name(invoke.group(1), allowed_tool_names=allowed):
             candidates.append(invoke.start())
 
+    for match in re.finditer(r"[\{\[]", value):
+        start = match.start()
+        if start > 0 and not value[start - 1].isspace():
+            continue
+        if not _has_tight_tool_call_preamble(value[:start]):
+            continue
+        if _json_prefix_contains_allowed_tool_call(
+            value[start:],
+            allowed_tool_names=allowed,
+        ):
+            candidates.append(start)
+
     dsml_marker = re.search(
         rf"<\s*{_DSML_PIPES}\s*DSML\s*{_DSML_PIPES}\s*(?:tool_calls|invoke)\b",
         value,
@@ -648,6 +765,24 @@ def extract_raw_tool_calls_from_text(
             if normalized:
                 calls.append(normalized)
         return calls
+    tool_call_suffix = _tool_call_suffix_with_boundary(
+        value,
+        allowed_tool_names=allowed,
+    )
+    if tool_call_suffix is None:
+        return []
+    payload = _loads_json_object(tool_call_suffix)
+    if payload is not None:
+        for index, candidate in enumerate(_candidate_tool_call_objects(payload)):
+            normalized = _normalize_raw_tool_call(
+                candidate,
+                allowed_tool_names=allowed,
+                index=index,
+            )
+            if normalized:
+                calls.append(normalized)
+        return calls
+    value = tool_call_suffix
     calls.extend(_extract_fenced_tool_calls(value, allowed_tool_names=allowed))
     if calls:
         return calls
