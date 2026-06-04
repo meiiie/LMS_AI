@@ -251,7 +251,12 @@ def _normalize_raw_tool_call(
         name,
         _raw_tool_arguments_payload(candidate, function),
     )
-    call_id = str(candidate.get("id") or f"raw_tool_call_{index}").strip()
+    call_id = str(
+        candidate.get("id")
+        or candidate.get("call_id")
+        or candidate.get("tool_call_id")
+        or f"raw_tool_call_{index}"
+    ).strip()
     return {"id": call_id, "name": name, "args": args}
 
 

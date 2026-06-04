@@ -129,6 +129,22 @@ def test_extract_raw_tool_calls_parses_content_block_tool_use_input() -> None:
     ]
 
 
+def test_extract_raw_tool_calls_preserves_responses_api_call_id() -> None:
+    calls = extract_raw_tool_calls_from_text(
+        '{"type":"function_call","call_id":"call_resp_1","name":"web_search",'
+        '"arguments":"{\\"query\\":\\"IANA H1\\"}"}',
+        allowed_tool_names={"tool_web_search"},
+    )
+
+    assert calls == [
+        {
+            "id": "call_resp_1",
+            "name": "tool_web_search",
+            "args": {"query": "IANA H1"},
+        }
+    ]
+
+
 def test_classify_raw_tool_call_text_start_waits_for_ambiguous_fence() -> None:
     assert (
         classify_raw_tool_call_text_start(
