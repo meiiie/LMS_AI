@@ -778,7 +778,7 @@ def _resolve_direct_turn_path_decision(
             query,
             state,
         ),
-        needs_weather_lookup=needs_weather_lookup and not weather_uses_web_fallback,
+        needs_weather_lookup=needs_weather_lookup,
         needs_web_search=(
             _safe_intent_flag(_needs_web_search, query) or weather_uses_web_fallback
         ),
@@ -1078,7 +1078,7 @@ def _collect_direct_tools(query: str, user_role: str = "student", state: Optiona
             tool_web_search,
             tool_fetch_url,
         ]
-        if turn_path_decision.path == "weather_lookup":
+        if turn_path_decision.path == "weather_lookup" and _weather_provider_configured():
             tool_current_weather = _load_attr(
                 "app.engine.tools.utility_tools",
                 "tool_current_weather",

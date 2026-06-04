@@ -655,7 +655,7 @@ def test_collect_direct_tools_routes_weather_followup_to_weather_tool(monkeypatc
     assert "tool_current_datetime" in names
 
 
-def test_collect_direct_tools_routes_weather_to_web_search_when_provider_missing(monkeypatch):
+def test_collect_direct_tools_keeps_weather_path_with_web_search_when_provider_missing(monkeypatch):
     from app.core.config import settings
     from app.engine.multi_agent import tool_collection as module
 
@@ -671,7 +671,7 @@ def test_collect_direct_tools_routes_weather_to_web_search_when_provider_missing
     names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
 
     assert force_tools is True
-    assert state["_turn_path_decision"]["path"] == "web_search"
+    assert state["_turn_path_decision"]["path"] == "weather_lookup"
     assert "tool_web_search" in names
     assert "tool_current_weather" not in names
 
