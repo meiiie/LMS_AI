@@ -267,6 +267,22 @@ def test_weather_web_search_query_contract_preserves_existing_date():
     )
 
 
+def test_weather_web_search_query_contract_preserves_future_anchor():
+    from app.engine.multi_agent.direct_web_search_policy import (
+        _enrich_current_weather_search_query,
+    )
+
+    assert (
+        _enrich_current_weather_search_query(
+            candidate_query="Hai Phong",
+            user_query="thoi tiet Hai Phong ngay mai the nao",
+            today="2026-06-05",
+            default_city="Ho Chi Minh City",
+        )
+        == "thoi tiet Hai Phong ngay mai"
+    )
+
+
 def test_prefer_official_query_rewrites_weather_search_args(monkeypatch):
     from app.engine.multi_agent import direct_web_search_policy as policy
 
@@ -364,7 +380,7 @@ async def test_execute_direct_tool_round_emits_skipped_weather_fanout_events():
             {
                 "id": "search_2",
                 "name": "tool_web_search",
-                "args": {"query": "weather Hai Phong today"},
+                "args": {"q": "Hai Phong"},
             },
         ]
     )
@@ -407,7 +423,9 @@ async def test_execute_direct_tool_round_emits_skipped_weather_fanout_events():
         get_tool_by_name=lambda *_args, **_kwargs: None,
         invoke_tool_with_runtime=lambda *_args, **_kwargs: None,
         is_search_tool_name=lambda name: name == "tool_web_search",
-        prefer_official_query_for_known_docs=lambda args, _query: args,
+        prefer_official_query_for_known_docs=lambda _args, _query: {
+            "query": "thoi tiet Hai Phong hom nay 2026-06-05"
+        },
         summarize_tool_result_for_stream=lambda _name, value: f"summary:{value}",
         maybe_emit_host_action_event=lambda **_kwargs: None,
         maybe_emit_visual_event=lambda **_kwargs: None,
@@ -432,6 +450,9 @@ async def test_execute_direct_tool_round_emits_skipped_weather_fanout_events():
     assert dispatch_calls == ["search_1"]
     assert [event["type"] for event in events] == ["tool_call", "tool_result"]
     assert events[0]["content"]["id"] == "search_2"
+    assert events[0]["content"]["args"] == {
+        "query": "thoi tiet Hai Phong hom nay 2026-06-05"
+    }
     assert events[1]["content"]["id"] == "search_2"
     assert events[1]["content"]["metadata"]["status"] == "skipped"
     assert (
@@ -439,8 +460,14 @@ async def test_execute_direct_tool_round_emits_skipped_weather_fanout_events():
         == "weather_search_fanout_limited"
     )
     assert tool_call_events[0]["type"] == "call"
+    assert tool_call_events[0]["args"] == {
+        "query": "thoi tiet Hai Phong hom nay 2026-06-05"
+    }
     assert tool_call_events[0]["metadata"]["status"] == "skipped"
     assert tool_call_events[1]["type"] == "result"
+    assert tool_call_events[1]["args"] == {
+        "query": "thoi tiet Hai Phong hom nay 2026-06-05"
+    }
     assert tool_call_events[1]["result"] == _WEATHER_SEARCH_FANOUT_SKIP_RESULT
     assert messages[-1].content == _WEATHER_SEARCH_FANOUT_SKIP_RESULT
 

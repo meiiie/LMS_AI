@@ -142,6 +142,9 @@ async def execute_direct_tool_round(
             tool_args = tool_call.get("args", {}) or {}
             if not isinstance(tool_args, dict):
                 tool_args = {"value": tool_args}
+            if is_search_tool_name(tool_name):
+                tool_args = prefer_official_query_for_known_docs(tool_args, query)
+                tool_call["args"] = tool_args
             public_tool_args = sanitize_tool_args_for_event(tool_args)
             skip_metadata = build_tool_result_event_metadata(
                 tool_name,
@@ -193,6 +196,7 @@ async def execute_direct_tool_round(
                 {
                     "type": "result",
                     "name": tool_name,
+                    "args": public_tool_args,
                     "result": _WEATHER_SEARCH_FANOUT_SKIP_RESULT,
                     "id": tool_call_id,
                     "policy": {

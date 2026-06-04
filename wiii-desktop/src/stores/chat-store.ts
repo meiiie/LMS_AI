@@ -721,6 +721,7 @@ function attachSourcesToSearchToolBlockDraft(
       );
       return true;
     }
+    return false;
   }
 
   const targetToolName = normalizeToolNameForSources(hint?.toolName || "");
@@ -1749,11 +1750,11 @@ export const useChatStore = create<ChatState>()(
       let attachedToFinalMessage = false;
       set((state) => {
         if (state.isStreaming) {
-          state.streamingSources =
-            sources.length === 0
-              ? []
-              : mergeSourceInfos(state.streamingSources, sources);
           if (sources.length > 0) {
+            state.streamingSources = mergeSourceInfos(
+              state.streamingSources,
+              sources,
+            );
             const attachedToBlock = attachSourcesToSearchToolBlockDraft(
               state.streamingBlocks,
               sources,

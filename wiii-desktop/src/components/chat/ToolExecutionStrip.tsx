@@ -765,18 +765,32 @@ function parseSearchResults(result?: string): SearchResultItem[] {
   return items;
 }
 
+function normalizeHttpSourceUrl(value: string): string | null {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
 function sourceInfoToSearchItems(sources?: SourceInfo[]): SearchResultItem[] {
   if (!sources?.length) return [];
   const items: SearchResultItem[] = [];
   const seenUrls = new Set<string>();
   for (const source of sources) {
-    const url = typeof source.url === "string" ? source.url.trim() : "";
+    const rawUrl = typeof source.url === "string" ? source.url.trim() : "";
+    const url = rawUrl ? normalizeHttpSourceUrl(rawUrl) : null;
     if (!url || seenUrls.has(url)) continue;
     seenUrls.add(url);
+    const domain = extractDomain(url);
     items.push({
-      title: source.title || extractDomain(url),
+      title: source.title || domain,
       url,
-      domain: extractDomain(url),
+      domain,
       snippet: source.content || undefined,
     });
     if (items.length >= 5) break;

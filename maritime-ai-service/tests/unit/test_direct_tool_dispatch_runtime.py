@@ -193,6 +193,59 @@ async def test_dispatch_direct_tool_call_emits_stable_call_and_result_events():
 
 
 @pytest.mark.asyncio
+async def test_dispatch_direct_tool_call_normalizes_search_args_before_policy_denial():
+    events: list[dict] = []
+    tool_call_events: list[dict] = []
+    tool_call = {
+        "id": "call_denied_search",
+        "name": "tool_web_search",
+        "args": {"q": "Hai Phong"},
+    }
+
+    async def push_event(event):
+        events.append(event)
+
+    async def invoke_tool_with_runtime(*_args, **_kwargs):
+        raise AssertionError("Policy-denied tools must not be invoked")
+
+    result = await dispatch_direct_tool_call(
+        tool_call=tool_call,
+        tool_round=0,
+        tools=[],
+        query="thoi tiet Hai Phong hom nay",
+        state={
+            "_turn_path_decision": {
+                "path": "weather_lookup",
+                "reason": "unit_test",
+                "bind_tools": True,
+                "force_tools": False,
+                "allow_all_tools": False,
+                "allowed_tool_names": [],
+            }
+        },
+        push_event=push_event,
+        tool_call_events=tool_call_events,
+        get_tool_by_name=lambda _tools, _name: None,
+        invoke_tool_with_runtime=invoke_tool_with_runtime,
+        runtime_context_base=None,
+        is_search_tool_name=lambda name: name == "tool_web_search",
+        prefer_official_query_for_known_docs=lambda _args, _query: {
+            "query": "thoi tiet Hai Phong hom nay 2026-06-05"
+        },
+        summarize_tool_result_for_stream=lambda _name, value: value,
+        logger_obj=SimpleNamespace(warning=lambda *args, **kwargs: None),
+    )
+
+    expected_args = {"query": "thoi tiet Hai Phong hom nay 2026-06-05"}
+    assert result.matched is False
+    assert result.tool_args == expected_args
+    assert tool_call["args"] == expected_args
+    assert events[0]["content"]["args"] == expected_args
+    assert tool_call_events[0]["args"] == expected_args
+    assert events[1]["content"]["metadata"]["status"] == "blocked"
+
+
+@pytest.mark.asyncio
 async def test_dispatch_direct_tool_call_enriches_weather_web_search_args(monkeypatch):
     from app.engine.multi_agent import direct_web_search_policy as policy
 

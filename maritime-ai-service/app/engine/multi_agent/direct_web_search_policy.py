@@ -36,6 +36,36 @@ _WEATHER_CURRENT_MARKERS = (
     "currently",
     "right now",
 )
+_WEATHER_NON_CURRENT_TEMPORAL_MARKERS = (
+    "ngay mai",
+    "toi mai",
+    "mai",
+    "ngay kia",
+    "hom qua",
+    "tuan sau",
+    "tuan toi",
+    "thang sau",
+    "cuoi tuan",
+    "thu hai",
+    "thu ba",
+    "thu tu",
+    "thu nam",
+    "thu sau",
+    "thu bay",
+    "chu nhat",
+    "tomorrow",
+    "yesterday",
+    "next week",
+    "next month",
+    "weekend",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
 _WEATHER_LOCATION_STOPWORDS = {
     "a",
     "ban",
@@ -168,6 +198,33 @@ def _has_calendar_anchor(value: str) -> bool:
     )
 
 
+def _contains_folded_marker(folded: str, markers: tuple[str, ...]) -> bool:
+    for marker in markers:
+        if " " in marker:
+            if marker in folded:
+                return True
+            continue
+        if re.search(rf"\b{re.escape(marker)}\b", folded):
+            return True
+    return False
+
+
+def _has_non_current_weather_temporal_anchor(value: str) -> bool:
+    return _has_calendar_anchor(value) or _contains_folded_marker(
+        _fold_tool_round_text(value),
+        _WEATHER_NON_CURRENT_TEMPORAL_MARKERS,
+    )
+
+
+def _has_weather_temporal_anchor(value: str) -> bool:
+    folded = _fold_tool_round_text(value)
+    return (
+        _has_calendar_anchor(value)
+        or _contains_folded_marker(folded, _WEATHER_CURRENT_MARKERS)
+        or _contains_folded_marker(folded, _WEATHER_NON_CURRENT_TEMPORAL_MARKERS)
+    )
+
+
 def _looks_weather_search_text(value: str) -> bool:
     folded = _fold_tool_round_text(value)
     return any(marker in folded for marker in _WEATHER_QUERY_MARKERS)
@@ -236,7 +293,13 @@ def _enrich_current_weather_search_query(
     candidate = _clean_search_query_text(candidate_query)
     user = _clean_search_query_text(user_query)
 
-    if _has_weather_location_hint(candidate):
+    if (
+        _has_weather_location_hint(candidate)
+        and not (
+            _has_weather_temporal_anchor(user)
+            and _has_weather_location_hint(user)
+        )
+    ):
         base = candidate
     elif _has_weather_location_hint(user):
         base = user
@@ -248,11 +311,14 @@ def _enrich_current_weather_search_query(
     if not _looks_weather_search_text(base):
         base = f"thoi tiet {base}".strip()
 
-    folded = _fold_tool_round_text(base)
-    if not any(marker in folded for marker in _WEATHER_CURRENT_MARKERS):
+    if not _has_weather_temporal_anchor(base):
         base = f"{base} hom nay"
 
-    if today and not _has_calendar_anchor(base):
+    if (
+        today
+        and not _has_calendar_anchor(base)
+        and not _has_non_current_weather_temporal_anchor(base)
+    ):
         base = f"{base} {today}"
 
     return " ".join(base.split())

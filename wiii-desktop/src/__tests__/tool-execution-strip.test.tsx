@@ -364,6 +364,49 @@ describe("ToolExecutionStrip", () => {
     expect(screen.queryByText(/Tìm được 2 nguồn:/)).toBeNull();
   });
 
+  it("skips unsafe structured source URLs", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-search-unsafe-source",
+      status: "completed",
+      tool: {
+        id: "tool-search-unsafe-source",
+        name: "tool_web_search",
+        args: {
+          query: "weather",
+        },
+        result: "Tìm được 2 nguồn",
+        sources: [
+          {
+            title: "Unsafe source",
+            content: "Should not render.",
+            url: "javascript:alert(1)",
+            source_type: "web",
+          },
+          {
+            title: "Safe source",
+            content: "Safe.",
+            url: "https://safe.example/weather",
+            source_type: "web",
+          },
+        ],
+        metadata: {
+          schema_version: "tool_result_metadata.v1",
+          status: "completed",
+          result_kind: "web_sources",
+          source_count: 2,
+        },
+      },
+    };
+
+    const { container } = render(<ToolExecutionStrip block={block} />);
+    fireEvent.click(screen.getByRole("button"));
+
+    expect(screen.queryByText("Unsafe source")).toBeNull();
+    expect(screen.getByText("Safe source")).toBeTruthy();
+    expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
+  });
+
   it("renders no-source search metadata as a warning state", () => {
     const block: ToolExecutionBlockData = {
       type: "tool_execution",

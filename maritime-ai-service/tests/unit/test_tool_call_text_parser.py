@@ -327,6 +327,20 @@ def test_find_raw_tool_call_marker_index_detects_json_fenced_tool_after_preamble
     assert marker_index == text.index("```json")
 
 
+def test_find_raw_tool_call_marker_index_detects_canonical_json_when_allowed_names_unknown() -> None:
+    text = (
+        "Let me check that now.\n"
+        '```json\n{"name":"tool_web_search","arguments":{"query":"weather Hai Phong"}}\n```'
+    )
+
+    marker_index = find_raw_tool_call_marker_index(
+        text,
+        allowed_tool_names=None,
+    )
+
+    assert marker_index == text.index("```json")
+
+
 def test_find_raw_tool_call_marker_index_detects_bare_json_tool_after_preamble() -> None:
     text = (
         "Let me check that now.\n"

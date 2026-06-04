@@ -144,7 +144,11 @@ def _resolve_allowed_tool_name(
 def _allowed_tool_name_hints(allowed_tool_names: set[str] | None) -> set[str]:
     hints = set(allowed_tool_names or [])
     for alias, canonical in _TOOL_NAME_ALIASES.items():
-        if allowed_tool_names is None or canonical in allowed_tool_names:
+        if allowed_tool_names is None:
+            hints.add(canonical)
+            hints.add(alias)
+        elif canonical in allowed_tool_names:
+            hints.add(canonical)
             hints.add(alias)
     return {name for name in hints if name}
 

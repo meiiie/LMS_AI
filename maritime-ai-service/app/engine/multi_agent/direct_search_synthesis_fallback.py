@@ -51,6 +51,7 @@ _NO_SOURCE_SEARCH_RESULT_MARKERS = (
     "khong tim duoc ket qua",
     "khong tim duoc nguon",
     "chua tim duoc ket qua",
+    "chua lay duoc nguon",
     "chua tim duoc nguon",
 )
 

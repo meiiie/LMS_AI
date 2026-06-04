@@ -71,6 +71,10 @@ async def dispatch_direct_tool_call(
         tool_args = {"value": tool_args}
         tool_call["args"] = tool_args
 
+    if is_search_tool_name(tool_name):
+        tool_args = prefer_official_query_for_known_docs(tool_args, query)
+        tool_call["args"] = tool_args
+
     policy_session = tool_policy_session_from_state(state)
     if policy_session is not None:
         policy_decision = policy_session.decision_for(tool_name.strip())
@@ -133,10 +137,6 @@ async def dispatch_direct_tool_call(
                 result=result,
                 matched=False,
             )
-
-    if is_search_tool_name(tool_name):
-        tool_args = prefer_official_query_for_known_docs(tool_args, query)
-        tool_call["args"] = tool_args
 
     public_tool_args = sanitize_tool_args_for_event(tool_args)
     await push_event(
