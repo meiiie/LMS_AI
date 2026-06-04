@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelSelector } from "@/components/chat/ModelSelector";
+import { useChatStore } from "@/stores/chat-store";
 import { useModelStore } from "@/stores/model-store";
 import { useSettingsStore } from "@/stores/settings-store";
 
@@ -79,9 +80,14 @@ describe("ModelSelector", () => {
     useModelStore.setState({
       activeProvider: "auto",
       activeModel: null,
+      nextTurnProvider: null,
       providers: [],
       isLoading: false,
       lastFetchedAt: null,
+    });
+    useChatStore.setState({
+      conversations: [],
+      activeConversationId: null,
     });
   });
 
@@ -205,5 +211,56 @@ describe("ModelSelector", () => {
       provider: "nvidia",
       model: "nvidia/nemotron-3-ultra",
     });
+  });
+
+  it("hydrates the selector from the active conversation model", async () => {
+    getMock.mockResolvedValue({
+      providers: [
+        {
+          id: "nvidia",
+          display_name: "NVIDIA NIM",
+          available: true,
+          is_primary: true,
+          is_fallback: false,
+          state: "selectable",
+          reason_code: null,
+          reason_label: null,
+          selected_model: "qwen/qwen3-next-80b-a3b-instruct",
+          strict_pin: true,
+          verified_at: "2026-06-05T00:00:00Z",
+        },
+      ],
+    });
+    useSettingsStore.setState((state) => ({
+      settings: {
+        ...state.settings,
+        model_provider: "nvidia",
+        nvidia_model: "qwen/qwen3-next-80b-a3b-instruct",
+      },
+    }));
+    useChatStore.setState({
+      activeConversationId: "conv-nemotron",
+      conversations: [
+        {
+          id: "conv-nemotron",
+          title: "Nemotron chat",
+          created_at: "2026-06-05T00:00:00Z",
+          updated_at: "2026-06-05T00:00:00Z",
+          messages: [],
+          model_provider: "nvidia",
+          model: "nvidia/nemotron-3-ultra",
+        },
+      ],
+    });
+
+    render(<ModelSelector />);
+
+    await waitFor(() => {
+      expect(useModelStore.getState().activeProvider).toBe("nvidia");
+    });
+    expect(useModelStore.getState().activeModel).toBe("nvidia/nemotron-3-ultra");
+    expect(screen.getByTestId("model-selector-trigger").textContent).toContain(
+      "nvidia/nemotron-3-ultra",
+    );
   });
 });

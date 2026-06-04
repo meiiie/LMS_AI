@@ -44,6 +44,7 @@ interface ModelState {
 
   setActiveProvider: (id: RequestModelProvider) => void;
   setActiveModel: (provider: RequestModelProvider, model: string) => void;
+  applyConversationSelection: (selection: RequestModelSelection | null) => void;
   setNextTurnProvider: (id: RequestModelProvider | null) => void;
   consumeProviderForRequest: () => RequestModelProvider;
   consumeSelectionForRequest: () => RequestModelSelection;
@@ -174,6 +175,28 @@ export const useModelStore = create<ModelState>((set, get) => ({
     void useSettingsStore.getState().updateSettings({
       model_provider: id,
       ...modelSettingPatchForProvider(id, normalizedModel),
+    });
+  },
+
+  applyConversationSelection: (selection) => {
+    if (selection?.provider) {
+      set({
+        activeProvider: selection.provider,
+        activeModel:
+          selection.provider === "auto"
+            ? null
+            : selection.model?.trim() || null,
+        nextTurnProvider: null,
+      });
+      return;
+    }
+
+    const settings = useSettingsStore.getState().settings;
+    const provider = normalizeModelProvider(settings.model_provider);
+    set({
+      activeProvider: provider,
+      activeModel: resolveConfiguredModelForProvider(provider, settings),
+      nextTurnProvider: null,
     });
   },
 

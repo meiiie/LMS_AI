@@ -2132,6 +2132,8 @@ export interface Conversation {
   title: string;
   domain_id?: string;
   organization_id?: string;
+  model_provider?: "auto" | "google" | "zhipu" | "openai" | "openrouter" | "nvidia" | "ollama";
+  model?: string;
   created_at: string;
   updated_at: string;
   messages: Message[];

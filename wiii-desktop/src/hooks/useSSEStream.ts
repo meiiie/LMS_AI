@@ -27,7 +27,7 @@ import { useHostContextStore, type ActionResult } from "@/stores/host-context-st
 import { useCodeStudioStore } from "@/stores/code-studio-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useToastStore } from "@/stores/toast-store";
-import { useModelStore } from "@/stores/model-store";
+import { useModelStore, type RequestModelSelection } from "@/stores/model-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { StreamBuffer } from "@/lib/stream-buffer";
 import { stripWiiiInternalMarkup } from "@/lib/internal-markup";
@@ -47,6 +47,7 @@ import type {
   ChatDocumentAttachment,
   ChatDocumentContext,
   ChatResponseMetadata,
+  Conversation,
   DisplayPresentationMeta,
   ImageInput,
   MoodType,
@@ -63,6 +64,19 @@ const IDLE_TIMEOUT_ABORT_REASON = "stream_idle_timeout";
 const STREAM_RESTART_ABORT_REASON = "stream_restart";
 const USER_CANCEL_ABORT_REASON = "user_cancel";
 const TRACE_SSE = import.meta.env.DEV;
+
+function resolveConversationModelSelection(
+  conversation?: Conversation,
+): RequestModelSelection | null {
+  if (!conversation?.model_provider) return null;
+  return {
+    provider: conversation.model_provider,
+    model:
+      conversation.model_provider === "auto"
+        ? null
+        : conversation.model?.trim() || null,
+  };
+}
 
 type HostContextForRequest = NonNullable<
   ReturnType<typeof useHostContextStore.getState>["currentContext"]
@@ -1904,9 +1918,17 @@ export function useSSEStream() {
       useUIStore.getState().openCodeStudio();
     }
 
-    // Per-request provider selection
+    // Session-bound provider selection. Conversations own their model once set;
+    // global settings are only the default for a new/unbound chat.
+    const conversationSelection = resolveConversationModelSelection(activeConv);
     const { provider: selectedProvider, model: selectedModel } =
-      useModelStore.getState().consumeSelectionForRequest();
+      conversationSelection
+      || useModelStore.getState().consumeSelectionForRequest();
+    if (!conversationSelection && activeConv?.id) {
+      useChatStore
+        .getState()
+        .setConversationModel(activeConv.id, selectedProvider, selectedModel);
+    }
     const authState = useAuthStore.getState();
     const compatibilityRole = _resolveCompatibilityRole(
       authState.authMode,

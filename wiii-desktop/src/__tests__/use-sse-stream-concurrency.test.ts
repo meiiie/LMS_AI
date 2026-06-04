@@ -310,6 +310,53 @@ describe("useSSEStream concurrency", () => {
     });
   });
 
+  it("prefers the active conversation model over the global default", async () => {
+    const sendMessageStreamMock = vi.mocked(sendMessageStream);
+    useSettingsStore.setState((state) => ({
+      settings: {
+        ...state.settings,
+        model_provider: "nvidia",
+        nvidia_model: "qwen/qwen3-next-80b-a3b-instruct",
+      },
+    }));
+    useModelStore.setState({
+      activeProvider: "nvidia",
+      activeModel: "qwen/qwen3-next-80b-a3b-instruct",
+      nextTurnProvider: null,
+    });
+    useChatStore.setState({
+      activeConversationId: "conv-session-model",
+      conversations: [
+        {
+          id: "conv-session-model",
+          title: "Session model",
+          created_at: "2026-06-05T00:00:00Z",
+          updated_at: "2026-06-05T00:00:00Z",
+          messages: [],
+          model_provider: "nvidia",
+          model: "nvidia/nemotron-3-ultra-550b-a55b",
+        },
+      ],
+    });
+    sendMessageStreamMock.mockResolvedValueOnce({
+      lastEventId: null,
+      sawDone: true,
+      eventOrder: ["done"],
+    });
+
+    const { result } = renderHook(() => useSSEStream());
+
+    await act(async () => {
+      await result.current.sendMessage("Dung model cua session");
+    });
+
+    expect(sendMessageStreamMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageStreamMock.mock.calls[0]?.[0]).toMatchObject({
+      provider: "nvidia",
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
+    });
+  });
+
   it("captures chat lifecycle telemetry without displaying raw lifecycle payloads", async () => {
     const sendMessageStreamMock = vi.mocked(sendMessageStream);
     sendMessageStreamMock.mockImplementationOnce(async (_request, handlers) => {

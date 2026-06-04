@@ -5,6 +5,7 @@ import { Fragment, useState, useRef, useEffect, useCallback, useMemo } from "rea
 import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle, ChevronUp, Cpu, Sparkles, Check, RefreshCw, Search } from "lucide-react";
 import { useModelStore, type RequestModelProvider } from "@/stores/model-store";
+import { useChatStore } from "@/stores/chat-store";
 import type { ModelCatalogEntry } from "@/api/types";
 
 const PROVIDER_ICONS: Record<string, typeof Cpu> = {
@@ -37,10 +38,13 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
     activeModel,
     setActiveProvider,
     setActiveModel,
+    applyConversationSelection,
     providers,
     fetchProviders,
     refreshIfStale,
   } = useModelStore();
+  const activeConversation = useChatStore((state) => state.activeConversation());
+  const setConversationModel = useChatStore((state) => state.setConversationModel);
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -52,6 +56,22 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
       void fetchProviders();
     }
   }, [fetchProviders]);
+
+  useEffect(() => {
+    if (activeConversation?.model_provider) {
+      applyConversationSelection({
+        provider: activeConversation.model_provider,
+        model: activeConversation.model ?? null,
+      });
+      return;
+    }
+    applyConversationSelection(null);
+  }, [
+    activeConversation?.id,
+    activeConversation?.model_provider,
+    activeConversation?.model,
+    applyConversationSelection,
+  ]);
 
   useEffect(() => {
     if (open) {
@@ -179,8 +199,14 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
     if (disabled) return;
     if (model) {
       setActiveModel(id, model.model_name);
+      if (activeConversation?.id) {
+        setConversationModel(activeConversation.id, id, model.model_name);
+      }
     } else {
       setActiveProvider(id);
+      if (activeConversation?.id) {
+        setConversationModel(activeConversation.id, id, null);
+      }
     }
     setSearchQuery("");
     setOpen(false);

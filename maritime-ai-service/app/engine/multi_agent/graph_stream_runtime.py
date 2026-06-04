@@ -23,6 +23,52 @@ from app.services.llm_runtime_audit_service import infer_runtime_completion_degr
 logger = logging.getLogger(__name__)
 
 
+def _persist_thread_model_selection(
+    *,
+    thread_id: str,
+    user_id: str,
+    organization_id: str | None,
+    domain_id: str | None,
+    title: str,
+    provider: str | None,
+    model: str | None,
+) -> None:
+    """Persist the concrete chat model on the thread view."""
+
+    if not (thread_id and user_id and provider):
+        return
+
+    extra_data: dict[str, str] = {"model_provider": str(provider)}
+    if model:
+        extra_data["model"] = str(model)
+
+    try:
+        from app.repositories.thread_repository import get_thread_repository
+
+        repo = get_thread_repository()
+        if not repo.is_available():
+            return
+
+        updated = repo.update_extra_data(
+            thread_id=thread_id,
+            user_id=str(user_id),
+            extra_data=extra_data,
+            organization_id=organization_id,
+        )
+        if not updated:
+            repo.upsert_thread(
+                thread_id=thread_id,
+                user_id=str(user_id),
+                domain_id=domain_id or "maritime",
+                title=(title or "Cuoc tro chuyen moi")[:50],
+                message_count_increment=0,
+                extra_data=extra_data,
+                organization_id=organization_id,
+            )
+    except Exception as exc:  # pragma: no cover - metadata persistence only
+        logger.debug("[STREAM] Could not persist thread model selection: %s", exc)
+
+
 def _split_model_context(context: dict | None) -> tuple[dict, dict | None]:
     """Remove backend-only continuation data from model-facing context."""
 
@@ -284,12 +330,12 @@ async def emit_stream_finalization_impl(
             logger.debug("[STREAM] Emotional state retrieval failed: %s", mood_err)
 
         meta_thread_id = ""
+        meta_user_id = str((context or {}).get("user_id", "") or "")
+        meta_session_id = str(effective_state.get("session_id", session_id) or "")
+        meta_org_id = (context or {}).get("organization_id")
         try:
             from app.core.thread_utils import build_thread_id as build_tid
 
-            meta_user_id = (context or {}).get("user_id", "")
-            meta_session_id = effective_state.get("session_id", session_id)
-            meta_org_id = (context or {}).get("organization_id")
             if meta_user_id and meta_session_id:
                 meta_thread_id = build_tid(str(meta_user_id), str(meta_session_id), org_id=meta_org_id)
         except Exception:
@@ -303,6 +349,15 @@ async def emit_stream_finalization_impl(
             runtime_llm.get("runtime_authoritative")
             if isinstance(runtime_llm, dict)
             else False
+        )
+        _persist_thread_model_selection(
+            thread_id=meta_thread_id,
+            user_id=meta_user_id,
+            organization_id=meta_org_id,
+            domain_id=str(effective_state.get("domain_id") or ""),
+            title=str(effective_state.get("query") or ""),
+            provider=runtime_provider,
+            model=runtime_model,
         )
         request_id = str((context or {}).get("request_id") or "").strip() or None
         routing_metadata = effective_state.get("routing_metadata") or {}

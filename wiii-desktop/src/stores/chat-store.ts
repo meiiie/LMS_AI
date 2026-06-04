@@ -61,6 +61,65 @@ interface SourceAttachmentHint {
   toolName?: string;
 }
 
+type ConversationModelProvider = NonNullable<Conversation["model_provider"]>;
+
+const CONVERSATION_MODEL_PROVIDERS = new Set<ConversationModelProvider>([
+  "auto",
+  "google",
+  "zhipu",
+  "openai",
+  "openrouter",
+  "nvidia",
+  "ollama",
+]);
+
+function normalizeConversationModelProvider(
+  value: unknown,
+): ConversationModelProvider | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase() as ConversationModelProvider;
+  return CONVERSATION_MODEL_PROVIDERS.has(normalized) ? normalized : undefined;
+}
+
+function assignConversationModel(
+  conversation: Conversation,
+  provider: unknown,
+  model?: unknown,
+) {
+  const normalizedProvider = normalizeConversationModelProvider(provider);
+  if (!normalizedProvider) return;
+
+  conversation.model_provider = normalizedProvider;
+  const normalizedModel = typeof model === "string" ? model.trim() : "";
+  if (normalizedProvider === "auto" || !normalizedModel) {
+    delete conversation.model;
+    return;
+  }
+  conversation.model = normalizedModel;
+}
+
+function assignConversationModelFromMetadata(
+  conversation: Conversation,
+  metadata?: Partial<ChatResponseMetadata> | Record<string, unknown>,
+) {
+  if (!metadata) return;
+  const provider = normalizeConversationModelProvider(metadata.provider);
+  if (!provider) return;
+  assignConversationModel(conversation, provider, metadata.model);
+}
+
+function assignConversationModelFromThreadExtra(
+  conversation: Conversation,
+  extraData?: Record<string, unknown> | null,
+) {
+  if (!extraData || typeof extraData !== "object") return;
+  const provider =
+    normalizeConversationModelProvider(extraData.model_provider)
+    || normalizeConversationModelProvider(extraData.provider);
+  if (!provider) return;
+  assignConversationModel(conversation, provider, extraData.model);
+}
+
 /**
  * Sprint 218: Per-user conversation storage.
  * Each user gets their own store file: conversations_{userId}.json
@@ -271,6 +330,11 @@ interface ChatState {
   ) => string;
   deleteConversation: (id: string) => void;
   setActiveConversation: (id: string | null) => void;
+  setConversationModel: (
+    id: string,
+    provider: Conversation["model_provider"],
+    model?: string | null,
+  ) => void;
   renameConversation: (id: string, title: string) => void;
   addUserMessage: (
     content: string,
@@ -1526,6 +1590,16 @@ export const useChatStore = create<ChatState>()(
       }
     },
 
+    setConversationModel: (id, provider, model) => {
+      set((state) => {
+        const found = state.conversations.find((c) => c.id === id);
+        if (!found) return;
+        assignConversationModel(found, provider, model);
+        found.updated_at = new Date().toISOString();
+      });
+      persistConversationsImmediate(get().conversations);
+    },
+
     renameConversation: (id, title) => {
       // Sprint 225: Capture thread_id for server propagation
       const conv = get().conversations.find((c) => c.id === id);
@@ -2714,6 +2788,7 @@ export const useChatStore = create<ChatState>()(
         if (metadata.session_id && !conv.session_id) {
           conv.session_id = metadata.session_id;
         }
+        assignConversationModelFromMetadata(conv, metadata);
 
         const backendThreadId =
           typeof metadata?.thread_id === "string"
@@ -2847,6 +2922,7 @@ export const useChatStore = create<ChatState>()(
           if (backendSessionId && !conv.session_id) {
             conv.session_id = backendSessionId;
           }
+          assignConversationModelFromMetadata(conv, effectiveMetadata);
           // Sprint 225: Store thread_id for server sync
           if (backendThreadId && !conv.thread_id) {
             conv.thread_id = backendThreadId;
@@ -2949,6 +3025,7 @@ export const useChatStore = create<ChatState>()(
                 existing.title = t.title;
               }
               existing.message_count = t.message_count;
+              assignConversationModelFromThreadExtra(existing, t.extra_data);
             } else {
               // New conversation from another platform — add stub
               // Extract session_id from thread_id format:
@@ -2968,6 +3045,7 @@ export const useChatStore = create<ChatState>()(
                 thread_id: t.thread_id,
                 message_count: t.message_count,
               };
+              assignConversationModelFromThreadExtra(stub, t.extra_data);
               state.conversations.push(stub);
             }
           }
