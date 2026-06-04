@@ -98,6 +98,37 @@ def test_extract_raw_tool_calls_parses_deepseek_dsml() -> None:
     ]
 
 
+def test_extract_raw_tool_calls_parses_anthropic_tool_use_input() -> None:
+    calls = extract_raw_tool_calls_from_text(
+        '{"type":"tool_use","id":"toolu_1","name":"web_search","input":{"query":"weather Hai Phong"}}',
+        allowed_tool_names={"tool_web_search"},
+    )
+
+    assert calls == [
+        {
+            "id": "toolu_1",
+            "name": "tool_web_search",
+            "args": {"query": "weather Hai Phong"},
+        }
+    ]
+
+
+def test_extract_raw_tool_calls_parses_content_block_tool_use_input() -> None:
+    calls = extract_raw_tool_calls_from_text(
+        '{"content":[{"type":"text","text":"Đang tra cứu"},'
+        '{"type":"tool_use","id":"toolu_2","name":"web_search","input":{"query":"IANA H1"}}]}',
+        allowed_tool_names={"tool_web_search"},
+    )
+
+    assert calls == [
+        {
+            "id": "toolu_2",
+            "name": "tool_web_search",
+            "args": {"query": "IANA H1"},
+        }
+    ]
+
+
 def test_classify_raw_tool_call_text_start_waits_for_ambiguous_fence() -> None:
     assert (
         classify_raw_tool_call_text_start(

@@ -210,7 +210,22 @@ def _candidate_tool_call_objects(payload: Any) -> list[Any]:
         return []
     if isinstance(payload.get("tool_calls"), list):
         return list(payload.get("tool_calls") or [])
+    if isinstance(payload.get("content"), list):
+        return list(payload.get("content") or [])
     return [payload]
+
+
+def _raw_tool_arguments_payload(
+    candidate: dict[str, Any],
+    function: dict[str, Any],
+) -> Any:
+    for key in ("arguments", "args", "input"):
+        if key in candidate:
+            return candidate.get(key)
+    for key in ("arguments", "input"):
+        if key in function:
+            return function.get(key)
+    return None
 
 
 def _normalize_raw_tool_call(
@@ -234,11 +249,7 @@ def _normalize_raw_tool_call(
         return None
     args = _coerce_tool_arguments(
         name,
-        candidate.get("arguments")
-        if "arguments" in candidate
-        else candidate.get("args")
-        if "args" in candidate
-        else function.get("arguments")
+        _raw_tool_arguments_payload(candidate, function),
     )
     call_id = str(candidate.get("id") or f"raw_tool_call_{index}").strip()
     return {"id": call_id, "name": name, "args": args}
