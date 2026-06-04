@@ -357,6 +357,14 @@ function getMetadataReason(metadata?: ToolResultMetadata): string {
   return normalizeMetadataCode(metadata?.reason_code);
 }
 
+function isPolicyBlockedMetadata(metadata?: ToolResultMetadata): boolean {
+  return (
+    getMetadataStatus(metadata) === "blocked" &&
+    (normalizeMetadataCode(metadata?.result_kind) === "policy" ||
+      getMetadataReason(metadata) === "not_allowed_by_path_policy")
+  );
+}
+
 function summarizeWeatherMetadata(
   metadata?: ToolResultMetadata,
 ): string | null {
@@ -399,6 +407,9 @@ function summarizeToolMetadata(
       ? "Đã có đủ nguồn thời tiết, bỏ qua lượt tìm kiếm trùng."
       : "Đã bỏ qua lượt gọi trùng.";
   }
+  if (isPolicyBlockedMetadata(metadata)) {
+    return "Tool không phù hợp với luồng hiện tại nên đã bỏ qua.";
+  }
   if (status === "blocked") return "Tool bị chặn bởi chính sách phiên.";
   if (status === "validation_failed") return "Đầu vào tool chưa đúng định dạng.";
   if (status === "needs_input") return "Cần thêm thông tin để chạy tool.";
@@ -435,6 +446,7 @@ function getToolStateLabel(
   if (isPending) return "Đang gọi";
   const status = getMetadataStatus(metadata);
   if (status === "skipped") return "Đã bỏ qua";
+  if (isPolicyBlockedMetadata(metadata)) return "Đã bỏ qua";
   if (status === "needs_input") return "Cần thêm dữ liệu";
   if (
     status === "blocked" ||

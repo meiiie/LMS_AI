@@ -440,6 +440,46 @@ describe("ToolExecutionStrip", () => {
     ).toBeTruthy();
   });
 
+  it("renders path-policy blocked side tools as deliberately skipped", () => {
+    const block: ToolExecutionBlockData = {
+      type: "tool_execution",
+      id: "tool-fetch-policy-blocked",
+      status: "completed",
+      tool: {
+        id: "tool-fetch-policy-blocked",
+        name: "tool_fetch_url",
+        args: {
+          url: "https://xemthoitiet.com.vn/hai-phong",
+        },
+        result: "Tool `tool_fetch_url` is not allowed for this path.",
+        metadata: {
+          schema_version: "tool_result_metadata.v1",
+          status: "blocked",
+          result_kind: "policy",
+          reason_code: "not_allowed_by_path_policy",
+          policy: {
+            allowed: false,
+            path: "weather_lookup",
+            reason: "not_allowed_by_path_policy",
+          },
+        },
+      },
+    };
+
+    render(<ToolExecutionStrip block={block} />);
+
+    const strip = screen.getByTestId("tool-execution-strip");
+    expect(strip.getAttribute("data-status")).toBe("blocked");
+    expect(screen.getByText("Đã bỏ qua")).toBeTruthy();
+    expect(screen.queryByText("Cần kiểm tra")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Đọc chi tiết URL/i }));
+    expect(
+      screen.getByText(
+        "Tool không phù hợp với luồng hiện tại nên đã bỏ qua.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("marks pending tool calls as busy without inventing output", () => {
     const block: ToolExecutionBlockData = {
       type: "tool_execution",
