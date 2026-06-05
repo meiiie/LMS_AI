@@ -93,6 +93,17 @@ class TestEmbeddingProvider:
         assert s.embedding_provider == val
 
 
+class TestVectorIndexBackend:
+    @pytest.mark.parametrize("val", ["postgres", "qdrant"])
+    def test_valid_vector_index_backends(self, val):
+        s = _make_settings(vector_index_backend=val)
+        assert s.vector_index_backend == val
+
+    def test_invalid_vector_index_backend_rejected(self):
+        with pytest.raises(ValidationError, match="vector_index_backend"):
+            _make_settings(vector_index_backend="chromadb")
+
+
 # =============================================================================
 # rag_quality_mode
 # =============================================================================

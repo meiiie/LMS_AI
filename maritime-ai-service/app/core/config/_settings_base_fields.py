@@ -120,6 +120,45 @@ class BaseSettingsFieldsMixin:
     postgres_idle_in_transaction_timeout_ms: int = Field(default=60000, ge=10000, le=600000, description="Idle transaction timeout in ms (default 60s)")
     postgres_connect_timeout_seconds: int = Field(default=5, ge=1, le=60, description="Connection timeout in seconds for PostgreSQL clients")
 
+    # Vector index sidecar (Postgres remains source of truth)
+    vector_index_backend: str = Field(
+        default="postgres",
+        description="ANN vector index backend: postgres or qdrant. Qdrant is an optional sidecar index only.",
+    )
+    qdrant_url: str = Field(
+        default="http://localhost:6333",
+        description="Qdrant HTTP API URL used when vector_index_backend=qdrant",
+    )
+    qdrant_api_key: Optional[str] = Field(default=None, description="Qdrant API key", repr=False)
+    qdrant_collection_prefix: str = Field(
+        default="wiii",
+        description="Prefix for Qdrant collections. Collection names also include entity type and embedding-space hash.",
+    )
+    qdrant_timeout_seconds: float = Field(
+        default=5.0,
+        ge=0.5,
+        le=60.0,
+        description="Timeout for Qdrant HTTP operations.",
+    )
+    qdrant_upsert_batch_size: int = Field(
+        default=64,
+        ge=1,
+        le=1024,
+        description="Number of points to upsert per Qdrant batch.",
+    )
+    qdrant_search_oversample: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Multiplier for Qdrant candidate fetch before Postgres tenant/source-of-truth filtering.",
+    )
+    qdrant_failure_cooldown_seconds: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=3600.0,
+        description="Cooldown after a Qdrant failure so writes/searches quickly fall back to Postgres.",
+    )
+
     # Object Storage (MinIO / S3-compatible)
     minio_endpoint: Optional[str] = Field(default=None, description="MinIO endpoint (host:port, no scheme)")
     minio_external_endpoint: Optional[str] = Field(default=None, description="MinIO endpoint for browser-facing presigned URLs (defaults to minio_endpoint)")

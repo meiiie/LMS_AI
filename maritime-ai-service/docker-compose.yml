@@ -37,6 +37,10 @@ services:
       - OPENSANDBOX_NETWORK_MODE=${OPENSANDBOX_NETWORK_MODE:-egress}
       # Database URLs pointing to Docker services (override .env for container networking)
       - DATABASE_URL=postgresql://${POSTGRES_USER:-wiii}:${POSTGRES_PASSWORD:-wiii_secret}@postgres:5432/${POSTGRES_DB:-wiii_ai}
+      # Qdrant sidecar index. Postgres remains the source of truth and app falls back if Qdrant is unavailable.
+      - VECTOR_INDEX_BACKEND=${VECTOR_INDEX_BACKEND:-qdrant}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - QDRANT_COLLECTION_PREFIX=${QDRANT_COLLECTION_PREFIX:-wiii_local}
       # MinIO (local S3 replacement)
       - MINIO_ENDPOINT=minio:9000
       - MINIO_EXTERNAL_ENDPOINT=localhost:9000
@@ -54,6 +58,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      qdrant:
+        condition: service_started
       # MinIO is optional — app starts without it, storage features degrade gracefully
       # To require MinIO, uncomment:
       # minio:
@@ -91,6 +97,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # =============================================================================
+  # QDRANT - Optional ANN sidecar for high-dimensional embedding spaces
+  # =============================================================================
+  qdrant:
+    image: qdrant/qdrant:v1.12.6
+    container_name: wiii-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - wiii-network
+    restart: unless-stopped
 
   # =============================================================================
   # MINIO - Local S3-Compatible Object Storage
@@ -278,6 +299,8 @@ volumes:
   valkey_data:
     driver: local
   ollama_data:
+    driver: local
+  qdrant_data:
     driver: local
 
 networks:

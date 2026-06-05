@@ -29,6 +29,7 @@ from app.repositories.knowledge_search_org_scope import (
     resolve_knowledge_search_org_scope,
 )
 from app.services.embedding_space_registry_service import get_active_embedding_read_space
+from app.services.qdrant_vector_index_service import search_qdrant_async
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,149 @@ class DenseSearchRepository:
             )
             self._column_cache[key] = bool(row)
         return self._column_cache[key]
+
+    def _build_dense_result_from_row(self, row, *, similarity: float) -> DenseSearchResult:
+        """Build a DenseSearchResult after Postgres source-of-truth fetch."""
+        metadata = row.get("metadata") or {}
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except Exception as exc:
+                logger.warning("Failed to parse metadata JSON: %s", exc)
+                metadata = {}
+
+        section_hierarchy = metadata.get("section_hierarchy", {})
+        published_date = metadata.get("published_date")
+        source_name = metadata.get("source_name")
+
+        bounding_boxes = row.get("bounding_boxes")
+        if isinstance(bounding_boxes, str):
+            try:
+                bounding_boxes = json.loads(bounding_boxes)
+            except Exception as exc:
+                logger.warning("Failed to parse bounding_boxes JSON: %s", exc)
+                bounding_boxes = []
+        elif bounding_boxes is None:
+            bounding_boxes = []
+
+        return DenseSearchResult(
+            node_id=row["node_id"],
+            similarity=similarity,
+            content=row["content"] or "",
+            content_type=row.get("content_type") or "text",
+            confidence_score=float(row.get("confidence_score") or 1.0),
+            page_number=row.get("page_number") or 0,
+            chunk_index=row.get("chunk_index") or 0,
+            image_url=row.get("image_url") or "",
+            document_id=row.get("document_id") or "",
+            domain_id=row.get("domain_id") or "",
+            section_hierarchy=section_hierarchy,
+            bounding_boxes=bounding_boxes,
+            published_date=published_date,
+            source_name=source_name,
+        )
+
+    async def _search_qdrant(
+        self,
+        conn,
+        *,
+        active_space,
+        query_embedding: List[float],
+        limit: int,
+        content_types: Optional[List[str]],
+        min_confidence: Optional[float],
+        domain_id: Optional[str],
+        scope,
+        has_domain_col: bool,
+    ) -> List[DenseSearchResult]:
+        if active_space is None or active_space.storage_kind != "shadow":
+            return []
+
+        filters: dict[str, object] = {}
+        if content_types:
+            filters["content_type"] = content_types
+        if min_confidence is not None:
+            filters["confidence_score"] = {"gte": float(min_confidence)}
+        if has_domain_col and domain_id and not settings.cross_domain_search:
+            filters["domain_id"] = domain_id
+
+        hits = await search_qdrant_async(
+            entity_type="knowledge_embeddings",
+            space=active_space,
+            query_embedding=query_embedding,
+            limit=limit,
+            filters=filters,
+        )
+        if not hits:
+            return []
+
+        seen: set[str] = set()
+        ordered_ids: list[str] = []
+        scores_by_id: dict[str, float] = {}
+        for hit in hits:
+            if hit.point_id in seen:
+                continue
+            seen.add(hit.point_id)
+            ordered_ids.append(hit.point_id)
+            scores_by_id[hit.point_id] = hit.score
+        if not ordered_ids:
+            return []
+
+        params: list[object] = list(ordered_ids)
+        id_placeholders = ", ".join(
+            f"${index + 1}::uuid" for index in range(len(ordered_ids))
+        )
+        query = f"""
+            SELECT
+                id::text as node_id,
+                content,
+                content_type,
+                confidence_score,
+                page_number,
+                chunk_index,
+                image_url,
+                document_id,
+                {'domain_id,' if has_domain_col else "'' as domain_id,"}
+                metadata,
+                bounding_boxes
+            FROM knowledge_embeddings
+            WHERE id IN ({id_placeholders})
+        """
+        param_idx = len(params) + 1
+
+        from app.core.org_filter import org_where_positional
+
+        query += org_where_positional(scope.org_id, params, allow_null=True)
+        param_idx = len(params) + 1
+
+        if has_domain_col and domain_id and not settings.cross_domain_search:
+            query += f" AND domain_id = ${param_idx}"
+            params.append(domain_id)
+            param_idx += 1
+        if content_types:
+            query += f" AND content_type = ANY(${param_idx})"
+            params.append(content_types)
+            param_idx += 1
+        if min_confidence is not None:
+            query += f" AND confidence_score >= ${param_idx}"
+            params.append(min_confidence)
+
+        rows = await conn.fetch(query, *params)
+        rows_by_id = {row["node_id"]: row for row in rows}
+        results: list[DenseSearchResult] = []
+        for node_id in ordered_ids:
+            row = rows_by_id.get(node_id)
+            if row is None:
+                continue
+            results.append(
+                self._build_dense_result_from_row(
+                    row,
+                    similarity=max(0.0, min(1.0, float(scores_by_id.get(node_id, 0.0)))),
+                )
+            )
+            if len(results) >= limit:
+                break
+        return results
     
     async def search(
         self,
@@ -222,6 +366,21 @@ class DenseSearchRepository:
                 # Sprint 170b: Use pgvector <=> operator (HNSW-accelerated)
                 # Sprint 165: Check if domain_id column exists (added Sprint 136 but migration missing)
                 _has_domain_col = await self._has_column(conn, 'knowledge_embeddings', 'domain_id')
+
+                qdrant_results = await self._search_qdrant(
+                    conn,
+                    active_space=active_space,
+                    query_embedding=query_embedding,
+                    limit=limit,
+                    content_types=content_types,
+                    min_confidence=min_confidence,
+                    domain_id=domain_id,
+                    scope=scope,
+                    has_domain_col=_has_domain_col,
+                )
+                if qdrant_results:
+                    logger.info("Qdrant dense search returned %d results", len(qdrant_results))
+                    return qdrant_results
 
                 # Convert embedding list to pgvector string format
                 embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
@@ -314,48 +473,12 @@ class DenseSearchRepository:
                 
                 results = []
                 for row in rows:
-                    # Parse section hierarchy from metadata
-                    metadata = row.get("metadata") or {}
-                    if isinstance(metadata, str):
-                        try:
-                            metadata = json.loads(metadata)
-                        except Exception as e:
-                            logger.warning("Failed to parse metadata JSON: %s", e)
-                            metadata = {}
-                    
-                    section_hierarchy = metadata.get("section_hierarchy", {})
-
-                    # Extract temporal metadata from JSONB
-                    published_date = metadata.get("published_date")
-                    source_name = metadata.get("source_name")
-
-                    # Parse bounding_boxes from JSONB
-                    bounding_boxes = row.get("bounding_boxes")
-                    if isinstance(bounding_boxes, str):
-                        try:
-                            bounding_boxes = json.loads(bounding_boxes)
-                        except Exception as e:
-                            logger.warning("Failed to parse bounding_boxes JSON: %s", e)
-                            bounding_boxes = []
-                    elif bounding_boxes is None:
-                        bounding_boxes = []
-
-                    results.append(DenseSearchResult(
-                        node_id=row["node_id"],
-                        similarity=float(row["similarity"]),
-                        content=row["content"] or "",
-                        content_type=row.get("content_type") or "text",
-                        confidence_score=float(row.get("confidence_score") or 1.0),
-                        page_number=row.get("page_number") or 0,
-                        chunk_index=row.get("chunk_index") or 0,
-                        image_url=row.get("image_url") or "",
-                        document_id=row.get("document_id") or "",
-                        domain_id=row.get("domain_id") or "",
-                        section_hierarchy=section_hierarchy,
-                        bounding_boxes=bounding_boxes,
-                        published_date=published_date,
-                        source_name=source_name
-                    ))
+                    results.append(
+                        self._build_dense_result_from_row(
+                            row,
+                            similarity=float(row["similarity"]),
+                        )
+                    )
                 
                 logger.info("Dense search returned %d results", len(results))
                 return results

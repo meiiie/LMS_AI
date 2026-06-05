@@ -14,6 +14,7 @@ from app.services.embedding_shadow_vector_service import (
 )
 from app.services.embedding_space_guard import get_active_embedding_space_contract
 from app.services.embedding_space_registry_service import get_embedding_write_spaces
+from app.services.qdrant_vector_index_service import upsert_qdrant_points_async
 from app.repositories.knowledge_search_org_scope import (
     log_knowledge_search_scope_blocked,
     resolve_knowledge_search_org_scope,
@@ -99,6 +100,7 @@ async def _upsert_shadow_vector_async(
     source_embedding: List[float],
     space,
     precomputed_embedding: List[float] | None = None,
+    qdrant_payload: dict | None = None,
 ) -> None:
     if precomputed_embedding:
         shadow_embedding = precomputed_embedding
@@ -140,6 +142,11 @@ async def _upsert_shadow_vector_async(
         shadow_embedding,
         build_shadow_metadata(metadata, contract=space),
     )
+    await upsert_qdrant_points_async(
+        entity_type="knowledge_embeddings",
+        space=space,
+        points=[(knowledge_embedding_id, shadow_embedding, qdrant_payload or {})],
+    )
 
 
 async def _write_shadow_vectors_async(
@@ -150,6 +157,7 @@ async def _write_shadow_vectors_async(
     metadata: dict | None,
     source_embedding: List[float],
     write_spaces: tuple,
+    qdrant_payload: dict | None = None,
 ) -> None:
     for shadow_space in filter_shadow_spaces(write_spaces):
         try:
@@ -160,6 +168,7 @@ async def _write_shadow_vectors_async(
                 metadata=metadata,
                 source_embedding=source_embedding,
                 space=shadow_space,
+                qdrant_payload=qdrant_payload,
             )
         except Exception as exc:
             logger.warning(
@@ -272,6 +281,7 @@ async def store_embedding_impl(repo, *, node_id: str, embedding: List[float], or
                         source_embedding=embedding,
                         space=shadow_space,
                         precomputed_embedding=list(embedding),
+                        qdrant_payload={"organization_id": eff_org_id},
                     )
 
             logger.debug("Stored embedding for node: %s", node_id)
@@ -379,6 +389,7 @@ async def upsert_embedding_impl(
                     metadata=None,
                     source_embedding=embedding,
                     write_spaces=write_spaces,
+                    qdrant_payload={"organization_id": eff_org_id},
                 )
 
             logger.debug("Upserted embedding for node: %s", node_id)
@@ -555,6 +566,12 @@ async def store_document_chunk_impl(
                     metadata=metadata,
                     source_embedding=embedding,
                     write_spaces=write_spaces,
+                    qdrant_payload={
+                        "organization_id": eff_org_id,
+                        "content_type": content_type,
+                        "confidence_score": confidence_score,
+                        "domain_id": domain_id,
+                    },
                 )
 
             logger.debug(

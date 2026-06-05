@@ -129,6 +129,13 @@ class Settings(BaseSettingsFieldsMixin, FeatureSettingsMixin, BaseSettings):
             ["google", "openai", "openrouter", "nvidia", "ollama", "zhipu", "auto"],
         )
     )
+    validate_vector_index_backend = field_validator("vector_index_backend")(
+        lambda cls, v: validate_choice_value(
+            "vector_index_backend",
+            (v or "").strip().lower(),
+            ["postgres", "qdrant"],
+        )
+    )
     validate_vision_provider = field_validator("vision_provider")(
         lambda cls, v: validate_choice_value(
             "vision_provider",
@@ -190,6 +197,7 @@ class Settings(BaseSettingsFieldsMixin, FeatureSettingsMixin, BaseSettings):
         "openai_base_url",
         "openrouter_base_url",
         "nvidia_base_url",
+        "qdrant_url",
     )(validate_url_field_value)
 
     normalize_string_lists = field_validator(

@@ -33,6 +33,7 @@ from app.services.embedding_space_guard import (
     stamp_embedding_metadata,
 )
 from app.services.embedding_space_registry_service import get_embedding_write_spaces
+from app.services.qdrant_vector_index_service import upsert_qdrant_points_sync
 
 logger = logging.getLogger(__name__)
 _SEMANTIC_MEMORY_REPOSITORY_MISSING_ORG_WARNING = (
@@ -170,6 +171,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
         memory_id: UUID,
         memory: SemanticMemoryCreate,
         write_spaces: tuple,
+        organization_id: str,
     ) -> None:
         source_contract = get_active_embedding_space_contract()
         if not self._has_embedding(memory.embedding):
@@ -237,6 +239,21 @@ class SemanticMemoryRepositoryRuntimeMixin:
                     ),
                 },
             )
+            upsert_qdrant_points_sync(
+                entity_type="semantic_memories",
+                space=shadow_space,
+                points=[
+                    (
+                        str(memory_id),
+                        shadow_embedding,
+                        {
+                            "user_id": memory.user_id,
+                            "organization_id": organization_id,
+                            "memory_type": memory.memory_type.value,
+                        },
+                    )
+                ],
+            )
 
     def save_memory(
         self,
@@ -276,6 +293,7 @@ class SemanticMemoryRepositoryRuntimeMixin:
                         memory_id=row.id,
                         memory=memory,
                         write_spaces=write_spaces,
+                        organization_id=scope.org_id,
                     )
                 session.commit()
 
