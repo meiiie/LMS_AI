@@ -14,6 +14,7 @@ from app.engine.agents import AgentConfig, RAG_AGENT_CONFIG
 from app.engine.agentic_rag.corrective_rag import get_corrective_rag
 from app.engine.multi_agent.state import AgentState
 from app.engine.reasoning import ReasoningRenderRequest, get_reasoning_narrator
+from app.engine.agentic_rag.runtime_llm_socket import agentic_rag_runtime_target
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,10 @@ class RAGAgentNode:
         _widget_feedback_ctx = state.get("widget_feedback_prompt", "")
         if _widget_feedback_ctx:
             context["widget_feedback_prompt"] = _widget_feedback_ctx
+        if state.get("provider"):
+            context["provider"] = state.get("provider")
+        if state.get("model"):
+            context["model"] = state.get("model")
 
         bus_id = state.get("_event_bus_id")
         event_queue = None
@@ -179,10 +184,14 @@ class RAGAgentNode:
             event_queue = _get_event_queue(bus_id)
 
         try:
-            if event_queue:
-                result = await self._process_with_streaming(query, context, event_queue)
-            else:
-                result = await self._corrective_rag.process(query, context)
+            with agentic_rag_runtime_target(
+                provider=state.get("provider"),
+                model=state.get("model"),
+            ):
+                if event_queue:
+                    result = await self._process_with_streaming(query, context, event_queue)
+                else:
+                    result = await self._corrective_rag.process(query, context)
 
             if result is None:
                 raise RuntimeError("process_streaming returned no result")

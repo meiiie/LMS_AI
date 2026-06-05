@@ -102,6 +102,7 @@ function assignConversationModelFromMetadata(
   conversation: Conversation,
   metadata?: Partial<ChatResponseMetadata> | Record<string, unknown>,
 ) {
+  if (conversation.model_provider) return;
   if (!metadata) return;
   const provider = normalizeConversationModelProvider(metadata.provider);
   if (!provider) return;

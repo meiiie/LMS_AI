@@ -146,6 +146,36 @@ class TestTierInjection:
 
         assert "_execution_tier" not in state
 
+    @pytest.mark.asyncio
+    async def test_run_step_preserves_request_scoped_model_when_node_returns_new_state(self):
+        from app.engine.multi_agent.runner import WiiiRunner
+
+        runner = WiiiRunner()
+
+        async def mock_supervisor(_state):
+            return {
+                "query": "test",
+                "next_agent": "rag_agent",
+                "routing_metadata": {"intent": "lookup"},
+            }
+
+        runner.register_node("supervisor", mock_supervisor)
+        state = await runner._run_step(
+            "supervisor",
+            {
+                "query": "test",
+                "provider": "nvidia",
+                "model": "nvidia/nemotron-3-ultra-550b-a55b",
+                "session_id": "session-1",
+                "context": {"request_id": "req-1"},
+            },
+        )
+
+        assert state["provider"] == "nvidia"
+        assert state["model"] == "nvidia/nemotron-3-ultra-550b-a55b"
+        assert state["session_id"] == "session-1"
+        assert state["context"] == {"request_id": "req-1"}
+
 
 # =========================================================================
 # Grader uses registry

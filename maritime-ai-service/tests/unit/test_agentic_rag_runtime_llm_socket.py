@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.engine.agentic_rag.runtime_llm_socket import (
+    agentic_rag_runtime_target,
     ainvoke_agentic_rag_llm,
     make_agentic_rag_messages,
     resolve_agentic_rag_llm,
@@ -51,6 +52,80 @@ def test_resolve_agentic_rag_llm_prefers_native_handle_when_client_exists():
         )
 
     assert llm is native_handle
+    fallback.assert_not_called()
+
+
+def test_resolve_agentic_rag_llm_forwards_request_scoped_model_to_native_registry():
+    native_handle = NativeChatModelHandle(
+        _wiii_provider_name="nvidia",
+        _wiii_model_name="nvidia/nemotron-3-ultra-550b-a55b",
+        _wiii_tier_key="moderate",
+    )
+
+    with (
+        patch(
+            "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_native_llm",
+            return_value=native_handle,
+        ) as get_native_llm,
+        patch(
+            "app.engine.multi_agent.openai_stream_runtime."
+            "_create_openai_compatible_stream_client_impl",
+            return_value=object(),
+        ),
+        patch("app.engine.agentic_rag.runtime_llm_socket.get_llm_for_provider") as fallback,
+        agentic_rag_runtime_target(
+            provider="nvidia",
+            model="nvidia/nemotron-3-ultra-550b-a55b",
+        ),
+    ):
+        llm = resolve_agentic_rag_llm(
+            tier=ThinkingTier.MODERATE,
+            component="RuntimeSocketTest",
+        )
+
+    assert llm is native_handle
+    assert get_native_llm.call_args.kwargs["provider_override"] == "nvidia"
+    assert get_native_llm.call_args.kwargs["requested_model"] == "nvidia/nemotron-3-ultra-550b-a55b"
+    fallback.assert_not_called()
+
+
+def test_resolve_agentic_rag_llm_uses_request_scoped_custom_model_when_native_missing():
+    custom_llm = object()
+
+    with (
+        patch(
+            "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_native_llm",
+            return_value=NativeChatModelHandle(
+                _wiii_provider_name="nvidia",
+                _wiii_model_name="nvidia/nemotron-3-ultra-550b-a55b",
+                _wiii_tier_key="moderate",
+            ),
+        ),
+        patch(
+            "app.engine.multi_agent.openai_stream_runtime."
+            "_create_openai_compatible_stream_client_impl",
+            return_value=None,
+        ),
+        patch(
+            "app.engine.multi_agent.agent_config.AgentConfigRegistry.get_llm",
+            return_value=custom_llm,
+        ) as get_llm,
+        patch("app.engine.agentic_rag.runtime_llm_socket.get_llm_for_provider") as fallback,
+        agentic_rag_runtime_target(
+            provider="nvidia",
+            model="nvidia/nemotron-3-ultra-550b-a55b",
+        ),
+    ):
+        llm = resolve_agentic_rag_llm(
+            tier=ThinkingTier.MODERATE,
+            component="RuntimeSocketTest",
+        )
+
+    assert llm is custom_llm
+    assert get_llm.call_args.args[0] == "rag_agent"
+    assert get_llm.call_args.kwargs["provider_override"] == "nvidia"
+    assert get_llm.call_args.kwargs["requested_model"] == "nvidia/nemotron-3-ultra-550b-a55b"
+    assert get_llm.call_args.kwargs["strict_provider_pin"] is True
     fallback.assert_not_called()
 
 

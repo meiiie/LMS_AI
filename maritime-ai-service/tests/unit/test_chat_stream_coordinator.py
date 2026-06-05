@@ -72,6 +72,38 @@ def _runtime_flow_ledgers(chunks):
     ]
 
 
+def test_runtime_flow_metadata_promotes_authoritative_runtime_model():
+    from app.engine.multi_agent.stream_utils import StreamEvent
+    from app.services import chat_stream_coordinator as coordinator
+
+    runtime_model = "nvidia/nemotron-3-ultra-550b-a55b"
+    flow_ledger = coordinator.RuntimeFlowLedger(request_id="req-runtime-model")
+    flow_ledger.provider = "nvidia"
+    flow_ledger.model = runtime_model
+    flow_ledger.runtime_authoritative = True
+
+    metadata_event = StreamEvent(
+        type="metadata",
+        content={
+            "provider": "nvidia",
+            "model": "qwen/qwen3-next-80b-a3b-instruct",
+            "runtime_authoritative": True,
+        },
+    )
+
+    enriched = coordinator._with_runtime_flow_metadata(
+        metadata_event,
+        coordinator._StreamLatencyTracker(),
+        flow_ledger,
+    )
+
+    assert enriched.content["provider"] == "nvidia"
+    assert enriched.content["model"] == runtime_model
+    assert enriched.content["runtime_provider"] == "nvidia"
+    assert enriched.content["runtime_model"] == runtime_model
+    assert enriched.content["runtime_flow_ledger"]["runtime"]["model"] == runtime_model
+
+
 def _all_runtime_flow_ledgers(chunks):
     ledgers = []
     for chunk in chunks:

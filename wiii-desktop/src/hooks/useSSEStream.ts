@@ -27,7 +27,11 @@ import { useHostContextStore, type ActionResult } from "@/stores/host-context-st
 import { useCodeStudioStore } from "@/stores/code-studio-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useToastStore } from "@/stores/toast-store";
-import { useModelStore, type RequestModelSelection } from "@/stores/model-store";
+import {
+  resolveSelectedModelForProvider,
+  useModelStore,
+  type RequestModelSelection,
+} from "@/stores/model-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { StreamBuffer } from "@/lib/stream-buffer";
 import { stripWiiiInternalMarkup } from "@/lib/internal-markup";
@@ -75,6 +79,30 @@ function resolveConversationModelSelection(
       conversation.model_provider === "auto"
         ? null
         : conversation.model?.trim() || null,
+  };
+}
+
+function completeRequestModelSelection(
+  selection: RequestModelSelection,
+): RequestModelSelection {
+  if (selection.provider === "auto" || selection.model) {
+    return selection;
+  }
+
+  const modelState = useModelStore.getState();
+  const activeModel =
+    modelState.activeProvider === selection.provider
+      ? modelState.activeModel?.trim() || null
+      : null;
+  return {
+    ...selection,
+    model:
+      activeModel
+      || resolveSelectedModelForProvider(
+        selection.provider,
+        modelState.providers,
+        useSettingsStore.getState().settings,
+      ),
   };
 }
 
@@ -1922,9 +1950,21 @@ export function useSSEStream() {
     // global settings are only the default for a new/unbound chat.
     const conversationSelection = resolveConversationModelSelection(activeConv);
     const { provider: selectedProvider, model: selectedModel } =
-      conversationSelection
-      || useModelStore.getState().consumeSelectionForRequest();
+      completeRequestModelSelection(
+        conversationSelection
+        || useModelStore.getState().consumeSelectionForRequest(),
+      );
     if (!conversationSelection && activeConv?.id) {
+      useChatStore
+        .getState()
+        .setConversationModel(activeConv.id, selectedProvider, selectedModel);
+    } else if (
+      conversationSelection
+      && !conversationSelection.model
+      && selectedProvider !== "auto"
+      && selectedModel
+      && activeConv?.id
+    ) {
       useChatStore
         .getState()
         .setConversationModel(activeConv.id, selectedProvider, selectedModel);

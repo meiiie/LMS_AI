@@ -49,6 +49,22 @@ _NODE_AGGREGATOR = "aggregator"
 _MAX_DISPATCH_ITERATIONS = 2  # Safety limit for aggregator→supervisor loop
 _MAX_HANDOFF_COUNT = 2  # Max agent-to-agent handoffs per request
 
+_REQUEST_SCOPED_STATE_KEYS = (
+    "query",
+    "user_id",
+    "session_id",
+    "context",
+    "messages",
+    "domain_id",
+    "domain_config",
+    "organization_id",
+    "thinking_effort",
+    "provider",
+    "model",
+    "_event_bus_id",
+    "_host_action_control_feedback",
+)
+
 
 _RUNTIME_STEP_MESSAGES = {
     _NODE_GUARDIAN: "Wiii đang kiểm tra an toàn...",
@@ -64,6 +80,27 @@ _RUNTIME_STEP_MESSAGES = {
     _NODE_AGGREGATOR: "Wiii đang tổng hợp báo cáo agent...",
     _NODE_SYNTHESIZER: "Wiii đang chốt câu trả lời cuối...",
 }
+
+
+def _is_missing_state_value(value: Any) -> bool:
+    return value is None or value == ""
+
+
+def _preserve_request_scoped_state(
+    source_state: AgentState,
+    result_state: AgentState,
+) -> AgentState:
+    """Carry request/session fields across nodes that return a new state dict."""
+
+    if result_state is source_state:
+        return result_state
+    for key in _REQUEST_SCOPED_STATE_KEYS:
+        source_value = source_state.get(key)
+        if _is_missing_state_value(source_value):
+            continue
+        if key not in result_state or _is_missing_state_value(result_state.get(key)):
+            result_state[key] = source_value
+    return result_state
 
 
 def _ensure_runtime_latency(state: AgentState) -> dict[str, Any]:
@@ -280,6 +317,7 @@ class WiiiRunner:
         started_at: float,
         status: str,
     ) -> AgentState:
+        result_state = _preserve_request_scoped_state(source_state, result_state)
         if result_state is not source_state:
             result_state.setdefault(
                 "_runtime_latency_started_at",

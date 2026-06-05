@@ -403,6 +403,27 @@ describe("Chat Store — Streaming", () => {
     expect(conv.messages[1].thinking).toBe("I analyzed the question...");
   });
 
+  it("does not let response metadata overwrite a pinned conversation model", () => {
+    const store = useChatStore.getState();
+    const id = store.createConversation("maritime");
+    store.setConversationModel(id, "nvidia", "nvidia/nemotron-3-ultra-550b-a55b");
+    store.addUserMessage("Test model persistence");
+    store.startStreaming();
+    store.appendStreamingContent("Answer from runtime.");
+
+    useChatStore.getState().finalizeStream({
+      processing_time: 1.2,
+      provider: "nvidia",
+      model: "qwen/qwen3-next-80b-a3b-instruct",
+      agent_type: "rag",
+    } as any);
+
+    const conv = useChatStore.getState().conversations[0];
+    expect(conv.model_provider).toBe("nvidia");
+    expect(conv.model).toBe("nvidia/nemotron-3-ultra-550b-a55b");
+    expect(conv.messages[1].metadata?.model).toBe("qwen/qwen3-next-80b-a3b-instruct");
+  });
+
   it("prefers richer metadata thinking when stream rail is thinner", () => {
     const store = useChatStore.getState();
     store.createConversation("maritime");

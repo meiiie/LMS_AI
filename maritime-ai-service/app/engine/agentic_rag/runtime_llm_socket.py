@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Callable, Optional
 from unittest.mock import Mock
 
@@ -15,6 +17,27 @@ from app.engine.native_chat_runtime import (
 )
 
 logger = logging.getLogger(__name__)
+
+_REQUESTED_PROVIDER: ContextVar[str | None] = ContextVar("agentic_rag_requested_provider", default=None)
+_REQUESTED_MODEL: ContextVar[str | None] = ContextVar("agentic_rag_requested_model", default=None)
+
+
+def _clean_runtime_text(value: Any) -> str | None:
+    cleaned = str(value or "").strip()
+    return cleaned or None
+
+
+@contextmanager
+def agentic_rag_runtime_target(*, provider: Any = None, model: Any = None):
+    """Pin agentic RAG model resolution to the active user/session request."""
+
+    provider_token = _REQUESTED_PROVIDER.set(_clean_runtime_text(provider))
+    model_token = _REQUESTED_MODEL.set(_clean_runtime_text(model))
+    try:
+        yield
+    finally:
+        _REQUESTED_MODEL.reset(model_token)
+        _REQUESTED_PROVIDER.reset(provider_token)
 
 
 def resolve_agentic_rag_llm(
@@ -55,6 +78,8 @@ def resolve_agentic_rag_llm(
                 node_id=node_id,
                 tier=tier,
                 component=component,
+                requested_provider=_REQUESTED_PROVIDER.get(),
+                requested_model=_REQUESTED_MODEL.get(),
             )
             if native_llm is not None:
                 return native_llm
@@ -67,7 +92,19 @@ def resolve_agentic_rag_llm(
             )
 
     try:
-        llm = get_llm_for_provider(None, default_tier=tier)
+        requested_provider = _REQUESTED_PROVIDER.get()
+        requested_model = _REQUESTED_MODEL.get()
+        if requested_provider and requested_model:
+            from app.engine.multi_agent.agent_config import AgentConfigRegistry
+
+            llm = AgentConfigRegistry.get_llm(
+                node_id,
+                provider_override=requested_provider,
+                requested_model=requested_model,
+                strict_provider_pin=True,
+            )
+        else:
+            llm = get_llm_for_provider(requested_provider, default_tier=tier)
         if llm is not None:
             return llm
     except Exception as exc:
@@ -120,6 +157,8 @@ def _resolve_native_agentic_rag_llm(
     node_id: str,
     tier: ThinkingTier | str,
     component: str,
+    requested_provider: str | None = None,
+    requested_model: str | None = None,
 ) -> Any:
     """Resolve a native provider handle only when its OpenAI-compatible client exists."""
     from app.engine.multi_agent.agent_config import AgentConfigRegistry
@@ -131,6 +170,8 @@ def _resolve_native_agentic_rag_llm(
     native_llm = AgentConfigRegistry.get_native_llm(
         node_id,
         effort_override=tier_name,
+        provider_override=requested_provider,
+        requested_model=requested_model,
     )
     provider_name = str(getattr(native_llm, "_wiii_provider_name", "") or "").strip().lower()
     if not native_llm or not provider_name:
