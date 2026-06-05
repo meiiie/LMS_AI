@@ -158,6 +158,43 @@ _EXPLICIT_WEB_SEARCH_MARKERS = (
     "web search",
 )
 
+_LOW_SIGNAL_DOMAIN_KEYWORDS = frozenset(
+    {
+        "answer",
+        "ask",
+        "cau",
+        "hoi",
+        "hoi dap",
+        "lookup",
+        "question",
+        "search",
+        "tim",
+        "tim kiem",
+        "tra",
+        "tra cuu",
+        "tra loi",
+    }
+)
+
+
+def _ascii_fold(value: str) -> str:
+    try:
+        from app.engine.content_filter import TextNormalizer
+
+        return TextNormalizer.strip_diacritics(value)
+    except Exception:
+        import unicodedata
+
+        nfkd = unicodedata.normalize("NFD", value)
+        return "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
+
+
+def _is_low_signal_domain_keyword(keyword: str) -> bool:
+    normalized = " ".join(_ascii_fold(str(keyword or "").lower()).split())
+    if len(normalized) <= 1:
+        return True
+    return normalized in _LOW_SIGNAL_DOMAIN_KEYWORDS
+
 
 def _contains_any_marker(normalized_query: str, markers: tuple[str, ...]) -> bool:
     return any(marker in normalized_query for marker in markers)
@@ -652,10 +689,26 @@ def get_domain_keywords_impl(
     """Extract domain routing keywords from config or registry fallback."""
     domain_keywords: list[str] = []
     if domain_config and domain_config.get("routing_keywords"):
-        for kw_group in domain_config["routing_keywords"]:
-            domain_keywords.extend(
-                keyword.strip().lower() for keyword in kw_group.split(",")
-            )
+        raw_groups = domain_config["routing_keywords"]
+        if isinstance(raw_groups, str):
+            keyword_groups = [raw_groups]
+        elif isinstance(raw_groups, (list, tuple, set)):
+            keyword_groups = list(raw_groups)
+        else:
+            keyword_groups = []
+
+        for kw_group in keyword_groups:
+            if isinstance(kw_group, str):
+                raw_keywords = kw_group.split(",")
+            elif isinstance(kw_group, (list, tuple, set)):
+                raw_keywords = kw_group
+            else:
+                raw_keywords = [kw_group]
+
+            for keyword in raw_keywords:
+                normalized = str(keyword or "").strip().lower()
+                if normalized and not _is_low_signal_domain_keyword(normalized):
+                    domain_keywords.append(normalized)
 
     if not domain_keywords:
         try:
@@ -666,7 +719,9 @@ def get_domain_keywords_impl(
             if domain:
                 config = domain.get_config()
                 domain_keywords = [
-                    keyword.lower() for keyword in (config.routing_keywords or [])
+                    keyword.lower()
+                    for keyword in (config.routing_keywords or [])
+                    if not _is_low_signal_domain_keyword(str(keyword or ""))
                 ]
         except Exception as exc:
             logger.debug("Failed to load domain keywords: %s", exc)

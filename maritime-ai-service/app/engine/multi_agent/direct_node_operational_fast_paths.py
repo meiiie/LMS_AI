@@ -6,6 +6,7 @@ import re
 
 from app.engine.multi_agent.direct_intent import _normalize_for_intent
 from app.engine.multi_agent.direct_web_search_policy import (
+    _looks_explicit_web_fetch_query,
     _looks_explicit_web_search_query,
 )
 from app.engine.multi_agent.direct_reasoning import _is_codebase_analysis_query
@@ -49,12 +50,16 @@ def _is_explicit_web_search_turn_for_direct(query: str, state: AgentState | None
     if (
         "@web-search" in folded
         or "@web_search" in folded
+        or "@web-fetch" in folded
+        or "@web_fetch" in folded
         or "search the web" in folded
+        or _looks_explicit_web_fetch_query(query)
         or _looks_explicit_web_search_query(query)
     ):
         return True
     if isinstance(state, dict):
-        if "web-search" in _force_skills_from_state(state):
+        forced = _force_skills_from_state(state)
+        if "web-search" in forced or "web-fetch" in forced or "web_fetch" in forced:
             return True
     return False
 

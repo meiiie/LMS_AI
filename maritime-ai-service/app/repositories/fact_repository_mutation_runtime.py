@@ -7,7 +7,7 @@ from uuid import UUID
 
 from sqlalchemy import text
 
-from app.models.semantic_memory import MemoryType
+from app.models.semantic_memory import MemoryType, SemanticMemoryCreate
 
 logger = logging.getLogger(__name__)
 _FACT_REPOSITORY_MISSING_ORG_WARNING = "fact_repository_blocked_missing_org_context"
@@ -116,19 +116,43 @@ class FactRepositoryMutationRuntimeMixin:
 
         try:
             with self._session_factory() as session:
-                from app.services.embedding_space_guard import stamp_embedding_metadata
+                memory = SemanticMemoryCreate(
+                    user_id=user_id or "",
+                    content=content,
+                    embedding=embedding,
+                    memory_type=MemoryType.USER_FACT,
+                    importance=float(metadata.get("confidence", 0.5) or 0.5),
+                    metadata=metadata,
+                    session_id=None,
+                )
+                inline_embedding = embedding
+                metadata_json = json.dumps(metadata)
+                write_spaces = tuple()
+                if hasattr(self, "_resolve_inline_embedding"):
+                    inline_embedding, metadata_json, write_spaces = self._resolve_inline_embedding(
+                        memory=memory,
+                    )
 
                 query, params = self._build_update_fact_statement(
                     fact_id=fact_id,
                     user_id=user_id,
                     content=content,
-                    embedding=embedding,
-                    metadata=stamp_embedding_metadata(metadata),
+                    inline_embedding=inline_embedding,
+                    metadata_json=metadata_json,
+                    importance=memory.importance,
                     org_filter=org_filter,
                 )
                 params["org_id"] = scope.org_id
 
                 row = session.execute(query, params).fetchone()
+                if row and hasattr(self, "_store_shadow_vectors"):
+                    self._store_shadow_vectors(
+                        session=session,
+                        memory_id=row.id,
+                        memory=memory,
+                        write_spaces=write_spaces,
+                        organization_id=scope.org_id,
+                    )
                 session.commit()
                 if row:
                     logger.debug("Updated fact %s", fact_id)
@@ -146,19 +170,28 @@ class FactRepositoryMutationRuntimeMixin:
         fact_id: UUID,
         user_id: Optional[str],
         content: str,
-        embedding: List[float],
-        metadata: dict,
+        inline_embedding: Optional[List[float]],
+        metadata_json: str,
+        importance: float,
         org_filter: str,
     ):
-        embedding_str = self._format_embedding(embedding)
-        metadata_json = json.dumps(metadata)
+        embedding_assignment = ""
+        params = {
+            "fact_id": str(fact_id),
+            "content": content,
+            "metadata": metadata_json,
+            "importance": importance,
+        }
+        if inline_embedding:
+            embedding_assignment = "embedding = CAST(:embedding AS vector),"
+            params["embedding"] = self._format_embedding(inline_embedding)
 
         if user_id:
             query = text(
                 f"""
                 UPDATE {self.TABLE_NAME}
                 SET content = :content,
-                    embedding = CAST(:embedding AS vector),
+                    {embedding_assignment}
                     metadata = CAST(:metadata AS jsonb),
                     importance = :importance,
                     updated_at = NOW()
@@ -167,20 +200,13 @@ class FactRepositoryMutationRuntimeMixin:
                 RETURNING id
                 """
             )
-            params = {
-                "fact_id": str(fact_id),
-                "user_id": user_id,
-                "content": content,
-                "embedding": embedding_str,
-                "metadata": metadata_json,
-                "importance": metadata.get("confidence", 0.5),
-            }
+            params["user_id"] = user_id
         else:
             query = text(
                 f"""
                 UPDATE {self.TABLE_NAME}
                 SET content = :content,
-                    embedding = CAST(:embedding AS vector),
+                    {embedding_assignment}
                     metadata = CAST(:metadata AS jsonb),
                     importance = :importance,
                     updated_at = NOW()
@@ -189,13 +215,6 @@ class FactRepositoryMutationRuntimeMixin:
                 RETURNING id
                 """
             )
-            params = {
-                "fact_id": str(fact_id),
-                "content": content,
-                "embedding": embedding_str,
-                "metadata": metadata_json,
-                "importance": metadata.get("confidence", 0.5),
-            }
         return query, params
 
     def update_fact_preserve_embedding(

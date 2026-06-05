@@ -93,6 +93,7 @@ class TurnPathSignals:
     needs_external_connection_status: bool = False
     needs_external_app_action: bool = False
     needs_weather_lookup: bool = False
+    needs_web_fetch: bool = False
     needs_web_search: bool = False
     needs_datetime: bool = False
     needs_news_search: bool = False
@@ -259,6 +260,19 @@ def resolve_turn_path_decision(signals: TurnPathSignals) -> TurnPathDecision:
             reason="low_signal_noise_no_tool",
             bind_tools=False,
             allow_all_tools=False,
+            allow_agent_handoff=False,
+        )
+
+    if signals.needs_web_fetch:
+        return TurnPathDecision(
+            path="web_search",
+            reason="explicit_web_fetch_url",
+            force_tools=True,
+            allow_all_tools=False,
+            allowed_tool_names=frozenset({"tool_fetch_url"}),
+            forbidden_tool_prefixes=POINTY_TOOL_PREFIXES
+            if signals.suppress_pointy_for_output
+            else (),
             allow_agent_handoff=False,
         )
 
@@ -530,6 +544,7 @@ def _has_tool_or_output_signal(signals: TurnPathSignals) -> bool:
             signals.needs_external_connection_status,
             signals.needs_external_app_action,
             signals.needs_weather_lookup,
+            signals.needs_web_fetch,
             signals.needs_web_search,
             signals.needs_datetime,
             signals.needs_news_search,

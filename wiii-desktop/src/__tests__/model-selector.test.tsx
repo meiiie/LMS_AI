@@ -293,4 +293,73 @@ describe("ModelSelector", () => {
       "nvidia/nemotron-3-ultra",
     );
   });
+
+  it("labels the session model as current and backend default separately", async () => {
+    getMock.mockResolvedValue({
+      providers: [
+        {
+          id: "nvidia",
+          display_name: "NVIDIA NIM",
+          available: true,
+          is_primary: true,
+          is_fallback: false,
+          state: "selectable",
+          reason_code: null,
+          reason_label: null,
+          selected_model: "qwen/qwen3-next-80b-a3b-instruct",
+          model_options: [
+            {
+              provider: "nvidia",
+              model_name: "qwen/qwen3-next-80b-a3b-instruct",
+              display_name: "Qwen3 Next 80B",
+              status: "current",
+              released_on: null,
+              is_default: true,
+            },
+            {
+              provider: "nvidia",
+              model_name: "nvidia/nemotron-3-ultra-550b-a55b",
+              display_name: "Nemotron 3 Ultra",
+              status: "available",
+              released_on: null,
+              is_default: false,
+            },
+          ],
+          strict_pin: true,
+          verified_at: "2026-06-05T00:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      activeConversationId: "conv-nemotron",
+      conversations: [
+        {
+          id: "conv-nemotron",
+          title: "Nemotron chat",
+          created_at: "2026-06-05T00:00:00Z",
+          updated_at: "2026-06-05T00:00:00Z",
+          messages: [],
+          model_provider: "nvidia",
+          model: "nvidia/nemotron-3-ultra-550b-a55b",
+        },
+      ],
+    });
+
+    render(<ModelSelector />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("model-selector-trigger").textContent).toContain(
+        "nvidia/nemotron-3-ultra-550b-a55b",
+      );
+    });
+
+    fireEvent.click(screen.getByTestId("model-selector-trigger"));
+
+    const nemotronOption = screen.getByText("Nemotron 3 Ultra").closest("button");
+    const qwenOption = screen.getByText("Qwen3 Next 80B").closest("button");
+
+    expect(nemotronOption?.textContent).toContain("đang dùng");
+    expect(qwenOption?.textContent).toContain("mặc định");
+    expect(qwenOption?.textContent).not.toContain("current");
+  });
 });

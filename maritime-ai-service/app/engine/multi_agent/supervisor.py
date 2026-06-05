@@ -61,6 +61,10 @@ from app.engine.multi_agent.supervisor_runtime_support import (
 from app.engine.multi_agent.direct_search_synthesis_fallback import (
     build_search_template_fallback,
 )
+from app.engine.multi_agent.direct_web_search_policy import (
+    _looks_explicit_web_fetch_query,
+    _looks_explicit_web_search_query,
+)
 from app.engine.multi_agent.supervisor_surface import (
     _build_recent_turns_for_routing_impl as _build_recent_turns_for_routing,
     _clean_supervisor_visible_reasoning_impl as _clean_supervisor_visible_reasoning,
@@ -208,6 +212,44 @@ def _apply_turn_path_governor_preflight(
         "final_agent": agent,
         "turn_path": path,
         "turn_path_reason": reason,
+    }
+    return agent
+
+
+def _apply_explicit_web_tool_preflight(
+    state: AgentState,
+    query: str,
+) -> str | None:
+    """Route explicit web tool requests before the LLM router can misclassify them."""
+
+    if _looks_explicit_web_fetch_query(query):
+        method = "deterministic_explicit_web_fetch_preflight"
+        web_tool = "tool_fetch_url"
+        reason = "user explicitly asked to fetch/read a URL"
+    elif _looks_explicit_web_search_query(query):
+        method = "deterministic_explicit_web_search_preflight"
+        web_tool = "tool_web_search"
+        reason = "user explicitly asked to search the web"
+    else:
+        return None
+
+    agent = AgentType.DIRECT.value
+    intent = "web_search"
+    state["routing_metadata"] = {
+        "intent": intent,
+        "confidence": 1.0,
+        "reasoning": _finalize_routing_reasoning(
+            raw_reasoning=reason,
+            method=method,
+            chosen_agent=agent,
+            intent=intent,
+            query=query,
+        ),
+        "llm_reasoning": "",
+        "method": method,
+        "final_agent": agent,
+        "turn_path": "web_search",
+        "web_tool": web_tool,
     }
     return agent
 
@@ -369,6 +411,10 @@ class SupervisorAgent:
             return agent
 
         _apply_routing_hint(state, query)
+        explicit_web_agent = _apply_explicit_web_tool_preflight(state, query)
+        if explicit_web_agent:
+            return explicit_web_agent
+
         turn_path_agent = _apply_turn_path_governor_preflight(state, query)
         if turn_path_agent:
             return turn_path_agent

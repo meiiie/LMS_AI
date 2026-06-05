@@ -123,6 +123,15 @@ class VectorMemoryRepositoryMixin:
     ) -> List[SemanticMemorySearchResult]:
         if active_space is None or active_space.storage_kind != "shadow":
             return []
+        if len(query_embedding) != int(active_space.dimensions):
+            logger.warning(
+                "Qdrant semantic memory search skipped due to embedding dimension mismatch: "
+                "query_dims=%d space_dims=%d space=%s",
+                len(query_embedding),
+                int(active_space.dimensions),
+                active_space.space_fingerprint,
+            )
+            return []
 
         filters: dict[str, Any] = {
             "user_id": user_id,
@@ -313,9 +322,11 @@ class VectorMemoryRepositoryMixin:
 
                 # Build type filter if specified
                 type_filter = ""
+                alias_type_filter = ""
                 params = {
                     "user_id": user_id,
                     "embedding": embedding_str,
+                    "embedding_dims": len(query_embedding),
                     "threshold": threshold,
                     "limit": fetch_limit
                 }
@@ -324,9 +335,14 @@ class VectorMemoryRepositoryMixin:
                 if memory_types:
                     type_values = [t.value for t in memory_types]
                     type_filter = "AND memory_type = ANY(:memory_types)"
+                    alias_type_filter = "AND sm.memory_type = ANY(:memory_types)"
                     params["memory_types"] = type_values
 
-                if active_space is not None and active_space.storage_kind == "shadow":
+                if (
+                    active_space is not None
+                    and active_space.storage_kind == "shadow"
+                    and len(query_embedding) == int(active_space.dimensions)
+                ):
                     safe_dims = max(1, int(active_space.dimensions))
                     query = text(f"""
                         SELECT
@@ -346,7 +362,7 @@ class VectorMemoryRepositoryMixin:
                          AND sv.dimensions = {safe_dims}
                         WHERE sm.user_id = :user_id
                           AND 1 - ((sv.embedding::vector({safe_dims})) <=> CAST(:embedding AS vector({safe_dims}))) >= :threshold
-                          {type_filter.replace('memory_type', 'sm.memory_type')}
+                          {alias_type_filter}
                           {org_filter.replace('organization_id', 'sm.organization_id')}
                         ORDER BY (sv.embedding::vector({safe_dims})) <=> CAST(:embedding AS vector({safe_dims}))
                         LIMIT :limit
@@ -356,7 +372,33 @@ class VectorMemoryRepositoryMixin:
                     # Cosine similarity = 1 - cosine distance
                     # pgvector <=> returns cosine distance
                     # Sprint 98: Also fetch last_accessed, access_count for Stanford ranking
+                    if active_space is not None and active_space.storage_kind == "shadow":
+                        logger.warning(
+                            "Semantic memory shadow search skipped due to embedding dimension "
+                            "mismatch: query_dims=%d space_dims=%d space=%s",
+                            len(query_embedding),
+                            int(active_space.dimensions),
+                            active_space.space_fingerprint,
+                        )
                     query = text(f"""
+                        WITH candidates AS MATERIALIZED (
+                            SELECT
+                                id,
+                                content,
+                                memory_type,
+                                importance,
+                                metadata,
+                                created_at,
+                                last_accessed,
+                                access_count,
+                                embedding
+                            FROM {self.TABLE_NAME}
+                            WHERE user_id = :user_id
+                              AND embedding IS NOT NULL
+                              AND vector_dims(embedding) = :embedding_dims
+                              {type_filter}
+                              {org_filter}
+                        )
                         SELECT
                             id,
                             content,
@@ -367,11 +409,8 @@ class VectorMemoryRepositoryMixin:
                             last_accessed,
                             access_count,
                             1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
-                        FROM {self.TABLE_NAME}
-                        WHERE user_id = :user_id
-                          AND 1 - (embedding <=> CAST(:embedding AS vector)) >= :threshold
-                          {type_filter}
-                          {org_filter}
+                        FROM candidates
+                        WHERE 1 - (embedding <=> CAST(:embedding AS vector)) >= :threshold
                         ORDER BY embedding <=> CAST(:embedding AS vector)
                         LIMIT :limit
                     """)

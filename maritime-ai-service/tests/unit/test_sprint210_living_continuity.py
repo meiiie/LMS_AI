@@ -2292,6 +2292,39 @@ class TestRoutineTrackerOrgScope:
         assert params["org_id"] == "org-A"
 
     @pytest.mark.asyncio
+    async def test_routine_load_blocks_missing_org_column(self, monkeypatch, caplog):
+        """Legacy local routine tables fail closed until migration 051 is applied."""
+        from app.core.config import settings
+        from app.core.org_context import current_org_id
+        from app.engine.living_agent.routine_tracker import RoutineTracker
+
+        tracker = RoutineTracker()
+        monkeypatch.setattr(settings, "enable_multi_tenant", True)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "default_organization_id", "default")
+        caplog.set_level(logging.WARNING)
+
+        schema_result = MagicMock()
+        schema_result.fetchone.return_value = None
+        mock_session = MagicMock()
+        mock_session.execute.return_value = schema_result
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_factory = MagicMock(return_value=mock_session)
+
+        token = current_org_id.set("org-A")
+        try:
+            with patch("app.core.database.get_shared_session_factory", return_value=mock_factory):
+                routine = await tracker.get_routine("raw-routine-user")
+        finally:
+            current_org_id.reset(token)
+
+        assert routine is None
+        assert mock_session.execute.call_count == 1
+        assert "routine_tracking_blocked_missing_org_column" in caplog.text
+        assert "raw-routine-user" not in caplog.text
+
+    @pytest.mark.asyncio
     async def test_routine_upsert_uses_org_conflict_key(self, monkeypatch):
         """Routine profile writes are keyed by org and user."""
         from app.core.config import settings

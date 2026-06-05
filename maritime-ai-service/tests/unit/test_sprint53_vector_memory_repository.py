@@ -317,3 +317,52 @@ class TestSearchSimilar:
         params = mock_session.execute.call_args[0][1]
         assert "semantic_memory_vectors" in query
         assert params["space_fingerprint"] == "openai:text-embedding-3-small:1536"
+
+    def test_shadow_space_memory_type_filter_keeps_bind_name(self, monkeypatch):
+        repo = _make_repo()
+        mock_session = MagicMock()
+        repo._session_factory.return_value.__enter__ = MagicMock(return_value=mock_session)
+        repo._session_factory.return_value.__exit__ = MagicMock(return_value=False)
+        mock_session.execute.return_value.fetchall.return_value = []
+
+        shadow_space = SimpleNamespace(
+            storage_kind="shadow",
+            space_fingerprint="nvidia:nv-embed-v1:4096",
+            dimensions=4096,
+        )
+        monkeypatch.setattr(
+            "app.repositories.vector_memory_repository.get_active_embedding_read_space",
+            lambda *_args, **_kwargs: shadow_space,
+        )
+
+        repo.search_similar(
+            "user1",
+            [0.1] * 4096,
+            memory_types=[MemoryType.MESSAGE],
+        )
+
+        query = mock_session.execute.call_args[0][0].text
+        params = mock_session.execute.call_args[0][1]
+        assert "sm.memory_type = ANY(:memory_types)" in query
+        assert "sm.memory_types" not in query
+        assert params["memory_types"] == ["message"]
+
+    def test_inline_fallback_filters_vector_dimensions(self, monkeypatch):
+        repo = _make_repo()
+        mock_session = MagicMock()
+        repo._session_factory.return_value.__enter__ = MagicMock(return_value=mock_session)
+        repo._session_factory.return_value.__exit__ = MagicMock(return_value=False)
+        mock_session.execute.return_value.fetchall.return_value = []
+
+        monkeypatch.setattr(
+            "app.repositories.vector_memory_repository.get_active_embedding_read_space",
+            lambda *_args, **_kwargs: None,
+        )
+
+        repo.search_similar("user1", [0.1] * 4096)
+
+        query = mock_session.execute.call_args[0][0].text
+        params = mock_session.execute.call_args[0][1]
+        assert "vector_dims(embedding) = :embedding_dims" in query
+        assert "WITH candidates AS MATERIALIZED" in query
+        assert params["embedding_dims"] == 4096

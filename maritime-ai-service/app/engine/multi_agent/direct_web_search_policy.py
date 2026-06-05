@@ -19,6 +19,35 @@ FORCED_WEB_SEARCH_TOOL_NAMES = (
     "tool_web_search",
     "web_search",
 )
+FORCED_WEB_FETCH_TOOL_NAMES = (
+    "tool_fetch_url",
+    "fetch_url",
+)
+_URL_PATTERN = re.compile(r"https?://[^\s<>\]\)}\"']+")
+_WEB_FETCH_MARKERS = (
+    "web_fetch",
+    "web fetch",
+    "webfetch",
+    "fetch_url",
+    "fetch url",
+    "tool_fetch_url",
+)
+_URL_READ_MARKERS = (
+    "doc h1",
+    "read h1",
+    "heading h1",
+    "lay h1",
+    "lay heading",
+    "doc heading",
+    "doc tieu de",
+    "read title",
+    "doc title",
+    "doc url",
+    "read url",
+    "doc trang",
+    "read page",
+    "crawl",
+)
 _RICH_SEARCH_RESULT_CHAR_FLOOR = 1200
 _WEATHER_QUERY_MARKERS = (
     "thoi tiet",
@@ -182,7 +211,8 @@ def _has_fetch_tool_result(tool_call_events: list[dict]) -> bool:
 def _fold_tool_round_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", str(value or ""))
     stripped = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-    return " ".join(stripped.lower().replace("đ", "d").split())
+    stripped = stripped.replace("đ", "d").replace("Đ", "D")
+    return " ".join(stripped.lower().split())
 
 
 def _today_vietnam() -> str:
@@ -374,6 +404,40 @@ def _looks_explicit_web_search_query(query: str) -> bool:
             "search the web",
             "look up online",
         )
+    )
+
+
+def _extract_first_url(value: str) -> str:
+    match = _URL_PATTERN.search(str(value or ""))
+    if not match:
+        return ""
+    return match.group(0).strip().rstrip(".,;:)>]}'\"")
+
+
+def _looks_explicit_web_fetch_query(query: str) -> bool:
+    """Detect explicit URL-fetch/read requests without broadening web search."""
+
+    folded = _fold_tool_round_text(query)
+    if not folded or not _extract_first_url(query):
+        return False
+    if any(marker in folded for marker in _WEB_FETCH_MARKERS):
+        return True
+    return any(marker in folded for marker in _URL_READ_MARKERS)
+
+
+def _is_explicit_web_fetch_turn(query: str, state: AgentState | None) -> bool:
+    forced = _force_skills_for_turn(state)
+    return (
+        "web-fetch" in forced
+        or "web_fetch" in forced
+        or _looks_explicit_web_fetch_query(query)
+    )
+
+
+def _is_explicit_web_access_turn(query: str, state: AgentState | None) -> bool:
+    return _is_explicit_web_fetch_turn(query, state) or _is_explicit_web_search_turn(
+        query,
+        state,
     )
 
 

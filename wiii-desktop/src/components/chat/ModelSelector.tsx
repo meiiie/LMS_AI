@@ -32,6 +32,22 @@ const PROVIDER_LABELS: Record<string, string> = {
   ollama: "Ollama",
 };
 
+function sameModelName(left?: string | null, right?: string | null): boolean {
+  return Boolean(left && right && left.trim() === right.trim());
+}
+
+function formatModelStatus(status: string | undefined, isActive: boolean): string | null {
+  if (isActive) return "đang dùng";
+  const normalized = status?.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "current" || normalized === "selected" || normalized === "default") {
+    return "mặc định";
+  }
+  if (normalized === "available") return "sẵn sàng";
+  if (normalized === "unavailable") return "không sẵn sàng";
+  return status ?? null;
+}
+
 interface ModelSelectorProps {
   compact?: boolean;
 }
@@ -126,7 +142,33 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
   }, [open]);
 
   const visibleProviders = useMemo(() => {
-    const visible = providers.filter((provider) => provider.state !== "hidden");
+    const visible = providers
+      .filter((provider) => provider.state !== "hidden")
+      .map((provider) => {
+        if (provider.id !== activeProvider || !activeModel) {
+          return provider;
+        }
+        const hasActiveModel = (provider.modelOptions || []).some((model) =>
+          sameModelName(model.model_name, activeModel),
+        );
+        if (hasActiveModel) {
+          return provider;
+        }
+        return {
+          ...provider,
+          modelOptions: [
+            {
+              provider: activeProvider,
+              model_name: activeModel,
+              display_name: activeModel,
+              status: "selected",
+              released_on: null,
+              is_default: false,
+            },
+            ...(provider.modelOptions || []),
+          ],
+        };
+      });
     if (
       activeProvider === "auto"
       || visible.some((provider) => provider.id === activeProvider)
@@ -199,7 +241,14 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
           reasonLabel: provider.reasonLabel,
           selectedModel: provider.selectedModel,
         },
-        ...modelOptions.map((model) => ({
+        ...modelOptions.map((model) => {
+          const modelIsSessionActive =
+            providerId === activeProvider
+            && (
+              sameModelName(activeModel, model.model_name)
+              || (!activeModel && sameModelName(provider.selectedModel, model.model_name))
+            );
+          return {
           kind: "model" as const,
           id: providerId,
           label: model.display_name || model.model_name,
@@ -207,9 +256,13 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
           disabled,
           reasonLabel: provider.reasonLabel,
           selectedModel: model.model_name,
-          isProviderDefaultModel: provider.selectedModel === model.model_name,
-          model,
-        })),
+          isProviderDefaultModel: sameModelName(provider.selectedModel, model.model_name),
+          model: {
+            ...model,
+            status: formatModelStatus(model.status, modelIsSessionActive) || "",
+          },
+        };
+        }),
       ];
     }),
   ];
@@ -345,7 +398,7 @@ export function ModelSelector({ compact: _compact }: ModelSelectorProps = {}) {
                     : isModel
                       ? id === activeProvider
                         && (
-                          activeModel === model?.model_name
+                          sameModelName(activeModel, model?.model_name)
                           || (!activeModel && Boolean(isProviderDefaultModel))
                         )
                       : id === activeProvider && !activeModel && !groupOnly;
