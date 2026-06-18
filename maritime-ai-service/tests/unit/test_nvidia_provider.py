@@ -39,15 +39,15 @@ class TestNvidiaRegistry:
 # ---------------------------------------------------------------------------
 
 class TestNvidiaResolvers:
-    def test_default_models_are_current_qwen_targets(self):
+    def test_default_models_are_current_nemotron_target(self):
         from app.engine.model_catalog import (
             NVIDIA_DEFAULT_MODEL,
             NVIDIA_DEFAULT_MODEL_ADVANCED,
             get_all_static_chat_models,
         )
 
-        assert NVIDIA_DEFAULT_MODEL == "qwen/qwen3-next-80b-a3b-instruct"
-        assert NVIDIA_DEFAULT_MODEL_ADVANCED == "qwen/qwen3-next-80b-a3b-thinking"
+        assert NVIDIA_DEFAULT_MODEL == "nvidia/nemotron-3-ultra-550b-a55b"
+        assert NVIDIA_DEFAULT_MODEL_ADVANCED == "nvidia/nemotron-3-ultra-550b-a55b"
         assert NVIDIA_DEFAULT_MODEL in get_all_static_chat_models()["nvidia"]
         assert NVIDIA_DEFAULT_MODEL_ADVANCED in get_all_static_chat_models()["nvidia"]
 

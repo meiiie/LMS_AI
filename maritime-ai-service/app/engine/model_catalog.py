@@ -81,18 +81,18 @@ ZHIPU_DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 # NVIDIA NIM — OpenAI-compatible endpoint (Issue #110)
 # Free tier available with NGC API key from build.nvidia.com.
 NVIDIA_DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
+NVIDIA_NEMOTRON_ULTRA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 NVIDIA_QWEN_INSTRUCT_MODEL = "qwen/qwen3-next-80b-a3b-instruct"
 NVIDIA_QWEN_THINKING_MODEL = "qwen/qwen3-next-80b-a3b-thinking"
 NVIDIA_DEEPSEEK_FLASH_MODEL = "deepseek-ai/deepseek-v4-flash"
 NVIDIA_DEEPSEEK_PRO_MODEL = "deepseek-ai/deepseek-v4-pro"
-NVIDIA_DEFAULT_MODEL = NVIDIA_QWEN_INSTRUCT_MODEL
-NVIDIA_DEFAULT_MODEL_ADVANCED = NVIDIA_QWEN_THINKING_MODEL
+NVIDIA_DEFAULT_MODEL = NVIDIA_NEMOTRON_ULTRA_MODEL
+NVIDIA_DEFAULT_MODEL_ADVANCED = NVIDIA_NEMOTRON_ULTRA_MODEL
 NVIDIA_DEFAULT_VISION_MODEL = "meta/llama-3.2-11b-vision-instruct"
-# Phase 32a (#207): Qwen3 thinking model emits ``reasoning_content`` deltas
-# that Wiii's existing thinking-stream extractor already understands.
-# The default NVIDIA profile stays on Qwen for both normal and deep turns so
-# Wiii does not silently fall back to DeepSeek when env overrides are absent.
-NVIDIA_THINKING_MODEL = NVIDIA_QWEN_THINKING_MODEL
+# Keep the NVIDIA profile pinned to the product-design model for both normal
+# and deep turns so env-free startup, admin presets, and direct chatter do not
+# drift back to older Qwen/DeepSeek defaults.
+NVIDIA_THINKING_MODEL = NVIDIA_NEMOTRON_ULTRA_MODEL
 
 GOOGLE_CHAT_MODELS: dict[str, ChatModelMetadata] = {
     GOOGLE_DEFAULT_MODEL: ChatModelMetadata(
@@ -434,20 +434,31 @@ OLLAMA_KNOWN_MODELS: dict[str, ChatModelMetadata] = {
 }
 
 NVIDIA_CHAT_MODELS: dict[str, ChatModelMetadata] = {
-    NVIDIA_DEFAULT_MODEL: ChatModelMetadata(
+    NVIDIA_NEMOTRON_ULTRA_MODEL: ChatModelMetadata(
         provider="nvidia",
-        model_name=NVIDIA_DEFAULT_MODEL,
-        display_name="Qwen3 Next 80B Instruct (NVIDIA NIM)",
+        model_name=NVIDIA_NEMOTRON_ULTRA_MODEL,
+        display_name="Nemotron 3 Ultra 550B-A55B (NVIDIA NIM)",
         status="current",
+        supports_tool_calling=True,
+        supports_streaming=True,
+        supports_structured_output=False,
+        context_window_tokens=262_144,
+        capability_source="static",
+    ),
+    NVIDIA_QWEN_INSTRUCT_MODEL: ChatModelMetadata(
+        provider="nvidia",
+        model_name=NVIDIA_QWEN_INSTRUCT_MODEL,
+        display_name="Qwen3 Next 80B Instruct (NVIDIA NIM)",
+        status="available",
         supports_streaming=True,
         supports_structured_output=False,
         capability_source="static",
     ),
-    NVIDIA_DEFAULT_MODEL_ADVANCED: ChatModelMetadata(
+    NVIDIA_QWEN_THINKING_MODEL: ChatModelMetadata(
         provider="nvidia",
-        model_name=NVIDIA_DEFAULT_MODEL_ADVANCED,
+        model_name=NVIDIA_QWEN_THINKING_MODEL,
         display_name="Qwen3 80B Thinking (NVIDIA NIM)",
-        status="current",
+        status="available",
         supports_streaming=True,
         supports_structured_output=False,
         capability_source="static",

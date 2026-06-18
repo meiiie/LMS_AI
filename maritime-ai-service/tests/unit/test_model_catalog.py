@@ -22,21 +22,25 @@ def test_google_default_model_is_current():
     assert metadata.status == "current"
 
 
-def test_nvidia_defaults_are_qwen_models():
+def test_nvidia_defaults_are_nemotron_model():
     default_metadata = get_provider_chat_model_metadata("nvidia", NVIDIA_DEFAULT_MODEL)
     advanced_metadata = get_provider_chat_model_metadata(
         "nvidia",
         NVIDIA_DEFAULT_MODEL_ADVANCED,
     )
 
-    assert NVIDIA_DEFAULT_MODEL == "qwen/qwen3-next-80b-a3b-instruct"
-    assert NVIDIA_DEFAULT_MODEL_ADVANCED == "qwen/qwen3-next-80b-a3b-thinking"
+    assert NVIDIA_DEFAULT_MODEL == "nvidia/nemotron-3-ultra-550b-a55b"
+    assert NVIDIA_DEFAULT_MODEL_ADVANCED == "nvidia/nemotron-3-ultra-550b-a55b"
     assert default_metadata is not None
     assert default_metadata.status == "current"
-    assert "Qwen" in default_metadata.display_name
+    assert "Nemotron 3 Ultra" in default_metadata.display_name
+    assert default_metadata.supports_tool_calling is True
+    assert default_metadata.context_window_tokens == 262_144
     assert advanced_metadata is not None
     assert advanced_metadata.status == "current"
-    assert "Qwen" in advanced_metadata.display_name
+    assert "Nemotron 3 Ultra" in advanced_metadata.display_name
+    assert advanced_metadata.supports_tool_calling is True
+    assert advanced_metadata.context_window_tokens == 262_144
 
 
 def test_legacy_google_model_is_marked_legacy():
