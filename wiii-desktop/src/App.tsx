@@ -191,19 +191,16 @@ export default function App() {
         if (authState.authMode === "oauth") {
           if (failure?.status === 403) {
             const activeOrgId = authState.user?.active_organization_id || "";
-            const currentOrgId = useSettingsStore.getState().settings.organization_id || "";
-            if (activeOrgId && currentOrgId !== activeOrgId) {
+            if (activeOrgId) {
               await useSettingsStore.getState().updateSettings({
                 organization_id: activeOrgId,
               });
               return true;
             }
-            await authState.logout();
-            addToast(
-              "error",
-              "Phiên đăng nhập không còn khớp với tổ chức hiện tại. Vui lòng đăng nhập lại.",
-            );
-            return false;
+            await useSettingsStore.getState().updateSettings({
+              organization_id: null,
+            });
+            return true;
           }
 
           const refreshed = await authState.refreshAccessToken(

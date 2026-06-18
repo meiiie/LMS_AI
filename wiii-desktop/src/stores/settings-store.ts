@@ -100,6 +100,13 @@ function normalizeLoadedSettings(saved: Partial<AppSettings> | null): AppSetting
   return normalizeLoadedSettingsForHost(saved, hostname);
 }
 
+export function resolveOAuthOrganizationHeader(
+  activeOrganizationId?: string | null,
+): string | undefined {
+  const orgId = typeof activeOrganizationId === "string" ? activeOrganizationId.trim() : "";
+  return orgId && orgId !== "personal" ? orgId : undefined;
+}
+
 const DEFAULT_SETTINGS: AppSettings = {
   server_url: DEFAULT_SERVER_URL,
   api_key: "",
@@ -269,9 +276,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       // Sprint 194b (H1): OAuth mode — identity from JWT only
       // DO NOT send X-User-ID or X-Role — backend extracts from token
       headers["Authorization"] = `Bearer ${authState.tokens!.access_token}`;
-      // Sprint 156: Include org ID when not personal workspace
-      if (settings.organization_id && settings.organization_id !== "personal") {
-        headers["X-Organization-ID"] = settings.organization_id;
+      const oauthOrgId = resolveOAuthOrganizationHeader(authState.user?.active_organization_id);
+      if (oauthOrgId) {
+        headers["X-Organization-ID"] = oauthOrgId;
       }
       return headers;
     }

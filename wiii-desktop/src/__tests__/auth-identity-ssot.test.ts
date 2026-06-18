@@ -58,7 +58,11 @@ vi.mock("@/api/admin", () => ({
 // Imports (after mocks)
 // =============================================================================
 
-import { useSettingsStore, generateAnonymousId } from "@/stores/settings-store";
+import {
+  useSettingsStore,
+  generateAnonymousId,
+  resolveOAuthOrganizationHeader,
+} from "@/stores/settings-store";
 import { useAuthStore } from "@/stores/auth-store";
 import type { AuthUser } from "@/stores/auth-store";
 import { useOrgStore } from "@/stores/org-store";
@@ -818,6 +822,58 @@ describe("Integration: settings + auth store header coordination", () => {
 
     const headers = useSettingsStore.getState().getAuthHeaders();
     expect(headers["X-Role"]).toBe("admin");
+  });
+
+  it("settings-store OAuth headers use the token active org instead of stale settings org", async () => {
+    useSettingsStore.setState({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        organization_id: "maritime-lms",
+      },
+      isLoaded: true,
+    });
+
+    await useAuthStore.getState().loginWithTokens(
+      "oauth-access-token",
+      "oauth-refresh-token",
+      1800,
+      {
+        ...MOCK_USER,
+        active_organization_id: "default",
+      },
+    );
+
+    const headers = useSettingsStore.getState().getAuthHeaders();
+    expect(headers["Authorization"]).toBe("Bearer oauth-access-token");
+    expect(headers["X-Organization-ID"]).toBe("default");
+  });
+
+  it("settings-store OAuth headers omit stale org when the token has no active org", async () => {
+    useSettingsStore.setState({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        organization_id: "maritime-lms",
+      },
+      isLoaded: true,
+    });
+
+    await useAuthStore.getState().loginWithTokens(
+      "oauth-access-token",
+      "oauth-refresh-token",
+      1800,
+      MOCK_USER,
+    );
+
+    const headers = useSettingsStore.getState().getAuthHeaders();
+    expect(headers["Authorization"]).toBe("Bearer oauth-access-token");
+    expect(headers["X-Organization-ID"]).toBeUndefined();
+  });
+
+  it("normalizes OAuth org headers", () => {
+    expect(resolveOAuthOrganizationHeader(" default ")).toBe("default");
+    expect(resolveOAuthOrganizationHeader("personal")).toBeUndefined();
+    expect(resolveOAuthOrganizationHeader("")).toBeUndefined();
+    expect(resolveOAuthOrganizationHeader(null)).toBeUndefined();
   });
 });
 
