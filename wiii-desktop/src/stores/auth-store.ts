@@ -159,19 +159,54 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           isLoaded: true,
         });
       } else if (saved?.authMode === "oauth") {
-        // Saved oauth mode but tokens are missing/stale — demote to legacy
-        // and persist the corrected mode so subsequent loads don't loop.
+        // OAuth access tokens are short-lived. If a refresh token is still
+        // available, try to renew before showing the login screen.
+        if (tokens?.refresh_token && saved.user) {
+          set({
+            isAuthenticated: true,
+            isLoaded: false,
+            user: saved.user,
+            tokens,
+            authMode: "oauth",
+          });
+
+          let serverUrl = "";
+          try {
+            const { useSettingsStore } = await import(
+              "@/stores/settings-store"
+            );
+            serverUrl = useSettingsStore.getState().settings.server_url || "";
+          } catch {
+            serverUrl = "";
+          }
+
+          if (serverUrl) {
+            const refreshed = await get().refreshAccessToken(serverUrl);
+            if (refreshed) {
+              set({
+                isAuthenticated: true,
+                isLoaded: true,
+                user: saved.user,
+                authMode: "oauth",
+              });
+              return;
+            }
+          }
+        }
+        // Saved oauth mode but tokens are missing or refresh failed. Keep the
+        // user unauthenticated in OAuth mode; never fall back to legacy API-key
+        // identity for a Google-login account.
         set({
           isAuthenticated: false,
           isLoaded: true,
           user: null,
           tokens: null,
-          authMode: "legacy",
+          authMode: "oauth",
         });
         try {
           await saveStore(AUTH_STORE_KEY, "data", {
             user: null,
-            authMode: "legacy",
+            authMode: "oauth",
           });
         } catch {
           // Persistence failure is non-fatal; in-memory state is still corrected.
@@ -359,7 +394,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   getAuthHeaders: (): Record<string, string> => {
     const { tokens, authMode } = get();
-    if (authMode === "oauth" && tokens?.access_token) {
+    const STALE_TOKEN_GRACE_MS = 30_000;
+    const hasFreshOAuthToken =
+      authMode === "oauth" &&
+      !!tokens?.access_token &&
+      typeof tokens.expires_at === "number" &&
+      tokens.expires_at + STALE_TOKEN_GRACE_MS >= Date.now();
+    if (hasFreshOAuthToken) {
       return { Authorization: `Bearer ${tokens.access_token}` };
     }
     return {};

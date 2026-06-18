@@ -283,6 +283,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       return headers;
     }
 
+    if (authState.authMode === "oauth") {
+      // OAuth sessions should recover via refresh token after a 401. Do not
+      // fall through to legacy API-key headers, or an expired Google session
+      // can look like a different anonymous legacy user.
+      return headers;
+    }
+
     // Legacy API key mode
     // Sprint 192: API key from settings (secure store loaded at init)
     if (settings.api_key) headers["X-API-Key"] = settings.api_key;
