@@ -867,7 +867,7 @@ class TestRouterRegistration:
 
     def test_lms_data_endpoints_exist(self):
         from app.api.v1.lms_data import router
-        paths = [route.path for route in router.routes]
+        paths = [getattr(route, "path", "") for route in router.routes]
         assert "/lms/students/{student_id}/profile" in paths
         assert "/lms/students/{student_id}/grades" in paths
         assert "/lms/students/{student_id}/enrollments" in paths
@@ -876,7 +876,7 @@ class TestRouterRegistration:
 
     def test_lms_dashboard_endpoints_exist(self):
         from app.api.v1.lms_dashboard import router
-        paths = [route.path for route in router.routes]
+        paths = [getattr(route, "path", "") for route in router.routes]
         assert "/lms/dashboard/courses/{course_id}/overview" in paths
         assert "/lms/dashboard/courses/{course_id}/at-risk" in paths
         assert "/lms/dashboard/courses/{course_id}/grade-distribution" in paths

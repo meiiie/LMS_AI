@@ -554,7 +554,7 @@ class TestEndpointRegistration:
         """GET /threads/{thread_id}/messages route is registered."""
         from app.api.v1.threads import router
 
-        routes = [r.path for r in router.routes]
+        routes = [getattr(r, "path", "") for r in router.routes]
         assert "/threads/{thread_id}/messages" in routes
 
     def test_messages_route_is_get(self):
