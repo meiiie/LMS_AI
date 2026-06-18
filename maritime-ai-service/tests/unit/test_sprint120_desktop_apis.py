@@ -228,15 +228,21 @@ class TestSSEMetadataMood:
 class TestRouterRegistration:
     """Tests that new routers are registered."""
 
+    def _registered_paths(self) -> list[str]:
+        from fastapi import FastAPI
+
+        from app.api.v1 import router
+
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        return [route.path for route in app.routes if hasattr(route, "path")]
+
     def test_character_router_registered(self):
         """Character router is in v1 routes."""
-        from app.api.v1 import router
-        paths = [r.path for r in router.routes]
+        paths = self._registered_paths()
         assert any("/character" in p for p in paths)
 
     def test_mood_router_registered(self):
         """Mood router is in v1 routes."""
-        from app.api.v1 import router
-        paths = [r.path for r in router.routes]
+        paths = self._registered_paths()
         assert any("/mood" in p for p in paths)
-
