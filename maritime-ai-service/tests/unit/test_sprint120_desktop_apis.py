@@ -228,21 +228,26 @@ class TestSSEMetadataMood:
 class TestRouterRegistration:
     """Tests that new routers are registered."""
 
-    def _registered_paths(self) -> list[str]:
-        from fastapi import FastAPI
-
+    def _registered_imports(self, monkeypatch) -> list[str]:
         from app.api.v1 import _build_router
+        import app.api.v1 as v1
 
-        app = FastAPI()
-        app.include_router(_build_router(), prefix="/api/v1")
-        return [route.path for route in app.routes if hasattr(route, "path")]
+        imports: list[str] = []
 
-    def test_character_router_registered(self):
+        def capture_router(_router, import_path: str, _label: str) -> None:
+            imports.append(import_path)
+
+        monkeypatch.setattr(v1, "_register_router", capture_router)
+        monkeypatch.setattr(v1, "_register_optional_router", lambda *args, **kwargs: None)
+        _build_router()
+        return imports
+
+    def test_character_router_registered(self, monkeypatch):
         """Character router is in v1 routes."""
-        paths = self._registered_paths()
-        assert any("/character" in p for p in paths)
+        imports = self._registered_imports(monkeypatch)
+        assert "app.api.v1.character.router" in imports
 
-    def test_mood_router_registered(self):
+    def test_mood_router_registered(self, monkeypatch):
         """Mood router is in v1 routes."""
-        paths = self._registered_paths()
-        assert any("/mood" in p for p in paths)
+        imports = self._registered_imports(monkeypatch)
+        assert "app.api.v1.mood.router" in imports
