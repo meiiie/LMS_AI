@@ -174,15 +174,37 @@ export default function App() {
       //     backend's .env). Force-logout clears state + lets the user
       //     re-authenticate fresh instead of leaving them stuck on a
       //     broken-looking app where every call silently 401s.
-      client.setOnUnauthorized(async () => {
+      client.setOnUnauthorized(async (failure) => {
         const authState = useAuthStore.getState();
         if (authState.authMode === "oauth") {
-          return authState.refreshAccessToken(
+          if (failure?.status === 403) {
+            const activeOrgId = authState.user?.active_organization_id || "";
+            const currentOrgId = useSettingsStore.getState().settings.organization_id || "";
+            if (activeOrgId && currentOrgId !== activeOrgId) {
+              await useSettingsStore.getState().updateSettings({
+                organization_id: activeOrgId,
+              });
+              return true;
+            }
+            await authState.logout();
+            addToast(
+              "error",
+              "Phiên đăng nhập không còn khớp với tổ chức hiện tại. Vui lòng đăng nhập lại.",
+            );
+            return false;
+          }
+
+          const refreshed = await authState.refreshAccessToken(
             useSettingsStore.getState().settings.server_url,
           );
+          if (refreshed) return true;
+          await authState.logout();
+          addToast("error", "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+          return false;
         }
         if (authState.authMode === "legacy" && authState.isAuthenticated) {
           await authState.logout();
+          addToast("error", "API key không còn hợp lệ. Vui lòng đăng nhập lại.");
         }
         return false;
       });
