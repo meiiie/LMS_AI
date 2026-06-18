@@ -284,6 +284,8 @@ class LLMPool:
         return thinking_budget_for_tier_impl(
             thinking_budgets=THINKING_BUDGETS,
             tier_key=tier_key,
+            thinking_enabled=getattr(settings, "thinking_enabled", True),
+            include_thought_summaries=getattr(settings, "include_thought_summaries", True),
         )
 
     @classmethod

@@ -208,12 +208,13 @@ class TestLegacyPath:
 
     @patch("app.engine.llm_pool.create_provider")
     @patch("app.engine.llm_pool.settings")
-    def test_legacy_uses_provider_thinking_contract(self, mock_settings, mock_create_provider):
+    def test_legacy_respects_disabled_thinking_contract(self, mock_settings, mock_create_provider):
         mock_settings.enable_llm_failover = False
         mock_settings.llm_provider = "google"
         mock_settings.google_api_key = "test-key"
         mock_settings.google_model = "gemini-3-flash-preview"
         mock_settings.thinking_enabled = False
+        mock_settings.include_thought_summaries = False
         mock_settings.llm_failover_chain = ["google"]
         google = _make_mock_provider("google")
         mock_create_provider.return_value = google
@@ -223,8 +224,8 @@ class TestLegacyPath:
 
         call_kwargs = google.create_instance.call_args.kwargs
         assert call_kwargs["tier"] == "light"
-        assert call_kwargs["thinking_budget"] == 1024
-        assert call_kwargs["include_thoughts"] is True
+        assert call_kwargs["thinking_budget"] == 0
+        assert call_kwargs["include_thoughts"] is False
 
     @patch("app.engine.llm_pool.create_provider")
     @patch("app.engine.llm_pool.settings")

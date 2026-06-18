@@ -47,10 +47,19 @@ def normalize_tier_key_impl(*, tier, resolve_tier, thinking_tier) -> str:
     return tier_key
 
 
-def thinking_budget_for_tier_impl(*, thinking_budgets: dict, tier_key: str) -> tuple[int, bool]:
+def thinking_budget_for_tier_impl(
+    *,
+    thinking_budgets: dict,
+    tier_key: str,
+    thinking_enabled: bool = True,
+    include_thought_summaries: bool = True,
+) -> tuple[int, bool]:
     """Return thinking budget + thought flag for one tier."""
+    if not thinking_enabled:
+        return 0, False
+
     thinking_budget = thinking_budgets.get(tier_key, 1024)
-    include_thoughts = thinking_budget > 0
+    include_thoughts = thinking_budget > 0 and include_thought_summaries
     return thinking_budget, include_thoughts
 
 
