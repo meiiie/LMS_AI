@@ -65,6 +65,13 @@ function manualChunks(id: string) {
     return "vendor-react";
   }
 
+  if (
+    normalizedId.includes("/node_modules/zustand/")
+    || normalizedId.includes("/node_modules/use-sync-external-store/")
+  ) {
+    return "vendor-state";
+  }
+
   return undefined;
 }
 
