@@ -196,6 +196,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     set({
       isAuthenticated: true,
+      isLoaded: true,
       user,
       tokens,
       authMode: "oauth",

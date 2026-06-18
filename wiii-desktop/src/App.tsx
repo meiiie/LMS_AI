@@ -56,6 +56,12 @@ function BootSplash({ label }: { label: string }) {
   );
 }
 
+export function readOAuthCallbackParams(hash: string): URLSearchParams | null {
+  if (!hash) return null;
+  const params = new URLSearchParams(hash.startsWith("#") ? hash.substring(1) : hash);
+  return params.get("access_token") && params.get("refresh_token") ? params : null;
+}
+
 export default function App() {
   // Dev tool: ?preview=avatar shows avatar preview page
   if (window.location.search.includes("preview=avatar")) {
@@ -142,11 +148,17 @@ export default function App() {
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Initialize on mount
+  // Initialize on mount. When Google returns tokens in the URL hash, the
+  // callback effect above owns auth persistence; loadAuth() must not restore
+  // an older expired session over the fresh callback.
   useEffect(() => {
     async function init() {
       // 1. Load persisted settings
       await loadSettings();
+      if (readOAuthCallbackParams(window.location.hash)) {
+        await loadConversations();
+        return;
+      }
       // 2. Load persisted auth state (Sprint 157)
       await loadAuth();
       // 3. Load persisted conversations
