@@ -135,7 +135,11 @@ def base_app():
     from app.api.v1.admin_audit import router as audit_router
     from app.api.v1.admin_gdpr import router as gdpr_router
 
-    existing_paths = {r.path for r in _app.routes}
+    existing_paths = {
+        path
+        for route in _app.routes
+        if (path := getattr(route, "path", None)) is not None
+    }
     if "/api/v1/admin/audit-logs" not in existing_paths:
         _app.include_router(audit_router, prefix="/api/v1")
     if "/api/v1/admin/users/{user_id}/export" not in existing_paths:

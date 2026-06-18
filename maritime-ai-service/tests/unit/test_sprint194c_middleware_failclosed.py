@@ -186,3 +186,12 @@ class TestSubdomain:
                     },
                 )
         assert captured[0] == "header-org"
+
+    def test_wiii_app_subdomain_is_reserved(self):
+        captured = []
+        ms = MagicMock(); ms.enable_multi_tenant = True; ms.subdomain_base_domain = "holilihu.online"
+        with patch(_SP, ms):
+            with patch(_RP) as repo_fn:
+                _get(_app(captured), headers={"Host": "wiii.holilihu.online"})
+        assert captured[0] is None
+        repo_fn.assert_not_called()

@@ -3,10 +3,10 @@
  *
  * Tests:
  *   1. loadAuth() keeps oauth+valid-tokens as oauth (no demotion)
- *   2. loadAuth() demotes oauth+expired-tokens to legacy
- *   3. loadAuth() demotes oauth+null-tokens to legacy
+ *   2. loadAuth() refreshes oauth+expired-tokens before showing login
+ *   3. loadAuth() clears oauth+null-tokens without falling back to legacy
  *   4. getAuthHeaders() returns Authorization when tokens are fresh
- *   5. getAuthHeaders() falls through to X-API-Key when tokens are expired
+ *   5. getAuthHeaders() does not send stale OAuth or legacy headers when tokens are expired
  *   6. getAuthHeaders() returns Authorization when token is within 30s grace window
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -70,8 +70,56 @@ describe("auth-store loadAuth — self-heal stale OAuth (Issue #108)", () => {
     expect(s.isAuthenticated).toBe(true);
   });
 
-  it("demotes oauth to legacy when tokens are expired", async () => {
+  it("refreshes oauth tokens on load when access token is expired", async () => {
     const pastExpiry = Date.now() - 60_000; // 60s ago
+    const storeTokens = vi.fn();
+    vi.doMock("@/lib/secure-token-storage", () => ({
+      loadTokens: async () => ({
+        access_token: "expired-access",
+        refresh_token: "refresh",
+        expires_at: pastExpiry,
+      }),
+      storeTokens,
+      clearTokens: async () => {},
+    }));
+    vi.doMock("@/lib/storage", () => ({
+      loadStore: async () => ({
+        user: { id: "u1", email: "u@x.com", name: "U" },
+        authMode: "oauth",
+      }),
+      saveStore: async () => {},
+    }));
+    vi.doMock("@/stores/settings-store", () => ({
+      useSettingsStore: {
+        getState: () => ({ settings: { server_url: "https://wiii.example" } }),
+      },
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: "new-access",
+        refresh_token: "new-refresh",
+        expires_in: 1800,
+      }),
+    }));
+    vi.resetModules();
+    const { useAuthStore: mod } = await import("@/stores/auth-store");
+    await mod.getState().loadAuth();
+
+    const s = mod.getState();
+    expect(s.authMode).toBe("oauth");
+    expect(s.tokens?.access_token).toBe("new-access");
+    expect(s.tokens?.refresh_token).toBe("new-refresh");
+    expect(s.isAuthenticated).toBe(true);
+    expect(storeTokens).toHaveBeenCalledWith(
+      "new-access",
+      "new-refresh",
+      expect.any(Number),
+    );
+  });
+
+  it("shows oauth login when expired token refresh fails", async () => {
+    const pastExpiry = Date.now() - 60_000;
     vi.doMock("@/lib/secure-token-storage", () => ({
       loadTokens: async () => ({
         access_token: "expired-access",
@@ -91,19 +139,25 @@ describe("auth-store loadAuth — self-heal stale OAuth (Issue #108)", () => {
         savedPayload = payload;
       },
     }));
+    vi.doMock("@/stores/settings-store", () => ({
+      useSettingsStore: {
+        getState: () => ({ settings: { server_url: "https://wiii.example" } }),
+      },
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
     vi.resetModules();
     const { useAuthStore: mod } = await import("@/stores/auth-store");
     await mod.getState().loadAuth();
 
     const s = mod.getState();
-    expect(s.authMode).toBe("legacy");
+    expect(s.authMode).toBe("oauth");
     expect(s.tokens).toBeNull();
     expect(s.isAuthenticated).toBe(false);
-    // Persisted demotion so we don't loop on next load
-    expect(savedPayload?.authMode).toBe("legacy");
+    expect(s.isLoaded).toBe(true);
+    expect(savedPayload?.authMode).toBe("oauth");
   });
 
-  it("demotes oauth to legacy when no tokens are present", async () => {
+  it("clears oauth auth when no tokens are present", async () => {
     vi.doMock("@/lib/secure-token-storage", () => ({
       loadTokens: async () => null,
       storeTokens: async () => {},
@@ -125,9 +179,9 @@ describe("auth-store loadAuth — self-heal stale OAuth (Issue #108)", () => {
     await mod.getState().loadAuth();
 
     const s = mod.getState();
-    expect(s.authMode).toBe("legacy");
+    expect(s.authMode).toBe("oauth");
     expect(s.tokens).toBeNull();
-    expect(savedPayload?.authMode).toBe("legacy");
+    expect(savedPayload?.authMode).toBe("oauth");
   });
 });
 
@@ -150,7 +204,7 @@ describe("settings-store getAuthHeaders — runtime stale-token defense (Issue #
     expect(headers["X-API-Key"]).toBeUndefined();
   });
 
-  it("falls through to X-API-Key when oauth tokens are expired", () => {
+  it("does not send stale OAuth or legacy headers when oauth tokens are expired", () => {
     useAuthStore.setState({
       isAuthenticated: true,
       authMode: "oauth",
@@ -164,7 +218,9 @@ describe("settings-store getAuthHeaders — runtime stale-token defense (Issue #
 
     const headers = useSettingsStore.getState().getAuthHeaders();
     expect(headers["Authorization"]).toBeUndefined();
-    expect(headers["X-API-Key"]).toBe("local-dev-key");
+    expect(headers["X-API-Key"]).toBeUndefined();
+    expect(headers["X-User-ID"]).toBeUndefined();
+    expect(Object.keys(headers)).toHaveLength(0);
   });
 
   it("treats tokens within 30s of expiry as fresh (clock-skew tolerance)", () => {

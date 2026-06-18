@@ -26,7 +26,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 logger = logging.getLogger(__name__)
 
 # Subdomains that should NOT be treated as org slugs
-_RESERVED_SUBDOMAINS = frozenset({"www", "api", "admin", "app", "mail", "static", "cdn"})
+_RESERVED_SUBDOMAINS = frozenset({"www", "api", "admin", "app", "mail", "static", "cdn", "wiii"})
 _EMBED_HASHED_ASSET_RE = re.compile(r"^(?P<prefix>.+)-(?P<hash>[A-Za-z0-9_-]+)\.(?P<ext>js|css)$")
 
 

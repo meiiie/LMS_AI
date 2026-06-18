@@ -176,8 +176,7 @@ def create_primary_instance_impl(*, cls_ref, tier, settings_obj, logger_obj, thi
         else:
             return cached_llm
 
-    thinking_budget = thinking_budgets.get(tier_key, 1024)
-    include_thoughts = thinking_budget > 0
+    thinking_budget, include_thoughts = cls_ref._thinking_budget_for_tier(tier_key)
     should_use_provider_chain = cls_ref._providers and (
         settings_obj.enable_llm_failover or settings_obj.llm_provider != "google"
     )
@@ -253,8 +252,7 @@ def create_fallback_instances_impl(*, cls_ref, settings_obj, logger_obj, thinkin
         created = 0
         for tier in [thinking_tier.DEEP, thinking_tier.MODERATE, thinking_tier.LIGHT]:
             tier_key = tier.value
-            thinking_budget = thinking_budgets.get(tier_key, 1024)
-            include_thoughts = thinking_budget > 0
+            thinking_budget, include_thoughts = cls_ref._thinking_budget_for_tier(tier_key)
             try:
                 llm = provider.create_instance(
                     tier=tier_key,

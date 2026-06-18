@@ -56,6 +56,12 @@ function BootSplash({ label }: { label: string }) {
   );
 }
 
+export function readOAuthCallbackParams(hash: string): URLSearchParams | null {
+  if (!hash) return null;
+  const params = new URLSearchParams(hash.startsWith("#") ? hash.substring(1) : hash);
+  return params.get("access_token") && params.get("refresh_token") ? params : null;
+}
+
 export default function App() {
   // Dev tool: ?preview=avatar shows avatar preview page
   if (window.location.search.includes("preview=avatar")) {
@@ -142,11 +148,17 @@ export default function App() {
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Initialize on mount
+  // Initialize on mount. When Google returns tokens in the URL hash, the
+  // callback effect above owns auth persistence; loadAuth() must not restore
+  // an older expired session over the fresh callback.
   useEffect(() => {
     async function init() {
       // 1. Load persisted settings
       await loadSettings();
+      if (readOAuthCallbackParams(window.location.hash)) {
+        await loadConversations();
+        return;
+      }
       // 2. Load persisted auth state (Sprint 157)
       await loadAuth();
       // 3. Load persisted conversations
@@ -174,15 +186,34 @@ export default function App() {
       //     backend's .env). Force-logout clears state + lets the user
       //     re-authenticate fresh instead of leaving them stuck on a
       //     broken-looking app where every call silently 401s.
-      client.setOnUnauthorized(async () => {
+      client.setOnUnauthorized(async (failure) => {
         const authState = useAuthStore.getState();
         if (authState.authMode === "oauth") {
-          return authState.refreshAccessToken(
+          if (failure?.status === 403) {
+            const activeOrgId = authState.user?.active_organization_id || "";
+            if (activeOrgId) {
+              await useSettingsStore.getState().updateSettings({
+                organization_id: activeOrgId,
+              });
+              return true;
+            }
+            await useSettingsStore.getState().updateSettings({
+              organization_id: null,
+            });
+            return true;
+          }
+
+          const refreshed = await authState.refreshAccessToken(
             useSettingsStore.getState().settings.server_url,
           );
+          if (refreshed) return true;
+          await authState.logout();
+          addToast("error", "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+          return false;
         }
         if (authState.authMode === "legacy" && authState.isAuthenticated) {
           await authState.logout();
+          addToast("error", "API key không còn hợp lệ. Vui lòng đăng nhập lại.");
         }
         return false;
       });

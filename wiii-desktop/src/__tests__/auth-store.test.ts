@@ -33,6 +33,7 @@ const MOCK_USER: AuthUser = {
 function resetStore() {
   useAuthStore.setState({
     isAuthenticated: false,
+    isLoaded: false,
     user: null,
     tokens: null,
     authMode: "legacy",
@@ -64,6 +65,7 @@ describe("AuthStore", () => {
 
     const state = useAuthStore.getState();
     expect(state.isAuthenticated).toBe(true);
+    expect(state.isLoaded).toBe(true);
     expect(state.user).toEqual(MOCK_USER);
     expect(state.tokens?.access_token).toBe("access-token-abc");
     expect(state.tokens?.refresh_token).toBe("refresh-token-xyz");
