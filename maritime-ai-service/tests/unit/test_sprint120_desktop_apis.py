@@ -231,10 +231,10 @@ class TestRouterRegistration:
     def _registered_paths(self) -> list[str]:
         from fastapi import FastAPI
 
-        from app.api.v1 import router
+        from app.api.v1 import _build_router
 
         app = FastAPI()
-        app.include_router(router, prefix="/api/v1")
+        app.include_router(_build_router(), prefix="/api/v1")
         return [route.path for route in app.routes if hasattr(route, "path")]
 
     def test_character_router_registered(self):
