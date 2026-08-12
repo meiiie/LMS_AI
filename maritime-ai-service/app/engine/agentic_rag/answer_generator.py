@@ -3,18 +3,18 @@ Answer Generator for RAG Agent.
 
 Handles LLM-based answer generation including:
 - Synchronous response synthesis with RAG context
-- Streaming token-by-token generation (Native SDK + LangChain fallback)
+- Streaming token-by-token generation through WiiiChatModel.astream()
 - Role-based prompt building
-- Native thinking extraction
+- Native thinking extraction (reasoning deltas + <thinking> tag splitting)
 
 Extracted from rag_agent.py as part of modular refactoring.
 
 **Feature: wiii, p3-sota-streaming, document-kg**
 
-De-LangChaining Phase 1: Streaming path now uses Native AsyncOpenAI SDK
-directly, with LangChain as automatic fallback. This eliminates the
-`LLM.astream()` blackbox and enables reuse of thinking extraction logic
-from the Direct path.
+Epic #207: the former dual streaming engine (a provider-specific
+"Native SDK" bypass plus a fallback still named LangChain) is collapsed
+into the single WiiiChatModel route; reasoning deltas arrive as
+``chunk.reasoning`` and <thinking> tags are split with stream-local state.
 """
 
 import asyncio
