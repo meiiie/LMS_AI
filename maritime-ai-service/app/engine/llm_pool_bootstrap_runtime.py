@@ -49,7 +49,6 @@ def create_provider_instance_impl(
         include_thoughts=include_thoughts,
         temperature=0.5,
     )
-    cls_ref._attach_tracking_callback(llm, f"{provider_name}_{tier_key}")
     llm = cls_ref._tag_runtime_metadata(
         llm,
         provider_name=provider_name,
@@ -201,7 +200,6 @@ def create_primary_instance_impl(*, cls_ref, tier, settings_obj, logger_obj, thi
                     include_thoughts=include_thoughts,
                     temperature=0.5,
                 )
-                cls_ref._attach_tracking_callback(llm, tier_key)
                 llm = cls_ref._tag_runtime_metadata(
                     llm,
                     provider_name=provider_name,
@@ -262,7 +260,6 @@ def create_fallback_instances_impl(*, cls_ref, settings_obj, logger_obj, thinkin
                     include_thoughts=include_thoughts,
                     temperature=0.5,
                 )
-                cls_ref._attach_tracking_callback(llm, f"fallback_{tier_key}")
                 llm = cls_ref._tag_runtime_metadata(
                     llm,
                     provider_name=name,
