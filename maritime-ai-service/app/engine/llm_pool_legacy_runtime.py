@@ -5,25 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 
-def attach_tracking_callback_impl(
-    *,
-    llm: Any,
-    tier_key: str,
-    logger_obj: Any,
-) -> None:
-    """Attach token tracking callback to an LLM instance."""
-    try:
-        from app.core.token_tracker import TokenTrackingCallback
-
-        callback = TokenTrackingCallback(tier=tier_key)
-        if hasattr(llm, "callbacks") and llm.callbacks is not None:
-            llm.callbacks.append(callback)
-        else:
-            llm.callbacks = [callback]
-    except Exception as exc:
-        logger_obj.debug("[LLM_POOL] Token tracking callback not attached: %s", exc)
-
-
 def create_instance_legacy_impl(
     *,
     cls_ref,
@@ -33,7 +14,6 @@ def create_instance_legacy_impl(
     settings_obj: Any,
     create_provider_fn,
     logger_obj: Any,
-    attach_tracking_callback_fn,
 ):
     """Single-provider creation path for Google via GeminiProvider (WiiiChatModel)."""
     provider = create_provider_fn("google")
@@ -44,7 +24,6 @@ def create_instance_legacy_impl(
             include_thoughts=include_thoughts,
             temperature=0.5,
         )
-        attach_tracking_callback_fn(llm, tier_key)
         llm = cls_ref._tag_runtime_metadata(
             llm,
             provider_name="google",
