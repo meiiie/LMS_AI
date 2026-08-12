@@ -183,13 +183,6 @@ async def build_stream_bootstrap_impl(
     elif sid:
         invoke_config = {"configurable": {"thread_id": sid}}
 
-    from app.core.langsmith import get_langsmith_callback, is_langsmith_enabled
-
-    if is_langsmith_enabled():
-        ls_cb = get_langsmith_callback(uid, sid, domain_id)
-        if ls_cb:
-            invoke_config.setdefault("callbacks", []).append(ls_cb)
-
     return {
         "domain_config": domain_config,
         "bus_id": bus_id,

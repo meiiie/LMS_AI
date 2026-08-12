@@ -35,11 +35,6 @@ def _init_observability(logger_: logging.Logger) -> None:
         traces_sample_rate=settings.sentry_traces_sample_rate,
     )
 
-    if settings.enable_langsmith:
-        configure_langsmith = _load_attr("app.core.langsmith", "configure_langsmith")
-
-        configure_langsmith(settings)
-
 
 def _register_runtime_lifecycle_hooks(logger_: logging.Logger) -> None:
     registration_count = 0
