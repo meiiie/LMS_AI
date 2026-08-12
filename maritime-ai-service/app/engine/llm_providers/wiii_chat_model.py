@@ -50,6 +50,7 @@ class StreamChunk:
     content: str = ""
     tool_call_chunks: list[dict] = field(default_factory=list)
     finish_reason: Optional[str] = None
+    reasoning: str = ""
 
     @property
     def message(self) -> "StreamChunk":
@@ -96,6 +97,7 @@ class StreamChunk:
             content=merged_content,
             tool_call_chunks=list(merged_chunks.values()),
             finish_reason=other.finish_reason or self.finish_reason,
+            reasoning=(self.reasoning or "") + (other.reasoning or ""),
         )
 
     def __radd__(self, other: Optional["StreamChunk"]) -> "StreamChunk":
@@ -340,6 +342,16 @@ def _openai_chunk_to_stream_chunk(chunk: Any) -> Optional[StreamChunk]:
         return None
 
     content = getattr(delta, "content", None) or ""
+    # Reasoning deltas (GLM/DeepSeek-style ``reasoning_content``, some
+    # OpenAI-compat endpoints use ``reasoning``). Surfacing them here lets
+    # consumers drop their own bypass clients (epic #207 single-path).
+    reasoning = (
+        getattr(delta, "reasoning_content", None)
+        or getattr(delta, "reasoning", None)
+        or ""
+    )
+    if not isinstance(reasoning, str):
+        reasoning = ""
     tool_call_chunks: list[dict] = []
     raw_tool_calls = getattr(delta, "tool_calls", None)
     if raw_tool_calls:
@@ -359,6 +371,7 @@ def _openai_chunk_to_stream_chunk(chunk: Any) -> Optional[StreamChunk]:
         content=content,
         tool_call_chunks=tool_call_chunks,
         finish_reason=getattr(choice, "finish_reason", None),
+        reasoning=reasoning,
     )
 
 
@@ -527,6 +540,7 @@ class WiiiChatModel(BaseModel):
                     content=injector.process(sc.content),
                     tool_call_chunks=sc.tool_call_chunks,
                     finish_reason=sc.finish_reason,
+                    reasoning=sc.reasoning,
                 )
             yield sc
 
