@@ -13,6 +13,11 @@ pub fn run() {
             commands::health::check_server_reachable,
             commands::files::pick_document,
             commands::splash::close_splash,
+            commands::neko_agent::neko_detect_agents,
+            commands::neko_agent::neko_spawn_agent,
+            commands::neko_agent::neko_write_stdin,
+            commands::neko_agent::neko_kill_agent,
+            commands::neko_agent::neko_kill_all_agents,
         ])
         .setup(|app| {
             // Create system tray
@@ -28,6 +33,12 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Wiii desktop");
+        .build(tauri::generate_context!())
+        .expect("error while running Wiii desktop")
+        .run(|_app, event| {
+            // Fail-closed: no agent process outlives the app (FR-009, #886).
+            if let tauri::RunEvent::Exit = event {
+                commands::neko_agent::kill_all();
+            }
+        });
 }
