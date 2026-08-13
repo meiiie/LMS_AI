@@ -36,6 +36,32 @@
 - **Context Panel** -- Token budget visualization, conversation compaction controls
 - **Screenshot Blocks** -- Inline browser screenshot rendering from product search
 - **Embed Mode** -- Standalone embed build for web integration (`EmbedApp.tsx`)
+- **Neko Chill Mode** -- No-login local-agent surface: drive ACP agents (neko-core, Gemini CLI) as Tauri sidecars with streaming transcript, fail-closed permission gating, and locally persisted sessions (`src/neko-chill/`)
+
+---
+
+## Neko Chill Mode
+
+A second shell-level mode (issue #886, spec `specs/731-neko-chill-mode/`) that
+works entirely without a Wiii account: the desktop app becomes a client for
+**local coding agents** speaking the Agent Client Protocol (ACP, JSON-RPC over
+stdio), launched as sidecar processes from `src-tauri`.
+
+- **Entry**: the `ModeGate` in `App.tsx` mounts `NekoChillApp` INSTEAD of the
+  cloud app — auth/org/backend init can never run while the mode is active.
+- **Agents**: neko-core (`neko acp`, v0.24.0+) and Gemini CLI
+  (`gemini --experimental-acp`) are detected automatically.
+- **Safety**: every agent side effect surfaces as an explicit approval card;
+  unanswered requests fail closed; agent processes are killed on app exit and
+  reaped after 30 idle minutes.
+- **Persistence**: sessions and transcripts live in local app storage only
+  (tauri plugin-store); restored sessions respawn a fresh agent process on the
+  next prompt.
+- **Architecture**: provider-agnostic `DriverEvent` contract
+  (`src/neko-chill/drivers/types.ts`) — the ACP driver is golden-tested
+  against recorded real-agent sessions
+  (`src/__tests__/neko-chill/fixtures/`); a future Wiii-cloud driver
+  implements the same contract.
 
 ---
 

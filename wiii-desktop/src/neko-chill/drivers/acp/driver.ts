@@ -130,7 +130,7 @@ export class AcpDriver implements Driver {
   }
 
   async start(): Promise<void> {
-    await this.client.request("initialize", {
+    const init = (await this.client.request("initialize", {
       protocolVersion: ACP_PROTOCOL_VERSION,
       // v0 policy (PROTOCOL-NOTES): no client fs/terminal — every side effect
       // must surface through session/request_permission (FR-006).
@@ -139,7 +139,17 @@ export class AcpDriver implements Driver {
         terminal: false,
       },
       clientInfo: { name: "wiii-neko-chill", title: "Wiii — Neko Chill", version: "0.1.0" },
-    });
+    })) as { protocolVersion?: unknown };
+    // T602: version drift between agents (neko acp vs Gemini CLI) must be an
+    // actionable error, not a stream of confusing protocol failures.
+    if (
+      typeof init?.protocolVersion === "number" &&
+      init.protocolVersion !== ACP_PROTOCOL_VERSION
+    ) {
+      throw new Error(
+        `Agent nói ACP v${init.protocolVersion}, Wiii cần v${ACP_PROTOCOL_VERSION} — hãy cập nhật agent hoặc Wiii.`,
+      );
+    }
     const session = (await this.client.request("session/new", {
       cwd: this.cwd,
       // neko-core refuses client-supplied MCP servers; always empty in v0.

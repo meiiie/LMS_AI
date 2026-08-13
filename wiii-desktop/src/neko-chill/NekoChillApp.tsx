@@ -9,7 +9,7 @@
 import { useEffect } from "react";
 import { useModeStore } from "./stores/mode-store";
 import { useNekoAgentStore, type DetectedAgent } from "./stores/neko-agent-store";
-import { useNekoSessionStore } from "./stores/neko-session-store";
+import { startIdleReaper, useNekoSessionStore } from "./stores/neko-session-store";
 import { NekoTranscript } from "./components/NekoTranscript";
 import { NekoComposer } from "./components/NekoComposer";
 
@@ -134,6 +134,7 @@ export default function NekoChillApp() {
   useEffect(() => {
     void detect();
     void hydrate();
+    startIdleReaper();
   }, [detect, hydrate]);
 
   const statusLabel = session

@@ -56,6 +56,8 @@ export interface NekoSession {
   agentName: string;
   title: string;
   createdAt: number;
+  /** Last user/agent activity — drives the 30-minute idle reap (T601). */
+  lastActivityAt: number;
   status: NekoSessionStatus;
   messages: NekoMessage[];
   /** Set while the agent waits on an approval (FR-006); UI must resolve it. */
@@ -150,6 +152,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           agentName: entry.agentName,
           title: entry.title,
           createdAt: entry.createdAt,
+          lastActivityAt: entry.updatedAt,
           status: "exited",
           messages: await loadSessionTranscript(entry.id),
           pendingPermission: null,
@@ -171,6 +174,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           agentName: agent.name,
           title: `Phiên với ${agent.name}`,
           createdAt: Date.now(),
+          lastActivityAt: Date.now(),
           status: "connecting",
           messages: [],
           pendingPermission: null,
@@ -260,6 +264,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         const s = state.sessions[sessionId];
         if (!s) return;
         s.messages.push({ id: uuidv4(), role: "user", text });
+        s.lastActivityAt = Date.now();
         if (s.messages.length === 1) {
           s.title = text.length > 48 ? `${text.slice(0, 48)}…` : text;
         }
@@ -333,6 +338,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       set((state) => {
         const session = state.sessions[event.sessionId];
         if (!session) return;
+        session.lastActivityAt = Date.now();
 
         switch (event.type) {
           case "turn-started": {
@@ -437,6 +443,47 @@ export const useNekoSessionStore = create<NekoSessionState>()(
     },
   })),
 );
+
+// ---------------------------------------------------------------------------
+// Idle reap (T601, FR-009 — waku's lesson, reimplemented)
+// ---------------------------------------------------------------------------
+
+const IDLE_REAP_MS = 30 * 60 * 1000;
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+let reaperTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Dispose drivers of sessions idle past the threshold. Never touches a
+ * streaming turn or an unanswered permission request (the sweep may run
+ * while the user reads an approval — reaping there would fail their turn).
+ */
+export async function sweepIdleSessions(now: number = Date.now()): Promise<void> {
+  const { sessions } = useNekoSessionStore.getState();
+  for (const session of Object.values(sessions)) {
+    if (session.status !== "idle") continue;
+    if (session.pendingPermission) continue;
+    if (now - session.lastActivityAt < IDLE_REAP_MS) continue;
+    const driver = drivers.get(session.id);
+    if (!driver) continue;
+    drivers.delete(session.id);
+    await driver.dispose().catch(() => {});
+    useNekoSessionStore.setState((state) => {
+      const s = state.sessions[session.id];
+      if (s && s.status === "idle") {
+        s.status = "exited";
+        s.statusDetail = "Agent tạm nghỉ sau 30 phút yên lặng — nhắn tiếp để khởi động lại.";
+      }
+    });
+    const updated = useNekoSessionStore.getState().sessions[session.id];
+    if (updated) await persistSessionNow(updated);
+  }
+}
+
+/** Start the periodic sweep (idempotent; called on mode entry). */
+export function startIdleReaper(): void {
+  if (reaperTimer) return;
+  reaperTimer = setInterval(() => void sweepIdleSessions(), SWEEP_INTERVAL_MS);
+}
 
 /** Test hook: swap the driver factory (kept off the public interface). */
 export function _setDriverFactoryForTests(factory: DriverFactory | undefined): void {
