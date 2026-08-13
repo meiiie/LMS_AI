@@ -1,0 +1,75 @@
+/**
+ * Neko Chill design tokens — waku-fidelity palette (#893, task #12).
+ *
+ * Values studied from references/waku (theme.rs — design PARAMETERS, not
+ * code; the GPL wall covers expression, and these are reproduced by hand
+ * in our own system). Scoped to .nk-root so the cloud surface keeps wiii's
+ * own theme. Light is the :root default; .dark (Tailwind class strategy)
+ * flips the palette.
+ */
+
+.nk-root {
+  --nk-canvas: #f6f5f6;
+  --nk-raised: #ececec;
+  --nk-composer: #ffffff;
+  --nk-inset: #e6e6e6;
+  --nk-overlay: rgba(28, 32, 41, 0.05);
+  --nk-overlay-strong: rgba(28, 32, 41, 0.09);
+
+  --nk-border: rgba(28, 32, 41, 0.08);
+  --nk-border-strong: rgba(28, 32, 41, 0.15);
+
+  --nk-text: #242424;
+  --nk-text-2: #666666;
+  --nk-text-3: #858585;
+  --nk-ghost: #a4a4a4;
+
+  --nk-accent: #c85f44;
+  --nk-inverse: #202227;
+  --nk-on-inverse: #f8f8f9;
+
+  --nk-success: #2f8f52;
+  --nk-warning: #a66b20;
+  --nk-danger: #c64a42;
+  --nk-danger-soft: rgba(198, 74, 66, 0.1);
+
+  --nk-item-active: rgba(20, 20, 20, 0.06);
+}
+
+.dark .nk-root {
+  --nk-canvas: #1a1a1a;
+  --nk-raised: #232323;
+  --nk-composer: #212121;
+  --nk-inset: #151515;
+  --nk-overlay: rgba(229, 233, 240, 0.05);
+  --nk-overlay-strong: rgba(229, 233, 240, 0.09);
+
+  --nk-border: rgba(229, 233, 240, 0.07);
+  --nk-border-strong: rgba(229, 233, 240, 0.14);
+
+  --nk-text: #e2e2e2;
+  --nk-text-2: #a3a3a3;
+  --nk-text-3: #7d7d7d;
+  --nk-ghost: #575757;
+
+  --nk-accent: #e2795b;
+  --nk-inverse: #e7e9ec;
+  --nk-on-inverse: #17181c;
+
+  --nk-success: #62c987;
+  --nk-warning: #e0b36a;
+  --nk-danger: #e2726a;
+  --nk-danger-soft: rgba(226, 114, 106, 0.1);
+
+  --nk-item-active: rgba(240, 240, 240, 0.06);
+}
+
+/* Session-card hover affordance: kebab reveals like waku's row actions. */
+.nk-session-row .nk-row-action {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.nk-session-row:hover .nk-row-action,
+.nk-session-row:focus-within .nk-row-action {
+  opacity: 1;
+}

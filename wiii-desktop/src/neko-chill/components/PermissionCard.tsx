@@ -1,7 +1,7 @@
 /**
- * Inline permission gate (FR-006). Minimal v0 pulled forward from Phase 4 so
- * an agent approval request can never hang a turn without a visible surface.
- * Reject stays visually primary — fail-closed by design.
+ * Inline permission gate (FR-006) — waku-fidelity card: quiet raised surface,
+ * reject stays the prominent default (fail-closed by design), allow is
+ * the bordered secondary.
  */
 import type { PermissionRequest } from "../drivers/types";
 
@@ -16,17 +16,19 @@ export function PermissionCard({ request, onResolve }: PermissionCardProps) {
 
   return (
     <div
-      className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 my-2"
+      className="my-2 rounded-[10px] border border-[var(--nk-border-strong)] bg-[var(--nk-raised)] px-4 py-3"
       data-testid="permission-card"
     >
-      <p className="text-sm font-medium mb-1">Agent xin phép</p>
-      <p className="text-sm text-text-secondary mb-3">{request.title}</p>
-      <div className="flex flex-wrap gap-2">
+      <p className="text-[11.5px] font-medium uppercase tracking-wide text-[var(--nk-warning)]">
+        Agent xin phép
+      </p>
+      <p className="mb-3 mt-1 text-[13px] text-[var(--nk-text)]">{request.title}</p>
+      <div className="flex flex-wrap gap-1.5">
         {rejects.map((option) => (
           <button
             key={option.optionId}
             type="button"
-            className="text-sm rounded-md border border-border px-3 py-1.5 font-medium hover:bg-surface-hover transition-colors"
+            className="rounded-lg bg-[var(--nk-inverse)] px-3 py-1.5 text-[12px] font-medium text-[var(--nk-on-inverse)] transition-opacity hover:opacity-90"
             onClick={() => onResolve(option.optionId)}
           >
             {option.label}
@@ -36,7 +38,7 @@ export function PermissionCard({ request, onResolve }: PermissionCardProps) {
           <button
             key={option.optionId}
             type="button"
-            className="text-sm rounded-md border border-amber-500/50 text-amber-600 px-3 py-1.5 hover:bg-amber-500/10 transition-colors"
+            className="rounded-lg border border-[var(--nk-border-strong)] px-3 py-1.5 text-[12px] text-[var(--nk-text-2)] transition-colors hover:bg-[var(--nk-overlay)] hover:text-[var(--nk-text)]"
             onClick={() => onResolve(option.optionId)}
           >
             {option.label}
