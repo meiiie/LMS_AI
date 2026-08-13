@@ -14,6 +14,7 @@ import { useOrgStore } from "@/stores/org-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useToastStore } from "@/stores/toast-store";
+import { useModeStore } from "@/neko-chill/stores/mode-store";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useScheduledTaskNotifications } from "@/hooks/useScheduledTaskNotifications";
 import { WiiiAvatar } from "@/components/common/WiiiAvatar";
@@ -45,6 +46,8 @@ const PointyPreview = lazy(async () => {
   return { default: mod.PointyPreview };
 });
 
+const NekoChillApp = lazy(async () => import("@/neko-chill/NekoChillApp"));
+
 function BootSplash({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-surface">
@@ -56,27 +59,7 @@ function BootSplash({ label }: { label: string }) {
   );
 }
 
-export default function App() {
-  // Dev tool: ?preview=avatar shows avatar preview page
-  if (window.location.search.includes("preview=avatar")) {
-    return (
-      <Suspense fallback={<BootSplash label="Wiii đang mở bản xem trước..." />}>
-        <AvatarPreview />
-      </Suspense>
-    );
-  }
-
-  // Wiii Pointy demo: ?preview=pointy showcases the spring-physics
-  // multi-cursor system. Standalone — no auth, no chat boot, just
-  // visual verification of the cursor architecture.
-  if (window.location.search.includes("preview=pointy")) {
-    return (
-      <Suspense fallback={<BootSplash label="Wiii Pointy đang khởi động..." />}>
-        <PointyPreview />
-      </Suspense>
-    );
-  }
-
+function WiiiCloudApp() {
   const { loadSettings, settings, updateSettings, isLoaded: settingsLoaded } = useSettingsStore();
   const { loadAuth, loginWithTokens, isAuthenticated, isLoaded: authLoaded, authMode, user: authUser, isTokenExpiringSoon, refreshAccessToken } = useAuthStore();
   const { startPolling, stopPolling, setOnReconnect } = useConnectionStore();
@@ -308,4 +291,59 @@ export default function App() {
       </Suspense>
     </ErrorBoundary>
   );
+}
+
+/**
+ * Shell-level mode gate (issue #886, FR-001/FR-002).
+ *
+ * WiiiCloudApp mounts ONLY in cloud mode, so its init effects (client,
+ * polling, OAuth, org context) can never run while Neko Chill is active —
+ * the no-login guarantee is structural, not conditional.
+ */
+export function ModeGate() {
+  const { mode, isLoaded, loadMode } = useModeStore();
+
+  useEffect(() => {
+    void loadMode();
+  }, [loadMode]);
+
+  if (!isLoaded) {
+    return <BootSplash label="Wiii đang thức dậy..." />;
+  }
+
+  if (mode === "neko-chill") {
+    return (
+      <ErrorBoundary>
+        <Suspense fallback={<BootSplash label="Neko Chill đang thức dậy..." />}>
+          <NekoChillApp />
+        </Suspense>
+      </ErrorBoundary>
+    );
+  }
+
+  return <WiiiCloudApp />;
+}
+
+export default function App() {
+  // Dev tool: ?preview=avatar shows avatar preview page
+  if (window.location.search.includes("preview=avatar")) {
+    return (
+      <Suspense fallback={<BootSplash label="Wiii đang mở bản xem trước..." />}>
+        <AvatarPreview />
+      </Suspense>
+    );
+  }
+
+  // Wiii Pointy demo: ?preview=pointy showcases the spring-physics
+  // multi-cursor system. Standalone — no auth, no chat boot, just
+  // visual verification of the cursor architecture.
+  if (window.location.search.includes("preview=pointy")) {
+    return (
+      <Suspense fallback={<BootSplash label="Wiii Pointy đang khởi động..." />}>
+        <PointyPreview />
+      </Suspense>
+    );
+  }
+
+  return <ModeGate />;
 }
