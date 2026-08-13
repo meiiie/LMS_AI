@@ -42,7 +42,6 @@ def test_production_supported_tier_covers_real_secondary_surfaces():
 def test_dormant_tier_captures_legacy_or_low_exercise_surfaces():
     assert get_feature_tier("enable_neo4j") is FeatureTier.DORMANT
     assert get_feature_tier("enable_telegram") is FeatureTier.DORMANT
-    assert get_feature_tier("enable_oauth_token_store") is FeatureTier.DORMANT
 
 
 def test_summary_is_stable_and_sorted():

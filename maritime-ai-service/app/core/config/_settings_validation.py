@@ -249,10 +249,6 @@ def build_validate_cross_field_consistency(config_logger):
             config_logger.warning(
                 "enable_browser_agent=True with sandbox_provider='opensandbox' but sandbox_allow_browser_workloads=False — browser workloads stay outside the privileged sandbox"
             )
-        if self.enable_oauth_token_store and not self.oauth_encryption_key:
-            config_logger.warning(
-                "enable_oauth_token_store=True but oauth_encryption_key is not set — tokens will not be encrypted"
-            )
         if "facebook_group" in self.product_search_platforms:
             if not self.enable_browser_scraping:
                 config_logger.warning(
