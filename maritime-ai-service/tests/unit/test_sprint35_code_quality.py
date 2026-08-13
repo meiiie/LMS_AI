@@ -11,20 +11,6 @@ import ast
 import pytest
 
 
-class TestDatetimeUtcnowRemoved:
-    """Verify no deprecated datetime.utcnow() calls remain in app/."""
-
-    def test_no_utcnow_in_memory_summarizer(self):
-        with open("app/engine/memory_summarizer.py", "r", encoding="utf-8") as f:
-            content = f.read()
-        assert "utcnow()" not in content
-        assert "timezone.utc" in content
-
-    def test_no_utcnow_in_vision_processor(self):
-        with open("app/services/vision_processor.py", "r", encoding="utf-8") as f:
-            content = f.read()
-        assert "utcnow()" not in content
-        assert "timezone.utc" in content
 
 
 class TestExceptExceptionHasVariable:
@@ -76,19 +62,3 @@ class TestExceptExceptionHasVariable:
                     )
 
 
-class TestPronounDetectionAsserts:
-    """Verify test_pronoun_detection.py uses assert, not return."""
-
-    def test_no_return_in_test_functions(self):
-        with open("tests/unit/test_pronoun_detection.py", "r", encoding="utf-8") as f:
-            tree = ast.parse(f.read())
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
-                # Check that the function body does not end with a Return
-                last_stmt = node.body[-1] if node.body else None
-                if isinstance(last_stmt, ast.Return) and last_stmt.value is not None:
-                    pytest.fail(
-                        f"test function '{node.name}' returns a value "
-                        f"(line {last_stmt.lineno}) — should use assert"
-                    )

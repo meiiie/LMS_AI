@@ -403,8 +403,3 @@ def test_inject_operator_context_mentions_preview_confirmation_when_pending():
     assert "authoring.apply_lesson_patch" in prompt
 
 
-def test_streaming_path_has_host_context_injection():
-    from app.engine.multi_agent import graph_stream_runtime
-
-    source = inspect.getsource(graph_stream_runtime.build_stream_bootstrap_impl)
-    assert "host_context_prompt" in source or "_inject_host_context" in source

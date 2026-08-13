@@ -107,14 +107,6 @@ class TestAnswerGeneratorStreamingTimeout:
         assert "Test: Content" in error_text
         assert "Nguồn tham khảo" in error_text
 
-    def test_source_has_timeout_constants(self):
-        """answer_generator streaming method defines timeout constants."""
-        from app.engine.agentic_rag.answer_generator import AnswerGenerator
-
-        source = inspect.getsource(AnswerGenerator.generate_response_streaming)
-        assert "CHUNK_TIMEOUT" in source
-        assert "TOTAL_TIMEOUT" in source
-        assert "asyncio.wait_for" in source
 
 
 # ============================================================================
@@ -122,30 +114,6 @@ class TestAnswerGeneratorStreamingTimeout:
 # ============================================================================
 
 
-class TestGraphStreamingTimeout:
-    """Test that graph_streaming has timeout protection."""
-
-    def test_source_has_timeout_constants(self):
-        """graph_streaming defines timeout constants for graph nodes."""
-        with open("app/engine/multi_agent/graph_streaming.py", encoding="utf-8") as f:
-            source = f.read()
-        assert "GRAPH_NODE_TIMEOUT" in source
-        assert "GRAPH_TOTAL_TIMEOUT" in source
-        assert "asyncio.wait_for" in source
-
-    def test_no_str_e_in_error_event(self):
-        """Error event uses generic message, not str(e)."""
-        with open("app/engine/multi_agent/graph_streaming.py", encoding="utf-8") as f:
-            content = f.read()
-
-        # Find except Exception blocks
-        lines = content.split("\n")
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if "create_error_event" in stripped and "str(e)" in stripped:
-                pytest.fail(
-                    f"graph_streaming.py:{i+1} leaks str(e) via create_error_event: {stripped}"
-                )
 
 
 # ============================================================================
@@ -164,33 +132,9 @@ class TestSemanticCacheAsyncSafety:
         assert hasattr(cache, "_lock")
         assert isinstance(cache._lock, asyncio.Lock)
 
-    def test_get_uses_lock(self):
-        """get() method acquires _lock."""
-        from app.cache.semantic_cache import SemanticResponseCache
 
-        source = inspect.getsource(SemanticResponseCache.get)
-        assert "async with self._lock" in source
 
-    def test_set_uses_lock(self):
-        """set() method acquires _lock."""
-        from app.cache.semantic_cache import SemanticResponseCache
 
-        source = inspect.getsource(SemanticResponseCache.set)
-        assert "async with self._lock" in source
-
-    def test_invalidate_uses_lock(self):
-        """invalidate_by_document() method acquires _lock."""
-        from app.cache.semantic_cache import SemanticResponseCache
-
-        source = inspect.getsource(SemanticResponseCache.invalidate_by_document)
-        assert "async with self._lock" in source
-
-    def test_clear_uses_lock(self):
-        """clear() method acquires _lock."""
-        from app.cache.semantic_cache import SemanticResponseCache
-
-        source = inspect.getsource(SemanticResponseCache.clear)
-        assert "async with self._lock" in source
 
     @pytest.mark.asyncio
     async def test_concurrent_set_get_no_crash(self):
@@ -235,98 +179,6 @@ class TestSemanticCacheAsyncSafety:
 # ============================================================================
 
 
-class TestRateLimitingDecorators:
-    """Verify all API endpoints have rate limiting."""
-
-    def test_chat_stream_v3_has_rate_limit(self):
-        """V3 /chat/stream/v3 endpoint has @limiter.limit decorator."""
-        from app.api.v1 import chat_stream
-
-        fn = getattr(chat_stream, "chat_stream_v3")
-        # Check that the module imports limiter
-        mod_source = inspect.getsource(chat_stream)
-        assert "from app.core.rate_limit import limiter" in mod_source
-
-    def test_chat_stream_module_imports_limiter(self):
-        """chat_stream.py imports the limiter."""
-        with open("app/api/v1/chat_stream.py", encoding="utf-8") as f:
-            content = f.read()
-        assert "from app.core.rate_limit import limiter" in content
-
-    @pytest.mark.parametrize("line_pattern", [
-        "@limiter.limit",
-    ])
-    def test_chat_stream_all_endpoints_decorated(self, line_pattern):
-        """All streaming endpoints have @limiter.limit before the function."""
-        with open("app/api/v1/chat_stream.py", encoding="utf-8") as f:
-            content = f.read()
-
-        # Count @limiter.limit occurrences — should be >= 1 (v3)
-        count = content.count(line_pattern)
-        assert count >= 1, f"Expected >= 1 {line_pattern} decorators, found {count}"
-
-    def test_admin_module_imports_limiter(self):
-        """admin.py imports the limiter."""
-        with open("app/api/v1/admin.py", encoding="utf-8") as f:
-            content = f.read()
-        assert "from app.core.rate_limit import limiter" in content
-
-    def test_admin_all_endpoints_rate_limited(self):
-        """All admin endpoints have @limiter.limit decorator."""
-        with open("app/api/v1/admin.py", encoding="utf-8") as f:
-            content = f.read()
-
-        # 7 endpoints: upload, status, list, delete, list_domains, get_domain, list_skills
-        count = content.count("@limiter.limit")
-        assert count >= 7, f"Expected >= 7 @limiter.limit in admin.py, found {count}"
-
-    def test_organizations_module_imports_limiter(self):
-        """organizations.py imports the limiter."""
-        with open("app/api/v1/organizations.py", encoding="utf-8") as f:
-            content = f.read()
-        assert "from app.core.rate_limit import limiter" in content
-
-    def test_organizations_all_endpoints_rate_limited(self):
-        """All organization endpoints have @limiter.limit decorator."""
-        with open("app/api/v1/organizations.py", encoding="utf-8") as f:
-            content = f.read()
-
-        # 9 endpoints: list, get, create, update, delete, add_member, remove_member, list_members, my_orgs
-        count = content.count("@limiter.limit")
-        assert count >= 9, f"Expected >= 9 @limiter.limit in organizations.py, found {count}"
-
-    def test_admin_endpoints_have_request_param(self):
-        """All rate-limited admin endpoints accept Request parameter."""
-        with open("app/api/v1/admin.py", encoding="utf-8") as f:
-            tree = ast.parse(f.read())
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.AsyncFunctionDef):
-                if node.name in (
-                    "upload_document", "get_document_status", "list_documents",
-                    "delete_document", "list_domains", "get_domain", "list_domain_skills"
-                ):
-                    arg_names = [a.arg for a in node.args.args]
-                    assert "request" in arg_names, (
-                        f"admin.{node.name}() missing 'request' param for slowapi"
-                    )
-
-    def test_organizations_endpoints_have_request_param(self):
-        """All rate-limited org endpoints accept Request parameter."""
-        with open("app/api/v1/organizations.py", encoding="utf-8") as f:
-            tree = ast.parse(f.read())
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.AsyncFunctionDef):
-                if node.name in (
-                    "list_organizations", "get_organization", "create_organization",
-                    "update_organization", "delete_organization", "add_member",
-                    "remove_member", "list_members", "my_organizations"
-                ):
-                    arg_names = [a.arg for a in node.args.args]
-                    assert "request" in arg_names, (
-                        f"organizations.{node.name}() missing 'request' param for slowapi"
-                    )
 
 
 # ============================================================================

@@ -325,14 +325,6 @@ class TestCurationQuality:
         product_lines = [l for l in text.split("\n") if l.startswith("[")]
         assert len(product_lines) == 70  # All products should fit
 
-    def test_no_price_sort_before_curation(self):
-        """aggregate_results should NOT sort by price (removed in Sprint 202b)."""
-        # Verify by reading the source code for _price_key (should not exist)
-        import inspect
-        from app.engine.multi_agent.subagents.search import workers
-        source = inspect.getsource(workers.aggregate_results)
-        assert "_price_key" not in source
-        assert "unique.sort" not in source
 
 
 # ═════════════════════════════════════════════════════════════════

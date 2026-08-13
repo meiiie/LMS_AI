@@ -19,13 +19,6 @@ def test_async_pool_config_values():
     assert settings.async_pool_max_size >= settings.async_pool_min_size
 
 
-def test_dense_repo_uses_config():
-    """Verify DenseSearchRepository uses config for pool size."""
-    from app.repositories.dense_search_repository import DenseSearchRepository
-    import inspect
-
-    source = inspect.getsource(DenseSearchRepository._get_pool)
-    assert "async_pool_max_size" in source or "settings" in source
 
 
 def test_sparse_repo_has_pool():

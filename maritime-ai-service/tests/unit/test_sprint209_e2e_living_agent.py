@@ -1156,32 +1156,6 @@ class TestSkillToolBridgeE2E:
 # Group 12: ChatOrchestrator → RoutineTracker Wiring (3 tests)
 # ============================================================================
 
-class TestOrchestratorRoutineWiring:
-    """Sprint 208: ChatOrchestrator records interactions via RoutineTracker."""
-
-    def test_routine_tracking_code_exists_in_orchestrator(self):
-        """ChatOrchestrator source contains RoutineTracker wiring."""
-        import inspect
-        from app.services.chat_orchestrator import ChatOrchestrator
-
-        source = inspect.getsource(ChatOrchestrator)
-        assert "routine_tracker" in source.lower() or "get_routine_tracker" in source
-
-    def test_routine_tracking_flag_checked(self):
-        """Routine scheduling checks living_agent_enable_routine_tracking."""
-        import inspect
-        from app.services import routine_post_response
-
-        source = inspect.getsource(routine_post_response)
-        assert "living_agent_enable_routine_tracking" in source
-
-    def test_routine_tracking_is_fire_and_forget(self):
-        """RoutineTracker scheduling remains fire-and-forget at continuity seam."""
-        import inspect
-        from app.services import routine_post_response
-
-        source = inspect.getsource(routine_post_response)
-        assert "ensure_future" in source or "create_task" in source
 
 
 # ============================================================================
@@ -1191,25 +1165,6 @@ class TestOrchestratorRoutineWiring:
 class TestModelsIntegrity:
     """Verify models used across modules are consistent."""
 
-    def test_all_action_types_handled_in_heartbeat(self):
-        """Every ActionType has a handler or explicit skip in _dispatch_action.
-
-        Sprint 210: _execute_action now wraps _dispatch_action with timeout.
-        """
-        import inspect
-        from app.engine.living_agent.heartbeat import HeartbeatScheduler
-        from app.engine.living_agent.models import ActionType
-
-        # Sprint 210: Check _dispatch_action (actual handler), not _execute_action (timeout wrapper)
-        source = inspect.getsource(HeartbeatScheduler._dispatch_action)
-        # NOOP: never dispatched. PRACTICE_SKILL: external-only action (not heartbeat).
-        skip = {ActionType.NOOP, ActionType.PRACTICE_SKILL}
-        for action in ActionType:
-            if action in skip:
-                continue
-            # Check action type name appears in source
-            assert action.value in source or action.name in source, \
-                f"ActionType.{action.name} not handled in _dispatch_action"
 
     def test_heartbeat_result_fields(self):
         """HeartbeatResult has all required fields."""

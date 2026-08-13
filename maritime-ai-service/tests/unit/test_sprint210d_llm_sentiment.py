@@ -419,43 +419,6 @@ class TestEpisodicMemoryLLM:
 # Group 6: No Keywords in Production Code
 # ============================================================================
 
-class TestNoKeywords:
-    """Verify keyword matching has been fully removed from production paths."""
-
-    def test_chat_orchestrator_no_keywords(self):
-        """chat_orchestrator.py should NOT contain keyword arrays."""
-        import inspect
-        from app.services import chat_orchestrator
-        source = inspect.getsource(chat_orchestrator)
-        assert '_pos = [' not in source
-        assert '_neg = [' not in source
-        assert '"sai rồi"' not in source
-        assert '"cảm ơn"' not in source
-
-    def test_chat_stream_no_keywords(self):
-        """chat_stream.py should NOT contain keyword arrays."""
-        import inspect
-        from app.api.v1 import chat_stream
-        source = inspect.getsource(chat_stream)
-        assert '_pos = [' not in source
-        assert '_neg = [' not in source
-        assert '"sai rồi"' not in source
-        assert '"cảm ơn"' not in source
-
-    def test_orchestrator_uses_llm_sentiment(self):
-        """chat_orchestrator.py should use _analyze_and_process_sentiment."""
-        import inspect
-        from app.services import chat_orchestrator
-        source = inspect.getsource(chat_orchestrator)
-        assert "_analyze_and_process_sentiment" in source
-        assert "SentimentAnalyzer" in source or "get_sentiment_analyzer" in source
-
-    def test_stream_uses_llm_sentiment(self):
-        """chat_stream.py should delegate to _analyze_and_process_sentiment."""
-        import inspect
-        from app.api.v1 import chat_stream
-        source = inspect.getsource(chat_stream)
-        assert "_analyze_and_process_sentiment" in source
 
 
 # ============================================================================

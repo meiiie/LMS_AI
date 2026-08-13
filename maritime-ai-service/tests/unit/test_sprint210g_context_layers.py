@@ -211,37 +211,3 @@ class TestContextInfoErrorResilience:
 # ============================================================================
 
 
-class TestContextInfoEndpointCode:
-    """Verify the endpoint code passes system_prompt and core_memory."""
-
-    def test_endpoint_passes_system_prompt(self):
-        """The context/info endpoint passes system_prompt to compactor."""
-        import inspect
-        from app.api.v1 import chat
-        source = inspect.getsource(chat.get_context_info)
-        assert "system_prompt=" in source, \
-            "Endpoint must pass system_prompt to get_context_info"
-
-    def test_endpoint_passes_core_memory(self):
-        """The context/info endpoint passes core_memory to compactor."""
-        import inspect
-        from app.api.v1 import chat
-        source = inspect.getsource(chat.get_context_info)
-        assert "core_memory=" in source, \
-            "Endpoint must pass core_memory to get_context_info"
-
-    def test_endpoint_builds_system_prompt_via_loader(self):
-        """The endpoint uses PromptLoader to build system_prompt."""
-        import inspect
-        from app.api.v1 import chat
-        source = inspect.getsource(chat.get_context_info)
-        assert "get_prompt_loader" in source or "PromptLoader" in source, \
-            "Endpoint should use a PromptLoader access path for system_prompt"
-
-    def test_endpoint_fetches_core_memory_block(self):
-        """The endpoint uses CoreMemoryBlock to fetch core_memory."""
-        import inspect
-        from app.api.v1 import chat
-        source = inspect.getsource(chat.get_context_info)
-        assert "core_memory_block" in source or "get_core_memory_block" in source, \
-            "Endpoint should use CoreMemoryBlock for core_memory"

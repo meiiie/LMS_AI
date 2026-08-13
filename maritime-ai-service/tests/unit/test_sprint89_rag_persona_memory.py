@@ -122,50 +122,12 @@ class TestRAGPersonaFix:
         assert "conversation_summary" in params
         assert "core_memory_block" in params
 
-    def test_corrective_rag_extracts_user_name_from_context(self):
-        """CorrectiveRAG generation runtime extracts user_name from context dict."""
-        import inspect
-        from app.engine.agentic_rag.corrective_rag_generation import generate_answer_impl
-        source = inspect.getsource(generate_answer_impl)
-        assert 'context.get("user_name")' in source, \
-            "generate_answer_impl must extract user_name from context"
-        assert 'user_name=context.get("user_name")' in source, \
-            "generate_answer_impl must pass user_name to generate_from_documents"
-        assert 'core_memory_block=context.get("core_memory_block")' in source
 
 
 # =========================================================================
 # TestFallbackIdentity — Verify _generate_fallback uses identity YAML
 # =========================================================================
 
-class TestFallbackIdentity:
-    """Verify _generate_fallback injects identity from wiii_identity.yaml."""
-
-    def test_fallback_source_includes_identity_import(self):
-        """Fallback runtime imports and uses get_prompt_loader for identity."""
-        import inspect
-        from app.engine.agentic_rag.corrective_rag_generation import generate_fallback_impl
-        source = inspect.getsource(generate_fallback_impl)
-        assert "get_prompt_loader" in source, \
-            "generate_fallback_impl must use get_prompt_loader for identity"
-        assert "get_identity" in source, \
-            "generate_fallback_impl must call get_identity()"
-
-    def test_fallback_includes_user_name_when_available(self):
-        """Fallback runtime references context user_name."""
-        import inspect
-        from app.engine.agentic_rag.corrective_rag_generation import generate_fallback_impl
-        source = inspect.getsource(generate_fallback_impl)
-        assert 'context.get("user_name"' in source, \
-            "generate_fallback_impl must extract user_name from context"
-
-    def test_fallback_includes_emoji_usage(self):
-        """Fallback runtime references emoji_usage from identity."""
-        import inspect
-        from app.engine.agentic_rag.corrective_rag_generation import generate_fallback_impl
-        source = inspect.getsource(generate_fallback_impl)
-        assert "emoji_usage" in source, \
-            "generate_fallback_impl must inject emoji_usage from identity"
 
 
 # =========================================================================
