@@ -228,15 +228,26 @@ class TestSSEMetadataMood:
 class TestRouterRegistration:
     """Tests that new routers are registered."""
 
+    @staticmethod
+    def _registered_import_paths():
+        import app.api.v1 as api_v1
+
+        captured = []
+
+        def capture_register(_router, import_path, _label):
+            captured.append(import_path)
+
+        with patch.object(api_v1, "_register_router", side_effect=capture_register), \
+                patch.object(api_v1, "_register_optional_router", return_value=None):
+            api_v1._build_router()
+        return captured
+
     def test_character_router_registered(self):
         """Character router is in v1 routes."""
-        from app.api.v1 import router
-        paths = [r.path for r in router.routes]
-        assert any("/character" in p for p in paths)
+        paths = self._registered_import_paths()
+        assert "app.api.v1.character.router" in paths
 
     def test_mood_router_registered(self):
         """Mood router is in v1 routes."""
-        from app.api.v1 import router
-        paths = [r.path for r in router.routes]
-        assert any("/mood" in p for p in paths)
-
+        paths = self._registered_import_paths()
+        assert "app.api.v1.mood.router" in paths

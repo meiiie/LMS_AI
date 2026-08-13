@@ -37,6 +37,14 @@ def test_get_runtime_provider_preset_for_google_exposes_advanced_model():
     assert preset.google_model_advanced == "gemini-3.1-pro-preview"
 
 
+def test_get_runtime_provider_preset_for_nvidia_uses_nemotron_design_default():
+    preset = get_runtime_provider_preset("nvidia")
+    assert preset.provider == "nvidia"
+    assert preset.failover_chain == ("nvidia",)
+    assert preset.nvidia_model == "nvidia/nemotron-3-ultra-550b-a55b"
+    assert preset.nvidia_model_advanced == "nvidia/nemotron-3-ultra-550b-a55b"
+
+
 def test_get_runtime_provider_preset_for_ollama_matches_verified_local_default():
     preset = get_runtime_provider_preset("ollama")
     assert preset.provider == "ollama"

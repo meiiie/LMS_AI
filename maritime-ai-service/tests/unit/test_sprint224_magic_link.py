@@ -661,17 +661,17 @@ class TestMagicLinkRouter:
 
     def test_router_has_request_endpoint(self):
         from app.auth.magic_link_router import router
-        paths = [r.path for r in router.routes]
+        paths = [getattr(r, "path", "") for r in router.routes]
         assert any("request" in p for p in paths)
 
     def test_router_has_verify_endpoint(self):
         from app.auth.magic_link_router import router
-        paths = [r.path for r in router.routes]
+        paths = [getattr(r, "path", "") for r in router.routes]
         assert any("verify" in p and "token" in p for p in paths)
 
     def test_router_has_websocket_endpoint(self):
         from app.auth.magic_link_router import router
-        paths = [r.path for r in router.routes]
+        paths = [getattr(r, "path", "") for r in router.routes]
         assert any("/ws/" in p for p in paths)
 
 
