@@ -5,6 +5,16 @@ protocol/prompt-turn, protocol/initialization). Pin: **`protocolVersion: 1`**
 (integer). JSON-RPC 2.0 over stdio; camelCase property keys, snake_case
 discriminator values; all file paths absolute; line numbers 1-based.
 
+**Agent roster invocations (verified 2026-08-13):**
+
+- Gemini CLI ≥0.38: `gemini --experimental-acp`
+- **neko-core ≥0.24.0** (released 2026-08-13, "Stable ACP v1"): **`neko acp`**
+  (subcommand, not a flag; optional `--profile <p>`; `--yolo` = neko's `auto`
+  mode). Per its `docs/process/ACP.md`: newline-delimited JSON-RPC on stdio;
+  ACP session modes map to neko's default/accept-edits/plan/auto; client
+  approvals cannot bypass neko's own safety boundary; it REFUSES
+  client-supplied MCP servers at session creation — send `mcpServers: []`.
+
 ## Flow
 
 1. Client spawns agent binary with its ACP flag (Gemini CLI:
