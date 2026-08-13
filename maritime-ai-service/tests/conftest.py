@@ -56,7 +56,6 @@ def mock_settings():
     s.enable_websocket = False
     s.enable_telegram = False
     s.enable_multi_tenant = False
-    s.enable_oauth_token_store = False
     s.enable_lms_integration = False
     s.lms_base_url = None
     s.lms_service_token = None

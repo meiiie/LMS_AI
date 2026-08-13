@@ -463,7 +463,6 @@ class FeatureSettingsMixin:
     tool_selection_max_candidates: int = Field(default=15, description="Maximum tools to select per query")
 
     # OAuth skeleton
-    enable_oauth_token_store: bool = Field(default=False, description="Enable OAuth token store")
     oauth_encryption_key: Optional[str] = Field(default=None, description="Fernet encryption key for OAuth tokens", repr=False)
 
     # Quality & Model Config
