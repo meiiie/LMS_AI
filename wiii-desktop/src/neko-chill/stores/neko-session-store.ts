@@ -25,6 +25,14 @@ import type {
   PermissionRequest,
 } from "../drivers/types";
 import type { DetectedAgent } from "./neko-agent-store";
+import { useNekoAgentStore } from "./neko-agent-store";
+import {
+  deletePersistedSession,
+  loadSessionIndex,
+  loadSessionTranscript,
+  persistSessionDebounced,
+  persistSessionNow,
+} from "../persistence";
 
 export interface NekoMessage {
   id: string;
@@ -78,11 +86,17 @@ async function defaultDriverFactory(
 interface NekoSessionState {
   sessions: Record<string, NekoSession>;
   activeSessionId: string | null;
+  hydrated: boolean;
+  /** Load persisted sessions from local storage (T502, FR-008). */
+  hydrate: () => Promise<void>;
   createSession: (agent: DetectedAgent) => Promise<string>;
   sendPrompt: (text: string) => Promise<void>;
   cancelTurn: () => Promise<void>;
   resolvePermission: (optionId: string | null) => Promise<void>;
+  /** End the live agent process but KEEP the transcript (persisted). */
   closeSession: (sessionId: string) => Promise<void>;
+  /** Remove a session from state AND local storage. */
+  deleteSession: (sessionId: string) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   /** DriverEvent intake — exported on the store for direct unit testing. */
   handleEvent: (event: DriverEvent) => void;
@@ -121,6 +135,32 @@ export const useNekoSessionStore = create<NekoSessionState>()(
   immer((set, get) => ({
     sessions: {},
     activeSessionId: null,
+    hydrated: false,
+
+    hydrate: async () => {
+      if (get().hydrated) return;
+      const index = await loadSessionIndex();
+      const restored: Record<string, NekoSession> = {};
+      for (const entry of index) {
+        // Live sessions in state win over their persisted snapshot.
+        if (get().sessions[entry.id]) continue;
+        restored[entry.id] = {
+          id: entry.id,
+          agentId: entry.agentId,
+          agentName: entry.agentName,
+          title: entry.title,
+          createdAt: entry.createdAt,
+          status: "exited",
+          messages: await loadSessionTranscript(entry.id),
+          pendingPermission: null,
+          statusDetail: "Phiên đã lưu — nhắn tiếp để khởi động lại agent.",
+        };
+      }
+      set((state) => {
+        state.sessions = { ...restored, ...state.sessions };
+        state.hydrated = true;
+      });
+    },
 
     createSession: async (agent) => {
       const sessionId = uuidv4();
@@ -165,9 +205,56 @@ export const useNekoSessionStore = create<NekoSessionState>()(
     sendPrompt: async (text) => {
       const sessionId = get().activeSessionId;
       if (!sessionId) return;
-      const driver = drivers.get(sessionId);
       const session = get().sessions[sessionId];
-      if (!driver || !session || session.status !== "idle") return;
+      // "exited" accepts a new prompt: a restored (or crashed) session
+      // respawns a FRESH agent process (spec US3-2 / edge case restart).
+      if (!session || (session.status !== "idle" && session.status !== "exited")) {
+        return;
+      }
+
+      let driver = drivers.get(sessionId);
+      if (!driver) {
+        const agentStore = useNekoAgentStore.getState();
+        if (agentStore.agents.length === 0) await agentStore.detect();
+        const agent = useNekoAgentStore
+          .getState()
+          .agents.find((a) => a.id === session.agentId);
+        if (!agent?.found) {
+          set((state) => {
+            const s = state.sessions[sessionId];
+            if (s) {
+              s.status = "error";
+              s.statusDetail = `Không tìm thấy agent "${session.agentName}" trên máy này.`;
+            }
+          });
+          return;
+        }
+        try {
+          const factory: DriverFactory =
+            (get() as unknown as { _driverFactory?: DriverFactory })._driverFactory ??
+            defaultDriverFactory;
+          driver = await factory(agent, sessionId, (event) =>
+            get().handleEvent(event),
+          );
+          drivers.set(sessionId, driver);
+          set((state) => {
+            const s = state.sessions[sessionId];
+            if (s) {
+              s.status = "idle";
+              s.statusDetail = undefined;
+            }
+          });
+        } catch (err) {
+          set((state) => {
+            const s = state.sessions[sessionId];
+            if (s) {
+              s.status = "error";
+              s.statusDetail = err instanceof Error ? err.message : String(err);
+            }
+          });
+          return;
+        }
+      }
 
       set((state) => {
         const s = state.sessions[sessionId];
@@ -177,6 +264,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           s.title = text.length > 48 ? `${text.slice(0, 48)}…` : text;
         }
       });
+      const updated = get().sessions[sessionId];
+      if (updated) persistSessionDebounced(updated);
       // turn-started from the driver flips status + opens the assistant
       // message; prompt() resolves only when the whole turn ends.
       await driver.prompt(text);
@@ -210,10 +299,26 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       drivers.delete(sessionId);
       await driver?.dispose().catch(() => {});
       set((state) => {
+        const session = state.sessions[sessionId];
+        if (session) {
+          session.status = "exited";
+          session.pendingPermission = null;
+          session.statusDetail = "Đã kết thúc phiên — nhắn tiếp để khởi động lại agent.";
+        }
+      });
+      const session = get().sessions[sessionId];
+      if (session) await persistSessionNow(session);
+    },
+
+    deleteSession: async (sessionId) => {
+      const driver = drivers.get(sessionId);
+      drivers.delete(sessionId);
+      await driver?.dispose().catch(() => {});
+      await deletePersistedSession(sessionId);
+      set((state) => {
         delete state.sessions[sessionId];
         if (state.activeSessionId === sessionId) {
-          const remaining = Object.keys(state.sessions);
-          state.activeSessionId = remaining[remaining.length - 1] ?? null;
+          state.activeSessionId = null;
         }
       });
     },
@@ -326,6 +431,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           }
         }
       });
+      // Trailing debounced persist after every transcript-affecting event.
+      const session = get().sessions[event.sessionId];
+      if (session) persistSessionDebounced(session);
     },
   })),
 );
@@ -333,4 +441,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
 /** Test hook: swap the driver factory (kept off the public interface). */
 export function _setDriverFactoryForTests(factory: DriverFactory | undefined): void {
   useNekoSessionStore.setState({ _driverFactory: factory } as never);
+}
+
+/** Test hook: drop live drivers, simulating an app restart. */
+export function _clearLiveDriversForTests(): void {
+  drivers.clear();
 }

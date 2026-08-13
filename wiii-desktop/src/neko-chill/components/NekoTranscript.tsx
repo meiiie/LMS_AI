@@ -89,8 +89,11 @@ export function NekoTranscript({ session, onResolvePermission }: NekoTranscriptP
           {session.agentName} đang làm việc…
         </p>
       ) : null}
-      {session.status === "exited" || session.status === "error" ? (
+      {session.status === "error" ? (
         <p className="text-sm text-red-500 my-2">{session.statusDetail}</p>
+      ) : null}
+      {session.status === "exited" && session.statusDetail ? (
+        <p className="text-sm text-text-tertiary my-2">{session.statusDetail}</p>
       ) : null}
       <div ref={bottomRef} />
     </div>

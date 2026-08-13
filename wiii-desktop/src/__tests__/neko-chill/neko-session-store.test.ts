@@ -149,12 +149,13 @@ describe("neko-session-store", () => {
     expect(driver.prompts).toEqual([]);
   });
 
-  it("closeSession disposes the driver and clears active state", async () => {
+  it("closeSession disposes the driver but keeps the transcript (exited)", async () => {
     const id = await setup();
     await useNekoSessionStore.getState().closeSession(id);
     expect(driver.disposed).toBe(1);
-    expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
-    expect(useNekoSessionStore.getState().activeSessionId).toBeNull();
+    const closed = session(id);
+    expect(closed.status).toBe("exited");
+    expect(closed.pendingPermission).toBeNull();
   });
 
   it("marks the session as error when the driver factory fails", async () => {
