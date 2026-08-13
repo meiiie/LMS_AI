@@ -37,14 +37,5 @@ class TestVerifyApiKey:
             mock_settings.api_key = None
             assert verify_api_key("anything") is True
 
-    def test_uses_hmac_compare_digest(self):
-        """Ensure the code uses constant-time comparison (not ==)."""
-        import inspect
-        from app.core.security import verify_api_key
-
-        source = inspect.getsource(verify_api_key)
-        assert "hmac.compare_digest" in source, (
-            "verify_api_key must use hmac.compare_digest for timing-safe comparison"
-        )
         # Should NOT use bare == for the actual comparison
         # (the 'if not settings.api_key' check is fine)

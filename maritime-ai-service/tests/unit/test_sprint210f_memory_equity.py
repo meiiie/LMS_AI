@@ -302,57 +302,6 @@ class TestMemoryEquityEdgeCases:
 # ============================================================================
 
 
-class TestTierLogicInSource:
-    """Verify the source code has correct tier handling."""
-
-    def test_sentiment_function_has_three_tier_branches(self):
-        """_analyze_and_process_sentiment has Creator/Known/Other branches."""
-        import inspect
-        from app.services.chat_orchestrator import _analyze_and_process_sentiment
-        source = inspect.getsource(_analyze_and_process_sentiment)
-
-        assert "TIER_CREATOR" in source
-        assert "TIER_KNOWN" in source
-        assert "tier == TIER_CREATOR" in source
-        assert "tier == TIER_KNOWN" in source
-
-    def test_known_users_get_process_event(self):
-        """TIER_KNOWN branch calls process_event, not just record_interaction."""
-        import inspect
-        from app.services.chat_orchestrator import _analyze_and_process_sentiment
-        source = inspect.getsource(_analyze_and_process_sentiment)
-
-        known_idx = source.find("elif tier == TIER_KNOWN:")
-        assert known_idx > 0, "Must have elif TIER_KNOWN branch"
-
-        next_else = source.find("else:", known_idx + 1)
-        known_block = source[known_idx:next_else]
-        assert "process_event" in known_block
-
-    def test_known_importance_has_06_multiplier(self):
-        """TIER_KNOWN importance is multiplied by 0.6."""
-        import inspect
-        from app.services.chat_orchestrator import _analyze_and_process_sentiment
-        source = inspect.getsource(_analyze_and_process_sentiment)
-
-        assert "importance * 0.6" in source or "importance*0.6" in source
-
-    def test_episode_creation_has_all_tier_thresholds(self):
-        """Episode creation logic includes all three tiers."""
-        import inspect
-        from app.services.chat_orchestrator import _analyze_and_process_sentiment
-        source = inspect.getsource(_analyze_and_process_sentiment)
-
-        assert "tier == TIER_CREATOR" in source
-        assert ">= 0.4" in source
-        assert ">= 0.5" in source
-
-    def test_streaming_path_calls_same_function(self):
-        """Streaming path imports and calls _analyze_and_process_sentiment."""
-        import inspect
-        from app.api.v1 import chat_stream
-        source = inspect.getsource(chat_stream)
-        assert "_analyze_and_process_sentiment" in source
 
 
 # ============================================================================

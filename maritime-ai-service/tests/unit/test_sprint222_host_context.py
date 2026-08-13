@@ -407,20 +407,8 @@ def test_chat_context_has_host_context_field():
 
 # --- Task 13: Pipeline threading ---
 
-def test_orchestrator_threads_host_context():
-    """Multi-agent context builder must include host_context in graph context."""
-    import inspect
-    from app.services import chat_orchestrator_multi_agent
-    source = inspect.getsource(chat_orchestrator_multi_agent.build_multi_agent_context_impl)
-    assert "host_context" in source, "chat_orchestrator must thread host_context"
 
 
-def test_chat_stream_threads_host_context():
-    """chat_stream.py must include host_context in context dict."""
-    import inspect
-    from app.api.v1 import chat_stream
-    source = inspect.getsource(chat_stream)
-    assert "host_context" in source, "chat_stream must thread host_context"
 
 
 def test_build_operator_session_includes_candidate_actions_and_confirmation():

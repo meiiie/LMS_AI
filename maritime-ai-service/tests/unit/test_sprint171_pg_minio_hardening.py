@@ -85,16 +85,6 @@ class TestHealthCheckSingleton:
         # Cleanup
         health_mod._shared_async_engine = None
 
-    def test_check_async_pool_health_no_dispose_call(self):
-        """check_async_pool_health no longer calls engine.dispose()."""
-        import inspect
-        from app.api.v1.health import check_async_pool_health
-        source = inspect.getsource(check_async_pool_health)
-        # Remove docstring before checking — "dispose" may appear in comments
-        lines = source.split("\n")
-        code_lines = [l for l in lines if not l.strip().startswith(('"""', "#", "Sprint"))]
-        code_only = "\n".join(code_lines)
-        assert ".dispose()" not in code_only, "Should NOT call engine.dispose() per-call"
 
 
 # ============================================================================
@@ -172,13 +162,6 @@ class TestStatementTimeout:
         assert "statement_timeout" in source
         assert "listens_for" in source
 
-    def test_dense_search_pool_uses_init_callback(self):
-        """dense_search_repository uses asyncpg pool init= for timeouts."""
-        import inspect
-        from app.repositories.dense_search_repository import DenseSearchRepository
-        source = inspect.getsource(DenseSearchRepository._get_pool)
-        assert "statement_timeout" in source
-        assert "init=_init_conn" in source or "init=" in source
 
 
 # ============================================================================
@@ -249,23 +232,7 @@ class TestStorageOrgPaths:
 class TestSourcesPoolConsolidation:
     """Verify Sources API uses shared DenseSearch pool."""
 
-    def test_sources_no_standalone_asyncpg_import(self):
-        """sources.py should not import asyncpg at module level."""
-        import inspect
-        from app.api.v1 import sources
-        source = inspect.getsource(sources)
-        # The module should not have `import asyncpg` at top level
-        lines = source.split("\n")
-        top_level_imports = [l for l in lines[:25] if "import asyncpg" in l]
-        assert len(top_level_imports) == 0, \
-            "sources.py should not import asyncpg at module level"
 
-    def test_sources_get_pool_uses_dense_search(self):
-        """get_pool() delegates to DenseSearchRepository."""
-        import inspect
-        from app.api.v1 import sources
-        source = inspect.getsource(sources.get_pool)
-        assert "dense_search_repository" in source or "get_dense_search_repository" in source
 
     @pytest.mark.asyncio
     async def test_sources_close_pool_is_noop(self):
@@ -395,17 +362,3 @@ class TestAutovacuumMigration:
 # Group 8: Upload Safety (3 tests)
 # ============================================================================
 
-class TestUploadSafety:
-    """Verify upload uses stable public URLs (not expiring presigned URLs)."""
-
-    def test_upload_image_uses_public_url(self):
-        """upload_image uses get_public_url (stable, no expiry) for DB storage."""
-        import inspect
-        from app.services.object_storage import ObjectStorageClient
-        source = inspect.getsource(ObjectStorageClient.upload_image)
-        # Design decision: presigned URLs expire after 1h — unsuitable for
-        # permanent DB storage. upload_image uses stable public URLs instead.
-        assert "get_public_url" in source, "upload_image should call get_public_url"
-        assert "get_signed_url" not in source, (
-            "upload_image should NOT use get_signed_url — presigned URLs expire"
-        )

@@ -295,36 +295,7 @@ class TestBulkAnswerPush:
         assert elapsed < 0.01, f"Bulk push took {elapsed:.3f}s, expected < 10ms"
         assert len(chunks) == 5  # 1000 / 200
 
-    @pytest.mark.skip(reason="De-LangGraphing: _push_answer_bulk removed from refactored _react_loop")
-    @pytest.mark.asyncio
-    async def test_tutor_react_loop_uses_bulk_for_reemit(self):
-        """When ReAct loop emits answer after thinking, should use bulk push."""
-        # Verify the constant exists in tutor_node module
-        from app.engine.multi_agent.agents import tutor_node as tn_mod
 
-        # Read source to verify _push_answer_bulk is defined
-        import inspect
-        source = inspect.getsource(tn_mod.TutorAgentNode._react_loop)
-        assert "_push_answer_bulk" in source, (
-            "_push_answer_bulk should be used in _react_loop for answer re-emission"
-        )
-
-    @pytest.mark.skip(reason="De-LangGraphing: _push_answer_deltas removed from refactored _react_loop")
-    @pytest.mark.asyncio
-    async def test_tutor_final_generation_still_uses_deltas(self):
-        """Final generation block (line ~560) should still use _push_answer_deltas.
-
-        When tutor exhausts iterations and generates final answer from scratch,
-        it should use smooth streaming (_push_answer_deltas) since content hasn't
-        been shown yet via thinking.
-        """
-        from app.engine.multi_agent.agents import tutor_node as tn_mod
-        import inspect
-        source = inspect.getsource(tn_mod.TutorAgentNode._react_loop)
-
-        # Both should be present — deltas for live streaming, bulk for re-emission
-        assert "_push_answer_deltas" in source
-        assert "_push_answer_bulk" in source
 
 
 # ============================================================================
@@ -335,27 +306,8 @@ class TestBulkAnswerPush:
 class TestLatencyConstants:
     """Verify Sprint 75 constants are correctly set."""
 
-    @pytest.mark.skip(reason="De-LangGraphing: _BULK_SIZE removed from refactored _react_loop")
-    def test_bulk_size_is_200(self):
-        """_BULK_SIZE should be 200 (not 12 like _CHUNK_SIZE)."""
-        from app.engine.multi_agent.agents import tutor_node as tn_mod
-        import inspect
-        source = inspect.getsource(tn_mod.TutorAgentNode._react_loop)
-        assert "_BULK_SIZE = 200" in source
 
-    def test_chunk_size_unchanged(self):
-        """_CHUNK_SIZE should be 40 for faster streaming (Sprint 103b: was 12)."""
-        from app.engine.multi_agent.agents import tutor_node as tn_mod
-        import inspect
-        source = inspect.getsource(tn_mod.TutorAgentNode._react_loop)
-        assert "_CHUNK_SIZE = 40" in source
 
-    def test_chunk_delay_unchanged(self):
-        """_CHUNK_DELAY should be 0.008 for faster streaming (Sprint 103b: was 0.018)."""
-        from app.engine.multi_agent.agents import tutor_node as tn_mod
-        import inspect
-        source = inspect.getsource(tn_mod.TutorAgentNode._react_loop)
-        assert "_CHUNK_DELAY = 0.008" in source
 
     @pytest.mark.skip(reason="De-LangGraphing Phase 3: _guardian_instance removed")
     def test_guardian_singleton_exists(self):

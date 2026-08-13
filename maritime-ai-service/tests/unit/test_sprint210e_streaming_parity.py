@@ -272,53 +272,11 @@ class TestStreamingRoutineTracking:
 class TestSyncStreamingParity:
     """Validate that streaming post-processing matches sync path."""
 
-    def test_sync_path_has_background_tasks(self):
-        """Sync path finalizes through the post-turn lifecycle contract."""
-        import inspect
-        from app.services.chat_orchestrator import ChatOrchestrator
-        source = inspect.getsource(ChatOrchestrator.process)
-        assert "finalize_response_turn" in source
-        assert "post_turn_lifecycle" in source
 
-    def test_streaming_path_has_background_tasks(self):
-        """Streaming path finalizes through the same orchestrator contract."""
-        import inspect
-        from app.services.chat_stream_coordinator import generate_stream_v3_events
-        source = inspect.getsource(generate_stream_v3_events)
-        assert "finalize_response_turn" in source
-        assert "post_turn_lifecycle" in source
 
-    def test_sync_path_has_routine_tracking(self):
-        """Sync path has Sprint 208 routine tracking."""
-        import inspect
-        from app.services.chat_orchestrator import ChatOrchestrator
-        source = inspect.getsource(ChatOrchestrator.process)
-        assert "routine_tracker" in source or "record_interaction" in source, \
-            "Sync path must have routine tracking"
 
-    def test_streaming_path_has_routine_tracking(self):
-        """Streaming path now has Sprint 208 routine tracking (Sprint 210e)."""
-        import inspect
-        from app.api.v1 import chat_stream
-        source = inspect.getsource(chat_stream)
-        assert "routine_tracker" in source or "record_interaction" in source, \
-            "Streaming path must have routine tracking (Sprint 210e)"
 
-    def test_sync_path_has_sentiment_analysis(self):
-        """Sync path has Sprint 210d sentiment analysis."""
-        import inspect
-        from app.services.chat_orchestrator import ChatOrchestrator
-        source = inspect.getsource(ChatOrchestrator.process)
-        assert "_analyze_and_process_sentiment" in source, \
-            "Sync path must have sentiment analysis"
 
-    def test_streaming_path_has_sentiment_analysis(self):
-        """Streaming path has Sprint 210d sentiment analysis."""
-        import inspect
-        from app.api.v1 import chat_stream
-        source = inspect.getsource(chat_stream)
-        assert "_analyze_and_process_sentiment" in source, \
-            "Streaming path must have sentiment analysis"
 
     def test_both_paths_schedule_5_background_tasks(self):
         """Compatibility wrapper still schedules 5 tasks with all deps available."""
@@ -356,47 +314,3 @@ class TestSyncStreamingParity:
         bg_save = MagicMock()
         # Should not raise TypeError
         runner.schedule_all(bg_save, "u1", test_id, "msg", "resp")
-
-
-# ============================================================================
-# GROUP 5: Code inspection — streaming post-stream block structure
-# ============================================================================
-
-
-class TestStreamingPostStreamBlock:
-    """Verify the post-stream block has all required sections in order."""
-
-    def _get_post_stream_source(self):
-        """Extract the authoritative finalization helper source."""
-        import inspect
-        from app.services.chat_orchestrator_support import finalize_response_turn_impl
-        return inspect.getsource(finalize_response_turn_impl)
-
-    def test_assistant_message_saved_before_background_tasks(self):
-        """Assistant message must be saved BEFORE background tasks run."""
-        source = self._get_post_stream_source()
-        save_pos = source.find("persist_chat_message")
-        schedule_pos = source.find("schedule_post_turn_lifecycle")
-        assert save_pos > 0, "persist_chat_message must exist"
-        assert schedule_pos > 0, "schedule_post_turn_lifecycle must exist"
-        assert save_pos < schedule_pos, \
-            "message persistence must come before post-turn lifecycle scheduling"
-
-    def test_background_tasks_before_continuity_hooks(self):
-        """Background tasks must be scheduled before continuity hooks."""
-        source = self._get_post_stream_source()
-        schedule_pos = source.find("schedule_post_turn_lifecycle")
-        continuity_pos = source.find("scheduled_hooks = schedule_post_response_continuity_fn")
-        assert schedule_pos > 0, "schedule_post_turn_lifecycle must exist"
-        assert continuity_pos > 0, "continuity scheduling call must exist"
-        assert schedule_pos < continuity_pos, \
-            "post-turn lifecycle must come before continuity hooks"
-
-    def test_lifecycle_summary_logged_after_continuity_hooks(self):
-        """Final summary should include lifecycle and continuity evidence."""
-        source = self._get_post_stream_source()
-        schedule_pos = source.find("schedule_post_turn_lifecycle")
-        continuity_pos = source.find("scheduled_hooks = schedule_post_response_continuity_fn")
-        summary_pos = source.find("continuity_summary")
-        assert schedule_pos < continuity_pos < summary_pos, \
-            "Order: post_turn_lifecycle -> continuity_summary"

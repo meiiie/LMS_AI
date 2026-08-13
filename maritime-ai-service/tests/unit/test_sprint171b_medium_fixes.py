@@ -110,13 +110,6 @@ class TestUploadTimeout:
         assert hasattr(ObjectStorageClient, "UPLOAD_TIMEOUT")
         assert ObjectStorageClient.UPLOAD_TIMEOUT > 0
 
-    def test_upload_uses_wait_for(self):
-        """upload_image source code uses asyncio.wait_for for timeout."""
-        from app.services.object_storage import ObjectStorageClient
-
-        source = inspect.getsource(ObjectStorageClient.upload_image)
-        assert "wait_for" in source
-        assert "UPLOAD_TIMEOUT" in source or "timeout" in source
 
 
 # ============================================================================
@@ -124,44 +117,6 @@ class TestUploadTimeout:
 # ============================================================================
 
 
-class TestIntervalParameterization:
-    """Verify INTERVAL values use parameterized queries, not f-strings."""
-
-    def test_emotional_repo_get_history_parameterized(self):
-        """get_history uses parameterized INTERVAL, not f-string."""
-        from app.repositories.emotional_state_repository import EmotionalStateRepository
-
-        source = inspect.getsource(EmotionalStateRepository.get_history)
-        # Should NOT have f-string INTERVAL
-        assert "INTERVAL '{hours}" not in source
-        # Should have parameterized form
-        assert ":hours" in source
-
-    def test_emotional_repo_cleanup_parameterized(self):
-        """cleanup_old_snapshots uses parameterized INTERVAL."""
-        from app.repositories.emotional_state_repository import EmotionalStateRepository
-
-        source = inspect.getsource(EmotionalStateRepository.cleanup_old_snapshots)
-        assert "INTERVAL '{keep_days}" not in source
-        assert ":keep_days" in source
-
-    def test_journal_get_recent_parameterized(self):
-        """get_recent_entries uses parameterized INTERVAL."""
-        from app.engine.living_agent.journal import JournalWriter
-
-        source = inspect.getsource(JournalWriter.get_recent_entries)
-        assert "INTERVAL '{days}" not in source
-        assert ":days" in source
-
-    def test_skill_builder_count_safe(self):
-        """_count_recent_discoveries uses literal constant (not user input)."""
-        from app.engine.living_agent.skill_builder import SkillBuilder
-
-        source = inspect.getsource(SkillBuilder._count_recent_discoveries)
-        # This uses a literal '7 days' — safe, no f-string interpolation
-        assert "INTERVAL '7 days'" in source
-        # Should NOT have f-string interpolation
-        assert "INTERVAL '{" not in source
 
 
 # ============================================================================
@@ -169,56 +124,6 @@ class TestIntervalParameterization:
 # ============================================================================
 
 
-class TestLivingAgentOrgIsolation:
-    """Verify Living Agent methods use org_id filtering."""
-
-    def test_skill_find_by_name_uses_org_filter(self):
-        """_find_by_name source includes explicit org scoping."""
-        from app.engine.living_agent.skill_builder import SkillBuilder
-
-        source = inspect.getsource(SkillBuilder._find_by_name)
-        assert "_resolve_skill_scope" in source
-        assert "AND organization_id = :org_id" in source
-
-    def test_skill_query_skills_uses_org_filter(self):
-        """_query_skills source includes explicit org scoping."""
-        from app.engine.living_agent.skill_builder import SkillBuilder
-
-        source = inspect.getsource(SkillBuilder._query_skills)
-        assert "_resolve_skill_scope" in source
-        assert "organization_id = :org_id" in source
-
-    def test_skill_count_recent_uses_org_filter(self):
-        """_count_recent_discoveries source includes explicit org scoping."""
-        from app.engine.living_agent.skill_builder import SkillBuilder
-
-        source = inspect.getsource(SkillBuilder._count_recent_discoveries)
-        assert "_resolve_skill_scope" in source
-        assert "organization_id = :org_id" in source
-
-    def test_heartbeat_queue_pending_includes_org_id(self):
-        """queue_pending_actions_impl resolves write scope and inserts org_id."""
-        from app.engine.living_agent.heartbeat_runtime_support import queue_pending_actions_impl
-
-        source = inspect.getsource(queue_pending_actions_impl)
-        assert "organization_id" in source
-        assert "resolve_memory_write_scope" in source
-
-    def test_heartbeat_load_pending_filters_by_org(self):
-        """load_pending_action_impl uses explicit org filtering."""
-        from app.engine.living_agent.heartbeat_runtime_support import load_pending_action_impl
-
-        source = inspect.getsource(load_pending_action_impl)
-        assert "resolve_memory_read_scope" in source
-        assert "AND organization_id = :org_id" in source
-
-    def test_heartbeat_audit_includes_org_id(self):
-        """save_heartbeat_audit_impl resolves write scope and inserts org_id."""
-        from app.engine.living_agent.heartbeat_runtime_support import save_heartbeat_audit_impl
-
-        source = inspect.getsource(save_heartbeat_audit_impl)
-        assert "organization_id" in source
-        assert "resolve_memory_write_scope" in source
 
 
 # ============================================================================

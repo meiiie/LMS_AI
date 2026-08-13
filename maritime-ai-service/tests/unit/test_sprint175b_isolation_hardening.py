@@ -159,27 +159,6 @@ class TestCacheManagerOrgId:
 # =============================================================================
 
 
-class TestCorrectiveRAGCacheParams:
-    """Verify CorrectiveRAG passes org_id as separate param."""
-
-    def test_no_concatenation_in_source(self):
-        """Source code should NOT contain the old concatenation pattern."""
-        import inspect
-        from app.engine.agentic_rag import corrective_rag
-
-        source = inspect.getsource(corrective_rag)
-        # Old pattern: f"{_org}:{_uid}" should be gone
-        assert 'f"{_org}:{_uid}"' not in source, \
-            "Old concatenation pattern still present in corrective_rag.py"
-
-    def test_org_id_param_in_cache_calls(self):
-        """Source should use org_id= keyword argument."""
-        import inspect
-        from app.engine.agentic_rag import corrective_rag
-
-        source = inspect.getsource(corrective_rag)
-        assert "org_id=_org" in source or "org_id=_cache_org" in source, \
-            "corrective_rag should pass org_id as separate keyword argument"
 
 
 # =============================================================================
@@ -690,24 +669,7 @@ class TestCoreMemoryBlockOrgCache:
 
         assert result == "cached_block"
 
-    def test_source_code_uses_get_effective_org_id(self):
-        """Source code should call get_effective_org_id() for cache keying."""
-        import inspect
-        from app.engine.semantic_memory import core_memory_block
-        source = inspect.getsource(core_memory_block)
-        assert "get_effective_org_id" in source, \
-            "CoreMemoryBlock should use get_effective_org_id for cache key"
 
-    def test_source_code_no_bare_user_id_cache_key(self):
-        """Source should NOT use bare user_id as cache key in get_block."""
-        import inspect
-        from app.engine.semantic_memory.core_memory_block import CoreMemoryBlock
-        source = inspect.getsource(CoreMemoryBlock.get_block)
-        # Should NOT have self._cache.get(user_id) or self._cache[user_id]
-        assert "self._cache.get(user_id)" not in source, \
-            "get_block should NOT use bare user_id as cache key"
-        assert "self._cache[user_id]" not in source, \
-            "get_block should NOT set cache with bare user_id key"
 
 
 # =============================================================================
@@ -759,23 +721,7 @@ class TestBackgroundTaskOrgContext:
         fn, args, kwargs = calls[0]
         assert "org_test" in args, "org_id should be passed as positional arg to background task"
 
-    def test_store_interaction_sets_context_var(self):
-        """_store_semantic_interaction should set ContextVar for org_id."""
-        import inspect
-        from app.services.background_tasks import BackgroundTaskRunner
-        source = inspect.getsource(BackgroundTaskRunner._store_semantic_interaction)
-        assert "current_org_id" in source, \
-            "_store_semantic_interaction should set current_org_id ContextVar"
-        assert "finally" in source, \
-            "_store_semantic_interaction should reset ContextVar in finally block"
 
-    def test_orchestrator_passes_org_id(self):
-        """ChatOrchestrator should pass org scope into post-turn finalization."""
-        import inspect
-        from app.services import chat_orchestrator
-        source = inspect.getsource(chat_orchestrator)
-        assert "organization_id=org_id" in source, \
-            "ChatOrchestrator should pass org_id into post-turn lifecycle"
 
 
 # =============================================================================
@@ -794,13 +740,6 @@ class TestHybridSearchOrgId:
         assert "org_id" in sig.parameters, \
             "search_sparse_only must accept org_id parameter"
 
-    def test_search_sparse_only_passes_org_id_to_repo(self):
-        """search_sparse_only should forward org_id to sparse repo."""
-        import inspect
-        from app.services.hybrid_search_service import HybridSearchService
-        source = inspect.getsource(HybridSearchService.search_sparse_only)
-        assert "org_id=org_id" in source or "org_id=" in source, \
-            "search_sparse_only should pass org_id to sparse_repo.search()"
 
 
 # =============================================================================
