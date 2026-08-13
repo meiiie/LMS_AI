@@ -1,8 +1,7 @@
 /**
- * Neko Chill transcript (T303, FR-005) — renders the session's messages from
- * the ContentBlock vocabulary using the shared markdown stack. Deliberately a
- * thin list; virtualization for very long transcripts is a follow-up noted in
- * the spec's edge cases.
+ * Neko Chill transcript — waku-fidelity styling (#893, task #12): 720px
+ * centered column, quiet thinking rail, dot-status tool rows, shared
+ * MarkdownRenderer for answers. Virtualization: follow-up #891.
  */
 import { useEffect, useRef } from "react";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
@@ -14,33 +13,30 @@ function Block({ block }: { block: ContentBlock }) {
   switch (block.type) {
     case "thinking":
       return (
-        <div className="border-l-2 border-border pl-3 my-2 text-sm text-text-tertiary whitespace-pre-wrap">
+        <div className="my-2 whitespace-pre-wrap border-l-2 border-[var(--nk-border-strong)] pl-3 text-[12.5px] leading-[19px] text-[var(--nk-text-3)]">
           {block.content}
         </div>
       );
     case "tool_execution":
       return (
-        <div className="flex items-center gap-2 my-1.5 text-sm" data-testid="tool-strip">
+        <div className="my-1.5 flex items-center gap-2 text-[12.5px]" data-testid="tool-strip">
           <span
             className={
               block.status === "pending"
-                ? "inline-block h-2 w-2 rounded-full bg-amber-400 animate-pulse"
-                : "inline-block h-2 w-2 rounded-full bg-green-500"
+                ? "inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--nk-warning)] animate-pulse"
+                : "inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--nk-success)]"
             }
           />
-          <span className="font-medium">{block.tool.name}</span>
+          <span className="font-medium text-[var(--nk-text-2)]">{block.tool.name}</span>
           {block.tool.result ? (
-            <span className="text-text-tertiary truncate max-w-[24rem]">
-              — {block.tool.result}
-            </span>
+            <span className="truncate text-[var(--nk-text-3)]">— {block.tool.result}</span>
           ) : null}
         </div>
       );
     case "answer":
-      return <MarkdownRenderer content={block.content} className="my-2" />;
+      return <MarkdownRenderer content={block.content} className="my-2 text-[13.5px]" />;
     default:
-      // Cloud-only block kinds (visual, artifact, …) never arrive from the
-      // local drivers in v0.
+      // Cloud-only block kinds never arrive from local drivers in v0.
       return null;
   }
 }
@@ -56,46 +52,48 @@ export function NekoTranscript({ session, onResolvePermission }: NekoTranscriptP
   const lastMessage = session.messages[messageCount - 1];
   const lastBlockCount = lastMessage?.blocks?.length ?? 0;
 
-  // Follow the stream (v0: always stick to bottom while content grows).
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messageCount, lastBlockCount, session.pendingPermission]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-4" data-testid="neko-transcript">
-      {session.messages.map((message) =>
-        message.role === "user" ? (
-          <div key={message.id} className="flex justify-end my-3">
-            <div className="max-w-[80%] rounded-2xl bg-surface-secondary px-4 py-2.5 text-sm whitespace-pre-wrap">
-              {message.text}
+    <div className="min-h-0 flex-1 overflow-y-auto" data-testid="neko-transcript">
+      <div className="mx-auto w-full max-w-[720px] px-6 py-4">
+        {session.messages.map((message) =>
+          message.role === "user" ? (
+            <div key={message.id} className="my-3 flex justify-end">
+              <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl bg-[var(--nk-raised)] px-3.5 py-2 text-[13.5px] leading-[20px] text-[var(--nk-text)]">
+                {message.text}
+              </div>
             </div>
-          </div>
-        ) : (
-          <div key={message.id} className="my-3">
-            {(message.blocks ?? []).map((block) => (
-              <Block key={block.id} block={block} />
-            ))}
-          </div>
-        ),
-      )}
-      {session.pendingPermission ? (
-        <PermissionCard
-          request={session.pendingPermission}
-          onResolve={onResolvePermission}
-        />
-      ) : null}
-      {session.status === "streaming" && !session.pendingPermission ? (
-        <p className="text-sm text-text-tertiary animate-pulse my-2">
-          {session.agentName} đang làm việc…
-        </p>
-      ) : null}
-      {session.status === "error" ? (
-        <p className="text-sm text-red-500 my-2">{session.statusDetail}</p>
-      ) : null}
-      {session.status === "exited" && session.statusDetail ? (
-        <p className="text-sm text-text-tertiary my-2">{session.statusDetail}</p>
-      ) : null}
-      <div ref={bottomRef} />
+          ) : (
+            <div key={message.id} className="my-3">
+              {(message.blocks ?? []).map((block) => (
+                <Block key={block.id} block={block} />
+              ))}
+            </div>
+          ),
+        )}
+        {session.pendingPermission ? (
+          <PermissionCard
+            request={session.pendingPermission}
+            onResolve={onResolvePermission}
+          />
+        ) : null}
+        {session.status === "streaming" && !session.pendingPermission ? (
+          <p className="my-2 flex items-center gap-2 text-[12.5px] text-[var(--nk-text-3)]">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--nk-accent)] animate-pulse" />
+            {session.agentName} đang làm việc…
+          </p>
+        ) : null}
+        {session.status === "error" ? (
+          <p className="my-2 text-[12.5px] text-[var(--nk-danger)]">{session.statusDetail}</p>
+        ) : null}
+        {session.status === "exited" && session.statusDetail ? (
+          <p className="my-2 text-[12.5px] text-[var(--nk-text-3)]">{session.statusDetail}</p>
+        ) : null}
+        <div ref={bottomRef} />
+      </div>
     </div>
   );
 }
