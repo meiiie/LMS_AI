@@ -12,6 +12,7 @@ import { useAuthStore } from "@/stores/auth-store";
 import type { AuthUser } from "@/stores/auth-store";
 import type { AppSettings } from "@/api/types";
 import { WiiiAvatar } from "@/components/common/WiiiAvatar";
+import { useModeStore } from "@/neko-chill/stores/mode-store";
 import {
   buildAuthUserFromPayload,
   toCompatibilitySettingsRole,
@@ -586,6 +587,16 @@ export function LoginScreen() {
             </div>
           </div>
         )}
+
+        {/* Desktop-first escape hatch (#893): the login wall must never be a
+            dead end — Neko Chill works without any account. */}
+        <button
+          onClick={() => void useModeStore.getState().setMode("neko-chill")}
+          className="mt-4 text-sm text-text-secondary hover:text-text-primary underline underline-offset-4 transition-colors"
+          data-testid="login-neko-chill-escape"
+        >
+          Dùng không cần tài khoản — mở Neko Chill
+        </button>
 
         {/* Developer mode toggle */}
         {!showDevMode ? (
