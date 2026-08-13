@@ -50,11 +50,47 @@ export interface PermissionRequest {
   options: PermissionOption[];
 }
 
+/** One value in a driver-owned select control. */
+export interface DriverConfigChoice {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+/**
+ * Provider-neutral session control. ACP stable config options, legacy ACP
+ * modes, and Gemini's legacy model picker all normalize to this shape.
+ */
+export interface DriverConfigOption {
+  id: string;
+  label: string;
+  description?: string;
+  category: "mode" | "model" | "model_config" | "thought_level" | "other";
+  kind: "select" | "boolean";
+  currentValue: string | boolean;
+  choices?: DriverConfigChoice[];
+}
+
+/** Slash command reported by the active agent. */
+export interface DriverCommand {
+  name: string;
+  description: string;
+  inputHint?: string;
+}
+
 /**
  * Everything a driver may emit. `sessionId` scopes every event so concurrent
  * sessions can never cross streams (spec edge case).
  */
 export type DriverEvent =
+  | { type: "session-controls"; sessionId: string; controls: DriverConfigOption[] }
+  | { type: "available-commands"; sessionId: string; commands: DriverCommand[] }
+  | {
+      type: "session-info";
+      sessionId: string;
+      title?: string | null;
+      updatedAt?: string | null;
+    }
   | { type: "turn-started"; sessionId: string }
   | { type: "reasoning-delta"; sessionId: string; text: string }
   | { type: "answer-delta"; sessionId: string; text: string }
@@ -90,6 +126,8 @@ export interface Driver {
   cancel(): Promise<void>;
   /** Deliver the user's permission decision (FR-006). */
   resolvePermission(decision: PermissionDecision): Promise<void>;
+  /** Change one capability-backed session option. */
+  setConfigOption(optionId: string, value: string | boolean): Promise<void>;
   /** Terminate transport + process. Idempotent. */
   dispose(): Promise<void>;
 }

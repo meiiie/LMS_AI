@@ -18,6 +18,7 @@ const AGENT: DetectedAgent = {
   version: "0.24.0",
   found: true,
 };
+const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
 class FakeDriver implements Driver {
   readonly kind = "acp" as const;
@@ -25,6 +26,7 @@ class FakeDriver implements Driver {
   cancelled = 0;
   disposed = 0;
   decisions: PermissionDecision[] = [];
+  configChanges: Array<{ optionId: string; value: string | boolean }> = [];
   constructor(
     readonly sessionId: string,
     readonly emit: (event: DriverEvent) => void,
@@ -39,19 +41,24 @@ class FakeDriver implements Driver {
   async resolvePermission(decision: PermissionDecision): Promise<void> {
     this.decisions.push(decision);
   }
+  async setConfigOption(optionId: string, value: string | boolean): Promise<void> {
+    this.configChanges.push({ optionId, value });
+  }
   async dispose(): Promise<void> {
     this.disposed += 1;
   }
 }
 
 let driver: FakeDriver;
+let launchConfig: { workspace: typeof WORKSPACE; profileId?: string } | undefined;
 
 async function setup(): Promise<string> {
-  _setDriverFactoryForTests(async (agent, sessionId, onEvent) => {
+  _setDriverFactoryForTests(async (agent, sessionId, launch, onEvent) => {
+    launchConfig = launch;
     driver = new FakeDriver(sessionId, onEvent);
     return driver;
   });
-  return useNekoSessionStore.getState().createSession(AGENT);
+  return useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
 }
 
 const emit = (event: DriverEvent) => useNekoSessionStore.getState().handleEvent(event);
@@ -60,6 +67,7 @@ const session = (id: string) => useNekoSessionStore.getState().sessions[id];
 describe("neko-session-store", () => {
   beforeEach(() => {
     useNekoSessionStore.setState({ sessions: {}, activeSessionId: null });
+    launchConfig = undefined;
     _setDriverFactoryForTests(undefined);
   });
 
@@ -67,11 +75,80 @@ describe("neko-session-store", () => {
     const id = await setup();
     expect(session(id).status).toBe("idle");
     expect(useNekoSessionStore.getState().activeSessionId).toBe(id);
+    expect(session(id).workspace).toEqual(WORKSPACE);
+    expect(launchConfig?.workspace).toEqual(WORKSPACE);
 
     await useNekoSessionStore.getState().sendPrompt("Xin chào");
     expect(driver.prompts).toEqual(["Xin chào"]);
     expect(session(id).messages[0]).toMatchObject({ role: "user", text: "Xin chào" });
     expect(session(id).title).toBe("Xin chào");
+  });
+
+  it("refuses to create a session without an explicit workspace", async () => {
+    await expect(
+      useNekoSessionStore.getState().createSession(AGENT, undefined as never),
+    ).rejects.toThrow("thư mục dự án tuyệt đối");
+    await expect(
+      useNekoSessionStore.getState().createSession(AGENT, {
+        path: "relative/project",
+        name: "project",
+      }),
+    ).rejects.toThrow("thư mục dự án tuyệt đối");
+    expect(Object.keys(useNekoSessionStore.getState().sessions)).toHaveLength(0);
+  });
+
+  it("stores controls, commands, session info, and routes a control change", async () => {
+    const id = await setup();
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [
+        {
+          id: "mode",
+          label: "Chế độ",
+          category: "mode",
+          kind: "select",
+          currentValue: "default",
+          choices: [{ value: "default", label: "Default" }, { value: "plan", label: "Plan" }],
+        },
+      ],
+    });
+    emit({
+      type: "available-commands",
+      sessionId: id,
+      commands: [{ name: "memory show", description: "Show memory" }],
+    });
+    emit({
+      type: "session-info",
+      sessionId: id,
+      title: "Tiêu đề từ agent",
+      updatedAt: "2026-08-13T12:00:00.000Z",
+    });
+
+    expect(session(id)).toMatchObject({
+      title: "Tiêu đề từ agent",
+      controls: [{ id: "mode", currentValue: "default" }],
+      commands: [{ name: "memory show" }],
+    });
+    expect(session(id).updatedAt).toBeGreaterThanOrEqual(
+      Date.parse("2026-08-13T12:00:00.000Z"),
+    );
+    await useNekoSessionStore.getState().setConfigOption("mode", "plan");
+    expect(driver.configChanges).toEqual([{ optionId: "mode", value: "plan" }]);
+    expect(session(id).pendingControlId).toBeNull();
+  });
+
+  it("attaches a workspace to a legacy transcript and restarts on the next prompt", async () => {
+    const id = await setup();
+    useNekoSessionStore.setState((state) => {
+      state.sessions[id].workspace = null;
+      state.sessions[id].messages.push({ id: "old", role: "user", text: "old turn" });
+    });
+
+    const attached = { path: "C:/tmp/legacy", name: "legacy" };
+    await useNekoSessionStore.getState().attachWorkspace(id, attached);
+    expect(driver.disposed).toBe(1);
+    expect(session(id)).toMatchObject({ workspace: attached, status: "exited" });
   });
 
   it("streams interleaved thinking/answer/tool blocks in ContentBlock vocabulary", async () => {
@@ -162,7 +239,7 @@ describe("neko-session-store", () => {
     _setDriverFactoryForTests(async () => {
       throw new Error("spawn thất bại");
     });
-    const id = await useNekoSessionStore.getState().createSession(AGENT);
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     expect(session(id).status).toBe("error");
     expect(session(id).statusDetail).toContain("spawn thất bại");
     vi.restoreAllMocks();
