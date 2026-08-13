@@ -54,7 +54,7 @@
       build, Rust tests/check, `git diff --check`, and self-review the diff.
 - [x] T402 Run Neko Core + Gemini native acceptance, record selected cwd and
       capability requests, and capture wide/narrow screenshots.
-- [ ] T403 Update feature/task status and `docs/STATE.md`; open a linked PR
+- [x] T403 Update feature/task status and `docs/STATE.md`; open a linked PR
       with exact gates, risk, rollback, research/license note, and evidence.
 - [ ] T404 Resolve review/CI findings, merge only when required gates are
       green, rebuild/install the native app, and verify the installed result.
