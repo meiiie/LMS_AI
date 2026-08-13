@@ -12,6 +12,7 @@ import { useAuthStore } from "@/stores/auth-store";
 import type { AuthUser } from "@/stores/auth-store";
 import type { AppSettings } from "@/api/types";
 import { WiiiAvatar } from "@/components/common/WiiiAvatar";
+import { TitleBar } from "@/components/layout/TitleBar";
 import { useModeStore } from "@/neko-chill/stores/mode-store";
 import {
   buildAuthUserFromPayload,
@@ -422,13 +423,17 @@ export function LoginScreen() {
 
   return (
     <div
-      className="flex flex-col items-center h-screen pt-[10vh]"
+      className="flex flex-col h-screen"
       style={{
         background:
           "linear-gradient(180deg, var(--surface) 0%, var(--surface-secondary) 100%)",
       }}
       aria-busy={isLoading}
     >
+      {/* Frameless window: without this the login surface has no close/
+          minimize/drag at all (live smoke finding, 2026-08-13). */}
+      <TitleBar minimal />
+      <div className="flex-1 overflow-y-auto flex flex-col items-center pt-[10vh]">
       <div className="w-full max-w-[360px] mx-auto flex flex-col items-center px-6">
         {/* Wiii avatar */}
         <div className="mb-5">
@@ -653,6 +658,7 @@ export function LoginScreen() {
           </p>
           <p className="text-[10px] text-text-quaternary">by The Wiii Lab</p>
         </div>
+      </div>
       </div>
     </div>
   );

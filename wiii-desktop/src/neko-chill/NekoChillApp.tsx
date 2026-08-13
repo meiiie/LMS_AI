@@ -7,6 +7,7 @@
  * session) or the streaming chat surface.
  */
 import { useEffect } from "react";
+import { TitleBar } from "@/components/layout/TitleBar";
 import { useModeStore } from "./stores/mode-store";
 import { useNekoAgentStore, type DetectedAgent } from "./stores/neko-agent-store";
 import { startIdleReaper, useNekoSessionStore } from "./stores/neko-session-store";
@@ -151,6 +152,9 @@ export default function NekoChillApp() {
 
   return (
     <div className="flex flex-col h-screen bg-surface text-text-primary">
+      {/* Frameless window: standalone surfaces must carry their own
+          window controls + drag region (live smoke finding, 2026-08-13). */}
+      <TitleBar minimal />
       <header className="flex items-center justify-between px-6 py-4 border-b border-border">
         <div>
           <h1 className="text-lg font-semibold">Neko Chill</h1>

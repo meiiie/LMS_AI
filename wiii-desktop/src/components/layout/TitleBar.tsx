@@ -11,7 +11,13 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-export function TitleBar() {
+interface TitleBarProps {
+  /** Hide cloud-shell controls (sidebar toggle) on standalone surfaces
+   *  (login, Neko Chill) — window controls + drag region only. */
+  minimal?: boolean;
+}
+
+export function TitleBar({ minimal = false }: TitleBarProps) {
   const { sidebarOpen, toggleSidebar } = useUIStore();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [appWindow, setAppWindow] = useState<any>(null);
@@ -38,17 +44,19 @@ export function TitleBar() {
     >
       {/* Left: Toggle sidebar + App name */}
       <div className="flex items-center gap-2 px-3">
-        <button
-          onClick={toggleSidebar}
-          className="p-1 rounded hover:bg-surface-tertiary transition-colors"
-          title={sidebarOpen ? "Ẩn sidebar" : "Hiện sidebar"}
-        >
-          {sidebarOpen ? (
-            <PanelLeftClose size={16} className="text-text-secondary" />
-          ) : (
-            <PanelLeft size={16} className="text-text-secondary" />
-          )}
-        </button>
+        {!minimal ? (
+          <button
+            onClick={toggleSidebar}
+            className="p-1 rounded hover:bg-surface-tertiary transition-colors"
+            title={sidebarOpen ? "Ẩn sidebar" : "Hiện sidebar"}
+          >
+            {sidebarOpen ? (
+              <PanelLeftClose size={16} className="text-text-secondary" />
+            ) : (
+              <PanelLeft size={16} className="text-text-secondary" />
+            )}
+          </button>
+        ) : null}
         <span
           className="text-sm font-semibold text-text-secondary"
           data-tauri-drag-region
