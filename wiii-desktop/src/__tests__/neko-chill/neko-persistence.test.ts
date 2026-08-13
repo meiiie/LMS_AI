@@ -37,6 +37,7 @@ const AGENT: DetectedAgent = {
   version: "0.24.0",
   found: true,
 };
+const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
 class FakeDriver implements Driver {
   readonly kind = "acp" as const;
@@ -51,13 +52,14 @@ class FakeDriver implements Driver {
   }
   async cancel(): Promise<void> {}
   async resolvePermission(_: PermissionDecision): Promise<void> {}
+  async setConfigOption(): Promise<void> {}
   async dispose(): Promise<void> {}
 }
 
 let spawned: FakeDriver[] = [];
 
 function useFakeFactory(): void {
-  _setDriverFactoryForTests(async (agent, sessionId, onEvent) => {
+  _setDriverFactoryForTests(async (agent, sessionId, _launch, onEvent) => {
     const driver = new FakeDriver(sessionId, onEvent);
     spawned.push(driver);
     return driver;
@@ -85,7 +87,7 @@ describe("neko-chill persistence", () => {
   });
 
   it("persists a streamed session and restores it after a restart", async () => {
-    const id = await useNekoSessionStore.getState().createSession(AGENT);
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     await useNekoSessionStore.getState().sendPrompt("Xin chào neko");
     emit({ type: "turn-started", sessionId: id });
     emit({ type: "answer-delta", sessionId: id, text: "Meo! " });
@@ -101,16 +103,47 @@ describe("neko-chill persistence", () => {
     expect(restored).toBeDefined();
     expect(restored.status).toBe("exited");
     expect(restored.title).toBe("Xin chào neko");
+    expect(restored.workspace).toEqual(WORKSPACE);
     expect(restored.messages).toHaveLength(2);
     expect(restored.messages[0]).toMatchObject({ role: "user", text: "Xin chào neko" });
     expect(restored.messages[1].blocks?.[0]).toMatchObject({
       type: "answer",
       content: "Meo! Chào bạn.",
     });
+    expect(storage.get("neko-chill-sessions.json:index")).toMatchObject([
+      { v: 2, workspace: WORKSPACE },
+    ]);
+  });
+
+  it("hydrates a v1 index as a visible legacy session without losing transcript", async () => {
+    storage.set("neko-chill-sessions.json:index", [
+      {
+        id: "legacy-1",
+        agentId: "neko",
+        agentName: "Neko Core",
+        title: "Phiên cũ",
+        createdAt: 100,
+        updatedAt: 200,
+      },
+    ]);
+    storage.set("neko-chill-sessions.json:session:legacy-1", {
+      v: 1,
+      messages: [{ id: "m1", role: "user", text: "không được mất" }],
+    });
+
+    await useNekoSessionStore.getState().hydrate();
+    expect(useNekoSessionStore.getState().sessions["legacy-1"]).toMatchObject({
+      workspace: null,
+      launchProfile: null,
+      controls: [],
+      commands: [],
+      pendingControlId: null,
+      messages: [{ text: "không được mất" }],
+    });
   });
 
   it("hydrate is idempotent and never overwrites live sessions", async () => {
-    const id = await useNekoSessionStore.getState().createSession(AGENT);
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     await useNekoSessionStore.getState().sendPrompt("bản sống");
     await flushDebounce();
 
@@ -123,7 +156,7 @@ describe("neko-chill persistence", () => {
   });
 
   it("a restored session respawns a fresh agent process on the next prompt", async () => {
-    const id = await useNekoSessionStore.getState().createSession(AGENT);
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     await useNekoSessionStore.getState().sendPrompt("lần đầu");
     await flushDebounce();
     expect(spawned).toHaveLength(1);
@@ -142,7 +175,7 @@ describe("neko-chill persistence", () => {
   });
 
   it("deleteSession removes state, index, and transcript", async () => {
-    const id = await useNekoSessionStore.getState().createSession(AGENT);
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     await useNekoSessionStore.getState().sendPrompt("sẽ bị xoá");
     await flushDebounce();
     expect(storage.get("neko-chill-sessions.json:index")).toHaveLength(1);
@@ -154,7 +187,7 @@ describe("neko-chill persistence", () => {
   });
 
   it("closeSession keeps the transcript and persists immediately", async () => {
-    const id = await useNekoSessionStore.getState().createSession(AGENT);
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     await useNekoSessionStore.getState().sendPrompt("giữ lại nhé");
     await useNekoSessionStore.getState().closeSession(id);
 

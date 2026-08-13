@@ -10,6 +10,7 @@
 
 .nk-root {
   --nk-canvas: #f6f5f6;
+  --nk-sidebar: #f2f1f2;
   --nk-raised: #ececec;
   --nk-composer: #ffffff;
   --nk-inset: #e6e6e6;
@@ -18,6 +19,7 @@
 
   --nk-border: rgba(28, 32, 41, 0.08);
   --nk-border-strong: rgba(28, 32, 41, 0.15);
+  --nk-focus-soft: rgba(80, 92, 118, 0.12);
 
   --nk-text: #242424;
   --nk-text-2: #666666;
@@ -38,6 +40,7 @@
 
 .dark .nk-root {
   --nk-canvas: #1a1a1a;
+  --nk-sidebar: #1d1d1d;
   --nk-raised: #232323;
   --nk-composer: #212121;
   --nk-inset: #151515;
@@ -46,6 +49,7 @@
 
   --nk-border: rgba(229, 233, 240, 0.07);
   --nk-border-strong: rgba(229, 233, 240, 0.14);
+  --nk-focus-soft: rgba(170, 184, 215, 0.12);
 
   --nk-text: #e2e2e2;
   --nk-text-2: #a3a3a3;

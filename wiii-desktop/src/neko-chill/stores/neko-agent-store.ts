@@ -13,6 +13,31 @@ export interface DetectedAgent {
   found: boolean;
 }
 
+export interface AgentLaunchProfile {
+  id: string;
+  provider: string;
+  model: string | null;
+  active: boolean;
+}
+
+/** Read-only, workspace-aware Neko profile discovery. Other agents return none. */
+export async function loadAgentProfiles(
+  agent: DetectedAgent,
+  workspacePath: string,
+): Promise<AgentLaunchProfile[]> {
+  if (agent.id !== "neko" || !agent.binary || !workspacePath) return [];
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const profiles = await invoke<AgentLaunchProfile[]>("neko_agent_profiles", {
+      program: agent.binary,
+      cwd: workspacePath,
+    });
+    return Array.isArray(profiles) ? profiles : [];
+  } catch {
+    return [];
+  }
+}
+
 interface NekoAgentState {
   agents: DetectedAgent[];
   isLoading: boolean;

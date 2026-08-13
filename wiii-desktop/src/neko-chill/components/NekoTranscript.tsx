@@ -1,5 +1,5 @@
 /**
- * Neko Chill transcript — waku-fidelity styling (#893, task #12): 720px
+ * Neko Chill transcript — workspace-shell styling (#904): 780px
  * centered column, quiet thinking rail, dot-status tool rows, shared
  * MarkdownRenderer for answers. Virtualization: follow-up #891.
  */
@@ -9,12 +9,27 @@ import type { ContentBlock } from "@/api/types";
 import type { NekoSession } from "../stores/neko-session-store";
 import { PermissionCard } from "./PermissionCard";
 
+/** Remove one matching outer emphasis pair without interpreting reasoning as HTML. */
+export function formatReasoningLabel(content: string): string {
+  const trimmed = content.trim();
+  for (const marker of ["**", "__", "*", "_"]) {
+    if (
+      trimmed.length > marker.length * 2 &&
+      trimmed.startsWith(marker) &&
+      trimmed.endsWith(marker)
+    ) {
+      return trimmed.slice(marker.length, -marker.length).trim();
+    }
+  }
+  return trimmed;
+}
+
 function Block({ block }: { block: ContentBlock }) {
   switch (block.type) {
     case "thinking":
       return (
         <div className="my-2 whitespace-pre-wrap border-l-2 border-[var(--nk-border-strong)] pl-3 text-[12.5px] leading-[19px] text-[var(--nk-text-3)]">
-          {block.content}
+          {formatReasoningLabel(block.content)}
         </div>
       );
     case "tool_execution":
@@ -53,12 +68,14 @@ export function NekoTranscript({ session, onResolvePermission }: NekoTranscriptP
   const lastBlockCount = lastMessage?.blocks?.length ?? 0;
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
+    if (typeof bottomRef.current?.scrollIntoView === "function") {
+      bottomRef.current.scrollIntoView({ block: "end" });
+    }
   }, [messageCount, lastBlockCount, session.pendingPermission]);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" data-testid="neko-transcript">
-      <div className="mx-auto w-full max-w-[720px] px-6 py-4">
+      <div className="mx-auto w-full max-w-[780px] px-6 py-4">
         {session.messages.map((message) =>
           message.role === "user" ? (
             <div key={message.id} className="my-3 flex justify-end">
@@ -91,6 +108,9 @@ export function NekoTranscript({ session, onResolvePermission }: NekoTranscriptP
         ) : null}
         {session.status === "exited" && session.statusDetail ? (
           <p className="my-2 text-[12.5px] text-[var(--nk-text-3)]">{session.statusDetail}</p>
+        ) : null}
+        {session.status === "idle" && session.statusDetail ? (
+          <p className="my-2 text-[12.5px] text-[var(--nk-warning)]">{session.statusDetail}</p>
         ) : null}
         <div ref={bottomRef} />
       </div>

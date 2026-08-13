@@ -88,7 +88,237 @@ async function startDriver(events: DriverEvent[], transport: FakeTransport): Pro
   return driver;
 }
 
+async function startDriverWithSessionResult(
+  events: DriverEvent[],
+  transport: FakeTransport,
+  result: Record<string, unknown>,
+): Promise<AcpDriver> {
+  const driver = new AcpDriver({
+    sessionId: "local-capabilities",
+    cwd: "C:/tmp/project",
+    transport,
+    onEvent: (event) => events.push(event),
+  });
+  const starting = driver.start();
+  await tick();
+  transport.inject({
+    jsonrpc: "2.0",
+    id: transport.sent[0].id,
+    result: { protocolVersion: 1 },
+  });
+  await tick();
+  transport.inject({
+    jsonrpc: "2.0",
+    id: transport.sent[1].id,
+    result: { sessionId: "agent-capabilities", ...result },
+  });
+  await starting;
+  return driver;
+}
+
 describe("AcpDriver golden replay (real neko-core v0.24.0 fixture)", () => {
+  it("normalizes Neko's reported modes during session creation", async () => {
+    const events: DriverEvent[] = [];
+    const transport = new FakeTransport();
+    await startDriver(events, transport);
+
+    const controls = events.find((event) => event.type === "session-controls");
+    expect(controls).toMatchObject({
+      type: "session-controls",
+      sessionId: "local-1",
+      controls: [
+        {
+          id: "mode",
+          category: "mode",
+          kind: "select",
+          currentValue: "default",
+        },
+      ],
+    });
+    if (controls?.type === "session-controls") {
+      expect(controls.controls[0].choices?.map((choice) => choice.value)).toEqual([
+        "default",
+        "accept-edits",
+        "plan",
+        "auto",
+      ]);
+    }
+  });
+
+  it("routes stable config, legacy mode, and legacy model controls honestly", async () => {
+    const events: DriverEvent[] = [];
+    const transport = new FakeTransport();
+    const driver = await startDriverWithSessionResult(events, transport, {
+      configOptions: [
+        {
+          id: "effort",
+          name: "Effort",
+          category: "thought_level",
+          type: "select",
+          currentValue: "medium",
+          options: [
+            { value: "medium", name: "Medium" },
+            { value: "high", name: "High" },
+          ],
+        },
+      ],
+      modes: {
+        currentModeId: "default",
+        availableModes: [
+          { id: "default", name: "Default" },
+          { id: "plan", name: "Plan" },
+        ],
+      },
+      models: {
+        currentModelId: "auto",
+        availableModels: [
+          { modelId: "auto", name: "Auto" },
+          { modelId: "gemini-pro", name: "Gemini Pro" },
+        ],
+      },
+    });
+
+    const changeEffort = driver.setConfigOption("config:effort", "high");
+    await tick();
+    const effortRequest = transport.sent.at(-1)!;
+    expect(effortRequest).toMatchObject({
+      method: "session/set_config_option",
+      params: { sessionId: "agent-capabilities", configId: "effort", value: "high" },
+    });
+    transport.inject({
+      jsonrpc: "2.0",
+      id: effortRequest.id,
+      result: {
+        configOptions: [
+          {
+            id: "effort",
+            name: "Effort",
+            category: "thought_level",
+            type: "select",
+            currentValue: "high",
+            options: [
+              { value: "medium", name: "Medium" },
+              { value: "high", name: "High" },
+            ],
+          },
+        ],
+      },
+    });
+    await changeEffort;
+
+    const changeMode = driver.setConfigOption("mode", "plan");
+    await tick();
+    const modeRequest = transport.sent.at(-1)!;
+    expect(modeRequest).toMatchObject({
+      method: "session/set_mode",
+      params: { sessionId: "agent-capabilities", modeId: "plan" },
+    });
+    transport.inject({ jsonrpc: "2.0", id: modeRequest.id, result: {} });
+    await changeMode;
+
+    const changeModel = driver.setConfigOption("model", "gemini-pro");
+    await tick();
+    const modelRequest = transport.sent.at(-1)!;
+    expect(modelRequest).toMatchObject({
+      method: "session/set_model",
+      params: { sessionId: "agent-capabilities", modelId: "gemini-pro" },
+    });
+    transport.inject({ jsonrpc: "2.0", id: modelRequest.id, result: {} });
+    await changeModel;
+
+    const latest = events.filter((event) => event.type === "session-controls").at(-1);
+    if (latest?.type !== "session-controls") throw new Error("missing controls");
+    expect(latest.controls.map((option) => [option.id, option.currentValue])).toEqual([
+      ["config:effort", "high"],
+      ["mode", "plan"],
+      ["model", "gemini-pro"],
+    ]);
+  });
+
+  it("maps command, current-mode, config, and session-info updates", async () => {
+    const events: DriverEvent[] = [];
+    const transport = new FakeTransport();
+    await startDriverWithSessionResult(events, transport, {
+      modes: {
+        currentModeId: "default",
+        availableModes: [
+          { id: "default", name: "Default" },
+          { id: "plan", name: "Plan" },
+        ],
+      },
+    });
+
+    transport.inject({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "agent-capabilities",
+        update: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [
+            { name: "memory show", description: "Show memory", input: { hint: "path" } },
+          ],
+        },
+      },
+    });
+    transport.inject({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "agent-capabilities",
+        update: { sessionUpdate: "current_mode_update", currentModeId: "plan" },
+      },
+    });
+    transport.inject({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "agent-capabilities",
+        update: {
+          sessionUpdate: "config_option_update",
+          configOptions: [
+            {
+              id: "model",
+              name: "Model",
+              category: "model",
+              type: "select",
+              currentValue: "fast",
+              options: [{ value: "fast", name: "Fast" }],
+            },
+          ],
+        },
+      },
+    });
+    transport.inject({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "agent-capabilities",
+        update: {
+          sessionUpdate: "session_info_update",
+          title: "Agent-generated title",
+          updatedAt: "2026-08-13T12:00:00.000Z",
+        },
+      },
+    });
+
+    expect(events.find((event) => event.type === "available-commands")).toMatchObject({
+      commands: [{ name: "memory show", description: "Show memory", inputHint: "path" }],
+    });
+    expect(events.find((event) => event.type === "session-info")).toMatchObject({
+      title: "Agent-generated title",
+      updatedAt: "2026-08-13T12:00:00.000Z",
+    });
+    const controls = events.filter((event) => event.type === "session-controls");
+    expect(controls.some((event) =>
+      event.type === "session-controls"
+      && event.controls.some((control) => control.id === "mode" && control.currentValue === "plan"),
+    )).toBe(true);
+    expect(controls.at(-1)).toMatchObject({
+      controls: [{ id: "config:model", currentValue: "fast" }, { id: "mode" }],
+    });
+  });
+
   it("normalizes the full recorded session into DriverEvents", async () => {
     const events: DriverEvent[] = [];
     const transport = new FakeTransport();

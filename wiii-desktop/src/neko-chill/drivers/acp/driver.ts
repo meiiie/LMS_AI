@@ -8,6 +8,9 @@
 import type {
   Driver,
   DriverActivity,
+  DriverCommand,
+  DriverConfigChoice,
+  DriverConfigOption,
   DriverEvent,
   DriverEventHandler,
   PermissionDecision,
@@ -94,6 +97,157 @@ function permissionOptionKind(kind: unknown): PermissionOption["kind"] {
   }
 }
 
+type AcpRecord = Record<string, unknown>;
+
+type ControlRoute =
+  | { kind: "config"; wireId: string }
+  | { kind: "mode" }
+  | { kind: "model" };
+
+function record(value: unknown): AcpRecord | null {
+  return value && typeof value === "object" ? (value as AcpRecord) : null;
+}
+
+function optionCategory(value: unknown): DriverConfigOption["category"] {
+  switch (value) {
+    case "mode":
+    case "model":
+    case "model_config":
+    case "thought_level":
+      return value;
+    default:
+      return "other";
+  }
+}
+
+function flattenConfigChoices(value: unknown): DriverConfigChoice[] {
+  if (!Array.isArray(value)) return [];
+  const choices: DriverConfigChoice[] = [];
+  for (const item of value) {
+    const candidate = record(item);
+    if (!candidate) continue;
+    if (typeof candidate.value === "string" && typeof candidate.name === "string") {
+      choices.push({
+        value: candidate.value,
+        label: candidate.name,
+        description:
+          typeof candidate.description === "string" ? candidate.description : undefined,
+      });
+      continue;
+    }
+    choices.push(...flattenConfigChoices(candidate.options));
+  }
+  return choices;
+}
+
+function normalizeConfigOptions(value: unknown): DriverConfigOption[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): DriverConfigOption[] => {
+    const option = record(item);
+    if (!option || typeof option.id !== "string" || typeof option.name !== "string") {
+      return [];
+    }
+    const description =
+      typeof option.description === "string" ? option.description : undefined;
+    if (option.type === "boolean" && typeof option.currentValue === "boolean") {
+      return [
+        {
+          id: `config:${option.id}`,
+          label: option.name,
+          description,
+          category: optionCategory(option.category),
+          kind: "boolean",
+          currentValue: option.currentValue,
+        },
+      ];
+    }
+    if (option.type !== "select" || typeof option.currentValue !== "string") return [];
+    const choices = flattenConfigChoices(option.options);
+    return [
+      {
+        id: `config:${option.id}`,
+        label: option.name,
+        description,
+        category: optionCategory(option.category),
+        kind: "select",
+        currentValue: option.currentValue,
+        choices,
+      },
+    ];
+  });
+}
+
+function normalizeLegacyMode(value: unknown): DriverConfigOption | null {
+  const modes = record(value);
+  if (!modes || typeof modes.currentModeId !== "string") return null;
+  const choices = Array.isArray(modes.availableModes)
+    ? modes.availableModes.flatMap((item): DriverConfigChoice[] => {
+        const mode = record(item);
+        if (!mode || typeof mode.id !== "string") return [];
+        return [
+          {
+            value: mode.id,
+            label: typeof mode.name === "string" ? mode.name : mode.id,
+            description: typeof mode.description === "string" ? mode.description : undefined,
+          },
+        ];
+      })
+    : [];
+  if (!choices.length) return null;
+  return {
+    id: "mode",
+    label: "Chế độ",
+    category: "mode",
+    kind: "select",
+    currentValue: modes.currentModeId,
+    choices,
+  };
+}
+
+function normalizeLegacyModel(value: unknown): DriverConfigOption | null {
+  const models = record(value);
+  if (!models || typeof models.currentModelId !== "string") return null;
+  const choices = Array.isArray(models.availableModels)
+    ? models.availableModels.flatMap((item): DriverConfigChoice[] => {
+        const model = record(item);
+        if (!model || typeof model.modelId !== "string") return [];
+        return [
+          {
+            value: model.modelId,
+            label: typeof model.name === "string" ? model.name : model.modelId,
+            description: typeof model.description === "string" ? model.description : undefined,
+          },
+        ];
+      })
+    : [];
+  if (!choices.length) return null;
+  return {
+    id: "model",
+    label: "Model",
+    category: "model",
+    kind: "select",
+    currentValue: models.currentModelId,
+    choices,
+  };
+}
+
+function normalizeCommands(value: unknown): DriverCommand[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): DriverCommand[] => {
+    const command = record(item);
+    if (!command || typeof command.name !== "string") return [];
+    const input = record(command.input);
+    return [
+      {
+        name: command.name.replace(/^\/+/, ""),
+        description:
+          typeof command.description === "string" ? command.description : command.name,
+        inputHint: input && typeof input.hint === "string" ? input.hint : undefined,
+      },
+    ];
+  });
+}
+
 interface PendingPermission {
   resolve: (result: unknown) => void;
   /** Option ids the agent offered — decisions outside this set fail closed. */
@@ -113,6 +267,11 @@ export class AcpDriver implements Driver {
   private readonly pendingPermissions = new Map<string, PendingPermission>();
   /** Per-session activity cache so tool_call_update can merge partial data. */
   private readonly activities = new Map<string, DriverActivity>();
+  private stableControls: DriverConfigOption[] = [];
+  private legacyMode: DriverConfigOption | null = null;
+  private legacyModel: DriverConfigOption | null = null;
+  private controls: DriverConfigOption[] = [];
+  private readonly controlRoutes = new Map<string, ControlRoute>();
 
   constructor(options: AcpDriverOptions) {
     this.sessionId = options.sessionId;
@@ -154,11 +313,20 @@ export class AcpDriver implements Driver {
       cwd: this.cwd,
       // neko-core refuses client-supplied MCP servers; always empty in v0.
       mcpServers: [],
-    })) as { sessionId?: unknown };
+    })) as {
+      sessionId?: unknown;
+      configOptions?: unknown;
+      modes?: unknown;
+      models?: unknown;
+    };
     if (typeof session?.sessionId !== "string" || !session.sessionId) {
       throw new Error("session/new returned no sessionId");
     }
     this.acpSessionId = session.sessionId;
+    this.stableControls = normalizeConfigOptions(session.configOptions);
+    this.legacyMode = normalizeLegacyMode(session.modes);
+    this.legacyModel = normalizeLegacyModel(session.models);
+    this.rebuildControls();
   }
 
   async prompt(text: string): Promise<void> {
@@ -205,6 +373,55 @@ export class AcpDriver implements Driver {
     }
   }
 
+  async setConfigOption(optionId: string, value: string | boolean): Promise<void> {
+    if (!this.acpSessionId) throw new Error("driver not started");
+    if (this.turnRunning) throw new Error("cannot change session controls while a turn is running");
+    const route = this.controlRoutes.get(optionId);
+    const option = this.controls.find((candidate) => candidate.id === optionId);
+    if (!route || !option) throw new Error(`unknown session option ${optionId}`);
+    if (option.kind === "boolean" && typeof value !== "boolean") {
+      throw new Error(`session option ${optionId} expects a boolean`);
+    }
+    if (option.kind === "select") {
+      if (typeof value !== "string") throw new Error(`session option ${optionId} expects a value id`);
+      if (!option.choices?.some((choice) => choice.value === value)) {
+        throw new Error(`unsupported value for session option ${optionId}`);
+      }
+    }
+
+    if (route.kind === "config") {
+      const result = (await this.client.request("session/set_config_option", {
+        sessionId: this.acpSessionId,
+        configId: route.wireId,
+        value,
+        ...(typeof value === "boolean" ? { type: "boolean" } : {}),
+      })) as { configOptions?: unknown };
+      if (Array.isArray(result?.configOptions)) {
+        this.stableControls = normalizeConfigOptions(result.configOptions);
+      } else {
+        this.updateControl(optionId, value);
+      }
+      this.rebuildControls();
+      return;
+    }
+
+    if (typeof value !== "string") throw new Error(`session option ${optionId} expects a value id`);
+    if (route.kind === "mode") {
+      await this.client.request("session/set_mode", {
+        sessionId: this.acpSessionId,
+        modeId: value,
+      });
+      if (this.legacyMode) this.legacyMode = { ...this.legacyMode, currentValue: value };
+    } else {
+      await this.client.request("session/set_model", {
+        sessionId: this.acpSessionId,
+        modelId: value,
+      });
+      if (this.legacyModel) this.legacyModel = { ...this.legacyModel, currentValue: value };
+    }
+    this.rebuildControls();
+  }
+
   async dispose(): Promise<void> {
     // Unanswered permission requests fail closed before the process dies.
     for (const [, pending] of this.pendingPermissions) {
@@ -220,12 +437,80 @@ export class AcpDriver implements Driver {
     this.emit(event);
   }
 
+  private updateControl(optionId: string, value: string | boolean): void {
+    this.stableControls = this.stableControls.map((option) =>
+      option.id === optionId ? { ...option, currentValue: value } : option,
+    );
+  }
+
+  private rebuildControls(): void {
+    const categories = new Set(this.stableControls.map((option) => option.category));
+    this.controls = [
+      ...this.stableControls,
+      ...(this.legacyMode && !categories.has("mode") ? [this.legacyMode] : []),
+      ...(this.legacyModel && !categories.has("model") ? [this.legacyModel] : []),
+    ];
+    this.controlRoutes.clear();
+    for (const option of this.stableControls) {
+      this.controlRoutes.set(option.id, { kind: "config", wireId: option.id.slice(7) });
+    }
+    if (this.controls.some((option) => option.id === "mode")) {
+      this.controlRoutes.set("mode", { kind: "mode" });
+    }
+    if (this.controls.some((option) => option.id === "model")) {
+      this.controlRoutes.set("model", { kind: "model" });
+    }
+    this.emitEvent({
+      type: "session-controls",
+      sessionId: this.sessionId,
+      controls: this.controls.map((option) => ({
+        ...option,
+        choices: option.choices?.map((choice) => ({ ...choice })),
+      })),
+    });
+  }
+
   private handleNotification(method: string, params: unknown): void {
     if (method !== "session/update") return;
     const update = (params as { update?: Record<string, unknown> })?.update;
     if (!update || typeof update !== "object") return;
 
     switch (update.sessionUpdate) {
+      case "available_commands_update": {
+        this.emitEvent({
+          type: "available-commands",
+          sessionId: this.sessionId,
+          commands: normalizeCommands(update.availableCommands),
+        });
+        return;
+      }
+      case "config_option_update": {
+        this.stableControls = normalizeConfigOptions(update.configOptions);
+        this.rebuildControls();
+        return;
+      }
+      case "current_mode_update": {
+        if (this.legacyMode && typeof update.currentModeId === "string") {
+          this.legacyMode = { ...this.legacyMode, currentValue: update.currentModeId };
+          this.rebuildControls();
+        }
+        return;
+      }
+      case "session_info_update": {
+        this.emitEvent({
+          type: "session-info",
+          sessionId: this.sessionId,
+          title:
+            typeof update.title === "string" || update.title === null
+              ? update.title
+              : undefined,
+          updatedAt:
+            typeof update.updatedAt === "string" || update.updatedAt === null
+              ? update.updatedAt
+              : undefined,
+        });
+        return;
+      }
       case "agent_message_chunk": {
         const text = contentText(update.content);
         if (text) this.emitEvent({ type: "answer-delta", sessionId: this.sessionId, text });

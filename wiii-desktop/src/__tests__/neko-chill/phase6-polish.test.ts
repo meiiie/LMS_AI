@@ -126,13 +126,14 @@ describe("T602 — honest error surfaces", () => {
 });
 
 describe("T601 — idle reap", () => {
-  const AGENT: DetectedAgent = {
+const AGENT: DetectedAgent = {
     id: "neko",
     name: "Neko Core",
     binary: "neko",
     version: "0.24.0",
     found: true,
-  };
+};
+const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
   class FakeDriver implements Driver {
     readonly kind = "acp" as const;
@@ -142,6 +143,7 @@ describe("T601 — idle reap", () => {
     async prompt(): Promise<void> {}
     async cancel(): Promise<void> {}
     async resolvePermission(_: PermissionDecision): Promise<void> {}
+    async setConfigOption(): Promise<void> {}
     async dispose(): Promise<void> {
       this.disposed += 1;
     }
@@ -161,7 +163,7 @@ describe("T601 — idle reap", () => {
   afterEach(() => _setDriverFactoryForTests(undefined));
 
   it("reaps an idle session past the threshold; keeps fresh and busy ones", async () => {
-    const id = await useNekoSessionStore.getState().createSession(AGENT);
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     // Fresh session: not reaped.
     await sweepIdleSessions();
     expect(driver.disposed).toBe(0);
@@ -177,7 +179,7 @@ describe("T601 — idle reap", () => {
     expect(reaped.statusDetail).toContain("30 phút");
 
     // Streaming session with stale timestamp: never reaped.
-    const id2 = await useNekoSessionStore.getState().createSession(AGENT);
+    const id2 = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     useNekoSessionStore.getState().handleEvent({ type: "turn-started", sessionId: id2 });
     useNekoSessionStore.setState((state) => {
       state.sessions[id2].lastActivityAt = Date.now() - 31 * 60 * 1000;

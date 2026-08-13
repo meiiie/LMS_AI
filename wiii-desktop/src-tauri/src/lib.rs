@@ -14,6 +14,7 @@ pub fn run() {
             commands::files::pick_document,
             commands::splash::close_splash,
             commands::neko_agent::neko_detect_agents,
+            commands::neko_agent::neko_agent_profiles,
             commands::neko_agent::neko_spawn_agent,
             commands::neko_agent::neko_write_stdin,
             commands::neko_agent::neko_kill_agent,

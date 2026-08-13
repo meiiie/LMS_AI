@@ -11,19 +11,28 @@
  */
 import { loadStore, saveStore, deleteStore } from "@/lib/storage";
 import type { NekoMessage, NekoSession } from "./stores/neko-session-store";
+import type { DriverCommand, DriverConfigOption } from "./drivers/types";
+import type { AgentLaunchProfile } from "./stores/neko-agent-store";
+import type { WorkspaceRef } from "./workspace";
 
 const STORE = "neko-chill-sessions.json";
 const INDEX_KEY = "index";
+const INDEX_SCHEMA_VERSION = 2;
 const SCHEMA_VERSION = 1;
 const DEBOUNCE_MS = 400;
 
 export interface SessionIndexEntry {
+  v?: number;
   id: string;
   agentId: string;
   agentName: string;
   title: string;
   createdAt: number;
   updatedAt: number;
+  workspace?: WorkspaceRef | null;
+  launchProfile?: AgentLaunchProfile | null;
+  controls?: DriverConfigOption[];
+  commands?: DriverCommand[];
 }
 
 interface PersistedTranscript {
@@ -36,12 +45,17 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
 async function writeSession(session: NekoSession): Promise<void> {
   const index = await loadStore<SessionIndexEntry[]>(STORE, INDEX_KEY, []);
   const entry: SessionIndexEntry = {
+    v: INDEX_SCHEMA_VERSION,
     id: session.id,
     agentId: session.agentId,
     agentName: session.agentName,
     title: session.title,
     createdAt: session.createdAt,
-    updatedAt: Date.now(),
+    updatedAt: session.updatedAt,
+    workspace: session.workspace,
+    launchProfile: session.launchProfile,
+    controls: session.controls,
+    commands: session.commands,
   };
   const next = [entry, ...index.filter((item) => item.id !== session.id)];
   await saveStore(STORE, INDEX_KEY, next);

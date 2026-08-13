@@ -30,7 +30,9 @@ fn table() -> &'static Mutex<HashMap<u64, AgentProc>> {
 /// Lock that survives a poisoned mutex — `kill_all` runs on exit paths and
 /// must never panic.
 fn lock_table() -> MutexGuard<'static, HashMap<u64, AgentProc>> {
-    table().lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    table()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(windows)]
@@ -57,6 +59,88 @@ pub struct AgentInfo {
     pub binary: String,
     pub version: Option<String>,
     pub found: bool,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfile {
+    pub id: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub active: bool,
+}
+
+fn parse_neko_profiles(output: &str) -> Vec<AgentProfile> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim_start();
+            let (active, body) = if let Some(rest) = trimmed.strip_prefix("* ") {
+                (true, rest)
+            } else {
+                (false, trimmed)
+            };
+            let (id, details) = body.split_once(':')?;
+            let id = id.trim();
+            if id.is_empty()
+                || id.eq_ignore_ascii_case(
+                    "profiles (select with --profile name, neko_profile, or active_profile)",
+                )
+            {
+                return None;
+            }
+            let mut provider = None;
+            let mut model = None;
+            for field in details.split_whitespace() {
+                if let Some(value) = field.strip_prefix("provider=") {
+                    if value != "?" && !value.is_empty() {
+                        provider = Some(value.to_string());
+                    }
+                } else if let Some(value) = field.strip_prefix("model=") {
+                    if value != "-" && !value.is_empty() {
+                        model = Some(value.to_string());
+                    }
+                }
+            }
+            Some(AgentProfile {
+                id: id.to_string(),
+                provider: provider?,
+                model,
+                active,
+            })
+        })
+        .collect()
+}
+
+/// Read Neko's config-first launch profiles for one selected workspace.
+/// This is intentionally a read-only probe; selecting a profile later only
+/// adds `--profile <id>` to that ACP process and never rewrites Neko config.
+#[tauri::command]
+pub fn neko_agent_profiles(program: String, cwd: String) -> Result<Vec<AgentProfile>, String> {
+    let cwd_path = std::path::Path::new(&cwd);
+    if !cwd_path.is_absolute() || !cwd_path.is_dir() {
+        return Err("workspace must be an existing absolute directory".into());
+    }
+    let mut cmd = Command::new(&program);
+    hidden(
+        cmd.arg("profiles")
+            .current_dir(cwd_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null()),
+    );
+    let output = cmd
+        .output()
+        .map_err(|e| format!("profile probe '{program}' failed: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "profile probe '{program}' exited with {}",
+            output.status
+        ));
+    }
+    Ok(parse_neko_profiles(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 /// Try candidate binary names in order; first probe that answers wins.
@@ -100,13 +184,21 @@ pub fn neko_detect_agents() -> Vec<AgentInfo> {
         probe(
             "gemini",
             "Gemini CLI",
-            if cfg!(windows) { &["gemini.cmd", "gemini"] } else { &["gemini"] },
+            if cfg!(windows) {
+                &["gemini.cmd", "gemini"]
+            } else {
+                &["gemini"]
+            },
             "--version",
         ),
         probe(
             "neko",
             "Neko Core",
-            if cfg!(windows) { &["neko.exe", "neko.cmd", "neko"] } else { &["neko"] },
+            if cfg!(windows) {
+                &["neko.exe", "neko.cmd", "neko"]
+            } else {
+                &["neko"]
+            },
             "--version",
         ),
     ]
@@ -178,7 +270,11 @@ fn kill_proc(mut proc_: AgentProc) {
     {
         let pid = proc_.child.id();
         let mut cmd = Command::new("taskkill");
-        hidden(cmd.args(["/T", "/F", "/PID", &pid.to_string()]).stdout(Stdio::null()).stderr(Stdio::null()));
+        hidden(
+            cmd.args(["/T", "/F", "/PID", &pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        );
         let _ = cmd.status();
     }
     let _ = proc_.child.kill();
@@ -209,5 +305,28 @@ pub fn kill_all() {
     };
     for proc_ in procs {
         kill_proc(proc_);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_neko_profiles;
+
+    #[test]
+    fn parses_profile_provider_model_and_active_marker() {
+        let output = r#"Profiles (select with --profile NAME, NEKO_PROFILE, or active_profile):
+ * chatgpt: provider=chatgpt base_url=https://example.test model=gpt-5.6-luna
+   local: provider=openai_compat base_url=http://127.0.0.1:8080/v1 model=local-model
+   openrouter: provider=openai_compat base_url=https://openrouter.ai/api/v1 model=-
+ malformed line
+"#;
+        let profiles = parse_neko_profiles(output);
+        assert_eq!(profiles.len(), 3);
+        assert_eq!(profiles[0].id, "chatgpt");
+        assert_eq!(profiles[0].provider, "chatgpt");
+        assert_eq!(profiles[0].model.as_deref(), Some("gpt-5.6-luna"));
+        assert!(profiles[0].active);
+        assert_eq!(profiles[2].model, None);
+        assert!(!profiles[2].active);
     }
 }
