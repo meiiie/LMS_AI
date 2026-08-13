@@ -94,4 +94,3 @@
    diff panel. Those require separate runtime contracts and evidence.
 6. Search stays in memory over the already-local session index/transcripts;
    no SQLite dependency is introduced for the current scale.
-

@@ -83,4 +83,3 @@ interface NekoSession {
 Index entries add `v: 2`, workspace, updatedAt, launchProfile, controls, and
 commands. Missing fields from v1 are interpreted as null/empty; transcript
 records remain at their existing schema because message shape is unchanged.
-

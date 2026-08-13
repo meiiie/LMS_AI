@@ -34,4 +34,3 @@ Rules:
 - `current_mode_update` -> update the legacy mode fallback.
 - `available_commands_update` -> `available-commands`.
 - `session_info_update` -> `session-info`.
-

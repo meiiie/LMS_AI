@@ -126,4 +126,3 @@ profile probe. Cloud chat/auth/embed files remain untouched.
   detected. Removing it later cannot affect Neko mode controls.
 - Rollback is a single feature PR revert; no backend or user config migration
   is performed.
-
