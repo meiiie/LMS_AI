@@ -31,9 +31,16 @@ export const useModeStore = create<ModeState>((set) => ({
   isLoaded: false,
 
   loadMode: async () => {
-    const stored = await loadStore<string>(STORE_NAME, KEY, "wiii");
-    // Unknown/corrupt values fall back to the cloud default, never crash.
-    set({ mode: isAppMode(stored) ? stored : "wiii", isLoaded: true });
+    const stored = await loadStore<string>(STORE_NAME, KEY, "");
+    if (isAppMode(stored)) {
+      set({ mode: stored, isLoaded: true });
+      return;
+    }
+    // Desktop-first landing (#893): with no persisted (or a corrupt) mode,
+    // signed-in users land in the cloud app, everyone else in the no-login
+    // Neko Chill mode. This is a storage peek only — no cloud init runs.
+    const auth = await loadStore<unknown>("auth_state", "data", null);
+    set({ mode: auth ? "wiii" : "neko-chill", isLoaded: true });
   },
 
   setMode: async (mode: AppMode) => {
