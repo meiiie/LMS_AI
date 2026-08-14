@@ -164,6 +164,13 @@ describe("RuntimeRegistry", () => {
       provider: null,
       error: expect.objectContaining({ message: "process kill failed" }),
     });
+    expect(registry.ownedSessionIds()).toEqual(["s1"]);
+    let replacementAttempted = false;
+    await expect(registry.replace("s1", "neko", async () => {
+      replacementAttempted = true;
+      return new FakeDriver("s1");
+    })).rejects.toThrow("process kill failed");
+    expect(replacementAttempted).toBe(false);
   });
 
   it("fails closed when a consumer requests an undeclared capability", async () => {

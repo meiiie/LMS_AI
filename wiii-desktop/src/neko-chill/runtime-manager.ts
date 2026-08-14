@@ -134,11 +134,19 @@ export class RuntimeRegistry {
         })
       : work;
     let tracked!: Promise<void>;
-    tracked = combined.finally(() => {
-      if (this.inFlightDisposals.get(sessionId) === tracked) {
-        this.inFlightDisposals.delete(sessionId);
-      }
-    });
+    tracked = combined.then(
+      () => {
+        if (this.inFlightDisposals.get(sessionId) === tracked) {
+          this.inFlightDisposals.delete(sessionId);
+        }
+      },
+      (error) => {
+        // Retain failed ownership. Later delete, replacement, or mode teardown
+        // must keep observing the cleanup failure instead of forgetting a
+        // child process that may still be alive.
+        throw error;
+      },
+    );
     this.inFlightDisposals.set(sessionId, tracked);
     return tracked;
   }
@@ -184,6 +192,8 @@ export class RuntimeRegistry {
     providerId: string,
     create: (instanceId: string, own: (driver: Driver) => void) => Promise<Driver>,
   ): Promise<RuntimeReplacement> {
+    const priorCleanup = this.joinDisposal(sessionId);
+    if (priorCleanup) await priorCleanup;
     let completePreparation!: () => void;
     let rejectPreparation!: (error: unknown) => void;
     const preparationCompletion = new Promise<void>((resolve, reject) => {

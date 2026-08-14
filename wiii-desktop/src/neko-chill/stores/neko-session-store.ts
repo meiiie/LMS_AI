@@ -569,6 +569,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       const current = get().sessions[sessionId];
       if (!current || current.workspace || current.closePending || current.deletePending) return;
       const releaseOperation = acquireHold(runtimeOperations, sessionId);
+      let contextEventId: string | null = null;
       try {
         set((state) => {
           const session = state.sessions[sessionId];
@@ -593,13 +594,13 @@ export const useNekoSessionStore = create<NekoSessionState>()(
               reason: "workspace-change",
             });
           }
-          appendOwnedSessionEvent(session, "model", {
+          contextEventId = appendOwnedSessionEvent(session, "model", {
             type: "session-context",
             source: "workspace-attached",
             agentId: session.agentId,
             workspacePath: workspace.path,
             launchProfileId: session.launchProfile?.id ?? null,
-          });
+          }).eventId!;
           session.status = "exited";
           session.statusDetail = "Đã gắn dự án. Lượt tiếp theo sẽ khởi động một runtime mới trong thư mục này.";
           if (disposeError) {
@@ -616,9 +617,16 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             set((state) => {
               const session = state.sessions[sessionId];
               if (session) {
-                session.status = "error";
-                session.statusDetail = `Không thể lưu ngữ cảnh dự án: ${error instanceof Error ? error.message : String(error)}`;
+                session.workspace = null;
+                removeEventById(session.events as NekoSessionEvent[], contextEventId);
+                session.status = "exited";
+                session.statusDetail = `Không thể lưu ngữ cảnh dự án; hãy chọn lại thư mục: ${error instanceof Error ? error.message : String(error)}`;
+                session.updatedAt = Date.now();
+                session.lastActivityAt = session.updatedAt;
               }
+            });
+            await persistSessionNowOrReport(sessionId, "rollback ngữ cảnh dự án", {
+              strict: true,
             });
           }
         }
@@ -807,22 +815,14 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const persistInvocation = persistSessionNowOrReport(sessionId, "xác nhận dispatch prompt", {
             strict: true,
           });
-          let invocationPersisted = false;
-          let invocationFailed = false;
-          let invocationError: unknown;
-          try {
-            await invocation;
-          } catch (error) {
-            invocationFailed = true;
-            invocationError = error;
-          } finally {
-            invocationPersisted = await persistInvocation;
-          }
-          if (!invocationPersisted) {
-            await revokeRuntimeAfterDurabilityFailure(sessionId, provider);
-            return;
-          }
-          if (invocationFailed) throw invocationError;
+          const outcome = await observeInvocationAfterMarker(
+            sessionId,
+            provider,
+            invocation,
+            persistInvocation,
+          );
+          if (!outcome.markerPersisted) return;
+          if (outcome.invocationFailed) throw outcome.error;
           set((state) => {
             const current = state.sessions[sessionId];
             // Some drivers only resolve prompt() and do not emit lifecycle
@@ -925,22 +925,14 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const persistInvocation = persistSessionNowOrReport(sessionId, "xác nhận dispatch yêu cầu dừng", {
             strict: true,
           });
-          let invocationPersisted = false;
-          let invocationFailed = false;
-          let invocationError: unknown;
-          try {
-            await invocation;
-          } catch (error) {
-            invocationFailed = true;
-            invocationError = error;
-          } finally {
-            invocationPersisted = await persistInvocation;
-          }
-          if (!invocationPersisted) {
-            await revokeRuntimeAfterDurabilityFailure(sessionId, provider);
-            return;
-          }
-          if (invocationFailed) throw invocationError;
+          const outcome = await observeInvocationAfterMarker(
+            sessionId,
+            provider,
+            invocation,
+            persistInvocation,
+          );
+          if (!outcome.markerPersisted) return;
+          if (outcome.invocationFailed) throw outcome.error;
         } catch (error) {
           let rolledBackUndispatchedCancel = false;
           set((state) => {
@@ -1028,17 +1020,25 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         const persistInvocation = persistSessionNowOrReport(sessionId, "xác nhận dispatch quyết định", {
           strict: true,
         });
-        let invocationPersisted = false;
-        let invocationFailed = false;
-        let invocationError: unknown;
-        try {
-          await invocation;
-        } catch (error) {
-          invocationFailed = true;
-          invocationError = error;
-        } finally {
-          invocationPersisted = await persistInvocation;
+        const outcome = await observeInvocationAfterMarker(
+          sessionId,
+          provider,
+          invocation,
+          persistInvocation,
+        );
+        if (!outcome.markerPersisted) {
+          set((state) => {
+            const s = state.sessions[sessionId];
+            if (s?.pendingPermission?.requestId === request.requestId) {
+              s.pendingPermission = null;
+            }
+            if (s?.resolvingPermissionId === request.requestId) {
+              s.resolvingPermissionId = null;
+            }
+          });
+          return;
         }
+        if (outcome.invocationFailed) throw outcome.error;
         set((state) => {
           const s = state.sessions[sessionId];
           if (s?.pendingPermission?.requestId === request.requestId) {
@@ -1048,11 +1048,6 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             s.resolvingPermissionId = null;
           }
         });
-        if (!invocationPersisted) {
-          await revokeRuntimeAfterDurabilityFailure(sessionId, provider);
-          return;
-        }
-        if (invocationFailed) throw invocationError;
       } catch (error) {
         let rolledBackUndispatchedDecision = false;
         set((state) => {
@@ -1381,10 +1376,42 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           session.status = "stopping";
         }
       });
+      const provider = runtimes.get(sessionId) ?? current.runtime;
       await closeOperations.get(sessionId)?.catch(() => {});
       await waitForHolds(dispatchBarriers, sessionId);
-      await runtimes.detach(sessionId).catch(() => {});
+      const disposeError = await runtimes.detach(sessionId).then(
+        () => null,
+        (error) => error,
+      );
       await waitForHolds(runtimeOperations, sessionId);
+      if (disposeError) {
+        set((state) => {
+          const session = state.sessions[sessionId];
+          if (!session) return;
+          session.runtime = null;
+          session.deletePending = false;
+          session.status = "error";
+          session.statusDetail = `Không thể xóa phiên vì runtime chưa đóng sạch: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}`;
+          if (
+            provider &&
+            !session.events.some((event) =>
+              event.data.type === "runtime-detached" &&
+              event.data.instanceId === provider.instanceId)
+          ) {
+            appendOwnedSessionEvent(session, "runtime", {
+              type: "runtime-detached",
+              providerId: provider.providerId,
+              instanceId: provider.instanceId,
+              kind: provider.kind,
+              reason: "delete",
+            });
+          }
+        });
+        await persistSessionNowOrReport(sessionId, "lỗi cleanup trước khi xóa", {
+          strict: true,
+        });
+        return;
+      }
       try {
         await deletePersistedSession(sessionId);
       } catch (error) {
@@ -1622,6 +1649,36 @@ async function revokeRuntimeAfterDurabilityFailure(
       }
     });
   }
+}
+
+async function observeInvocationAfterMarker(
+  sessionId: string,
+  provider: RuntimeProviderSnapshot,
+  invocation: Promise<void>,
+  markerPersistence: Promise<boolean>,
+): Promise<
+  | { markerPersisted: false; invocationFailed: false }
+  | { markerPersisted: true; invocationFailed: false }
+  | { markerPersisted: true; invocationFailed: true; error: unknown }
+> {
+  // Attach both handlers before waiting on storage so a provider rejection can
+  // never become unobserved while the marker write is in flight.
+  const invocationOutcome = invocation.then(
+    () => ({ failed: false as const }),
+    (error) => ({ failed: true as const, error }),
+  );
+  const markerPersisted = await markerPersistence;
+  if (!markerPersisted) {
+    // detachInstance revokes the registry binding synchronously before cleanup
+    // waits, so a long-running prompt cannot keep dispatching tools after the
+    // audit boundary has failed.
+    await revokeRuntimeAfterDurabilityFailure(sessionId, provider);
+    return { markerPersisted: false, invocationFailed: false };
+  }
+  const outcome = await invocationOutcome;
+  return outcome.failed
+    ? { markerPersisted: true, invocationFailed: true, error: outcome.error }
+    : { markerPersisted: true, invocationFailed: false };
 }
 
 async function detachInstanceForRecovery(

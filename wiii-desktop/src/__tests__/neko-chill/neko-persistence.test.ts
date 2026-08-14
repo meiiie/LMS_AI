@@ -30,6 +30,7 @@ let driverDisposeGate: Promise<void> | null = null;
 let notifyDriverDisposeEntered: (() => void) | null = null;
 let driverConfigGate: Promise<void> | null = null;
 let notifyDriverConfigEntered: (() => void) | null = null;
+let driverPromptGate: Promise<void> | null = null;
 
 async function saveToMemory(store: string, key: string, value: unknown): Promise<void> {
   if (key === "session-ids" && failCatalogWrites) {
@@ -157,6 +158,7 @@ class FakeDriver implements Driver {
       | undefined;
     this.promptSawDurableEvents.push(snapshot?.events ?? []);
     this.prompts.push(text);
+    if (driverPromptGate) await driverPromptGate;
     if (this.promptError) throw new Error("provider prompt rejected");
   }
   async cancel(): Promise<void> {
@@ -226,6 +228,7 @@ describe("neko-chill persistence", () => {
     notifyDriverDisposeEntered = null;
     driverConfigGate = null;
     notifyDriverConfigEntered = null;
+    driverPromptGate = null;
     spawned = [];
     useNekoSessionStore.setState({
       sessions: {},
@@ -970,6 +973,21 @@ describe("neko-chill persistence", () => {
     expect(useNekoSessionStore.getState().sessions[id].statusDetail).toContain("chưa xác nhận gửi");
   });
 
+  it("revokes immediately when marker persistence fails during a pending prompt", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    let releasePrompt!: () => void;
+    driverPromptGate = new Promise<void>((resolve) => { releasePrompt = resolve; });
+    transcriptWritesBeforeFailure = 1;
+
+    const sending = useNekoSessionStore.getState().sendPrompt("turn vẫn đang chạy");
+    await vi.waitFor(() => expect(spawned[0].disposed).toBe(1));
+    await sending;
+
+    expect(spawned[0].prompts).toEqual(["turn vẫn đang chạy"]);
+    expect(useNekoSessionStore.getState().sessions[id].runtime).toBeNull();
+    releasePrompt();
+  });
+
   it("revokes a rejected cancellation when its dispatch marker also fails", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     transcriptWritesBeforeFailure = 1;
@@ -1021,6 +1039,35 @@ describe("neko-chill persistence", () => {
       events: Array<{ data: { type: string } }>;
     };
     expect(stale.events.some((event) => event.data.type === "dispatch-invoked")).toBe(false);
+  });
+
+  it("keeps a permission request retryable when invoked delivery rejects", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    emit({
+      type: "permission-request",
+      sessionId: id,
+      request: {
+        requestId: "permission-retry",
+        title: "Write(config.json)",
+        options: [{ optionId: "allow", label: "Cho phép", kind: "allow_once" }],
+      },
+    });
+    spawned[0].permissionError = true;
+
+    await useNekoSessionStore.getState().resolvePermission("allow");
+
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      pendingPermission: expect.objectContaining({ requestId: "permission-retry" }),
+      resolvingPermissionId: null,
+      runtime: expect.objectContaining({ instanceId: expect.any(String) }),
+    });
+    expect(useNekoSessionStore.getState().sessions[id].statusDetail)
+      .toContain("provider permission rejected");
+
+    spawned[0].permissionError = false;
+    await useNekoSessionStore.getState().resolvePermission("allow");
+    expect(spawned[0].decisions).toHaveLength(2);
+    expect(useNekoSessionStore.getState().sessions[id].pendingPermission).toBeNull();
   });
 
   it("removes a staged cancellation when the provider exits before invocation", async () => {
@@ -1661,6 +1708,54 @@ describe("neko-chill persistence", () => {
     expect(storage.get("neko-chill-sessions.json:index")).toHaveLength(0);
     expect(storage.get("neko-chill-sessions.json:session-ids")).toHaveLength(0);
     expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(false);
+  });
+
+  it("keeps a session durable when runtime cleanup fails before deletion", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    spawned[0].failDispose = true;
+
+    await useNekoSessionStore.getState().deleteSession(id);
+
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      deletePending: false,
+      status: "error",
+    });
+    expect(useNekoSessionStore.getState().sessions[id].statusDetail)
+      .toContain("runtime chưa đóng sạch");
+    expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(true);
+    expect(storage.get("neko-chill-sessions.json:session-ids")).toContain(id);
+
+    // A process restart clears live ownership; deletion can then be retried.
+    _clearLiveDriversForTests();
+    await useNekoSessionStore.getState().deleteSession(id);
+    expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
+  });
+
+  it("rolls back an unpersisted workspace attachment so it can be retried", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    useNekoSessionStore.setState((state) => {
+      state.sessions[id].workspace = null;
+    });
+    const attached = { path: "C:/tmp/retry-workspace", name: "retry-workspace" };
+    failTranscriptWrites = true;
+
+    await useNekoSessionStore.getState().attachWorkspace(id, attached);
+
+    const failed = useNekoSessionStore.getState().sessions[id];
+    expect(failed.workspace).toBeNull();
+    expect(failed.events.some((event) =>
+      event.data.type === "session-context" &&
+      event.data.source === "workspace-attached" &&
+      event.data.workspacePath === attached.path,
+    )).toBe(false);
+
+    failTranscriptWrites = false;
+    await useNekoSessionStore.getState().attachWorkspace(id, attached);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      workspace: attached,
+      status: "exited",
+    });
   });
 
   it("keeps a session visible when durable deletion metadata cannot persist", async () => {
