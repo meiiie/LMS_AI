@@ -99,6 +99,19 @@ surface also run `npm run build:embed`.
       detection entry, one full US1+US2 run against neko-core; file issues
       for any protocol drift (do not patch around it silently).
 
+## Phase 7: Runtime Integrity Follow-up (#908)
+
+- [x] T701 Add a versioned append-only session event log and a strict
+      persistence-before-dispatch barrier for Wiii-controlled model facts;
+      migrate v1 transcripts without loss (FR-011).
+- [x] T702 Replace the unowned live-driver map with `RuntimeScope` and
+      `RuntimeRegistry`; clean up partial initialization and mode-exit resources
+      idempotently (FR-012).
+- [x] T703 Assign provider instance identity, declare driver capabilities, gate
+      operations by capability, and ignore stale-provider events (FR-013).
+- [x] T704 Make provider preparation and control changes transactional; cover
+      replacement failure, commit, rollback, and rollback-failed paths (FR-014).
+
 ## Dependencies
 
 - Phase 2 blocks 3; T302 blocks T303; Phase 4–5 depend on Phase 3; Phase 6 last.

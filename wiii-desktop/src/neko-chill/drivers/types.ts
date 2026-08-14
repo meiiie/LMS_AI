@@ -10,6 +10,26 @@
 /** Stable identifier vocabulary shared by all drivers. */
 export type DriverKind = "acp" | "wiii-cloud";
 
+/**
+ * Operations a live provider explicitly promises to support. Consumers must
+ * require one of these capabilities instead of inferring support from the
+ * driver's kind or from a stale object reference.
+ */
+export type DriverCapability =
+  | "prompt"
+  | "cancel"
+  | "permission-resolution"
+  | "session-config";
+
+/** Honest context/safety metadata for one driver implementation. */
+export interface DriverRuntimeDescriptor {
+  capabilities: DriverCapability[];
+  /** `process` means context lasts only as long as this live process. */
+  contextContinuity: "process" | "resumable";
+  /** `advisory` is a cwd hint, not an OS-enforced sandbox boundary. */
+  workspaceIsolation: "advisory" | "enforced";
+}
+
 /** Why a turn stopped — superset across backends (ACP stopReason ⊆ this). */
 export type TurnStopReason =
   | "end_turn"
@@ -119,6 +139,7 @@ export interface PermissionDecision {
 export interface Driver {
   readonly kind: DriverKind;
   readonly sessionId: string;
+  readonly runtime: DriverRuntimeDescriptor;
   start(): Promise<void>;
   /** Send one user prompt; events stream via the subscribed handler. */
   prompt(text: string): Promise<void>;

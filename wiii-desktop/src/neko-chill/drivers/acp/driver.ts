@@ -257,6 +257,19 @@ interface PendingPermission {
 export class AcpDriver implements Driver {
   readonly kind = "acp" as const;
   readonly sessionId: string;
+  readonly runtime: Driver["runtime"] = {
+    capabilities: [
+      "prompt",
+      "cancel",
+      "permission-resolution",
+      "session-config",
+    ],
+    // ACP v0 creates a fresh session/new for each process; Wiii does not
+    // pretend that a restored transcript resumes hidden provider memory.
+    contextContinuity: "process",
+    // cwd scopes the session semantically, but no OS sandbox is enforced.
+    workspaceIsolation: "advisory",
+  };
 
   private readonly cwd: string;
   private readonly emit: DriverEventHandler;

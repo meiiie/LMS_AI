@@ -200,3 +200,31 @@ storage.
 - v0 targets desktop platforms only (Windows first, macOS/Linux by CI parity);
   mobile and the Wiii-cloud driver inside the mode are explicit later phases.
 - Vietnamese-first user-facing copy applies to the new surface (AGENTS.md).
+
+## Runtime Integrity Follow-up (#908)
+
+DeepSeek Harness and its accompanying paper motivate four runtime invariants,
+adapted here only at the boundary Wiii actually owns. ACP agents may retain
+hidden in-process context, so this section does **not** claim that Wiii can
+reconstruct provider memory without a provider resume contract.
+
+- **FR-011 — Durable model boundary**: Every Wiii-controlled fact that can
+  affect a provider request (workspace/profile context, user prompt,
+  permission decision, effective session control) MUST enter a versioned,
+  monotonically sequenced session event log before dispatch.
+- **FR-012 — Owned resources**: Every live runtime resource MUST have one
+  explicit owner and an idempotent disposer. Mode exit, close, delete, idle
+  reap, failed initialization, and process exit MUST all reach teardown.
+- **FR-013 — Provider identity and capabilities**: Every runtime attachment
+  MUST receive a fresh provider instance identity and an explicit capability
+  set. Consumers MUST resolve the current identity and require the capability
+  they use; stale provider events and unsupported operations fail closed.
+- **FR-014 — Transactional transitions**: Provider replacement MUST prepare
+  before commit, leaving the old provider active when preparation fails.
+  Configuration changes MUST either durably commit or restore the prior
+  effective value and record a rollback; failed compensation is an explicit
+  error state.
+
+Acceptance evidence includes ordering at the storage/driver boundary, v1-to-v2
+event-log migration without transcript loss, reverse/idempotent disposal,
+replacement failure, capability denial, and configuration rollback tests.

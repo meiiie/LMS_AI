@@ -13,6 +13,7 @@ import { TitleBar } from "@/components/layout/TitleBar";
 import { useModeStore } from "./stores/mode-store";
 import { useNekoAgentStore } from "./stores/neko-agent-store";
 import {
+  disposeAllNekoRuntimes,
   startIdleReaper,
   useNekoSessionStore,
   type NekoSessionStatus,
@@ -150,7 +151,11 @@ export default function NekoChillApp() {
   useEffect(() => {
     void detect();
     void hydrate();
-    startIdleReaper();
+    const stopIdleReaper = startIdleReaper();
+    return () => {
+      stopIdleReaper();
+      void disposeAllNekoRuntimes();
+    };
   }, [detect, hydrate]);
 
   useEffect(() => {

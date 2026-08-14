@@ -8,6 +8,8 @@ import type { Driver, DriverEvent, PermissionDecision } from "@/neko-chill/drive
 import type { DetectedAgent } from "@/neko-chill/stores/neko-agent-store";
 
 const storage = new Map<string, unknown>();
+let failTranscriptWrites = false;
+let transcriptWritesBeforeFailure: number | null = null;
 
 vi.mock("@/lib/storage", () => ({
   loadStore: vi.fn(async (store: string, key: string, dflt: unknown) => {
@@ -15,6 +17,13 @@ vi.mock("@/lib/storage", () => ({
     return hit === undefined ? dflt : JSON.parse(JSON.stringify(hit));
   }),
   saveStore: vi.fn(async (store: string, key: string, value: unknown) => {
+    if (key.startsWith("session:")) {
+      if (failTranscriptWrites) throw new Error("disk unavailable");
+      if (transcriptWritesBeforeFailure !== null) {
+        if (transcriptWritesBeforeFailure === 0) throw new Error("commit disk failure");
+        transcriptWritesBeforeFailure -= 1;
+      }
+    }
     storage.set(`${store}:${key}`, JSON.parse(JSON.stringify(value)));
   }),
   deleteStore: vi.fn(async (store: string, key: string) => {
@@ -41,18 +50,31 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
 class FakeDriver implements Driver {
   readonly kind = "acp" as const;
+  readonly runtime: Driver["runtime"] = {
+    capabilities: ["prompt", "cancel", "permission-resolution", "session-config"],
+    contextContinuity: "process",
+    workspaceIsolation: "advisory",
+  };
   prompts: string[] = [];
+  promptSawDurableEvents: unknown[][] = [];
+  configErrorForValue: string | boolean | null = null;
   constructor(
     readonly sessionId: string,
     readonly emit: (event: DriverEvent) => void,
   ) {}
   async start(): Promise<void> {}
   async prompt(text: string): Promise<void> {
+    const snapshot = storage.get(`neko-chill-sessions.json:session:${this.sessionId}`) as
+      | { events?: unknown[] }
+      | undefined;
+    this.promptSawDurableEvents.push(snapshot?.events ?? []);
     this.prompts.push(text);
   }
   async cancel(): Promise<void> {}
   async resolvePermission(_: PermissionDecision): Promise<void> {}
-  async setConfigOption(): Promise<void> {}
+  async setConfigOption(_optionId: string, value: string | boolean): Promise<void> {
+    if (value === this.configErrorForValue) throw new Error("compensation rejected");
+  }
   async dispose(): Promise<void> {}
 }
 
@@ -76,6 +98,8 @@ describe("neko-chill persistence", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     storage.clear();
+    failTranscriptWrites = false;
+    transcriptWritesBeforeFailure = null;
     spawned = [];
     useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
     useNekoAgentStore.setState({ agents: [AGENT], isLoading: false });
@@ -113,6 +137,64 @@ describe("neko-chill persistence", () => {
     expect(storage.get("neko-chill-sessions.json:index")).toMatchObject([
       { v: 2, workspace: WORKSPACE },
     ]);
+    const persisted = storage.get(`neko-chill-sessions.json:session:${id}`) as {
+      v: number;
+      events: Array<{ seq: number; data: { type: string; text?: string } }>;
+    };
+    expect(persisted.v).toBe(2);
+    expect(spawned[0].promptSawDurableEvents[0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({ type: "model-input", text: "Xin chào neko" }),
+        }),
+      ]),
+    );
+    expect(persisted.events.map((event) => event.seq)).toEqual(
+      persisted.events.map((_, eventIndex) => eventIndex + 1),
+    );
+  });
+
+  it("fails closed and never dispatches when the model-input log cannot persist", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    failTranscriptWrites = true;
+
+    await useNekoSessionStore.getState().sendPrompt("không được gửi");
+
+    expect(spawned[0].prompts).toEqual([]);
+    expect(useNekoSessionStore.getState().sessions[id].statusDetail).toContain(
+      "chưa gửi cho agent",
+    );
+  });
+
+  it("surfaces rollback-failed when commit persistence and compensation both fail", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "model",
+        label: "Model",
+        category: "model",
+        kind: "select",
+        currentValue: "stable",
+        choices: [
+          { value: "stable", label: "Stable" },
+          { value: "preview", label: "Preview" },
+        ],
+      }],
+    });
+    spawned[0].configErrorForValue = "stable";
+    // requested persists; committed write fails; compensation back to stable fails.
+    transcriptWritesBeforeFailure = 1;
+
+    await useNekoSessionStore.getState().setConfigOption("model", "preview");
+
+    const session = useNekoSessionStore.getState().sessions[id];
+    expect(session.status).toBe("error");
+    expect(session.events[session.events.length - 1].data).toMatchObject({
+      type: "control-change",
+      phase: "rollback-failed",
+    });
   });
 
   it("hydrates a v1 index as a visible legacy session without losing transcript", async () => {
@@ -140,6 +222,22 @@ describe("neko-chill persistence", () => {
       pendingControlId: null,
       messages: [{ text: "không được mất" }],
     });
+    const migrated = storage.get("neko-chill-sessions.json:session:legacy-1") as {
+      v: number;
+      events: Array<{ data: { type: string; source?: string; text?: string } }>;
+    };
+    expect(migrated.v).toBe(2);
+    expect(migrated.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: "model-input",
+            source: "legacy-migration",
+            text: "không được mất",
+          }),
+        }),
+      ]),
+    );
   });
 
   it("hydrate is idempotent and never overwrites live sessions", async () => {
@@ -153,6 +251,40 @@ describe("neko-chill persistence", () => {
     // Live session (idle, with driver) must not be downgraded to exited.
     expect(session.status).toBe("idle");
     expect(Object.keys(useNekoSessionStore.getState().sessions)).toHaveLength(1);
+  });
+
+  it("rebuilds effective controls from committed log events", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "model",
+        label: "Model",
+        category: "model",
+        kind: "select",
+        currentValue: "stable",
+        choices: [
+          { value: "stable", label: "Stable" },
+          { value: "preview", label: "Preview" },
+        ],
+      }],
+    });
+    await useNekoSessionStore.getState().setConfigOption("model", "preview");
+
+    // Simulate an index write lagging behind the log-bearing transcript key.
+    const index = storage.get("neko-chill-sessions.json:index") as Array<{
+      id: string;
+      controls: Array<{ id: string; currentValue: string }>;
+    }>;
+    index.find((entry) => entry.id === id)!.controls[0].currentValue = "stable";
+    storage.set("neko-chill-sessions.json:index", index);
+
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+    await useNekoSessionStore.getState().hydrate();
+
+    expect(useNekoSessionStore.getState().sessions[id].controls[0].currentValue).toBe("preview");
   });
 
   it("a restored session respawns a fresh agent process on the next prompt", async () => {

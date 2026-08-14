@@ -33,13 +33,22 @@ export async function spawnTauriTransport(
   const lineHandlers: Array<(line: string) => void> = [];
   const exitHandlers: Array<(code: number | null) => void> = [];
   let killed = false;
+  let unlistenLine: (() => void) | null = null;
+  let unlistenExit: (() => void) | null = null;
 
-  const unlistenLine = await listen<string>(`neko-agent://line/${procId}`, (event) => {
-    for (const handler of lineHandlers) handler(event.payload);
-  });
-  const unlistenExit = await listen<number | null>(`neko-agent://exit/${procId}`, (event) => {
-    for (const handler of exitHandlers) handler(event.payload ?? null);
-  });
+  try {
+    unlistenLine = await listen<string>(`neko-agent://line/${procId}`, (event) => {
+      for (const handler of lineHandlers) handler(event.payload);
+    });
+    unlistenExit = await listen<number | null>(`neko-agent://exit/${procId}`, (event) => {
+      for (const handler of exitHandlers) handler(event.payload ?? null);
+    });
+  } catch (error) {
+    unlistenLine?.();
+    unlistenExit?.();
+    await invoke("neko_kill_agent", { procId }).catch(() => {});
+    throw error;
+  }
 
   return {
     async send(line: string): Promise<void> {
@@ -54,8 +63,8 @@ export async function spawnTauriTransport(
     async kill(): Promise<void> {
       if (killed) return;
       killed = true;
-      unlistenLine();
-      unlistenExit();
+      unlistenLine?.();
+      unlistenExit?.();
       await invoke("neko_kill_agent", { procId }).catch(() => {
         /* process already gone */
       });
@@ -94,6 +103,11 @@ export async function createDriverForAgent(
     transport,
     onEvent,
   });
-  await driver.start();
-  return driver;
+  try {
+    await driver.start();
+    return driver;
+  } catch (error) {
+    await driver.dispose().catch(() => {});
+    throw error;
+  }
 }

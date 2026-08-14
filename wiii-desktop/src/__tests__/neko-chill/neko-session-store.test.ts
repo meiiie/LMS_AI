@@ -22,11 +22,17 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
 class FakeDriver implements Driver {
   readonly kind = "acp" as const;
+  readonly runtime: Driver["runtime"] = {
+    capabilities: ["prompt", "cancel", "permission-resolution", "session-config"],
+    contextContinuity: "process",
+    workspaceIsolation: "advisory",
+  };
   prompts: string[] = [];
   cancelled = 0;
   disposed = 0;
   decisions: PermissionDecision[] = [];
   configChanges: Array<{ optionId: string; value: string | boolean }> = [];
+  configError: Error | null = null;
   constructor(
     readonly sessionId: string,
     readonly emit: (event: DriverEvent) => void,
@@ -42,6 +48,7 @@ class FakeDriver implements Driver {
     this.decisions.push(decision);
   }
   async setConfigOption(optionId: string, value: string | boolean): Promise<void> {
+    if (this.configError) throw this.configError;
     this.configChanges.push({ optionId, value });
   }
   async dispose(): Promise<void> {
@@ -136,6 +143,36 @@ describe("neko-session-store", () => {
     await useNekoSessionStore.getState().setConfigOption("mode", "plan");
     expect(driver.configChanges).toEqual([{ optionId: "mode", value: "plan" }]);
     expect(session(id).pendingControlId).toBeNull();
+  });
+
+  it("rolls a failed config transaction back to the previous effective value", async () => {
+    const id = await setup();
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "model",
+        label: "Model",
+        category: "model",
+        kind: "select",
+        currentValue: "stable",
+        choices: [
+          { value: "stable", label: "Stable" },
+          { value: "preview", label: "Preview" },
+        ],
+      }],
+    });
+    driver.configError = new Error("provider rejected preview");
+
+    await useNekoSessionStore.getState().setConfigOption("model", "preview");
+
+    expect(session(id).controls[0].currentValue).toBe("stable");
+    expect(session(id).pendingControlId).toBeNull();
+    expect(session(id).statusDetail).toContain("provider rejected preview");
+    const phases = session(id).events.flatMap((event) =>
+      event.data.type === "control-change" ? [event.data.phase] : [],
+    );
+    expect(phases.slice(-2)).toEqual(["requested", "rolled-back"]);
   });
 
   it("attaches a workspace to a legacy transcript and restarts on the next prompt", async () => {

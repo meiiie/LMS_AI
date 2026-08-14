@@ -32,10 +32,16 @@ import { isAbsoluteWorkspacePath, type WorkspaceRef } from "../workspace";
 import {
   deletePersistedSession,
   loadSessionIndex,
-  loadSessionTranscript,
+  loadSessionSnapshot,
   persistSessionDebounced,
+  persistSessionBeforeDispatch,
   persistSessionNow,
 } from "../persistence";
+import { appendSessionEvent, type NekoSessionEvent } from "../session-events";
+import {
+  RuntimeRegistry,
+  type RuntimeProviderSnapshot,
+} from "../runtime-manager";
 
 export interface NekoMessage {
   id: string;
@@ -72,14 +78,18 @@ export interface NekoSession {
   lastActivityAt: number;
   status: NekoSessionStatus;
   messages: NekoMessage[];
+  /** Durable, append-only facts at Wiii's model/runtime boundary. */
+  events: NekoSessionEvent[];
+  /** Current provider identity; null for a restored or stopped session. */
+  runtime: RuntimeProviderSnapshot | null;
   /** Set while the agent waits on an approval (FR-006); UI must resolve it. */
   pendingPermission: PermissionRequest | null;
   /** Honest error text for the banner when status is error/exited. */
   statusDetail?: string;
 }
 
-/** Live drivers, keyed by session id — deliberately outside zustand. */
-const drivers = new Map<string, Driver>();
+/** Live runtimes stay outside Zustand but are owned by RuntimeRegistry. */
+const runtimes = new RuntimeRegistry();
 
 /** Injected so tests can fake the driver without Tauri (vi.mock factory). */
 type DriverFactory = (
@@ -154,6 +164,30 @@ function toToolBlock(activity: DriverActivity): ToolExecutionBlockData {
   };
 }
 
+/** Rebuild effective session-control values from the durable transition log. */
+function projectControls(
+  controls: DriverConfigOption[],
+  events: NekoSessionEvent[],
+): DriverConfigOption[] {
+  const projected = controls.map((option) => ({
+    ...option,
+    choices: option.choices?.map((choice) => ({ ...choice })),
+  }));
+  for (const event of events) {
+    const transition = event.data;
+    if (transition.type !== "control-change") continue;
+    const value = transition.phase === "committed"
+      ? transition.nextValue
+      : transition.phase === "rolled-back"
+        ? transition.previousValue
+        : null;
+    if (value === null) continue;
+    const option = projected.find((candidate) => candidate.id === transition.optionId);
+    if (option) option.currentValue = value;
+  }
+  return projected;
+}
+
 export const useNekoSessionStore = create<NekoSessionState>()(
   immer((set, get) => ({
     sessions: {},
@@ -164,9 +198,32 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       if (get().hydrated) return;
       const index = await loadSessionIndex();
       const restored: Record<string, NekoSession> = {};
+      const migratedIds: string[] = [];
       for (const entry of index) {
         // Live sessions in state win over their persisted snapshot.
         if (get().sessions[entry.id]) continue;
+        const snapshot = await loadSessionSnapshot(entry.id);
+        const events = [...snapshot.events];
+        if (snapshot.needsEventMigration || events.length === 0) {
+          appendSessionEvent(events, "model", {
+            type: "session-context",
+            source: "legacy-migration",
+            agentId: entry.agentId,
+            workspacePath: entry.workspace?.path ?? null,
+            launchProfileId: entry.launchProfile?.id ?? null,
+          }, entry.createdAt);
+          for (const [index, message] of snapshot.messages.entries()) {
+            if (message.role !== "user" || typeof message.text !== "string") continue;
+            appendSessionEvent(events, "model", {
+              type: "model-input",
+              source: "legacy-migration",
+              messageId: message.id,
+              text: message.text,
+              providerInstanceId: null,
+            }, entry.createdAt + index + 1);
+          }
+          migratedIds.push(entry.id);
+        }
         restored[entry.id] = {
           id: entry.id,
           agentId: entry.agentId,
@@ -176,12 +233,14 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           updatedAt: entry.updatedAt,
           workspace: entry.workspace ?? null,
           launchProfile: entry.launchProfile ?? null,
-          controls: entry.controls ?? [],
+          controls: projectControls(entry.controls ?? [], events),
           commands: entry.commands ?? [],
           pendingControlId: null,
           lastActivityAt: entry.updatedAt,
           status: "exited",
-          messages: await loadSessionTranscript(entry.id),
+          messages: snapshot.messages,
+          events,
+          runtime: null,
           pendingPermission: null,
           statusDetail: "Phiên đã lưu — nhắn tiếp để khởi động lại agent.",
         };
@@ -190,6 +249,10 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         state.sessions = { ...restored, ...state.sessions };
         state.hydrated = true;
       });
+      for (const sessionId of migratedIds) {
+        const session = get().sessions[sessionId];
+        if (session) await persistSessionNow(session);
+      }
     },
 
     createSession: async (agent, workspace, launchProfile = null) => {
@@ -198,6 +261,14 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       }
       const sessionId = uuidv4();
       const now = Date.now();
+      const events: NekoSessionEvent[] = [];
+      appendSessionEvent(events, "model", {
+        type: "session-context",
+        source: "created",
+        agentId: agent.id,
+        workspacePath: workspace.path,
+        launchProfileId: launchProfile?.id ?? null,
+      }, now);
       set((state) => {
         state.sessions[sessionId] = {
           id: sessionId,
@@ -214,35 +285,68 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           lastActivityAt: now,
           status: "connecting",
           messages: [],
+          events,
+          runtime: null,
           pendingPermission: null,
         };
         state.activeSessionId = sessionId;
       });
       try {
+        // The workspace/profile can affect the provider before the first
+        // prompt, so its event must be durable before driver.start().
+        await persistSessionBeforeDispatch(get().sessions[sessionId]);
         const factory: DriverFactory =
           (get() as unknown as { _driverFactory?: DriverFactory })._driverFactory ??
           defaultDriverFactory;
-        const driver = await factory(
-          agent,
+        const pendingEvents: DriverEvent[] = [];
+        let preparingRuntime = true;
+        const replacement = await runtimes.replace(
           sessionId,
-          {
-            workspace,
-            ...(launchProfile?.id ? { profileId: launchProfile.id } : {}),
-          },
-          (event) => get().handleEvent(event),
+          agent.id,
+          (instanceId) => factory(
+            agent,
+            sessionId,
+            {
+              workspace,
+              ...(launchProfile?.id ? { profileId: launchProfile.id } : {}),
+            },
+            (event) => {
+              if (runtimes.isCurrent(sessionId, instanceId)) get().handleEvent(event);
+              else if (preparingRuntime) pendingEvents.push(event);
+            },
+          ),
         );
-        drivers.set(sessionId, driver);
+        preparingRuntime = false;
         set((state) => {
           const session = state.sessions[sessionId];
-          if (session && session.status === "connecting") session.status = "idle";
+          if (!session) return;
+          session.runtime = replacement.current;
+          appendSessionEvent(session.events as NekoSessionEvent[], "runtime", {
+            type: "runtime-attached",
+            provider: replacement.current,
+          });
+          if (session.status === "connecting") session.status = "idle";
+          if (replacement.cleanupError) {
+            session.statusDetail = "Runtime mới đã chạy nhưng runtime cũ không đóng sạch.";
+          }
         });
+        for (const event of pendingEvents) {
+          if (runtimes.isCurrent(sessionId, replacement.current.instanceId)) {
+            get().handleEvent(event);
+          }
+        }
       } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
         set((state) => {
           const session = state.sessions[sessionId];
-          if (session) {
+          if (session?.status === "connecting") {
             session.status = "error";
-            session.statusDetail =
-              err instanceof Error ? err.message : String(err);
+            session.statusDetail = reason;
+            appendSessionEvent(session.events as NekoSessionEvent[], "runtime", {
+              type: "runtime-attach-failed",
+              providerId: agent.id,
+              reason,
+            });
           }
         });
       }
@@ -255,21 +359,59 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       if (!workspace || !isAbsoluteWorkspacePath(workspace.path)) return;
       const current = get().sessions[sessionId];
       if (!current || current.workspace) return;
-      const driver = drivers.get(sessionId);
-      drivers.delete(sessionId);
-      await driver?.dispose().catch(() => {});
+      set((state) => {
+        const session = state.sessions[sessionId];
+        if (session && !session.workspace) session.status = "connecting";
+      });
+      const provider = runtimes.get(sessionId);
+      const disposeError = await runtimes.detach(sessionId).then(
+        () => null,
+        (error) => error,
+      );
       set((state) => {
         const session = state.sessions[sessionId];
         if (!session || session.workspace) return;
         session.workspace = workspace;
+        session.runtime = null;
+        if (provider) {
+          appendSessionEvent(session.events as NekoSessionEvent[], "runtime", {
+            type: "runtime-detached",
+            providerId: provider.providerId,
+            instanceId: provider.instanceId,
+            kind: provider.kind,
+            reason: "workspace-change",
+          });
+        }
+        appendSessionEvent(session.events as NekoSessionEvent[], "model", {
+          type: "session-context",
+          source: "workspace-attached",
+          agentId: session.agentId,
+          workspacePath: workspace.path,
+          launchProfileId: session.launchProfile?.id ?? null,
+        });
         session.status = "exited";
         session.statusDetail =
           "Đã gắn dự án. Lượt tiếp theo sẽ khởi động một runtime mới trong thư mục này.";
+        if (disposeError) {
+          session.statusDetail = "Đã gắn dự án nhưng runtime cũ không đóng sạch.";
+        }
         session.updatedAt = Date.now();
         session.lastActivityAt = session.updatedAt;
       });
       const updated = get().sessions[sessionId];
-      if (updated) await persistSessionNow(updated);
+      if (updated) {
+        try {
+          await persistSessionBeforeDispatch(updated);
+        } catch (error) {
+          set((state) => {
+            const session = state.sessions[sessionId];
+            if (session) {
+              session.status = "error";
+              session.statusDetail = `Không thể lưu ngữ cảnh dự án: ${error instanceof Error ? error.message : String(error)}`;
+            }
+          });
+        }
+      }
     },
 
     sendPrompt: async (text) => {
@@ -291,8 +433,12 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         return;
       }
 
-      let driver = drivers.get(sessionId);
-      if (!driver) {
+      let provider = runtimes.get(sessionId);
+      if (!provider) {
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (current) current.status = "connecting";
+        });
         const agentStore = useNekoAgentStore.getState();
         if (agentStore.agents.length === 0) await agentStore.detect();
         const agent = useNekoAgentStore
@@ -301,7 +447,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         if (!agent?.found) {
           set((state) => {
             const s = state.sessions[sessionId];
-            if (s) {
+            if (s?.status === "connecting") {
               s.status = "error";
               s.statusDetail = `Không tìm thấy agent "${session.agentName}" trên máy này.`;
             }
@@ -312,41 +458,77 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const factory: DriverFactory =
             (get() as unknown as { _driverFactory?: DriverFactory })._driverFactory ??
             defaultDriverFactory;
-          driver = await factory(
-            agent,
+          const pendingEvents: DriverEvent[] = [];
+          let preparingRuntime = true;
+          const replacement = await runtimes.replace(
             sessionId,
-            {
-              workspace: session.workspace,
-              ...(session.launchProfile?.id
-                ? { profileId: session.launchProfile.id }
-                : {}),
-            },
-            (event) => get().handleEvent(event),
+            agent.id,
+            (instanceId) => factory(
+              agent,
+              sessionId,
+              {
+                workspace: session.workspace!,
+                ...(session.launchProfile?.id
+                  ? { profileId: session.launchProfile.id }
+                  : {}),
+              },
+              (event) => {
+                if (runtimes.isCurrent(sessionId, instanceId)) get().handleEvent(event);
+                else if (preparingRuntime) pendingEvents.push(event);
+              },
+            ),
           );
-          drivers.set(sessionId, driver);
+          preparingRuntime = false;
+          provider = replacement.current;
           set((state) => {
             const s = state.sessions[sessionId];
             if (s) {
+              s.runtime = replacement.current;
+              appendSessionEvent(s.events as NekoSessionEvent[], "runtime", {
+                type: "runtime-attached",
+                provider: replacement.current,
+              });
               s.status = "idle";
               s.statusDetail = undefined;
             }
           });
+          for (const event of pendingEvents) {
+            if (runtimes.isCurrent(sessionId, replacement.current.instanceId)) {
+              get().handleEvent(event);
+            }
+          }
         } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
           set((state) => {
             const s = state.sessions[sessionId];
             if (s) {
               s.status = "error";
-              s.statusDetail = err instanceof Error ? err.message : String(err);
+              s.statusDetail = reason;
+              appendSessionEvent(s.events as NekoSessionEvent[], "runtime", {
+                type: "runtime-attach-failed",
+                providerId: s.agentId,
+                reason,
+              });
             }
           });
+          const failed = get().sessions[sessionId];
+          if (failed) await persistSessionNow(failed);
           return;
         }
       }
 
+      const messageId = uuidv4();
       set((state) => {
         const s = state.sessions[sessionId];
         if (!s) return;
-        s.messages.push({ id: uuidv4(), role: "user", text });
+        s.messages.push({ id: messageId, role: "user", text });
+        appendSessionEvent(s.events as NekoSessionEvent[], "model", {
+          type: "model-input",
+          source: "live",
+          messageId,
+          text,
+          providerInstanceId: provider?.instanceId ?? null,
+        });
         s.lastActivityAt = Date.now();
         s.updatedAt = s.lastActivityAt;
         if (s.messages.length === 1) {
@@ -354,16 +536,61 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         }
       });
       const updated = get().sessions[sessionId];
-      if (updated) persistSessionDebounced(updated);
+      if (!updated) return;
+      try {
+        // Hard barrier: the provider cannot observe this prompt before the
+        // exact model input is durable in the append-only log.
+        await persistSessionBeforeDispatch(updated);
+      } catch (error) {
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (current) {
+            current.statusDetail = `Không thể lưu prompt nên chưa gửi cho agent: ${error instanceof Error ? error.message : String(error)}`;
+          }
+        });
+        return;
+      }
       // turn-started from the driver flips status + opens the assistant
       // message; prompt() resolves only when the whole turn ends.
-      await driver.prompt(text);
+      try {
+        await runtimes.require(sessionId, "prompt").prompt(text);
+      } catch (error) {
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (current) {
+            current.status = "error";
+            current.statusDetail = error instanceof Error ? error.message : String(error);
+          }
+        });
+      }
     },
 
     cancelTurn: async () => {
       const sessionId = get().activeSessionId;
       if (!sessionId) return;
-      await drivers.get(sessionId)?.cancel();
+      const provider = runtimes.get(sessionId);
+      if (!provider) return;
+      set((state) => {
+        const session = state.sessions[sessionId];
+        if (session) {
+          appendSessionEvent(session.events as NekoSessionEvent[], "model", {
+            type: "runtime-command",
+            action: "cancel",
+            providerInstanceId: provider.instanceId,
+          });
+        }
+      });
+      const session = get().sessions[sessionId];
+      if (!session) return;
+      try {
+        await persistSessionBeforeDispatch(session);
+        await runtimes.require(sessionId, "cancel").cancel();
+      } catch (error) {
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (current) current.statusDetail = error instanceof Error ? error.message : String(error);
+        });
+      }
     },
 
     resolvePermission: async (optionId) => {
@@ -372,72 +599,184 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       const session = get().sessions[sessionId];
       const request = session?.pendingPermission;
       if (!request) return;
+      const provider = runtimes.get(sessionId);
+      if (!provider) return;
       set((state) => {
         const s = state.sessions[sessionId];
-        if (s) s.pendingPermission = null;
+        if (s) {
+          appendSessionEvent(s.events as NekoSessionEvent[], "model", {
+            type: "permission-decision",
+            requestId: request.requestId,
+            optionId,
+            providerInstanceId: provider.instanceId,
+          });
+        }
       });
-      // Driver fails closed on null/unknown options (FR-006).
-      await drivers.get(sessionId)?.resolvePermission({
-        requestId: request.requestId,
-        optionId,
-      });
+      try {
+        await persistSessionBeforeDispatch(get().sessions[sessionId]);
+        // Driver fails closed on null/unknown options (FR-006).
+        await runtimes.require(sessionId, "permission-resolution").resolvePermission({
+          requestId: request.requestId,
+          optionId,
+        });
+        set((state) => {
+          const s = state.sessions[sessionId];
+          if (s?.pendingPermission?.requestId === request.requestId) {
+            s.pendingPermission = null;
+          }
+        });
+      } catch (error) {
+        set((state) => {
+          const s = state.sessions[sessionId];
+          if (s) s.statusDetail = error instanceof Error ? error.message : String(error);
+        });
+      }
     },
 
     setConfigOption: async (optionId, value) => {
       const sessionId = get().activeSessionId;
       if (!sessionId) return;
       const session = get().sessions[sessionId];
-      const driver = drivers.get(sessionId);
+      const option = session?.controls.find((candidate) => candidate.id === optionId);
       if (
         !session ||
-        !driver ||
+        !option ||
         session.status !== "idle" ||
         session.pendingPermission ||
         session.pendingControlId
       ) {
         return;
       }
+      let driver: Driver;
+      try {
+        driver = runtimes.require(sessionId, "session-config");
+      } catch (error) {
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (current) current.statusDetail = error instanceof Error ? error.message : String(error);
+        });
+        return;
+      }
+      const previousValue = option.currentValue;
       set((state) => {
         const current = state.sessions[sessionId];
         if (current) {
           current.pendingControlId = optionId;
           current.statusDetail = undefined;
+          appendSessionEvent(current.events as NekoSessionEvent[], "model", {
+            type: "control-change",
+            phase: "requested",
+            optionId,
+            previousValue,
+            nextValue: value,
+          });
         }
       });
       try {
+        await persistSessionBeforeDispatch(get().sessions[sessionId]);
         await driver.setConfigOption(optionId, value);
       } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
         set((state) => {
           const current = state.sessions[sessionId];
           if (current) {
-            current.statusDetail =
-              error instanceof Error ? error.message : String(error);
+            const control = current.controls.find((candidate) => candidate.id === optionId);
+            if (control) control.currentValue = previousValue;
+            current.statusDetail = reason;
+            current.pendingControlId = null;
+            appendSessionEvent(current.events as NekoSessionEvent[], "model", {
+              type: "control-change",
+              phase: "rolled-back",
+              optionId,
+              previousValue,
+              nextValue: value,
+              reason,
+            });
           }
         });
-      } finally {
+        const rolledBack = get().sessions[sessionId];
+        if (rolledBack) await persistSessionNow(rolledBack);
+        return;
+      }
+
+      set((state) => {
+        const current = state.sessions[sessionId];
+        if (!current) return;
+        const control = current.controls.find((candidate) => candidate.id === optionId);
+        if (control) control.currentValue = value;
+        current.pendingControlId = null;
+        appendSessionEvent(current.events as NekoSessionEvent[], "model", {
+          type: "control-change",
+          phase: "committed",
+          optionId,
+          previousValue,
+          nextValue: value,
+        });
+      });
+      try {
+        await persistSessionBeforeDispatch(get().sessions[sessionId]);
+      } catch (commitError) {
+        let rollbackError: unknown;
+        try {
+          await driver.setConfigOption(optionId, previousValue);
+        } catch (error) {
+          rollbackError = error;
+        }
+        const reason = commitError instanceof Error ? commitError.message : String(commitError);
         set((state) => {
           const current = state.sessions[sessionId];
-          if (current?.pendingControlId === optionId) {
-            current.pendingControlId = null;
-          }
+          if (!current) return;
+          const control = current.controls.find((candidate) => candidate.id === optionId);
+          if (!rollbackError && control) control.currentValue = previousValue;
+          current.status = rollbackError ? "error" : current.status;
+          current.statusDetail = rollbackError
+            ? `Không thể xác nhận hoặc hoàn tác cấu hình: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+            : `Không thể lưu cấu hình; đã hoàn tác: ${reason}`;
+          appendSessionEvent(current.events as NekoSessionEvent[], "model", {
+            type: "control-change",
+            phase: rollbackError ? "rollback-failed" : "rolled-back",
+            optionId,
+            previousValue,
+            nextValue: value,
+            reason,
+          });
         });
+        const rolledBack = get().sessions[sessionId];
+        if (rolledBack) await persistSessionNow(rolledBack);
       }
-      const updated = get().sessions[sessionId];
-      if (updated) persistSessionDebounced(updated);
     },
 
     closeSession: async (sessionId) => {
-      const driver = drivers.get(sessionId);
-      drivers.delete(sessionId);
-      await driver?.dispose().catch(() => {});
+      set((state) => {
+        const session = state.sessions[sessionId];
+        if (session) session.status = "connecting";
+      });
+      const provider = runtimes.get(sessionId);
+      const disposeError = await runtimes.detach(sessionId).then(
+        () => null,
+        (error) => error,
+      );
       set((state) => {
         const session = state.sessions[sessionId];
         if (session) {
+          session.runtime = null;
+          if (provider) {
+            appendSessionEvent(session.events as NekoSessionEvent[], "runtime", {
+              type: "runtime-detached",
+              providerId: provider.providerId,
+              instanceId: provider.instanceId,
+              kind: provider.kind,
+              reason: "close",
+            });
+          }
           session.status = "exited";
           session.pendingPermission = null;
           session.pendingControlId = null;
           session.statusDetail = "Đã kết thúc phiên — nhắn tiếp để khởi động lại agent.";
           session.updatedAt = Date.now();
+          if (disposeError) {
+            session.statusDetail = "Phiên đã đóng nhưng runtime báo lỗi khi thu hồi tài nguyên.";
+          }
         }
       });
       const session = get().sessions[sessionId];
@@ -445,9 +784,11 @@ export const useNekoSessionStore = create<NekoSessionState>()(
     },
 
     deleteSession: async (sessionId) => {
-      const driver = drivers.get(sessionId);
-      drivers.delete(sessionId);
-      await driver?.dispose().catch(() => {});
+      set((state) => {
+        const session = state.sessions[sessionId];
+        if (session) session.status = "connecting";
+      });
+      await runtimes.detach(sessionId).catch(() => {});
       await deletePersistedSession(sessionId);
       set((state) => {
         delete state.sessions[sessionId];
@@ -464,6 +805,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
     },
 
     handleEvent: (event) => {
+      const exitingProvider = event.type === "process-exited"
+        ? runtimes.get(event.sessionId)
+        : null;
       set((state) => {
         const session = state.sessions[event.sessionId];
         if (!session) return;
@@ -582,7 +926,16 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             return;
           }
           case "process-exited": {
-            drivers.delete(event.sessionId);
+            session.runtime = null;
+            if (exitingProvider) {
+              appendSessionEvent(session.events as NekoSessionEvent[], "runtime", {
+                type: "runtime-detached",
+                providerId: exitingProvider.providerId,
+                instanceId: exitingProvider.instanceId,
+                kind: exitingProvider.kind,
+                reason: "process-exit",
+              });
+            }
             session.status = "exited";
             session.pendingPermission = null;
             session.pendingControlId = null;
@@ -597,6 +950,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       // Trailing debounced persist after every transcript-affecting event.
       const session = get().sessions[event.sessionId];
       if (session) persistSessionDebounced(session);
+      if (event.type === "process-exited") {
+        void runtimes.detach(event.sessionId).catch(() => {});
+      }
     },
   })),
 );
@@ -610,7 +966,7 @@ const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 let reaperTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Dispose drivers of sessions idle past the threshold. Never touches a
+ * Dispose runtimes of sessions idle past the threshold. Never touches a
  * streaming turn or an unanswered permission request (the sweep may run
  * while the user reads an approval — reaping there would fail their turn).
  */
@@ -620,15 +976,32 @@ export async function sweepIdleSessions(now: number = Date.now()): Promise<void>
     if (session.status !== "idle") continue;
     if (session.pendingPermission) continue;
     if (now - session.lastActivityAt < IDLE_REAP_MS) continue;
-    const driver = drivers.get(session.id);
-    if (!driver) continue;
-    drivers.delete(session.id);
-    await driver.dispose().catch(() => {});
+    const provider = runtimes.get(session.id);
+    if (!provider) continue;
+    useNekoSessionStore.setState((state) => {
+      const current = state.sessions[session.id];
+      if (current?.status === "idle") current.status = "connecting";
+    });
+    const disposeError = await runtimes.detach(session.id).then(
+      () => null,
+      (error) => error,
+    );
     useNekoSessionStore.setState((state) => {
       const s = state.sessions[session.id];
-      if (s && s.status === "idle") {
+      if (s && s.status === "connecting") {
+        s.runtime = null;
+        appendSessionEvent(s.events as NekoSessionEvent[], "runtime", {
+          type: "runtime-detached",
+          providerId: provider.providerId,
+          instanceId: provider.instanceId,
+          kind: provider.kind,
+          reason: "idle",
+        }, now);
         s.status = "exited";
         s.statusDetail = "Agent tạm nghỉ sau 30 phút yên lặng — nhắn tiếp để khởi động lại.";
+        if (disposeError) {
+          s.statusDetail = "Runtime hết hạn nhưng báo lỗi khi thu hồi tài nguyên.";
+        }
         s.updatedAt = now;
         s.lastActivityAt = now;
       }
@@ -638,10 +1011,53 @@ export async function sweepIdleSessions(now: number = Date.now()): Promise<void>
   }
 }
 
-/** Start the periodic sweep (idempotent; called on mode entry). */
-export function startIdleReaper(): void {
-  if (reaperTimer) return;
+/** Start the periodic sweep and return its explicit owner/disposer. */
+export function startIdleReaper(): () => void {
+  stopIdleReaper();
   reaperTimer = setInterval(() => void sweepIdleSessions(), SWEEP_INTERVAL_MS);
+  return stopIdleReaper;
+}
+
+export function stopIdleReaper(): void {
+  if (!reaperTimer) return;
+  clearInterval(reaperTimer);
+  reaperTimer = null;
+}
+
+/** Mode-exit owner: stop every live runtime and persist detach facts. */
+export async function disposeAllNekoRuntimes(): Promise<void> {
+  const results = await runtimes.disposeAll();
+  useNekoSessionStore.setState((state) => {
+    for (const result of results) {
+      const session = state.sessions[result.provider.sessionId];
+      if (!session) continue;
+      const currentProvider = runtimes.get(result.provider.sessionId);
+      const hasNewRuntime = Boolean(
+        currentProvider && currentProvider.instanceId !== result.provider.instanceId,
+      );
+      if (!hasNewRuntime) {
+        session.runtime = null;
+        session.status = "exited";
+        session.pendingPermission = null;
+        session.pendingControlId = null;
+        session.updatedAt = Date.now();
+        session.statusDetail = result.error
+          ? "Đã rời Neko Chill nhưng runtime báo lỗi khi thu hồi tài nguyên."
+          : "Runtime đã dừng khi rời Neko Chill.";
+      }
+      appendSessionEvent(session.events as NekoSessionEvent[], "runtime", {
+        type: "runtime-detached",
+        providerId: result.provider.providerId,
+        instanceId: result.provider.instanceId,
+        kind: result.provider.kind,
+        reason: "mode-exit",
+      });
+    }
+  });
+  await Promise.all(results.map(async ({ provider }) => {
+    const session = useNekoSessionStore.getState().sessions[provider.sessionId];
+    if (session) await persistSessionNow(session);
+  }));
 }
 
 /** Test hook: swap the driver factory (kept off the public interface). */
@@ -649,7 +1065,8 @@ export function _setDriverFactoryForTests(factory: DriverFactory | undefined): v
   useNekoSessionStore.setState({ _driverFactory: factory } as never);
 }
 
-/** Test hook: drop live drivers, simulating an app restart. */
+/** Test hook: drop live runtimes, simulating an app restart. */
 export function _clearLiveDriversForTests(): void {
-  drivers.clear();
+  runtimes.clearForTests();
+  stopIdleReaper();
 }
