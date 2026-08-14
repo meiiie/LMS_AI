@@ -3,9 +3,13 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 const values = new Map<string, unknown>();
 let failNextSave = false;
 let failEverySave = false;
+let failReads = false;
 
 const store = {
-  get: vi.fn(async (key: string) => values.get(key)),
+  get: vi.fn(async (key: string) => {
+    if (failReads) throw new Error("desktop read unavailable");
+    return values.get(key);
+  }),
   set: vi.fn(async (key: string, value: unknown) => { values.set(key, value); }),
   delete: vi.fn(async (key: string) => { values.delete(key); }),
   save: vi.fn(async () => {
@@ -21,13 +25,18 @@ vi.mock("@tauri-apps/plugin-store", () => ({
   Store: { load: vi.fn(async () => store) },
 }));
 
-import { saveStoreStrict } from "@/lib/storage";
+import {
+  deleteStoreStrict,
+  loadStoreStrict,
+  saveStoreStrict,
+} from "@/lib/storage";
 
 describe("saveStoreStrict in Tauri", () => {
   beforeEach(() => {
     values.clear();
     failNextSave = false;
     failEverySave = false;
+    failReads = false;
     vi.clearAllMocks();
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
@@ -74,5 +83,23 @@ describe("saveStoreStrict in Tauri", () => {
       expect.objectContaining({ message: "desktop disk unavailable" }),
       expect.objectContaining({ message: "desktop disk unavailable" }),
     ]);
+  });
+
+  it("propagates authoritative desktop read failures", async () => {
+    failReads = true;
+
+    await expect(loadStoreStrict("strict.json", "fact", null))
+      .rejects.toThrow("desktop read unavailable");
+  });
+
+  it("restores a staged value when strict desktop deletion rejects", async () => {
+    values.set("fact", "before");
+    failNextSave = true;
+
+    await expect(deleteStoreStrict("strict.json", "fact"))
+      .rejects.toThrow("desktop disk unavailable");
+
+    expect(values.get("fact")).toBe("before");
+    expect(store.set).toHaveBeenLastCalledWith("fact", "before");
   });
 });

@@ -15,6 +15,7 @@ import type { DetectedAgent } from "@/neko-chill/stores/neko-agent-store";
 const storage = new Map<string, unknown>();
 vi.mock("@/lib/storage", () => ({
   loadStore: vi.fn(async (_s: string, _k: string, dflt: unknown) => dflt),
+  loadStoreStrict: vi.fn(async (_s: string, _k: string, dflt: unknown) => dflt),
   saveStore: vi.fn(async (store: string, key: string, value: unknown) => {
     storage.set(`${store}:${key}`, value);
   }),
@@ -22,6 +23,7 @@ vi.mock("@/lib/storage", () => ({
     storage.set(`${store}:${key}`, value);
   }),
   deleteStore: vi.fn(async () => {}),
+  deleteStoreStrict: vi.fn(async () => {}),
   clearStore: vi.fn(async () => {}),
 }));
 

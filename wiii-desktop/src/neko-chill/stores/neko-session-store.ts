@@ -204,9 +204,9 @@ function projectControls(
   return projected;
 }
 
-function removeEventAtSequence(events: NekoSessionEvent[], sequence: number | null): void {
-  if (sequence === null) return;
-  const eventIndex = events.findIndex((event) => event.seq === sequence);
+function removeEventById(events: NekoSessionEvent[], eventId: string | null): void {
+  if (eventId === null) return;
+  const eventIndex = events.findIndex((event) => event.eventId === eventId);
   if (eventIndex < 0) return;
   events.splice(eventIndex, 1);
   events.forEach((event, index) => { event.seq = index + 1; });
@@ -220,13 +220,25 @@ export const useNekoSessionStore = create<NekoSessionState>()(
 
     hydrate: async () => {
       if (get().hydrated) return;
-      const index = await loadSessionIndex();
+      let index: Awaited<ReturnType<typeof loadSessionIndex>>;
+      try {
+        index = await loadSessionIndex();
+      } catch {
+        // Authoritative reads fail closed. Leave `hydrated` false so an app
+        // restart or explicit retry can read again without overwriting data.
+        return;
+      }
       const restored: Record<string, NekoSession> = {};
       const migratedIds: string[] = [];
       for (const entry of index) {
         // Live sessions in state win over their persisted snapshot.
         if (get().sessions[entry.id]) continue;
-        const snapshot = await loadSessionSnapshot(entry.id);
+        let snapshot: Awaited<ReturnType<typeof loadSessionSnapshot>>;
+        try {
+          snapshot = await loadSessionSnapshot(entry.id);
+        } catch {
+          return;
+        }
         const events = [...snapshot.events];
         const needsMigration = snapshot.needsEventMigration || events.length === 0;
         if (needsMigration) {
@@ -599,18 +611,18 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       const providerInstanceId = provider.instanceId;
       const messageId = uuidv4();
       const previousTitle = get().sessions[sessionId]?.title;
-      let inputEventSequence: number | null = null;
+      let inputEventId: string | null = null;
       set((state) => {
         const s = state.sessions[sessionId];
         if (!s) return;
         s.messages.push({ id: messageId, role: "user", text });
-        inputEventSequence = appendSessionEvent(s.events as NekoSessionEvent[], "model", {
+        inputEventId = appendSessionEvent(s.events as NekoSessionEvent[], "model", {
           type: "model-input",
           source: "live",
           messageId,
           text,
           providerInstanceId,
-        }).seq;
+        }).eventId!;
         // Acquire the turn synchronously. No second composer submission may
         // pass while the first prompt waits for its durability barrier.
         s.status = "dispatching";
@@ -631,9 +643,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const current = state.sessions[sessionId];
           if (current) {
             current.messages = current.messages.filter((message) => message.id !== messageId);
-            removeEventAtSequence(
+            removeEventById(
               current.events as NekoSessionEvent[],
-              inputEventSequence,
+              inputEventId,
             );
             if (current.messages.length === 0 && previousTitle) {
               current.title = previousTitle;
@@ -672,15 +684,15 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       if (!sessionId) return;
       const provider = runtimes.get(sessionId);
       if (!provider) return;
-      let commandEventSequence: number | null = null;
+      let commandEventId: string | null = null;
       set((state) => {
         const session = state.sessions[sessionId];
         if (session) {
-          commandEventSequence = appendSessionEvent(session.events as NekoSessionEvent[], "model", {
+          commandEventId = appendSessionEvent(session.events as NekoSessionEvent[], "model", {
             type: "runtime-command",
             action: "cancel",
             providerInstanceId: provider.instanceId,
-          }).seq;
+          }).eventId!;
         }
       });
       const session = get().sessions[sessionId];
@@ -691,9 +703,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         set((state) => {
           const current = state.sessions[sessionId];
           if (current) {
-            removeEventAtSequence(
+            removeEventById(
               current.events as NekoSessionEvent[],
-              commandEventSequence,
+              commandEventId,
             );
             current.statusDetail = error instanceof Error ? error.message : String(error);
           }
@@ -720,7 +732,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       if (!request || session?.resolvingPermissionId) return;
       const provider = runtimes.get(sessionId);
       if (!provider) return;
-      let decisionEventSequence: number | null = null;
+      let decisionEventId: string | null = null;
       let decisionPersisted = false;
       set((state) => {
         const s = state.sessions[sessionId];
@@ -728,12 +740,12 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           // Acquire this approval synchronously so a double click cannot
           // append a conflicting decision while persistence is in flight.
           s.resolvingPermissionId = request.requestId;
-          decisionEventSequence = appendSessionEvent(s.events as NekoSessionEvent[], "model", {
+          decisionEventId = appendSessionEvent(s.events as NekoSessionEvent[], "model", {
             type: "permission-decision",
             requestId: request.requestId,
             optionId,
             providerInstanceId: provider.instanceId,
-          }).seq;
+          }).eventId!;
         }
       });
       try {
@@ -761,9 +773,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const s = state.sessions[sessionId];
           if (s) {
             if (!decisionPersisted) {
-              removeEventAtSequence(
+              removeEventById(
                 s.events as NekoSessionEvent[],
-                decisionEventSequence,
+                decisionEventId,
               );
             }
             if (s.resolvingPermissionId === request.requestId) {

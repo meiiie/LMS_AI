@@ -116,6 +116,31 @@ export async function loadStore<T>(
   return (map.get(key) as T) ?? defaultValue;
 }
 
+/** Read authoritative state without converting I/O or parse failures to absence. */
+export async function loadStoreStrict<T>(
+  storeName: string,
+  key: string,
+  defaultValue: T,
+): Promise<T> {
+  const effectiveName = namespacedStoreName(storeName);
+  const StoreClass = await getStoreClass();
+
+  if (StoreClass) {
+    const store = await StoreClass.load(effectiveName);
+    const value = (await store.get(key)) as T | undefined;
+    return value ?? defaultValue;
+  }
+
+  // localStorage is the durable browser authority. Refresh the memory mirror
+  // only after a successful read/parse so transient failures cannot look like
+  // a missing key and later overwrite existing data.
+  const raw = localStorage.getItem(`wiii:${effectiveName}`);
+  const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+  const map = new Map<string, unknown>(Object.entries(parsed));
+  memoryStore.set(effectiveName, map);
+  return (map.get(key) as T) ?? defaultValue;
+}
+
 export async function saveStore<T>(
   storeName: string,
   key: string,
@@ -219,6 +244,53 @@ export async function deleteStore(
   const map = getMemoryStore(effectiveName);
   map.delete(key);
   persistMemoryStore(effectiveName);
+}
+
+/** Delete a durable key or reject while restoring any staged prior value. */
+export async function deleteStoreStrict(
+  storeName: string,
+  key: string,
+): Promise<void> {
+  const effectiveName = namespacedStoreName(storeName);
+  const StoreClass = await getStoreClass();
+
+  if (StoreClass) {
+    const store = await StoreClass.load(effectiveName);
+    const previous = await store.get(key);
+    const hadPrevious = previous !== undefined;
+    await store.delete(key);
+    try {
+      await store.save();
+    } catch (error) {
+      if (!hadPrevious) throw error;
+      let compensationError: unknown;
+      try {
+        await store.set(key, previous);
+        await store.save();
+      } catch (rollbackError) {
+        compensationError = rollbackError;
+      }
+      if (compensationError) {
+        throw new AggregateError(
+          [error, compensationError],
+          `Không thể xóa hoặc hoàn tác ${effectiveName}/${key}.`,
+        );
+      }
+      throw error;
+    }
+    return;
+  }
+
+  const map = getMemoryStore(effectiveName);
+  const hadPrevious = map.has(key);
+  const previous = map.get(key);
+  map.delete(key);
+  try {
+    persistMemoryStoreStrict(effectiveName);
+  } catch (error) {
+    if (hadPrevious) map.set(key, previous);
+    throw error;
+  }
 }
 
 export async function clearStore(storeName: string): Promise<void> {

@@ -10,7 +10,13 @@
  * Writes are debounced per session so token streaming never causes a
  * full-store rewrite per delta (spec edge case: long transcripts).
  */
-import { loadStore, saveStore, saveStoreStrict, deleteStore } from "@/lib/storage";
+import {
+  deleteStoreStrict,
+  loadStore,
+  loadStoreStrict,
+  saveStore,
+  saveStoreStrict,
+} from "@/lib/storage";
 import type { NekoMessage, NekoSession } from "./stores/neko-session-store";
 import type { DriverCommand, DriverConfigOption } from "./drivers/types";
 import type { AgentLaunchProfile } from "./stores/neko-agent-store";
@@ -104,7 +110,9 @@ async function writeSession(session: NekoSession, strict: boolean): Promise<void
   // independent from unrelated index I/O.
   if (!publishedIds.has(session.id)) {
     const catalogOperation = catalogWriteChain.catch(() => {}).then(async () => {
-      const catalog = validSessionIds(await loadStore<unknown>(STORE, SESSION_IDS_KEY, []));
+      const catalog = validSessionIds(
+        await loadStoreStrict<unknown>(STORE, SESSION_IDS_KEY, []),
+      );
       if (!catalog.includes(session.id)) {
         // Discovery is part of the authoritative snapshot contract, even for
         // background writes. Never mark an ID published after a best-effort save.
@@ -199,16 +207,19 @@ export async function loadSessionIndex(): Promise<SessionIndexEntry[]> {
   const cached = Array.isArray(rawIndex)
     ? rawIndex.filter((entry): entry is SessionIndexEntry => isSessionIndexEntry(entry))
     : [];
-  const catalog = validSessionIds(await loadStore<unknown>(STORE, SESSION_IDS_KEY, []));
+  const catalog = validSessionIds(
+    await loadStoreStrict<unknown>(STORE, SESSION_IDS_KEY, []),
+  );
   for (const sessionId of catalog) publishedIds.add(sessionId);
   const sessionIds = [...new Set([...catalog, ...cached.map((entry) => entry.id)])];
   const cachedById = new Map(cached.map((entry) => [entry.id, entry]));
   const resolved = await Promise.all(sessionIds.map(async (sessionId) => {
-    const stored = await loadStore<PersistedTranscript | null>(
+    const stored = await loadStoreStrict<PersistedTranscript | null>(
       STORE,
       `session:${sessionId}`,
       null,
     );
+    if (!stored) return null;
     const embedded = stored && isSessionIndexEntry(stored.entry, sessionId)
       ? stored.entry
       : null;
@@ -221,7 +232,7 @@ export async function loadSessionIndex(): Promise<SessionIndexEntry[]> {
 }
 
 export async function loadSessionSnapshot(sessionId: string): Promise<LoadedSessionSnapshot> {
-  const stored = await loadStore<PersistedTranscript | null>(
+  const stored = await loadStoreStrict<PersistedTranscript | null>(
     STORE,
     `session:${sessionId}`,
     null,
@@ -252,6 +263,9 @@ export async function deletePersistedSession(sessionId: string): Promise<void> {
     timers.delete(sessionId);
   }
   await writeChains.get(sessionId)?.catch(() => {});
+  // Delete the authoritative transcript first. If this fails, catalog/index
+  // still discover the intact session and the caller can retry safely.
+  await deleteStoreStrict(STORE, `session:${sessionId}`);
   const indexOperation = indexWriteChain.catch(() => {}).then(async () => {
     const rawIndex = await loadStore<unknown>(STORE, INDEX_KEY, []);
     const index = Array.isArray(rawIndex)
@@ -266,7 +280,9 @@ export async function deletePersistedSession(sessionId: string): Promise<void> {
   indexWriteChain = indexOperation.catch(() => {});
   await indexOperation;
   const catalogOperation = catalogWriteChain.catch(() => {}).then(async () => {
-    const catalog = validSessionIds(await loadStore<unknown>(STORE, SESSION_IDS_KEY, []));
+    const catalog = validSessionIds(
+      await loadStoreStrict<unknown>(STORE, SESSION_IDS_KEY, []),
+    );
     await saveStoreStrict(
       STORE,
       SESSION_IDS_KEY,
@@ -276,5 +292,4 @@ export async function deletePersistedSession(sessionId: string): Promise<void> {
   catalogWriteChain = catalogOperation.catch(() => {});
   await catalogOperation;
   publishedIds.delete(sessionId);
-  await deleteStore(STORE, `session:${sessionId}`).catch(() => {});
 }

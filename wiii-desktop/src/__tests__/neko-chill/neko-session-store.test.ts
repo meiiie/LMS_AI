@@ -11,6 +11,8 @@ const storage = new Map<string, unknown>();
 vi.mock("@/lib/storage", () => ({
   loadStore: vi.fn(async (store: string, key: string, dflt: unknown) =>
     storage.get(`${store}:${key}`) ?? dflt),
+  loadStoreStrict: vi.fn(async (store: string, key: string, dflt: unknown) =>
+    storage.get(`${store}:${key}`) ?? dflt),
   saveStore: vi.fn(async (store: string, key: string, value: unknown) => {
     storage.set(`${store}:${key}`, value);
   }),
@@ -18,6 +20,9 @@ vi.mock("@/lib/storage", () => ({
     storage.set(`${store}:${key}`, value);
   }),
   deleteStore: vi.fn(async (store: string, key: string) => {
+    storage.delete(`${store}:${key}`);
+  }),
+  deleteStoreStrict: vi.fn(async (store: string, key: string) => {
     storage.delete(`${store}:${key}`);
   }),
   clearStore: vi.fn(async () => {}),

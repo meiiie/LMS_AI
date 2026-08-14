@@ -10,6 +10,9 @@ import type { DetectedAgent } from "@/neko-chill/stores/neko-agent-store";
 const storage = new Map<string, unknown>();
 let failTranscriptWrites = false;
 let failIndexWrites = false;
+let failTranscriptReads = false;
+let failCatalogReads = false;
+let failTranscriptDeletes = false;
 let indexWriteGate: Promise<void> | null = null;
 let notifyIndexWriteEntered: (() => void) | null = null;
 let indexWriteAttempts = 0;
@@ -48,16 +51,39 @@ async function saveStrictToMemory(store: string, key: string, value: unknown): P
   await saveToMemory(store, key, value);
 }
 
+async function loadFromMemory(store: string, key: string, dflt: unknown): Promise<unknown> {
+  const hit = storage.get(`${store}:${key}`);
+  return hit === undefined ? dflt : JSON.parse(JSON.stringify(hit));
+}
+
+async function loadStrictFromMemory(
+  store: string,
+  key: string,
+  dflt: unknown,
+): Promise<unknown> {
+  if (key === "session-ids" && failCatalogReads) throw new Error("catalog read unavailable");
+  if (key.startsWith("session:") && failTranscriptReads) {
+    throw new Error("transcript read unavailable");
+  }
+  return loadFromMemory(store, key, dflt);
+}
+
+async function deleteStrictFromMemory(store: string, key: string): Promise<void> {
+  if (key.startsWith("session:") && failTranscriptDeletes) {
+    throw new Error("transcript delete unavailable");
+  }
+  storage.delete(`${store}:${key}`);
+}
+
 vi.mock("@/lib/storage", () => ({
-  loadStore: vi.fn(async (store: string, key: string, dflt: unknown) => {
-    const hit = storage.get(`${store}:${key}`);
-    return hit === undefined ? dflt : JSON.parse(JSON.stringify(hit));
-  }),
+  loadStore: vi.fn(loadFromMemory),
+  loadStoreStrict: vi.fn(loadStrictFromMemory),
   saveStore: vi.fn(saveToMemory),
   saveStoreStrict: vi.fn(saveStrictToMemory),
   deleteStore: vi.fn(async (store: string, key: string) => {
     storage.delete(`${store}:${key}`);
   }),
+  deleteStoreStrict: vi.fn(deleteStrictFromMemory),
   clearStore: vi.fn(async () => {}),
 }));
 
@@ -142,6 +168,9 @@ describe("neko-chill persistence", () => {
     storage.clear();
     failTranscriptWrites = false;
     failIndexWrites = false;
+    failTranscriptReads = false;
+    failCatalogReads = false;
+    failTranscriptDeletes = false;
     indexWriteGate = null;
     notifyIndexWriteEntered = null;
     indexWriteAttempts = 0;
@@ -204,6 +233,29 @@ describe("neko-chill persistence", () => {
     );
   });
 
+  it("does not migrate or overwrite a snapshot after a transient read failure", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await useNekoSessionStore.getState().sendPrompt("dữ liệu phải giữ nguyên");
+    const storedBefore = JSON.parse(JSON.stringify(
+      storage.get(`neko-chill-sessions.json:session:${id}`),
+    ));
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+    failTranscriptReads = true;
+
+    await useNekoSessionStore.getState().hydrate();
+
+    expect(useNekoSessionStore.getState().hydrated).toBe(false);
+    expect(useNekoSessionStore.getState().sessions).toEqual({});
+    expect(storage.get(`neko-chill-sessions.json:session:${id}`)).toEqual(storedBefore);
+
+    failTranscriptReads = false;
+    await useNekoSessionStore.getState().hydrate();
+    expect(useNekoSessionStore.getState().sessions[id].messages).toEqual([
+      expect.objectContaining({ text: "dữ liệu phải giữ nguyên" }),
+    ]);
+  });
+
   it("fails closed and never dispatches when the model-input log cannot persist", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     const originalTitle = useNekoSessionStore.getState().sessions[id].title;
@@ -260,6 +312,20 @@ describe("neko-chill persistence", () => {
         }),
       ]),
     );
+  });
+
+  it("does not replace the catalog when its authoritative read fails", async () => {
+    const firstId = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    failCatalogReads = true;
+
+    const secondId = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+
+    expect(storage.get("neko-chill-sessions.json:session-ids")).toEqual([firstId]);
+    expect(spawned.map((driver) => driver.sessionId)).toEqual([firstId]);
+    expect(useNekoSessionStore.getState().sessions[secondId]).toMatchObject({
+      status: "error",
+      runtime: null,
+    });
   });
 
   it("does not block another session or new catalog entry behind index-cache I/O", async () => {
@@ -329,7 +395,9 @@ describe("neko-chill persistence", () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     failTranscriptWrites = true;
 
-    await useNekoSessionStore.getState().cancelTurn();
+    const first = useNekoSessionStore.getState().cancelTurn();
+    const second = useNekoSessionStore.getState().cancelTurn();
+    await Promise.all([first, second]);
 
     expect(spawned[0].cancelled).toBe(0);
     expect(useNekoSessionStore.getState().sessions[id].events.filter(
@@ -886,9 +954,30 @@ describe("neko-chill persistence", () => {
     });
     expect(useNekoSessionStore.getState().sessions[id].statusDetail)
       .toContain("Không thể xóa phiên");
-    expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(true);
+    expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(false);
+    expect(storage.get("neko-chill-sessions.json:session-ids")).toContain(id);
 
     failIndexWrites = false;
+    await useNekoSessionStore.getState().deleteSession(id);
+    expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
+  });
+
+  it("keeps deletion discoverable when the authoritative snapshot delete fails", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await vi.waitFor(() => expect(storage.get("neko-chill-sessions.json:index"))
+      .toHaveLength(1));
+    failTranscriptDeletes = true;
+
+    await useNekoSessionStore.getState().deleteSession(id);
+
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      status: "error",
+      runtime: null,
+    });
+    expect(storage.get("neko-chill-sessions.json:session-ids")).toContain(id);
+    expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(true);
+
+    failTranscriptDeletes = false;
     await useNekoSessionStore.getState().deleteSession(id);
     expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
   });

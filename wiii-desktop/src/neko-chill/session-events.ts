@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import type { DriverCapability, DriverKind } from "./drivers/types";
 import type { RuntimeProviderSnapshot } from "./runtime-manager";
 
@@ -82,6 +83,8 @@ export type NekoSessionEventData =
  */
 export interface NekoSessionEvent {
   v: typeof NEKO_SESSION_EVENT_VERSION;
+  /** Stable identity for rollback; absent only on pre-ID persisted events. */
+  eventId?: string;
   seq: number;
   at: number;
   visibility: "model" | "runtime";
@@ -96,6 +99,7 @@ export function appendSessionEvent(
 ): NekoSessionEvent {
   const event: NekoSessionEvent = {
     v: NEKO_SESSION_EVENT_VERSION,
+    eventId: uuidv4(),
     seq: (events[events.length - 1]?.seq ?? 0) + 1,
     at,
     visibility,
@@ -185,6 +189,9 @@ export function isNekoSessionEvent(value: unknown): value is NekoSessionEvent {
   const data = candidate.data as Record<string, unknown> | undefined;
   return (
     candidate.v === NEKO_SESSION_EVENT_VERSION &&
+    (candidate.eventId === undefined || (
+      typeof candidate.eventId === "string" && candidate.eventId.length > 0
+    )) &&
     typeof candidate.seq === "number" &&
     Number.isInteger(candidate.seq) &&
     candidate.seq > 0 &&

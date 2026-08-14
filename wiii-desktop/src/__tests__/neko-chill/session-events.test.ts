@@ -12,13 +12,17 @@ function event(data: NekoSessionEvent["data"]): NekoSessionEvent {
 
 describe("Neko session event validation", () => {
   it("accepts complete discriminated payloads", () => {
-    expect(isNekoSessionEvent(event({
+    const appended = event({
       type: "model-input",
       source: "live",
       messageId: "m1",
       text: "xin chào",
       providerInstanceId: "provider-1",
-    }))).toBe(true);
+    });
+    expect(appended.eventId).toEqual(expect.any(String));
+    expect(isNekoSessionEvent(appended)).toBe(true);
+    expect(isNekoSessionEvent({ ...appended, eventId: undefined })).toBe(true);
+    expect(isNekoSessionEvent({ ...appended, eventId: "" })).toBe(false);
   });
 
   it.each([
