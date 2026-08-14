@@ -264,6 +264,30 @@ describe("Neko Chill shell UI", () => {
     expect(screen.getByRole("status").textContent).toBe("Đang lưu quyết định…");
   });
 
+  it("keeps the close action available when a session is in error", () => {
+    const closeSession = vi.fn(async () => {});
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên cần phục hồi",
+          { path: "C:/work/neko", name: "Neko" },
+          {
+            status: "error",
+            statusDetail: "Runtime báo lỗi",
+          },
+        ),
+      },
+      activeSessionId: "active",
+      closeSession,
+    });
+
+    render(<NekoChillApp />);
+    fireEvent.click(screen.getByRole("button", { name: "Kết thúc" }));
+
+    expect(closeSession).toHaveBeenCalledWith("active");
+  });
+
   it("requires a project and reuses an exact recent workspace for a new session", async () => {
     const createSession = vi.fn(async () => "created");
     const agent = {
