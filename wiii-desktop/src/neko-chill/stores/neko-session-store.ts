@@ -230,6 +230,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         state.hydrating = true;
         state.hydrationError = null;
       });
+      const migratedIds: string[] = [];
+      try {
       let index: Awaited<ReturnType<typeof loadSessionIndex>>;
       try {
         index = await loadSessionIndex();
@@ -241,7 +243,6 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         return;
       }
       const restored: Record<string, NekoSession> = {};
-      const migratedIds: string[] = [];
       for (const entry of index) {
         // Live sessions in state win over their persisted snapshot.
         if (get().sessions[entry.id]) continue;
@@ -333,6 +334,15 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         state.hydrating = false;
         state.hydrationError = null;
       });
+      } catch (error) {
+        // No parser/projection bug may strand the shell in its loading state.
+        set((state) => {
+          state.hydrated = false;
+          state.hydrating = false;
+          state.hydrationError = error instanceof Error ? error.message : String(error);
+        });
+        return;
+      }
       for (const sessionId of migratedIds) {
         const session = get().sessions[sessionId];
         if (!session) continue;
@@ -1102,6 +1112,10 @@ export const useNekoSessionStore = create<NekoSessionState>()(
     },
 
     deleteSession: async (sessionId) => {
+      const current = get().sessions[sessionId];
+      // Acquire the lifecycle lock before runtime teardown. A duplicate delete
+      // cannot bypass a stalled disposer and reach persistent storage.
+      if (!current || current.status === "stopping") return;
       set((state) => {
         const session = state.sessions[sessionId];
         if (session) session.status = "stopping";

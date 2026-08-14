@@ -17,10 +17,11 @@ import {
   saveStore,
   saveStoreStrict,
 } from "@/lib/storage";
+import type { ContentBlock } from "@/api/types";
 import type { NekoMessage, NekoSession } from "./stores/neko-session-store";
 import type { DriverCommand, DriverConfigOption } from "./drivers/types";
 import type { AgentLaunchProfile } from "./stores/neko-agent-store";
-import type { WorkspaceRef } from "./workspace";
+import { isAbsoluteWorkspacePath, type WorkspaceRef } from "./workspace";
 import { isNekoSessionEvent, type NekoSessionEvent } from "./session-events";
 
 const STORE = "neko-chill-sessions.json";
@@ -66,10 +67,71 @@ const publishedIds = new Set<string>();
 let catalogWriteChain: Promise<void> = Promise.resolve();
 let indexWriteChain: Promise<void> = Promise.resolve();
 
+function isDriverConfigChoice(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const choice = value as Record<string, unknown>;
+  return (
+    typeof choice.value === "string" &&
+    typeof choice.label === "string" &&
+    (choice.description === undefined || typeof choice.description === "string")
+  );
+}
+
+function isDriverConfigOption(value: unknown): value is DriverConfigOption {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const option = value as Record<string, unknown>;
+  return (
+    typeof option.id === "string" &&
+    typeof option.label === "string" &&
+    (option.description === undefined || typeof option.description === "string") &&
+    ["mode", "model", "model_config", "thought_level", "other"].includes(
+      option.category as string,
+    ) &&
+    (option.kind === "select" || option.kind === "boolean") &&
+    (typeof option.currentValue === "string" || typeof option.currentValue === "boolean") &&
+    (option.choices === undefined || (
+      Array.isArray(option.choices) && option.choices.every(isDriverConfigChoice)
+    ))
+  );
+}
+
+function isDriverCommand(value: unknown): value is DriverCommand {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const command = value as Record<string, unknown>;
+  return (
+    typeof command.name === "string" &&
+    typeof command.description === "string" &&
+    (command.inputHint === undefined || typeof command.inputHint === "string")
+  );
+}
+
+function isWorkspaceRef(value: unknown): value is WorkspaceRef {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const workspace = value as Record<string, unknown>;
+  return (
+    typeof workspace.path === "string" &&
+    isAbsoluteWorkspacePath(workspace.path) &&
+    typeof workspace.name === "string" &&
+    workspace.name.length > 0
+  );
+}
+
+function isLaunchProfile(value: unknown): value is AgentLaunchProfile {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const profile = value as Record<string, unknown>;
+  return (
+    typeof profile.id === "string" &&
+    typeof profile.provider === "string" &&
+    (profile.model === null || typeof profile.model === "string") &&
+    typeof profile.active === "boolean"
+  );
+}
+
 function isSessionIndexEntry(value: unknown, expectedId?: string): value is SessionIndexEntry {
-  if (!value || typeof value !== "object") return false;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const entry = value as Partial<SessionIndexEntry>;
   return (
+    (entry.v === undefined || entry.v === INDEX_SCHEMA_VERSION) &&
     typeof entry.id === "string" &&
     (!expectedId || entry.id === expectedId) &&
     typeof entry.agentId === "string" &&
@@ -79,8 +141,16 @@ function isSessionIndexEntry(value: unknown, expectedId?: string): value is Sess
     Number.isFinite(entry.createdAt) &&
     typeof entry.updatedAt === "number" &&
     Number.isFinite(entry.updatedAt) &&
-    (entry.controls === undefined || Array.isArray(entry.controls)) &&
-    (entry.commands === undefined || Array.isArray(entry.commands))
+    (entry.workspace === undefined || entry.workspace === null || isWorkspaceRef(entry.workspace)) &&
+    (entry.launchProfile === undefined ||
+      entry.launchProfile === null ||
+      isLaunchProfile(entry.launchProfile)) &&
+    (entry.controls === undefined || (
+      Array.isArray(entry.controls) && entry.controls.every(isDriverConfigOption)
+    )) &&
+    (entry.commands === undefined || (
+      Array.isArray(entry.commands) && entry.commands.every(isDriverCommand)
+    ))
   );
 }
 
@@ -94,6 +164,41 @@ function parseSessionIds(value: unknown): string[] {
   return [...new Set(value)];
 }
 
+function isToolCall(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const tool = value as Record<string, unknown>;
+  return (
+    typeof tool.id === "string" &&
+    typeof tool.name === "string" &&
+    (tool.result === undefined || typeof tool.result === "string") &&
+    (tool.node === undefined || typeof tool.node === "string") &&
+    (tool.args === undefined || (
+      tool.args !== null && typeof tool.args === "object" && !Array.isArray(tool.args)
+    ))
+  );
+}
+
+function isNekoContentBlock(value: unknown): value is ContentBlock {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const block = value as Record<string, unknown>;
+  if (typeof block.id !== "string") return false;
+  if (block.type === "answer") return typeof block.content === "string";
+  if (block.type === "thinking") {
+    return (
+      typeof block.content === "string" &&
+      Array.isArray(block.toolCalls) &&
+      block.toolCalls.every(isToolCall)
+    );
+  }
+  if (block.type === "tool_execution") {
+    return (
+      (block.status === "pending" || block.status === "completed") &&
+      isToolCall(block.tool)
+    );
+  }
+  return false;
+}
+
 function isPersistedMessage(value: unknown): value is NekoMessage {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const message = value as Partial<NekoMessage>;
@@ -101,7 +206,9 @@ function isPersistedMessage(value: unknown): value is NekoMessage {
     typeof message.id !== "string" ||
     (message.role !== "user" && message.role !== "assistant") ||
     (message.text !== undefined && typeof message.text !== "string") ||
-    (message.blocks !== undefined && !Array.isArray(message.blocks))
+    (message.blocks !== undefined && (
+      !Array.isArray(message.blocks) || !message.blocks.every(isNekoContentBlock)
+    ))
   ) {
     return false;
   }
@@ -273,7 +380,11 @@ export async function loadSessionIndex(): Promise<SessionIndexEntry[]> {
     const embedded = stored && isSessionIndexEntry(stored.entry, sessionId)
       ? stored.entry
       : null;
-    return embedded ?? cachedById.get(sessionId) ?? null;
+    const metadata = embedded ?? cachedById.get(sessionId) ?? null;
+    if (!metadata && catalog.includes(sessionId)) {
+      throw new Error(`Không thể khôi phục metadata phiên ${sessionId}.`);
+    }
+    return metadata;
   }));
   const reconciled = resolved.filter(
     (entry): entry is SessionIndexEntry => entry !== null,
@@ -307,31 +418,50 @@ async function performDeletePersistedSession(sessionId: string): Promise<void> {
     timers.delete(sessionId);
   }
   await writeChains.get(sessionId)?.catch(() => {});
-  // Delete the authoritative transcript first. If this fails, catalog/index
-  // still discover the intact session and the caller can retry safely.
-  await deleteStoreStrict(STORE, `session:${sessionId}`);
-  const indexOperation = indexWriteChain.catch(() => {}).then(async () => {
-    const rawIndex = await loadStore<unknown>(STORE, INDEX_KEY, []);
-    const index = Array.isArray(rawIndex)
-      ? rawIndex.filter((entry): entry is SessionIndexEntry => isSessionIndexEntry(entry))
-      : [];
-    await saveStoreStrict(
-      STORE,
-      INDEX_KEY,
-      index.filter((item) => item.id !== sessionId),
-    );
-  });
-  indexWriteChain = indexOperation.catch(() => {});
-  await indexOperation;
+  const snapshotKey = `session:${sessionId}`;
+  // Hold the catalog chain from validation through metadata commit. A
+  // malformed catalog must fail before the destructive snapshot delete.
   const catalogOperation = catalogWriteChain.catch(() => {}).then(async () => {
     const catalog = parseSessionIds(
       await loadStoreStrict<unknown>(STORE, SESSION_IDS_KEY, []),
     );
-    await saveStoreStrict(
-      STORE,
-      SESSION_IDS_KEY,
-      catalog.filter((id) => id !== sessionId),
-    );
+    const snapshot = await loadStoreStrict<unknown>(STORE, snapshotKey, undefined);
+    if (snapshot !== undefined) parsePersistedTranscript(snapshot, sessionId);
+    let snapshotDeleted = false;
+    try {
+      await deleteStoreStrict(STORE, snapshotKey);
+      snapshotDeleted = true;
+      const indexOperation = indexWriteChain.catch(() => {}).then(async () => {
+        const rawIndex = await loadStore<unknown>(STORE, INDEX_KEY, []);
+        const index = Array.isArray(rawIndex)
+          ? rawIndex.filter((entry): entry is SessionIndexEntry => isSessionIndexEntry(entry))
+          : [];
+        await saveStoreStrict(
+          STORE,
+          INDEX_KEY,
+          index.filter((item) => item.id !== sessionId),
+        );
+      });
+      indexWriteChain = indexOperation.catch(() => {});
+      await indexOperation;
+      await saveStoreStrict(
+        STORE,
+        SESSION_IDS_KEY,
+        catalog.filter((id) => id !== sessionId),
+      );
+    } catch (error) {
+      if (snapshotDeleted && snapshot !== undefined) {
+        try {
+          await saveStoreStrict(STORE, snapshotKey, snapshot);
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            `Không thể xóa hoặc khôi phục snapshot phiên ${sessionId}.`,
+          );
+        }
+      }
+      throw error;
+    }
   });
   catalogWriteChain = catalogOperation.catch(() => {});
   await catalogOperation;
