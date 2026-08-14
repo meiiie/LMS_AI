@@ -358,9 +358,11 @@ describe("neko-chill persistence", () => {
 
     await useNekoSessionStore.getState().setConfigOption("model", "preview");
 
-    expect(useNekoSessionStore.getState().sessions[id].status).toBe("error");
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("exited");
+    expect(useNekoSessionStore.getState().sessions[id].runtime).toBeNull();
+    expect(spawned[0].disposed).toBe(1);
     expect(useNekoSessionStore.getState().sessions[id].statusDetail).toContain(
-      "Không thể lưu trạng thái hoàn tác cấu hình",
+      "runtime đã được thu hồi",
     );
     const strictTranscriptWrites = vi.mocked(saveStoreStrict).mock.calls.filter(
       ([, key]) => key === `session:${id}`,
@@ -392,7 +394,9 @@ describe("neko-chill persistence", () => {
     await useNekoSessionStore.getState().setConfigOption("model", "preview");
 
     const session = useNekoSessionStore.getState().sessions[id];
-    expect(session.status).toBe("error");
+    expect(session.status).toBe("exited");
+    expect(session.runtime).toBeNull();
+    expect(spawned[0].disposed).toBe(1);
     expect(session.events[session.events.length - 1].data).toMatchObject({
       type: "control-change",
       phase: "rollback-failed",
@@ -433,6 +437,12 @@ describe("neko-chill persistence", () => {
     expect(spawned[0].configChanges).toEqual([{ optionId: "model", value: "preview" }]);
     expect(useNekoSessionStore.getState().sessions[id].events.at(-1)?.data)
       .toMatchObject({ type: "control-change", phase: "rollback-failed" });
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("exited");
+
+    transcriptWritesBeforeFailure = null;
+    await useNekoSessionStore.getState().sendPrompt("phiên đã đóng vẫn tiếp tục");
+    expect(spawned).toHaveLength(2);
+    expect(spawned[1].prompts).toEqual(["phiên đã đóng vẫn tiếp tục"]);
   });
 
   it("hydrates a v1 index as a visible legacy session without losing transcript", async () => {

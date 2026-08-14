@@ -788,18 +788,24 @@ export const useNekoSessionStore = create<NekoSessionState>()(
               });
             }
             if (ownsControlLock) {
-              current.status = rollbackError
-                ? revocation && !revocation.error ? "exited" : "error"
-                : current.status;
-              current.statusDetail = rollbackError
-                ? revocation
-                  ? revocation.error
-                    ? `Cấu hình không xác định; runtime đã bị thu hồi nhưng cleanup báo lỗi: ${revocation.error instanceof Error ? revocation.error.message : String(revocation.error)}`
-                    : `Cấu hình không xác định sau lỗi "${rollbackReason}"; runtime đã được thu hồi. Nhắn tiếp để khởi động một runtime mới.`
-                  : `Không thể xác nhận hoặc hoàn tác cấu hình: ${rollbackReason}`
-                : configDispatched
-                  ? `Provider báo lỗi; đã hoàn tác cấu hình: ${reason}`
-                  : reason;
+              const lifecycleAlreadyClosed =
+                current.status === "stopping" || current.status === "exited";
+              if (rollbackError && revocation) {
+                current.status = revocation.error ? "error" : "exited";
+              } else if (rollbackError && !lifecycleAlreadyClosed) {
+                current.status = "error";
+              }
+              if (!(rollbackError && !revocation && lifecycleAlreadyClosed)) {
+                current.statusDetail = rollbackError
+                  ? revocation
+                    ? revocation.error
+                      ? `Cấu hình không xác định; runtime đã bị thu hồi nhưng cleanup báo lỗi: ${revocation.error instanceof Error ? revocation.error.message : String(revocation.error)}`
+                      : `Cấu hình không xác định sau lỗi "${rollbackReason}"; runtime đã được thu hồi. Nhắn tiếp để khởi động một runtime mới.`
+                    : `Không thể xác nhận hoặc hoàn tác cấu hình: ${rollbackReason}`
+                  : configDispatched
+                    ? `Provider báo lỗi; đã hoàn tác cấu hình: ${reason}`
+                    : reason;
+              }
             }
             appendSessionEvent(current.events as NekoSessionEvent[], "model", {
               type: "control-change",
@@ -811,10 +817,17 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             });
           }
         });
-        await persistSessionNowOrReport(sessionId, "trạng thái hoàn tác cấu hình", {
-          fatal: true,
-          strict: true,
-        });
+        const terminalPersisted = await persistSessionNowOrReport(
+          sessionId,
+          "trạng thái hoàn tác cấu hình",
+          {
+            fatal: true,
+            strict: true,
+          },
+        );
+        if (!terminalPersisted) {
+          await revokeRuntimeAfterDurabilityFailure(sessionId, provider);
+        }
         releaseControlLock();
         return;
       }
@@ -876,16 +889,22 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             });
           }
           if (ownsControlLock) {
-            current.status = rollbackError
-              ? revocation && !revocation.error ? "exited" : "error"
-              : current.status;
-            current.statusDetail = rollbackError
-              ? revocation
-                ? revocation.error
-                  ? `Cấu hình không xác định; runtime đã bị thu hồi nhưng cleanup báo lỗi: ${revocation.error instanceof Error ? revocation.error.message : String(revocation.error)}`
-                  : `Cấu hình không xác định sau lỗi "${rollbackReason}"; runtime đã được thu hồi. Nhắn tiếp để khởi động một runtime mới.`
-                : `Không thể xác nhận hoặc hoàn tác cấu hình: ${rollbackReason}`
-              : `Không thể lưu cấu hình; đã hoàn tác: ${reason}`;
+            const lifecycleAlreadyClosed =
+              current.status === "stopping" || current.status === "exited";
+            if (rollbackError && revocation) {
+              current.status = revocation.error ? "error" : "exited";
+            } else if (rollbackError && !lifecycleAlreadyClosed) {
+              current.status = "error";
+            }
+            if (!(rollbackError && !revocation && lifecycleAlreadyClosed)) {
+              current.statusDetail = rollbackError
+                ? revocation
+                  ? revocation.error
+                    ? `Cấu hình không xác định; runtime đã bị thu hồi nhưng cleanup báo lỗi: ${revocation.error instanceof Error ? revocation.error.message : String(revocation.error)}`
+                    : `Cấu hình không xác định sau lỗi "${rollbackReason}"; runtime đã được thu hồi. Nhắn tiếp để khởi động một runtime mới.`
+                  : `Không thể xác nhận hoặc hoàn tác cấu hình: ${rollbackReason}`
+                : `Không thể lưu cấu hình; đã hoàn tác: ${reason}`;
+            }
           }
           appendSessionEvent(current.events as NekoSessionEvent[], "model", {
             type: "control-change",
@@ -896,10 +915,17 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             reason: rollbackError ? `${reason}; compensation: ${rollbackReason}` : reason,
           });
         });
-        await persistSessionNowOrReport(sessionId, "trạng thái hoàn tác cấu hình", {
-          fatal: true,
-          strict: true,
-        });
+        const terminalPersisted = await persistSessionNowOrReport(
+          sessionId,
+          "trạng thái hoàn tác cấu hình",
+          {
+            fatal: true,
+            strict: true,
+          },
+        );
+        if (!terminalPersisted) {
+          await revokeRuntimeAfterDurabilityFailure(sessionId, provider);
+        }
         releaseControlLock();
       }
     },
@@ -1114,23 +1140,59 @@ export const useNekoSessionStore = create<NekoSessionState>()(
   })),
 );
 
+async function revokeRuntimeAfterDurabilityFailure(
+  sessionId: string,
+  provider: RuntimeProviderSnapshot,
+): Promise<void> {
+  const revocation = await runtimes.detachInstance(sessionId, provider.instanceId);
+  if (!revocation) return;
+  useNekoSessionStore.setState((state) => {
+    const current = state.sessions[sessionId];
+    if (!current) return;
+    if (current.runtime?.instanceId === revocation.provider.instanceId) {
+      current.runtime = null;
+    }
+    appendSessionEvent(current.events as NekoSessionEvent[], "runtime", {
+      type: "runtime-detached",
+      providerId: revocation.provider.providerId,
+      instanceId: revocation.provider.instanceId,
+      kind: revocation.provider.kind,
+      reason: "durability-failure",
+    });
+    if (current.status !== "stopping") {
+      current.status = revocation.error ? "error" : "exited";
+      current.statusDetail = revocation.error
+        ? `Không thể lưu kết quả giao dịch; runtime đã bị thu hồi nhưng cleanup báo lỗi: ${revocation.error instanceof Error ? revocation.error.message : String(revocation.error)}`
+        : "Không thể lưu kết quả giao dịch; runtime đã được thu hồi. Nhắn tiếp để thử lại khi bộ nhớ bền đã sẵn sàng.";
+    }
+  });
+}
+
 async function persistSessionNowOrReport(
   sessionId: string,
   context: string,
   options: { fatal?: boolean; strict?: boolean } = {},
-): Promise<void> {
+): Promise<boolean> {
   const session = useNekoSessionStore.getState().sessions[sessionId];
-  if (!session) return;
+  if (!session) return false;
   try {
     await (options.strict ? persistSessionStrict(session) : persistSessionNow(session));
+    return true;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     useNekoSessionStore.setState((state) => {
       const current = state.sessions[sessionId];
       if (!current) return;
-      if (options.fatal) current.status = "error";
+      if (
+        options.fatal &&
+        current.status !== "stopping" &&
+        current.status !== "exited"
+      ) {
+        current.status = "error";
+      }
       current.statusDetail = `Không thể lưu ${context}: ${reason}`;
     });
+    return false;
   }
 }
 

@@ -55,7 +55,8 @@ export type NekoSessionEventData =
         | "mode-exit"
         | "process-exit"
         | "workspace-change"
-        | "config-uncertain";
+        | "config-uncertain"
+        | "durability-failure";
     }
   | {
       type: "runtime-attach-failed";
@@ -167,6 +168,7 @@ function isValidEventData(data: Record<string, unknown>): boolean {
           "process-exit",
           "workspace-change",
           "config-uncertain",
+          "durability-failure",
         ].includes(data.reason as string)
       );
     case "runtime-attach-failed":
