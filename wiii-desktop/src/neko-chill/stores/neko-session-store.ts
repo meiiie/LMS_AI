@@ -36,6 +36,7 @@ import {
   persistSessionDebounced,
   persistSessionBeforeDispatch,
   persistSessionNow,
+  persistSessionStrict,
 } from "../persistence";
 import { appendSessionEvent, type NekoSessionEvent } from "../session-events";
 import {
@@ -177,7 +178,14 @@ function projectControls(
     ...option,
     choices: option.choices?.map((choice) => ({ ...choice })),
   }));
-  for (const event of events) {
+  // Index controls are the latest provider-reported baseline. Historical
+  // commits from an earlier process must never override a fresh provider's
+  // defaults, so replay only the current provider epoch.
+  let epochStart = 0;
+  for (const [eventIndex, event] of events.entries()) {
+    if (event.data.type === "runtime-attached") epochStart = eventIndex + 1;
+  }
+  for (const event of events.slice(epochStart)) {
     const transition = event.data;
     if (transition.type !== "control-change") continue;
     const value = transition.phase === "committed"
@@ -716,6 +724,12 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       });
       let driver: Driver;
       let configDispatched = false;
+      const releaseControlLock = () => {
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (current?.pendingControlId === optionId) current.pendingControlId = null;
+        });
+      };
       try {
         await persistSessionBeforeDispatch(get().sessions[sessionId]);
         driver = runtimes.requireInstance(
@@ -750,18 +764,43 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         const rollbackReason = rollbackError instanceof Error
           ? rollbackError.message
           : String(rollbackError ?? "");
+        const revocation = rollbackError
+          ? await runtimes.detachInstance(sessionId, provider.instanceId)
+          : null;
         set((state) => {
           const current = state.sessions[sessionId];
           if (current) {
+            const ownsControlLock = current.pendingControlId === optionId;
             const control = current.controls.find((candidate) => candidate.id === optionId);
-            if (!rollbackError && control) control.currentValue = previousValue;
-            current.status = rollbackError ? "error" : current.status;
-            current.statusDetail = rollbackError
-              ? `Không thể xác nhận hoặc hoàn tác cấu hình: ${rollbackReason}`
-              : configDispatched
-                ? `Provider báo lỗi; đã hoàn tác cấu hình: ${reason}`
-                : reason;
-            current.pendingControlId = null;
+            if (!rollbackError && ownsControlLock && control) {
+              control.currentValue = previousValue;
+            }
+            if (revocation) {
+              if (current.runtime?.instanceId === revocation.provider.instanceId) {
+                current.runtime = null;
+              }
+              appendSessionEvent(current.events as NekoSessionEvent[], "runtime", {
+                type: "runtime-detached",
+                providerId: revocation.provider.providerId,
+                instanceId: revocation.provider.instanceId,
+                kind: revocation.provider.kind,
+                reason: "config-uncertain",
+              });
+            }
+            if (ownsControlLock) {
+              current.status = rollbackError
+                ? revocation && !revocation.error ? "exited" : "error"
+                : current.status;
+              current.statusDetail = rollbackError
+                ? revocation
+                  ? revocation.error
+                    ? `Cấu hình không xác định; runtime đã bị thu hồi nhưng cleanup báo lỗi: ${revocation.error instanceof Error ? revocation.error.message : String(revocation.error)}`
+                    : `Cấu hình không xác định sau lỗi "${rollbackReason}"; runtime đã được thu hồi. Nhắn tiếp để khởi động một runtime mới.`
+                  : `Không thể xác nhận hoặc hoàn tác cấu hình: ${rollbackReason}`
+                : configDispatched
+                  ? `Provider báo lỗi; đã hoàn tác cấu hình: ${reason}`
+                  : reason;
+            }
             appendSessionEvent(current.events as NekoSessionEvent[], "model", {
               type: "control-change",
               phase: rollbackError ? "rollback-failed" : "rolled-back",
@@ -772,7 +811,11 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             });
           }
         });
-        await persistSessionNowOrReport(sessionId, "trạng thái hoàn tác cấu hình", true);
+        await persistSessionNowOrReport(sessionId, "trạng thái hoàn tác cấu hình", {
+          fatal: true,
+          strict: true,
+        });
+        releaseControlLock();
         return;
       }
 
@@ -781,7 +824,6 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         if (!current) return;
         const control = current.controls.find((candidate) => candidate.id === optionId);
         if (control) control.currentValue = value;
-        current.pendingControlId = null;
         appendSessionEvent(current.events as NekoSessionEvent[], "model", {
           type: "control-change",
           phase: "committed",
@@ -792,6 +834,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       });
       try {
         await persistSessionBeforeDispatch(get().sessions[sessionId]);
+        releaseControlLock();
       } catch (commitError) {
         let rollbackError: unknown;
         try {
@@ -806,25 +849,58 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           rollbackError = error;
         }
         const reason = commitError instanceof Error ? commitError.message : String(commitError);
+        const rollbackReason = rollbackError instanceof Error
+          ? rollbackError.message
+          : String(rollbackError ?? "");
+        const revocation = rollbackError
+          ? await runtimes.detachInstance(sessionId, provider.instanceId)
+          : null;
         set((state) => {
           const current = state.sessions[sessionId];
           if (!current) return;
+          const ownsControlLock = current.pendingControlId === optionId;
           const control = current.controls.find((candidate) => candidate.id === optionId);
-          if (!rollbackError && control) control.currentValue = previousValue;
-          current.status = rollbackError ? "error" : current.status;
-          current.statusDetail = rollbackError
-            ? `Không thể xác nhận hoặc hoàn tác cấu hình: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
-            : `Không thể lưu cấu hình; đã hoàn tác: ${reason}`;
+          if (!rollbackError && ownsControlLock && control) {
+            control.currentValue = previousValue;
+          }
+          if (revocation) {
+            if (current.runtime?.instanceId === revocation.provider.instanceId) {
+              current.runtime = null;
+            }
+            appendSessionEvent(current.events as NekoSessionEvent[], "runtime", {
+              type: "runtime-detached",
+              providerId: revocation.provider.providerId,
+              instanceId: revocation.provider.instanceId,
+              kind: revocation.provider.kind,
+              reason: "config-uncertain",
+            });
+          }
+          if (ownsControlLock) {
+            current.status = rollbackError
+              ? revocation && !revocation.error ? "exited" : "error"
+              : current.status;
+            current.statusDetail = rollbackError
+              ? revocation
+                ? revocation.error
+                  ? `Cấu hình không xác định; runtime đã bị thu hồi nhưng cleanup báo lỗi: ${revocation.error instanceof Error ? revocation.error.message : String(revocation.error)}`
+                  : `Cấu hình không xác định sau lỗi "${rollbackReason}"; runtime đã được thu hồi. Nhắn tiếp để khởi động một runtime mới.`
+                : `Không thể xác nhận hoặc hoàn tác cấu hình: ${rollbackReason}`
+              : `Không thể lưu cấu hình; đã hoàn tác: ${reason}`;
+          }
           appendSessionEvent(current.events as NekoSessionEvent[], "model", {
             type: "control-change",
             phase: rollbackError ? "rollback-failed" : "rolled-back",
             optionId,
             previousValue,
             nextValue: value,
-            reason,
+            reason: rollbackError ? `${reason}; compensation: ${rollbackReason}` : reason,
           });
         });
-        await persistSessionNowOrReport(sessionId, "trạng thái hoàn tác cấu hình", true);
+        await persistSessionNowOrReport(sessionId, "trạng thái hoàn tác cấu hình", {
+          fatal: true,
+          strict: true,
+        });
+        releaseControlLock();
       }
     },
 
@@ -854,7 +930,6 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           session.status = "exited";
           session.pendingPermission = null;
           session.resolvingPermissionId = null;
-          session.pendingControlId = null;
           session.statusDetail = "Đã kết thúc phiên — nhắn tiếp để khởi động lại agent.";
           session.updatedAt = Date.now();
           if (disposeError) {
@@ -902,7 +977,6 @@ export const useNekoSessionStore = create<NekoSessionState>()(
               ...option,
               choices: option.choices?.map((choice) => ({ ...choice })),
             }));
-            session.pendingControlId = null;
             return;
           }
           case "available-commands": {
@@ -984,7 +1058,6 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             session.status = "idle";
             session.pendingPermission = null;
             session.resolvingPermissionId = null;
-            session.pendingControlId = null;
             const message = openAssistant(session);
             const last = message ? lastBlock(message) : undefined;
             if (last?.type === "thinking") {
@@ -1023,7 +1096,6 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             session.status = "exited";
             session.pendingPermission = null;
             session.resolvingPermissionId = null;
-            session.pendingControlId = null;
             session.statusDetail =
               event.code === 0 || event.code === null
                 ? "Agent đã thoát."
@@ -1045,18 +1117,18 @@ export const useNekoSessionStore = create<NekoSessionState>()(
 async function persistSessionNowOrReport(
   sessionId: string,
   context: string,
-  fatal = false,
+  options: { fatal?: boolean; strict?: boolean } = {},
 ): Promise<void> {
   const session = useNekoSessionStore.getState().sessions[sessionId];
   if (!session) return;
   try {
-    await persistSessionNow(session);
+    await (options.strict ? persistSessionStrict(session) : persistSessionNow(session));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     useNekoSessionStore.setState((state) => {
       const current = state.sessions[sessionId];
       if (!current) return;
-      if (fatal) current.status = "error";
+      if (options.fatal) current.status = "error";
       current.statusDetail = `Không thể lưu ${context}: ${reason}`;
     });
   }
@@ -1080,6 +1152,7 @@ export async function sweepIdleSessions(now: number = Date.now()): Promise<void>
   for (const session of Object.values(sessions)) {
     if (session.status !== "idle") continue;
     if (session.pendingPermission) continue;
+    if (session.pendingControlId) continue;
     if (now - session.lastActivityAt < IDLE_REAP_MS) continue;
     const provider = runtimes.get(session.id);
     if (!provider) continue;
@@ -1144,7 +1217,6 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
         session.status = "exited";
         session.pendingPermission = null;
         session.resolvingPermissionId = null;
-        session.pendingControlId = null;
         session.updatedAt = Date.now();
         session.statusDetail = result.error
           ? "Đã rời Neko Chill nhưng runtime báo lỗi khi thu hồi tài nguyên."

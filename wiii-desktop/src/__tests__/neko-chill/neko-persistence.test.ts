@@ -58,6 +58,7 @@ import {
   _clearLiveDriversForTests,
 } from "@/neko-chill/stores/neko-session-store";
 import { persistSessionNow } from "@/neko-chill/persistence";
+import { saveStoreStrict } from "@/lib/storage";
 
 const AGENT: DetectedAgent = {
   id: "neko",
@@ -78,6 +79,7 @@ class FakeDriver implements Driver {
   prompts: string[] = [];
   promptSawDurableEvents: unknown[][] = [];
   configErrorForValue: string | boolean | null = null;
+  failStorageOnConfigError = false;
   configChanges: Array<{ optionId: string; value: string | boolean }> = [];
   disposed = 0;
   constructor(
@@ -95,7 +97,10 @@ class FakeDriver implements Driver {
   async cancel(): Promise<void> {}
   async resolvePermission(_: PermissionDecision): Promise<void> {}
   async setConfigOption(optionId: string, value: string | boolean): Promise<void> {
-    if (value === this.configErrorForValue) throw new Error("compensation rejected");
+    if (value === this.configErrorForValue) {
+      if (this.failStorageOnConfigError) failTranscriptWrites = true;
+      throw new Error("compensation rejected");
+    }
     this.configChanges.push({ optionId, value });
   }
   async dispose(): Promise<void> { this.disposed += 1; }
@@ -274,6 +279,95 @@ describe("neko-chill persistence", () => {
       .toEqual(["phiên đang chờ đĩa"]);
   });
 
+  it("holds the config lock until the committed event is durably persisted", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "mode",
+        label: "Chế độ",
+        category: "mode",
+        kind: "select",
+        currentValue: "default",
+        choices: [
+          { value: "default", label: "Default" },
+          { value: "plan", label: "Plan" },
+        ],
+      }],
+    });
+    let release!: () => void;
+    strictWriteGate = new Promise<void>((resolve) => { release = resolve; });
+    strictBlockedKey = `session:${id}`;
+    gateOnlyWhenFailurePending = true;
+    transcriptWritesBeforeFailure = 1;
+    const gateEntered = new Promise<void>((resolve) => { notifyStrictGateEntered = resolve; });
+
+    const changing = useNekoSessionStore.getState().setConfigOption("mode", "plan");
+    await gateEntered;
+
+    expect(useNekoSessionStore.getState().sessions[id].pendingControlId).toBe("mode");
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "mode",
+        label: "Chế độ",
+        category: "mode",
+        kind: "select",
+        currentValue: "plan",
+        choices: [
+          { value: "default", label: "Default" },
+          { value: "plan", label: "Plan" },
+        ],
+      }],
+    });
+    expect(useNekoSessionStore.getState().sessions[id].pendingControlId).toBe("mode");
+    await useNekoSessionStore.getState().sendPrompt("không được chen vào commit");
+    await useNekoSessionStore.getState().setConfigOption("mode", "default");
+    expect(spawned[0].prompts).toEqual([]);
+    expect(spawned[0].configChanges).toEqual([{ optionId: "mode", value: "plan" }]);
+
+    transcriptWritesBeforeFailure = null;
+    release();
+    await changing;
+
+    expect(useNekoSessionStore.getState().sessions[id].pendingControlId).toBeNull();
+  });
+
+  it("uses strict persistence for a post-dispatch rollback outcome", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "model",
+        label: "Model",
+        category: "model",
+        kind: "select",
+        currentValue: "stable",
+        choices: [
+          { value: "stable", label: "Stable" },
+          { value: "preview", label: "Preview" },
+        ],
+      }],
+    });
+    vi.mocked(saveStoreStrict).mockClear();
+    spawned[0].configErrorForValue = "preview";
+    spawned[0].failStorageOnConfigError = true;
+
+    await useNekoSessionStore.getState().setConfigOption("model", "preview");
+
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("error");
+    expect(useNekoSessionStore.getState().sessions[id].statusDetail).toContain(
+      "Không thể lưu trạng thái hoàn tác cấu hình",
+    );
+    const strictTranscriptWrites = vi.mocked(saveStoreStrict).mock.calls.filter(
+      ([, key]) => key === `session:${id}`,
+    );
+    expect(strictTranscriptWrites).toHaveLength(2);
+  });
+
   it("surfaces rollback-failed when commit persistence and compensation both fail", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     emit({
@@ -429,6 +523,52 @@ describe("neko-chill persistence", () => {
     await useNekoSessionStore.getState().hydrate();
 
     expect(useNekoSessionStore.getState().sessions[id].controls[0].currentValue).toBe("preview");
+  });
+
+  it("does not replay configuration commits from an older provider epoch", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "model",
+        label: "Model",
+        category: "model",
+        kind: "select",
+        currentValue: "stable",
+        choices: [
+          { value: "stable", label: "Stable" },
+          { value: "preview", label: "Preview" },
+        ],
+      }],
+    });
+    await useNekoSessionStore.getState().setConfigOption("model", "preview");
+    await useNekoSessionStore.getState().closeSession(id);
+
+    useNekoSessionStore.getState().setActiveSession(id);
+    await useNekoSessionStore.getState().sendPrompt("runtime mới");
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "model",
+        label: "Model",
+        category: "model",
+        kind: "select",
+        currentValue: "stable",
+        choices: [
+          { value: "stable", label: "Stable" },
+          { value: "preview", label: "Preview" },
+        ],
+      }],
+    });
+    await flushDebounce();
+
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+    await useNekoSessionStore.getState().hydrate();
+
+    expect(useNekoSessionStore.getState().sessions[id].controls[0].currentValue).toBe("stable");
   });
 
   it("a restored session respawns a fresh agent process on the next prompt", async () => {

@@ -135,6 +135,24 @@ describe("RuntimeRegistry", () => {
     expect(registry.requireInstance("s1", two.current.instanceId, "prompt")).toBe(second);
   });
 
+  it("detaches only the exact provider instance requested", async () => {
+    const registry = new RuntimeRegistry();
+    const first = new FakeDriver("s1");
+    const one = await registry.replace("s1", "neko", async () => first);
+    const second = new FakeDriver("s1");
+    const two = await registry.replace("s1", "neko", async () => second);
+
+    await expect(registry.detachInstance("s1", one.current.instanceId))
+      .resolves.toBeNull();
+    expect(registry.get("s1")?.instanceId).toBe(two.current.instanceId);
+    expect(second.disposed).toBe(0);
+
+    const detached = await registry.detachInstance("s1", two.current.instanceId);
+    expect(detached?.provider.instanceId).toBe(two.current.instanceId);
+    expect(registry.get("s1")).toBeNull();
+    expect(second.disposed).toBe(1);
+  });
+
   it("revokes all bindings and starts every disposer before awaiting a stalled one", async () => {
     const registry = new RuntimeRegistry();
     let release!: () => void;

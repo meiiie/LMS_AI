@@ -124,17 +124,22 @@ export async function persistSessionNow(session: NekoSession): Promise<void> {
   await enqueueWrite(session);
 }
 
-/**
- * Durability barrier for model-visible facts. Unlike background persistence,
- * failure propagates so callers can fail closed before invoking a driver.
- */
-export async function persistSessionBeforeDispatch(session: NekoSession): Promise<void> {
+/** Immediate strict persist for terminal audit outcomes and dispatch barriers. */
+export async function persistSessionStrict(session: NekoSession): Promise<void> {
   const timer = timers.get(session.id);
   if (timer) {
     clearTimeout(timer);
     timers.delete(session.id);
   }
   await enqueueWrite(session, true);
+}
+
+/**
+ * Durability barrier for model-visible facts. Unlike background persistence,
+ * failure propagates so callers can fail closed before invoking a driver.
+ */
+export async function persistSessionBeforeDispatch(session: NekoSession): Promise<void> {
+  await persistSessionStrict(session);
 }
 
 export async function loadSessionIndex(): Promise<SessionIndexEntry[]> {

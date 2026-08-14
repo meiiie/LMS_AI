@@ -60,6 +60,11 @@ export interface RuntimeReplacement {
   cleanupError?: unknown;
 }
 
+export interface RuntimeDisposalResult {
+  provider: RuntimeProviderSnapshot;
+  error?: unknown;
+}
+
 export class RuntimeCapabilityError extends Error {
   constructor(capability: DriverCapability) {
     super(`Runtime hiện tại không công bố capability "${capability}".`);
@@ -200,6 +205,36 @@ export class RuntimeRegistry {
         this.sessionGenerations.delete(sessionId);
       }
     }
+  }
+
+  /** Revoke only the provider that observed an uncertain operation. */
+  async detachInstance(
+    sessionId: string,
+    instanceId: string,
+  ): Promise<RuntimeDisposalResult | null> {
+    const binding = this.bindings.get(sessionId);
+    if (!binding || binding.provider.instanceId !== instanceId) return null;
+    this.sessionGenerations.set(
+      sessionId,
+      (this.sessionGenerations.get(sessionId) ?? 0) + 1,
+    );
+    // Revoke synchronously so no further consumer can dispatch while cleanup
+    // awaits a process or transport disposer.
+    this.bindings.delete(sessionId);
+    let error: unknown;
+    try {
+      await binding.scope.dispose();
+    } catch (disposeError) {
+      error = disposeError;
+    } finally {
+      if (!this.pendingPreparations.has(sessionId)) {
+        this.sessionGenerations.delete(sessionId);
+      }
+    }
+    return {
+      provider: binding.provider,
+      ...(error ? { error } : {}),
+    };
   }
 
   async disposeAll(): Promise<Array<{ provider: RuntimeProviderSnapshot; error?: unknown }>> {

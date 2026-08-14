@@ -48,7 +48,14 @@ export type NekoSessionEventData =
       providerId: string;
       instanceId: string;
       kind: DriverKind;
-      reason: "close" | "delete" | "idle" | "mode-exit" | "process-exit" | "workspace-change";
+      reason:
+        | "close"
+        | "delete"
+        | "idle"
+        | "mode-exit"
+        | "process-exit"
+        | "workspace-change"
+        | "config-uncertain";
     }
   | {
       type: "runtime-attach-failed";
@@ -152,9 +159,15 @@ function isValidEventData(data: Record<string, unknown>): boolean {
         typeof data.providerId === "string" &&
         typeof data.instanceId === "string" &&
         (data.kind === "acp" || data.kind === "wiii-cloud") &&
-        ["close", "delete", "idle", "mode-exit", "process-exit", "workspace-change"].includes(
-          data.reason as string,
-        )
+        [
+          "close",
+          "delete",
+          "idle",
+          "mode-exit",
+          "process-exit",
+          "workspace-change",
+          "config-uncertain",
+        ].includes(data.reason as string)
       );
     case "runtime-attach-failed":
       return typeof data.providerId === "string" && typeof data.reason === "string";

@@ -222,9 +222,11 @@ describe("neko-session-store", () => {
 
     await useNekoSessionStore.getState().setConfigOption("model", "preview");
 
-    expect(session(id).status).toBe("error");
+    expect(session(id).status).toBe("exited");
     expect(session(id).pendingControlId).toBeNull();
     expect(session(id).statusDetail).toContain("compensation unavailable");
+    expect(session(id).runtime).toBeNull();
+    expect(driver.disposed).toBe(1);
     expect(driver.configChanges).toEqual([
       { optionId: "model", value: "preview" },
       { optionId: "model", value: "stable" },
@@ -234,6 +236,14 @@ describe("neko-session-store", () => {
       phase: "rollback-failed",
       reason: expect.stringContaining("provider response lost"),
     });
+    expect(session(id).events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "runtime-detached",
+          reason: "config-uncertain",
+        }),
+      }),
+    ]));
   });
 
   it("blocks prompts until a configuration transaction finishes", async () => {
