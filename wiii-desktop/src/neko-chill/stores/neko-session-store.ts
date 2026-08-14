@@ -808,8 +808,13 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             strict: true,
           });
           let invocationPersisted = false;
+          let invocationFailed = false;
+          let invocationError: unknown;
           try {
             await invocation;
+          } catch (error) {
+            invocationFailed = true;
+            invocationError = error;
           } finally {
             invocationPersisted = await persistInvocation;
           }
@@ -817,6 +822,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             await revokeRuntimeAfterDurabilityFailure(sessionId, provider);
             return;
           }
+          if (invocationFailed) throw invocationError;
           set((state) => {
             const current = state.sessions[sessionId];
             // Some drivers only resolve prompt() and do not emit lifecycle
@@ -920,14 +926,21 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             strict: true,
           });
           let invocationPersisted = false;
+          let invocationFailed = false;
+          let invocationError: unknown;
           try {
             await invocation;
+          } catch (error) {
+            invocationFailed = true;
+            invocationError = error;
           } finally {
             invocationPersisted = await persistInvocation;
           }
           if (!invocationPersisted) {
             await revokeRuntimeAfterDurabilityFailure(sessionId, provider);
+            return;
           }
+          if (invocationFailed) throw invocationError;
         } catch (error) {
           let rolledBackUndispatchedCancel = false;
           set((state) => {
@@ -1016,8 +1029,13 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           strict: true,
         });
         let invocationPersisted = false;
+        let invocationFailed = false;
+        let invocationError: unknown;
         try {
           await invocation;
+        } catch (error) {
+          invocationFailed = true;
+          invocationError = error;
         } finally {
           invocationPersisted = await persistInvocation;
         }
@@ -1032,7 +1050,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         });
         if (!invocationPersisted) {
           await revokeRuntimeAfterDurabilityFailure(sessionId, provider);
+          return;
         }
+        if (invocationFailed) throw invocationError;
       } catch (error) {
         let rolledBackUndispatchedDecision = false;
         set((state) => {

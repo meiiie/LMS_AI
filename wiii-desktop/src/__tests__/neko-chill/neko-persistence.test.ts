@@ -136,6 +136,9 @@ class FakeDriver implements Driver {
   };
   prompts: string[] = [];
   promptSawDurableEvents: unknown[][] = [];
+  promptError = false;
+  cancelError = false;
+  permissionError = false;
   configErrorForValue: string | boolean | null = null;
   failStorageOnConfigError = false;
   configChanges: Array<{ optionId: string; value: string | boolean }> = [];
@@ -154,10 +157,15 @@ class FakeDriver implements Driver {
       | undefined;
     this.promptSawDurableEvents.push(snapshot?.events ?? []);
     this.prompts.push(text);
+    if (this.promptError) throw new Error("provider prompt rejected");
   }
-  async cancel(): Promise<void> { this.cancelled += 1; }
+  async cancel(): Promise<void> {
+    this.cancelled += 1;
+    if (this.cancelError) throw new Error("provider cancel rejected");
+  }
   async resolvePermission(decision: PermissionDecision): Promise<void> {
     this.decisions.push(decision);
+    if (this.permissionError) throw new Error("provider permission rejected");
   }
   async setConfigOption(optionId: string, value: string | boolean): Promise<void> {
     notifyDriverConfigEntered?.();
@@ -934,6 +942,7 @@ describe("neko-chill persistence", () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     // The staged input becomes durable; the dispatch marker and terminal retry fail.
     transcriptWritesBeforeFailure = 1;
+    spawned[0].promptError = true;
 
     await useNekoSessionStore.getState().sendPrompt("provider đã thấy nhưng marker lỗi");
 
@@ -959,6 +968,59 @@ describe("neko-chill persistence", () => {
 
     expect(useNekoSessionStore.getState().sessions[id].messages).toEqual([]);
     expect(useNekoSessionStore.getState().sessions[id].statusDetail).toContain("chưa xác nhận gửi");
+  });
+
+  it("revokes a rejected cancellation when its dispatch marker also fails", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    transcriptWritesBeforeFailure = 1;
+    spawned[0].cancelError = true;
+
+    await useNekoSessionStore.getState().cancelTurn();
+
+    expect(spawned[0].cancelled).toBe(1);
+    expect(spawned[0].disposed).toBe(1);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      status: "exited",
+      cancelPending: false,
+    });
+    const stale = storage.get(`neko-chill-sessions.json:session:${id}`) as {
+      events: Array<{ data: { type: string } }>;
+    };
+    expect(stale.events.some((event) => event.data.type === "dispatch-invoked")).toBe(false);
+  });
+
+  it("revokes a rejected permission when its dispatch marker also fails", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    emit({
+      type: "permission-request",
+      sessionId: id,
+      request: {
+        requestId: "permission-marker-failure",
+        title: "Write(config.json)",
+        options: [{ optionId: "allow", label: "Cho phép", kind: "allow_once" }],
+      },
+    });
+    transcriptWritesBeforeFailure = 1;
+    spawned[0].permissionError = true;
+
+    await useNekoSessionStore.getState().resolvePermission("allow");
+
+    expect(spawned[0].decisions).toEqual([{
+      requestId: "permission-marker-failure",
+      optionId: "allow",
+    }]);
+    expect(spawned[0].disposed).toBe(1);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      runtime: null,
+      status: "exited",
+      pendingPermission: null,
+      resolvingPermissionId: null,
+    });
+    const stale = storage.get(`neko-chill-sessions.json:session:${id}`) as {
+      events: Array<{ data: { type: string } }>;
+    };
+    expect(stale.events.some((event) => event.data.type === "dispatch-invoked")).toBe(false);
   });
 
   it("removes a staged cancellation when the provider exits before invocation", async () => {
