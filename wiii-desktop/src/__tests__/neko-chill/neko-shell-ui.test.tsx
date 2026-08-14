@@ -74,7 +74,7 @@ describe("Neko Chill shell UI", () => {
     expect(screen.queryByRole("menu", { name: "Chọn chế độ" })).toBeNull();
   });
 
-  it("groups every persisted session by project and searches local history", () => {
+  it("groups every persisted session and searches all local history from Ctrl+K", () => {
     useNekoSessionStore.setState({
       sessions: {
         alpha: makeSession(
@@ -105,15 +105,15 @@ describe("Neko Chill shell UI", () => {
     expect(screen.getByRole("button", { name: "Mở phiên Kiểm tra bản đồ" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Xoá phiên Phiên cũ" })).toBeTruthy();
 
-    const search = screen.getByRole("searchbox", { name: "Tìm phiên Neko Chill" });
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    expect(document.activeElement).toBe(search);
-    fireEvent.change(search, { target: { value: "hàng hải" } });
-    expect(screen.getByRole("button", { name: "Mở phiên Kiểm tra bản đồ" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Mở phiên Gemini review" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Trung tâm lệnh Neko Chill" })).toBeTruthy();
+    const commandSearch = screen.getByRole("searchbox", { name: "Tìm phiên hoặc lệnh" });
+    fireEvent.change(commandSearch, { target: { value: "hàng hải" } });
+    expect(screen.getByRole("option", { name: /Kiểm tra bản đồ.*Project Alpha/i })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /Gemini review/i })).toBeNull();
   });
 
-  it("routes provider controls and inserts agent slash commands", () => {
+  it("routes provider controls and inserts agent slash commands", async () => {
     const setConfigOption = vi.fn(async () => {});
     useNekoSessionStore.setState({
       sessions: {
@@ -165,6 +165,60 @@ describe("Neko Chill shell UI", () => {
     expect(screen.getByRole("option", { name: /memory show.*Agent/i })).toBeTruthy();
     fireEvent.keyDown(composer, { key: "Enter" });
     expect((composer as HTMLTextAreaElement).value).toBe("/memory show");
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const commandSearch = screen.getByRole("searchbox", { name: "Tìm phiên hoặc lệnh" });
+    fireEvent.change(commandSearch, { target: { value: "memory" } });
+    fireEvent.click(screen.getByRole("option", { name: /memory show.*Agent/i }));
+    expect((composer as HTMLTextAreaElement).value).toBe("/memory show");
+    await vi.waitFor(() => expect(document.activeElement).toBe(composer));
+  });
+
+  it("keeps navigation and inspector progressively disclosed", () => {
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên gọn gàng",
+          { path: "C:/work/neko", name: "Neko" },
+          { status: "idle", statusDetail: undefined },
+        ),
+      },
+      activeSessionId: "active",
+    });
+
+    render(<NekoChillApp />);
+
+    expect(screen.queryByTestId("session-inspector")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Mở thông tin phiên" }));
+    expect(screen.getByTestId("session-inspector")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ẩn cây dự án và phiên" }));
+    expect(screen.queryByTestId("session-sidebar")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Hiện cây dự án và phiên" }));
+    expect(screen.getByTestId("session-sidebar")).toBeTruthy();
+  });
+
+  it("gives an empty live session a useful, non-executing start state", () => {
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên mới",
+          { path: "C:/work/neko", name: "Neko" },
+          { status: "idle", statusDetail: undefined },
+        ),
+      },
+      activeSessionId: "active",
+    });
+
+    render(<NekoChillApp />);
+
+    expect(screen.getByText("Sẵn sàng trong Neko")).toBeTruthy();
+    expect(screen.getByText(/Gõ \/ để xem lệnh/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Chèn gợi ý Kiểm tra dự án này" }));
+    const composer = screen.getByTestId("neko-composer-input") as HTMLTextAreaElement;
+    expect(composer.value).toBe("Kiểm tra dự án này và cho tôi biết điểm cần chú ý.");
   });
 
   it("requires a project and reuses an exact recent workspace for a new session", async () => {
@@ -190,9 +244,9 @@ describe("Neko Chill shell UI", () => {
 
     render(<NekoChillApp />);
 
-    const start = screen.getByTestId("start-neko") as HTMLButtonElement;
-    expect(start.disabled).toBe(true);
+    expect(screen.queryByTestId("start-neko")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "project" }));
+    const start = await screen.findByTestId("start-neko") as HTMLButtonElement;
     await vi.waitFor(() => expect(start.disabled).toBe(false));
     fireEvent.click(start);
 

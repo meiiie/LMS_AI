@@ -1,4 +1,4 @@
-import { Bot, Command, Folder, HardDrive, Settings2, X } from "lucide-react";
+import { Activity, Bot, Command, Folder, HardDrive, Settings2, X } from "lucide-react";
 import type { DriverConfigOption } from "../drivers/types";
 import type { NekoSession } from "../stores/neko-session-store";
 
@@ -6,6 +6,7 @@ interface SessionInspectorProps {
   session: NekoSession;
   onClose: () => void;
   onSetConfigOption: (optionId: string, value: string | boolean) => void;
+  onInsertCommand: (text: string) => void;
 }
 
 function currentLabel(option: DriverConfigOption): string {
@@ -18,6 +19,7 @@ export function SessionInspector({
   session,
   onClose,
   onSetConfigOption,
+  onInsertCommand,
 }: SessionInspectorProps) {
   const controlsDisabled =
     session.status !== "idle" ||
@@ -73,9 +75,26 @@ export function SessionInspector({
               </div>
             </div>
             <div className="flex gap-2.5">
+              <Activity aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--nk-text-3)]" />
+              <div className="min-w-0">
+                <dt className="text-[10px] uppercase tracking-wide text-[var(--nk-ghost)]">Trạng thái</dt>
+                <dd className="truncate text-[var(--nk-text-2)]">
+                  {session.status === "streaming"
+                    ? "Đang làm việc"
+                    : session.status === "connecting"
+                      ? "Đang kết nối"
+                      : session.status === "idle"
+                        ? "Sẵn sàng"
+                        : session.status === "exited"
+                          ? "Runtime đã dừng"
+                          : "Có lỗi"}
+                </dd>
+              </div>
+            </div>
+            <div className="flex gap-2.5">
               <HardDrive aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--nk-text-3)]" />
               <div className="min-w-0">
-                <dt className="text-[10px] uppercase tracking-wide text-[var(--nk-ghost)]">Runtime</dt>
+                <dt className="text-[10px] uppercase tracking-wide text-[var(--nk-ghost)]">Model / profile</dt>
                 <dd className="text-[var(--nk-text-2)]">
                   {session.launchProfile
                     ? `${session.launchProfile.provider} · ${session.launchProfile.model ?? session.launchProfile.id}`
@@ -140,9 +159,16 @@ export function SessionInspector({
           {session.commands.length ? (
             <ul className="space-y-1.5">
               {session.commands.map((command) => (
-                <li key={command.name} className="text-[11px] leading-4">
-                  <code className="text-[var(--nk-text-2)]">/{command.name}</code>
-                  <span className="ml-1 text-[var(--nk-ghost)]">{command.description}</span>
+                <li key={command.name}>
+                  <button
+                    type="button"
+                    className="w-full rounded-lg px-1.5 py-1 text-left text-[11px] leading-4 transition-colors hover:bg-[var(--nk-overlay)]"
+                    title="Chèn lệnh vào ô soạn"
+                    onClick={() => onInsertCommand(`/${command.name}${command.inputHint ? " " : ""}`)}
+                  >
+                    <code className="text-[var(--nk-text-2)]">/{command.name}</code>
+                    <span className="ml-1 text-[var(--nk-ghost)]">{command.description}</span>
+                  </button>
                 </li>
               ))}
             </ul>

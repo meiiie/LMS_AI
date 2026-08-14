@@ -156,7 +156,15 @@ export function NewSessionView() {
           <h2 className="mb-2 text-[11.5px] font-semibold uppercase tracking-wide text-[var(--nk-text-3)]">
             2 · Chọn agent và model
           </h2>
-          {isLoading ? (
+          {!workspace ? (
+            <div className="flex min-h-[74px] items-center gap-3 rounded-xl border border-dashed border-[var(--nk-border)] px-4 text-[12px] leading-5 text-[var(--nk-text-3)]">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--nk-inset)]">
+                <Bot aria-hidden="true" className="h-3.5 w-3.5" />
+              </span>
+              Chọn một dự án trước. Neko Chill sẽ chỉ sau đó đọc các agent,
+              profile và model thật sự có trên máy bạn.
+            </div>
+          ) : isLoading ? (
             <p className="flex items-center gap-2 py-4 text-[13px] text-[var(--nk-text-3)]">
               <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> Đang dò agent…
             </p>
@@ -196,10 +204,10 @@ export function NewSessionView() {
                         {startingAgentId === agent.id ? "Đang mở…" : "Bắt đầu"}
                       </button>
                     </div>
-                    {agent.id === "neko" && agent.found && workspace ? (
+                    {agent.id === "neko" && agent.found ? (
                       <div className="mt-3 border-t border-[var(--nk-border)] pt-3">
                         <label className="flex items-center gap-3">
-                          <span className="text-[11.5px] text-[var(--nk-text-3)]">Cấu hình Neko</span>
+                          <span className="text-[11.5px] text-[var(--nk-text-3)]">Profile / model</span>
                           {profileLoading ? (
                             <span className="text-[11px] text-[var(--nk-ghost)]">Đang đọc profiles…</span>
                           ) : profiles.length ? (
@@ -224,7 +232,7 @@ export function NewSessionView() {
                         </label>
                         {selectedProfile ? (
                           <p className="mt-1.5 pl-[94px] text-[10.5px] text-[var(--nk-ghost)]">
-                            {selectedProfile.provider} · {selectedProfile.model ?? "model do profile quyết định"}
+                            Provider {selectedProfile.provider} · {selectedProfile.model ?? "model do profile quyết định"}
                           </p>
                         ) : null}
                       </div>

@@ -1,6 +1,14 @@
 /** Neko Chill desktop-agent shell: projects -> sessions -> active runtime. */
-import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, PanelRight, Power } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Check,
+  ChevronDown,
+  PanelLeft,
+  PanelLeftClose,
+  PanelRight,
+  Power,
+  Search,
+} from "lucide-react";
 import { TitleBar } from "@/components/layout/TitleBar";
 import { useModeStore } from "./stores/mode-store";
 import { useNekoAgentStore } from "./stores/neko-agent-store";
@@ -14,6 +22,12 @@ import { NekoComposer } from "./components/NekoComposer";
 import { NewSessionView } from "./components/NewSessionView";
 import { SessionInspector } from "./components/SessionInspector";
 import { SessionSidebar } from "./components/SessionSidebar";
+import { NekoCommandCenter } from "./components/NekoCommandCenter";
+import {
+  type ClientCommandName,
+  type WorkbenchActionName,
+} from "./command-items";
+import type { ComposerInsertRequest } from "./components/NekoComposer";
 import { chooseWorkspaceFolder } from "./workspace";
 import "./theme.css";
 
@@ -116,6 +130,8 @@ export default function NekoChillApp() {
   const session = useNekoSessionStore((state) =>
     state.activeSessionId ? state.sessions[state.activeSessionId] : null,
   );
+  const sessionsById = useNekoSessionStore((state) => state.sessions);
+  const sessions = useMemo(() => Object.values(sessionsById), [sessionsById]);
   const {
     attachWorkspace,
     cancelTurn,
@@ -125,8 +141,11 @@ export default function NekoChillApp() {
     setActiveSession,
     setConfigOption,
   } = useNekoSessionStore();
-  const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [focusSearchToken, setFocusSearchToken] = useState(0);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [commandCenterOpen, setCommandCenterOpen] = useState(false);
+  const [insertRequest, setInsertRequest] = useState<ComposerInsertRequest | null>(null);
+  const desktopChrome = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
   useEffect(() => {
     void detect();
@@ -135,8 +154,19 @@ export default function NekoChillApp() {
   }, [detect, hydrate]);
 
   useEffect(() => {
-    if (activeSessionId) setInspectorOpen(true);
+    setInspectorOpen(false);
   }, [activeSessionId]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandCenterOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const handleProjectCommand = async () => {
     if (!session) return;
@@ -148,18 +178,71 @@ export default function NekoChillApp() {
     if (workspace) await attachWorkspace(session.id, workspace);
   };
 
-  const handleClientCommand = (command: "new" | "project" | "search" | "info") => {
+  const handleClientCommand = (command: ClientCommandName) => {
     if (command === "new") setActiveSession(null);
     else if (command === "project") void handleProjectCommand();
-    else if (command === "search") setFocusSearchToken((value) => value + 1);
+    else if (command === "search") setCommandCenterOpen(true);
     else setInspectorOpen(true);
   };
 
+  const insertIntoComposer = (text: string) => {
+    setInsertRequest((current) => ({ text, token: (current?.token ?? 0) + 1 }));
+  };
+
+  const handleWorkbenchAction = (action: WorkbenchActionName) => {
+    if (action === "new") setActiveSession(null);
+    else if (action === "toggle-sidebar") setSidebarOpen((value) => !value);
+    else if (action === "project") void handleProjectCommand();
+    else setInspectorOpen(true);
+  };
+
+  const sidebarToggle = (
+    <button
+      type="button"
+      className="grid h-8 w-8 place-items-center rounded-md text-[var(--nk-text-3)] transition-colors hover:bg-[var(--nk-overlay)] hover:text-[var(--nk-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--nk-focus-soft)]"
+      aria-label={sidebarOpen ? "Ẩn cây dự án và phiên" : "Hiện cây dự án và phiên"}
+      aria-pressed={!sidebarOpen}
+      title={sidebarOpen ? "Ẩn cây dự án và phiên" : "Hiện cây dự án và phiên"}
+      onClick={() => setSidebarOpen((value) => !value)}
+    >
+      {sidebarOpen ? (
+        <PanelLeftClose aria-hidden="true" className="h-4 w-4" />
+      ) : (
+        <PanelLeft aria-hidden="true" className="h-4 w-4" />
+      )}
+    </button>
+  );
+
   return (
     <div className="nk-root flex h-screen flex-col bg-[var(--nk-canvas)] text-[var(--nk-text)]">
-      <TitleBar minimal />
+      <TitleBar
+        minimal
+        leading={<ModeSwitcher />}
+        commandCenter={{
+          label: "Tìm phiên hoặc chạy lệnh",
+          onClick: () => setCommandCenterOpen(true),
+        }}
+        trailing={sidebarToggle}
+      />
+      {!desktopChrome ? (
+        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-[var(--nk-border)] bg-[var(--nk-sidebar)] px-2">
+          <ModeSwitcher />
+          <div className="flex-1" />
+          <button
+            type="button"
+            className="flex h-8 min-w-8 items-center gap-2 rounded-lg border border-[var(--nk-border)] bg-[var(--nk-raised)] px-2.5 text-[11.5px] text-[var(--nk-text-3)] hover:text-[var(--nk-text)]"
+            aria-label="Tìm phiên hoặc chạy lệnh"
+            onClick={() => setCommandCenterOpen(true)}
+          >
+            <Search aria-hidden="true" className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Tìm hoặc chạy lệnh</span>
+            <kbd className="hidden text-[9px] text-[var(--nk-ghost)] md:inline">Ctrl K</kbd>
+          </button>
+          {sidebarToggle}
+        </div>
+      ) : null}
       <div className="flex min-h-0 flex-1">
-        <SessionSidebar modeSwitcher={<ModeSwitcher />} focusSearchToken={focusSearchToken} />
+        {sidebarOpen ? <SessionSidebar /> : null}
         {session ? (
           <div className="relative flex min-w-0 flex-1">
             <div className="flex min-w-0 flex-1 flex-col">
@@ -179,7 +262,7 @@ export default function NekoChillApp() {
                   <button
                     type="button"
                     className={`rounded-md p-1.5 text-[var(--nk-text-3)] hover:bg-[var(--nk-overlay)] hover:text-[var(--nk-text)] ${inspectorOpen ? "bg-[var(--nk-overlay)]" : ""}`}
-                    aria-label={inspectorOpen ? "Ẩn thông tin phiên" : "Hiện thông tin phiên"}
+                    aria-label={inspectorOpen ? "Ẩn thông tin phiên" : "Mở thông tin phiên"}
                     aria-pressed={inspectorOpen}
                     onClick={() => setInspectorOpen((value) => !value)}
                   >
@@ -200,6 +283,7 @@ export default function NekoChillApp() {
               <NekoTranscript
                 session={session}
                 onResolvePermission={(optionId) => void resolvePermission(optionId)}
+                onInsertPrompt={insertIntoComposer}
               />
               <NekoComposer
                 session={session}
@@ -209,6 +293,7 @@ export default function NekoChillApp() {
                 onCancel={() => void cancelTurn()}
                 onSetConfigOption={(optionId, value) => void setConfigOption(optionId, value)}
                 onClientCommand={handleClientCommand}
+                insertRequest={insertRequest}
               />
             </div>
             {inspectorOpen ? (
@@ -223,6 +308,10 @@ export default function NekoChillApp() {
                   session={session}
                   onClose={() => setInspectorOpen(false)}
                   onSetConfigOption={(optionId, value) => void setConfigOption(optionId, value)}
+                  onInsertCommand={(text) => {
+                    insertIntoComposer(text);
+                    setInspectorOpen(false);
+                  }}
                 />
               </>
             ) : null}
@@ -231,6 +320,16 @@ export default function NekoChillApp() {
           <NewSessionView />
         )}
       </div>
+      <NekoCommandCenter
+        open={commandCenterOpen}
+        sessions={sessions}
+        activeSession={session}
+        sidebarOpen={sidebarOpen}
+        onClose={() => setCommandCenterOpen(false)}
+        onAction={handleWorkbenchAction}
+        onSelectSession={setActiveSession}
+        onInsertCommand={insertIntoComposer}
+      />
     </div>
   );
 }

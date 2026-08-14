@@ -1,5 +1,4 @@
-import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -13,11 +12,7 @@ import {
   useNekoSessionStore,
   type NekoSession,
 } from "../stores/neko-session-store";
-
-interface SessionSidebarProps {
-  modeSwitcher: ReactNode;
-  focusSearchToken: number;
-}
+import { sessionSearchableText } from "../command-items";
 
 interface SessionGroup {
   key: string;
@@ -27,32 +22,10 @@ interface SessionGroup {
   sessions: NekoSession[];
 }
 
-function searchableText(session: NekoSession): string {
-  const preview = session.messages
-    .flatMap((message) => [
-      message.text ?? "",
-      ...(message.blocks ?? []).map((block) =>
-        "content" in block && typeof block.content === "string" ? block.content : "",
-      ),
-    ])
-    .join(" ");
-  return [
-    session.title,
-    session.agentName,
-    session.workspace?.name ?? "",
-    session.workspace?.path ?? "",
-    session.launchProfile?.provider ?? "",
-    session.launchProfile?.model ?? "",
-    preview,
-  ]
-    .join(" ")
-    .toLocaleLowerCase("vi");
-}
-
 function groupSessions(sessions: NekoSession[], query: string): SessionGroup[] {
   const normalized = query.trim().toLocaleLowerCase("vi");
   const visible = normalized
-    ? sessions.filter((session) => searchableText(session).includes(normalized))
+    ? sessions.filter((session) => sessionSearchableText(session).includes(normalized))
     : sessions;
   const groups = new Map<string, SessionGroup>();
   for (const session of visible) {
@@ -92,38 +65,24 @@ function statusClass(session: NekoSession): string {
   return "bg-[var(--nk-ghost)]";
 }
 
-export function SessionSidebar({ modeSwitcher, focusSearchToken }: SessionSidebarProps) {
+export function SessionSidebar() {
   const sessionsById = useNekoSessionStore((state) => state.sessions);
   const activeSessionId = useNekoSessionStore((state) => state.activeSessionId);
   const { deleteSession, setActiveSession } = useNekoSessionStore();
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const searchRef = useRef<HTMLInputElement>(null);
   const sessions = useMemo(() => Object.values(sessionsById), [sessionsById]);
   const groups = useMemo(() => groupSessions(sessions, query), [query, sessions]);
 
-  useEffect(() => {
-    if (focusSearchToken > 0) searchRef.current?.focus();
-  }, [focusSearchToken]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
   return (
     <aside
-      className="flex w-[264px] shrink-0 flex-col border-r border-[var(--nk-border)] bg-[var(--nk-sidebar)]"
+      className="flex w-[276px] shrink-0 flex-col border-r border-[var(--nk-border)] bg-[var(--nk-sidebar)]"
       data-testid="session-sidebar"
     >
-      <div className="px-2 pt-2 pb-1">{modeSwitcher}</div>
+      <div className="flex h-9 items-center justify-between px-3 pt-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-[var(--nk-ghost)]">
+        <span>Dự án và phiên</span>
+        <span className="font-normal tabular-nums">{sessions.length}</span>
+      </div>
       <div className="px-2 pb-2">
         <button
           type="button"
@@ -137,7 +96,6 @@ export function SessionSidebar({ modeSwitcher, focusSearchToken }: SessionSideba
         <label className="mt-1 flex h-8 items-center gap-2 rounded-lg bg-[var(--nk-inset)] px-2.5 text-[var(--nk-text-3)] focus-within:ring-1 focus-within:ring-[var(--nk-border-strong)]">
           <Search aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
           <input
-            ref={searchRef}
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -155,7 +113,7 @@ export function SessionSidebar({ modeSwitcher, focusSearchToken }: SessionSideba
               <X aria-hidden="true" className="h-3 w-3" />
             </button>
           ) : (
-            <kbd className="text-[9px] text-[var(--nk-ghost)]">Ctrl K</kbd>
+            <span className="text-[9px] text-[var(--nk-ghost)]">Lọc</span>
           )}
         </label>
       </div>
