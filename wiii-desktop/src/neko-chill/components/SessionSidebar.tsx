@@ -59,7 +59,7 @@ function groupSessions(sessions: NekoSession[], query: string): SessionGroup[] {
 }
 
 function statusClass(session: NekoSession): string {
-  if (session.status === "streaming") return "bg-[var(--nk-accent)] animate-pulse";
+  if (session.status === "streaming" || session.status === "dispatching") return "bg-[var(--nk-accent)] animate-pulse";
   if (session.status === "idle") return "bg-[var(--nk-success)]";
   if (session.status === "error") return "bg-[var(--nk-danger)]";
   return "bg-[var(--nk-ghost)]";

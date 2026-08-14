@@ -148,3 +148,27 @@ micro-PR first.
   protocol version in `initialize` and surface a clear mismatch error.
 - Risk: Windows process-tree kill semantics (agents spawning children) →
   use Job Objects semantics via Tauri/std where available; verify in SC-006.
+
+## Runtime Integrity Follow-up (#908)
+
+The follow-up remains inside `src/neko-chill/` and adds no framework or backend
+dependency:
+
+1. `session-events.ts` defines the versioned append-only boundary log. The
+   materialized `messages` transcript remains for rendering/backward
+   compatibility; transcript schema v2 stores both and migrates v1 user inputs.
+2. `runtime-manager.ts` owns live drivers through `RuntimeScope`, assigns a new
+   provider `instanceId` on each attach, and resolves operations by declared
+   capability. Driver events are accepted only from the current identity.
+3. Critical persistence is a dispatch barrier. Writes are serialized so an
+   older debounced snapshot cannot overwrite a newer model-input record.
+4. Runtime prepare failure leaves the current binding untouched. Session
+   control changes persist `requested`, then `committed` or `rolled-back`;
+   commit-persistence failure triggers compensation and surfaces
+   `rollback-failed` if compensation also fails.
+5. React mode entry owns the idle-reaper timer and disposes all runtimes on
+   unmount. The Rust process table remains the final app-exit safety net.
+
+Risk is limited to local session persistence/provider lifecycle. Rollback is a
+revert of #908: v2 retains the `messages` snapshot, while the new reader accepts
+v1 transcripts. No cloud state, auth, tenant boundary, or backend API changes.

@@ -6,10 +6,35 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Driver, DriverEvent, PermissionDecision } from "@/neko-chill/drivers/types";
 import type { DetectedAgent } from "@/neko-chill/stores/neko-agent-store";
+
+const storage = new Map<string, unknown>();
+vi.mock("@/lib/storage", () => ({
+  loadStore: vi.fn(async (store: string, key: string, dflt: unknown) =>
+    storage.get(`${store}:${key}`) ?? dflt),
+  loadStoreStrict: vi.fn(async (store: string, key: string, dflt: unknown) => {
+    const hit = storage.get(`${store}:${key}`);
+    return hit === undefined ? dflt : hit;
+  }),
+  saveStore: vi.fn(async (store: string, key: string, value: unknown) => {
+    storage.set(`${store}:${key}`, value);
+  }),
+  saveStoreStrict: vi.fn(async (store: string, key: string, value: unknown) => {
+    storage.set(`${store}:${key}`, value);
+  }),
+  deleteStore: vi.fn(async (store: string, key: string) => {
+    storage.delete(`${store}:${key}`);
+  }),
+  deleteStoreStrict: vi.fn(async (store: string, key: string) => {
+    storage.delete(`${store}:${key}`);
+  }),
+  clearStore: vi.fn(async () => {}),
+}));
+
 import {
   useNekoSessionStore,
   _setDriverFactoryForTests,
 } from "@/neko-chill/stores/neko-session-store";
+import { useNekoAgentStore } from "@/neko-chill/stores/neko-agent-store";
 
 const AGENT: DetectedAgent = {
   id: "neko",
@@ -22,11 +47,17 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
 class FakeDriver implements Driver {
   readonly kind = "acp" as const;
+  readonly runtime: Driver["runtime"] = {
+    capabilities: ["prompt", "cancel", "permission-resolution", "session-config"],
+    contextContinuity: "process",
+    workspaceIsolation: "advisory",
+  };
   prompts: string[] = [];
   cancelled = 0;
   disposed = 0;
   decisions: PermissionDecision[] = [];
   configChanges: Array<{ optionId: string; value: string | boolean }> = [];
+  configErrors: Error[] = [];
   constructor(
     readonly sessionId: string,
     readonly emit: (event: DriverEvent) => void,
@@ -43,6 +74,8 @@ class FakeDriver implements Driver {
   }
   async setConfigOption(optionId: string, value: string | boolean): Promise<void> {
     this.configChanges.push({ optionId, value });
+    const error = this.configErrors.shift();
+    if (error) throw error;
   }
   async dispose(): Promise<void> {
     this.disposed += 1;
@@ -66,6 +99,7 @@ const session = (id: string) => useNekoSessionStore.getState().sessions[id];
 
 describe("neko-session-store", () => {
   beforeEach(() => {
+    storage.clear();
     useNekoSessionStore.setState({ sessions: {}, activeSessionId: null });
     launchConfig = undefined;
     _setDriverFactoryForTests(undefined);
@@ -80,7 +114,8 @@ describe("neko-session-store", () => {
 
     await useNekoSessionStore.getState().sendPrompt("Xin chào");
     expect(driver.prompts).toEqual(["Xin chào"]);
-    expect(session(id).messages[0]).toMatchObject({ role: "user", text: "Xin chào" });
+    expect(session(id).messages[0]).toMatchObject({ role: "user", text: "Xin chào",
+    });
     expect(session(id).title).toBe("Xin chào");
   });
 
@@ -138,17 +173,126 @@ describe("neko-session-store", () => {
     expect(session(id).pendingControlId).toBeNull();
   });
 
+  it("rolls a failed config transaction back to the previous effective value", async () => {
+    const id = await setup();
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "model",
+        label: "Model",
+        category: "model",
+        kind: "select",
+        currentValue: "stable",
+        choices: [
+          { value: "stable", label: "Stable" },
+          { value: "preview", label: "Preview" },
+        ],
+      }],
+    });
+    driver.configErrors.push(new Error("provider rejected preview"));
+
+    await useNekoSessionStore.getState().setConfigOption("model", "preview");
+
+    expect(session(id).controls[0].currentValue).toBe("stable");
+    expect(session(id).pendingControlId).toBeNull();
+    expect(session(id).statusDetail).toContain("provider rejected preview");
+    expect(driver.configChanges).toEqual([
+      { optionId: "model", value: "preview" },
+      { optionId: "model", value: "stable" },
+    ]);
+    const phases = session(id).events.flatMap((event) =>
+      event.data.type === "control-change" ? [event.data.phase] : [],
+    );
+    expect(phases.slice(-2)).toEqual(["requested", "rolled-back"]);
+  });
+
+  it("reports unknown effective config when an ambiguous failure cannot be compensated", async () => {
+    const id = await setup();
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "model",
+        label: "Model",
+        category: "model",
+        kind: "select",
+        currentValue: "stable",
+        choices: [
+          { value: "stable", label: "Stable" },
+          { value: "preview", label: "Preview" },
+        ],
+      }],
+    });
+    driver.configErrors.push(
+      new Error("provider response lost"),
+      new Error("compensation unavailable"),
+    );
+
+    await useNekoSessionStore.getState().setConfigOption("model", "preview");
+
+    expect(session(id).status).toBe("exited");
+    expect(session(id).pendingControlId).toBeNull();
+    expect(session(id).statusDetail).toContain("compensation unavailable");
+    expect(session(id).runtime).toBeNull();
+    expect(driver.disposed).toBe(1);
+    expect(driver.configChanges).toEqual([
+      { optionId: "model", value: "preview" },
+      { optionId: "model", value: "stable" },
+    ]);
+    expect(session(id).events.at(-1)?.data).toMatchObject({
+      type: "control-change",
+      phase: "rollback-failed",
+      reason: expect.stringContaining("provider response lost"),
+    });
+    expect(session(id).events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "runtime-detached",
+          reason: "config-uncertain",
+        }),
+      }),
+    ]));
+  });
+
+  it("blocks prompts until a configuration transaction finishes", async () => {
+    const id = await setup();
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "mode",
+        label: "Chế độ",
+        category: "mode",
+        kind: "select",
+        currentValue: "default",
+        choices: [{ value: "default", label: "Default" }, { value: "plan", label: "Plan" }],
+      }],
+    });
+
+    const changing = useNekoSessionStore.getState().setConfigOption("mode", "plan");
+    expect(session(id).pendingControlId).toBe("mode");
+    await useNekoSessionStore.getState().sendPrompt("không được chạy giữa giao dịch");
+    await changing;
+
+    expect(driver.prompts).toEqual([]);
+    expect(driver.configChanges).toEqual([{ optionId: "mode", value: "plan" }]);
+    expect(session(id).pendingControlId).toBeNull();
+  });
+
   it("attaches a workspace to a legacy transcript and restarts on the next prompt", async () => {
     const id = await setup();
     useNekoSessionStore.setState((state) => {
       state.sessions[id].workspace = null;
-      state.sessions[id].messages.push({ id: "old", role: "user", text: "old turn" });
+      state.sessions[id].messages.push({ id: "old", role: "user", text: "old turn",
+      });
     });
 
     const attached = { path: "C:/tmp/legacy", name: "legacy" };
     await useNekoSessionStore.getState().attachWorkspace(id, attached);
     expect(driver.disposed).toBe(1);
-    expect(session(id)).toMatchObject({ workspace: attached, status: "exited" });
+    expect(session(id)).toMatchObject({ workspace: attached, status: "exited",
+    });
   });
 
   it("streams interleaved thinking/answer/tool blocks in ContentBlock vocabulary", async () => {
@@ -161,7 +305,8 @@ describe("neko-session-store", () => {
     emit({
       type: "activity",
       sessionId: id,
-      activity: { id: "t1", title: "Write(hello.txt)", kind: "file", status: "pending" },
+      activity: { id: "t1", title: "Write(hello.txt)", kind: "file", status: "pending",
+      },
     });
     emit({ type: "answer-delta", sessionId: id, text: "Chào " });
     emit({ type: "answer-delta", sessionId: id, text: "bạn!" });
@@ -207,9 +352,15 @@ describe("neko-session-store", () => {
     });
     expect(session(id).pendingPermission?.requestId).toBe("perm-1");
 
-    await useNekoSessionStore.getState().resolvePermission("reject_once");
+    const firstDecision = useNekoSessionStore.getState().resolvePermission("reject_once");
+    expect(session(id).resolvingPermissionId).toBe("perm-1");
+    const conflictingDecision = useNekoSessionStore.getState().resolvePermission("allow_once");
+    await Promise.all([firstDecision, conflictingDecision]);
     expect(session(id).pendingPermission).toBeNull();
+    expect(session(id).resolvingPermissionId).toBeNull();
     expect(driver.decisions).toEqual([{ requestId: "perm-1", optionId: "reject_once" }]);
+    expect(session(id).events.filter((event) => event.data.type === "permission-decision"))
+      .toHaveLength(1);
   });
 
   it("cancel reaches the driver; process exit marks the session honestly", async () => {
@@ -233,6 +384,42 @@ describe("neko-session-store", () => {
     const closed = session(id);
     expect(closed.status).toBe("exited");
     expect(closed.pendingPermission).toBeNull();
+  });
+
+  it("keeps a session exited when close cancels respawn preparation", async () => {
+    const id = await setup();
+    await useNekoSessionStore.getState().closeSession(id);
+    let replacement!: FakeDriver;
+    _setDriverFactoryForTests(async (_agent, sessionId, _launch, onEvent, ownDriver) => {
+      replacement = new FakeDriver(sessionId, onEvent);
+      let rejectStart!: (error: Error) => void;
+      const starting = new Promise<Driver>((_resolve, reject) => {
+        rejectStart = reject;
+      });
+      const dispose = replacement.dispose.bind(replacement);
+      replacement.dispose = async () => {
+        await dispose();
+        rejectStart(new Error("client disposed")); };
+      ownDriver(replacement);
+      return starting;
+    });
+    useNekoAgentStore.setState({ agents: [AGENT], isLoading: false });
+    useNekoSessionStore.getState().setActiveSession(id);
+
+    const respawning = useNekoSessionStore.getState().sendPrompt("thử khởi động lại");
+    await vi.waitFor(() => {
+      expect(session(id).status).toBe("connecting");
+      expect(replacement).toBeDefined();
+    });
+    const closing = useNekoSessionStore.getState().closeSession(id);
+    expect(session(id).status).toBe("stopping");
+    await closing;
+    expect(session(id).status).toBe("exited");
+    await respawning;
+
+    expect(replacement.disposed).toBe(1);
+    expect(replacement.prompts).toEqual([]);
+    expect(session(id).status).toBe("exited");
   });
 
   it("marks the session as error when the driver factory fails", async () => {

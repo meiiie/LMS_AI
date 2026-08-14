@@ -99,8 +99,14 @@ export function NekoComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mode = session.controls.find((option) => option.category === "mode" && option.kind === "select");
   const model = session.controls.find((option) => option.category === "model" && option.kind === "select");
-  const controlsDisabled =
-    session.status !== "idle" || disabled || streaming || Boolean(session.pendingPermission);
+  const interactionBlocked =
+    disabled ||
+    streaming ||
+    Boolean(session.pendingPermission) ||
+    Boolean(session.pendingControlId);
+  const composerDisabled =
+    (session.status !== "idle" && session.status !== "exited") || interactionBlocked;
+  const controlsDisabled = session.status !== "idle" || interactionBlocked;
   const slashQuery = draft.startsWith("/") && !draft.includes("\n")
     ? draft.slice(1).toLocaleLowerCase("vi")
     : null;
@@ -118,7 +124,7 @@ export function NekoComposer({
       )
       .slice(0, 8);
   }, [session.commands, slashQuery]);
-  const slashOpen = slashQuery !== null && !slashDismissed && !disabled;
+  const slashOpen = slashQuery !== null && !slashDismissed && !composerDisabled;
 
   useEffect(() => {
     if (!insertRequest) return;
@@ -141,7 +147,7 @@ export function NekoComposer({
 
   const submit = () => {
     const text = draft.trim();
-    if (!text || disabled || streaming) return;
+    if (!text || composerDisabled) return;
     const local = CLIENT_COMMANDS.find((command) => `/${command.name}` === text);
     setDraft("");
     setSlashDismissed(false);
@@ -223,7 +229,9 @@ export function NekoComposer({
             rows={Math.min(draft.split("\n").length || 1, 6)}
             placeholder={session.workspace ? "Nhắn cho agent… Gõ / để xem lệnh" : "Gắn dự án trước khi nhắn…"}
             value={draft}
-            disabled={disabled || !session.workspace}
+            disabled={!session.workspace}
+            readOnly={composerDisabled}
+            aria-busy={composerDisabled}
             data-testid="neko-composer-input"
             onChange={(event) => {
               setDraft(event.target.value);
@@ -310,10 +318,14 @@ export function NekoComposer({
             {streaming ? (
               <button
                 type="button"
-                className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[var(--nk-danger-soft)] text-[var(--nk-danger)] transition-colors hover:bg-[var(--nk-danger)] hover:text-[var(--nk-on-inverse)]"
-                onClick={onCancel}
-                title="Dừng"
-                aria-label="Dừng lượt đang chạy"
+                className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[var(--nk-danger-soft)] text-[var(--nk-danger)] transition-colors hover:bg-[var(--nk-danger)] hover:text-[var(--nk-on-inverse)] aria-disabled:cursor-wait aria-disabled:opacity-50 aria-disabled:hover:bg-[var(--nk-danger-soft)] aria-disabled:hover:text-[var(--nk-danger)]"
+                aria-disabled={session.cancelPending}
+                onClick={() => {
+                  if (!session.cancelPending) onCancel();
+                }}
+                title={session.cancelPending ? "Đang lưu yêu cầu dừng…" : "Dừng"}
+                aria-label={session.cancelPending ? "Đang lưu yêu cầu dừng" : "Dừng lượt đang chạy"}
+                aria-busy={session.cancelPending}
                 data-testid="neko-cancel"
               >
                 <Square aria-hidden="true" className="h-2.5 w-2.5 fill-current" />
@@ -322,7 +334,7 @@ export function NekoComposer({
               <button
                 type="button"
                 className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[var(--nk-inverse)] text-[var(--nk-on-inverse)] disabled:opacity-30"
-                disabled={disabled || !session.workspace || !draft.trim()}
+                disabled={composerDisabled || !session.workspace || !draft.trim()}
                 onClick={submit}
                 title="Gửi"
                 aria-label="Gửi tin nhắn"

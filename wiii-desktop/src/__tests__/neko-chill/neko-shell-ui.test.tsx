@@ -30,7 +30,14 @@ function makeSession(
     status: "exited",
     statusDetail: "Đã lưu",
     messages: [],
+    events: [],
+    eventHighWaterMark: 0,
+    runtime: null,
     pendingPermission: null,
+    resolvingPermissionId: null,
+    cancelPending: false,
+    closePending: false,
+    deletePending: false,
     ...overrides,
   };
 }
@@ -46,8 +53,31 @@ describe("Neko Chill shell UI", () => {
       sessions: {},
       activeSessionId: null,
       hydrated: true,
+      hydrating: false,
+      hydrationError: null,
       hydrate: vi.fn(async () => {}),
     });
+  });
+
+  it("keeps history closed on hydration failure and exposes a retry", () => {
+    const hydrate = vi.fn(async () => {});
+    useNekoSessionStore.setState({
+      sessions: {},
+      activeSessionId: null,
+      hydrated: false,
+      hydrating: false,
+      hydrationError: "Snapshot phiên local-1 có schema không hợp lệ.",
+      hydrate,
+    });
+
+    render(<NekoChillApp />);
+
+    expect(screen.getByRole("alert").textContent).toContain("Chưa thể mở lịch sử phiên");
+    expect(screen.getByText(/khóa việc tạo và mở phiên/i)).toBeTruthy();
+    expect(screen.queryByTestId("session-sidebar")).toBeNull();
+    expect(screen.queryByTestId("start-neko")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Thử tải lại" }));
+    expect(hydrate).toHaveBeenCalledTimes(2);
   });
 
   it("removes transport emphasis markers from reasoning labels only", () => {
@@ -107,7 +137,8 @@ describe("Neko Chill shell UI", () => {
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(screen.getByRole("dialog", { name: "Trung tâm lệnh Neko Chill" })).toBeTruthy();
-    const commandSearch = screen.getByRole("searchbox", { name: "Tìm phiên hoặc lệnh" });
+    const commandSearch = screen.getByRole("searchbox", { name: "Tìm phiên hoặc lệnh",
+    });
     fireEvent.change(commandSearch, { target: { value: "hàng hải" } });
     expect(screen.getByRole("option", { name: /Kiểm tra bản đồ.*Project Alpha/i })).toBeTruthy();
     expect(screen.queryByRole("option", { name: /Gemini review/i })).toBeNull();
@@ -167,7 +198,8 @@ describe("Neko Chill shell UI", () => {
     expect((composer as HTMLTextAreaElement).value).toBe("/memory show");
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    const commandSearch = screen.getByRole("searchbox", { name: "Tìm phiên hoặc lệnh" });
+    const commandSearch = screen.getByRole("searchbox", { name: "Tìm phiên hoặc lệnh",
+    });
     fireEvent.change(commandSearch, { target: { value: "memory" } });
     fireEvent.click(screen.getByRole("option", { name: /memory show.*Agent/i }));
     expect((composer as HTMLTextAreaElement).value).toBe("/memory show");
@@ -219,6 +251,190 @@ describe("Neko Chill shell UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Chèn gợi ý Kiểm tra dự án này" }));
     const composer = screen.getByTestId("neko-composer-input") as HTMLTextAreaElement;
     expect(composer.value).toBe("Kiểm tra dự án này và cho tôi biết điểm cần chú ý.");
+  });
+
+  it("shows in-flight durability states and disables duplicate actions", () => {
+    const resolvePermission = vi.fn(async () => {});
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên đang lưu",
+          { path: "C:/work/neko", name: "Neko" },
+          {
+            status: "dispatching",
+            statusDetail: undefined,
+            pendingPermission: {
+              requestId: "perm-1",
+              title: "Write(config.json)",
+              options: [
+                { optionId: "allow_once", label: "Cho phép", kind: "allow_once",
+                },
+                { optionId: "reject_once", label: "Từ chối", kind: "reject_once",
+                },
+              ],
+            },
+            resolvingPermissionId: "perm-1",
+          },
+        ),
+      },
+      activeSessionId: "active",
+      resolvePermission,
+    });
+
+    render(<NekoChillApp />);
+
+    expect(screen.getByText(/đang lưu & gửi/i)).toBeTruthy();
+    expect(screen.getByText("Đang lưu quyết định…")).toBeTruthy();
+    const allow = screen.getByRole("button", { name: "Cho phép" }) as HTMLButtonElement;
+    const reject = screen.getByRole("button", { name: "Từ chối" }) as HTMLButtonElement;
+    expect(allow.disabled).toBe(false);
+    expect(reject.disabled).toBe(false);
+    expect(allow.getAttribute("aria-disabled")).toBe("true");
+    expect(reject.getAttribute("aria-disabled")).toBe("true");
+    allow.focus();
+    fireEvent.click(allow);
+    expect(resolvePermission).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(allow);
+    const composer = screen.getByTestId("neko-composer-input") as HTMLTextAreaElement;
+    expect(composer.disabled).toBe(false);
+    expect(composer.readOnly).toBe(true);
+    expect(composer.getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByRole("status").textContent).toBe("Đang lưu quyết định…");
+  });
+
+  it("shows cancel durability progress and blocks duplicate stop clicks", () => {
+    const cancelTurn = vi.fn(async () => {});
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên đang dừng",
+          { path: "C:/work/neko", name: "Neko" },
+          {
+            status: "streaming",
+            cancelPending: true,
+            pendingPermission: {
+              requestId: "perm-cancel",
+              title: "Write(config.json)",
+              options: [{ optionId: "allow_once", label: "Cho phép", kind: "allow_once" }],
+            },
+          },
+        ),
+      },
+      activeSessionId: "active",
+      cancelTurn,
+    });
+
+    render(<NekoChillApp />);
+
+    const cancel = screen.getByRole("button", { name: "Đang lưu yêu cầu dừng",
+    });
+    expect((cancel as HTMLButtonElement).disabled).toBe(false);
+    expect(cancel.getAttribute("aria-disabled")).toBe("true");
+    expect(cancel.getAttribute("aria-busy")).toBe("true");
+    const allow = screen.getByRole("button", { name: "Cho phép" }) as HTMLButtonElement;
+    expect(allow.disabled).toBe(false);
+    expect(allow.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("status").textContent).toBe("Đang lưu yêu cầu dừng…");
+    cancel.focus();
+    fireEvent.click(cancel);
+    expect(cancelTurn).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(cancel);
+  });
+
+  it("allows an exited session to send while keeping runtime controls locked", () => {
+    const sendPrompt = vi.fn(async () => {});
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên đã dừng",
+          { path: "C:/work/neko", name: "Neko" },
+          {
+            status: "exited",
+            controls: [{
+              id: "model",
+              label: "Model",
+              category: "model",
+              kind: "select",
+              currentValue: "stable",
+              choices: [
+                { value: "stable", label: "Stable" },
+                { value: "preview", label: "Preview" },
+              ],
+            }],
+          },
+        ),
+      },
+      activeSessionId: "active",
+      sendPrompt,
+    });
+
+    render(<NekoChillApp />);
+
+    const composer = screen.getByTestId("neko-composer-input") as HTMLTextAreaElement;
+    expect(composer.readOnly).toBe(false);
+    expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).disabled)
+      .toBe(true);
+    fireEvent.change(composer, { target: { value: "khởi động lại" } });
+    fireEvent.click(screen.getByRole("button", { name: "Gửi tin nhắn" }));
+    expect(sendPrompt).toHaveBeenCalledWith("khởi động lại");
+  });
+
+  it("keeps the close action available when a session is in error", () => {
+    const closeSession = vi.fn(async () => {});
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên cần phục hồi",
+          { path: "C:/work/neko", name: "Neko" },
+          {
+            status: "error",
+            statusDetail: "Runtime báo lỗi",
+            runtime: {
+              sessionId: "active",
+              providerId: "neko",
+              instanceId: "runtime-live",
+              kind: "acp",
+              capabilities: ["prompt", "cancel"],
+              contextContinuity: "process",
+              workspaceIsolation: "advisory",
+            },
+          },
+        ),
+      },
+      activeSessionId: "active",
+      closeSession,
+    });
+
+    render(<NekoChillApp />);
+    fireEvent.click(screen.getByRole("button", { name: "Kết thúc" }));
+
+    expect(closeSession).toHaveBeenCalledWith("active");
+  });
+
+  it("keeps a durability error without a runtime fail-closed", () => {
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên chưa lưu được",
+          { path: "C:/work/neko", name: "Neko" },
+          {
+            status: "error",
+            statusDetail: "Không thể lưu ngữ cảnh dự án",
+            runtime: null,
+          },
+        ),
+      },
+      activeSessionId: "active",
+    });
+
+    render(<NekoChillApp />);
+
+    expect(screen.queryByRole("button", { name: "Kết thúc" })).toBeNull();
   });
 
   it("requires a project and reuses an exact recent workspace for a new session", async () => {

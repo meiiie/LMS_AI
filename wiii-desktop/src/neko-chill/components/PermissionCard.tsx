@@ -8,16 +8,30 @@ import type { PermissionRequest } from "../drivers/types";
 interface PermissionCardProps {
   request: PermissionRequest;
   onResolve: (optionId: string | null) => void;
+  resolving?: boolean;
+  blockedByCancel?: boolean;
 }
 
-export function PermissionCard({ request, onResolve }: PermissionCardProps) {
+export function PermissionCard({
+  request,
+  onResolve,
+  resolving = false,
+  blockedByCancel = false,
+}: PermissionCardProps) {
   const allows = request.options.filter((o) => o.kind.startsWith("allow"));
   const rejects = request.options.filter((o) => !o.kind.startsWith("allow"));
+  const busy = resolving || blockedByCancel;
+  const busyLabel = resolving
+    ? "Đang lưu quyết định…"
+    : blockedByCancel
+      ? "Đang lưu yêu cầu dừng…"
+      : "";
 
   return (
     <div
       className="my-2 rounded-[10px] border border-[var(--nk-border-strong)] bg-[var(--nk-raised)] px-4 py-3"
       data-testid="permission-card"
+      aria-busy={busy}
     >
       <p className="text-[11.5px] font-medium uppercase tracking-wide text-[var(--nk-warning)]">
         Agent xin phép
@@ -28,8 +42,11 @@ export function PermissionCard({ request, onResolve }: PermissionCardProps) {
           <button
             key={option.optionId}
             type="button"
-            className="rounded-lg bg-[var(--nk-inverse)] px-3 py-1.5 text-[12px] font-medium text-[var(--nk-on-inverse)] transition-opacity hover:opacity-90"
-            onClick={() => onResolve(option.optionId)}
+            className="rounded-lg bg-[var(--nk-inverse)] px-3 py-1.5 text-[12px] font-medium text-[var(--nk-on-inverse)] transition-opacity hover:opacity-90 aria-disabled:cursor-wait aria-disabled:opacity-50 aria-disabled:hover:opacity-50"
+            aria-disabled={busy}
+            onClick={() => {
+              if (!busy) onResolve(option.optionId);
+            }}
           >
             {option.label}
           </button>
@@ -38,13 +55,25 @@ export function PermissionCard({ request, onResolve }: PermissionCardProps) {
           <button
             key={option.optionId}
             type="button"
-            className="rounded-lg border border-[var(--nk-border-strong)] px-3 py-1.5 text-[12px] text-[var(--nk-text-2)] transition-colors hover:bg-[var(--nk-overlay)] hover:text-[var(--nk-text)]"
-            onClick={() => onResolve(option.optionId)}
+            className="rounded-lg border border-[var(--nk-border-strong)] px-3 py-1.5 text-[12px] text-[var(--nk-text-2)] transition-colors hover:bg-[var(--nk-overlay)] hover:text-[var(--nk-text)] aria-disabled:cursor-wait aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-[var(--nk-text-2)]"
+            aria-disabled={busy}
+            onClick={() => {
+              if (!busy) onResolve(option.optionId);
+            }}
           >
             {option.label}
           </button>
         ))}
       </div>
+      <p
+        className={busy
+          ? "mt-2 text-[11px] text-[var(--nk-text-3)]"
+          : "sr-only"}
+        role="status"
+        aria-live="polite"
+      >
+        {busyLabel}
+      </p>
     </div>
   );
 }

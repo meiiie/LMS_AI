@@ -15,10 +15,15 @@ import type { DetectedAgent } from "@/neko-chill/stores/neko-agent-store";
 const storage = new Map<string, unknown>();
 vi.mock("@/lib/storage", () => ({
   loadStore: vi.fn(async (_s: string, _k: string, dflt: unknown) => dflt),
+  loadStoreStrict: vi.fn(async (_s: string, _k: string, dflt: unknown) => dflt),
   saveStore: vi.fn(async (store: string, key: string, value: unknown) => {
     storage.set(`${store}:${key}`, value);
   }),
+  saveStoreStrict: vi.fn(async (store: string, key: string, value: unknown) => {
+    storage.set(`${store}:${key}`, value);
+  }),
   deleteStore: vi.fn(async () => {}),
+  deleteStoreStrict: vi.fn(async () => {}),
   clearStore: vi.fn(async () => {}),
 }));
 
@@ -26,6 +31,7 @@ import {
   useNekoSessionStore,
   _setDriverFactoryForTests,
   _clearLiveDriversForTests,
+  disposeAllNekoRuntimes,
   sweepIdleSessions,
 } from "@/neko-chill/stores/neko-session-store";
 
@@ -137,6 +143,11 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
   class FakeDriver implements Driver {
     readonly kind = "acp" as const;
+    readonly runtime: Driver["runtime"] = {
+      capabilities: ["prompt", "cancel", "permission-resolution", "session-config"],
+      contextContinuity: "process",
+      workspaceIsolation: "advisory",
+    };
     disposed = 0;
     constructor(readonly sessionId: string) {}
     async start(): Promise<void> {}
@@ -153,7 +164,13 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
   beforeEach(() => {
     storage.clear();
-    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    useNekoSessionStore.setState({
+      sessions: {},
+      activeSessionId: null,
+      hydrated: false,
+      hydrating: false,
+      hydrationError: null,
+    });
     _clearLiveDriversForTests();
     _setDriverFactoryForTests(async (_agent, sessionId) => {
       driver = new FakeDriver(sessionId);
@@ -187,5 +204,21 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
     await sweepIdleSessions();
     expect(driver.disposed).toBe(0);
     expect(useNekoSessionStore.getState().sessions[id2].status).toBe("streaming");
+  });
+
+  it("mode exit disposes the runtime once and records the owner teardown", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+
+    await disposeAllNekoRuntimes();
+    await disposeAllNekoRuntimes();
+
+    expect(driver.disposed).toBe(1);
+    const session = useNekoSessionStore.getState().sessions[id];
+    expect(session.runtime).toBeNull();
+    expect(session.status).toBe("exited");
+    expect(session.events[session.events.length - 1]?.data).toMatchObject({
+      type: "runtime-detached",
+      reason: "mode-exit",
+    });
   });
 });
