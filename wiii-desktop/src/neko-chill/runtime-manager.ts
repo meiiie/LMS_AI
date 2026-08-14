@@ -57,7 +57,7 @@ interface RuntimeBinding {
 interface RuntimePreparation {
   scope: RuntimeScope;
   completion: Promise<void>;
-  complete: () => void;
+  complete: (error?: unknown) => void;
 }
 
 export interface RuntimeReplacement {
@@ -68,6 +68,12 @@ export interface RuntimeReplacement {
 
 export interface RuntimeDisposalResult {
   provider: RuntimeProviderSnapshot;
+  error?: unknown;
+}
+
+export interface RuntimeSessionDisposalResult {
+  sessionId: string;
+  provider: RuntimeProviderSnapshot | null;
   error?: unknown;
 }
 
@@ -179,12 +185,21 @@ export class RuntimeRegistry {
     create: (instanceId: string, own: (driver: Driver) => void) => Promise<Driver>,
   ): Promise<RuntimeReplacement> {
     let completePreparation!: () => void;
+    let rejectPreparation!: (error: unknown) => void;
+    const preparationCompletion = new Promise<void>((resolve, reject) => {
+      completePreparation = resolve;
+      rejectPreparation = reject;
+    });
+    // replace() reports the same cleanup failure to its caller. This handler
+    // prevents an unobserved rejection when no teardown is concurrently joining.
+    void preparationCompletion.catch(() => {});
     const preparation: RuntimePreparation = {
       scope: new RuntimeScope(),
-      completion: new Promise<void>((resolve) => {
-        completePreparation = resolve;
-      }),
-      complete: () => completePreparation(),
+      completion: preparationCompletion,
+      complete: (error) => {
+        if (error === undefined) completePreparation();
+        else rejectPreparation(error);
+      },
     };
     const preparations =
       this.pendingPreparations.get(sessionId) ?? new Set<RuntimePreparation>();
@@ -192,6 +207,7 @@ export class RuntimeRegistry {
     this.pendingPreparations.set(sessionId, preparations);
     let ownedDriver: Driver | null = null;
     const unownedCleanups: Promise<void>[] = [];
+    let preparationCleanupError: unknown;
     const own = (driver: Driver) => {
       if (ownedDriver && ownedDriver !== driver) {
         unownedCleanups.push(driver.dispose());
@@ -227,6 +243,7 @@ export class RuntimeRegistry {
           (result): result is PromiseRejectedResult => result.status === "rejected",
         );
         if (cleanupError) {
+          preparationCleanupError = cleanupError.reason;
           throw new AggregateError(
             [error, cleanupError.reason],
             "Runtime preparation and cleanup both failed.",
@@ -244,11 +261,31 @@ export class RuntimeRegistry {
         generation !== this.generation ||
         sessionGeneration !== (this.sessionGenerations.get(sessionId) ?? 0)
       ) {
-        await preparation.scope.dispose().catch(() => {});
+        const cleanupError = await preparation.scope.dispose().then(
+          () => null,
+          (error) => error,
+        );
+        if (cleanupError) {
+          preparationCleanupError = cleanupError;
+          throw new AggregateError(
+            [new Error("Runtime preparation was cancelled during teardown."), cleanupError],
+            "Runtime preparation cancellation and cleanup both failed.",
+          );
+        }
         throw new Error("Runtime preparation was cancelled during teardown.");
       }
       if (driver.sessionId !== sessionId) {
-        await preparation.scope.dispose().catch(() => {});
+        const cleanupError = await preparation.scope.dispose().then(
+          () => null,
+          (error) => error,
+        );
+        if (cleanupError) {
+          preparationCleanupError = cleanupError;
+          throw new AggregateError(
+            [new Error("Driver trả về sai sessionId."), cleanupError],
+            "Invalid runtime preparation and cleanup both failed.",
+          );
+        }
         throw new Error("Driver trả về sai sessionId.");
       }
 
@@ -284,7 +321,7 @@ export class RuntimeRegistry {
         ...(cleanupError ? { cleanupError } : {}),
       };
     } finally {
-      preparation.complete();
+      preparation.complete(preparationCleanupError);
       const pending = this.pendingPreparations.get(sessionId);
       pending?.delete(preparation);
       if (!pending || pending.size === 0) {
@@ -361,7 +398,7 @@ export class RuntimeRegistry {
     };
   }
 
-  async disposeAll(): Promise<Array<{ provider: RuntimeProviderSnapshot; error?: unknown }>> {
+  async disposeAll(): Promise<RuntimeSessionDisposalResult[]> {
     // Invalidates in-flight preparations before touching committed bindings.
     this.generation += 1;
     const bindings = [...this.bindings.values()];
@@ -396,10 +433,14 @@ export class RuntimeRegistry {
         cleanupResults.set(sessionId, error);
       }
     }));
-    return bindings.map((binding) => {
-      const error = cleanupResults.get(binding.provider.sessionId);
+    return [...sessionIds].map((sessionId) => {
+      const provider = bindings.find(
+        (binding) => binding.provider.sessionId === sessionId,
+      )?.provider ?? null;
+      const error = cleanupResults.get(sessionId);
       return {
-        provider: binding.provider,
+        sessionId,
+        provider,
         ...(error ? { error } : {}),
       };
     });

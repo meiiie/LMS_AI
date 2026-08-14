@@ -42,9 +42,11 @@ export function PermissionCard({
           <button
             key={option.optionId}
             type="button"
-            className="rounded-lg bg-[var(--nk-inverse)] px-3 py-1.5 text-[12px] font-medium text-[var(--nk-on-inverse)] transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
-            disabled={busy}
-            onClick={() => onResolve(option.optionId)}
+            className="rounded-lg bg-[var(--nk-inverse)] px-3 py-1.5 text-[12px] font-medium text-[var(--nk-on-inverse)] transition-opacity hover:opacity-90 aria-disabled:cursor-wait aria-disabled:opacity-50 aria-disabled:hover:opacity-50"
+            aria-disabled={busy}
+            onClick={() => {
+              if (!busy) onResolve(option.optionId);
+            }}
           >
             {option.label}
           </button>
@@ -53,9 +55,11 @@ export function PermissionCard({
           <button
             key={option.optionId}
             type="button"
-            className="rounded-lg border border-[var(--nk-border-strong)] px-3 py-1.5 text-[12px] text-[var(--nk-text-2)] transition-colors hover:bg-[var(--nk-overlay)] hover:text-[var(--nk-text)] disabled:cursor-wait disabled:opacity-50"
-            disabled={busy}
-            onClick={() => onResolve(option.optionId)}
+            className="rounded-lg border border-[var(--nk-border-strong)] px-3 py-1.5 text-[12px] text-[var(--nk-text-2)] transition-colors hover:bg-[var(--nk-overlay)] hover:text-[var(--nk-text)] aria-disabled:cursor-wait aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-[var(--nk-text-2)]"
+            aria-disabled={busy}
+            onClick={() => {
+              if (!busy) onResolve(option.optionId);
+            }}
           >
             {option.label}
           </button>

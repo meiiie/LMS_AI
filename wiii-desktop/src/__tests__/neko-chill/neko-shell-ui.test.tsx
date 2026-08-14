@@ -254,6 +254,7 @@ describe("Neko Chill shell UI", () => {
   });
 
   it("shows in-flight durability states and disables duplicate actions", () => {
+    const resolvePermission = vi.fn(async () => {});
     useNekoSessionStore.setState({
       sessions: {
         active: makeSession(
@@ -278,16 +279,23 @@ describe("Neko Chill shell UI", () => {
         ),
       },
       activeSessionId: "active",
+      resolvePermission,
     });
 
     render(<NekoChillApp />);
 
     expect(screen.getByText(/đang lưu & gửi/i)).toBeTruthy();
     expect(screen.getByText("Đang lưu quyết định…")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Cho phép" }) as HTMLButtonElement).disabled)
-      .toBe(true);
-    expect((screen.getByRole("button", { name: "Từ chối" }) as HTMLButtonElement).disabled)
-      .toBe(true);
+    const allow = screen.getByRole("button", { name: "Cho phép" }) as HTMLButtonElement;
+    const reject = screen.getByRole("button", { name: "Từ chối" }) as HTMLButtonElement;
+    expect(allow.disabled).toBe(false);
+    expect(reject.disabled).toBe(false);
+    expect(allow.getAttribute("aria-disabled")).toBe("true");
+    expect(reject.getAttribute("aria-disabled")).toBe("true");
+    allow.focus();
+    fireEvent.click(allow);
+    expect(resolvePermission).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(allow);
     const composer = screen.getByTestId("neko-composer-input") as HTMLTextAreaElement;
     expect(composer.disabled).toBe(false);
     expect(composer.readOnly).toBe(true);
@@ -325,7 +333,9 @@ describe("Neko Chill shell UI", () => {
     expect((cancel as HTMLButtonElement).disabled).toBe(false);
     expect(cancel.getAttribute("aria-disabled")).toBe("true");
     expect(cancel.getAttribute("aria-busy")).toBe("true");
-    expect((screen.getByRole("button", { name: "Cho phép" }) as HTMLButtonElement).disabled).toBe(true);
+    const allow = screen.getByRole("button", { name: "Cho phép" }) as HTMLButtonElement;
+    expect(allow.disabled).toBe(false);
+    expect(allow.getAttribute("aria-disabled")).toBe("true");
     expect(screen.getByRole("status").textContent).toBe("Đang lưu yêu cầu dừng…");
     cancel.focus();
     fireEvent.click(cancel);

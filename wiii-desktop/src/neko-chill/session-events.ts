@@ -40,16 +40,26 @@ export type NekoSessionEventData =
       messageId: string;
       text: string;
       providerInstanceId: string | null;
+      /** New live inputs remain non-authoritative until dispatch-invoked exists. */
+      delivery?: "staged";
     }
   | {
       type: "permission-decision";
       requestId: string;
       optionId: string | null;
       providerInstanceId: string;
+      delivery?: "staged";
     }
   | {
       type: "runtime-command";
       action: "cancel";
+      providerInstanceId: string;
+      delivery?: "staged";
+    }
+  | {
+      type: "dispatch-invoked";
+      targetEventId: string;
+      action: "prompt" | "cancel" | "permission";
       providerInstanceId: string;
     }
   | {
@@ -150,16 +160,29 @@ function isValidEventData(data: Record<string, unknown>): boolean {
         (data.source === "live" || data.source === "legacy-migration") &&
         typeof data.messageId === "string" &&
         typeof data.text === "string" &&
-        isStringOrNull(data.providerInstanceId)
+        isStringOrNull(data.providerInstanceId) &&
+        (data.delivery === undefined || data.delivery === "staged")
       );
     case "permission-decision":
       return (
         typeof data.requestId === "string" &&
         isStringOrNull(data.optionId) &&
-        typeof data.providerInstanceId === "string"
+        typeof data.providerInstanceId === "string" &&
+        (data.delivery === undefined || data.delivery === "staged")
       );
     case "runtime-command":
-      return data.action === "cancel" && typeof data.providerInstanceId === "string";
+      return (
+        data.action === "cancel" &&
+        typeof data.providerInstanceId === "string" &&
+        (data.delivery === undefined || data.delivery === "staged")
+      );
+    case "dispatch-invoked":
+      return (
+        typeof data.targetEventId === "string" &&
+        data.targetEventId.length > 0 &&
+        ["prompt", "cancel", "permission"].includes(data.action as string) &&
+        typeof data.providerInstanceId === "string"
+      );
     case "control-change":
       return (
         ["requested", "committed", "rolled-back", "rollback-failed"].includes(

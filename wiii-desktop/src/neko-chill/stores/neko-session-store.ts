@@ -34,7 +34,11 @@ import {
   persistSessionStrict,
 } from "../persistence";
 import { appendSessionEvent, type NekoSessionEvent, type NekoSessionEventData } from "../session-events";
-import { RuntimeRegistry, type RuntimeProviderSnapshot } from "../runtime-manager";
+import {
+  RuntimeRegistry,
+  type RuntimeDisposalResult,
+  type RuntimeProviderSnapshot,
+} from "../runtime-manager";
 
 export interface NekoMessage {
   id: string;
@@ -244,6 +248,43 @@ function removeEventById(events: NekoSessionEvent[], eventId: string | null): vo
   events.splice(eventIndex, 1);
 }
 
+function projectAuthoritativeMessages(
+  messages: NekoMessage[],
+  events: NekoSessionEvent[],
+): NekoMessage[] {
+  const stagedPrompts = new Map(
+    events.flatMap((event) =>
+      event.eventId &&
+      event.data.type === "model-input" &&
+      event.data.delivery === "staged"
+        ? [[event.eventId, event] as const]
+        : []),
+  );
+  const invokedEventIds = new Set<string>();
+  for (const event of events) {
+    if (event.data.type !== "dispatch-invoked" || event.data.action !== "prompt") continue;
+    const target = stagedPrompts.get(event.data.targetEventId);
+    if (
+      target &&
+      event.seq > target.seq &&
+      target.data.type === "model-input" &&
+      event.data.providerInstanceId === target.data.providerInstanceId
+    ) {
+      invokedEventIds.add(event.data.targetEventId);
+    }
+  }
+  const stagedMessageIds = new Set(
+    events.flatMap((event) =>
+      event.data.type === "model-input" &&
+      event.data.delivery === "staged" &&
+      (!event.eventId || !invokedEventIds.has(event.eventId))
+        ? [event.data.messageId]
+        : []),
+  );
+  if (stagedMessageIds.size === 0) return messages;
+  return messages.filter((message) => !stagedMessageIds.has(message.id));
+}
+
 export const useNekoSessionStore = create<NekoSessionState>()(
   immer((set, get) => ({
     sessions: {},
@@ -317,6 +358,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             migratedIds.push(entry.id);
           }
           const eventHighWaterMark = Math.max(snapshot.eventHighWaterMark, events[events.length - 1]?.seq ?? 0);
+          const messages = projectAuthoritativeMessages(snapshot.messages, events);
+          const droppedStagedMessages = messages.length !== snapshot.messages.length;
           const latestContext = [...events].reverse().find((event) => event.data.type === "session-context");
           const contextData = latestContext?.data.type === "session-context" ? latestContext.data : null;
           const workspace = contextData
@@ -342,7 +385,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             id: entry.id,
             agentId: entry.agentId,
             agentName: entry.agentName,
-            title: entry.title,
+            title: droppedStagedMessages && messages.length === 0
+              ? `Phiên với ${entry.agentName}`
+              : entry.title,
             createdAt: entry.createdAt,
             updatedAt: entry.updatedAt,
             workspace,
@@ -352,7 +397,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             pendingControlId: null,
             lastActivityAt: entry.updatedAt,
             status: needsMigration ? "connecting" : "exited",
-            messages: snapshot.messages,
+            messages,
             events,
             eventHighWaterMark,
             runtime: null,
@@ -363,7 +408,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             deletePending: false,
             statusDetail: needsMigration
               ? "Đang nâng cấp log phiên trước khi có thể khởi động lại agent…"
-              : "Phiên đã lưu — nhắn tiếp để khởi động lại agent.",
+              : droppedStagedMessages
+                ? "Đã bỏ qua prompt chưa xác nhận gửi sau lần thoát trước."
+                : "Phiên đã lưu — nhắn tiếp để khởi động lại agent.",
           };
         }
         set((state) => {
@@ -517,6 +564,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
 
     attachWorkspace: async (sessionId, workspace) => {
       if (!workspace || !isAbsoluteWorkspacePath(workspace.path)) return;
+      const activeModeExit = modeExitOperation;
+      if (activeModeExit) await activeModeExit;
       const current = get().sessions[sessionId];
       if (!current || current.workspace || current.closePending || current.deletePending) return;
       const releaseOperation = acquireHold(runtimeOperations, sessionId);
@@ -702,6 +751,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             messageId,
             text,
             providerInstanceId,
+            delivery: "staged",
           }).eventId!;
           // Acquire the turn synchronously. No second composer submission may
           // pass while the first prompt waits for its durability barrier.
@@ -741,8 +791,32 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         let promptStarted = false;
         try {
           const driver = runtimes.requireInstance(sessionId, providerInstanceId, "prompt");
+          const invocation = driver.prompt(text);
           promptStarted = true;
-          await driver.prompt(text);
+          set((state) => {
+            const current = state.sessions[sessionId];
+            if (current && inputEventId) {
+              appendOwnedSessionEvent(current, "model", {
+                type: "dispatch-invoked",
+                targetEventId: inputEventId,
+                action: "prompt",
+                providerInstanceId,
+              });
+            }
+          });
+          const persistInvocation = persistSessionNowOrReport(sessionId, "xác nhận dispatch prompt", {
+            strict: true,
+          });
+          let invocationPersisted = false;
+          try {
+            await invocation;
+          } finally {
+            invocationPersisted = await persistInvocation;
+          }
+          if (!invocationPersisted) {
+            await revokeRuntimeAfterDurabilityFailure(sessionId, provider);
+            return;
+          }
           set((state) => {
             const current = state.sessions[sessionId];
             // Some drivers only resolve prompt() and do not emit lifecycle
@@ -804,6 +878,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
               type: "runtime-command",
               action: "cancel",
               providerInstanceId: provider.instanceId,
+              delivery: "staged",
             }).eventId!;
           }
         });
@@ -828,8 +903,31 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         let cancelStarted = false;
         try {
           const driver = runtimes.requireInstance(sessionId, provider.instanceId, "cancel");
+          const invocation = driver.cancel();
           cancelStarted = true;
-          await driver.cancel();
+          set((state) => {
+            const current = state.sessions[sessionId];
+            if (current && commandEventId) {
+              appendOwnedSessionEvent(current, "model", {
+                type: "dispatch-invoked",
+                targetEventId: commandEventId,
+                action: "cancel",
+                providerInstanceId: provider.instanceId,
+              });
+            }
+          });
+          const persistInvocation = persistSessionNowOrReport(sessionId, "xác nhận dispatch yêu cầu dừng", {
+            strict: true,
+          });
+          let invocationPersisted = false;
+          try {
+            await invocation;
+          } finally {
+            invocationPersisted = await persistInvocation;
+          }
+          if (!invocationPersisted) {
+            await revokeRuntimeAfterDurabilityFailure(sessionId, provider);
+          }
         } catch (error) {
           let rolledBackUndispatchedCancel = false;
           set((state) => {
@@ -890,6 +988,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             requestId: request.requestId,
             optionId,
             providerInstanceId: provider.instanceId,
+            delivery: "staged",
           }).eventId!;
         }
       });
@@ -900,8 +999,28 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         releaseDispatchBarrier();
         // Driver fails closed on null/unknown options (FR-006).
         const driver = runtimes.requireInstance(sessionId, provider.instanceId, "permission-resolution");
+        const invocation = driver.resolvePermission({ requestId: request.requestId, optionId });
         resolutionStarted = true;
-        await driver.resolvePermission({ requestId: request.requestId, optionId });
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (current && decisionEventId) {
+            appendOwnedSessionEvent(current, "model", {
+              type: "dispatch-invoked",
+              targetEventId: decisionEventId,
+              action: "permission",
+              providerInstanceId: provider.instanceId,
+            });
+          }
+        });
+        const persistInvocation = persistSessionNowOrReport(sessionId, "xác nhận dispatch quyết định", {
+          strict: true,
+        });
+        let invocationPersisted = false;
+        try {
+          await invocation;
+        } finally {
+          invocationPersisted = await persistInvocation;
+        }
         set((state) => {
           const s = state.sessions[sessionId];
           if (s?.pendingPermission?.requestId === request.requestId) {
@@ -911,6 +1030,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             s.resolvingPermissionId = null;
           }
         });
+        if (!invocationPersisted) {
+          await revokeRuntimeAfterDurabilityFailure(sessionId, provider);
+        }
       } catch (error) {
         let rolledBackUndispatchedDecision = false;
         set((state) => {
@@ -1014,7 +1136,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             }
           }
           const rollbackReason = rollbackError instanceof Error ? rollbackError.message : String(rollbackError ?? "");
-          const revocation = rollbackError ? await runtimes.detachInstance(sessionId, provider.instanceId) : null;
+          const revocation = rollbackError
+            ? await detachInstanceForRecovery(sessionId, provider)
+            : null;
           set((state) => {
             const current = state.sessions[sessionId];
             if (current) {
@@ -1102,7 +1226,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           }
           const reason = commitError instanceof Error ? commitError.message : String(commitError);
           const rollbackReason = rollbackError instanceof Error ? rollbackError.message : String(rollbackError ?? "");
-          const revocation = rollbackError ? await runtimes.detachInstance(sessionId, provider.instanceId) : null;
+          const revocation = rollbackError
+            ? await detachInstanceForRecovery(sessionId, provider)
+            : null;
           set((state) => {
             const current = state.sessions[sessionId];
             if (!current) return;
@@ -1413,9 +1539,18 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           }
         }
       });
-      // Trailing debounced persist after every transcript-affecting event.
+      // Provider exit is a boundary fact, not ordinary streaming output. Make
+      // its detach record immediate so a crash cannot restore a phantom runtime.
       const session = get().sessions[event.sessionId];
-      if (session) persistSessionDebounced(session);
+      if (session) {
+        if (event.type === "process-exited") {
+          void persistSessionNowOrReport(event.sessionId, "trạng thái provider đã thoát", {
+            strict: true,
+          });
+        } else {
+          persistSessionDebounced(session);
+        }
+      }
       if (event.type === "process-exited") {
         void runtimes.detach(event.sessionId).catch(() => {});
       }
@@ -1427,28 +1562,60 @@ async function revokeRuntimeAfterDurabilityFailure(
   sessionId: string,
   provider: RuntimeProviderSnapshot,
 ): Promise<void> {
-  const revocation = await runtimes.detachInstance(sessionId, provider.instanceId);
-  if (!revocation) return;
-  useNekoSessionStore.setState((state) => {
-    const current = state.sessions[sessionId];
-    if (!current) return;
-    if (current.runtime?.instanceId === revocation.provider.instanceId) {
-      current.runtime = null;
-    }
-    appendOwnedSessionEvent(current, "runtime", {
-      type: "runtime-detached",
-      providerId: revocation.provider.providerId,
-      instanceId: revocation.provider.instanceId,
-      kind: revocation.provider.kind,
-      reason: "durability-failure",
+  const revocation = await detachInstanceForRecovery(sessionId, provider);
+  let terminalDetail: string | null = null;
+  if (revocation) {
+    useNekoSessionStore.setState((state) => {
+      const current = state.sessions[sessionId];
+      if (!current) return;
+      if (current.runtime?.instanceId === revocation.provider.instanceId) {
+        current.runtime = null;
+      }
+      appendOwnedSessionEvent(current, "runtime", {
+        type: "runtime-detached",
+        providerId: revocation.provider.providerId,
+        instanceId: revocation.provider.instanceId,
+        kind: revocation.provider.kind,
+        reason: "durability-failure",
+      });
+      if (current.status !== "stopping") {
+        current.status = revocation.error ? "error" : "exited";
+        terminalDetail = revocation.error
+          ? `Không thể lưu kết quả giao dịch; runtime đã bị thu hồi nhưng cleanup báo lỗi: ${revocation.error instanceof Error ? revocation.error.message : String(revocation.error)}`
+          : "Không thể lưu kết quả giao dịch; runtime đã được thu hồi. Nhắn tiếp để thử lại khi bộ nhớ bền đã sẵn sàng.";
+        current.statusDetail = terminalDetail;
+      }
     });
-    if (current.status !== "stopping") {
-      current.status = revocation.error ? "error" : "exited";
-      current.statusDetail = revocation.error
-        ? `Không thể lưu kết quả giao dịch; runtime đã bị thu hồi nhưng cleanup báo lỗi: ${revocation.error instanceof Error ? revocation.error.message : String(revocation.error)}`
-        : "Không thể lưu kết quả giao dịch; runtime đã được thu hồi. Nhắn tiếp để thử lại khi bộ nhớ bền đã sẵn sàng.";
-    }
+  }
+  // The original boundary write may have failed transiently. Retry once with
+  // the terminal revocation included; if storage is still unavailable, the
+  // earlier durable staged record remains non-authoritative on hydration.
+  const terminalPersisted = await persistSessionNowOrReport(sessionId, "trạng thái thu hồi sau lỗi độ bền", {
+    fatal: true,
+    strict: true,
   });
+  if (!terminalPersisted && terminalDetail) {
+    useNekoSessionStore.setState((state) => {
+      const current = state.sessions[sessionId];
+      if (current) {
+        current.statusDetail = `${terminalDetail} Bản ghi kết thúc vẫn chưa thể lưu bền.`;
+      }
+    });
+  }
+}
+
+async function detachInstanceForRecovery(
+  sessionId: string,
+  provider: RuntimeProviderSnapshot,
+): Promise<RuntimeDisposalResult | null> {
+  try {
+    return await runtimes.detachInstance(sessionId, provider.instanceId);
+  } catch (error) {
+    // The provider may already be synchronously revoked while its joined
+    // cleanup is still failing. Preserve the captured identity so config
+    // recovery can finish its state transition and strict terminal persist.
+    return { provider, error };
+  }
 }
 
 async function persistSessionNowOrReport(
@@ -1580,13 +1747,14 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
     const results = await runtimes.disposeAll();
     await Promise.all([...sessionIds].map((sessionId) => waitForHolds(runtimeOperations, sessionId)));
 
-    const resultsBySession = new Map(results.map((result) => [result.provider.sessionId, result] as const));
+    const resultsBySession = new Map(results.map((result) => [result.sessionId, result] as const));
     const sessionIdsToPersist: string[] = [];
     useNekoSessionStore.setState((draft) => {
       for (const sessionId of sessionIds) {
         const session = draft.sessions[sessionId];
         if (!session || session.deletePending) continue;
         const result = resultsBySession.get(sessionId);
+        const provider = result?.provider ?? session.runtime;
         session.runtime = null;
         session.status = "exited";
         session.pendingPermission = null;
@@ -1596,12 +1764,12 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
         session.statusDetail = result?.error
           ? "Đã rời Neko Chill nhưng runtime báo lỗi khi thu hồi tài nguyên."
           : "Runtime đã dừng khi rời Neko Chill.";
-        if (result) {
+        if (provider) {
           appendOwnedSessionEvent(session, "runtime", {
             type: "runtime-detached",
-            providerId: result.provider.providerId,
-            instanceId: result.provider.instanceId,
-            kind: result.provider.kind,
+            providerId: provider.providerId,
+            instanceId: provider.instanceId,
+            kind: provider.kind,
             reason: "mode-exit",
           });
         }

@@ -23,12 +23,22 @@ describe("Neko session event validation", () => {
     expect(isNekoSessionEvent(appended)).toBe(true);
     expect(isNekoSessionEvent({ ...appended, eventId: undefined })).toBe(true);
     expect(isNekoSessionEvent({ ...appended, eventId: "" })).toBe(false);
+
+    expect(isNekoSessionEvent(event({
+      type: "dispatch-invoked",
+      targetEventId: appended.eventId!,
+      action: "prompt",
+      providerInstanceId: "provider-1",
+    }))).toBe(true);
   });
 
   it.each([
     { type: "model-input", source: "live", messageId: "m1" },
     { type: "permission-decision", requestId: "p1", optionId: "allow" },
     { type: "runtime-command", action: "stop", providerInstanceId: "provider-1" },
+    { type: "dispatch-invoked", targetEventId: "", action: "prompt", providerInstanceId: "provider-1" },
+    { type: "dispatch-invoked", targetEventId: "event-1", action: "config", providerInstanceId: "provider-1" },
+    { type: "model-input", source: "live", messageId: "m1", text: "x", providerInstanceId: "provider-1", delivery: "sent" },
     { type: "control-change", phase: "committed", optionId: "model" },
     { type: "runtime-attached", provider: { instanceId: "provider-1" } },
     { type: "runtime-detached", providerId: "neko", instanceId: "provider-1" },

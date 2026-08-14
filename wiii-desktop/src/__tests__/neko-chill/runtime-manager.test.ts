@@ -49,6 +49,18 @@ class BlockingDisposeDriver extends FakeDriver {
   }
 }
 
+class BlockingFailingDisposeDriver extends FakeDriver {
+  constructor(sessionId: string, private readonly gate: Promise<void>) {
+    super(sessionId);
+  }
+
+  override async dispose(): Promise<void> {
+    this.disposed += 1;
+    await this.gate;
+    throw new Error("process kill failed");
+  }
+}
+
 describe("RuntimeScope", () => {
   it("disposes owned resources once in reverse order", async () => {
     const calls: string[] = [];
@@ -127,6 +139,31 @@ describe("RuntimeRegistry", () => {
     release();
     await Promise.all([first, second]);
     expect(driver.disposed).toBe(1);
+  });
+
+  it("reports a joined cleanup failure after the binding was already revoked", async () => {
+    const registry = new RuntimeRegistry();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const driver = new BlockingFailingDisposeDriver("s1", gate);
+    await registry.replace("s1", "neko", async () => driver);
+
+    const firstOutcome = registry.detach("s1").then(
+      () => null,
+      (error) => error,
+    );
+    await vi.waitFor(() => expect(driver.disposed).toBe(1));
+    const teardown = registry.disposeAll();
+    release();
+
+    expect(await firstOutcome).toBeInstanceOf(Error);
+    const results = await teardown;
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      sessionId: "s1",
+      provider: null,
+      error: expect.objectContaining({ message: "process kill failed" }),
+    });
   });
 
   it("fails closed when a consumer requests an undeclared capability", async () => {
@@ -286,6 +323,35 @@ describe("RuntimeRegistry", () => {
     releaseDispose();
     await expect(creating).rejects.toThrow("cancelled during teardown");
     await detaching;
+    expect(registry.get("s1")).toBeNull();
+  });
+
+  it("propagates a late-owned driver's cleanup failure to teardown", async () => {
+    const registry = new RuntimeRegistry();
+    let releaseDispose!: () => void;
+    const disposeGate = new Promise<void>((resolve) => { releaseDispose = resolve; });
+    const driver = new BlockingFailingDisposeDriver("s1", disposeGate);
+    let finishCreate!: (driver: Driver) => void;
+    const creating = registry.replace(
+      "s1",
+      "neko",
+      async () => new Promise<Driver>((resolve) => { finishCreate = resolve; }),
+    );
+    const createOutcome = creating.then(
+      () => null,
+      (error) => error,
+    );
+    const detachOutcome = registry.detach("s1").then(
+      () => null,
+      (error) => error,
+    );
+
+    finishCreate(driver);
+    await vi.waitFor(() => expect(driver.disposed).toBe(1));
+    releaseDispose();
+
+    expect(await createOutcome).toBeInstanceOf(AggregateError);
+    expect(await detachOutcome).toMatchObject({ message: "process kill failed" });
     expect(registry.get("s1")).toBeNull();
   });
 

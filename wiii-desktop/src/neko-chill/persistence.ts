@@ -500,6 +500,9 @@ async function performDeletePersistedSession(sessionId: string): Promise<void> {
             }
           }
           if (rollbackErrors.length > 0) {
+            // The catalog may no longer contain this ID. Force the next write
+            // to republish it instead of trusting a stale in-memory marker.
+            publishedIds.delete(sessionId);
             throw new AggregateError(
               [error, ...rollbackErrors],
               `Không thể xóa hoặc khôi phục metadata phiên ${sessionId}.`,
