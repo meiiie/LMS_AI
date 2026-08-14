@@ -87,7 +87,7 @@ export class RuntimeProviderChangedError extends Error {
 export class RuntimeRegistry {
   private readonly bindings = new Map<string, RuntimeBinding>();
   private readonly sessionGenerations = new Map<string, number>();
-  private readonly pendingPreparations = new Map<string, number>();
+  private readonly pendingPreparations = new Map<string, Set<RuntimeScope>>();
   private generation = 0;
 
   get(sessionId: string): RuntimeProviderSnapshot | null {
@@ -96,6 +96,13 @@ export class RuntimeRegistry {
 
   isCurrent(sessionId: string, instanceId: string): boolean {
     return this.bindings.get(sessionId)?.provider.instanceId === instanceId;
+  }
+
+  /** Sessions with either a committed provider or an owned preparation. */
+  ownedSessionIds(): string[] {
+    return [
+      ...new Set([...this.bindings.keys(), ...this.pendingPreparations.keys()]),
+    ];
   }
 
   requireInstance(
@@ -116,32 +123,66 @@ export class RuntimeRegistry {
   async replace(
     sessionId: string,
     providerId: string,
-    create: (instanceId: string) => Promise<Driver>,
+    create: (instanceId: string, own: (driver: Driver) => void) => Promise<Driver>,
   ): Promise<RuntimeReplacement> {
-    this.pendingPreparations.set(
-      sessionId,
-      (this.pendingPreparations.get(sessionId) ?? 0) + 1,
-    );
+    const preparationScope = new RuntimeScope();
+    const preparations =
+      this.pendingPreparations.get(sessionId) ?? new Set<RuntimeScope>();
+    preparations.add(preparationScope);
+    this.pendingPreparations.set(sessionId, preparations);
+    let ownedDriver: Driver | null = null;
+    const own = (driver: Driver) => {
+      if (ownedDriver && ownedDriver !== driver) {
+        void driver.dispose().catch(() => {});
+        throw new Error("Runtime preparation returned more than one driver.");
+      }
+      if (ownedDriver) return;
+      ownedDriver = driver;
+      try {
+        preparationScope.add(() => driver.dispose());
+      } catch (error) {
+        void driver.dispose().catch(() => {});
+        throw error;
+      }
+    };
     try {
       // Transaction prepare: no registry mutation until creation succeeds.
       const generation = this.generation;
       const sessionGeneration = this.sessionGenerations.get(sessionId) ?? 0;
       const instanceId = uuidv4();
-      const driver = await create(instanceId);
+      let driver: Driver;
+      try {
+        driver = await create(instanceId, own);
+        own(driver);
+      } catch (error) {
+        try {
+          await preparationScope.dispose();
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            "Runtime preparation and cleanup both failed.",
+          );
+        }
+        if (
+          generation !== this.generation ||
+          sessionGeneration !== (this.sessionGenerations.get(sessionId) ?? 0)
+        ) {
+          throw new Error("Runtime preparation was cancelled during teardown.");
+        }
+        throw error;
+      }
       if (
         generation !== this.generation ||
         sessionGeneration !== (this.sessionGenerations.get(sessionId) ?? 0)
       ) {
-        await driver.dispose().catch(() => {});
+        await preparationScope.dispose().catch(() => {});
         throw new Error("Runtime preparation was cancelled during teardown.");
       }
       if (driver.sessionId !== sessionId) {
-        await driver.dispose().catch(() => {});
+        await preparationScope.dispose().catch(() => {});
         throw new Error("Driver trả về sai sessionId.");
       }
 
-      const scope = new RuntimeScope();
-      scope.add(() => driver.dispose());
       const provider: RuntimeProviderSnapshot = {
         sessionId,
         providerId,
@@ -154,7 +195,7 @@ export class RuntimeRegistry {
       const previous = this.bindings.get(sessionId) ?? null;
 
       // Commit: all consumers resolve to the new provider identity atomically.
-      this.bindings.set(sessionId, { driver, provider, scope });
+      this.bindings.set(sessionId, { driver, provider, scope: preparationScope });
       let cleanupError: unknown;
       if (previous) {
         try {
@@ -174,10 +215,9 @@ export class RuntimeRegistry {
         ...(cleanupError ? { cleanupError } : {}),
       };
     } finally {
-      const pending = (this.pendingPreparations.get(sessionId) ?? 1) - 1;
-      if (pending > 0) {
-        this.pendingPreparations.set(sessionId, pending);
-      } else {
+      const pending = this.pendingPreparations.get(sessionId);
+      pending?.delete(preparationScope);
+      if (!pending || pending.size === 0) {
         this.pendingPreparations.delete(sessionId);
         this.sessionGenerations.delete(sessionId);
       }
@@ -190,16 +230,19 @@ export class RuntimeRegistry {
       (this.sessionGenerations.get(sessionId) ?? 0) + 1,
     );
     const binding = this.bindings.get(sessionId);
-    if (!binding) {
-      if (!this.pendingPreparations.has(sessionId)) {
-        this.sessionGenerations.delete(sessionId);
-      }
-      return null;
-    }
-    this.bindings.delete(sessionId);
+    const preparations = [...(this.pendingPreparations.get(sessionId) ?? [])];
+    if (binding) this.bindings.delete(sessionId);
     try {
-      await binding.scope.dispose();
-      return binding.provider;
+      const scopes = new Set([
+        ...preparations,
+        ...(binding ? [binding.scope] : []),
+      ]);
+      const results = await Promise.allSettled([...scopes].map((scope) => scope.dispose()));
+      const failed = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (failed) throw failed.reason;
+      return binding?.provider ?? null;
     } finally {
       if (!this.pendingPreparations.has(sessionId)) {
         this.sessionGenerations.delete(sessionId);
@@ -241,10 +284,17 @@ export class RuntimeRegistry {
     // Invalidates in-flight preparations before touching committed bindings.
     this.generation += 1;
     const bindings = [...this.bindings.values()];
+    const preparationScopes = [
+      ...new Set([...this.pendingPreparations.values()].flatMap((scopes) => [...scopes])),
+    ];
     // Revoke every provider synchronously before awaiting any disposer. A
     // stalled process cannot leave unrelated sessions registered or unowned.
     this.bindings.clear();
-    return Promise.all(bindings.map(async (binding) => {
+    const bindingScopes = new Set(bindings.map((binding) => binding.scope));
+    const pendingDisposals = preparationScopes
+      .filter((scope) => !bindingScopes.has(scope))
+      .map((scope) => scope.dispose().catch(() => {}));
+    const bindingResults = Promise.all(bindings.map(async (binding) => {
       try {
         await binding.scope.dispose();
         return { provider: binding.provider };
@@ -252,6 +302,8 @@ export class RuntimeRegistry {
         return { provider: binding.provider, error };
       }
     }));
+    const [results] = await Promise.all([bindingResults, Promise.all(pendingDisposals)]);
+    return results;
   }
 
   /** Simulates process loss/restart without touching test-owned fakes. */

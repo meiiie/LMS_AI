@@ -97,11 +97,12 @@ export function appendSessionEvent(
   visibility: NekoSessionEvent["visibility"],
   data: NekoSessionEventData,
   at: number = Date.now(),
+  afterSeq: number = 0,
 ): NekoSessionEvent {
   const event: NekoSessionEvent = {
     v: NEKO_SESSION_EVENT_VERSION,
     eventId: uuidv4(),
-    seq: (events[events.length - 1]?.seq ?? 0) + 1,
+    seq: Math.max(events[events.length - 1]?.seq ?? 0, afterSeq) + 1,
     at,
     visibility,
     data,

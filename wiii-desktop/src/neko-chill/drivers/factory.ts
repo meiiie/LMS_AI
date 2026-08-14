@@ -82,6 +82,7 @@ export async function createDriverForAgent(
   sessionId: string,
   launch: DriverLaunchConfig,
   onEvent: DriverEventHandler,
+  ownDriver?: (driver: Driver) => void,
 ): Promise<Driver> {
   const baseArgs = ACP_ARGS[agent.id];
   if (!baseArgs) throw new Error(`Không có cấu hình ACP cho agent "${agent.id}"`);
@@ -104,10 +105,12 @@ export async function createDriverForAgent(
     onEvent,
   });
   try {
+    // Let RuntimeRegistry own the process before initialize/session-new can hang.
+    ownDriver?.(driver);
     await driver.start();
     return driver;
   } catch (error) {
-    await driver.dispose().catch(() => {});
+    if (!ownDriver) await driver.dispose().catch(() => {});
     throw error;
   }
 }

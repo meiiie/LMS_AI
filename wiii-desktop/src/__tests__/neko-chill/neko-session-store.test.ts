@@ -114,7 +114,8 @@ describe("neko-session-store", () => {
 
     await useNekoSessionStore.getState().sendPrompt("Xin chào");
     expect(driver.prompts).toEqual(["Xin chào"]);
-    expect(session(id).messages[0]).toMatchObject({ role: "user", text: "Xin chào" });
+    expect(session(id).messages[0]).toMatchObject({ role: "user", text: "Xin chào",
+    });
     expect(session(id).title).toBe("Xin chào");
   });
 
@@ -283,13 +284,15 @@ describe("neko-session-store", () => {
     const id = await setup();
     useNekoSessionStore.setState((state) => {
       state.sessions[id].workspace = null;
-      state.sessions[id].messages.push({ id: "old", role: "user", text: "old turn" });
+      state.sessions[id].messages.push({ id: "old", role: "user", text: "old turn",
+      });
     });
 
     const attached = { path: "C:/tmp/legacy", name: "legacy" };
     await useNekoSessionStore.getState().attachWorkspace(id, attached);
     expect(driver.disposed).toBe(1);
-    expect(session(id)).toMatchObject({ workspace: attached, status: "exited" });
+    expect(session(id)).toMatchObject({ workspace: attached, status: "exited",
+    });
   });
 
   it("streams interleaved thinking/answer/tool blocks in ContentBlock vocabulary", async () => {
@@ -302,7 +305,8 @@ describe("neko-session-store", () => {
     emit({
       type: "activity",
       sessionId: id,
-      activity: { id: "t1", title: "Write(hello.txt)", kind: "file", status: "pending" },
+      activity: { id: "t1", title: "Write(hello.txt)", kind: "file", status: "pending",
+      },
     });
     emit({ type: "answer-delta", sessionId: id, text: "Chào " });
     emit({ type: "answer-delta", sessionId: id, text: "bạn!" });
@@ -385,11 +389,19 @@ describe("neko-session-store", () => {
   it("keeps a session exited when close cancels respawn preparation", async () => {
     const id = await setup();
     await useNekoSessionStore.getState().closeSession(id);
-    let resolveDriver!: (value: Driver) => void;
     let replacement!: FakeDriver;
-    _setDriverFactoryForTests(async (_agent, sessionId, _launch, onEvent) => {
+    _setDriverFactoryForTests(async (_agent, sessionId, _launch, onEvent, ownDriver) => {
       replacement = new FakeDriver(sessionId, onEvent);
-      return new Promise<Driver>((resolve) => { resolveDriver = resolve; });
+      let rejectStart!: (error: Error) => void;
+      const starting = new Promise<Driver>((_resolve, reject) => {
+        rejectStart = reject;
+      });
+      const dispose = replacement.dispose.bind(replacement);
+      replacement.dispose = async () => {
+        await dispose();
+        rejectStart(new Error("client disposed")); };
+      ownDriver(replacement);
+      return starting;
     });
     useNekoAgentStore.setState({ agents: [AGENT], isLoading: false });
     useNekoSessionStore.getState().setActiveSession(id);
@@ -397,13 +409,12 @@ describe("neko-session-store", () => {
     const respawning = useNekoSessionStore.getState().sendPrompt("thử khởi động lại");
     await vi.waitFor(() => {
       expect(session(id).status).toBe("connecting");
-      expect(typeof resolveDriver).toBe("function");
+      expect(replacement).toBeDefined();
     });
     const closing = useNekoSessionStore.getState().closeSession(id);
     expect(session(id).status).toBe("stopping");
     await closing;
     expect(session(id).status).toBe("exited");
-    resolveDriver(replacement);
     await respawning;
 
     expect(replacement.disposed).toBe(1);

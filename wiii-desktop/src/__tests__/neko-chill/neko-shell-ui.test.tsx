@@ -31,10 +31,12 @@ function makeSession(
     statusDetail: "Đã lưu",
     messages: [],
     events: [],
+    eventHighWaterMark: 0,
     runtime: null,
     pendingPermission: null,
     resolvingPermissionId: null,
     cancelPending: false,
+    closePending: false,
     deletePending: false,
     ...overrides,
   };
@@ -135,7 +137,8 @@ describe("Neko Chill shell UI", () => {
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(screen.getByRole("dialog", { name: "Trung tâm lệnh Neko Chill" })).toBeTruthy();
-    const commandSearch = screen.getByRole("searchbox", { name: "Tìm phiên hoặc lệnh" });
+    const commandSearch = screen.getByRole("searchbox", { name: "Tìm phiên hoặc lệnh",
+    });
     fireEvent.change(commandSearch, { target: { value: "hàng hải" } });
     expect(screen.getByRole("option", { name: /Kiểm tra bản đồ.*Project Alpha/i })).toBeTruthy();
     expect(screen.queryByRole("option", { name: /Gemini review/i })).toBeNull();
@@ -195,7 +198,8 @@ describe("Neko Chill shell UI", () => {
     expect((composer as HTMLTextAreaElement).value).toBe("/memory show");
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    const commandSearch = screen.getByRole("searchbox", { name: "Tìm phiên hoặc lệnh" });
+    const commandSearch = screen.getByRole("searchbox", { name: "Tìm phiên hoặc lệnh",
+    });
     fireEvent.change(commandSearch, { target: { value: "memory" } });
     fireEvent.click(screen.getByRole("option", { name: /memory show.*Agent/i }));
     expect((composer as HTMLTextAreaElement).value).toBe("/memory show");
@@ -263,8 +267,10 @@ describe("Neko Chill shell UI", () => {
               requestId: "perm-1",
               title: "Write(config.json)",
               options: [
-                { optionId: "allow_once", label: "Cho phép", kind: "allow_once" },
-                { optionId: "reject_once", label: "Từ chối", kind: "reject_once" },
+                { optionId: "allow_once", label: "Cho phép", kind: "allow_once",
+                },
+                { optionId: "reject_once", label: "Từ chối", kind: "reject_once",
+                },
               ],
             },
             resolvingPermissionId: "perm-1",
@@ -306,7 +312,8 @@ describe("Neko Chill shell UI", () => {
 
     render(<NekoChillApp />);
 
-    const cancel = screen.getByRole("button", { name: "Đang lưu yêu cầu dừng" });
+    const cancel = screen.getByRole("button", { name: "Đang lưu yêu cầu dừng",
+    });
     expect((cancel as HTMLButtonElement).disabled).toBe(false);
     expect(cancel.getAttribute("aria-disabled")).toBe("true");
     expect(cancel.getAttribute("aria-busy")).toBe("true");

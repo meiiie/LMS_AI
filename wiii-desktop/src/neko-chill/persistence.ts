@@ -49,6 +49,8 @@ interface PersistedTranscript {
   v: number;
   messages: NekoMessage[];
   events?: NekoSessionEvent[];
+  /** Monotonic allocator state; may exceed the surviving tail after rollback. */
+  eventHighWaterMark?: number;
   /** Authoritative materialized metadata; index is only a discovery cache. */
   entry?: SessionIndexEntry;
 }
@@ -56,6 +58,7 @@ interface PersistedTranscript {
 export interface LoadedSessionSnapshot {
   messages: NekoMessage[];
   events: NekoSessionEvent[];
+  eventHighWaterMark: number;
   /** v1/corrupt event data needs a deterministic audit-log backfill. */
   needsEventMigration: boolean;
 }
@@ -243,6 +246,14 @@ function parsePersistedTranscript(
     )) {
       throw new Error(`Log sự kiện phiên ${sessionId} có thứ tự không hợp lệ.`);
     }
+    const lastSeq = transcript.events[transcript.events.length - 1]?.seq ?? 0;
+    if (
+      transcript.eventHighWaterMark !== undefined &&
+      (!Number.isInteger(transcript.eventHighWaterMark) ||
+        transcript.eventHighWaterMark < lastSeq)
+    ) {
+      throw new Error(`Bộ đếm sự kiện phiên ${sessionId} không hợp lệ.`);
+    }
   } else if (transcript.events !== undefined && !Array.isArray(transcript.events)) {
     throw new Error(`Snapshot phiên ${sessionId} có schema không hợp lệ.`);
   }
@@ -291,6 +302,7 @@ async function writeSession(session: NekoSession, strict: boolean): Promise<void
     v: SCHEMA_VERSION,
     messages: session.messages,
     events: session.events,
+    eventHighWaterMark: session.eventHighWaterMark,
     entry,
   });
   // The shared index is only a cache. Queue it to prevent lost updates, but do
@@ -400,12 +412,28 @@ export async function loadSessionSnapshot(sessionId: string): Promise<LoadedSess
     sessionId,
   );
   if (!stored) {
-    return { messages: [], events: [], needsEventMigration: false };
+    return {
+      messages: [],
+      events: [],
+      eventHighWaterMark: 0,
+      needsEventMigration: false,
+    };
   }
   if (stored.v !== SCHEMA_VERSION) {
-    return { messages: stored.messages, events: [], needsEventMigration: true };
+    return {
+      messages: stored.messages,
+      events: [],
+      eventHighWaterMark: 0,
+      needsEventMigration: true,
+    };
   }
-  return { messages: stored.messages, events: stored.events!, needsEventMigration: false };
+  const lastSeq = stored.events![stored.events!.length - 1]?.seq ?? 0;
+  return {
+    messages: stored.messages,
+    events: stored.events!,
+    eventHighWaterMark: stored.eventHighWaterMark ?? lastSeq,
+    needsEventMigration: false,
+  };
 }
 
 /** Compatibility helper for callers that only need the materialized view. */

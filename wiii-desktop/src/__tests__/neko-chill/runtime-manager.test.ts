@@ -228,4 +228,44 @@ describe("RuntimeRegistry", () => {
     expect(driver.disposed).toBe(1);
     expect(registry.get("s1")).toBeNull();
   });
+
+  it("owns and cancels a driver while its preparation is still pending", async () => {
+    const registry = new RuntimeRegistry();
+    const driver = new FakeDriver("s1");
+    let rejectStart!: (error: Error) => void;
+    const starting = new Promise<Driver>((_resolve, reject) => {
+      rejectStart = reject;
+    });
+    const dispose = driver.dispose.bind(driver);
+    driver.dispose = async () => {
+      await dispose();
+      rejectStart(new Error("client disposed"));
+    };
+
+    const creating = registry.replace("s1", "neko", async (_instanceId, own) => {
+      own(driver);
+      return starting;
+    });
+    await Promise.resolve();
+
+    await expect(registry.detach("s1")).resolves.toBeNull();
+    await expect(creating).rejects.toThrow("cancelled during teardown");
+    expect(driver.disposed).toBe(1);
+    expect(registry.get("s1")).toBeNull();
+  });
+
+  it("cleans up both drivers when a factory returns a different owned instance", async () => {
+    const registry = new RuntimeRegistry();
+    const owned = new FakeDriver("s1");
+    const returned = new FakeDriver("s1");
+
+    await expect(registry.replace("s1", "neko", async (_instanceId, own) => {
+      own(owned);
+      return returned;
+    })).rejects.toThrow("more than one driver");
+
+    expect(owned.disposed).toBe(1);
+    expect(returned.disposed).toBe(1);
+    expect(registry.get("s1")).toBeNull();
+  });
 });

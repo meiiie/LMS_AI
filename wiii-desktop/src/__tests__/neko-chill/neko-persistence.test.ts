@@ -110,6 +110,7 @@ import {
   useNekoSessionStore,
   _setDriverFactoryForTests,
   _clearLiveDriversForTests,
+  disposeAllNekoRuntimes,
 } from "@/neko-chill/stores/neko-session-store";
 import { deletePersistedSession, persistSessionNow } from "@/neko-chill/persistence";
 import { saveStoreStrict } from "@/lib/storage";
@@ -234,7 +235,8 @@ describe("neko-chill persistence", () => {
     await flushDebounce();
 
     // Simulate app restart: fresh in-memory state, same storage.
-    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false,
+    });
     await useNekoSessionStore.getState().hydrate();
 
     const restored = useNekoSessionStore.getState().sessions[id];
@@ -243,7 +245,8 @@ describe("neko-chill persistence", () => {
     expect(restored.title).toBe("Xin chào neko");
     expect(restored.workspace).toEqual(WORKSPACE);
     expect(restored.messages).toHaveLength(2);
-    expect(restored.messages[0]).toMatchObject({ role: "user", text: "Xin chào neko" });
+    expect(restored.messages[0]).toMatchObject({ role: "user", text: "Xin chào neko",
+    });
     expect(restored.messages[1].blocks?.[0]).toMatchObject({
       type: "answer",
       content: "Meo! Chào bạn.",
@@ -259,7 +262,8 @@ describe("neko-chill persistence", () => {
     expect(spawned[0].promptSawDurableEvents[0]).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          data: expect.objectContaining({ type: "model-input", text: "Xin chào neko" }),
+          data: expect.objectContaining({ type: "model-input", text: "Xin chào neko",
+          }),
         }),
       ]),
     );
@@ -274,7 +278,8 @@ describe("neko-chill persistence", () => {
     const storedBefore = JSON.parse(JSON.stringify(
       storage.get(`neko-chill-sessions.json:session:${id}`),
     ));
-    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false,
+    });
     _clearLiveDriversForTests();
     failTranscriptReads = true;
 
@@ -308,6 +313,7 @@ describe("neko-chill persistence", () => {
     expect(failed.events.some(
       (event) => event.data.type === "model-input" && event.data.text === "không được gửi",
     )).toBe(false);
+    expect(failed.eventHighWaterMark).toBe(3);
     expect(failed.statusDetail).toContain(
       "chưa gửi cho agent",
     );
@@ -318,6 +324,26 @@ describe("neko-chill persistence", () => {
     expect(useNekoSessionStore.getState().sessions[id].messages).toEqual([
       expect.objectContaining({ text: "thử lại" }),
     ]);
+    const retryEvent = useNekoSessionStore
+      .getState()
+      .sessions[id].events.find((event) => event.data.type === "model-input" && event.data.text === "thử lại");
+    expect(retryEvent?.seq).toBe(4);
+    expect(
+      (
+        storage.get(`neko-chill-sessions.json:session:${id}`) as {
+          eventHighWaterMark: number;
+        }
+      ).eventHighWaterMark,
+    ).toBe(4);
+
+    useNekoSessionStore.setState({
+      sessions: {},
+      activeSessionId: null,
+      hydrated: false,
+    });
+    _clearLiveDriversForTests();
+    await useNekoSessionStore.getState().hydrate();
+    expect(useNekoSessionStore.getState().sessions[id].eventHighWaterMark).toBe(4);
   });
 
   it("recovers a self-contained session when the index cache write fails", async () => {
@@ -329,7 +355,8 @@ describe("neko-chill persistence", () => {
     expect(spawned).toHaveLength(1);
     expect(storage.get("neko-chill-sessions.json:session-ids")).toContain(id);
     expect(storage.get("neko-chill-sessions.json:index")).toBeUndefined();
-    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false,
+    });
     _clearLiveDriversForTests();
     failIndexWrites = false;
 
@@ -528,6 +555,44 @@ describe("neko-chill persistence", () => {
     )).toHaveLength(1);
   });
 
+  it("blocks cancel while a permission decision is crossing durability", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    emit({
+      type: "permission-request",
+      sessionId: id,
+      request: {
+        requestId: "permission-cancel-race",
+        title: "Write(config.json)",
+        options: [{ optionId: "allow", label: "Cho phép", kind: "allow_once" }],
+      },
+    });
+    let release!: () => void;
+    strictWriteGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    strictBlockedKey = `session:${id}`;
+    failTranscriptWrites = true;
+    const gateEntered = new Promise<void>((resolve) => {
+      notifyStrictGateEntered = resolve;
+    });
+
+    const resolving = useNekoSessionStore.getState().resolvePermission("allow");
+    await gateEntered;
+    await useNekoSessionStore.getState().cancelTurn();
+
+    expect(spawned[0].cancelled).toBe(0);
+    expect(
+      useNekoSessionStore.getState().sessions[id].events.filter((event) => event.data.type === "runtime-command"),
+    ).toHaveLength(0);
+
+    release();
+    await resolving;
+    expect(spawned[0].decisions).toEqual([]);
+    expect(
+      useNekoSessionStore.getState().sessions[id].events.filter((event) => event.data.type === "permission-decision"),
+    ).toHaveLength(0);
+  });
+
   it("removes a cancel command whose durability barrier fails", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     failTranscriptWrites = true;
@@ -575,7 +640,8 @@ describe("neko-chill persistence", () => {
     expect(useNekoSessionStore.getState().sessions[id].events.map((event) => event.seq))
       .toEqual([1, 2, 4, 5, 6]);
 
-    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false,
+    });
     _clearLiveDriversForTests();
     await useNekoSessionStore.getState().hydrate();
     expect(useNekoSessionStore.getState().sessions[id].events.map((event) => event.seq))
@@ -607,6 +673,69 @@ describe("neko-chill persistence", () => {
 
     expect(spawned[0].prompts).toEqual(["lượt đầu"]);
     expect(useNekoSessionStore.getState().sessions[id].status).toBe("idle");
+  });
+
+  it("waits for a prompt durability barrier before closing its provider", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    let release!: () => void;
+    strictWriteGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    strictBlockedKey = `session:${id}`;
+    const gateEntered = new Promise<void>((resolve) => {
+      notifyStrictGateEntered = resolve;
+    });
+
+    const sending = useNekoSessionStore.getState().sendPrompt("ghi rồi mới đóng");
+    await gateEntered;
+    const closing = useNekoSessionStore.getState().closeSession(id);
+    await Promise.resolve();
+
+    expect(spawned[0].disposed).toBe(0);
+    expect(useNekoSessionStore.getState().sessions[id].closePending).toBe(true);
+
+    release();
+    await Promise.all([sending, closing]);
+    expect(spawned[0].prompts).toEqual(["ghi rồi mới đóng"]);
+    expect(spawned[0].disposed).toBe(1);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      status: "exited",
+      closePending: false,
+    });
+  });
+
+  it("waits for prompt durability before mode-exit teardown", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    let release!: () => void;
+    strictWriteGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    strictBlockedKey = `session:${id}`;
+    const gateEntered = new Promise<void>((resolve) => {
+      notifyStrictGateEntered = resolve;
+    });
+
+    const sending = useNekoSessionStore.getState().sendPrompt("ghi rồi mới rời mode");
+    await gateEntered;
+    const exiting = disposeAllNekoRuntimes();
+    await Promise.resolve();
+
+    expect(spawned[0].disposed).toBe(0);
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      status: "stopping",
+      closePending: true,
+    });
+
+    release();
+    await Promise.all([sending, exiting]);
+    expect(spawned[0].prompts).toEqual(["ghi rồi mới rời mode"]);
+    expect(spawned[0].disposed).toBe(1);
+    const session = useNekoSessionStore.getState().sessions[id];
+    expect(session).toMatchObject({ status: "exited", closePending: false });
+    expect(session.events.at(-1)?.data).toMatchObject({
+      type: "runtime-detached",
+      reason: "mode-exit",
+    });
   });
 
   it("cancels initial runtime creation when the session closes during persistence", async () => {
@@ -819,7 +948,9 @@ describe("neko-chill persistence", () => {
     await Promise.all([changing, closing]);
 
     expect(spawned[0].configChanges).toEqual([{ optionId: "model", value: "preview" }]);
-    expect(useNekoSessionStore.getState().sessions[id].events.at(-1)?.data)
+    expect(useNekoSessionStore.getState().sessions[id].events.filter((event) => event.data.type === "control-change")
+        .at(-1)?.data,
+    )
       .toMatchObject({ type: "control-change", phase: "rollback-failed" });
     expect(useNekoSessionStore.getState().sessions[id].status).toBe("exited");
 
@@ -1028,7 +1159,8 @@ describe("neko-chill persistence", () => {
     delete transcript.entry;
     storage.set(`neko-chill-sessions.json:session:${id}`, transcript);
 
-    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false,
+    });
     _clearLiveDriversForTests();
     await useNekoSessionStore.getState().hydrate();
 
@@ -1074,7 +1206,8 @@ describe("neko-chill persistence", () => {
     });
     await flushDebounce();
 
-    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false,
+    });
     _clearLiveDriversForTests();
     await useNekoSessionStore.getState().hydrate();
 
@@ -1088,7 +1221,8 @@ describe("neko-chill persistence", () => {
     expect(spawned).toHaveLength(1);
 
     // Restart: state + live drivers cleared, hydrate → driverless session.
-    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false,
+    });
     _clearLiveDriversForTests();
     await useNekoSessionStore.getState().hydrate();
     useNekoSessionStore.getState().setActiveSession(id);
@@ -1206,6 +1340,32 @@ describe("neko-chill persistence", () => {
     expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
   });
 
+  it("waits for an in-flight close before deleting durable state", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    let releaseDispose!: () => void;
+    driverDisposeGate = new Promise<void>((resolve) => {
+      releaseDispose = resolve;
+    });
+    const disposeEntered = new Promise<void>((resolve) => {
+      notifyDriverDisposeEntered = resolve;
+    });
+
+    const closing = useNekoSessionStore.getState().closeSession(id);
+    await disposeEntered;
+    const deleting = useNekoSessionStore.getState().deleteSession(id);
+    await Promise.resolve();
+
+    expect(useNekoSessionStore.getState().sessions[id].deletePending).toBe(true);
+    expect(transcriptDeleteAttempts).toBe(0);
+    expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(true);
+
+    releaseDispose();
+    await Promise.all([closing, deleting]);
+    expect(spawned[0].disposed).toBe(1);
+    expect(transcriptDeleteAttempts).toBe(1);
+    expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
+  });
+
   it("restores a legacy snapshot and exact index when catalog deletion fails", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     await vi.waitFor(() => expect(storage.get("neko-chill-sessions.json:index"))
@@ -1231,7 +1391,8 @@ describe("neko-chill persistence", () => {
     expect(storage.get("neko-chill-sessions.json:session-ids")).toContain(id);
 
     failCatalogWrites = false;
-    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false,
+    });
     _clearLiveDriversForTests();
     await useNekoSessionStore.getState().hydrate();
     expect(useNekoSessionStore.getState().sessions[id].messages)
@@ -1240,7 +1401,8 @@ describe("neko-chill persistence", () => {
 
   it("can delete a loaded session even when its stored snapshot is malformed", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
-    storage.set(`neko-chill-sessions.json:session:${id}`, { v: 2, broken: true });
+    storage.set(`neko-chill-sessions.json:session:${id}`, { v: 2, broken: true,
+    });
 
     await useNekoSessionStore.getState().deleteSession(id);
 

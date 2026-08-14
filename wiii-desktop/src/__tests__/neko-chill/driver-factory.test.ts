@@ -8,7 +8,8 @@ const tauri = vi.hoisted(() => ({
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: tauri.listen }));
 
-import { spawnTauriTransport } from "@/neko-chill/drivers/factory";
+import type { Driver } from "@/neko-chill/drivers/types";
+import { createDriverForAgent, spawnTauriTransport } from "@/neko-chill/drivers/factory";
 
 describe("Neko driver factory resource ownership", () => {
   beforeEach(() => {
@@ -30,7 +31,8 @@ describe("Neko driver factory resource ownership", () => {
     );
 
     expect(unlistenLine).toHaveBeenCalledOnce();
-    expect(tauri.invoke).toHaveBeenCalledWith("neko_kill_agent", { procId: 42 });
+    expect(tauri.invoke).toHaveBeenCalledWith("neko_kill_agent", { procId: 42,
+    });
   });
 
   it("owns listener cleanup and process kill idempotently", async () => {
@@ -48,5 +50,31 @@ describe("Neko driver factory resource ownership", () => {
     expect(unlistenExit).toHaveBeenCalledOnce();
     expect(tauri.invoke.mock.calls.filter(([command]) => command === "neko_kill_agent"))
       .toHaveLength(1);
+  });
+
+  it("exposes ownership before ACP initialization completes", async () => {
+    tauri.listen.mockResolvedValueOnce(vi.fn()).mockResolvedValueOnce(vi.fn());
+    let owned: Driver | null = null;
+
+    const creating = createDriverForAgent(
+      {
+        id: "neko",
+        name: "Neko Core",
+        binary: "neko",
+        version: "0.24.0",
+        found: true,
+      },
+      "session-1",
+      { workspace: { path: "C:/tmp/project", name: "project" } },
+      vi.fn(),
+      (driver) => {
+        owned = driver;
+      },
+    );
+    await vi.waitFor(() => expect(owned).not.toBeNull());
+
+    await owned!.dispose();
+    await expect(creating).rejects.toThrow("client disposed");
+    expect(tauri.invoke.mock.calls.filter(([command]) => command === "neko_kill_agent")).toHaveLength(1);
   });
 });
