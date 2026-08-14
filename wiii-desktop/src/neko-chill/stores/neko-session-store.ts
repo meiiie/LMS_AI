@@ -28,7 +28,11 @@ import type {
 } from "../drivers/types";
 import type { AgentLaunchProfile, DetectedAgent } from "./neko-agent-store";
 import { useNekoAgentStore } from "./neko-agent-store";
-import { isAbsoluteWorkspacePath, type WorkspaceRef } from "../workspace";
+import {
+  isAbsoluteWorkspacePath,
+  workspaceFromPath,
+  type WorkspaceRef,
+} from "../workspace";
 import {
   deletePersistedSession,
   loadSessionIndex,
@@ -236,6 +240,31 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           }
           migratedIds.push(entry.id);
         }
+        const latestContext = [...events].reverse().find(
+          (event) => event.data.type === "session-context",
+        );
+        const contextData = latestContext?.data.type === "session-context"
+          ? latestContext.data
+          : null;
+        const workspace = contextData
+          ? contextData.workspacePath === null
+            ? null
+            : entry.workspace?.path === contextData.workspacePath
+              ? entry.workspace
+              : workspaceFromPath(contextData.workspacePath)
+          : entry.workspace ?? null;
+        const launchProfile = contextData
+          ? contextData.launchProfileId === null
+            ? null
+            : entry.launchProfile?.id === contextData.launchProfileId
+              ? entry.launchProfile
+              : {
+                  id: contextData.launchProfileId,
+                  provider: "legacy",
+                  model: null,
+                  active: true,
+                }
+          : entry.launchProfile ?? null;
         restored[entry.id] = {
           id: entry.id,
           agentId: entry.agentId,
@@ -243,8 +272,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           title: entry.title,
           createdAt: entry.createdAt,
           updatedAt: entry.updatedAt,
-          workspace: entry.workspace ?? null,
-          launchProfile: entry.launchProfile ?? null,
+          workspace,
+          launchProfile,
           controls: projectControls(entry.controls ?? [], events),
           commands: entry.commands ?? [],
           pendingControlId: null,
@@ -521,7 +550,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const reason = err instanceof Error ? err.message : String(err);
           set((state) => {
             const s = state.sessions[sessionId];
-            if (s) {
+            if (s?.status === "connecting") {
               s.status = "error";
               s.statusDetail = reason;
               appendSessionEvent(s.events as NekoSessionEvent[], "runtime", {

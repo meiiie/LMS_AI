@@ -264,7 +264,9 @@ export default function NekoChillApp() {
                   >
                     <PanelRight aria-hidden="true" className="h-3.5 w-3.5" />
                   </button>
-                  {session.status !== "exited" && session.status !== "stopping" ? (
+                  {session.status !== "exited" &&
+                  session.status !== "stopping" &&
+                  (session.status !== "error" || session.runtime !== null) ? (
                     <button
                       type="button"
                       className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11.5px] text-[var(--nk-text-3)] hover:bg-[var(--nk-overlay)] hover:text-[var(--nk-text)]"

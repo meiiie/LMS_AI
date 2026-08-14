@@ -9,6 +9,7 @@ import type { DetectedAgent } from "@/neko-chill/stores/neko-agent-store";
 
 const storage = new Map<string, unknown>();
 let failTranscriptWrites = false;
+let failIndexWrites = false;
 let transcriptWritesBeforeFailure: number | null = null;
 let strictWriteGate: Promise<void> | null = null;
 let strictBlockedKey: string | null = null;
@@ -16,6 +17,7 @@ let gateOnlyWhenFailurePending = false;
 let notifyStrictGateEntered: (() => void) | null = null;
 
 async function saveToMemory(store: string, key: string, value: unknown): Promise<void> {
+  if (key === "index" && failIndexWrites) throw new Error("index unavailable");
   if (key.startsWith("session:")) {
     if (failTranscriptWrites) throw new Error("disk unavailable");
     if (transcriptWritesBeforeFailure !== null) {
@@ -127,6 +129,7 @@ describe("neko-chill persistence", () => {
     vi.useFakeTimers();
     storage.clear();
     failTranscriptWrites = false;
+    failIndexWrites = false;
     transcriptWritesBeforeFailure = null;
     strictWriteGate = null;
     strictBlockedKey = null;
@@ -195,6 +198,37 @@ describe("neko-chill persistence", () => {
     expect(spawned[0].prompts).toEqual([]);
     expect(useNekoSessionStore.getState().sessions[id].statusDetail).toContain(
       "chưa gửi cho agent",
+    );
+  });
+
+  it("recovers a self-contained session when the index cache write fails", async () => {
+    failIndexWrites = true;
+
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+
+    expect(spawned).toEqual([]);
+    expect(storage.get("neko-chill-sessions.json:session-ids")).toContain(id);
+    expect(storage.get("neko-chill-sessions.json:index")).toBeUndefined();
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+    failIndexWrites = false;
+
+    await useNekoSessionStore.getState().hydrate();
+
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      workspace: WORKSPACE,
+      agentId: AGENT.id,
+      status: "exited",
+    });
+    expect(useNekoSessionStore.getState().sessions[id].events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: "session-context",
+            workspacePath: WORKSPACE.path,
+          }),
+        }),
+      ]),
     );
   });
 
@@ -488,6 +522,48 @@ describe("neko-chill persistence", () => {
     );
   });
 
+  it("reconciles workspace metadata from a durable context event", async () => {
+    storage.set("neko-chill-sessions.json:index", [
+      {
+        v: 2,
+        id: "context-recovery",
+        agentId: AGENT.id,
+        agentName: AGENT.name,
+        title: "Phiên cũ",
+        createdAt: 100,
+        updatedAt: 200,
+        workspace: null,
+        launchProfile: null,
+        controls: [],
+        commands: [],
+      },
+    ]);
+    storage.set("neko-chill-sessions.json:session:context-recovery", {
+      v: 2,
+      messages: [],
+      events: [
+        {
+          v: 1,
+          seq: 1,
+          at: 200,
+          visibility: "model",
+          data: {
+            type: "session-context",
+            source: "workspace-attached",
+            agentId: AGENT.id,
+            workspacePath: WORKSPACE.path,
+            launchProfileId: null,
+          },
+        },
+      ],
+    });
+
+    await useNekoSessionStore.getState().hydrate();
+
+    expect(useNekoSessionStore.getState().sessions["context-recovery"].workspace)
+      .toEqual(WORKSPACE);
+  });
+
   it("hydrate is idempotent and never overwrites live sessions", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     await useNekoSessionStore.getState().sendPrompt("bản sống");
@@ -527,6 +603,13 @@ describe("neko-chill persistence", () => {
     }>;
     index.find((entry) => entry.id === id)!.controls[0].currentValue = "stable";
     storage.set("neko-chill-sessions.json:index", index);
+    // Exercise backward compatibility: old v2 snapshots had no embedded
+    // metadata, so the committed event must repair a stale cached baseline.
+    const transcript = storage.get(`neko-chill-sessions.json:session:${id}`) as {
+      entry?: unknown;
+    };
+    delete transcript.entry;
+    storage.set(`neko-chill-sessions.json:session:${id}`, transcript);
 
     useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
     _clearLiveDriversForTests();
@@ -609,6 +692,7 @@ describe("neko-chill persistence", () => {
     await useNekoSessionStore.getState().deleteSession(id);
     expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
     expect(storage.get("neko-chill-sessions.json:index")).toHaveLength(0);
+    expect(storage.get("neko-chill-sessions.json:session-ids")).toHaveLength(0);
     expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(false);
   });
 

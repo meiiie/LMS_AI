@@ -275,6 +275,15 @@ describe("Neko Chill shell UI", () => {
           {
             status: "error",
             statusDetail: "Runtime báo lỗi",
+            runtime: {
+              sessionId: "active",
+              providerId: "neko",
+              instanceId: "runtime-live",
+              kind: "acp",
+              capabilities: ["prompt", "cancel"],
+              contextContinuity: "process",
+              workspaceIsolation: "advisory",
+            },
           },
         ),
       },
@@ -286,6 +295,28 @@ describe("Neko Chill shell UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Kết thúc" }));
 
     expect(closeSession).toHaveBeenCalledWith("active");
+  });
+
+  it("keeps a durability error without a runtime fail-closed", () => {
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên chưa lưu được",
+          { path: "C:/work/neko", name: "Neko" },
+          {
+            status: "error",
+            statusDetail: "Không thể lưu ngữ cảnh dự án",
+            runtime: null,
+          },
+        ),
+      },
+      activeSessionId: "active",
+    });
+
+    render(<NekoChillApp />);
+
+    expect(screen.queryByRole("button", { name: "Kết thúc" })).toBeNull();
   });
 
   it("requires a project and reuses an exact recent workspace for a new session", async () => {

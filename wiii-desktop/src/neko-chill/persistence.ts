@@ -3,8 +3,9 @@
  * shared storage wrapper (localStorage fallback in browser dev).
  *
  * Layout (versioned for future migration):
- *   neko-chill-sessions.json / "index"        → SessionIndexEntry[]
- *   neko-chill-sessions.json / "session:{id}" → { v: 2, messages, events }
+ *   neko-chill-sessions.json / "session-ids"  → string[]
+ *   neko-chill-sessions.json / "index"        → SessionIndexEntry[] cache
+ *   neko-chill-sessions.json / "session:{id}" → self-contained snapshot
  *
  * Writes are debounced per session so token streaming never causes a
  * full-store rewrite per delta (spec edge case: long transcripts).
@@ -18,6 +19,7 @@ import { isNekoSessionEvent, type NekoSessionEvent } from "./session-events";
 
 const STORE = "neko-chill-sessions.json";
 const INDEX_KEY = "index";
+const SESSION_IDS_KEY = "session-ids";
 const INDEX_SCHEMA_VERSION = 2;
 const SCHEMA_VERSION = 2;
 const DEBOUNCE_MS = 400;
@@ -40,6 +42,8 @@ interface PersistedTranscript {
   v: number;
   messages: NekoMessage[];
   events?: NekoSessionEvent[];
+  /** Authoritative materialized metadata; index is only a discovery cache. */
+  entry?: SessionIndexEntry;
 }
 
 export interface LoadedSessionSnapshot {
@@ -52,6 +56,30 @@ export interface LoadedSessionSnapshot {
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const writeChains = new Map<string, Promise<void>>();
 let indexWriteChain: Promise<void> = Promise.resolve();
+
+function isSessionIndexEntry(value: unknown, expectedId?: string): value is SessionIndexEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<SessionIndexEntry>;
+  return (
+    typeof entry.id === "string" &&
+    (!expectedId || entry.id === expectedId) &&
+    typeof entry.agentId === "string" &&
+    typeof entry.agentName === "string" &&
+    typeof entry.title === "string" &&
+    typeof entry.createdAt === "number" &&
+    Number.isFinite(entry.createdAt) &&
+    typeof entry.updatedAt === "number" &&
+    Number.isFinite(entry.updatedAt) &&
+    (entry.controls === undefined || Array.isArray(entry.controls)) &&
+    (entry.commands === undefined || Array.isArray(entry.commands))
+  );
+}
+
+function validSessionIds(value: unknown): string[] {
+  return Array.isArray(value)
+    ? [...new Set(value.filter((item): item is string => typeof item === "string"))]
+    : [];
+}
 
 async function writeSession(session: NekoSession, strict: boolean): Promise<void> {
   const entry: SessionIndexEntry = {
@@ -67,13 +95,26 @@ async function writeSession(session: NekoSession, strict: boolean): Promise<void
     controls: session.controls,
     commands: session.commands,
   };
-  // Log-bearing snapshot first: a crash may leave stale index metadata, but
-  // must never expose newer model-visible state without its durable event.
   const write = strict ? saveStoreStrict : saveStore;
+  // The catalog contains IDs only, so publishing it before the snapshot never
+  // exposes model-visible state. It makes a transcript recoverable when the
+  // later index-cache write fails or the process crashes between keys.
+  const catalogOperation = indexWriteChain.catch(() => {}).then(async () => {
+    const catalog = validSessionIds(await loadStore<unknown>(STORE, SESSION_IDS_KEY, []));
+    if (!catalog.includes(session.id)) {
+      await write(STORE, SESSION_IDS_KEY, [session.id, ...catalog]);
+    }
+  });
+  indexWriteChain = catalogOperation.catch(() => {});
+  await catalogOperation;
+
+  // This per-session key is the authoritative, self-contained snapshot. A
+  // crash may leave stale index metadata, but hydration reconciles from here.
   await write<PersistedTranscript>(STORE, `session:${session.id}`, {
     v: SCHEMA_VERSION,
     messages: session.messages,
     events: session.events,
+    entry,
   });
   // The shared index needs its own short critical section to prevent lost
   // updates, but a slow transcript write in another session must not block
@@ -143,8 +184,27 @@ export async function persistSessionBeforeDispatch(session: NekoSession): Promis
 }
 
 export async function loadSessionIndex(): Promise<SessionIndexEntry[]> {
-  const index = await loadStore<SessionIndexEntry[]>(STORE, INDEX_KEY, []);
-  return Array.isArray(index) ? index : [];
+  const rawIndex = await loadStore<unknown>(STORE, INDEX_KEY, []);
+  const cached = Array.isArray(rawIndex)
+    ? rawIndex.filter((entry): entry is SessionIndexEntry => isSessionIndexEntry(entry))
+    : [];
+  const catalog = validSessionIds(await loadStore<unknown>(STORE, SESSION_IDS_KEY, []));
+  const sessionIds = [...new Set([...catalog, ...cached.map((entry) => entry.id)])];
+  const reconciled: SessionIndexEntry[] = [];
+  for (const sessionId of sessionIds) {
+    const stored = await loadStore<PersistedTranscript | null>(
+      STORE,
+      `session:${sessionId}`,
+      null,
+    );
+    const embedded = stored && isSessionIndexEntry(stored.entry, sessionId)
+      ? stored.entry
+      : null;
+    const fallback = cached.find((entry) => entry.id === sessionId) ?? null;
+    const recovered = embedded ?? fallback;
+    if (recovered) reconciled.push(recovered);
+  }
+  return reconciled.sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
 export async function loadSessionSnapshot(sessionId: string): Promise<LoadedSessionSnapshot> {
@@ -180,11 +240,20 @@ export async function deletePersistedSession(sessionId: string): Promise<void> {
   }
   await writeChains.get(sessionId)?.catch(() => {});
   const indexOperation = indexWriteChain.catch(() => {}).then(async () => {
-    const index = await loadSessionIndex();
+    const rawIndex = await loadStore<unknown>(STORE, INDEX_KEY, []);
+    const index = Array.isArray(rawIndex)
+      ? rawIndex.filter((entry): entry is SessionIndexEntry => isSessionIndexEntry(entry))
+      : [];
+    const catalog = validSessionIds(await loadStore<unknown>(STORE, SESSION_IDS_KEY, []));
     await saveStore(
       STORE,
       INDEX_KEY,
       index.filter((item) => item.id !== sessionId),
+    );
+    await saveStore(
+      STORE,
+      SESSION_IDS_KEY,
+      catalog.filter((id) => id !== sessionId),
     );
   });
   indexWriteChain = indexOperation.catch(() => {});

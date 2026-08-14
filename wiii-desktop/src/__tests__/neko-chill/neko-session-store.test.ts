@@ -27,6 +27,7 @@ import {
   useNekoSessionStore,
   _setDriverFactoryForTests,
 } from "@/neko-chill/stores/neko-session-store";
+import { useNekoAgentStore } from "@/neko-chill/stores/neko-agent-store";
 
 const AGENT: DetectedAgent = {
   id: "neko",
@@ -372,6 +373,35 @@ describe("neko-session-store", () => {
     const closed = session(id);
     expect(closed.status).toBe("exited");
     expect(closed.pendingPermission).toBeNull();
+  });
+
+  it("keeps a session exited when close cancels respawn preparation", async () => {
+    const id = await setup();
+    await useNekoSessionStore.getState().closeSession(id);
+    let resolveDriver!: (value: Driver) => void;
+    let replacement!: FakeDriver;
+    _setDriverFactoryForTests(async (_agent, sessionId, _launch, onEvent) => {
+      replacement = new FakeDriver(sessionId, onEvent);
+      return new Promise<Driver>((resolve) => { resolveDriver = resolve; });
+    });
+    useNekoAgentStore.setState({ agents: [AGENT], isLoading: false });
+    useNekoSessionStore.getState().setActiveSession(id);
+
+    const respawning = useNekoSessionStore.getState().sendPrompt("thử khởi động lại");
+    await vi.waitFor(() => {
+      expect(session(id).status).toBe("connecting");
+      expect(typeof resolveDriver).toBe("function");
+    });
+    const closing = useNekoSessionStore.getState().closeSession(id);
+    expect(session(id).status).toBe("stopping");
+    await closing;
+    expect(session(id).status).toBe("exited");
+    resolveDriver(replacement);
+    await respawning;
+
+    expect(replacement.disposed).toBe(1);
+    expect(replacement.prompts).toEqual([]);
+    expect(session(id).status).toBe("exited");
   });
 
   it("marks the session as error when the driver factory fails", async () => {
