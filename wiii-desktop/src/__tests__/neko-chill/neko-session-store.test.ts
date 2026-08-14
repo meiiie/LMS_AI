@@ -49,7 +49,7 @@ class FakeDriver implements Driver {
   disposed = 0;
   decisions: PermissionDecision[] = [];
   configChanges: Array<{ optionId: string; value: string | boolean }> = [];
-  configError: Error | null = null;
+  configErrors: Error[] = [];
   constructor(
     readonly sessionId: string,
     readonly emit: (event: DriverEvent) => void,
@@ -65,8 +65,9 @@ class FakeDriver implements Driver {
     this.decisions.push(decision);
   }
   async setConfigOption(optionId: string, value: string | boolean): Promise<void> {
-    if (this.configError) throw this.configError;
     this.configChanges.push({ optionId, value });
+    const error = this.configErrors.shift();
+    if (error) throw error;
   }
   async dispose(): Promise<void> {
     this.disposed += 1;
@@ -180,17 +181,59 @@ describe("neko-session-store", () => {
         ],
       }],
     });
-    driver.configError = new Error("provider rejected preview");
+    driver.configErrors.push(new Error("provider rejected preview"));
 
     await useNekoSessionStore.getState().setConfigOption("model", "preview");
 
     expect(session(id).controls[0].currentValue).toBe("stable");
     expect(session(id).pendingControlId).toBeNull();
     expect(session(id).statusDetail).toContain("provider rejected preview");
+    expect(driver.configChanges).toEqual([
+      { optionId: "model", value: "preview" },
+      { optionId: "model", value: "stable" },
+    ]);
     const phases = session(id).events.flatMap((event) =>
       event.data.type === "control-change" ? [event.data.phase] : [],
     );
     expect(phases.slice(-2)).toEqual(["requested", "rolled-back"]);
+  });
+
+  it("reports unknown effective config when an ambiguous failure cannot be compensated", async () => {
+    const id = await setup();
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "model",
+        label: "Model",
+        category: "model",
+        kind: "select",
+        currentValue: "stable",
+        choices: [
+          { value: "stable", label: "Stable" },
+          { value: "preview", label: "Preview" },
+        ],
+      }],
+    });
+    driver.configErrors.push(
+      new Error("provider response lost"),
+      new Error("compensation unavailable"),
+    );
+
+    await useNekoSessionStore.getState().setConfigOption("model", "preview");
+
+    expect(session(id).status).toBe("error");
+    expect(session(id).pendingControlId).toBeNull();
+    expect(session(id).statusDetail).toContain("compensation unavailable");
+    expect(driver.configChanges).toEqual([
+      { optionId: "model", value: "preview" },
+      { optionId: "model", value: "stable" },
+    ]);
+    expect(session(id).events.at(-1)?.data).toMatchObject({
+      type: "control-change",
+      phase: "rollback-failed",
+      reason: expect.stringContaining("provider response lost"),
+    });
   });
 
   it("blocks prompts until a configuration transaction finishes", async () => {

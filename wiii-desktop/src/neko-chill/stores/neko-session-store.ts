@@ -715,6 +715,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         }
       });
       let driver: Driver;
+      let configDispatched = false;
       try {
         await persistSessionBeforeDispatch(get().sessions[sessionId]);
         driver = runtimes.requireInstance(
@@ -722,26 +723,52 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           provider.instanceId,
           "session-config",
         );
+        configDispatched = true;
         await driver.setConfigOption(optionId, value);
         // Do not commit a response from a provider that was replaced while
         // its asynchronous configuration call was running.
         runtimes.requireInstance(sessionId, provider.instanceId, "session-config");
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
+        let rollbackError: unknown;
+        if (configDispatched) {
+          try {
+            // A rejected request is ambiguous: the provider may have applied
+            // the value before its response was lost. Compensate only through
+            // the exact provider instance that received the request.
+            const rollbackDriver = runtimes.requireInstance(
+              sessionId,
+              provider.instanceId,
+              "session-config",
+            );
+            await rollbackDriver.setConfigOption(optionId, previousValue);
+            runtimes.requireInstance(sessionId, provider.instanceId, "session-config");
+          } catch (compensationError) {
+            rollbackError = compensationError;
+          }
+        }
+        const rollbackReason = rollbackError instanceof Error
+          ? rollbackError.message
+          : String(rollbackError ?? "");
         set((state) => {
           const current = state.sessions[sessionId];
           if (current) {
             const control = current.controls.find((candidate) => candidate.id === optionId);
-            if (control) control.currentValue = previousValue;
-            current.statusDetail = reason;
+            if (!rollbackError && control) control.currentValue = previousValue;
+            current.status = rollbackError ? "error" : current.status;
+            current.statusDetail = rollbackError
+              ? `Không thể xác nhận hoặc hoàn tác cấu hình: ${rollbackReason}`
+              : configDispatched
+                ? `Provider báo lỗi; đã hoàn tác cấu hình: ${reason}`
+                : reason;
             current.pendingControlId = null;
             appendSessionEvent(current.events as NekoSessionEvent[], "model", {
               type: "control-change",
-              phase: "rolled-back",
+              phase: rollbackError ? "rollback-failed" : "rolled-back",
               optionId,
               previousValue,
               nextValue: value,
-              reason,
+              reason: rollbackError ? `${reason}; compensation: ${rollbackReason}` : reason,
             });
           }
         });
