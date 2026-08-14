@@ -57,7 +57,7 @@ interface RuntimeBinding {
 interface RuntimePreparation {
   scope: RuntimeScope;
   completion: Promise<void>;
-  complete: (error?: unknown) => void;
+  complete: (outcome: { ok: true } | { ok: false; error: unknown }) => void;
 }
 
 export interface RuntimeReplacement {
@@ -172,6 +172,13 @@ export class RuntimeRegistry {
     return this.joinDisposal(sessionId, work);
   }
 
+  private retainDisposalFailure(sessionId: string, error: unknown): void {
+    const retained = this.joinDisposal(sessionId, Promise.reject(error));
+    // Ownership is retained by inFlightDisposals; this observer only prevents
+    // an unhandled rejection when no teardown is concurrently joining it.
+    void retained?.catch(() => {});
+  }
+
   requireInstance(
     sessionId: string,
     instanceId: string,
@@ -206,9 +213,9 @@ export class RuntimeRegistry {
     const preparation: RuntimePreparation = {
       scope: new RuntimeScope(),
       completion: preparationCompletion,
-      complete: (error) => {
-        if (error === undefined) completePreparation();
-        else rejectPreparation(error);
+      complete: (outcome) => {
+        if (outcome.ok) completePreparation();
+        else rejectPreparation(outcome.error);
       },
     };
     const preparations =
@@ -217,6 +224,7 @@ export class RuntimeRegistry {
     this.pendingPreparations.set(sessionId, preparations);
     let ownedDriver: Driver | null = null;
     const unownedCleanups: Promise<void>[] = [];
+    let preparationCleanupFailed = false;
     let preparationCleanupError: unknown;
     const own = (driver: Driver) => {
       if (ownedDriver && ownedDriver !== driver) {
@@ -253,6 +261,7 @@ export class RuntimeRegistry {
           (result): result is PromiseRejectedResult => result.status === "rejected",
         );
         if (cleanupError) {
+          preparationCleanupFailed = true;
           preparationCleanupError = cleanupError.reason;
           throw new AggregateError(
             [error, cleanupError.reason],
@@ -276,6 +285,7 @@ export class RuntimeRegistry {
           (error) => error,
         );
         if (cleanupError) {
+          preparationCleanupFailed = true;
           preparationCleanupError = cleanupError;
           throw new AggregateError(
             [new Error("Runtime preparation was cancelled during teardown."), cleanupError],
@@ -290,6 +300,7 @@ export class RuntimeRegistry {
           (error) => error,
         );
         if (cleanupError) {
+          preparationCleanupFailed = true;
           preparationCleanupError = cleanupError;
           throw new AggregateError(
             [new Error("Driver trả về sai sessionId."), cleanupError],
@@ -331,7 +342,14 @@ export class RuntimeRegistry {
         ...(cleanupError ? { cleanupError } : {}),
       };
     } finally {
-      preparation.complete(preparationCleanupError);
+      if (preparationCleanupFailed) {
+        this.retainDisposalFailure(sessionId, preparationCleanupError);
+      }
+      preparation.complete(
+        preparationCleanupFailed
+          ? { ok: false, error: preparationCleanupError }
+          : { ok: true },
+      );
       const pending = this.pendingPreparations.get(sessionId);
       pending?.delete(preparation);
       if (!pending || pending.size === 0) {

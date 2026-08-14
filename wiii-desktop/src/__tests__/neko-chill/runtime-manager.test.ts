@@ -103,6 +103,26 @@ describe("RuntimeRegistry", () => {
     expect(first.disposed).toBe(0);
   });
 
+  it("retains failed cleanup ownership after an owned preparation fails", async () => {
+    const registry = new RuntimeRegistry();
+    const failedDriver = new BlockingFailingDisposeDriver("s1", Promise.resolve());
+
+    await expect(registry.replace("s1", "neko", async (_instanceId, own) => {
+      own(failedDriver);
+      throw new Error("initialize failed");
+    })).rejects.toBeInstanceOf(AggregateError);
+
+    expect(failedDriver.disposed).toBe(1);
+    expect(registry.ownedSessionIds()).toEqual(["s1"]);
+    let replacementAttempted = false;
+    await expect(registry.replace("s1", "neko", async () => {
+      replacementAttempted = true;
+      return new FakeDriver("s1");
+    })).rejects.toThrow("process kill failed");
+    expect(replacementAttempted).toBe(false);
+    await expect(registry.detach("s1")).rejects.toThrow("process kill failed");
+  });
+
   it("changes provider identity atomically and disposes each driver once", async () => {
     const registry = new RuntimeRegistry();
     const first = new FakeDriver("s1");
