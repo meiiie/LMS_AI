@@ -49,7 +49,7 @@
 - [x] T402 Run packaged Windows acceptance for caption buttons, Ctrl+K,
       session navigation, command insertion, and panel behavior; capture
       wide/narrow screenshots.
-- [~] T403 Update Spec Kit status and umbrella `docs/STATE.md`; open a linked
+- [x] T403 Update Spec Kit status and umbrella `docs/STATE.md`; open a linked
       PR with exact evidence, risk, rollback, and research/license notes.
 - [ ] T404 Resolve review/CI findings, merge when green, rebuild/install Wiii,
       and verify the installed result.

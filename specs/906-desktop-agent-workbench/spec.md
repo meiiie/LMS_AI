@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/906-desktop-agent-workbench`
 **Created**: 2026-08-13
-**Status**: Implemented — delivery in progress
+**Status**: Implemented — PR #907 in review
 **Issue**: #906
 **Input**: Repair the unusable desktop window controls and make Neko Chill/Wiii feel like a coherent, discoverable desktop agent workbench.
 
