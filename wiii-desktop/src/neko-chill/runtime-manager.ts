@@ -67,6 +67,13 @@ export class RuntimeCapabilityError extends Error {
   }
 }
 
+export class RuntimeProviderChangedError extends Error {
+  constructor() {
+    super("Runtime provider đã thay đổi trước khi thao tác được gửi.");
+    this.name = "RuntimeProviderChangedError";
+  }
+}
+
 /**
  * Live runtimes stay outside Zustand, but no longer live in an unowned map.
  * A replacement is prepared first; factory failure leaves the prior binding
@@ -86,9 +93,15 @@ export class RuntimeRegistry {
     return this.bindings.get(sessionId)?.provider.instanceId === instanceId;
   }
 
-  require(sessionId: string, capability: DriverCapability): Driver {
+  requireInstance(
+    sessionId: string,
+    instanceId: string,
+    capability: DriverCapability,
+  ): Driver {
     const binding = this.bindings.get(sessionId);
-    if (!binding) throw new Error("Phiên chưa có runtime đang hoạt động.");
+    if (!binding || binding.provider.instanceId !== instanceId) {
+      throw new RuntimeProviderChangedError();
+    }
     if (!binding.provider.capabilities.includes(capability)) {
       throw new RuntimeCapabilityError(capability);
     }
@@ -187,17 +200,18 @@ export class RuntimeRegistry {
   async disposeAll(): Promise<Array<{ provider: RuntimeProviderSnapshot; error?: unknown }>> {
     // Invalidates in-flight preparations before touching committed bindings.
     this.generation += 1;
-    const results: Array<{ provider: RuntimeProviderSnapshot; error?: unknown }> = [];
-    for (const [sessionId, binding] of [...this.bindings]) {
-      this.bindings.delete(sessionId);
+    const bindings = [...this.bindings.values()];
+    // Revoke every provider synchronously before awaiting any disposer. A
+    // stalled process cannot leave unrelated sessions registered or unowned.
+    this.bindings.clear();
+    return Promise.all(bindings.map(async (binding) => {
       try {
         await binding.scope.dispose();
-        results.push({ provider: binding.provider });
+        return { provider: binding.provider };
       } catch (error) {
-        results.push({ provider: binding.provider, error });
+        return { provider: binding.provider, error };
       }
-    }
-    return results;
+    }));
   }
 
   /** Simulates process loss/restart without touching test-owned fakes. */

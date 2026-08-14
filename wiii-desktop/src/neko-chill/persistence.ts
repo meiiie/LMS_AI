@@ -9,7 +9,7 @@
  * Writes are debounced per session so token streaming never causes a
  * full-store rewrite per delta (spec edge case: long transcripts).
  */
-import { loadStore, saveStore, deleteStore } from "@/lib/storage";
+import { loadStore, saveStore, saveStoreStrict, deleteStore } from "@/lib/storage";
 import type { NekoMessage, NekoSession } from "./stores/neko-session-store";
 import type { DriverCommand, DriverConfigOption } from "./drivers/types";
 import type { AgentLaunchProfile } from "./stores/neko-agent-store";
@@ -52,7 +52,7 @@ export interface LoadedSessionSnapshot {
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 let writeChain: Promise<void> = Promise.resolve();
 
-async function writeSession(session: NekoSession): Promise<void> {
+async function writeSession(session: NekoSession, strict: boolean): Promise<void> {
   const index = await loadStore<SessionIndexEntry[]>(STORE, INDEX_KEY, []);
   const entry: SessionIndexEntry = {
     v: INDEX_SCHEMA_VERSION,
@@ -70,17 +70,18 @@ async function writeSession(session: NekoSession): Promise<void> {
   const next = [entry, ...index.filter((item) => item.id !== session.id)];
   // Log-bearing snapshot first: a crash may leave stale index metadata, but
   // must never expose newer model-visible state without its durable event.
-  await saveStore<PersistedTranscript>(STORE, `session:${session.id}`, {
+  const write = strict ? saveStoreStrict : saveStore;
+  await write<PersistedTranscript>(STORE, `session:${session.id}`, {
     v: SCHEMA_VERSION,
     messages: session.messages,
     events: session.events,
   });
-  await saveStore(STORE, INDEX_KEY, next);
+  await write(STORE, INDEX_KEY, next);
 }
 
 /** Serialize index+transcript writes so an older debounce can never win. */
-function enqueueWrite(session: NekoSession): Promise<void> {
-  const operation = writeChain.catch(() => {}).then(() => writeSession(session));
+function enqueueWrite(session: NekoSession, strict = false): Promise<void> {
+  const operation = writeChain.catch(() => {}).then(() => writeSession(session, strict));
   writeChain = operation.catch(() => {});
   return operation;
 }
@@ -120,7 +121,7 @@ export async function persistSessionBeforeDispatch(session: NekoSession): Promis
     clearTimeout(timer);
     timers.delete(session.id);
   }
-  await enqueueWrite(session);
+  await enqueueWrite(session, true);
 }
 
 export async function loadSessionIndex(): Promise<SessionIndexEntry[]> {

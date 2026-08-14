@@ -10,22 +10,31 @@ import type { DetectedAgent } from "@/neko-chill/stores/neko-agent-store";
 const storage = new Map<string, unknown>();
 let failTranscriptWrites = false;
 let transcriptWritesBeforeFailure: number | null = null;
+let strictWriteGate: Promise<void> | null = null;
+
+async function saveToMemory(store: string, key: string, value: unknown): Promise<void> {
+  if (key.startsWith("session:")) {
+    if (failTranscriptWrites) throw new Error("disk unavailable");
+    if (transcriptWritesBeforeFailure !== null) {
+      if (transcriptWritesBeforeFailure === 0) throw new Error("commit disk failure");
+      transcriptWritesBeforeFailure -= 1;
+    }
+  }
+  storage.set(`${store}:${key}`, JSON.parse(JSON.stringify(value)));
+}
+
+async function saveStrictToMemory(store: string, key: string, value: unknown): Promise<void> {
+  if (strictWriteGate) await strictWriteGate;
+  await saveToMemory(store, key, value);
+}
 
 vi.mock("@/lib/storage", () => ({
   loadStore: vi.fn(async (store: string, key: string, dflt: unknown) => {
     const hit = storage.get(`${store}:${key}`);
     return hit === undefined ? dflt : JSON.parse(JSON.stringify(hit));
   }),
-  saveStore: vi.fn(async (store: string, key: string, value: unknown) => {
-    if (key.startsWith("session:")) {
-      if (failTranscriptWrites) throw new Error("disk unavailable");
-      if (transcriptWritesBeforeFailure !== null) {
-        if (transcriptWritesBeforeFailure === 0) throw new Error("commit disk failure");
-        transcriptWritesBeforeFailure -= 1;
-      }
-    }
-    storage.set(`${store}:${key}`, JSON.parse(JSON.stringify(value)));
-  }),
+  saveStore: vi.fn(saveToMemory),
+  saveStoreStrict: vi.fn(saveStrictToMemory),
   deleteStore: vi.fn(async (store: string, key: string) => {
     storage.delete(`${store}:${key}`);
   }),
@@ -100,6 +109,7 @@ describe("neko-chill persistence", () => {
     storage.clear();
     failTranscriptWrites = false;
     transcriptWritesBeforeFailure = null;
+    strictWriteGate = null;
     spawned = [];
     useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
     useNekoAgentStore.setState({ agents: [AGENT], isLoading: false });
@@ -164,6 +174,25 @@ describe("neko-chill persistence", () => {
     expect(useNekoSessionStore.getState().sessions[id].statusDetail).toContain(
       "chưa gửi cho agent",
     );
+  });
+
+  it("locks the composer while a prompt waits for durable storage", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    let release!: () => void;
+    strictWriteGate = new Promise<void>((resolve) => { release = resolve; });
+
+    const first = useNekoSessionStore.getState().sendPrompt("lượt đầu");
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("dispatching");
+    const second = useNekoSessionStore.getState().sendPrompt("không được chen ngang");
+
+    expect(useNekoSessionStore.getState().sessions[id].messages).toEqual([
+      expect.objectContaining({ role: "user", text: "lượt đầu" }),
+    ]);
+    release();
+    await Promise.all([first, second]);
+
+    expect(spawned[0].prompts).toEqual(["lượt đầu"]);
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("idle");
   });
 
   it("surfaces rollback-failed when commit persistence and compensation both fail", async () => {

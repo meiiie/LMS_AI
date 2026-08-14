@@ -81,6 +81,8 @@ export function SessionInspector({
                 <dd className="truncate text-[var(--nk-text-2)]">
                   {session.status === "streaming"
                     ? "Đang làm việc"
+                    : session.status === "dispatching"
+                      ? "Đang lưu yêu cầu"
                     : session.status === "connecting"
                       ? "Đang kết nối"
                       : session.status === "idle"

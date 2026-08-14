@@ -54,6 +54,7 @@ export interface NekoMessage {
 
 export type NekoSessionStatus =
   | "connecting"
+  | "dispatching"
   | "idle"
   | "streaming"
   | "exited"
@@ -84,6 +85,8 @@ export interface NekoSession {
   runtime: RuntimeProviderSnapshot | null;
   /** Set while the agent waits on an approval (FR-006); UI must resolve it. */
   pendingPermission: PermissionRequest | null;
+  /** Prevents two UI decisions from racing across the durability barrier. */
+  resolvingPermissionId: string | null;
   /** Honest error text for the banner when status is error/exited. */
   statusDetail?: string;
 }
@@ -242,6 +245,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           events,
           runtime: null,
           pendingPermission: null,
+          resolvingPermissionId: null,
           statusDetail: "Phiên đã lưu — nhắn tiếp để khởi động lại agent.",
         };
       }
@@ -288,6 +292,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           events,
           runtime: null,
           pendingPermission: null,
+          resolvingPermissionId: null,
         };
         state.activeSessionId = sessionId;
       });
@@ -529,6 +534,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           text,
           providerInstanceId: provider?.instanceId ?? null,
         });
+        // Acquire the turn synchronously. No second composer submission may
+        // pass while the first prompt waits for its durability barrier.
+        s.status = "dispatching";
         s.lastActivityAt = Date.now();
         s.updatedAt = s.lastActivityAt;
         if (s.messages.length === 1) {
@@ -537,6 +545,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       });
       const updated = get().sessions[sessionId];
       if (!updated) return;
+      if (!provider) return;
+      const providerInstanceId = provider.instanceId;
       try {
         // Hard barrier: the provider cannot observe this prompt before the
         // exact model input is durable in the append-only log.
@@ -545,6 +555,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         set((state) => {
           const current = state.sessions[sessionId];
           if (current) {
+            if (current.status === "dispatching") current.status = "idle";
             current.statusDetail = `Không thể lưu prompt nên chưa gửi cho agent: ${error instanceof Error ? error.message : String(error)}`;
           }
         });
@@ -553,11 +564,19 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       // turn-started from the driver flips status + opens the assistant
       // message; prompt() resolves only when the whole turn ends.
       try {
-        await runtimes.require(sessionId, "prompt").prompt(text);
+        await runtimes
+          .requireInstance(sessionId, providerInstanceId, "prompt")
+          .prompt(text);
+        set((state) => {
+          const current = state.sessions[sessionId];
+          // Some drivers only resolve prompt() and do not emit lifecycle
+          // events. Release the local dispatch lock in that valid case.
+          if (current?.status === "dispatching") current.status = "idle";
+        });
       } catch (error) {
         set((state) => {
           const current = state.sessions[sessionId];
-          if (current) {
+          if (current?.status === "dispatching") {
             current.status = "error";
             current.statusDetail = error instanceof Error ? error.message : String(error);
           }
@@ -584,7 +603,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       if (!session) return;
       try {
         await persistSessionBeforeDispatch(session);
-        await runtimes.require(sessionId, "cancel").cancel();
+        await runtimes
+          .requireInstance(sessionId, provider.instanceId, "cancel")
+          .cancel();
       } catch (error) {
         set((state) => {
           const current = state.sessions[sessionId];
@@ -598,12 +619,15 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       if (!sessionId) return;
       const session = get().sessions[sessionId];
       const request = session?.pendingPermission;
-      if (!request) return;
+      if (!request || session?.resolvingPermissionId) return;
       const provider = runtimes.get(sessionId);
       if (!provider) return;
       set((state) => {
         const s = state.sessions[sessionId];
-        if (s) {
+        if (s?.pendingPermission?.requestId === request.requestId) {
+          // Acquire this approval synchronously so a double click cannot
+          // append a conflicting decision while persistence is in flight.
+          s.resolvingPermissionId = request.requestId;
           appendSessionEvent(s.events as NekoSessionEvent[], "model", {
             type: "permission-decision",
             requestId: request.requestId,
@@ -615,20 +639,31 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       try {
         await persistSessionBeforeDispatch(get().sessions[sessionId]);
         // Driver fails closed on null/unknown options (FR-006).
-        await runtimes.require(sessionId, "permission-resolution").resolvePermission({
-          requestId: request.requestId,
-          optionId,
-        });
+        await runtimes
+          .requireInstance(
+            sessionId,
+            provider.instanceId,
+            "permission-resolution",
+          )
+          .resolvePermission({ requestId: request.requestId, optionId });
         set((state) => {
           const s = state.sessions[sessionId];
           if (s?.pendingPermission?.requestId === request.requestId) {
             s.pendingPermission = null;
           }
+          if (s?.resolvingPermissionId === request.requestId) {
+            s.resolvingPermissionId = null;
+          }
         });
       } catch (error) {
         set((state) => {
           const s = state.sessions[sessionId];
-          if (s) s.statusDetail = error instanceof Error ? error.message : String(error);
+          if (s) {
+            if (s.resolvingPermissionId === request.requestId) {
+              s.resolvingPermissionId = null;
+            }
+            s.statusDetail = error instanceof Error ? error.message : String(error);
+          }
         });
       }
     },
@@ -647,9 +682,10 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       ) {
         return;
       }
-      let driver: Driver;
+      const provider = runtimes.get(sessionId);
+      if (!provider) return;
       try {
-        driver = runtimes.require(sessionId, "session-config");
+        runtimes.requireInstance(sessionId, provider.instanceId, "session-config");
       } catch (error) {
         set((state) => {
           const current = state.sessions[sessionId];
@@ -672,9 +708,18 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           });
         }
       });
+      let driver: Driver;
       try {
         await persistSessionBeforeDispatch(get().sessions[sessionId]);
+        driver = runtimes.requireInstance(
+          sessionId,
+          provider.instanceId,
+          "session-config",
+        );
         await driver.setConfigOption(optionId, value);
+        // Do not commit a response from a provider that was replaced while
+        // its asynchronous configuration call was running.
+        runtimes.requireInstance(sessionId, provider.instanceId, "session-config");
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         set((state) => {
@@ -771,6 +816,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           }
           session.status = "exited";
           session.pendingPermission = null;
+          session.resolvingPermissionId = null;
           session.pendingControlId = null;
           session.statusDetail = "Đã kết thúc phiên — nhắn tiếp để khởi động lại agent.";
           session.updatedAt = Date.now();
@@ -895,11 +941,13 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           }
           case "permission-request": {
             session.pendingPermission = event.request;
+            session.resolvingPermissionId = null;
             return;
           }
           case "turn-finished": {
             session.status = "idle";
             session.pendingPermission = null;
+            session.resolvingPermissionId = null;
             session.pendingControlId = null;
             const message = openAssistant(session);
             const last = message ? lastBlock(message) : undefined;
@@ -938,6 +986,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             }
             session.status = "exited";
             session.pendingPermission = null;
+            session.resolvingPermissionId = null;
             session.pendingControlId = null;
             session.statusDetail =
               event.code === 0 || event.code === null
@@ -1039,6 +1088,7 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
         session.runtime = null;
         session.status = "exited";
         session.pendingPermission = null;
+        session.resolvingPermissionId = null;
         session.pendingControlId = null;
         session.updatedAt = Date.now();
         session.statusDetail = result.error

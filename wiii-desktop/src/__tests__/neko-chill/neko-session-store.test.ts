@@ -6,6 +6,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Driver, DriverEvent, PermissionDecision } from "@/neko-chill/drivers/types";
 import type { DetectedAgent } from "@/neko-chill/stores/neko-agent-store";
+
+const storage = new Map<string, unknown>();
+vi.mock("@/lib/storage", () => ({
+  loadStore: vi.fn(async (store: string, key: string, dflt: unknown) =>
+    storage.get(`${store}:${key}`) ?? dflt),
+  saveStore: vi.fn(async (store: string, key: string, value: unknown) => {
+    storage.set(`${store}:${key}`, value);
+  }),
+  saveStoreStrict: vi.fn(async (store: string, key: string, value: unknown) => {
+    storage.set(`${store}:${key}`, value);
+  }),
+  deleteStore: vi.fn(async (store: string, key: string) => {
+    storage.delete(`${store}:${key}`);
+  }),
+  clearStore: vi.fn(async () => {}),
+}));
+
 import {
   useNekoSessionStore,
   _setDriverFactoryForTests,
@@ -73,6 +90,7 @@ const session = (id: string) => useNekoSessionStore.getState().sessions[id];
 
 describe("neko-session-store", () => {
   beforeEach(() => {
+    storage.clear();
     useNekoSessionStore.setState({ sessions: {}, activeSessionId: null });
     launchConfig = undefined;
     _setDriverFactoryForTests(undefined);
@@ -244,9 +262,15 @@ describe("neko-session-store", () => {
     });
     expect(session(id).pendingPermission?.requestId).toBe("perm-1");
 
-    await useNekoSessionStore.getState().resolvePermission("reject_once");
+    const firstDecision = useNekoSessionStore.getState().resolvePermission("reject_once");
+    expect(session(id).resolvingPermissionId).toBe("perm-1");
+    const conflictingDecision = useNekoSessionStore.getState().resolvePermission("allow_once");
+    await Promise.all([firstDecision, conflictingDecision]);
     expect(session(id).pendingPermission).toBeNull();
+    expect(session(id).resolvingPermissionId).toBeNull();
     expect(driver.decisions).toEqual([{ requestId: "perm-1", optionId: "reject_once" }]);
+    expect(session(id).events.filter((event) => event.data.type === "permission-decision"))
+      .toHaveLength(1);
   });
 
   it("cancel reaches the driver; process exit marks the session honestly", async () => {

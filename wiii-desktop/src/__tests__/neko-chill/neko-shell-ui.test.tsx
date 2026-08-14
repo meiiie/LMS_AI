@@ -31,6 +31,7 @@ function makeSession(
     statusDetail: "Đã lưu",
     messages: [],
     pendingPermission: null,
+    resolvingPermissionId: null,
     ...overrides,
   };
 }
@@ -219,6 +220,43 @@ describe("Neko Chill shell UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Chèn gợi ý Kiểm tra dự án này" }));
     const composer = screen.getByTestId("neko-composer-input") as HTMLTextAreaElement;
     expect(composer.value).toBe("Kiểm tra dự án này và cho tôi biết điểm cần chú ý.");
+  });
+
+  it("shows in-flight durability states and disables duplicate actions", () => {
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên đang lưu",
+          { path: "C:/work/neko", name: "Neko" },
+          {
+            status: "dispatching",
+            statusDetail: undefined,
+            pendingPermission: {
+              requestId: "perm-1",
+              title: "Write(config.json)",
+              options: [
+                { optionId: "allow_once", label: "Cho phép", kind: "allow_once" },
+                { optionId: "reject_once", label: "Từ chối", kind: "reject_once" },
+              ],
+            },
+            resolvingPermissionId: "perm-1",
+          },
+        ),
+      },
+      activeSessionId: "active",
+    });
+
+    render(<NekoChillApp />);
+
+    expect(screen.getByText(/đang lưu & gửi/i)).toBeTruthy();
+    expect(screen.getByText("Đang lưu quyết định…")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Cho phép" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect((screen.getByRole("button", { name: "Từ chối" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect((screen.getByTestId("neko-composer-input") as HTMLTextAreaElement).disabled)
+      .toBe(true);
   });
 
   it("requires a project and reuses an exact recent workspace for a new session", async () => {

@@ -83,6 +83,15 @@ function persistMemoryStore(name: string) {
   }
 }
 
+function persistMemoryStoreStrict(name: string) {
+  const map = getMemoryStore(name);
+  const obj: Record<string, unknown> = {};
+  for (const [k, v] of map.entries()) {
+    obj[k] = v;
+  }
+  localStorage.setItem(`wiii:${name}`, JSON.stringify(obj));
+}
+
 export async function loadStore<T>(
   storeName: string,
   key: string,
@@ -130,6 +139,40 @@ export async function saveStore<T>(
   const map = getMemoryStore(effectiveName);
   map.set(key, value);
   persistMemoryStore(effectiveName);
+}
+
+/**
+ * Persist without a best-effort fallback. Use this as a durability barrier
+ * before an external runtime may observe state. A Tauri store failure is not
+ * equivalent to a successful in-memory write, so it is deliberately exposed
+ * to the caller.
+ */
+export async function saveStoreStrict<T>(
+  storeName: string,
+  key: string,
+  value: T
+): Promise<void> {
+  const effectiveName = namespacedStoreName(storeName);
+  const StoreClass = await getStoreClass();
+
+  if (StoreClass) {
+    const store = await StoreClass.load(effectiveName);
+    await store.set(key, value);
+    await store.save();
+    return;
+  }
+
+  const map = getMemoryStore(effectiveName);
+  const hadPrevious = map.has(key);
+  const previous = map.get(key);
+  map.set(key, value);
+  try {
+    persistMemoryStoreStrict(effectiveName);
+  } catch (error) {
+    if (hadPrevious) map.set(key, previous);
+    else map.delete(key);
+    throw error;
+  }
 }
 
 export async function deleteStore(

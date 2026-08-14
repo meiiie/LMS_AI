@@ -18,6 +18,9 @@ vi.mock("@/lib/storage", () => ({
   saveStore: vi.fn(async (store: string, key: string, value: unknown) => {
     storage.set(`${store}:${key}`, value);
   }),
+  saveStoreStrict: vi.fn(async (store: string, key: string, value: unknown) => {
+    storage.set(`${store}:${key}`, value);
+  }),
   deleteStore: vi.fn(async () => {}),
   clearStore: vi.fn(async () => {}),
 }));

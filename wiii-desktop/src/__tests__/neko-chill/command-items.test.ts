@@ -22,6 +22,7 @@ function session(index: number, overrides: Partial<NekoSession> = {}): NekoSessi
     status: "exited",
     messages: [],
     pendingPermission: null,
+    resolvingPermissionId: null,
     ...overrides,
   };
 }

@@ -111,6 +111,7 @@ function statusLabel(status: NekoSessionStatus): string {
   switch (status) {
     case "streaming": return "đang làm việc";
     case "connecting": return "đang kết nối";
+    case "dispatching": return "đang lưu & gửi";
     case "idle": return "sẵn sàng";
     case "exited": return "runtime đã dừng";
     default: return "lỗi";
@@ -118,7 +119,7 @@ function statusLabel(status: NekoSessionStatus): string {
 }
 
 function statusColor(status: NekoSessionStatus): string {
-  if (status === "streaming") return "bg-[var(--nk-accent)] animate-pulse";
+  if (status === "streaming" || status === "dispatching") return "bg-[var(--nk-accent)] animate-pulse";
   if (status === "idle") return "bg-[var(--nk-success)]";
   if (status === "error") return "bg-[var(--nk-danger)]";
   return "bg-[var(--nk-ghost)]";

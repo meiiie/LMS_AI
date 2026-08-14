@@ -118,7 +118,7 @@ export function NekoComposer({
       )
       .slice(0, 8);
   }, [session.commands, slashQuery]);
-  const slashOpen = slashQuery !== null && !slashDismissed && !disabled;
+  const slashOpen = slashQuery !== null && !slashDismissed && !controlsDisabled;
 
   useEffect(() => {
     if (!insertRequest) return;
@@ -141,7 +141,7 @@ export function NekoComposer({
 
   const submit = () => {
     const text = draft.trim();
-    if (!text || disabled || streaming) return;
+    if (!text || controlsDisabled) return;
     const local = CLIENT_COMMANDS.find((command) => `/${command.name}` === text);
     setDraft("");
     setSlashDismissed(false);
@@ -223,7 +223,7 @@ export function NekoComposer({
             rows={Math.min(draft.split("\n").length || 1, 6)}
             placeholder={session.workspace ? "Nhắn cho agent… Gõ / để xem lệnh" : "Gắn dự án trước khi nhắn…"}
             value={draft}
-            disabled={disabled || !session.workspace}
+            disabled={controlsDisabled || !session.workspace}
             data-testid="neko-composer-input"
             onChange={(event) => {
               setDraft(event.target.value);
@@ -322,7 +322,7 @@ export function NekoComposer({
               <button
                 type="button"
                 className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[var(--nk-inverse)] text-[var(--nk-on-inverse)] disabled:opacity-30"
-                disabled={disabled || !session.workspace || !draft.trim()}
+                disabled={controlsDisabled || !session.workspace || !draft.trim()}
                 onClick={submit}
                 title="Gửi"
                 aria-label="Gửi tin nhắn"

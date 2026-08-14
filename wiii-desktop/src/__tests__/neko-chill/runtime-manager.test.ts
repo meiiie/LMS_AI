@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Driver, PermissionDecision } from "@/neko-chill/drivers/types";
 import {
   RuntimeCapabilityError,
+  RuntimeProviderChangedError,
   RuntimeRegistry,
   RuntimeScope,
 } from "@/neko-chill/runtime-manager";
@@ -34,6 +35,17 @@ class FakeDriver implements Driver {
   async setConfigOption(): Promise<void> {}
   async dispose(): Promise<void> {
     this.disposed += 1;
+  }
+}
+
+class BlockingDisposeDriver extends FakeDriver {
+  constructor(sessionId: string, private readonly gate: Promise<void>) {
+    super(sessionId);
+  }
+
+  override async dispose(): Promise<void> {
+    this.disposed += 1;
+    await this.gate;
   }
 }
 
@@ -75,7 +87,7 @@ describe("RuntimeRegistry", () => {
     ).rejects.toThrow("initialize failed");
 
     expect(registry.get("s1")?.instanceId).toBe(attached.current.instanceId);
-    expect(registry.require("s1", "prompt")).toBe(first);
+    expect(registry.requireInstance("s1", attached.current.instanceId, "prompt")).toBe(first);
     expect(first.disposed).toBe(0);
   });
 
@@ -88,7 +100,7 @@ describe("RuntimeRegistry", () => {
 
     expect(two.current.instanceId).not.toBe(one.current.instanceId);
     expect(two.previous?.instanceId).toBe(one.current.instanceId);
-    expect(registry.require("s1", "prompt")).toBe(second);
+    expect(registry.requireInstance("s1", two.current.instanceId, "prompt")).toBe(second);
     expect(first.disposed).toBe(1);
 
     await registry.detach("s1");
@@ -98,9 +110,50 @@ describe("RuntimeRegistry", () => {
 
   it("fails closed when a consumer requests an undeclared capability", async () => {
     const registry = new RuntimeRegistry();
-    await registry.replace("s1", "read-only", async () => new FakeDriver("s1", ["prompt"]));
+    const attached = await registry.replace(
+      "s1",
+      "read-only",
+      async () => new FakeDriver("s1", ["prompt"]),
+    );
 
-    expect(() => registry.require("s1", "session-config")).toThrow(RuntimeCapabilityError);
+    expect(() => registry.requireInstance(
+      "s1",
+      attached.current.instanceId,
+      "session-config",
+    )).toThrow(RuntimeCapabilityError);
+  });
+
+  it("rejects a stale provider identity after replacement", async () => {
+    const registry = new RuntimeRegistry();
+    const first = new FakeDriver("s1");
+    const one = await registry.replace("s1", "neko", async () => first);
+    const second = new FakeDriver("s1");
+    const two = await registry.replace("s1", "neko", async () => second);
+
+    expect(() => registry.requireInstance("s1", one.current.instanceId, "prompt"))
+      .toThrow(RuntimeProviderChangedError);
+    expect(registry.requireInstance("s1", two.current.instanceId, "prompt")).toBe(second);
+  });
+
+  it("revokes all bindings and starts every disposer before awaiting a stalled one", async () => {
+    const registry = new RuntimeRegistry();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const first = new BlockingDisposeDriver("s1", gate);
+    const second = new FakeDriver("s2");
+    await registry.replace("s1", "neko", async () => first);
+    await registry.replace("s2", "neko", async () => second);
+
+    const disposing = registry.disposeAll();
+    await Promise.resolve();
+
+    expect(registry.get("s1")).toBeNull();
+    expect(registry.get("s2")).toBeNull();
+    expect(first.disposed).toBe(1);
+    expect(second.disposed).toBe(1);
+
+    release();
+    await disposing;
   });
 
   it("disposes an in-flight provider if mode teardown wins the race", async () => {
