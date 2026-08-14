@@ -61,6 +61,12 @@ describe("saveStoreStrict", () => {
     await expect(loadStoreStrict(STORE, "fact", null)).rejects.toThrow("read unavailable");
   });
 
+  it("preserves stored null so authoritative schema validation can reject it", async () => {
+    await saveStoreStrict(STORE, "fact", null);
+
+    await expect(loadStoreStrict(STORE, "fact", "missing")).resolves.toBeNull();
+  });
+
   it("restores a browser value when strict deletion cannot persist", async () => {
     await saveStoreStrict(STORE, "fact", "before");
     failWrites = true;

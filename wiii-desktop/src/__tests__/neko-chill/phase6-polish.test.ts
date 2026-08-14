@@ -164,7 +164,13 @@ const WORKSPACE = { path: "C:/tmp/project", name: "project" };
 
   beforeEach(() => {
     storage.clear();
-    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    useNekoSessionStore.setState({
+      sessions: {},
+      activeSessionId: null,
+      hydrated: false,
+      hydrating: false,
+      hydrationError: null,
+    });
     _clearLiveDriversForTests();
     _setDriverFactoryForTests(async (_agent, sessionId) => {
       driver = new FakeDriver(sessionId);

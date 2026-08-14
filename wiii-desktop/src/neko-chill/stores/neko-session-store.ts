@@ -93,6 +93,8 @@ export interface NekoSession {
   pendingPermission: PermissionRequest | null;
   /** Prevents two UI decisions from racing across the durability barrier. */
   resolvingPermissionId: string | null;
+  /** True while a cancel command crosses its durability barrier. */
+  cancelPending: boolean;
   /** Honest error text for the banner when status is error/exited. */
   statusDetail?: string;
 }
@@ -122,6 +124,8 @@ interface NekoSessionState {
   sessions: Record<string, NekoSession>;
   activeSessionId: string | null;
   hydrated: boolean;
+  hydrating: boolean;
+  hydrationError: string | null;
   /** Load persisted sessions from local storage (T502, FR-008). */
   hydrate: () => Promise<void>;
   createSession: (
@@ -217,15 +221,23 @@ export const useNekoSessionStore = create<NekoSessionState>()(
     sessions: {},
     activeSessionId: null,
     hydrated: false,
+    hydrating: false,
+    hydrationError: null,
 
     hydrate: async () => {
-      if (get().hydrated) return;
+      if (get().hydrated || get().hydrating) return;
+      set((state) => {
+        state.hydrating = true;
+        state.hydrationError = null;
+      });
       let index: Awaited<ReturnType<typeof loadSessionIndex>>;
       try {
         index = await loadSessionIndex();
-      } catch {
-        // Authoritative reads fail closed. Leave `hydrated` false so an app
-        // restart or explicit retry can read again without overwriting data.
+      } catch (error) {
+        set((state) => {
+          state.hydrating = false;
+          state.hydrationError = error instanceof Error ? error.message : String(error);
+        });
         return;
       }
       const restored: Record<string, NekoSession> = {};
@@ -236,7 +248,11 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         let snapshot: Awaited<ReturnType<typeof loadSessionSnapshot>>;
         try {
           snapshot = await loadSessionSnapshot(entry.id);
-        } catch {
+        } catch (error) {
+          set((state) => {
+            state.hydrating = false;
+            state.hydrationError = error instanceof Error ? error.message : String(error);
+          });
           return;
         }
         const events = [...snapshot.events];
@@ -305,6 +321,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           runtime: null,
           pendingPermission: null,
           resolvingPermissionId: null,
+          cancelPending: false,
           statusDetail: needsMigration
             ? "Đang nâng cấp log phiên trước khi có thể khởi động lại agent…"
             : "Phiên đã lưu — nhắn tiếp để khởi động lại agent.",
@@ -313,6 +330,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       set((state) => {
         state.sessions = { ...restored, ...state.sessions };
         state.hydrated = true;
+        state.hydrating = false;
+        state.hydrationError = null;
       });
       for (const sessionId of migratedIds) {
         const session = get().sessions[sessionId];
@@ -372,6 +391,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           runtime: null,
           pendingPermission: null,
           resolvingPermissionId: null,
+          cancelPending: false,
         };
         state.activeSessionId = sessionId;
       });
@@ -683,43 +703,52 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       const sessionId = get().activeSessionId;
       if (!sessionId) return;
       const provider = runtimes.get(sessionId);
-      if (!provider) return;
-      let commandEventId: string | null = null;
-      set((state) => {
-        const session = state.sessions[sessionId];
-        if (session) {
-          commandEventId = appendSessionEvent(session.events as NekoSessionEvent[], "model", {
-            type: "runtime-command",
-            action: "cancel",
-            providerInstanceId: provider.instanceId,
-          }).eventId!;
-        }
-      });
-      const session = get().sessions[sessionId];
-      if (!session) return;
+      if (!provider || get().sessions[sessionId]?.cancelPending) return;
       try {
-        await persistSessionBeforeDispatch(session);
-      } catch (error) {
+        let commandEventId: string | null = null;
         set((state) => {
-          const current = state.sessions[sessionId];
-          if (current) {
-            removeEventById(
-              current.events as NekoSessionEvent[],
-              commandEventId,
-            );
-            current.statusDetail = error instanceof Error ? error.message : String(error);
+          const session = state.sessions[sessionId];
+          if (session) {
+            session.cancelPending = true;
+            commandEventId = appendSessionEvent(session.events as NekoSessionEvent[], "model", {
+              type: "runtime-command",
+              action: "cancel",
+              providerInstanceId: provider.instanceId,
+            }).eventId!;
           }
         });
-        return;
-      }
-      try {
-        await runtimes
-          .requireInstance(sessionId, provider.instanceId, "cancel")
-          .cancel();
-      } catch (error) {
+        const session = get().sessions[sessionId];
+        if (!session) return;
+        try {
+          await persistSessionBeforeDispatch(session);
+        } catch (error) {
+          set((state) => {
+            const current = state.sessions[sessionId];
+            if (current) {
+              removeEventById(
+                current.events as NekoSessionEvent[],
+                commandEventId,
+              );
+              current.cancelPending = false;
+              current.statusDetail = error instanceof Error ? error.message : String(error);
+            }
+          });
+          return;
+        }
+        try {
+          await runtimes
+            .requireInstance(sessionId, provider.instanceId, "cancel")
+            .cancel();
+        } catch (error) {
+          set((state) => {
+            const current = state.sessions[sessionId];
+            if (current) current.statusDetail = error instanceof Error ? error.message : String(error);
+          });
+        }
+      } finally {
         set((state) => {
           const current = state.sessions[sessionId];
-          if (current) current.statusDetail = error instanceof Error ? error.message : String(error);
+          if (current) current.cancelPending = false;
         });
       }
     },
@@ -1061,6 +1090,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           session.status = "exited";
           session.pendingPermission = null;
           session.resolvingPermissionId = null;
+          session.cancelPending = false;
           session.statusDetail = "Đã kết thúc phiên — nhắn tiếp để khởi động lại agent.";
           session.updatedAt = Date.now();
           if (disposeError) {
@@ -1200,6 +1230,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             session.status = "idle";
             session.pendingPermission = null;
             session.resolvingPermissionId = null;
+            session.cancelPending = false;
             const message = openAssistant(session);
             const last = message ? lastBlock(message) : undefined;
             if (last?.type === "thinking") {
@@ -1238,6 +1269,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             session.status = "exited";
             session.pendingPermission = null;
             session.resolvingPermissionId = null;
+            session.cancelPending = false;
             session.statusDetail =
               event.code === 0 || event.code === null
                 ? "Agent đã thoát."
@@ -1395,6 +1427,7 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
         session.status = "exited";
         session.pendingPermission = null;
         session.resolvingPermissionId = null;
+        session.cancelPending = false;
         session.updatedAt = Date.now();
         session.statusDetail = result.error
           ? "Đã rời Neko Chill nhưng runtime báo lỗi khi thu hồi tài nguyên."

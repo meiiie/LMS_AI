@@ -61,6 +61,7 @@ export interface LoadedSessionSnapshot {
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const writeChains = new Map<string, Promise<void>>();
+const deleteChains = new Map<string, Promise<void>>();
 const publishedIds = new Set<string>();
 let catalogWriteChain: Promise<void> = Promise.resolve();
 let indexWriteChain: Promise<void> = Promise.resolve();
@@ -83,10 +84,60 @@ function isSessionIndexEntry(value: unknown, expectedId?: string): value is Sess
   );
 }
 
-function validSessionIds(value: unknown): string[] {
-  return Array.isArray(value)
-    ? [...new Set(value.filter((item): item is string => typeof item === "string"))]
-    : [];
+function parseSessionIds(value: unknown): string[] {
+  if (
+    !Array.isArray(value) ||
+    !value.every((item) => typeof item === "string" && item.length > 0)
+  ) {
+    throw new Error("Danh mục phiên Neko Chill có schema không hợp lệ.");
+  }
+  return [...new Set(value)];
+}
+
+function isPersistedMessage(value: unknown): value is NekoMessage {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const message = value as Partial<NekoMessage>;
+  if (
+    typeof message.id !== "string" ||
+    (message.role !== "user" && message.role !== "assistant") ||
+    (message.text !== undefined && typeof message.text !== "string") ||
+    (message.blocks !== undefined && !Array.isArray(message.blocks))
+  ) {
+    return false;
+  }
+  return message.role === "user"
+    ? typeof message.text === "string"
+    : Array.isArray(message.blocks) || typeof message.text === "string";
+}
+
+function parsePersistedTranscript(
+  value: unknown,
+  sessionId: string,
+): PersistedTranscript | null {
+  if (value === undefined) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Snapshot phiên ${sessionId} có schema không hợp lệ.`);
+  }
+  const transcript = value as Partial<PersistedTranscript>;
+  if (
+    (transcript.v !== 1 && transcript.v !== SCHEMA_VERSION) ||
+    !Array.isArray(transcript.messages) ||
+    !transcript.messages.every(isPersistedMessage) ||
+    (transcript.entry !== undefined && !isSessionIndexEntry(transcript.entry, sessionId))
+  ) {
+    throw new Error(`Snapshot phiên ${sessionId} có schema không hợp lệ.`);
+  }
+  if (transcript.v === SCHEMA_VERSION) {
+    if (!Array.isArray(transcript.events) || !transcript.events.every(isNekoSessionEvent)) {
+      throw new Error(`Log sự kiện phiên ${sessionId} có schema không hợp lệ.`);
+    }
+    if (!transcript.events.every((event, index) => event.seq === index + 1)) {
+      throw new Error(`Log sự kiện phiên ${sessionId} có thứ tự không hợp lệ.`);
+    }
+  } else if (transcript.events !== undefined && !Array.isArray(transcript.events)) {
+    throw new Error(`Snapshot phiên ${sessionId} có schema không hợp lệ.`);
+  }
+  return transcript as PersistedTranscript;
 }
 
 async function writeSession(session: NekoSession, strict: boolean): Promise<void> {
@@ -110,7 +161,7 @@ async function writeSession(session: NekoSession, strict: boolean): Promise<void
   // independent from unrelated index I/O.
   if (!publishedIds.has(session.id)) {
     const catalogOperation = catalogWriteChain.catch(() => {}).then(async () => {
-      const catalog = validSessionIds(
+      const catalog = parseSessionIds(
         await loadStoreStrict<unknown>(STORE, SESSION_IDS_KEY, []),
       );
       if (!catalog.includes(session.id)) {
@@ -207,17 +258,16 @@ export async function loadSessionIndex(): Promise<SessionIndexEntry[]> {
   const cached = Array.isArray(rawIndex)
     ? rawIndex.filter((entry): entry is SessionIndexEntry => isSessionIndexEntry(entry))
     : [];
-  const catalog = validSessionIds(
+  const catalog = parseSessionIds(
     await loadStoreStrict<unknown>(STORE, SESSION_IDS_KEY, []),
   );
   for (const sessionId of catalog) publishedIds.add(sessionId);
   const sessionIds = [...new Set([...catalog, ...cached.map((entry) => entry.id)])];
   const cachedById = new Map(cached.map((entry) => [entry.id, entry]));
   const resolved = await Promise.all(sessionIds.map(async (sessionId) => {
-    const stored = await loadStoreStrict<PersistedTranscript | null>(
-      STORE,
-      `session:${sessionId}`,
-      null,
+    const stored = parsePersistedTranscript(
+      await loadStoreStrict<unknown>(STORE, `session:${sessionId}`, undefined),
+      sessionId,
     );
     if (!stored) return null;
     const embedded = stored && isSessionIndexEntry(stored.entry, sessionId)
@@ -232,23 +282,17 @@ export async function loadSessionIndex(): Promise<SessionIndexEntry[]> {
 }
 
 export async function loadSessionSnapshot(sessionId: string): Promise<LoadedSessionSnapshot> {
-  const stored = await loadStoreStrict<PersistedTranscript | null>(
-    STORE,
-    `session:${sessionId}`,
-    null,
+  const stored = parsePersistedTranscript(
+    await loadStoreStrict<unknown>(STORE, `session:${sessionId}`, undefined),
+    sessionId,
   );
-  if (!stored || !Array.isArray(stored.messages)) {
+  if (!stored) {
     return { messages: [], events: [], needsEventMigration: false };
   }
-  if (stored.v !== SCHEMA_VERSION || !Array.isArray(stored.events)) {
+  if (stored.v !== SCHEMA_VERSION) {
     return { messages: stored.messages, events: [], needsEventMigration: true };
   }
-  const events = stored.events.filter(isNekoSessionEvent);
-  const hasStableSequence = events.every((event, index) => event.seq === index + 1);
-  if (events.length !== stored.events.length || !hasStableSequence) {
-    return { messages: stored.messages, events: [], needsEventMigration: true };
-  }
-  return { messages: stored.messages, events, needsEventMigration: false };
+  return { messages: stored.messages, events: stored.events!, needsEventMigration: false };
 }
 
 /** Compatibility helper for callers that only need the materialized view. */
@@ -256,7 +300,7 @@ export async function loadSessionTranscript(sessionId: string): Promise<NekoMess
   return (await loadSessionSnapshot(sessionId)).messages;
 }
 
-export async function deletePersistedSession(sessionId: string): Promise<void> {
+async function performDeletePersistedSession(sessionId: string): Promise<void> {
   const timer = timers.get(sessionId);
   if (timer) {
     clearTimeout(timer);
@@ -280,7 +324,7 @@ export async function deletePersistedSession(sessionId: string): Promise<void> {
   indexWriteChain = indexOperation.catch(() => {});
   await indexOperation;
   const catalogOperation = catalogWriteChain.catch(() => {}).then(async () => {
-    const catalog = validSessionIds(
+    const catalog = parseSessionIds(
       await loadStoreStrict<unknown>(STORE, SESSION_IDS_KEY, []),
     );
     await saveStoreStrict(
@@ -292,4 +336,18 @@ export async function deletePersistedSession(sessionId: string): Promise<void> {
   catalogWriteChain = catalogOperation.catch(() => {});
   await catalogOperation;
   publishedIds.delete(sessionId);
+}
+
+/** Serialize the complete delete transaction per session, including retries. */
+export function deletePersistedSession(sessionId: string): Promise<void> {
+  const previous = deleteChains.get(sessionId) ?? Promise.resolve();
+  const operation = previous
+    .catch(() => {})
+    .then(() => performDeletePersistedSession(sessionId));
+  const tail = operation.catch(() => {});
+  deleteChains.set(sessionId, tail);
+  void tail.then(() => {
+    if (deleteChains.get(sessionId) === tail) deleteChains.delete(sessionId);
+  });
+  return operation;
 }

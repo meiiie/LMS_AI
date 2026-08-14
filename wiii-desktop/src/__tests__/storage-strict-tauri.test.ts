@@ -92,6 +92,12 @@ describe("saveStoreStrict in Tauri", () => {
       .rejects.toThrow("desktop read unavailable");
   });
 
+  it("preserves stored null so authoritative schema validation can reject it", async () => {
+    values.set("fact", null);
+
+    await expect(loadStoreStrict("strict.json", "fact", "missing")).resolves.toBeNull();
+  });
+
   it("restores a staged value when strict desktop deletion rejects", async () => {
     values.set("fact", "before");
     failNextSave = true;

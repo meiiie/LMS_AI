@@ -1,12 +1,15 @@
 /** Neko Chill desktop-agent shell: projects -> sessions -> active runtime. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   Check,
   ChevronDown,
+  LoaderCircle,
   PanelLeft,
   PanelLeftClose,
   PanelRight,
   Power,
+  RefreshCw,
   Search,
 } from "lucide-react";
 import { TitleBar } from "@/components/layout/TitleBar";
@@ -115,9 +118,73 @@ function statusColor(status: NekoSessionStatus): string {
   return "bg-[var(--nk-ghost)]";
 }
 
+function SessionRecoveryState({
+  loading,
+  error,
+  onRetry,
+}: {
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  if (loading) {
+    return (
+      <main
+        className="grid min-h-0 flex-1 place-items-center px-6"
+        role="status"
+        aria-live="polite"
+      >
+        <div className="flex items-center gap-3 text-[13px] text-[var(--nk-text-3)]">
+          <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />
+          Đang khôi phục lịch sử phiên…
+        </div>
+      </main>
+    );
+  }
+  return (
+    <main className="grid min-h-0 flex-1 place-items-center px-6">
+      <section
+        className="w-full max-w-md rounded-2xl border border-[var(--nk-border-strong)] bg-[var(--nk-raised)] p-6 shadow-sm"
+        role="alert"
+        aria-labelledby="neko-history-error-title"
+      >
+        <div className="flex items-start gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--nk-danger-soft)] text-[var(--nk-danger)]">
+            <AlertTriangle aria-hidden="true" className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <h1 id="neko-history-error-title" className="text-[14px] font-semibold text-[var(--nk-text)]">
+              Chưa thể mở lịch sử phiên
+            </h1>
+            <p className="mt-1 text-[12px] leading-5 text-[var(--nk-text-3)]">
+              Neko Chill đã khóa việc tạo và mở phiên để không ghi đè dữ liệu đang có.
+            </p>
+            {error ? (
+              <p className="mt-2 break-words rounded-lg bg-[var(--nk-inset)] px-3 py-2 text-[11px] leading-4 text-[var(--nk-text-3)]">
+                {error}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              className="mt-4 inline-flex h-8 items-center gap-2 rounded-lg bg-[var(--nk-inverse)] px-3 text-[12px] font-medium text-[var(--nk-on-inverse)] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--nk-focus-soft)]"
+              onClick={onRetry}
+            >
+              <RefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
+              Thử tải lại
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export default function NekoChillApp() {
   const detect = useNekoAgentStore((state) => state.detect);
   const hydrate = useNekoSessionStore((state) => state.hydrate);
+  const hydrated = useNekoSessionStore((state) => state.hydrated);
+  const hydrating = useNekoSessionStore((state) => state.hydrating);
+  const hydrationError = useNekoSessionStore((state) => state.hydrationError);
   const activeSessionId = useNekoSessionStore((state) => state.activeSessionId);
   const session = useNekoSessionStore((state) =>
     state.activeSessionId ? state.sessions[state.activeSessionId] : null,
@@ -238,8 +305,16 @@ export default function NekoChillApp() {
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1">
-        {sidebarOpen ? <SessionSidebar /> : null}
-        {session ? (
+        {!hydrated ? (
+          <SessionRecoveryState
+            loading={hydrating || !hydrationError}
+            error={hydrationError}
+            onRetry={() => void hydrate()}
+          />
+        ) : (
+          <>
+            {sidebarOpen ? <SessionSidebar /> : null}
+            {session ? (
           <div className="relative flex min-w-0 flex-1">
             <div className="flex min-w-0 flex-1 flex-col">
               <header className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--nk-border)] px-4">
@@ -314,20 +389,24 @@ export default function NekoChillApp() {
               </>
             ) : null}
           </div>
-        ) : (
-          <NewSessionView />
+            ) : (
+              <NewSessionView />
+            )}
+          </>
         )}
       </div>
-      <NekoCommandCenter
-        open={commandCenterOpen}
-        sessions={sessions}
-        activeSession={session}
-        sidebarOpen={sidebarOpen}
-        onClose={() => setCommandCenterOpen(false)}
-        onAction={handleWorkbenchAction}
-        onSelectSession={setActiveSession}
-        onInsertCommand={insertIntoComposer}
-      />
+      {hydrated ? (
+        <NekoCommandCenter
+          open={commandCenterOpen}
+          sessions={sessions}
+          activeSession={session}
+          sidebarOpen={sidebarOpen}
+          onClose={() => setCommandCenterOpen(false)}
+          onAction={handleWorkbenchAction}
+          onSelectSession={setActiveSession}
+          onInsertCommand={insertIntoComposer}
+        />
+      ) : null}
     </div>
   );
 }

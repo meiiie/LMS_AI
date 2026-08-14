@@ -128,7 +128,7 @@ export async function loadStoreStrict<T>(
   if (StoreClass) {
     const store = await StoreClass.load(effectiveName);
     const value = (await store.get(key)) as T | undefined;
-    return value ?? defaultValue;
+    return value === undefined ? defaultValue : value;
   }
 
   // localStorage is the durable browser authority. Refresh the memory mirror
@@ -138,7 +138,8 @@ export async function loadStoreStrict<T>(
   const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
   const map = new Map<string, unknown>(Object.entries(parsed));
   memoryStore.set(effectiveName, map);
-  return (map.get(key) as T) ?? defaultValue;
+  const value = map.get(key) as T | undefined;
+  return value === undefined ? defaultValue : value;
 }
 
 export async function saveStore<T>(

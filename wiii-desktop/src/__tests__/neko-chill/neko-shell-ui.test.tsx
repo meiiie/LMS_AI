@@ -34,6 +34,7 @@ function makeSession(
     runtime: null,
     pendingPermission: null,
     resolvingPermissionId: null,
+    cancelPending: false,
     ...overrides,
   };
 }
@@ -49,8 +50,31 @@ describe("Neko Chill shell UI", () => {
       sessions: {},
       activeSessionId: null,
       hydrated: true,
+      hydrating: false,
+      hydrationError: null,
       hydrate: vi.fn(async () => {}),
     });
+  });
+
+  it("keeps history closed on hydration failure and exposes a retry", () => {
+    const hydrate = vi.fn(async () => {});
+    useNekoSessionStore.setState({
+      sessions: {},
+      activeSessionId: null,
+      hydrated: false,
+      hydrating: false,
+      hydrationError: "Snapshot phiên local-1 có schema không hợp lệ.",
+      hydrate,
+    });
+
+    render(<NekoChillApp />);
+
+    expect(screen.getByRole("alert").textContent).toContain("Chưa thể mở lịch sử phiên");
+    expect(screen.getByText(/khóa việc tạo và mở phiên/i)).toBeTruthy();
+    expect(screen.queryByTestId("session-sidebar")).toBeNull();
+    expect(screen.queryByTestId("start-neko")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Thử tải lại" }));
+    expect(hydrate).toHaveBeenCalledTimes(2);
   });
 
   it("removes transport emphasis markers from reasoning labels only", () => {
@@ -262,6 +286,26 @@ describe("Neko Chill shell UI", () => {
     expect(composer.readOnly).toBe(true);
     expect(composer.getAttribute("aria-busy")).toBe("true");
     expect(screen.getByRole("status").textContent).toBe("Đang lưu quyết định…");
+  });
+
+  it("shows cancel durability progress and blocks duplicate stop clicks", () => {
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên đang dừng",
+          { path: "C:/work/neko", name: "Neko" },
+          { status: "streaming", cancelPending: true },
+        ),
+      },
+      activeSessionId: "active",
+    });
+
+    render(<NekoChillApp />);
+
+    const cancel = screen.getByRole("button", { name: "Đang lưu yêu cầu dừng" });
+    expect((cancel as HTMLButtonElement).disabled).toBe(true);
+    expect(cancel.getAttribute("aria-busy")).toBe("true");
   });
 
   it("allows an exited session to send while keeping runtime controls locked", () => {
