@@ -143,6 +143,7 @@ export function NekoTranscript({
           <PermissionCard
             request={session.pendingPermission}
             resolving={session.resolvingPermissionId === session.pendingPermission.requestId}
+            blockedByCancel={session.cancelPending}
             onResolve={onResolvePermission}
           />
         ) : null}

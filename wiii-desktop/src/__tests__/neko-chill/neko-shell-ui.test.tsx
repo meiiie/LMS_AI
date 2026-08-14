@@ -303,7 +303,15 @@ describe("Neko Chill shell UI", () => {
           "active",
           "Phiên đang dừng",
           { path: "C:/work/neko", name: "Neko" },
-          { status: "streaming", cancelPending: true },
+          {
+            status: "streaming",
+            cancelPending: true,
+            pendingPermission: {
+              requestId: "perm-cancel",
+              title: "Write(config.json)",
+              options: [{ optionId: "allow_once", label: "Cho phép", kind: "allow_once" }],
+            },
+          },
         ),
       },
       activeSessionId: "active",
@@ -317,6 +325,8 @@ describe("Neko Chill shell UI", () => {
     expect((cancel as HTMLButtonElement).disabled).toBe(false);
     expect(cancel.getAttribute("aria-disabled")).toBe("true");
     expect(cancel.getAttribute("aria-busy")).toBe("true");
+    expect((screen.getByRole("button", { name: "Cho phép" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("status").textContent).toBe("Đang lưu yêu cầu dừng…");
     cancel.focus();
     fireEvent.click(cancel);
     expect(cancelTurn).not.toHaveBeenCalled();

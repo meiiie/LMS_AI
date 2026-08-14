@@ -108,6 +108,27 @@ describe("RuntimeRegistry", () => {
     expect(second.disposed).toBe(1);
   });
 
+  it("joins an in-flight disposal when detach is called again", async () => {
+    const registry = new RuntimeRegistry();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const driver = new BlockingDisposeDriver("s1", gate);
+    await registry.replace("s1", "neko", async () => driver);
+
+    const first = registry.detach("s1");
+    await vi.waitFor(() => expect(driver.disposed).toBe(1));
+    let secondSettled = false;
+    const second = registry.detach("s1").finally(() => {
+      secondSettled = true;
+    });
+    await Promise.resolve();
+
+    expect(secondSettled).toBe(false);
+    release();
+    await Promise.all([first, second]);
+    expect(driver.disposed).toBe(1);
+  });
+
   it("fails closed when a consumer requests an undeclared capability", async () => {
     const registry = new RuntimeRegistry();
     const attached = await registry.replace(
@@ -203,10 +224,16 @@ describe("RuntimeRegistry", () => {
       async () => new Promise<Driver>((resolve) => { finishCreate = resolve; }),
     );
 
-    await registry.disposeAll();
+    let teardownSettled = false;
+    const teardown = registry.disposeAll().finally(() => {
+      teardownSettled = true;
+    });
+    await Promise.resolve();
+    expect(teardownSettled).toBe(false);
     finishCreate(driver);
 
     await expect(creating).rejects.toThrow("cancelled during teardown");
+    await teardown;
     expect(driver.disposed).toBe(1);
     expect(registry.get("s1")).toBeNull();
   });
@@ -221,11 +248,44 @@ describe("RuntimeRegistry", () => {
       async () => new Promise<Driver>((resolve) => { finishCreate = resolve; }),
     );
 
-    await registry.detach("s1");
+    let detachSettled = false;
+    const detaching = registry.detach("s1").finally(() => {
+      detachSettled = true;
+    });
+    await Promise.resolve();
+    expect(detachSettled).toBe(false);
     finishCreate(driver);
 
     await expect(creating).rejects.toThrow("cancelled during teardown");
+    await detaching;
     expect(driver.disposed).toBe(1);
+    expect(registry.get("s1")).toBeNull();
+  });
+
+  it("awaits a late-owned driver's cleanup before detach completes", async () => {
+    const registry = new RuntimeRegistry();
+    let releaseDispose!: () => void;
+    const disposeGate = new Promise<void>((resolve) => { releaseDispose = resolve; });
+    const driver = new BlockingDisposeDriver("s1", disposeGate);
+    let finishCreate!: (driver: Driver) => void;
+    const creating = registry.replace(
+      "s1",
+      "neko",
+      async () => new Promise<Driver>((resolve) => { finishCreate = resolve; }),
+    );
+
+    let detachSettled = false;
+    const detaching = registry.detach("s1").finally(() => {
+      detachSettled = true;
+    });
+    finishCreate(driver);
+    await vi.waitFor(() => expect(driver.disposed).toBe(1));
+    await Promise.resolve();
+
+    expect(detachSettled).toBe(false);
+    releaseDispose();
+    await expect(creating).rejects.toThrow("cancelled during teardown");
+    await detaching;
     expect(registry.get("s1")).toBeNull();
   });
 

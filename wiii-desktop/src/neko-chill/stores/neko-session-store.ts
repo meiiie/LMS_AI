@@ -406,6 +406,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
     },
 
     createSession: async (agent, workspace, launchProfile = null) => {
+      const activeModeExit = modeExitOperation;
+      if (activeModeExit) await activeModeExit;
       if (!workspace || !isAbsoluteWorkspacePath(workspace.path)) {
         throw new Error("Hãy chọn một thư mục dự án tuyệt đối trước khi bắt đầu.");
       }
@@ -577,6 +579,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
     },
 
     sendPrompt: async (text) => {
+      const activeModeExit = modeExitOperation;
+      if (activeModeExit) await activeModeExit;
       const sessionId = get().activeSessionId;
       if (!sessionId) return;
       const session = get().sessions[sessionId];
@@ -734,8 +738,11 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         }
         // turn-started from the driver flips status + opens the assistant
         // message; prompt() resolves only when the whole turn ends.
+        let promptStarted = false;
         try {
-          await runtimes.requireInstance(sessionId, providerInstanceId, "prompt").prompt(text);
+          const driver = runtimes.requireInstance(sessionId, providerInstanceId, "prompt");
+          promptStarted = true;
+          await driver.prompt(text);
           set((state) => {
             const current = state.sessions[sessionId];
             // Some drivers only resolve prompt() and do not emit lifecycle
@@ -743,13 +750,29 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             if (current?.status === "dispatching") current.status = "idle";
           });
         } catch (error) {
+          let rolledBackUndispatchedInput = false;
           set((state) => {
             const current = state.sessions[sessionId];
+            if (!current) return;
+            if (!promptStarted) {
+              current.messages = current.messages.filter((message) => message.id !== messageId);
+              removeEventById(current.events as NekoSessionEvent[], inputEventId);
+              if (current.messages.length === 0 && previousTitle) {
+                current.title = previousTitle;
+              }
+              rolledBackUndispatchedInput = true;
+            }
             if (current?.status === "dispatching") {
-              current.status = "error";
+              current.status = promptStarted ? "error" : "idle";
               current.statusDetail = error instanceof Error ? error.message : String(error);
             }
           });
+          if (rolledBackUndispatchedInput) {
+            await persistSessionNowOrReport(sessionId, "rollback prompt chưa gửi", {
+              fatal: true,
+              strict: true,
+            });
+          }
         }
       } finally {
         releaseOperation();
@@ -802,13 +825,31 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         } finally {
           releaseDispatchBarrier();
         }
+        let cancelStarted = false;
         try {
-          await runtimes.requireInstance(sessionId, provider.instanceId, "cancel").cancel();
+          const driver = runtimes.requireInstance(sessionId, provider.instanceId, "cancel");
+          cancelStarted = true;
+          await driver.cancel();
         } catch (error) {
+          let rolledBackUndispatchedCancel = false;
           set((state) => {
             const current = state.sessions[sessionId];
-            if (current) current.statusDetail = error instanceof Error ? error.message : String(error);
+            if (current) {
+              if (!cancelStarted) {
+                removeEventById(current.events as NekoSessionEvent[], commandEventId);
+                rolledBackUndispatchedCancel = true;
+              }
+              if (current.status !== "stopping" && current.status !== "exited") {
+                current.statusDetail = error instanceof Error ? error.message : String(error);
+              }
+            }
           });
+          if (rolledBackUndispatchedCancel) {
+            await persistSessionNowOrReport(sessionId, "rollback yêu cầu dừng chưa gửi", {
+              fatal: true,
+              strict: true,
+            });
+          }
         }
       } finally {
         set((state) => {
@@ -824,12 +865,20 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       if (!sessionId) return;
       const session = get().sessions[sessionId];
       const request = session?.pendingPermission;
-      if (!request || session?.resolvingPermissionId || session.closePending || session.deletePending) return;
+      if (
+        !request ||
+        session?.resolvingPermissionId ||
+        session.cancelPending ||
+        session.closePending ||
+        session.deletePending
+      )
+        return;
       const provider = runtimes.get(sessionId);
       if (!provider) return;
       const releaseOperation = acquireHold(runtimeOperations, sessionId);
       let decisionEventId: string | null = null;
       let decisionPersisted = false;
+      let resolutionStarted = false;
       set((state) => {
         const s = state.sessions[sessionId];
         if (s?.pendingPermission?.requestId === request.requestId) {
@@ -850,9 +899,9 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         decisionPersisted = true;
         releaseDispatchBarrier();
         // Driver fails closed on null/unknown options (FR-006).
-        await runtimes
-          .requireInstance(sessionId, provider.instanceId, "permission-resolution")
-          .resolvePermission({ requestId: request.requestId, optionId });
+        const driver = runtimes.requireInstance(sessionId, provider.instanceId, "permission-resolution");
+        resolutionStarted = true;
+        await driver.resolvePermission({ requestId: request.requestId, optionId });
         set((state) => {
           const s = state.sessions[sessionId];
           if (s?.pendingPermission?.requestId === request.requestId) {
@@ -863,11 +912,13 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           }
         });
       } catch (error) {
+        let rolledBackUndispatchedDecision = false;
         set((state) => {
           const s = state.sessions[sessionId];
           if (s) {
-            if (!decisionPersisted) {
+            if (!decisionPersisted || !resolutionStarted) {
               removeEventById(s.events as NekoSessionEvent[], decisionEventId);
+              rolledBackUndispatchedDecision = decisionPersisted;
             }
             if (s.resolvingPermissionId === request.requestId) {
               s.resolvingPermissionId = null;
@@ -875,6 +926,12 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             s.statusDetail = error instanceof Error ? error.message : String(error);
           }
         });
+        if (rolledBackUndispatchedDecision) {
+          await persistSessionNowOrReport(sessionId, "rollback quyết định chưa gửi", {
+            fatal: true,
+            strict: true,
+          });
+        }
       } finally {
         releaseDispatchBarrier();
         releaseOperation();
@@ -1121,7 +1178,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       });
       const operation = (async () => {
         await waitForHolds(dispatchBarriers, sessionId);
-        const provider = runtimes.get(sessionId);
+        const provider = runtimes.get(sessionId) ?? get().sessions[sessionId]?.runtime ?? null;
         const disposeError = await runtimes.detach(sessionId).then(
           () => null,
           (error) => error,
