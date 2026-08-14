@@ -85,27 +85,97 @@ export function appendSessionEvent(
   return event;
 }
 
+function isStringOrNull(value: unknown): value is string | null {
+  return typeof value === "string" || value === null;
+}
+
+function isModelValue(value: unknown): value is ModelValue {
+  return typeof value === "string" || typeof value === "boolean" || value === null;
+}
+
+function isRuntimeProvider(value: unknown): value is RuntimeProviderSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const provider = value as Record<string, unknown>;
+  return (
+    typeof provider.sessionId === "string" &&
+    typeof provider.providerId === "string" &&
+    typeof provider.instanceId === "string" &&
+    (provider.kind === "acp" || provider.kind === "wiii-cloud") &&
+    Array.isArray(provider.capabilities) &&
+    provider.capabilities.every((capability) =>
+      ["prompt", "cancel", "permission-resolution", "session-config"].includes(
+        capability as string,
+      )) &&
+    (provider.contextContinuity === "process" || provider.contextContinuity === "resumable") &&
+    (provider.workspaceIsolation === "advisory" || provider.workspaceIsolation === "enforced")
+  );
+}
+
+function isValidEventData(data: Record<string, unknown>): boolean {
+  switch (data.type) {
+    case "session-context":
+      return (
+        ["created", "legacy-migration", "workspace-attached"].includes(data.source as string) &&
+        typeof data.agentId === "string" &&
+        isStringOrNull(data.workspacePath) &&
+        isStringOrNull(data.launchProfileId)
+      );
+    case "model-input":
+      return (
+        (data.source === "live" || data.source === "legacy-migration") &&
+        typeof data.messageId === "string" &&
+        typeof data.text === "string" &&
+        isStringOrNull(data.providerInstanceId)
+      );
+    case "permission-decision":
+      return (
+        typeof data.requestId === "string" &&
+        isStringOrNull(data.optionId) &&
+        typeof data.providerInstanceId === "string"
+      );
+    case "runtime-command":
+      return data.action === "cancel" && typeof data.providerInstanceId === "string";
+    case "control-change":
+      return (
+        ["requested", "committed", "rolled-back", "rollback-failed"].includes(
+          data.phase as string,
+        ) &&
+        typeof data.optionId === "string" &&
+        isModelValue(data.previousValue) &&
+        isModelValue(data.nextValue) &&
+        (data.reason === undefined || typeof data.reason === "string")
+      );
+    case "runtime-attached":
+      return isRuntimeProvider(data.provider);
+    case "runtime-detached":
+      return (
+        typeof data.providerId === "string" &&
+        typeof data.instanceId === "string" &&
+        (data.kind === "acp" || data.kind === "wiii-cloud") &&
+        ["close", "delete", "idle", "mode-exit", "process-exit", "workspace-change"].includes(
+          data.reason as string,
+        )
+      );
+    case "runtime-attach-failed":
+      return typeof data.providerId === "string" && typeof data.reason === "string";
+    default:
+      return false;
+  }
+}
+
 export function isNekoSessionEvent(value: unknown): value is NekoSessionEvent {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<NekoSessionEvent>;
-  const eventType = (candidate.data as { type?: unknown } | undefined)?.type;
+  const data = candidate.data as Record<string, unknown> | undefined;
   return (
     candidate.v === NEKO_SESSION_EVENT_VERSION &&
     typeof candidate.seq === "number" &&
     Number.isInteger(candidate.seq) &&
     candidate.seq > 0 &&
     typeof candidate.at === "number" &&
+    Number.isFinite(candidate.at) &&
     (candidate.visibility === "model" || candidate.visibility === "runtime") &&
-    typeof eventType === "string" &&
-    [
-      "session-context",
-      "model-input",
-      "permission-decision",
-      "runtime-command",
-      "control-change",
-      "runtime-attached",
-      "runtime-detached",
-      "runtime-attach-failed",
-    ].includes(eventType)
+    data !== undefined &&
+    isValidEventData(data)
   );
 }

@@ -1,6 +1,7 @@
 import { Activity, Bot, Command, Folder, HardDrive, Settings2, X } from "lucide-react";
 import type { DriverConfigOption } from "../drivers/types";
 import type { NekoSession } from "../stores/neko-session-store";
+import { NEKO_SESSION_STATUS_LABELS } from "../session-status";
 
 interface SessionInspectorProps {
   session: NekoSession;
@@ -79,17 +80,7 @@ export function SessionInspector({
               <div className="min-w-0">
                 <dt className="text-[10px] uppercase tracking-wide text-[var(--nk-ghost)]">Trạng thái</dt>
                 <dd className="truncate text-[var(--nk-text-2)]">
-                  {session.status === "streaming"
-                    ? "Đang làm việc"
-                    : session.status === "dispatching"
-                      ? "Đang lưu yêu cầu"
-                    : session.status === "connecting"
-                      ? "Đang kết nối"
-                      : session.status === "idle"
-                        ? "Sẵn sàng"
-                        : session.status === "exited"
-                          ? "Runtime đã dừng"
-                          : "Có lỗi"}
+                  {NEKO_SESSION_STATUS_LABELS[session.status]}
                 </dd>
               </div>
             </div>

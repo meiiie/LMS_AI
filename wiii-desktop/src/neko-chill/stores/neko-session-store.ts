@@ -54,6 +54,7 @@ export interface NekoMessage {
 
 export type NekoSessionStatus =
   | "connecting"
+  | "stopping"
   | "dispatching"
   | "idle"
   | "streaming"
@@ -215,7 +216,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             workspacePath: entry.workspace?.path ?? null,
             launchProfileId: entry.launchProfile?.id ?? null,
           }, entry.createdAt);
-          for (const [index, message] of snapshot.messages.entries()) {
+          for (const [messageIndex, message] of snapshot.messages.entries()) {
             if (message.role !== "user" || typeof message.text !== "string") continue;
             appendSessionEvent(events, "model", {
               type: "model-input",
@@ -223,7 +224,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
               messageId: message.id,
               text: message.text,
               providerInstanceId: null,
-            }, entry.createdAt + index + 1);
+            }, entry.createdAt + messageIndex + 1);
           }
           migratedIds.push(entry.id);
         }
@@ -254,8 +255,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         state.hydrated = true;
       });
       for (const sessionId of migratedIds) {
-        const session = get().sessions[sessionId];
-        if (session) await persistSessionNow(session);
+        await persistSessionNowOrReport(sessionId, "bản nâng cấp log phiên");
       }
     },
 
@@ -300,6 +300,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         // The workspace/profile can affect the provider before the first
         // prompt, so its event must be durable before driver.start().
         await persistSessionBeforeDispatch(get().sessions[sessionId]);
+        if (get().sessions[sessionId]?.status !== "connecting") return sessionId;
         const factory: DriverFactory =
           (get() as unknown as { _driverFactory?: DriverFactory })._driverFactory ??
           defaultDriverFactory;
@@ -355,8 +356,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           }
         });
       }
-      const created = get().sessions[sessionId];
-      if (created) await persistSessionNow(created);
+      await persistSessionNowOrReport(sessionId, "trạng thái khởi động runtime");
       return sessionId;
     },
 
@@ -425,7 +425,13 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       const session = get().sessions[sessionId];
       // "exited" accepts a new prompt: a restored (or crashed) session
       // respawns a FRESH agent process (spec US3-2 / edge case restart).
-      if (!session || (session.status !== "idle" && session.status !== "exited")) {
+      if (
+        !session ||
+        (session.status !== "idle" && session.status !== "exited") ||
+        session.pendingControlId ||
+        session.pendingPermission ||
+        session.resolvingPermissionId
+      ) {
         return;
       }
       if (!session.workspace) {
@@ -463,6 +469,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const factory: DriverFactory =
             (get() as unknown as { _driverFactory?: DriverFactory })._driverFactory ??
             defaultDriverFactory;
+          if (get().sessions[sessionId]?.status !== "connecting") return;
           const pendingEvents: DriverEvent[] = [];
           let preparingRuntime = true;
           const replacement = await runtimes.replace(
@@ -516,12 +523,13 @@ export const useNekoSessionStore = create<NekoSessionState>()(
               });
             }
           });
-          const failed = get().sessions[sessionId];
-          if (failed) await persistSessionNow(failed);
+          await persistSessionNowOrReport(sessionId, "lỗi khởi động runtime");
           return;
         }
       }
 
+      if (!provider) return;
+      const providerInstanceId = provider.instanceId;
       const messageId = uuidv4();
       set((state) => {
         const s = state.sessions[sessionId];
@@ -532,7 +540,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           source: "live",
           messageId,
           text,
-          providerInstanceId: provider?.instanceId ?? null,
+          providerInstanceId,
         });
         // Acquire the turn synchronously. No second composer submission may
         // pass while the first prompt waits for its durability barrier.
@@ -545,8 +553,6 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       });
       const updated = get().sessions[sessionId];
       if (!updated) return;
-      if (!provider) return;
-      const providerInstanceId = provider.instanceId;
       try {
         // Hard barrier: the provider cannot observe this prompt before the
         // exact model input is durable in the append-only log.
@@ -739,8 +745,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             });
           }
         });
-        const rolledBack = get().sessions[sessionId];
-        if (rolledBack) await persistSessionNow(rolledBack);
+        await persistSessionNowOrReport(sessionId, "trạng thái hoàn tác cấu hình", true);
         return;
       }
 
@@ -763,7 +768,13 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       } catch (commitError) {
         let rollbackError: unknown;
         try {
-          await driver.setConfigOption(optionId, previousValue);
+          const rollbackDriver = runtimes.requireInstance(
+            sessionId,
+            provider.instanceId,
+            "session-config",
+          );
+          await rollbackDriver.setConfigOption(optionId, previousValue);
+          runtimes.requireInstance(sessionId, provider.instanceId, "session-config");
         } catch (error) {
           rollbackError = error;
         }
@@ -786,15 +797,14 @@ export const useNekoSessionStore = create<NekoSessionState>()(
             reason,
           });
         });
-        const rolledBack = get().sessions[sessionId];
-        if (rolledBack) await persistSessionNow(rolledBack);
+        await persistSessionNowOrReport(sessionId, "trạng thái hoàn tác cấu hình", true);
       }
     },
 
     closeSession: async (sessionId) => {
       set((state) => {
         const session = state.sessions[sessionId];
-        if (session) session.status = "connecting";
+        if (session) session.status = "stopping";
       });
       const provider = runtimes.get(sessionId);
       const disposeError = await runtimes.detach(sessionId).then(
@@ -825,14 +835,13 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           }
         }
       });
-      const session = get().sessions[sessionId];
-      if (session) await persistSessionNow(session);
+      await persistSessionNowOrReport(sessionId, "trạng thái đóng phiên");
     },
 
     deleteSession: async (sessionId) => {
       set((state) => {
         const session = state.sessions[sessionId];
-        if (session) session.status = "connecting";
+        if (session) session.status = "stopping";
       });
       await runtimes.detach(sessionId).catch(() => {});
       await deletePersistedSession(sessionId);
@@ -1006,6 +1015,26 @@ export const useNekoSessionStore = create<NekoSessionState>()(
   })),
 );
 
+async function persistSessionNowOrReport(
+  sessionId: string,
+  context: string,
+  fatal = false,
+): Promise<void> {
+  const session = useNekoSessionStore.getState().sessions[sessionId];
+  if (!session) return;
+  try {
+    await persistSessionNow(session);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    useNekoSessionStore.setState((state) => {
+      const current = state.sessions[sessionId];
+      if (!current) return;
+      if (fatal) current.status = "error";
+      current.statusDetail = `Không thể lưu ${context}: ${reason}`;
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Idle reap (T601, FR-009 — waku's lesson, reimplemented)
 // ---------------------------------------------------------------------------
@@ -1055,8 +1084,7 @@ export async function sweepIdleSessions(now: number = Date.now()): Promise<void>
         s.lastActivityAt = now;
       }
     });
-    const updated = useNekoSessionStore.getState().sessions[session.id];
-    if (updated) await persistSessionNow(updated);
+    await persistSessionNowOrReport(session.id, "trạng thái runtime hết hạn");
   }
 }
 
@@ -1105,8 +1133,7 @@ export async function disposeAllNekoRuntimes(): Promise<void> {
     }
   });
   await Promise.all(results.map(async ({ provider }) => {
-    const session = useNekoSessionStore.getState().sessions[provider.sessionId];
-    if (session) await persistSessionNow(session);
+    await persistSessionNowOrReport(provider.sessionId, "trạng thái rời Neko Chill");
   }));
 }
 

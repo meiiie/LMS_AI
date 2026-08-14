@@ -21,6 +21,8 @@ function session(index: number, overrides: Partial<NekoSession> = {}): NekoSessi
     lastActivityAt: index,
     status: "exited",
     messages: [],
+    events: [],
+    runtime: null,
     pendingPermission: null,
     resolvingPermissionId: null,
     ...overrides,

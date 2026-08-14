@@ -50,10 +50,10 @@ export interface LoadedSessionSnapshot {
 }
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
-let writeChain: Promise<void> = Promise.resolve();
+const writeChains = new Map<string, Promise<void>>();
+let indexWriteChain: Promise<void> = Promise.resolve();
 
 async function writeSession(session: NekoSession, strict: boolean): Promise<void> {
-  const index = await loadStore<SessionIndexEntry[]>(STORE, INDEX_KEY, []);
   const entry: SessionIndexEntry = {
     v: INDEX_SCHEMA_VERSION,
     id: session.id,
@@ -67,7 +67,6 @@ async function writeSession(session: NekoSession, strict: boolean): Promise<void
     controls: session.controls,
     commands: session.commands,
   };
-  const next = [entry, ...index.filter((item) => item.id !== session.id)];
   // Log-bearing snapshot first: a crash may leave stale index metadata, but
   // must never expose newer model-visible state without its durable event.
   const write = strict ? saveStoreStrict : saveStore;
@@ -76,13 +75,27 @@ async function writeSession(session: NekoSession, strict: boolean): Promise<void
     messages: session.messages,
     events: session.events,
   });
-  await write(STORE, INDEX_KEY, next);
+  // The shared index needs its own short critical section to prevent lost
+  // updates, but a slow transcript write in another session must not block
+  // this session's durability barrier.
+  const indexOperation = indexWriteChain.catch(() => {}).then(async () => {
+    const index = await loadStore<SessionIndexEntry[]>(STORE, INDEX_KEY, []);
+    const next = [entry, ...index.filter((item) => item.id !== session.id)];
+    await write(STORE, INDEX_KEY, next);
+  });
+  indexWriteChain = indexOperation.catch(() => {});
+  await indexOperation;
 }
 
 /** Serialize index+transcript writes so an older debounce can never win. */
 function enqueueWrite(session: NekoSession, strict = false): Promise<void> {
-  const operation = writeChain.catch(() => {}).then(() => writeSession(session, strict));
-  writeChain = operation.catch(() => {});
+  const previous = writeChains.get(session.id) ?? Promise.resolve();
+  const operation = previous.catch(() => {}).then(() => writeSession(session, strict));
+  const tail = operation.catch(() => {});
+  writeChains.set(session.id, tail);
+  void tail.then(() => {
+    if (writeChains.get(session.id) === tail) writeChains.delete(session.id);
+  });
   return operation;
 }
 
@@ -108,7 +121,7 @@ export async function persistSessionNow(session: NekoSession): Promise<void> {
     clearTimeout(timer);
     timers.delete(session.id);
   }
-  await enqueueWrite(session).catch(() => {});
+  await enqueueWrite(session);
 }
 
 /**
@@ -160,12 +173,16 @@ export async function deletePersistedSession(sessionId: string): Promise<void> {
     clearTimeout(timer);
     timers.delete(sessionId);
   }
-  await writeChain.catch(() => {});
-  const index = await loadSessionIndex();
-  await saveStore(
-    STORE,
-    INDEX_KEY,
-    index.filter((item) => item.id !== sessionId),
-  );
+  await writeChains.get(sessionId)?.catch(() => {});
+  const indexOperation = indexWriteChain.catch(() => {}).then(async () => {
+    const index = await loadSessionIndex();
+    await saveStore(
+      STORE,
+      INDEX_KEY,
+      index.filter((item) => item.id !== sessionId),
+    );
+  });
+  indexWriteChain = indexOperation.catch(() => {});
+  await indexOperation;
   await deleteStore(STORE, `session:${sessionId}`).catch(() => {});
 }

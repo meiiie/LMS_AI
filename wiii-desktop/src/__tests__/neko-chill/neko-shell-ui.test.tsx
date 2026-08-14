@@ -30,6 +30,8 @@ function makeSession(
     status: "exited",
     statusDetail: "Đã lưu",
     messages: [],
+    events: [],
+    runtime: null,
     pendingPermission: null,
     resolvingPermissionId: null,
     ...overrides,
@@ -255,8 +257,11 @@ describe("Neko Chill shell UI", () => {
       .toBe(true);
     expect((screen.getByRole("button", { name: "Từ chối" }) as HTMLButtonElement).disabled)
       .toBe(true);
-    expect((screen.getByTestId("neko-composer-input") as HTMLTextAreaElement).disabled)
-      .toBe(true);
+    const composer = screen.getByTestId("neko-composer-input") as HTMLTextAreaElement;
+    expect(composer.disabled).toBe(false);
+    expect(composer.readOnly).toBe(true);
+    expect(composer.getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByRole("status").textContent).toBe("Đang lưu quyết định…");
   });
 
   it("requires a project and reuses an exact recent workspace for a new session", async () => {

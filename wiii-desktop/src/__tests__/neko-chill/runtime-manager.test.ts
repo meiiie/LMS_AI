@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Driver, PermissionDecision } from "@/neko-chill/drivers/types";
 import {
   RuntimeCapabilityError,
@@ -154,6 +154,25 @@ describe("RuntimeRegistry", () => {
 
     release();
     await disposing;
+  });
+
+  it("does not report an attached provider when teardown wins during old cleanup", async () => {
+    const registry = new RuntimeRegistry();
+    let releaseOld!: () => void;
+    const oldGate = new Promise<void>((resolve) => { releaseOld = resolve; });
+    const old = new BlockingDisposeDriver("s1", oldGate);
+    await registry.replace("s1", "old", async () => old);
+    const replacement = new FakeDriver("s1");
+
+    const replacing = registry.replace("s1", "new", async () => replacement);
+    await vi.waitFor(() => expect(registry.get("s1")?.providerId).toBe("new"));
+    const teardown = registry.disposeAll();
+    releaseOld();
+
+    await expect(replacing).rejects.toThrow(RuntimeProviderChangedError);
+    await teardown;
+    expect(registry.get("s1")).toBeNull();
+    expect(replacement.disposed).toBe(1);
   });
 
   it("disposes an in-flight provider if mode teardown wins the race", async () => {

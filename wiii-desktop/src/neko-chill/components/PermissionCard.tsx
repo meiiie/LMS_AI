@@ -50,7 +50,13 @@ export function PermissionCard({ request, onResolve, resolving = false }: Permis
         ))}
       </div>
       {resolving ? (
-        <p className="mt-2 text-[11px] text-[var(--nk-text-3)]">Đang lưu quyết định…</p>
+        <p
+          className="mt-2 text-[11px] text-[var(--nk-text-3)]"
+          role="status"
+          aria-live="polite"
+        >
+          Đang lưu quyết định…
+        </p>
       ) : null}
     </div>
   );

@@ -18,6 +18,7 @@ import {
   useNekoSessionStore,
   type NekoSessionStatus,
 } from "./stores/neko-session-store";
+import { NEKO_SESSION_STATUS_LABELS } from "./session-status";
 import { NekoTranscript } from "./components/NekoTranscript";
 import { NekoComposer } from "./components/NekoComposer";
 import { NewSessionView } from "./components/NewSessionView";
@@ -105,17 +106,6 @@ function ModeSwitcher() {
       ) : null}
     </div>
   );
-}
-
-function statusLabel(status: NekoSessionStatus): string {
-  switch (status) {
-    case "streaming": return "đang làm việc";
-    case "connecting": return "đang kết nối";
-    case "dispatching": return "đang lưu & gửi";
-    case "idle": return "sẵn sàng";
-    case "exited": return "runtime đã dừng";
-    default: return "lỗi";
-  }
 }
 
 function statusColor(status: NekoSessionStatus): string {
@@ -260,7 +250,7 @@ export default function NekoChillApp() {
                       {session.title}
                     </h1>
                     <p className="truncate text-[10.5px] text-[var(--nk-text-3)]">
-                      {session.workspace?.name ?? "Chưa gắn dự án"} · {session.agentName} · {statusLabel(session.status)}
+                      {session.workspace?.name ?? "Chưa gắn dự án"} · {session.agentName} · {NEKO_SESSION_STATUS_LABELS[session.status]}
                     </p>
                   </div>
                 </div>
@@ -274,7 +264,7 @@ export default function NekoChillApp() {
                   >
                     <PanelRight aria-hidden="true" className="h-3.5 w-3.5" />
                   </button>
-                  {session.status !== "exited" && session.status !== "error" ? (
+                  {session.status !== "exited" && session.status !== "error" && session.status !== "stopping" ? (
                     <button
                       type="button"
                       className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11.5px] text-[var(--nk-text-3)] hover:bg-[var(--nk-overlay)] hover:text-[var(--nk-text)]"

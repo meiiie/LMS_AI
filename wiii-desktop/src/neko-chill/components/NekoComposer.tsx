@@ -100,7 +100,11 @@ export function NekoComposer({
   const mode = session.controls.find((option) => option.category === "mode" && option.kind === "select");
   const model = session.controls.find((option) => option.category === "model" && option.kind === "select");
   const controlsDisabled =
-    session.status !== "idle" || disabled || streaming || Boolean(session.pendingPermission);
+    session.status !== "idle" ||
+    disabled ||
+    streaming ||
+    Boolean(session.pendingPermission) ||
+    Boolean(session.pendingControlId);
   const slashQuery = draft.startsWith("/") && !draft.includes("\n")
     ? draft.slice(1).toLocaleLowerCase("vi")
     : null;
@@ -223,7 +227,9 @@ export function NekoComposer({
             rows={Math.min(draft.split("\n").length || 1, 6)}
             placeholder={session.workspace ? "Nhắn cho agent… Gõ / để xem lệnh" : "Gắn dự án trước khi nhắn…"}
             value={draft}
-            disabled={controlsDisabled || !session.workspace}
+            disabled={!session.workspace}
+            readOnly={controlsDisabled}
+            aria-busy={controlsDisabled}
             data-testid="neko-composer-input"
             onChange={(event) => {
               setDraft(event.target.value);

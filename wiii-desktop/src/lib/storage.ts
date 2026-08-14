@@ -157,8 +157,31 @@ export async function saveStoreStrict<T>(
 
   if (StoreClass) {
     const store = await StoreClass.load(effectiveName);
+    const previous = await store.get(key);
+    const hadPrevious = previous !== undefined;
     await store.set(key, value);
-    await store.save();
+    try {
+      await store.save();
+    } catch (error) {
+      // plugin-store keeps staged values in memory. Restore that staging area
+      // so a later successful save cannot accidentally persist a fact whose
+      // durability barrier already failed.
+      let compensationError: unknown;
+      try {
+        if (hadPrevious) await store.set(key, previous);
+        else await store.delete(key);
+        await store.save();
+      } catch (rollbackError) {
+        compensationError = rollbackError;
+      }
+      if (compensationError) {
+        throw new AggregateError(
+          [error, compensationError],
+          `Không thể lưu hoặc hoàn tác ${effectiveName}/${key}.`,
+        );
+      }
+      throw error;
+    }
     return;
   }
 

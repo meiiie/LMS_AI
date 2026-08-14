@@ -11,6 +11,9 @@ const storage = new Map<string, unknown>();
 let failTranscriptWrites = false;
 let transcriptWritesBeforeFailure: number | null = null;
 let strictWriteGate: Promise<void> | null = null;
+let strictBlockedKey: string | null = null;
+let gateOnlyWhenFailurePending = false;
+let notifyStrictGateEntered: (() => void) | null = null;
 
 async function saveToMemory(store: string, key: string, value: unknown): Promise<void> {
   if (key.startsWith("session:")) {
@@ -24,7 +27,14 @@ async function saveToMemory(store: string, key: string, value: unknown): Promise
 }
 
 async function saveStrictToMemory(store: string, key: string, value: unknown): Promise<void> {
-  if (strictWriteGate) await strictWriteGate;
+  const shouldWait =
+    strictWriteGate &&
+    (!strictBlockedKey || key === strictBlockedKey) &&
+    (!gateOnlyWhenFailurePending || transcriptWritesBeforeFailure === 0);
+  if (shouldWait) {
+    notifyStrictGateEntered?.();
+    await strictWriteGate;
+  }
   await saveToMemory(store, key, value);
 }
 
@@ -47,6 +57,7 @@ import {
   _setDriverFactoryForTests,
   _clearLiveDriversForTests,
 } from "@/neko-chill/stores/neko-session-store";
+import { persistSessionNow } from "@/neko-chill/persistence";
 
 const AGENT: DetectedAgent = {
   id: "neko",
@@ -67,6 +78,8 @@ class FakeDriver implements Driver {
   prompts: string[] = [];
   promptSawDurableEvents: unknown[][] = [];
   configErrorForValue: string | boolean | null = null;
+  configChanges: Array<{ optionId: string; value: string | boolean }> = [];
+  disposed = 0;
   constructor(
     readonly sessionId: string,
     readonly emit: (event: DriverEvent) => void,
@@ -81,10 +94,11 @@ class FakeDriver implements Driver {
   }
   async cancel(): Promise<void> {}
   async resolvePermission(_: PermissionDecision): Promise<void> {}
-  async setConfigOption(_optionId: string, value: string | boolean): Promise<void> {
+  async setConfigOption(optionId: string, value: string | boolean): Promise<void> {
     if (value === this.configErrorForValue) throw new Error("compensation rejected");
+    this.configChanges.push({ optionId, value });
   }
-  async dispose(): Promise<void> {}
+  async dispose(): Promise<void> { this.disposed += 1; }
 }
 
 let spawned: FakeDriver[] = [];
@@ -110,6 +124,9 @@ describe("neko-chill persistence", () => {
     failTranscriptWrites = false;
     transcriptWritesBeforeFailure = null;
     strictWriteGate = null;
+    strictBlockedKey = null;
+    gateOnlyWhenFailurePending = false;
+    notifyStrictGateEntered = null;
     spawned = [];
     useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
     useNekoAgentStore.setState({ agents: [AGENT], isLoading: false });
@@ -176,6 +193,14 @@ describe("neko-chill persistence", () => {
     );
   });
 
+  it("propagates immediate background persistence failures to its caller", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    failTranscriptWrites = true;
+
+    await expect(persistSessionNow(useNekoSessionStore.getState().sessions[id]))
+      .rejects.toThrow("disk unavailable");
+  });
+
   it("locks the composer while a prompt waits for durable storage", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
     let release!: () => void;
@@ -193,6 +218,60 @@ describe("neko-chill persistence", () => {
 
     expect(spawned[0].prompts).toEqual(["lượt đầu"]);
     expect(useNekoSessionStore.getState().sessions[id].status).toBe("idle");
+  });
+
+  it("cancels initial runtime creation when the session closes during persistence", async () => {
+    let release!: () => void;
+    strictWriteGate = new Promise<void>((resolve) => { release = resolve; });
+
+    const creating = useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    const id = useNekoSessionStore.getState().activeSessionId!;
+    const closing = useNekoSessionStore.getState().closeSession(id);
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("stopping");
+
+    release();
+    await Promise.all([creating, closing]);
+
+    expect(spawned).toEqual([]);
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("exited");
+  });
+
+  it("cancels initial runtime creation when the session is deleted during persistence", async () => {
+    let release!: () => void;
+    strictWriteGate = new Promise<void>((resolve) => { release = resolve; });
+
+    const creating = useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    const id = useNekoSessionStore.getState().activeSessionId!;
+    const deleting = useNekoSessionStore.getState().deleteSession(id);
+    expect(useNekoSessionStore.getState().sessions[id].status).toBe("stopping");
+
+    release();
+    await Promise.all([creating, deleting]);
+
+    expect(spawned).toEqual([]);
+    expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
+  });
+
+  it("does not block one session behind another session's transcript write", async () => {
+    const firstId = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    const secondId = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    let release!: () => void;
+    strictWriteGate = new Promise<void>((resolve) => { release = resolve; });
+    strictBlockedKey = `session:${firstId}`;
+
+    useNekoSessionStore.getState().setActiveSession(firstId);
+    const blocked = useNekoSessionStore.getState().sendPrompt("phiên đang chờ đĩa");
+    expect(useNekoSessionStore.getState().sessions[firstId].status).toBe("dispatching");
+
+    useNekoSessionStore.getState().setActiveSession(secondId);
+    await useNekoSessionStore.getState().sendPrompt("phiên độc lập");
+    expect(spawned.find((driver) => driver.sessionId === secondId)?.prompts)
+      .toEqual(["phiên độc lập"]);
+
+    release();
+    await blocked;
+    expect(spawned.find((driver) => driver.sessionId === firstId)?.prompts)
+      .toEqual(["phiên đang chờ đĩa"]);
   });
 
   it("surfaces rollback-failed when commit persistence and compensation both fail", async () => {
@@ -224,6 +303,42 @@ describe("neko-chill persistence", () => {
       type: "control-change",
       phase: "rollback-failed",
     });
+  });
+
+  it("does not compensate a failed commit through a detached provider", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "model",
+        label: "Model",
+        category: "model",
+        kind: "select",
+        currentValue: "stable",
+        choices: [
+          { value: "stable", label: "Stable" },
+          { value: "preview", label: "Preview" },
+        ],
+      }],
+    });
+    let release!: () => void;
+    strictWriteGate = new Promise<void>((resolve) => { release = resolve; });
+    strictBlockedKey = `session:${id}`;
+    gateOnlyWhenFailurePending = true;
+    transcriptWritesBeforeFailure = 1;
+    const gateEntered = new Promise<void>((resolve) => { notifyStrictGateEntered = resolve; });
+
+    const changing = useNekoSessionStore.getState().setConfigOption("model", "preview");
+    await gateEntered;
+    const closing = useNekoSessionStore.getState().closeSession(id);
+    await vi.waitFor(() => expect(spawned[0].disposed).toBe(1));
+    release();
+    await Promise.all([changing, closing]);
+
+    expect(spawned[0].configChanges).toEqual([{ optionId: "model", value: "preview" }]);
+    expect(useNekoSessionStore.getState().sessions[id].events.at(-1)?.data)
+      .toMatchObject({ type: "control-change", phase: "rollback-failed" });
   });
 
   it("hydrates a v1 index as a visible legacy session without losing transcript", async () => {

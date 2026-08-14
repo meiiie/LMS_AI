@@ -158,6 +158,11 @@ export class RuntimeRegistry {
           cleanupError = error;
         }
       }
+      if (this.bindings.get(sessionId)?.provider.instanceId !== instanceId) {
+        // Teardown or another replacement won while the prior scope was
+        // closing. Never report a provider whose ownership was revoked.
+        throw new RuntimeProviderChangedError();
+      }
       return {
         current: provider,
         previous: previous?.provider ?? null,

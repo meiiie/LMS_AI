@@ -193,6 +193,31 @@ describe("neko-session-store", () => {
     expect(phases.slice(-2)).toEqual(["requested", "rolled-back"]);
   });
 
+  it("blocks prompts until a configuration transaction finishes", async () => {
+    const id = await setup();
+    emit({
+      type: "session-controls",
+      sessionId: id,
+      controls: [{
+        id: "mode",
+        label: "Chế độ",
+        category: "mode",
+        kind: "select",
+        currentValue: "default",
+        choices: [{ value: "default", label: "Default" }, { value: "plan", label: "Plan" }],
+      }],
+    });
+
+    const changing = useNekoSessionStore.getState().setConfigOption("mode", "plan");
+    expect(session(id).pendingControlId).toBe("mode");
+    await useNekoSessionStore.getState().sendPrompt("không được chạy giữa giao dịch");
+    await changing;
+
+    expect(driver.prompts).toEqual([]);
+    expect(driver.configChanges).toEqual([{ optionId: "mode", value: "plan" }]);
+    expect(session(id).pendingControlId).toBeNull();
+  });
+
   it("attaches a workspace to a legacy transcript and restarts on the next prompt", async () => {
     const id = await setup();
     useNekoSessionStore.setState((state) => {
