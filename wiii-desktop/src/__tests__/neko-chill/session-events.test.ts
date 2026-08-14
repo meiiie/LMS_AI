@@ -38,4 +38,17 @@ describe("Neko session event validation", () => {
       data,
     })).toBe(false);
   });
+
+  it.each([null, undefined, [], "model-input", 1])(
+    "rejects a non-object event payload: %s",
+    (data) => {
+      expect(isNekoSessionEvent({
+        v: 1,
+        seq: 1,
+        at: 100,
+        visibility: "model",
+        data,
+      })).toBe(false);
+    },
+  );
 });

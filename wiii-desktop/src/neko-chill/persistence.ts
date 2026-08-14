@@ -55,6 +55,8 @@ export interface LoadedSessionSnapshot {
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const writeChains = new Map<string, Promise<void>>();
+const publishedIds = new Set<string>();
+let catalogWriteChain: Promise<void> = Promise.resolve();
 let indexWriteChain: Promise<void> = Promise.resolve();
 
 function isSessionIndexEntry(value: unknown, expectedId?: string): value is SessionIndexEntry {
@@ -95,37 +97,46 @@ async function writeSession(session: NekoSession, strict: boolean): Promise<void
     controls: session.controls,
     commands: session.commands,
   };
-  const write = strict ? saveStoreStrict : saveStore;
   // The catalog contains IDs only, so publishing it before the snapshot never
   // exposes model-visible state. It makes a transcript recoverable when the
-  // later index-cache write fails or the process crashes between keys.
-  const catalogOperation = indexWriteChain.catch(() => {}).then(async () => {
-    const catalog = validSessionIds(await loadStore<unknown>(STORE, SESSION_IDS_KEY, []));
-    if (!catalog.includes(session.id)) {
-      await write(STORE, SESSION_IDS_KEY, [session.id, ...catalog]);
-    }
-  });
-  indexWriteChain = catalogOperation.catch(() => {});
-  await catalogOperation;
+  // later index-cache write fails or the process crashes between keys. Only a
+  // new ID enters the shared metadata chain; normal per-session barriers stay
+  // independent from unrelated index I/O.
+  if (!publishedIds.has(session.id)) {
+    const catalogOperation = catalogWriteChain.catch(() => {}).then(async () => {
+      const catalog = validSessionIds(await loadStore<unknown>(STORE, SESSION_IDS_KEY, []));
+      if (!catalog.includes(session.id)) {
+        // Discovery is part of the authoritative snapshot contract, even for
+        // background writes. Never mark an ID published after a best-effort save.
+        await saveStoreStrict(STORE, SESSION_IDS_KEY, [session.id, ...catalog]);
+      }
+    });
+    catalogWriteChain = catalogOperation.catch(() => {});
+    await catalogOperation;
+    publishedIds.add(session.id);
+  }
 
   // This per-session key is the authoritative, self-contained snapshot. A
   // crash may leave stale index metadata, but hydration reconciles from here.
+  const write = strict ? saveStoreStrict : saveStore;
   await write<PersistedTranscript>(STORE, `session:${session.id}`, {
     v: SCHEMA_VERSION,
     messages: session.messages,
     events: session.events,
     entry,
   });
-  // The shared index needs its own short critical section to prevent lost
-  // updates, but a slow transcript write in another session must not block
-  // this session's durability barrier.
+  // The shared index is only a cache. Queue it to prevent lost updates, but do
+  // not make a durable model boundary wait for unrelated cache I/O.
   const indexOperation = indexWriteChain.catch(() => {}).then(async () => {
-    const index = await loadStore<SessionIndexEntry[]>(STORE, INDEX_KEY, []);
+    const rawIndex = await loadStore<unknown>(STORE, INDEX_KEY, []);
+    const index = Array.isArray(rawIndex)
+      ? rawIndex.filter((item): item is SessionIndexEntry => isSessionIndexEntry(item))
+      : [];
     const next = [entry, ...index.filter((item) => item.id !== session.id)];
-    await write(STORE, INDEX_KEY, next);
+    await saveStore(STORE, INDEX_KEY, next);
   });
   indexWriteChain = indexOperation.catch(() => {});
-  await indexOperation;
+  void indexOperation.catch(() => {});
 }
 
 /** Serialize index+transcript writes so an older debounce can never win. */
@@ -189,9 +200,10 @@ export async function loadSessionIndex(): Promise<SessionIndexEntry[]> {
     ? rawIndex.filter((entry): entry is SessionIndexEntry => isSessionIndexEntry(entry))
     : [];
   const catalog = validSessionIds(await loadStore<unknown>(STORE, SESSION_IDS_KEY, []));
+  for (const sessionId of catalog) publishedIds.add(sessionId);
   const sessionIds = [...new Set([...catalog, ...cached.map((entry) => entry.id)])];
-  const reconciled: SessionIndexEntry[] = [];
-  for (const sessionId of sessionIds) {
+  const cachedById = new Map(cached.map((entry) => [entry.id, entry]));
+  const resolved = await Promise.all(sessionIds.map(async (sessionId) => {
     const stored = await loadStore<PersistedTranscript | null>(
       STORE,
       `session:${sessionId}`,
@@ -200,10 +212,11 @@ export async function loadSessionIndex(): Promise<SessionIndexEntry[]> {
     const embedded = stored && isSessionIndexEntry(stored.entry, sessionId)
       ? stored.entry
       : null;
-    const fallback = cached.find((entry) => entry.id === sessionId) ?? null;
-    const recovered = embedded ?? fallback;
-    if (recovered) reconciled.push(recovered);
-  }
+    return embedded ?? cachedById.get(sessionId) ?? null;
+  }));
+  const reconciled = resolved.filter(
+    (entry): entry is SessionIndexEntry => entry !== null,
+  );
   return reconciled.sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
@@ -244,19 +257,24 @@ export async function deletePersistedSession(sessionId: string): Promise<void> {
     const index = Array.isArray(rawIndex)
       ? rawIndex.filter((entry): entry is SessionIndexEntry => isSessionIndexEntry(entry))
       : [];
-    const catalog = validSessionIds(await loadStore<unknown>(STORE, SESSION_IDS_KEY, []));
-    await saveStore(
+    await saveStoreStrict(
       STORE,
       INDEX_KEY,
       index.filter((item) => item.id !== sessionId),
     );
-    await saveStore(
+  });
+  indexWriteChain = indexOperation.catch(() => {});
+  await indexOperation;
+  const catalogOperation = catalogWriteChain.catch(() => {}).then(async () => {
+    const catalog = validSessionIds(await loadStore<unknown>(STORE, SESSION_IDS_KEY, []));
+    await saveStoreStrict(
       STORE,
       SESSION_IDS_KEY,
       catalog.filter((id) => id !== sessionId),
     );
   });
-  indexWriteChain = indexOperation.catch(() => {});
-  await indexOperation;
+  catalogWriteChain = catalogOperation.catch(() => {});
+  await catalogOperation;
+  publishedIds.delete(sessionId);
   await deleteStore(STORE, `session:${sessionId}`).catch(() => {});
 }

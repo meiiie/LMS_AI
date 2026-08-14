@@ -1,9 +1,29 @@
-import type { DriverKind } from "./drivers/types";
+import type { DriverCapability, DriverKind } from "./drivers/types";
 import type { RuntimeProviderSnapshot } from "./runtime-manager";
 
 export const NEKO_SESSION_EVENT_VERSION = 1;
 
 export type ModelValue = string | boolean | null;
+
+const DRIVER_CAPABILITIES = {
+  prompt: true,
+  cancel: true,
+  "permission-resolution": true,
+  "session-config": true,
+} as const satisfies Record<DriverCapability, true>;
+
+const RUNTIME_DETACH_REASONS = [
+  "close",
+  "delete",
+  "idle",
+  "mode-exit",
+  "process-exit",
+  "workspace-change",
+  "config-uncertain",
+  "durability-failure",
+] as const;
+
+type RuntimeDetachReason = (typeof RUNTIME_DETACH_REASONS)[number];
 
 export type NekoSessionEventData =
   | {
@@ -48,15 +68,7 @@ export type NekoSessionEventData =
       providerId: string;
       instanceId: string;
       kind: DriverKind;
-      reason:
-        | "close"
-        | "delete"
-        | "idle"
-        | "mode-exit"
-        | "process-exit"
-        | "workspace-change"
-        | "config-uncertain"
-        | "durability-failure";
+      reason: RuntimeDetachReason;
     }
   | {
       type: "runtime-attach-failed";
@@ -111,9 +123,7 @@ function isRuntimeProvider(value: unknown): value is RuntimeProviderSnapshot {
     (provider.kind === "acp" || provider.kind === "wiii-cloud") &&
     Array.isArray(provider.capabilities) &&
     provider.capabilities.every((capability) =>
-      ["prompt", "cancel", "permission-resolution", "session-config"].includes(
-        capability as string,
-      )) &&
+      typeof capability === "string" && capability in DRIVER_CAPABILITIES) &&
     (provider.contextContinuity === "process" || provider.contextContinuity === "resumable") &&
     (provider.workspaceIsolation === "advisory" || provider.workspaceIsolation === "enforced")
   );
@@ -160,16 +170,7 @@ function isValidEventData(data: Record<string, unknown>): boolean {
         typeof data.providerId === "string" &&
         typeof data.instanceId === "string" &&
         (data.kind === "acp" || data.kind === "wiii-cloud") &&
-        [
-          "close",
-          "delete",
-          "idle",
-          "mode-exit",
-          "process-exit",
-          "workspace-change",
-          "config-uncertain",
-          "durability-failure",
-        ].includes(data.reason as string)
+        RUNTIME_DETACH_REASONS.includes(data.reason as RuntimeDetachReason)
       );
     case "runtime-attach-failed":
       return typeof data.providerId === "string" && typeof data.reason === "string";
@@ -190,7 +191,9 @@ export function isNekoSessionEvent(value: unknown): value is NekoSessionEvent {
     typeof candidate.at === "number" &&
     Number.isFinite(candidate.at) &&
     (candidate.visibility === "model" || candidate.visibility === "runtime") &&
-    data !== undefined &&
+    data !== null &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
     isValidEventData(data)
   );
 }

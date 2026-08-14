@@ -2,12 +2,14 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const values = new Map<string, unknown>();
 let failNextSave = false;
+let failEverySave = false;
 
 const store = {
   get: vi.fn(async (key: string) => values.get(key)),
   set: vi.fn(async (key: string, value: unknown) => { values.set(key, value); }),
   delete: vi.fn(async (key: string) => { values.delete(key); }),
   save: vi.fn(async () => {
+    if (failEverySave) throw new Error("desktop disk unavailable");
     if (failNextSave) {
       failNextSave = false;
       throw new Error("desktop disk unavailable");
@@ -25,6 +27,7 @@ describe("saveStoreStrict in Tauri", () => {
   beforeEach(() => {
     values.clear();
     failNextSave = false;
+    failEverySave = false;
     vi.clearAllMocks();
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
@@ -55,5 +58,21 @@ describe("saveStoreStrict in Tauri", () => {
 
     expect(values.get("fact")).toBe("before");
     expect(store.set).toHaveBeenLastCalledWith("fact", "before");
+  });
+
+  it("reports the save and compensation failures together", async () => {
+    values.set("fact", "before");
+    failEverySave = true;
+
+    const failure = await saveStoreStrict("strict.json", "fact", "after").then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      expect.objectContaining({ message: "desktop disk unavailable" }),
+      expect.objectContaining({ message: "desktop disk unavailable" }),
+    ]);
   });
 });

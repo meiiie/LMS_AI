@@ -204,6 +204,14 @@ function projectControls(
   return projected;
 }
 
+function removeEventAtSequence(events: NekoSessionEvent[], sequence: number | null): void {
+  if (sequence === null) return;
+  const eventIndex = events.findIndex((event) => event.seq === sequence);
+  if (eventIndex < 0) return;
+  events.splice(eventIndex, 1);
+  events.forEach((event, index) => { event.seq = index + 1; });
+}
+
 export const useNekoSessionStore = create<NekoSessionState>()(
   immer((set, get) => ({
     sessions: {},
@@ -220,7 +228,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         if (get().sessions[entry.id]) continue;
         const snapshot = await loadSessionSnapshot(entry.id);
         const events = [...snapshot.events];
-        if (snapshot.needsEventMigration || events.length === 0) {
+        const needsMigration = snapshot.needsEventMigration || events.length === 0;
+        if (needsMigration) {
           appendSessionEvent(events, "model", {
             type: "session-context",
             source: "legacy-migration",
@@ -278,13 +287,15 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           commands: entry.commands ?? [],
           pendingControlId: null,
           lastActivityAt: entry.updatedAt,
-          status: "exited",
+          status: needsMigration ? "connecting" : "exited",
           messages: snapshot.messages,
           events,
           runtime: null,
           pendingPermission: null,
           resolvingPermissionId: null,
-          statusDetail: "Phiên đã lưu — nhắn tiếp để khởi động lại agent.",
+          statusDetail: needsMigration
+            ? "Đang nâng cấp log phiên trước khi có thể khởi động lại agent…"
+            : "Phiên đã lưu — nhắn tiếp để khởi động lại agent.",
         };
       }
       set((state) => {
@@ -292,7 +303,26 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         state.hydrated = true;
       });
       for (const sessionId of migratedIds) {
-        await persistSessionNowOrReport(sessionId, "bản nâng cấp log phiên");
+        const session = get().sessions[sessionId];
+        if (!session) continue;
+        try {
+          // A migrated boundary log is not usable until the upgraded snapshot
+          // is durable. Restored sessions must not respawn through this gate.
+          await persistSessionStrict(session);
+          set((state) => {
+            const current = state.sessions[sessionId];
+            if (!current || current.runtime || current.status !== "connecting") return;
+            current.status = "exited";
+            current.statusDetail = "Phiên đã lưu — nhắn tiếp để khởi động lại agent.";
+          });
+        } catch (error) {
+          set((state) => {
+            const current = state.sessions[sessionId];
+            if (!current || current.runtime) return;
+            current.status = "error";
+            current.statusDetail = `Không thể lưu bản nâng cấp log phiên: ${error instanceof Error ? error.message : String(error)}`;
+          });
+        }
       }
     },
 
@@ -568,17 +598,19 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       if (!provider) return;
       const providerInstanceId = provider.instanceId;
       const messageId = uuidv4();
+      const previousTitle = get().sessions[sessionId]?.title;
+      let inputEventSequence: number | null = null;
       set((state) => {
         const s = state.sessions[sessionId];
         if (!s) return;
         s.messages.push({ id: messageId, role: "user", text });
-        appendSessionEvent(s.events as NekoSessionEvent[], "model", {
+        inputEventSequence = appendSessionEvent(s.events as NekoSessionEvent[], "model", {
           type: "model-input",
           source: "live",
           messageId,
           text,
           providerInstanceId,
-        });
+        }).seq;
         // Acquire the turn synchronously. No second composer submission may
         // pass while the first prompt waits for its durability barrier.
         s.status = "dispatching";
@@ -598,6 +630,14 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         set((state) => {
           const current = state.sessions[sessionId];
           if (current) {
+            current.messages = current.messages.filter((message) => message.id !== messageId);
+            removeEventAtSequence(
+              current.events as NekoSessionEvent[],
+              inputEventSequence,
+            );
+            if (current.messages.length === 0 && previousTitle) {
+              current.title = previousTitle;
+            }
             if (current.status === "dispatching") current.status = "idle";
             current.statusDetail = `Không thể lưu prompt nên chưa gửi cho agent: ${error instanceof Error ? error.message : String(error)}`;
           }
@@ -632,20 +672,35 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       if (!sessionId) return;
       const provider = runtimes.get(sessionId);
       if (!provider) return;
+      let commandEventSequence: number | null = null;
       set((state) => {
         const session = state.sessions[sessionId];
         if (session) {
-          appendSessionEvent(session.events as NekoSessionEvent[], "model", {
+          commandEventSequence = appendSessionEvent(session.events as NekoSessionEvent[], "model", {
             type: "runtime-command",
             action: "cancel",
             providerInstanceId: provider.instanceId,
-          });
+          }).seq;
         }
       });
       const session = get().sessions[sessionId];
       if (!session) return;
       try {
         await persistSessionBeforeDispatch(session);
+      } catch (error) {
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (current) {
+            removeEventAtSequence(
+              current.events as NekoSessionEvent[],
+              commandEventSequence,
+            );
+            current.statusDetail = error instanceof Error ? error.message : String(error);
+          }
+        });
+        return;
+      }
+      try {
         await runtimes
           .requireInstance(sessionId, provider.instanceId, "cancel")
           .cancel();
@@ -665,22 +720,25 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       if (!request || session?.resolvingPermissionId) return;
       const provider = runtimes.get(sessionId);
       if (!provider) return;
+      let decisionEventSequence: number | null = null;
+      let decisionPersisted = false;
       set((state) => {
         const s = state.sessions[sessionId];
         if (s?.pendingPermission?.requestId === request.requestId) {
           // Acquire this approval synchronously so a double click cannot
           // append a conflicting decision while persistence is in flight.
           s.resolvingPermissionId = request.requestId;
-          appendSessionEvent(s.events as NekoSessionEvent[], "model", {
+          decisionEventSequence = appendSessionEvent(s.events as NekoSessionEvent[], "model", {
             type: "permission-decision",
             requestId: request.requestId,
             optionId,
             providerInstanceId: provider.instanceId,
-          });
+          }).seq;
         }
       });
       try {
         await persistSessionBeforeDispatch(get().sessions[sessionId]);
+        decisionPersisted = true;
         // Driver fails closed on null/unknown options (FR-006).
         await runtimes
           .requireInstance(
@@ -702,6 +760,12 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         set((state) => {
           const s = state.sessions[sessionId];
           if (s) {
+            if (!decisionPersisted) {
+              removeEventAtSequence(
+                s.events as NekoSessionEvent[],
+                decisionEventSequence,
+              );
+            }
             if (s.resolvingPermissionId === request.requestId) {
               s.resolvingPermissionId = null;
             }
@@ -1001,7 +1065,18 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         if (session) session.status = "stopping";
       });
       await runtimes.detach(sessionId).catch(() => {});
-      await deletePersistedSession(sessionId);
+      try {
+        await deletePersistedSession(sessionId);
+      } catch (error) {
+        set((state) => {
+          const session = state.sessions[sessionId];
+          if (!session) return;
+          session.runtime = null;
+          session.status = "error";
+          session.statusDetail = `Không thể xóa phiên khỏi bộ nhớ bền: ${error instanceof Error ? error.message : String(error)}`;
+        });
+        return;
+      }
       set((state) => {
         delete state.sessions[sessionId];
         if (state.activeSessionId === sessionId) {

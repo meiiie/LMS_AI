@@ -10,6 +10,9 @@ import type { DetectedAgent } from "@/neko-chill/stores/neko-agent-store";
 const storage = new Map<string, unknown>();
 let failTranscriptWrites = false;
 let failIndexWrites = false;
+let indexWriteGate: Promise<void> | null = null;
+let notifyIndexWriteEntered: (() => void) | null = null;
+let indexWriteAttempts = 0;
 let transcriptWritesBeforeFailure: number | null = null;
 let strictWriteGate: Promise<void> | null = null;
 let strictBlockedKey: string | null = null;
@@ -17,7 +20,12 @@ let gateOnlyWhenFailurePending = false;
 let notifyStrictGateEntered: (() => void) | null = null;
 
 async function saveToMemory(store: string, key: string, value: unknown): Promise<void> {
-  if (key === "index" && failIndexWrites) throw new Error("index unavailable");
+  if (key === "index") {
+    indexWriteAttempts += 1;
+    notifyIndexWriteEntered?.();
+    if (indexWriteGate) await indexWriteGate;
+    if (failIndexWrites) throw new Error("index unavailable");
+  }
   if (key.startsWith("session:")) {
     if (failTranscriptWrites) throw new Error("disk unavailable");
     if (transcriptWritesBeforeFailure !== null) {
@@ -83,6 +91,8 @@ class FakeDriver implements Driver {
   configErrorForValue: string | boolean | null = null;
   failStorageOnConfigError = false;
   configChanges: Array<{ optionId: string; value: string | boolean }> = [];
+  decisions: PermissionDecision[] = [];
+  cancelled = 0;
   disposed = 0;
   constructor(
     readonly sessionId: string,
@@ -96,8 +106,10 @@ class FakeDriver implements Driver {
     this.promptSawDurableEvents.push(snapshot?.events ?? []);
     this.prompts.push(text);
   }
-  async cancel(): Promise<void> {}
-  async resolvePermission(_: PermissionDecision): Promise<void> {}
+  async cancel(): Promise<void> { this.cancelled += 1; }
+  async resolvePermission(decision: PermissionDecision): Promise<void> {
+    this.decisions.push(decision);
+  }
   async setConfigOption(optionId: string, value: string | boolean): Promise<void> {
     if (value === this.configErrorForValue) {
       if (this.failStorageOnConfigError) failTranscriptWrites = true;
@@ -130,6 +142,9 @@ describe("neko-chill persistence", () => {
     storage.clear();
     failTranscriptWrites = false;
     failIndexWrites = false;
+    indexWriteGate = null;
+    notifyIndexWriteEntered = null;
+    indexWriteAttempts = 0;
     transcriptWritesBeforeFailure = null;
     strictWriteGate = null;
     strictBlockedKey = null;
@@ -191,14 +206,28 @@ describe("neko-chill persistence", () => {
 
   it("fails closed and never dispatches when the model-input log cannot persist", async () => {
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    const originalTitle = useNekoSessionStore.getState().sessions[id].title;
     failTranscriptWrites = true;
 
     await useNekoSessionStore.getState().sendPrompt("không được gửi");
 
     expect(spawned[0].prompts).toEqual([]);
-    expect(useNekoSessionStore.getState().sessions[id].statusDetail).toContain(
+    const failed = useNekoSessionStore.getState().sessions[id];
+    expect(failed.messages).toEqual([]);
+    expect(failed.title).toBe(originalTitle);
+    expect(failed.events.some(
+      (event) => event.data.type === "model-input" && event.data.text === "không được gửi",
+    )).toBe(false);
+    expect(failed.statusDetail).toContain(
       "chưa gửi cho agent",
     );
+
+    failTranscriptWrites = false;
+    await useNekoSessionStore.getState().sendPrompt("thử lại");
+    expect(spawned[0].prompts).toEqual(["thử lại"]);
+    expect(useNekoSessionStore.getState().sessions[id].messages).toEqual([
+      expect.objectContaining({ text: "thử lại" }),
+    ]);
   });
 
   it("recovers a self-contained session when the index cache write fails", async () => {
@@ -206,7 +235,8 @@ describe("neko-chill persistence", () => {
 
     const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
 
-    expect(spawned).toEqual([]);
+    await vi.waitFor(() => expect(indexWriteAttempts).toBeGreaterThan(0));
+    expect(spawned).toHaveLength(1);
     expect(storage.get("neko-chill-sessions.json:session-ids")).toContain(id);
     expect(storage.get("neko-chill-sessions.json:index")).toBeUndefined();
     useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
@@ -230,6 +260,85 @@ describe("neko-chill persistence", () => {
         }),
       ]),
     );
+  });
+
+  it("does not block another session or new catalog entry behind index-cache I/O", async () => {
+    const firstId = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    const secondId = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await vi.waitFor(() => expect(
+      (storage.get("neko-chill-sessions.json:index") as unknown[] | undefined)?.length,
+    ).toBe(2));
+    const initialIndexAttempts = indexWriteAttempts;
+    let releaseIndex!: () => void;
+    indexWriteGate = new Promise<void>((resolve) => { releaseIndex = resolve; });
+    const indexEntered = new Promise<void>((resolve) => { notifyIndexWriteEntered = resolve; });
+
+    useNekoSessionStore.getState().setActiveSession(firstId);
+    await useNekoSessionStore.getState().sendPrompt("phiên một");
+    await indexEntered;
+    useNekoSessionStore.getState().setActiveSession(secondId);
+    await useNekoSessionStore.getState().sendPrompt("phiên hai");
+    const thirdId = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+
+    expect(spawned.find((driver) => driver.sessionId === secondId)?.prompts)
+      .toEqual(["phiên hai"]);
+    expect(spawned.some((driver) => driver.sessionId === thirdId)).toBe(true);
+    releaseIndex();
+    indexWriteGate = null;
+    await vi.waitFor(() => expect(indexWriteAttempts).toBeGreaterThanOrEqual(
+      initialIndexAttempts + 3,
+    ));
+  });
+
+  it("removes a permission decision whose durability barrier fails", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    emit({
+      type: "permission-request",
+      sessionId: id,
+      request: {
+        requestId: "permission-retry",
+        title: "Write(config.json)",
+        options: [
+          { optionId: "reject", label: "Từ chối", kind: "reject_once" },
+          { optionId: "allow", label: "Cho phép", kind: "allow_once" },
+        ],
+      },
+    });
+    failTranscriptWrites = true;
+
+    await useNekoSessionStore.getState().resolvePermission("reject");
+
+    const failed = useNekoSessionStore.getState().sessions[id];
+    expect(failed.pendingPermission?.requestId).toBe("permission-retry");
+    expect(failed.resolvingPermissionId).toBeNull();
+    expect(failed.events.filter((event) => event.data.type === "permission-decision"))
+      .toHaveLength(0);
+    expect(spawned[0].decisions).toEqual([]);
+
+    failTranscriptWrites = false;
+    await useNekoSessionStore.getState().resolvePermission("allow");
+    expect(spawned[0].decisions).toEqual([
+      { requestId: "permission-retry", optionId: "allow" },
+    ]);
+    expect(useNekoSessionStore.getState().sessions[id].events.filter(
+      (event) => event.data.type === "permission-decision",
+    )).toHaveLength(1);
+  });
+
+  it("removes a cancel command whose durability barrier fails", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    failTranscriptWrites = true;
+
+    await useNekoSessionStore.getState().cancelTurn();
+
+    expect(spawned[0].cancelled).toBe(0);
+    expect(useNekoSessionStore.getState().sessions[id].events.filter(
+      (event) => event.data.type === "runtime-command",
+    )).toHaveLength(0);
+
+    failTranscriptWrites = false;
+    await useNekoSessionStore.getState().cancelTurn();
+    expect(spawned[0].cancelled).toBe(1);
   });
 
   it("propagates immediate background persistence failures to its caller", async () => {
@@ -522,6 +631,73 @@ describe("neko-chill persistence", () => {
     );
   });
 
+  it("keeps a legacy session fail-closed when log migration cannot persist", async () => {
+    storage.set("neko-chill-sessions.json:index", [
+      {
+        id: "legacy-migration-failure",
+        agentId: AGENT.id,
+        agentName: AGENT.name,
+        title: "Phiên cũ",
+        createdAt: 100,
+        updatedAt: 200,
+        workspace: WORKSPACE,
+      },
+    ]);
+    storage.set("neko-chill-sessions.json:session:legacy-migration-failure", {
+      v: 1,
+      messages: [{ id: "legacy-message", role: "user", text: "nội dung cũ" }],
+    });
+    failTranscriptWrites = true;
+
+    await useNekoSessionStore.getState().hydrate();
+
+    const restored = useNekoSessionStore.getState().sessions["legacy-migration-failure"];
+    expect(restored.status).toBe("error");
+    expect(restored.runtime).toBeNull();
+    expect(restored.statusDetail).toContain("nâng cấp log phiên");
+    useNekoSessionStore.getState().setActiveSession("legacy-migration-failure");
+    await useNekoSessionStore.getState().sendPrompt("không được respawn");
+    expect(spawned).toEqual([]);
+    expect((storage.get(
+      "neko-chill-sessions.json:session:legacy-migration-failure",
+    ) as { v: number }).v).toBe(1);
+  });
+
+  it("keeps a migrating legacy session closed until the strict write commits", async () => {
+    storage.set("neko-chill-sessions.json:index", [
+      {
+        id: "legacy-migration-pending",
+        agentId: AGENT.id,
+        agentName: AGENT.name,
+        title: "Phiên cũ",
+        createdAt: 100,
+        updatedAt: 200,
+        workspace: WORKSPACE,
+      },
+    ]);
+    storage.set("neko-chill-sessions.json:session:legacy-migration-pending", {
+      v: 1,
+      messages: [],
+    });
+    let release!: () => void;
+    strictWriteGate = new Promise<void>((resolve) => { release = resolve; });
+    strictBlockedKey = "session:legacy-migration-pending";
+    const gateEntered = new Promise<void>((resolve) => { notifyStrictGateEntered = resolve; });
+
+    const hydrating = useNekoSessionStore.getState().hydrate();
+    await gateEntered;
+    expect(useNekoSessionStore.getState().sessions["legacy-migration-pending"].status)
+      .toBe("connecting");
+    useNekoSessionStore.getState().setActiveSession("legacy-migration-pending");
+    await useNekoSessionStore.getState().sendPrompt("không được chen vào migration");
+    expect(spawned).toEqual([]);
+
+    release();
+    await hydrating;
+    expect(useNekoSessionStore.getState().sessions["legacy-migration-pending"].status)
+      .toBe("exited");
+  });
+
   it("reconciles workspace metadata from a durable context event", async () => {
     storage.set("neko-chill-sessions.json:index", [
       {
@@ -694,6 +870,27 @@ describe("neko-chill persistence", () => {
     expect(storage.get("neko-chill-sessions.json:index")).toHaveLength(0);
     expect(storage.get("neko-chill-sessions.json:session-ids")).toHaveLength(0);
     expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(false);
+  });
+
+  it("keeps a session visible when durable deletion metadata cannot persist", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await vi.waitFor(() => expect(storage.get("neko-chill-sessions.json:index"))
+      .toHaveLength(1));
+    failIndexWrites = true;
+
+    await useNekoSessionStore.getState().deleteSession(id);
+
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      status: "error",
+      runtime: null,
+    });
+    expect(useNekoSessionStore.getState().sessions[id].statusDetail)
+      .toContain("Không thể xóa phiên");
+    expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(true);
+
+    failIndexWrites = false;
+    await useNekoSessionStore.getState().deleteSession(id);
+    expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
   });
 
   it("closeSession keeps the transcript and persists immediately", async () => {

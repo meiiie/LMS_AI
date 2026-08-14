@@ -264,6 +264,45 @@ describe("Neko Chill shell UI", () => {
     expect(screen.getByRole("status").textContent).toBe("Đang lưu quyết định…");
   });
 
+  it("allows an exited session to send while keeping runtime controls locked", () => {
+    const sendPrompt = vi.fn(async () => {});
+    useNekoSessionStore.setState({
+      sessions: {
+        active: makeSession(
+          "active",
+          "Phiên đã dừng",
+          { path: "C:/work/neko", name: "Neko" },
+          {
+            status: "exited",
+            controls: [{
+              id: "model",
+              label: "Model",
+              category: "model",
+              kind: "select",
+              currentValue: "stable",
+              choices: [
+                { value: "stable", label: "Stable" },
+                { value: "preview", label: "Preview" },
+              ],
+            }],
+          },
+        ),
+      },
+      activeSessionId: "active",
+      sendPrompt,
+    });
+
+    render(<NekoChillApp />);
+
+    const composer = screen.getByTestId("neko-composer-input") as HTMLTextAreaElement;
+    expect(composer.readOnly).toBe(false);
+    expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).disabled)
+      .toBe(true);
+    fireEvent.change(composer, { target: { value: "khởi động lại" } });
+    fireEvent.click(screen.getByRole("button", { name: "Gửi tin nhắn" }));
+    expect(sendPrompt).toHaveBeenCalledWith("khởi động lại");
+  });
+
   it("keeps the close action available when a session is in error", () => {
     const closeSession = vi.fn(async () => {});
     useNekoSessionStore.setState({
