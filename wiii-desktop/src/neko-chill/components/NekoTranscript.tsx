@@ -4,6 +4,7 @@
  * MarkdownRenderer for answers. Virtualization: follow-up #891.
  */
 import { useEffect, useRef } from "react";
+import { Command, FolderGit2 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import type { ContentBlock } from "@/api/types";
 import type { NekoSession } from "../stores/neko-session-store";
@@ -59,9 +60,25 @@ function Block({ block }: { block: ContentBlock }) {
 interface NekoTranscriptProps {
   session: NekoSession;
   onResolvePermission: (optionId: string | null) => void;
+  onInsertPrompt: (text: string) => void;
 }
 
-export function NekoTranscript({ session, onResolvePermission }: NekoTranscriptProps) {
+const STARTER_PROMPTS = [
+  {
+    label: "Kiểm tra dự án này",
+    prompt: "Kiểm tra dự án này và cho tôi biết điểm cần chú ý.",
+  },
+  {
+    label: "Tóm tắt cấu trúc",
+    prompt: "Tóm tắt cấu trúc dự án và đề xuất bước tiếp theo.",
+  },
+];
+
+export function NekoTranscript({
+  session,
+  onResolvePermission,
+  onInsertPrompt,
+}: NekoTranscriptProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageCount = session.messages.length;
   const lastMessage = session.messages[messageCount - 1];
@@ -76,6 +93,37 @@ export function NekoTranscript({ session, onResolvePermission }: NekoTranscriptP
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" data-testid="neko-transcript">
       <div className="mx-auto w-full max-w-[780px] px-6 py-4">
+        {session.messages.length === 0 && session.status === "idle" ? (
+          <section className="mx-auto flex max-w-[560px] flex-col items-center px-4 py-[10vh] text-center" aria-label="Bắt đầu phiên">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-[var(--nk-inset)] text-[var(--nk-text-2)]">
+              <FolderGit2 aria-hidden="true" className="h-[18px] w-[18px]" />
+            </span>
+            <h2 className="mt-4 text-[18px] font-medium tracking-[-0.02em] text-[var(--nk-text)]">
+              Sẵn sàng trong {session.workspace?.name ?? "dự án này"}
+            </h2>
+            <p className="mt-1.5 max-w-[460px] text-[12.5px] leading-5 text-[var(--nk-text-3)]">
+              Agent chỉ làm việc trong thư mục đã chọn. Hãy mô tả kết quả bạn muốn;
+              các gợi ý dưới đây chỉ được chèn vào ô soạn để bạn xem lại.
+            </p>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              {STARTER_PROMPTS.map((starter) => (
+                <button
+                  key={starter.label}
+                  type="button"
+                  aria-label={`Chèn gợi ý ${starter.label}`}
+                  className="rounded-xl border border-[var(--nk-border)] bg-[var(--nk-composer)] px-3 py-2 text-[12px] text-[var(--nk-text-2)] transition-colors hover:border-[var(--nk-border-strong)] hover:bg-[var(--nk-raised)] hover:text-[var(--nk-text)]"
+                  onClick={() => onInsertPrompt(starter.prompt)}
+                >
+                  {starter.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-5 flex items-center gap-1.5 text-[10.5px] text-[var(--nk-ghost)]">
+              <Command aria-hidden="true" className="h-3 w-3" />
+              Gõ / để xem lệnh · Ctrl+K để tìm mọi phiên và lệnh
+            </p>
+          </section>
+        ) : null}
         {session.messages.map((message) =>
           message.role === "user" ? (
             <div key={message.id} className="my-3 flex justify-end">

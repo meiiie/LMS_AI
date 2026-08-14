@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   Bot,
@@ -13,8 +13,10 @@ import {
 } from "lucide-react";
 import type { DriverConfigOption } from "../drivers/types";
 import type { NekoSession } from "../stores/neko-session-store";
-
-type ClientCommandName = "new" | "project" | "search" | "info";
+import {
+  CLIENT_COMMANDS,
+  type ClientCommandName,
+} from "../command-items";
 
 interface SlashSuggestion {
   name: string;
@@ -23,12 +25,11 @@ interface SlashSuggestion {
   inputHint?: string;
   clientCommand?: ClientCommandName;
 }
-const CLIENT_COMMANDS: SlashSuggestion[] = [
-  { name: "new", description: "Tạo một phiên mới", source: "Neko Chill", clientCommand: "new" },
-  { name: "project", description: "Gắn hoặc xem thư mục dự án", source: "Neko Chill", clientCommand: "project" },
-  { name: "search", description: "Tìm trong lịch sử phiên cục bộ", source: "Neko Chill", clientCommand: "search" },
-  { name: "info", description: "Mở thông tin phiên", source: "Neko Chill", clientCommand: "info" },
-];
+
+export interface ComposerInsertRequest {
+  text: string;
+  token: number;
+}
 
 interface NekoComposerProps {
   session: NekoSession;
@@ -38,6 +39,7 @@ interface NekoComposerProps {
   onCancel: () => void;
   onSetConfigOption: (optionId: string, value: string | boolean) => void;
   onClientCommand: (command: ClientCommandName) => void;
+  insertRequest?: ComposerInsertRequest | null;
 }
 
 function controlLabel(option: DriverConfigOption): string {
@@ -89,6 +91,7 @@ export function NekoComposer({
   onCancel,
   onSetConfigOption,
   onClientCommand,
+  insertRequest,
 }: NekoComposerProps) {
   const [draft, setDraft] = useState("");
   const [highlight, setHighlight] = useState(0);
@@ -101,7 +104,7 @@ export function NekoComposer({
   const slashQuery = draft.startsWith("/") && !draft.includes("\n")
     ? draft.slice(1).toLocaleLowerCase("vi")
     : null;
-  const suggestions = useMemo(() => {
+  const suggestions = useMemo<SlashSuggestion[]>(() => {
     if (slashQuery === null) return [];
     const agent: SlashSuggestion[] = session.commands.map((command) => ({
       ...command,
@@ -116,6 +119,13 @@ export function NekoComposer({
       .slice(0, 8);
   }, [session.commands, slashQuery]);
   const slashOpen = slashQuery !== null && !slashDismissed && !disabled;
+
+  useEffect(() => {
+    if (!insertRequest) return;
+    setDraft(insertRequest.text);
+    setSlashDismissed(true);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [insertRequest?.token]);
 
   const runSuggestion = (suggestion: SlashSuggestion) => {
     if (suggestion.clientCommand) {
