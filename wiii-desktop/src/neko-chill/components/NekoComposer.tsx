@@ -318,9 +318,11 @@ export function NekoComposer({
             {streaming ? (
               <button
                 type="button"
-                className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[var(--nk-danger-soft)] text-[var(--nk-danger)] transition-colors hover:bg-[var(--nk-danger)] hover:text-[var(--nk-on-inverse)] disabled:cursor-wait disabled:opacity-50"
-                disabled={session.cancelPending}
-                onClick={onCancel}
+                className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[var(--nk-danger-soft)] text-[var(--nk-danger)] transition-colors hover:bg-[var(--nk-danger)] hover:text-[var(--nk-on-inverse)] aria-disabled:cursor-wait aria-disabled:opacity-50 aria-disabled:hover:bg-[var(--nk-danger-soft)] aria-disabled:hover:text-[var(--nk-danger)]"
+                aria-disabled={session.cancelPending}
+                onClick={() => {
+                  if (!session.cancelPending) onCancel();
+                }}
                 title={session.cancelPending ? "Đang lưu yêu cầu dừng…" : "Dừng"}
                 aria-label={session.cancelPending ? "Đang lưu yêu cầu dừng" : "Dừng lượt đang chạy"}
                 aria-busy={session.cancelPending}

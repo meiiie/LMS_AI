@@ -35,6 +35,7 @@ function makeSession(
     pendingPermission: null,
     resolvingPermissionId: null,
     cancelPending: false,
+    deletePending: false,
     ...overrides,
   };
 }
@@ -289,6 +290,7 @@ describe("Neko Chill shell UI", () => {
   });
 
   it("shows cancel durability progress and blocks duplicate stop clicks", () => {
+    const cancelTurn = vi.fn(async () => {});
     useNekoSessionStore.setState({
       sessions: {
         active: makeSession(
@@ -299,13 +301,19 @@ describe("Neko Chill shell UI", () => {
         ),
       },
       activeSessionId: "active",
+      cancelTurn,
     });
 
     render(<NekoChillApp />);
 
     const cancel = screen.getByRole("button", { name: "Đang lưu yêu cầu dừng" });
-    expect((cancel as HTMLButtonElement).disabled).toBe(true);
+    expect((cancel as HTMLButtonElement).disabled).toBe(false);
+    expect(cancel.getAttribute("aria-disabled")).toBe("true");
     expect(cancel.getAttribute("aria-busy")).toBe("true");
+    cancel.focus();
+    fireEvent.click(cancel);
+    expect(cancelTurn).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(cancel);
   });
 
   it("allows an exited session to send while keeping runtime controls locked", () => {

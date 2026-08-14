@@ -26,6 +26,7 @@ function session(index: number, overrides: Partial<NekoSession> = {}): NekoSessi
     pendingPermission: null,
     resolvingPermissionId: null,
     cancelPending: false,
+    deletePending: false,
     ...overrides,
   };
 }

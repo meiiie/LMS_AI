@@ -10,6 +10,7 @@ import type { DetectedAgent } from "@/neko-chill/stores/neko-agent-store";
 const storage = new Map<string, unknown>();
 let failTranscriptWrites = false;
 let failIndexWrites = false;
+let failCatalogWrites = false;
 let failTranscriptReads = false;
 let failCatalogReads = false;
 let failTranscriptDeletes = false;
@@ -29,6 +30,9 @@ let driverDisposeGate: Promise<void> | null = null;
 let notifyDriverDisposeEntered: (() => void) | null = null;
 
 async function saveToMemory(store: string, key: string, value: unknown): Promise<void> {
+  if (key === "session-ids" && failCatalogWrites) {
+    throw new Error("catalog unavailable");
+  }
   if (key === "index") {
     indexWriteAttempts += 1;
     notifyIndexWriteEntered?.();
@@ -186,6 +190,7 @@ describe("neko-chill persistence", () => {
     storage.clear();
     failTranscriptWrites = false;
     failIndexWrites = false;
+    failCatalogWrites = false;
     failTranscriptReads = false;
     failCatalogReads = false;
     failTranscriptDeletes = false;
@@ -545,6 +550,36 @@ describe("neko-chill persistence", () => {
     failTranscriptWrites = false;
     await useNekoSessionStore.getState().cancelTurn();
     expect(spawned[0].cancelled).toBe(1);
+  });
+
+  it("rolls back an undispatched fact without renumbering later events", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    let release!: () => void;
+    strictWriteGate = new Promise<void>((resolve) => { release = resolve; });
+    strictBlockedKey = `session:${id}`;
+    failTranscriptWrites = true;
+    const gateEntered = new Promise<void>((resolve) => { notifyStrictGateEntered = resolve; });
+
+    const cancelling = useNekoSessionStore.getState().cancelTurn();
+    await gateEntered;
+    emit({ type: "process-exited", sessionId: id, code: 0, signal: null });
+    release();
+    await cancelling;
+
+    expect(useNekoSessionStore.getState().sessions[id].events.map((event) => event.seq))
+      .toEqual([1, 2, 4]);
+
+    strictWriteGate = null;
+    failTranscriptWrites = false;
+    await useNekoSessionStore.getState().sendPrompt("tiếp tục sau rollback");
+    expect(useNekoSessionStore.getState().sessions[id].events.map((event) => event.seq))
+      .toEqual([1, 2, 4, 5, 6]);
+
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+    await useNekoSessionStore.getState().hydrate();
+    expect(useNekoSessionStore.getState().sessions[id].events.map((event) => event.seq))
+      .toEqual([1, 2, 4, 5, 6]);
   });
 
   it("propagates immediate background persistence failures to its caller", async () => {
@@ -1157,10 +1192,11 @@ describe("neko-chill persistence", () => {
 
     const first = useNekoSessionStore.getState().deleteSession(id);
     await disposeEntered;
+    emit({ type: "turn-finished", sessionId: id, stopReason: "end_turn" });
     const second = useNekoSessionStore.getState().deleteSession(id);
     await Promise.resolve();
 
-    expect(useNekoSessionStore.getState().sessions[id].status).toBe("stopping");
+    expect(useNekoSessionStore.getState().sessions[id].deletePending).toBe(true);
     expect(transcriptDeleteAttempts).toBe(0);
     expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(true);
 
@@ -1168,6 +1204,50 @@ describe("neko-chill persistence", () => {
     await Promise.all([first, second]);
     expect(transcriptDeleteAttempts).toBe(1);
     expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
+  });
+
+  it("restores a legacy snapshot and exact index when catalog deletion fails", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    await vi.waitFor(() => expect(storage.get("neko-chill-sessions.json:index"))
+      .toHaveLength(1));
+    const legacySnapshot = {
+      v: 1,
+      messages: [{ id: "legacy-message", role: "user", text: "phải khôi phục" }],
+    };
+    storage.set(`neko-chill-sessions.json:session:${id}`, legacySnapshot);
+    const indexBefore = JSON.parse(JSON.stringify(
+      storage.get("neko-chill-sessions.json:index"),
+    ));
+    failCatalogWrites = true;
+
+    await useNekoSessionStore.getState().deleteSession(id);
+
+    expect(useNekoSessionStore.getState().sessions[id]).toMatchObject({
+      status: "error",
+      deletePending: false,
+    });
+    expect(storage.get(`neko-chill-sessions.json:session:${id}`)).toEqual(legacySnapshot);
+    expect(storage.get("neko-chill-sessions.json:index")).toEqual(indexBefore);
+    expect(storage.get("neko-chill-sessions.json:session-ids")).toContain(id);
+
+    failCatalogWrites = false;
+    useNekoSessionStore.setState({ sessions: {}, activeSessionId: null, hydrated: false });
+    _clearLiveDriversForTests();
+    await useNekoSessionStore.getState().hydrate();
+    expect(useNekoSessionStore.getState().sessions[id].messages)
+      .toEqual([expect.objectContaining({ text: "phải khôi phục" })]);
+  });
+
+  it("can delete a loaded session even when its stored snapshot is malformed", async () => {
+    const id = await useNekoSessionStore.getState().createSession(AGENT, WORKSPACE);
+    storage.set(`neko-chill-sessions.json:session:${id}`, { v: 2, broken: true });
+
+    await useNekoSessionStore.getState().deleteSession(id);
+
+    expect(useNekoSessionStore.getState().sessions[id]).toBeUndefined();
+    expect(storage.has(`neko-chill-sessions.json:session:${id}`)).toBe(false);
+    expect(storage.get("neko-chill-sessions.json:index")).toEqual([]);
+    expect(storage.get("neko-chill-sessions.json:session-ids")).toEqual([]);
   });
 
   it("validates the catalog before deleting an authoritative snapshot", async () => {

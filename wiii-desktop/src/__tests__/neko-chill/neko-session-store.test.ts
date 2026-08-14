@@ -11,8 +11,10 @@ const storage = new Map<string, unknown>();
 vi.mock("@/lib/storage", () => ({
   loadStore: vi.fn(async (store: string, key: string, dflt: unknown) =>
     storage.get(`${store}:${key}`) ?? dflt),
-  loadStoreStrict: vi.fn(async (store: string, key: string, dflt: unknown) =>
-    storage.get(`${store}:${key}`) ?? dflt),
+  loadStoreStrict: vi.fn(async (store: string, key: string, dflt: unknown) => {
+    const hit = storage.get(`${store}:${key}`);
+    return hit === undefined ? dflt : hit;
+  }),
   saveStore: vi.fn(async (store: string, key: string, value: unknown) => {
     storage.set(`${store}:${key}`, value);
   }),

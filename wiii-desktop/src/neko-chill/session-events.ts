@@ -85,6 +85,7 @@ export interface NekoSessionEvent {
   v: typeof NEKO_SESSION_EVENT_VERSION;
   /** Stable identity for rollback; absent only on pre-ID persisted events. */
   eventId?: string;
+  /** Stable monotonic sequence; gaps record rolled-back, undispatched facts. */
   seq: number;
   at: number;
   visibility: "model" | "runtime";
@@ -127,7 +128,8 @@ function isRuntimeProvider(value: unknown): value is RuntimeProviderSnapshot {
     (provider.kind === "acp" || provider.kind === "wiii-cloud") &&
     Array.isArray(provider.capabilities) &&
     provider.capabilities.every((capability) =>
-      typeof capability === "string" && capability in DRIVER_CAPABILITIES) &&
+      typeof capability === "string" &&
+      Object.prototype.hasOwnProperty.call(DRIVER_CAPABILITIES, capability)) &&
     (provider.contextContinuity === "process" || provider.contextContinuity === "resumable") &&
     (provider.workspaceIsolation === "advisory" || provider.workspaceIsolation === "enforced")
   );

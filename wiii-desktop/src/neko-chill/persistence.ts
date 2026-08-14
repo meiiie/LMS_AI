@@ -238,7 +238,9 @@ function parsePersistedTranscript(
     if (!Array.isArray(transcript.events) || !transcript.events.every(isNekoSessionEvent)) {
       throw new Error(`Log sự kiện phiên ${sessionId} có schema không hợp lệ.`);
     }
-    if (!transcript.events.every((event, index) => event.seq === index + 1)) {
+    if (!transcript.events.every(
+      (event, index, events) => index === 0 || event.seq > events[index - 1].seq,
+    )) {
       throw new Error(`Log sự kiện phiên ${sessionId} có thứ tự không hợp lệ.`);
     }
   } else if (transcript.events !== undefined && !Array.isArray(transcript.events)) {
@@ -426,31 +428,62 @@ async function performDeletePersistedSession(sessionId: string): Promise<void> {
       await loadStoreStrict<unknown>(STORE, SESSION_IDS_KEY, []),
     );
     const snapshot = await loadStoreStrict<unknown>(STORE, snapshotKey, undefined);
-    if (snapshot !== undefined) parsePersistedTranscript(snapshot, sessionId);
-    let snapshotDeleted = false;
+    const previousIndex = await loadStoreStrict<unknown>(STORE, INDEX_KEY, undefined);
+    const indexBackup = Array.isArray(previousIndex) ? previousIndex : null;
+    let snapshotDeleteAttempted = false;
     try {
+      snapshotDeleteAttempted = true;
       await deleteStoreStrict(STORE, snapshotKey);
-      snapshotDeleted = true;
       const indexOperation = indexWriteChain.catch(() => {}).then(async () => {
-        const rawIndex = await loadStore<unknown>(STORE, INDEX_KEY, []);
-        const index = Array.isArray(rawIndex)
-          ? rawIndex.filter((entry): entry is SessionIndexEntry => isSessionIndexEntry(entry))
-          : [];
-        await saveStoreStrict(
-          STORE,
-          INDEX_KEY,
-          index.filter((item) => item.id !== sessionId),
-        );
+        let indexAttempted = false;
+        let catalogAttempted = false;
+        try {
+          if (indexBackup) {
+            indexAttempted = true;
+            await saveStoreStrict(
+              STORE,
+              INDEX_KEY,
+              indexBackup.filter((item) => (
+                !item || typeof item !== "object" || Array.isArray(item) ||
+                (item as Record<string, unknown>).id !== sessionId
+              )),
+            );
+          }
+          catalogAttempted = true;
+          await saveStoreStrict(
+            STORE,
+            SESSION_IDS_KEY,
+            catalog.filter((id) => id !== sessionId),
+          );
+        } catch (error) {
+          const rollbackErrors: unknown[] = [];
+          if (catalogAttempted) {
+            try {
+              await saveStoreStrict(STORE, SESSION_IDS_KEY, catalog);
+            } catch (rollbackError) {
+              rollbackErrors.push(rollbackError);
+            }
+          }
+          if (indexAttempted) {
+            try {
+              await saveStoreStrict(STORE, INDEX_KEY, indexBackup);
+            } catch (rollbackError) {
+              rollbackErrors.push(rollbackError);
+            }
+          }
+          if (rollbackErrors.length > 0) {
+            throw new AggregateError(
+              [error, ...rollbackErrors],
+              `Không thể xóa hoặc khôi phục metadata phiên ${sessionId}.`,
+            );
+          }
+          throw error;
+        }
       });
       indexWriteChain = indexOperation.catch(() => {});
       await indexOperation;
-      await saveStoreStrict(
-        STORE,
-        SESSION_IDS_KEY,
-        catalog.filter((id) => id !== sessionId),
-      );
     } catch (error) {
-      if (snapshotDeleted && snapshot !== undefined) {
+      if (snapshotDeleteAttempted && snapshot !== undefined) {
         try {
           await saveStoreStrict(STORE, snapshotKey, snapshot);
         } catch (rollbackError) {

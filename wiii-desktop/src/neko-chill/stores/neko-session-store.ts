@@ -95,6 +95,8 @@ export interface NekoSession {
   resolvingPermissionId: string | null;
   /** True while a cancel command crosses its durability barrier. */
   cancelPending: boolean;
+  /** Lifecycle lock held from delete intent through durable deletion. */
+  deletePending: boolean;
   /** Honest error text for the banner when status is error/exited. */
   statusDetail?: string;
 }
@@ -213,7 +215,6 @@ function removeEventById(events: NekoSessionEvent[], eventId: string | null): vo
   const eventIndex = events.findIndex((event) => event.eventId === eventId);
   if (eventIndex < 0) return;
   events.splice(eventIndex, 1);
-  events.forEach((event, index) => { event.seq = index + 1; });
 }
 
 export const useNekoSessionStore = create<NekoSessionState>()(
@@ -323,6 +324,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           pendingPermission: null,
           resolvingPermissionId: null,
           cancelPending: false,
+          deletePending: false,
           statusDetail: needsMigration
             ? "Đang nâng cấp log phiên trước khi có thể khởi động lại agent…"
             : "Phiên đã lưu — nhắn tiếp để khởi động lại agent.",
@@ -402,6 +404,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           pendingPermission: null,
           resolvingPermissionId: null,
           cancelPending: false,
+          deletePending: false,
         };
         state.activeSessionId = sessionId;
       });
@@ -472,7 +475,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
     attachWorkspace: async (sessionId, workspace) => {
       if (!workspace || !isAbsoluteWorkspacePath(workspace.path)) return;
       const current = get().sessions[sessionId];
-      if (!current || current.workspace) return;
+      if (!current || current.workspace || current.deletePending) return;
       set((state) => {
         const session = state.sessions[sessionId];
         if (session && !session.workspace) session.status = "connecting";
@@ -539,7 +542,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         (session.status !== "idle" && session.status !== "exited") ||
         session.pendingControlId ||
         session.pendingPermission ||
-        session.resolvingPermissionId
+        session.resolvingPermissionId ||
+        session.deletePending
       ) {
         return;
       }
@@ -713,7 +717,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       const sessionId = get().activeSessionId;
       if (!sessionId) return;
       const provider = runtimes.get(sessionId);
-      if (!provider || get().sessions[sessionId]?.cancelPending) return;
+      const session = get().sessions[sessionId];
+      if (!provider || !session || session.cancelPending || session.deletePending) return;
       try {
         let commandEventId: string | null = null;
         set((state) => {
@@ -768,7 +773,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       if (!sessionId) return;
       const session = get().sessions[sessionId];
       const request = session?.pendingPermission;
-      if (!request || session?.resolvingPermissionId) return;
+      if (!request || session?.resolvingPermissionId || session.deletePending) return;
       const provider = runtimes.get(sessionId);
       if (!provider) return;
       let decisionEventId: string | null = null;
@@ -836,7 +841,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
         !option ||
         session.status !== "idle" ||
         session.pendingPermission ||
-        session.pendingControlId
+        session.pendingControlId ||
+        session.deletePending
       ) {
         return;
       }
@@ -1075,6 +1081,8 @@ export const useNekoSessionStore = create<NekoSessionState>()(
     },
 
     closeSession: async (sessionId) => {
+      const current = get().sessions[sessionId];
+      if (!current || current.deletePending) return;
       set((state) => {
         const session = state.sessions[sessionId];
         if (session) session.status = "stopping";
@@ -1115,10 +1123,13 @@ export const useNekoSessionStore = create<NekoSessionState>()(
       const current = get().sessions[sessionId];
       // Acquire the lifecycle lock before runtime teardown. A duplicate delete
       // cannot bypass a stalled disposer and reach persistent storage.
-      if (!current || current.status === "stopping") return;
+      if (!current || current.deletePending) return;
       set((state) => {
         const session = state.sessions[sessionId];
-        if (session) session.status = "stopping";
+        if (session) {
+          session.deletePending = true;
+          session.status = "stopping";
+        }
       });
       await runtimes.detach(sessionId).catch(() => {});
       try {
@@ -1128,6 +1139,7 @@ export const useNekoSessionStore = create<NekoSessionState>()(
           const session = state.sessions[sessionId];
           if (!session) return;
           session.runtime = null;
+          session.deletePending = false;
           session.status = "error";
           session.statusDetail = `Không thể xóa phiên khỏi bộ nhớ bền: ${error instanceof Error ? error.message : String(error)}`;
         });

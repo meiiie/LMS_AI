@@ -55,4 +55,21 @@ describe("Neko session event validation", () => {
       })).toBe(false);
     },
   );
+
+  it("rejects inherited object keys as provider capabilities", () => {
+    const attached = event({
+      type: "runtime-attached",
+      provider: {
+        sessionId: "session-1",
+        providerId: "neko",
+        instanceId: "provider-1",
+        kind: "acp",
+        capabilities: ["toString" as "prompt"],
+        contextContinuity: "process",
+        workspaceIsolation: "advisory",
+      },
+    });
+
+    expect(isNekoSessionEvent(attached)).toBe(false);
+  });
 });
