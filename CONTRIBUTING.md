@@ -2,6 +2,11 @@
 
 Thank you for your interest in contributing to Wiii! This guide will help you get started.
 
+Wiii uses a dual-licensing model. Before a contribution to the core can be
+merged, its licensing authority must satisfy
+[CONTRIBUTOR-LICENSE-POLICY.md](CONTRIBUTOR-LICENSE-POLICY.md). Apache SDK
+contributions are accepted only inside the explicit `sdk/` boundary.
+
 ## Development Setup
 
 ### Prerequisites
