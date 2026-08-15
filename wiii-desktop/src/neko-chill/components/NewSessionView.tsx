@@ -44,6 +44,7 @@ export function NewSessionView() {
     "idle" | "checking" | "signed-out" | "signed-in" | "logging-in" | "error"
   >("idle");
   const [codexLoginUrl, setCodexLoginUrl] = useState<string | null>(null);
+  const [codexBootstrapAttempt, setCodexBootstrapAttempt] = useState(0);
   const codexAccountSession = useRef<CodexAccountSession | null>(null);
   const recent = useMemo(() => recentWorkspaces(), [sessions]);
   const neko = agents.find((agent) => agent.id === "neko" && agent.found);
@@ -71,6 +72,7 @@ export function NewSessionView() {
 
   useEffect(() => {
     let cancelled = false;
+    let bootstrapSession: CodexAccountSession | null = null;
     const previous = codexAccountSession.current;
     codexAccountSession.current = null;
     if (previous) void previous.dispose();
@@ -85,6 +87,7 @@ export function NewSessionView() {
     void spawnTauriTransport(codex.binary, ["app-server"])
       .then(async (transport) => {
         const session = new CodexAccountSession(transport);
+        bootstrapSession = session;
         if (cancelled) {
           await session.dispose();
           return;
@@ -95,7 +98,12 @@ export function NewSessionView() {
         setCodexAccount(account);
         setCodexAccountState(account.authenticated ? "signed-in" : "signed-out");
       })
-      .catch((cause) => {
+      .catch(async (cause) => {
+        const failed = bootstrapSession;
+        if (codexAccountSession.current === failed) {
+          codexAccountSession.current = null;
+        }
+        if (failed) await failed.dispose();
         if (cancelled) return;
         setCodexAccountState("error");
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -107,7 +115,7 @@ export function NewSessionView() {
       codexAccountSession.current = null;
       if (current) void current.dispose();
     };
-  }, [codex?.binary, workspace?.path]);
+  }, [codex?.binary, workspace?.path, codexBootstrapAttempt]);
 
   const chooseWorkspace = async () => {
     const selected = await chooseWorkspaceFolder();
@@ -332,9 +340,16 @@ export function NewSessionView() {
                             <button
                               type="button"
                               className="shrink-0 rounded-lg border border-[var(--nk-border-strong)] px-2.5 py-1.5 text-[11.5px] text-[var(--nk-text-2)] hover:bg-[var(--nk-raised)]"
-                              onClick={() => void loginCodex()}
+                              onClick={() => {
+                                if (codexAccountState === "error") {
+                                  setError(null);
+                                  setCodexBootstrapAttempt((attempt) => attempt + 1);
+                                } else {
+                                  void loginCodex();
+                                }
+                              }}
                             >
-                              Đăng nhập
+                              {codexAccountState === "error" ? "Thử lại" : "Đăng nhập"}
                             </button>
                           ) : null}
                         </div>

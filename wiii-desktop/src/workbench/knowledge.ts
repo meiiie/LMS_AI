@@ -119,6 +119,15 @@ export const useKnowledgeConnectionStore = create<KnowledgeConnectionState>((set
 
       const client = initClient(settings.server_url, {});
       client.setHeaderResolver(() => useSettingsStore.getState().getAuthHeaders());
+      client.setOnUnauthorized(() =>
+        useAuthStore.getState().refreshAccessToken(settings.server_url)
+      );
+      if (auth.authMode === "oauth" && auth.isTokenExpiringSoon()) {
+        const refreshed = await auth.refreshAccessToken(settings.server_url);
+        if (!refreshed) {
+          throw new Error("Phiên Wiii Service đã hết hạn; hãy đăng nhập lại");
+        }
+      }
       await client.get("/api/v1/health");
       set({ status: "ready", error: null });
       return true;

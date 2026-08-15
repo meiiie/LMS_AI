@@ -208,6 +208,22 @@ class TestSearchHybrid:
         assert results == []
 
     @pytest.mark.asyncio
+    async def test_strict_mode_surfaces_total_retrieval_failure(self):
+        from app.services.hybrid_search_service import HybridSearchUnavailableError
+
+        svc, mock_emb, mock_dense, mock_sparse = _make_service()
+        mock_emb.aembed_query = AsyncMock(return_value=[0.1] * 768)
+        mock_dense.search = AsyncMock(side_effect=Exception("Dense error"))
+        mock_sparse.search = AsyncMock(side_effect=Exception("Sparse error"))
+
+        with pytest.raises(HybridSearchUnavailableError):
+            await svc.search(
+                "Rule 15",
+                limit=5,
+                raise_on_total_failure=True,
+            )
+
+    @pytest.mark.asyncio
     async def test_embedding_fails_returns_empty(self):
         svc, mock_emb, mock_dense, mock_sparse = _make_service()
         mock_emb.aembed_query = AsyncMock(side_effect=Exception("Embedding error"))

@@ -7,12 +7,24 @@ class AccountTransport implements AcpTransport {
   private onLineHandler: ((line: string) => void) | null = null;
   private onExitHandler: ((code: number | null) => void) | null = null;
   account: Record<string, unknown> | null = null;
+  failInitialize = false;
+  killed = false;
 
   async send(line: string): Promise<void> {
     const frame = JSON.parse(line) as Record<string, unknown>;
     this.sent.push(frame);
     if (typeof frame.id !== "number") return;
-    if (frame.method === "initialize") this.response(frame.id, {});
+    if (frame.method === "initialize") {
+      if (this.failInitialize) {
+        this.emit({
+          jsonrpc: "2.0",
+          id: frame.id,
+          error: { code: -32603, message: "bootstrap failed" },
+        });
+      } else {
+        this.response(frame.id, {});
+      }
+    }
     if (frame.method === "account/read") {
       this.response(frame.id, { account: this.account, requiresOpenaiAuth: true });
     }
@@ -33,7 +45,9 @@ class AccountTransport implements AcpTransport {
     this.onExitHandler = handler;
   }
 
-  async kill(): Promise<void> {}
+  async kill(): Promise<void> {
+    this.killed = true;
+  }
 
   response(id: number, result: unknown): void {
     this.emit({ jsonrpc: "2.0", id, result });
@@ -92,5 +106,15 @@ describe("Codex provider-owned account session", () => {
       params: { loginId: "login-2", success: false, error: "denied" },
     });
     await expect(waiting).rejects.toThrow("denied");
+  });
+
+  it("disposes the App Server process when bootstrap fails", async () => {
+    const transport = new AccountTransport();
+    transport.failInitialize = true;
+    const session = new CodexAccountSession(transport);
+
+    await expect(session.start()).rejects.toThrow("bootstrap failed");
+    expect(transport.killed).toBe(true);
+    await expect(session.dispose()).resolves.toBeUndefined();
   });
 });

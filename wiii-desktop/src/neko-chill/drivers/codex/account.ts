@@ -32,6 +32,7 @@ function record(value: unknown): JsonRecord | null {
 
 export class CodexAccountSession {
   private readonly client: AcpJsonRpcClient;
+  private disposed = false;
   private readonly completed = new Map<string, LoginCompletion>();
   private readonly waiters = new Map<
     string,
@@ -55,16 +56,21 @@ export class CodexAccountSession {
   }
 
   async start(): Promise<CodexAccountSummary> {
-    await this.client.request("initialize", {
-      clientInfo: {
-        name: "wiii-workbench",
-        title: "Wiii Workbench",
-        version: APP_VERSION,
-      },
-      capabilities: { experimentalApi: true, requestAttestation: false },
-    });
-    await this.client.notify("initialized", {});
-    return this.read();
+    try {
+      await this.client.request("initialize", {
+        clientInfo: {
+          name: "wiii-workbench",
+          title: "Wiii Workbench",
+          version: APP_VERSION,
+        },
+        capabilities: { experimentalApi: true, requestAttestation: false },
+      });
+      await this.client.notify("initialized", {});
+      return await this.read();
+    } catch (cause) {
+      await this.dispose();
+      throw cause;
+    }
   }
 
   async read(): Promise<CodexAccountSummary> {
@@ -117,6 +123,8 @@ export class CodexAccountSession {
   }
 
   async dispose(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
     await this.client.dispose();
   }
 

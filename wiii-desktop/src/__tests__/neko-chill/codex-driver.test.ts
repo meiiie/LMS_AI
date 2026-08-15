@@ -12,6 +12,7 @@ class FakeCodexTransport implements AcpTransport {
   private exitHandler: ((code: number | null) => void) | null = null;
   killed = false;
   completeSynchronously = false;
+  returnTurnId = true;
 
   async send(line: string): Promise<void> {
     const frame = JSON.parse(line) as Record<string, unknown>;
@@ -22,14 +23,24 @@ class FakeCodexTransport implements AcpTransport {
     if (frame.method === "initialize") respond({ userAgent: "codex", codexHome: "C:/Codex", platformFamily: "windows", platformOs: "windows" });
     else if (frame.method === "account/read") respond({ account: { type: "chatgpt", email: null, planType: "plus" }, requiresOpenaiAuth: true });
     else if (frame.method === "model/list") respond({
-      data: [{
-        model: "gpt-test",
-        displayName: "GPT Test",
-        description: "fixture model",
-        hidden: false,
-        isDefault: true,
-        supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
-      }],
+      data: [
+        {
+          model: "gpt-test",
+          displayName: "GPT Test",
+          description: "fixture model",
+          hidden: false,
+          isDefault: true,
+          supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
+        },
+        {
+          model: "gpt-fast",
+          displayName: "GPT Fast",
+          description: "fixture fast model",
+          hidden: false,
+          isDefault: false,
+          supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low" }],
+        },
+      ],
       nextCursor: null,
     });
     else if (frame.method === "thread/start") respond({
@@ -37,7 +48,14 @@ class FakeCodexTransport implements AcpTransport {
       model: "gpt-test",
     });
     else if (frame.method === "turn/start") {
-      respond({ turn: { id: "turn-1", status: "inProgress", items: [] } });
+      respond({
+        turn: {
+          ...(this.returnTurnId ? { id: "turn-1" } : {}),
+          status: "inProgress",
+          items: [],
+        },
+      });
+      if (!this.returnTurnId) return;
       const complete = () => {
         this.emit({ jsonrpc: "2.0", method: "item/reasoning/textDelta", params: { delta: "nghĩ" } });
         this.emit({ jsonrpc: "2.0", method: "item/agentMessage/delta", params: { delta: "xong" } });
@@ -127,6 +145,43 @@ describe("Codex App Server driver", () => {
       sessionId: "local-1",
       stopReason: "end_turn",
     });
+  });
+
+  it("does not announce a turn until App Server returns a durable turn id", async () => {
+    const { driver, events, transport } = await startFixture();
+    transport.returnTurnId = false;
+    await expect(driver.prompt("broken turn")).rejects.toThrow("turn.id");
+    expect(events.some((event) => event.type === "turn-started")).toBe(false);
+
+    transport.returnTurnId = true;
+    await expect(driver.prompt("retry")).resolves.toBeUndefined();
+    expect(events.some((event) => event.type === "turn-started")).toBe(true);
+  });
+
+  it("rebuilds reasoning choices when the selected model changes", async () => {
+    const { driver, events, transport } = await startFixture();
+    await driver.setConfigOption("model", "gpt-fast");
+    const controlsEvent = [...events].reverse().find(
+      (event) => event.type === "session-controls",
+    );
+    expect(controlsEvent).toEqual(expect.objectContaining({
+      controls: expect.arrayContaining([
+        expect.objectContaining({
+          id: "reasoning-effort",
+          currentValue: "low",
+          choices: [expect.objectContaining({ value: "low" })],
+        }),
+      ]),
+    }));
+
+    await driver.prompt("use the selected model");
+    const request = [...transport.sent].reverse().find(
+      (frame) => frame.method === "turn/start",
+    );
+    expect(request?.params).toEqual(expect.objectContaining({
+      model: "gpt-fast",
+      effort: "low",
+    }));
   });
 
   it("routes explicit approvals and fails closed on dismiss", async () => {

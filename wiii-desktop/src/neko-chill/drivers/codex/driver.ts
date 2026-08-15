@@ -37,6 +37,11 @@ interface PendingApproval {
   resolve: (result: unknown) => void;
 }
 
+interface CodexModelCatalog {
+  controls: DriverConfigOption[];
+  reasoningChoicesByModel: Map<string, NonNullable<DriverConfigOption["choices"]>>;
+}
+
 function record(value: unknown): JsonRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as JsonRecord
@@ -159,8 +164,10 @@ export function normalizeCodexItem(
   return null;
 }
 
-function modelControls(models: unknown): DriverConfigOption[] {
-  if (!Array.isArray(models)) return [];
+function modelControls(models: unknown): CodexModelCatalog {
+  if (!Array.isArray(models)) {
+    return { controls: [], reasoningChoicesByModel: new Map() };
+  }
   const choices = models.flatMap((value) => {
     const model = record(value);
     if (!model || typeof model.model !== "string" || model.hidden === true) return [];
@@ -174,38 +181,49 @@ function modelControls(models: unknown): DriverConfigOption[] {
         : [],
     }];
   });
-  if (!choices.length) return [];
+  if (!choices.length) {
+    return { controls: [], reasoningChoicesByModel: new Map() };
+  }
   const selected = choices.find((choice) => choice.isDefault) ?? choices[0];
-  const effortChoices = selected.efforts.flatMap((value) => {
-    const effort = record(value);
-    return typeof effort?.reasoningEffort === "string"
-      ? [{
-          value: effort.reasoningEffort,
-          label: effort.reasoningEffort,
-          description: typeof effort.description === "string" ? effort.description : undefined,
-        }]
-      : [];
-  });
-  return [
-    {
-      id: "model",
-      label: "Model",
-      category: "model",
-      kind: "select",
-      currentValue: selected.value,
-      choices: choices.map(({ value, label, description }) => ({ value, label, description })),
-    },
-    ...(effortChoices.length
-      ? [{
-          id: "reasoning-effort",
-          label: "Mức suy luận",
-          category: "thought_level" as const,
-          kind: "select" as const,
-          currentValue: effortChoices[0].value,
-          choices: effortChoices,
-        }]
-      : []),
-  ];
+  const reasoningChoicesByModel = new Map(
+    choices.map((choice) => [
+      choice.value,
+      choice.efforts.flatMap((value) => {
+        const effort = record(value);
+        return typeof effort?.reasoningEffort === "string"
+          ? [{
+              value: effort.reasoningEffort,
+              label: effort.reasoningEffort,
+              description: typeof effort.description === "string" ? effort.description : undefined,
+            }]
+          : [];
+      }),
+    ]),
+  );
+  const effortChoices = reasoningChoicesByModel.get(selected.value) ?? [];
+  return {
+    controls: [
+      {
+        id: "model",
+        label: "Model",
+        category: "model",
+        kind: "select",
+        currentValue: selected.value,
+        choices: choices.map(({ value, label, description }) => ({ value, label, description })),
+      },
+      ...(effortChoices.length
+        ? [{
+            id: "reasoning-effort",
+            label: "Mức suy luận",
+            category: "thought_level" as const,
+            kind: "select" as const,
+            currentValue: effortChoices[0].value,
+            choices: effortChoices,
+          }]
+        : []),
+    ],
+    reasoningChoicesByModel,
+  };
 }
 
 export class CodexAppServerDriver implements Driver {
@@ -224,6 +242,10 @@ export class CodexAppServerDriver implements Driver {
   private threadId: string | null = null;
   private turnId: string | null = null;
   private controls: DriverConfigOption[] = [];
+  private reasoningChoicesByModel = new Map<
+    string,
+    NonNullable<DriverConfigOption["choices"]>
+  >();
   private readonly approvals = new Map<string, PendingApproval>();
   private readonly completedBeforeWait = new Map<string, TurnStopReason>();
   private finishTurn: ((reason: TurnStopReason) => void) | null = null;
@@ -281,7 +303,9 @@ export class CodexAppServerDriver implements Driver {
     const modelsResult = record(await this.client.request("model/list", {
       includeHidden: false,
     }));
-    this.controls = modelControls(modelsResult?.data);
+    const catalog = modelControls(modelsResult?.data);
+    this.controls = catalog.controls;
+    this.reasoningChoicesByModel = catalog.reasoningChoicesByModel;
 
     const model = this.controls.find((option) => option.id === "model")?.currentValue;
     const method = this.resumeThreadId ? "thread/resume" : "thread/start";
@@ -314,7 +338,6 @@ export class CodexAppServerDriver implements Driver {
   async prompt(promptText: string): Promise<void> {
     if (!this.threadId) throw new Error("Codex driver chưa khởi động");
     if (this.finishTurn) throw new Error("Một lượt Codex đang chạy");
-    this.emitEvent({ type: "turn-started", sessionId: this.sessionId });
 
     const result = record(await this.client.request("turn/start", {
       threadId: this.threadId,
@@ -329,6 +352,7 @@ export class CodexAppServerDriver implements Driver {
     const turn = record(result?.turn);
     this.turnId = text(turn?.id);
     if (!this.turnId) throw new Error("turn/start không trả về turn.id");
+    this.emitEvent({ type: "turn-started", sessionId: this.sessionId });
 
     const completedReason = this.completedBeforeWait.get(this.turnId);
     if (completedReason) this.completedBeforeWait.delete(this.turnId);
@@ -374,6 +398,7 @@ export class CodexAppServerDriver implements Driver {
       throw new Error(`Giá trị Codex không được hỗ trợ: ${value}`);
     }
     option.currentValue = value;
+    if (optionId === "model") this.syncReasoningControl(value);
     this.emitEvent({
       type: "session-controls",
       sessionId: this.sessionId,
@@ -395,6 +420,35 @@ export class CodexAppServerDriver implements Driver {
   private controlValue(id: string): string | undefined {
     const value = this.controls.find((option) => option.id === id)?.currentValue;
     return typeof value === "string" ? value : undefined;
+  }
+
+  private syncReasoningControl(model: string): void {
+    const choices = this.reasoningChoicesByModel.get(model) ?? [];
+    const existingIndex = this.controls.findIndex(
+      (option) => option.id === "reasoning-effort",
+    );
+    const existing = existingIndex >= 0 ? this.controls[existingIndex] : null;
+
+    if (!choices.length) {
+      if (existingIndex >= 0) this.controls.splice(existingIndex, 1);
+      return;
+    }
+
+    const currentValue =
+      typeof existing?.currentValue === "string" &&
+        choices.some((choice) => choice.value === existing.currentValue)
+        ? existing.currentValue
+        : choices[0].value;
+    const next: DriverConfigOption = {
+      id: "reasoning-effort",
+      label: "Mức suy luận",
+      category: "thought_level",
+      kind: "select",
+      currentValue,
+      choices,
+    };
+    if (existingIndex >= 0) this.controls[existingIndex] = next;
+    else this.controls.push(next);
   }
 
   private async handleServerRequest(method: string, paramsValue: unknown): Promise<unknown> {
